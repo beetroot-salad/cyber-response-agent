@@ -1,17 +1,25 @@
 """Minimal CLI over the cross-case query helpers + advisory adapter.
 
 Primitive queries:
-  python -m defender.scripts.invlang.cli <corpus_root> sequence [--contains S] [--disposition D] [--signature SIG]
-  python -m defender.scripts.invlang.cli <corpus_root> hypotheses <pattern> [--final-weight W] [--disposition D] [--signature SIG]
-  python -m defender.scripts.invlang.cli <corpus_root> branch-effects [--hyp PATTERN ...] [--min-support N]
-  python -m defender.scripts.invlang.cli <corpus_root> hypothesis-vocabulary --signature SIG [--top-k N] [--json]
+  python -m defender.skills.invlang.cli <corpus_root> sequence [--contains S] [--disposition D] [--signature SIG]
+  python -m defender.skills.invlang.cli <corpus_root> hypotheses <pattern> [--final-weight W] [--disposition D] [--signature SIG]
+  python -m defender.skills.invlang.cli <corpus_root> branch-effects [--hyp PATTERN ...] [--min-support N]
+  python -m defender.skills.invlang.cli <corpus_root> hypothesis-vocabulary --signature SIG [--top-k N] [--json]
+  python -m defender.skills.invlang.cli <corpus_root> hypothesis-shape [--parent-type T] [--parent-class CLASS] [--rel R] [--attached-to-type T] [--json]
 
 Composed PLAN-time advisory recall:
-  python -m defender.scripts.invlang.cli <corpus_root> advisory --signature SIG [--frontier ?H ...] [--class C ...] [--top-k 3] [--json]
+  python -m defender.skills.invlang.cli <corpus_root> advisory --signature SIG [--frontier ?H ...] [--class C ...] [--top-k 3] [--json]
+
+Controlled-vocabulary lookup (no corpus needed):
+  python -m defender.skills.invlang.cli <corpus_root> enum            # list slot names
+  python -m defender.skills.invlang.cli <corpus_root> enum <slot>      # list values for a slot (e.g. types, relations, compute.role)
+  python -m defender.skills.invlang.cli <corpus_root> enum [<slot>] --json
 
 Primitives emit JSON; `advisory` emits rendered markdown by default with
-a `--json` toggle for the harness. `hypothesis-vocabulary` emits markdown
-by default with a `--json` toggle.
+a `--json` toggle for the harness. `hypothesis-vocabulary` and
+`hypothesis-shape` emit markdown by default with a `--json` toggle.
+`enum` emits plain newline-delimited values by default with a `--json`
+toggle.
 """
 
 from __future__ import annotations
@@ -25,13 +33,15 @@ from .advisory import VALID_CLASSES, advisory_recall
 from .corpus import load_corpus
 from .queries import (
     hypothesis_name_wildcard,
+    hypothesis_shape_match,
     lead_branch_effects,
     lead_sequence_pattern,
 )
+from . import vocab
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="defender.scripts.invlang.cli")
+    p = argparse.ArgumentParser(prog="defender.skills.invlang.cli")
     p.add_argument("corpus_root", type=Path)
     p.add_argument("--quiet", action="store_true", help="Suppress LoadReport summary on stderr.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -66,6 +76,41 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument("--json", dest="as_json", action="store_true",
                     help="Emit JSON instead of rendered markdown.")
 
+    ps = sub.add_parser(
+        "hypothesis-shape",
+        help="Cross-case ?hypothesis-names used for a given discovery "
+             "topology (parent_type, parent_class, rel, attached_to_type). "
+             ":H is discovery-only: anchors are v-* ids. Class-refinement "
+             "questions use `??` / `{...}` on the prologue entry and don't "
+             "surface here. Cross-signature: same shape recurs across rules.",
+    )
+    ps.add_argument("--parent-type",
+                    help="Exact match on :H parent_type (closed vocab).")
+    ps.add_argument("--parent-class",
+                    help="fnmatch pattern on :H parent_class "
+                         "(e.g. 'bastion/*', '*/internal/*').")
+    ps.add_argument("--rel",
+                    help="Exact match on :H rel.")
+    ps.add_argument("--attached-to-type",
+                    help="Exact match on the type of the v-* vertex named "
+                         "as the anchor on :H rows.")
+    ps.add_argument("--json", dest="as_json", action="store_true",
+                    help="Emit JSON instead of rendered markdown.")
+
+    pe = sub.add_parser(
+        "enum",
+        help="List controlled-vocabulary slots, or values for a named "
+             "slot. No corpus load. Use before authoring :V/:E/:H rows "
+             "to pick from closed catalogs.",
+    )
+    pe.add_argument(
+        "slot", nargs="?",
+        help="Slot name (e.g. types, relations, compute.role). "
+             "If omitted, lists available slot names.",
+    )
+    pe.add_argument("--json", dest="as_json", action="store_true",
+                    help="Emit JSON instead of newline-delimited values.")
+
     pa = sub.add_parser("advisory", help="Composed PLAN-time advisory recall")
     pa.add_argument("--signature", required=True)
     pa.add_argument(
@@ -86,6 +131,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.cmd == "enum":
+        if args.slot is None:
+            slots = vocab.list_slots()
+            if args.as_json:
+                json.dump({"slots": slots}, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+            else:
+                for s in slots:
+                    print(s)
+            return 0
+        try:
+            values = vocab.get_enum(args.slot)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if args.as_json:
+            json.dump({"slot": args.slot, "values": list(values)},
+                      sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            for v in values:
+                print(v)
+        return 0
 
     if args.cmd == "advisory":
         # The adapter does its own (cached) corpus load + telemetry; skip
@@ -136,6 +205,26 @@ def main(argv: list[str] | None = None) -> int:
         out = _hypothesis_vocabulary(corpus, args.signature, args.top_k)
         if not args.as_json:
             sys.stdout.write(_render_vocab(out, args.signature))
+            sys.stdout.write("\n")
+            return 0
+    elif args.cmd == "hypothesis-shape":
+        if not (args.parent_type or args.parent_class or args.rel
+                or args.attached_to_type):
+            print(
+                "error: hypothesis-shape requires at least one of "
+                "--parent-type, --parent-class, --rel, --attached-to-type",
+                file=sys.stderr,
+            )
+            return 2
+        out = hypothesis_shape_match(
+            corpus,
+            parent_type=args.parent_type,
+            parent_class=args.parent_class,
+            rel=args.rel,
+            attached_to_type=args.attached_to_type,
+        )
+        if not args.as_json:
+            sys.stdout.write(_render_shape(out))
             sys.stdout.write("\n")
             return 0
     else:
@@ -206,6 +295,41 @@ def _render_vocab(out: dict, signature: str) -> str:
         "Use these names verbatim where the semantics match. Frontier-matched "
         "advisory recall returns precedent only when the `--frontier '?name'` "
         "values match corpus vocabulary."
+    )
+    return header + "\n".join(body) + "\n"
+
+
+def _render_shape(out: dict) -> str:
+    shape = out["shape"]
+    shape_parts = [f"{k}={v!r}" for k, v in shape.items() if v]
+    header = (
+        "## HYPOTHESIS SHAPE LOOKUP\n"
+        f"Shape: {', '.join(shape_parts) if shape_parts else '(none)'}\n"
+        f"Hits: {out['count']} distinct ?name(s)\n"
+    )
+    if not out["hits"]:
+        return header + "\n_no past hypotheses match this shape_\n"
+    body = [
+        "",
+        "| ?name | n | weights (++/+/0/-/--) | dispositions | example case(s) |",
+        "|---|---:|---|---|---|",
+    ]
+    for h in out["hits"]:
+        w = h["final_weight_distribution"]
+        wstr = (f"{w.get('++', 0)}/{w.get('+', 0)}/{w.get('null', 0)}"
+                f"/{w.get('-', 0)}/{w.get('--', 0)}")
+        dstr = ", ".join(f"{k}:{v}" for k, v in h["dispositions"].items())
+        cases = h["cases"][:3]
+        if len(h["cases"]) > 3:
+            cases = cases + [f"+{len(h['cases']) - 3} more"]
+        cstr = ", ".join(f"`{c}`" if not c.startswith("+") else c
+                          for c in cases)
+        body.append(f"| `{h['name']}` | {h['n']} | {wstr} | {dstr} | {cstr} |")
+    body.append("")
+    body.append(
+        "Use these names verbatim when the semantics match. Names with "
+        "broad disposition spread (benign+malicious) carry no inherent "
+        "verdict — they're shape labels, not conclusions."
     )
     return header + "\n".join(body) + "\n"
 

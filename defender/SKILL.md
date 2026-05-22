@@ -79,6 +79,21 @@ Author this as `:V` / `:E` blocks in `investigation.md`. State the
 triage question — what behavior is being flagged and what you need to
 determine to disposition it.
 
+`:V type`, `:E rel`, and several `class` / `attrs.kind` slots draw
+from closed catalogs. When you need a value and don't already know
+it, Bash the `enum` subcommand — don't memorize the catalog:
+
+```bash
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum                # slot names
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum types          # vertex types
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum relations      # edge rels
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum compute.role   # one slot's values
+```
+
+The skill at `defender/skills/invlang/SKILL.md` documents the grammar
+(packed-triple `class` for compute/identity/application, single-token
+otherwise); the CLI returns the live enums.
+
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
 
@@ -100,6 +115,17 @@ blocks. Do not pick a query template here — that's gather's job.
 If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
+
+**`:H` is for discovery; `??` is for refinement.** Reach for `:H`
+when the upstream cause is genuinely non-obvious — competing stories
+that imply different next leads. When the question is "what kind of
+entity is v-N?" and the discriminating lead is mechanical (a CMDB
+lookup, an egress-policy check, a behavior probe — the same lead
+regardless of which candidate is being tested), mark the open slot
+inline with `??` (or upgrade to `{a, b, c}` candidates) and let the
+lead close it via `:R attr_updates`. The hypothesis-shape CLI queries
+discovery topology only; refinement candidates do not surface there.
+See `defender/skills/invlang/SKILL.md` §Open questions.
 
 **Authz/legitimacy questions are leads.** "Is this source IP
 documented?", "Is this account provisioned?", "Is there a change
@@ -132,6 +158,84 @@ current alert shape, Read the body before writing your `:H` / `:L`
 blocks. Bodies are short; they teach you what to *check next time*,
 not what conclusion to reach.
 
+**Pick a lead that discriminates.** When the frontier carries two or
+more hypotheses that look equally plausible, the right next lead is
+the one whose result divides them. State which hypotheses it
+separates and why; if you can't, you don't yet have the lead.
+
+**Inline advisory retrieval (when uncertain which lead
+discriminates).** If two or more hypotheses look equally plausible
+and the obvious discriminator isn't clear from the alert plus your
+`:H` predictions, Bash the advisory CLI for a precedent read. Skip
+when your predictions already commit you to an obvious next lead.
+
+Do **not** pre-check the corpus yourself by listing run dirs, reading
+other investigations, or globbing the runs base. The CLI does its own
+corpus scan and prints a loud-empty banner if there is no past data
+for this signature — trust the response.
+
+Call (arg order is **corpus_root first, then `advisory`**):
+
+```bash
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
+    --signature wazuh-rule-NNNN \
+    --class lead_discrimination \
+    --frontier '?hypothesis-one' \
+    --frontier '?hypothesis-two' \
+    --top-k 5
+```
+
+Pass `--signature` from `alert.rule.id` in `alert.json`. Each
+`--frontier` takes one `?hypothesis` name; repeat the flag for each
+live `:H` row. Output is a markdown "Lead discrimination" block
+summarizing how each candidate lead has historically shifted
+hypothesis weights for this signature.
+
+Treat the response as **precedent, not evidence** — do not cite
+`case_id`s in `:R` or `:T`. Use the block to pick or order your next
+`:L` rows, then proceed normally.
+
+**Hypothesis-name lookup — call before every `:H` write.** Look up
+corpus names first; a fresh `?name` that doesn't match corpus
+vocabulary becomes a singleton, and the next case with the same shape
+gets a loud-empty banner from `advisory` instead of usable precedent.
+This is the discipline that makes cross-case retrieval pay off — fresh
+names compound the problem they were supposed to solve. Two reasons to
+call:
+
+- **(a) Survey** — when you've settled the `:H` topology
+  (`parent_type`, `parent_class`, `rel`, `attached_to`) but aren't
+  sure what `?names` the corpus has used for this kind of fork.
+- **(b) Normalize** — when you have a `?name` in mind. Check the
+  corpus for synonyms / canonical forms first; reuse the existing
+  name where the semantics match.
+
+Two verbs cover this:
+
+```bash
+# Cross-signature, topology-scoped: names for this kind of fork, anywhere.
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-shape \
+    --parent-type identity \
+    --parent-class 'service-account/*' \
+    --rel modified \
+    --attached-to-type configuration
+
+# Signature-scoped: names this rule has historically used.
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-vocabulary \
+    --signature wazuh-rule-NNNN
+```
+
+Call both when normalizing — signature first (canonical for this
+rule), then shape (canonical for this topology). `--parent-class`
+accepts fnmatch globs (`bastion/*`, `*/internal/*`). At least one
+filter required for `hypothesis-shape`. Output is a markdown table of
+`?name` → count, final-weight distribution, dispositions, supporting
+cases.
+
+Names with a broad disposition spread (benign + malicious) are shape
+labels, not verdicts — reuse them when the semantics match; don't
+read disposition off them.
+
 ### GATHER
 
 Dispatch the gather subagent on **Haiku** with a prompt that points it
@@ -145,7 +249,7 @@ Task(
   prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
          "## Dispatch\n"
          "```yaml\n"
-         "run_dir: /tmp/defender-runs/{run_id}\n"
+         "run_dir: {run_dir}\n"
          "position: N\n"
          "goal: <one-sentence measurement contract>\n"
          "what_to_characterize:\n"
@@ -178,8 +282,14 @@ writes it back. Gather returns: summary of observations + the
 wrote under `gather_raw/`.
 
 When PLAN issued multiple leads in one turn, dispatch them as parallel
-Task calls. When gather fans a single dispatch into multiple queries,
-those collapse into one `queries[]` list per sequence entry.
+`Task` calls — **all `Task` tool uses in the same assistant message**.
+Multiple Task blocks in one message run concurrently; sequential
+turn-per-Task dispatch makes the gather subagents run serially and
+roughly doubles wall time. If you find yourself ending an assistant
+turn after issuing one Task while another PLAN lead is still pending,
+you've already lost the parallelism — emit them together up front.
+When gather fans a single dispatch into multiple queries, those
+collapse into one `queries[]` list per sequence entry.
 
 ### ANALYZE
 
@@ -189,13 +299,15 @@ strongly supports, `+` weakly supports, `-` weakly refutes, `--`
 strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
-If a lead resolved a legitimacy contract declared in `:H` (e.g.
-`ac1: proposed:cmdb:…`), record the resolution in `:R` as a contract
-status — `authorized | unauthorized | indeterminate` — alongside the
-prediction grading. `unauthorized` on any live-weight hypothesis's
-contract forces escalation regardless of behavioral grading; an
-`indeterminate` contract is the right trigger to loop back to PLAN
-with a follow-up lead, not to fetch inline.
+If a lead resolved a legitimacy contract declared in `:H h-NNN.authz`,
+write the outcome as a `:R authz` row — not as `:R attr_updates`. One
+row per contract closed; the `fulfills` column names the `ac<n>` from
+the declaration. Verdict ∈ `authorized | unauthorized | indeterminate`.
+`unauthorized` on any live-weight hypothesis's contract forces
+escalation regardless of behavioral grading; `indeterminate` is the
+right trigger to loop back to PLAN with a follow-up lead, not to fetch
+inline. See `defender/skills/invlang/SKILL.md` §Authz contract
+resolution for the column shape.
 
 If gather's summary feels thin, Grep `gather_raw/{position}.json`
 for the specific signal first; Read it whole only if Grep doesn't
@@ -236,7 +348,7 @@ log is the bug, not the schema.
 
 Loaded on demand:
 
-- `defender/skills/dense-language/SKILL.md` — invlang block surface;
+- `defender/skills/invlang/SKILL.md` — invlang block surface;
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
@@ -254,7 +366,7 @@ vertices; the goal here is to carry the *shape* — what each phase
 writes, what gather returns, how the sequence projects. The block
 schemas shown use the leaner column set from the spec's reference
 example (`docs/dense-investigation-format.md`); the longer form in
-`defender/skills/dense-language/SKILL.md` is available when a case
+`defender/skills/invlang/SKILL.md` is available when a case
 needs it.
 
 ### Example A — FIM checksum change after apt upgrade
@@ -305,7 +417,7 @@ Task(model="haiku",
      prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
             "## Dispatch\n"
             "```yaml\n"
-            "run_dir: /tmp/defender-runs/2026-05-05-A\n"
+            "run_dir: {run_dir}\n"
             "position: 0\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
             "what_to_characterize:\n"
@@ -430,9 +542,8 @@ GATHER returned:
 ANALYZE:
 
 ```invlang
-:R attr_updates [resolved_by|target|key|value]
-l-002|h-001.ac1|status|indeterminate
-l-002|h-001.ac1|rationale|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-002|e-001|ac1|indeterminate|iam-policy|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
 
 :T resolutions
 h-001  null → +    [l-001 p1 weak ⟂ source documented as monitoring infra; p2 unresolved without host-side evidence]
@@ -458,9 +569,8 @@ the same package + version landed on every host carrying `role:
 monitoring` in the same window.
 
 ```invlang
-:R attr_updates [resolved_by|target|key|value]
-l-003|h-001.ac1|status|authorized
-l-003|h-001.ac1|rationale|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-003|e-001|ac1|authorized|iam-policy|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
 
 :T resolutions
 h-001  + → ++   [l-003 p2 severe ⟂ packaged daemon, install traced to SRE config-management, fleet-wide]

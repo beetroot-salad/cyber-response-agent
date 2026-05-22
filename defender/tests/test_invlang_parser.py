@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from defender.scripts.invlang.parser import (
+from defender.skills.invlang.parser import (
     RowError,
     _resolution_record,
     _split_cells,
@@ -373,6 +373,68 @@ def test_authz_block_emits_canonical_field_names():
     assert "concerns" not in row
 
 
+_AUTHZ_R_BLOCK_SLIM = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|ip-only/internal/anonymous|10.0.0.1|knowledge=partial
+v-002|compute|unknown/internal/known-corp|target-host|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-002|2026-05-07T00:00:00Z|siem-event:wazuh|outcome=failed
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?monitoring-probe|v-001|attempted_auth|compute|monitoring/internal/known-corp||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"source is documented monitoring infra"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|approved-source-list|"source authorized to probe target"|escalate|escalate
+ac2|e-001|iam-policy|"account authorized for SSH from source"|escalate|escalate
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|cmdb-lookup|v-001|h-001|stub-cmdb|host-lookup|ip=10.0.0.1|n/a
+l-002|1|iam-lookup|v-001|h-001|stub-iam|account-lookup|name=probe|n/a
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-001|e-001|ac1|unauthorized|approved-source-list|"10.0.0.1 absent from CMDB"
+l-002|e-001|ac2|unauthorized|iam-policy|"probe account marked inactive"
+
+:T resolutions
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: ac1=unauthorized, ac2=unauthorized]
+
+:T conclude
+disposition            malicious
+matched_archetype      scan
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+```
+"""
+
+
+def test_authz_slim_column_form_round_trips():
+    """Defender's documented column subset (the form taught in
+    skills/invlang/SKILL.md) parses without warnings and both contracts
+    land as distinct authorization_resolutions rows on the right leads.
+    """
+    body, warnings = parse_dense_companion(_AUTHZ_R_BLOCK_SLIM)
+    assert warnings == []
+
+    l1 = next(f for f in body["findings"] if f["id"] == "l-001")
+    l2 = next(f for f in body["findings"] if f["id"] == "l-002")
+    rows1 = l1["outcome"]["authorization_resolutions"]
+    rows2 = l2["outcome"]["authorization_resolutions"]
+    assert len(rows1) == 1 and len(rows2) == 1
+    assert rows1[0]["fulfills_contract"] == "ac1"
+    assert rows1[0]["verdict"] == "unauthorized"
+    assert rows1[0]["anchor_kind"] == "approved-source-list"
+    assert rows1[0]["edge"] == "e-001"
+    assert rows1[0]["reasoning"] == '"10.0.0.1 absent from CMDB"'
+    assert rows2[0]["fulfills_contract"] == "ac2"
+    assert rows2[0]["verdict"] == "unauthorized"
+
+
 _MIXED_RESOLUTIONS = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -459,8 +521,160 @@ def test_subblock_with_unknown_parent_logs_warning():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# `:H attached_to` canonicalizes to `anchor`; edge ids rejected
+# ---------------------------------------------------------------------------
+
+
+_H_VERTEX_ANCHOR = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|endpoint:linux|host|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|rule=5710
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?routine|v-001|attempted_auth|compute|bastion/internal/known-corp||null|active
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|n|v-001|h-001|s|t|q|w
+
+:T resolutions
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: p1]
+
+:T conclude
+disposition            benign
+matched_archetype      foo
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|++
+```
+"""
+
+
+def test_hypothesis_canonical_key_is_anchor():
+    """`:H attached_to=v-*` canonicalizes to `anchor` (not the legacy
+    `attached_to_vertex`); downstream queries (hypothesis_shape_match)
+    index off the new key."""
+    body, warnings = parse_dense_companion(_H_VERTEX_ANCHOR)
+    assert warnings == []
+    h = body["hypothesize"]["hypotheses"][0]
+    assert h["anchor"] == "v-001"
+    assert "attached_to_vertex" not in h
+
+
+_H_EDGE_ANCHOR = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|endpoint:linux|host|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|rule=5710
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-007|?edge-anchored|e-001|attempted_auth|identity|user/known-corp||null|active
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|n|v-001|h-007|s|t|q|w
+
+:T resolutions
+
+:T conclude
+disposition            inconclusive
+matched_archetype      foo
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+```
+"""
+
+
+def test_hypothesis_rejects_edge_anchor():
+    """`:H` is discovery-only — anchors must be `v-*` ids. Edge anchors
+    surface as a ParseWarning (row dropped) with the offending hyp id
+    plus a pointer to `??` notation as the alternative."""
+    body, warnings = parse_dense_companion(_H_EDGE_ANCHOR)
+    assert body.get("hypothesize", {}).get("hypotheses", []) == []
+    h_warnings = [w for w in warnings if w.block.startswith(":H ")]
+    assert len(h_warnings) == 1
+    reason = h_warnings[0].reason
+    assert "h-007" in reason
+    assert "??" in reason
+
+
+# ---------------------------------------------------------------------------
+# `??` and `{...}` notation round-trips as literal strings (no parser-side
+# decomposition — downstream consumers parse on demand)
+# ---------------------------------------------------------------------------
+
+
+def _wrap_prologue(vertex_row: str) -> str:
+    return (
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        f"{vertex_row}\n"
+        "```\n"
+    )
+
+
+def test_vertex_classification_admits_double_question_mark():
+    body, warnings = parse_dense_companion(
+        _wrap_prologue("v-001|compute|endpoint:??/??/??|host|")
+    )
+    assert warnings == []
+    v = body["prologue"]["vertices"][0]
+    assert v["classification"] == "endpoint:??/??/??"
+
+
+def test_vertex_classification_admits_partial_question_mark():
+    body, warnings = parse_dense_companion(
+        _wrap_prologue("v-001|compute|endpoint:monitoring-agent/??/known-corp|host|")
+    )
+    assert warnings == []
+    v = body["prologue"]["vertices"][0]
+    assert v["classification"] == "endpoint:monitoring-agent/??/known-corp"
+
+
+def test_vertex_classification_admits_curly_enum():
+    body, warnings = parse_dense_companion(
+        _wrap_prologue(
+            "v-001|compute|endpoint:{monitoring-agent/internal/known-corp, "
+            "ip-only/internet/novel}|host|"
+        )
+    )
+    assert warnings == []
+    v = body["prologue"]["vertices"][0]
+    assert v["classification"] == (
+        "endpoint:{monitoring-agent/internal/known-corp, "
+        "ip-only/internet/novel}"
+    )
+
+
+def test_attrs_value_admits_double_question_mark():
+    body, warnings = parse_dense_companion(
+        _wrap_prologue("v-001|process|process:bash|bash[pid=42]|signing=??")
+    )
+    assert warnings == []
+    v = body["prologue"]["vertices"][0]
+    assert v["attributes"]["signing"] == "??"
+
+
+def test_attrs_value_admits_curly_enum():
+    body, warnings = parse_dense_companion(
+        _wrap_prologue(
+            "v-001|process|process:bash|bash[pid=42]|"
+            "signing={signed:microsoft, unsigned}"
+        )
+    )
+    assert warnings == []
+    v = body["prologue"]["vertices"][0]
+    assert v["attributes"]["signing"] == "{signed:microsoft, unsigned}"
+
+
 def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
-    from defender.scripts.invlang.corpus import load_corpus
+    from defender.skills.invlang.corpus import load_corpus
 
     case_a = tmp_path / "case-a"
     case_a.mkdir()

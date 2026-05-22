@@ -147,19 +147,37 @@ def parse_duration(s):
     return timedelta(**{units[s[-1]]: int(s[:-1])})
 
 
+_DEFAULT_WINDOW = "1h"
+
+
 def compute_time_range(args):
-    """Compute (start, end) as ISO 8601 UTC strings from CLI args."""
+    """Compute (start, end, default_note) as ISO 8601 UTC strings from CLI args.
+
+    `default_note` is a non-empty marker like " (default 1h — pass --window to
+    override)" when the agent specified neither --window nor --start/--end and
+    the CLI filled in the default. Empty otherwise. Surfacing this loudly in
+    output lets the agent see when an implicit window was applied instead of
+    silently misreading "0 matches" as the truth.
+    """
     if args.start and args.end:
-        return args.start, args.end
+        return args.start, args.end, ""
 
     end = datetime.now(UTC) if not args.end else datetime.fromisoformat(
         args.end.replace("Z", "+00:00")
     )
-    window = parse_duration(args.window)
+    window_was_explicit = args.window is not None
+    window_str = args.window if window_was_explicit else _DEFAULT_WINDOW
+    window = parse_duration(window_str)
     start = end - window
+    default_note = (
+        ""
+        if (window_was_explicit or args.start or args.end)
+        else f" (default {_DEFAULT_WINDOW} — pass --window to override)"
+    )
     return (
         start.strftime("%Y-%m-%dT%H:%M:%SZ"),
         end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        default_note,
     )
 
 
@@ -380,7 +398,7 @@ def format_aggregations(agg_results: dict) -> str:
     return "\n".join(lines) if lines else "(empty aggregation response)"
 
 
-def format_output(query_string, time_start, time_end, config, items, match_count, index_count, agg_results=None):
+def format_output(query_string, time_start, time_end, config, items, match_count, index_count, agg_results=None, time_range_note=""):
     latest_ts = items[0].get("timestamp", "none") if items else "no matching events"
 
     if not items:
@@ -460,7 +478,7 @@ def format_output(query_string, time_start, time_end, config, items, match_count
 
     return f"""## Query Results
 **Query:** {query_string}
-**Time range:** {time_start} to {time_end}
+**Time range:** {time_start} to {time_end}{time_range_note}
 
 ### Data Source Health
 - **Source:** Wazuh Indexer ({config['WAZUH_INDEXER_ENDPOINT']})
@@ -545,7 +563,7 @@ def build_parser():
     )
     q.add_argument("--start", help="Start time (ISO 8601 UTC)")
     q.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
-    q.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
+    q.add_argument("--window", default=None, help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted. If unset and --start/--end are also unset, defaults to 1h with a loud marker in the output so callers see the implicit choice.")
     q.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000). Use 0 for count+aggs only.")
     q.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
     q.add_argument("--run-dir", help="Investigation run directory (reads salt from meta.json to wrap output in untrusted-data delimiters)")
@@ -651,8 +669,9 @@ def main():
         # Agent owns time filtering inside the JSON body; CLI's --window/--start/--end are ignored.
         time_start = "(JSON body owns time filter)"
         time_end = "(JSON body owns time filter)"
+        time_range_note = ""
     else:
-        time_start, time_end = compute_time_range(args)
+        time_start, time_end, time_range_note = compute_time_range(args)
     client = get_indexer_client(config)
 
     items, match_count, agg_results = query_alerts(
@@ -678,7 +697,7 @@ def main():
 
         formatted = format_output(
             query_display, time_start, time_end, config, items, match_count, index_count,
-            agg_results=agg_results,
+            agg_results=agg_results, time_range_note=time_range_note,
         )
         final_output = wrap_with_salt(formatted, salt) if salt else formatted
 

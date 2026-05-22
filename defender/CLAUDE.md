@@ -41,7 +41,7 @@ defender/
   hooks/
     extract_lead_metadata.py   # PreToolUse on Task: parses gather dispatch YAML, writes {position}.lead.json
   skills/
-    dense-language/     # invlang block surface (local copy of the schema)
+    invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory)
     gather/             # gather subagent (Haiku) + per-system query templates
     wazuh/              # per-system reference: visibility surface + execution
     host-query/         # per-system reference: visibility surface + execution
@@ -152,7 +152,7 @@ out of git and SIEM CLIs have writable scratch space.
 {run_id}/
   alert.json              # input — copied by run.py, read-only for the agent
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
-                          #   (:V/:E/:H/:L/:R/:T blocks per defender/skills/dense-language/SKILL.md)
+                          #   (:V/:E/:H/:L/:R/:T blocks per defender/skills/invlang/SKILL.md)
   lead_sequence.yaml      # projected contract surface for the learning loop (see below)
   report.md               # YAML frontmatter (case_id, disposition, confidence) + one paragraph
   tool_trace.jsonl        # stream-json events captured by run.py

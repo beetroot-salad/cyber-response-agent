@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.scripts.invlang.corpus import Companion
-from defender.scripts.invlang.queries import (
+from defender.skills.invlang.corpus import Companion
+from defender.skills.invlang.queries import (
     hypothesis_name_wildcard,
+    hypothesis_shape_match,
     lead_branch_effects,
     lead_sequence_pattern,
 )
@@ -411,3 +412,186 @@ def test_lead_branch_effects_ignores_unknown_assessment_shifts():
     out = lead_branch_effects(corpus, hypothesis_patterns=("?h",))
     bucket = out["leads"][0]["per_hypothesis_effect"]["?h"]
     assert bucket == {"++": 1, "+": 0, "-": 0, "--": 0}
+
+
+# ---------------------------------------------------------------------------
+# hypothesis_shape_match
+# ---------------------------------------------------------------------------
+
+
+def _shape_case(
+    case_id: str,
+    *,
+    signature_id: str = "wazuh-rule-5710",
+    vertices: list[dict] | None = None,
+    hypotheses: list[dict] | None = None,
+    disposition: str = "benign",
+    resolutions: list[dict] | None = None,
+) -> Companion:
+    leads = (
+        [{"name": "L", "outcome": {}, "resolutions": resolutions}]
+        if resolutions else []
+    )
+    body = {
+        "prologue": {"vertices": vertices or [], "edges": []},
+        "hypothesize": {"hypotheses": hypotheses or []},
+        "findings": leads,
+        "conclude": {"disposition": disposition},
+    }
+    return Companion(
+        case_id=case_id,
+        source_path=Path(f"/tmp/fake/{case_id}/investigation.md"),
+        body=body,
+        signature_id=signature_id,
+    )
+
+
+def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
+         parent_type: str = "compute",
+         parent_class: str = "bastion/internal/known-corp",
+         rel: str = "attempted_auth", weight: str | None = None) -> dict:
+    return {
+        "id": h_id, "name": name,
+        "anchor": attached_to,
+        "proposed_edge": {
+            "relation": rel,
+            "parent_vertex": {"type": parent_type, "classification": parent_class},
+        },
+        "weight": weight,
+        "status": "active",
+    }
+
+
+def test_hypothesis_shape_requires_at_least_one_filter():
+    import pytest
+    with pytest.raises(ValueError):
+        hypothesis_shape_match([])
+
+
+def test_hypothesis_shape_aggregates_by_name_across_cases():
+    corpus = [
+        _shape_case(
+            "case-a",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-001", "?routine-admin-source", weight="++")],
+        ),
+        _shape_case(
+            "case-b",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-001", "?routine-admin-source", weight="++")],
+        ),
+    ]
+    out = hypothesis_shape_match(corpus, parent_type="compute")
+    assert out["count"] == 1
+    hit = out["hits"][0]
+    assert hit["name"] == "?routine-admin-source"
+    assert hit["n"] == 2
+    assert hit["final_weight_distribution"]["++"] == 2
+    assert hit["dispositions"] == {"benign": 2}
+    assert hit["cases"] == ["case-a", "case-b"]
+
+
+def test_hypothesis_shape_parent_class_glob():
+    corpus = [
+        _shape_case(
+            "case-a",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-001", "?bastion-h",
+                              parent_class="bastion/internal/known-corp")],
+        ),
+        _shape_case(
+            "case-b",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-002", "?novel-h",
+                              parent_class="ip-only/internet/novel")],
+        ),
+    ]
+    out = hypothesis_shape_match(corpus, parent_class="bastion/*")
+    assert {h["name"] for h in out["hits"]} == {"?bastion-h"}
+
+
+def test_hypothesis_shape_resolves_attached_to_type_through_prologue():
+    corpus = [
+        _shape_case(
+            "case-a",
+            vertices=[{"id": "v-001", "type": "configuration"}],
+            hypotheses=[_hyp("h-001", "?config-changed", attached_to="v-001",
+                              parent_type="identity", rel="modified")],
+        ),
+        _shape_case(
+            "case-b",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-002", "?compute-auth", attached_to="v-001",
+                              parent_type="identity", rel="attempted_auth")],
+        ),
+    ]
+    out = hypothesis_shape_match(
+        corpus, parent_type="identity", attached_to_type="configuration"
+    )
+    assert {h["name"] for h in out["hits"]} == {"?config-changed"}
+
+
+def test_hypothesis_shape_uses_final_weight_from_resolutions():
+    corpus = [
+        _shape_case(
+            "case-a",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-001", "?h", weight="+")],
+            resolutions=[{"hypothesis": "h-001", "before": "+", "after": "--"}],
+        ),
+    ]
+    out = hypothesis_shape_match(corpus, parent_type="compute")
+    hit = out["hits"][0]
+    # initial '+' overridden by final '--'
+    assert hit["final_weight_distribution"]["--"] == 1
+    assert hit["final_weight_distribution"]["+"] == 0
+
+
+def test_hypothesis_shape_match_filters_via_anchor_field():
+    """Lock the canonical key: `hypothesis_shape_match` indexes off the
+    parser's `anchor` field (not the legacy `attached_to_vertex`). Built
+    by hand to bypass `_hyp`'s helper layer."""
+    h = {
+        "id": "h-001", "name": "?config-changed",
+        "anchor": "v-001",
+        "proposed_edge": {
+            "relation": "modified",
+            "parent_vertex": {"type": "identity",
+                              "classification": "service-account/known-corp"},
+        },
+        "weight": None, "status": "active",
+    }
+    corpus = [_shape_case(
+        "case-a",
+        vertices=[{"id": "v-001", "type": "configuration"}],
+        hypotheses=[h],
+    )]
+    out = hypothesis_shape_match(
+        corpus, parent_type="identity", attached_to_type="configuration"
+    )
+    assert {hit["name"] for hit in out["hits"]} == {"?config-changed"}
+
+
+def test_hypothesis_shape_filters_compose_with_and():
+    corpus = [
+        _shape_case(
+            "case-a",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-001", "?matches", parent_type="identity",
+                              rel="modified")],
+        ),
+        _shape_case(
+            "case-b",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-002", "?wrong-rel", parent_type="identity",
+                              rel="read")],
+        ),
+        _shape_case(
+            "case-c",
+            vertices=[{"id": "v-001", "type": "compute"}],
+            hypotheses=[_hyp("h-003", "?wrong-type", parent_type="compute",
+                              rel="modified")],
+        ),
+    ]
+    out = hypothesis_shape_match(corpus, parent_type="identity", rel="modified")
+    assert {h["name"] for h in out["hits"]} == {"?matches"}

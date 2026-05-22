@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts.invlang import advisory
-from defender.scripts.invlang.advisory import (
+from defender.skills.invlang import advisory
+from defender.skills.invlang.advisory import (
     CAVEAT,
     CLASS_HYPOTHESIS_VOCAB,
     CLASS_LEAD_DISCRIMINATION,
     CLASS_SIMILAR_CASES,
     advisory_recall,
 )
-from defender.scripts.invlang.corpus import Companion, LoadReport
+from defender.skills.invlang.corpus import Companion, LoadReport
 
 
 @pytest.fixture(autouse=True)

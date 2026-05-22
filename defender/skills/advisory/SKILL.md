@@ -17,7 +17,7 @@ the rendered markdown block verbatim.
 A fenced YAML dispatch block on stdin:
 
 ```yaml
-run_dir: /tmp/defender-runs/<run_id>
+run_dir: {run_dir}
 signature_id: wazuh-rule-NNNN
 frontier:
   - "?hypothesis-one"
@@ -37,7 +37,7 @@ goal: <one-sentence: what the caller wants past cases to tell them>
 3. **Call the CLI** (arg order is corpus_root first, then `advisory`):
 
    ```bash
-   python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
+   python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
        --signature <signature_id> \
        --class lead_discrimination \
        --frontier '?hypothesis-one' \
