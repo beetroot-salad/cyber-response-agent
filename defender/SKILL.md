@@ -282,8 +282,14 @@ writes it back. Gather returns: summary of observations + the
 wrote under `gather_raw/`.
 
 When PLAN issued multiple leads in one turn, dispatch them as parallel
-Task calls. When gather fans a single dispatch into multiple queries,
-those collapse into one `queries[]` list per sequence entry.
+`Task` calls — **all `Task` tool uses in the same assistant message**.
+Multiple Task blocks in one message run concurrently; sequential
+turn-per-Task dispatch makes the gather subagents run serially and
+roughly doubles wall time. If you find yourself ending an assistant
+turn after issuing one Task while another PLAN lead is still pending,
+you've already lost the parallelism — emit them together up front.
+When gather fans a single dispatch into multiple queries, those
+collapse into one `queries[]` list per sequence entry.
 
 ### ANALYZE
 
