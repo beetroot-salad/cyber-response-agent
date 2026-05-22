@@ -452,7 +452,7 @@ def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
          rel: str = "attempted_auth", weight: str | None = None) -> dict:
     return {
         "id": h_id, "name": name,
-        "attached_to_vertex": attached_to,
+        "anchor": attached_to,
         "proposed_edge": {
             "relation": rel,
             "parent_vertex": {"type": parent_type, "classification": parent_class},
@@ -545,6 +545,31 @@ def test_hypothesis_shape_uses_final_weight_from_resolutions():
     # initial '+' overridden by final '--'
     assert hit["final_weight_distribution"]["--"] == 1
     assert hit["final_weight_distribution"]["+"] == 0
+
+
+def test_hypothesis_shape_match_filters_via_anchor_field():
+    """Lock the canonical key: `hypothesis_shape_match` indexes off the
+    parser's `anchor` field (not the legacy `attached_to_vertex`). Built
+    by hand to bypass `_hyp`'s helper layer."""
+    h = {
+        "id": "h-001", "name": "?config-changed",
+        "anchor": "v-001",
+        "proposed_edge": {
+            "relation": "modified",
+            "parent_vertex": {"type": "identity",
+                              "classification": "service-account/known-corp"},
+        },
+        "weight": None, "status": "active",
+    }
+    corpus = [_shape_case(
+        "case-a",
+        vertices=[{"id": "v-001", "type": "configuration"}],
+        hypotheses=[h],
+    )]
+    out = hypothesis_shape_match(
+        corpus, parent_type="identity", attached_to_type="configuration"
+    )
+    assert {hit["name"] for hit in out["hits"]} == {"?config-changed"}
 
 
 def test_hypothesis_shape_filters_compose_with_and():

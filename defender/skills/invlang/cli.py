@@ -78,10 +78,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ps = sub.add_parser(
         "hypothesis-shape",
-        help="Cross-case ?hypothesis-names used for a given topology "
-             "shape (parent_type, parent_class, rel, attached_to_type). "
-             "Use when frontier topology is settled but the ?name choice "
-             "is open. Cross-signature: same shape recurs across rules.",
+        help="Cross-case ?hypothesis-names used for a given discovery "
+             "topology (parent_type, parent_class, rel, attached_to_type). "
+             ":H is discovery-only: anchors are v-* ids. Class-refinement "
+             "questions use `??` / `{...}` on the prologue entry and don't "
+             "surface here. Cross-signature: same shape recurs across rules.",
     )
     ps.add_argument("--parent-type",
                     help="Exact match on :H parent_type (closed vocab).")
@@ -91,8 +92,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--rel",
                     help="Exact match on :H rel.")
     ps.add_argument("--attached-to-type",
-                    help="Exact match on the type of the vertex named "
-                         "in :H attached_to.")
+                    help="Exact match on the type of the v-* vertex named "
+                         "as the anchor on :H rows.")
     ps.add_argument("--json", dest="as_json", action="store_true",
                     help="Emit JSON instead of rendered markdown.")
 

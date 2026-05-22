@@ -116,6 +116,17 @@ If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
 
+**`:H` is for discovery; `??` is for refinement.** Reach for `:H`
+when the upstream cause is genuinely non-obvious — competing stories
+that imply different next leads. When the question is "what kind of
+entity is v-N?" and the discriminating lead is mechanical (a CMDB
+lookup, an egress-policy check, a behavior probe — the same lead
+regardless of which candidate is being tested), mark the open slot
+inline with `??` (or upgrade to `{a, b, c}` candidates) and let the
+lead close it via `:R attr_updates`. The hypothesis-shape CLI queries
+discovery topology only; refinement candidates do not surface there.
+See `defender/skills/invlang/SKILL.md` §Open questions.
+
 **Authz/legitimacy questions are leads.** "Is this source IP
 documented?", "Is this account provisioned?", "Is there a change
 window covering this action?" — these are data-source queries

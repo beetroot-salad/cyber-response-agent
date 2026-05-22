@@ -395,7 +395,7 @@ def hypothesis_shape_match(
             h_parent_type = pv.get("type", "")
             h_parent_class = pv.get("classification", "")
             h_rel = pe.get("relation", "")
-            h_attached_to_type = v_type.get(h.get("attached_to_vertex", ""), "")
+            h_attached_to_type = v_type.get(h.get("anchor", ""), "")
 
             if parent_type and h_parent_type != parent_type:
                 continue

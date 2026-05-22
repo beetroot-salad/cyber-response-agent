@@ -390,7 +390,15 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
         raise RowError("hypothesis missing id/name")
     out: dict[str, Any] = {"id": rec["id"], "name": rec["name"]}
     if rec.get("attached_to"):
-        out["attached_to_vertex"] = rec["attached_to"]
+        anchor = rec["attached_to"]
+        if anchor.startswith("e-"):
+            raise RowError(
+                f"hypothesis {rec['id']!r} attached_to={anchor!r} names an edge; "
+                f":H is discovery-only (propose a new parent vertex+edge anchored "
+                f"to a v-* id). For class refinement of an existing vertex, use "
+                f"`??` / `{{...}}` notation on the prologue entry instead."
+            )
+        out["anchor"] = anchor
     if rec.get("rel"):
         out.setdefault("proposed_edge", {})["relation"] = rec["rel"]
     if rec.get("parent_type") or rec.get("parent_class"):

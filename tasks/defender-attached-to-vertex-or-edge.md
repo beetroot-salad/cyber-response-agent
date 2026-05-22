@@ -1,10 +1,41 @@
 ---
 title: Accept :H attached_to as vertex OR edge (defender invlang)
-status: todo
+status: done
 groups: defender, invlang, schema
 ---
 
-## Context
+## Resolution (superseded direction)
+
+Shipped on PR #224 — but **not** as the "accept both" design this
+task originally framed. After session discussion the root cause was
+re-cast as two different operations sharing one block:
+
+- **Discovery** — propose a new parent vertex+edge attaching to a
+  v-* anchor (`:H` keeps this; what FIM-style alerts actually do).
+- **Classification refinement** — refine an existing vertex's class
+  slot (what 5710-style interaction alerts were drifting into).
+
+Refinement isn't hypothesis-shaped: the discriminating lead is
+mechanical (CMDB / egress / behavior probe regardless of which
+candidate is tested), and the predictions degenerate to post-hoc
+labels. Hypothesis framing only earns its keep when "how to answer"
+is non-obvious.
+
+What landed instead:
+
+- Inline `??` and `{...}` notation on `:V` class slots and `attrs.*`
+  values for open-and-narrowing classification. Resolution via
+  `:R attr_updates`. `??` blocks `disposition: benign`.
+- `:H attached_to` canonical key renamed `attached_to_vertex` →
+  `anchor`; edge ids (`e-*`) rejected at parse time. The on-disk
+  column header stays `attached_to`; the user-facing CLI flag
+  `--attached-to-type` stays. `:H` is now discovery-only.
+
+See `/root/.claude/plans/do-a-b-atomic-thimble.md` for the full
+design rationale and `defender/skills/invlang/SKILL.md` §Open
+questions + §Discovery hypotheses for the agent-facing surface.
+
+## Original context (pre-resolution)
 
 Today the schema treats `:H attached_to` as a vertex id (per worked
 example in `defender/skills/invlang/SKILL.md`). The parser stores it

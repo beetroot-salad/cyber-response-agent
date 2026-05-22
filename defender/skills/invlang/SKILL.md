@@ -13,8 +13,11 @@ invlang audits the investigation process, not just the final attack graph.
 
 - **Observed graph:** `:V` vertices are real-world entities; `:E` edges
   are state relations or event interactions between them.
-- **Commitments:** `:H` is the current surface for topology commitments.
-  `ac*` and `ip*` are edge-check commitments for authz and impact.
+- **Commitments:** `:H` proposes a new parent vertex+edge for a
+  *discovery* question (non-obvious upstream). Refinement of an
+  existing vertex's class is `??` on the prologue entry, not a
+  hypothesis row. `ac*` and `ip*` are edge-check commitments for
+  authz and impact.
 - **Procedure:** `:L` records what the defender chose to run and why.
 - **Results:** `:R` records check results or learned facts; `:T resolutions`
   records belief movement; `:T conclude` records closure.
@@ -75,6 +78,59 @@ When the observation is just an IP with no role/zone context, use
 `role=ip-only`. Set `attrs.knowledge=partial`. Zone and provenance
 still carry signal (where in the topology the IP appears; how known
 it is).
+
+Slots that aren't yet settled mark themselves as **open** with `??`,
+or upgrade to **enumerated candidates** with `{a, b, c}`. See
+§Open questions below.
+
+## Open questions
+
+When the alert leaves a vertex partially classified, mark the open
+slots inline rather than guessing or authoring a hypothesis row whose
+lead choice is mechanical.
+
+- **`??`** — open class slot or attribute value. Marks "we don't know
+  yet, and it gates disposition." Use it on the whole triple
+  (`endpoint:??/??/??`), a single slot
+  (`endpoint:monitoring-agent/??/known-corp`), or an attribute value
+  (`attrs.signing=??`).
+- **`{a, b, c}`** — enumerated candidate set. Optional upgrade from
+  `??`. Primary form is full-triple enumeration
+  (`endpoint:{monitoring-agent/internal/known-corp,
+  ip-only/internet/novel}`) because per-slot enumeration on multiple
+  axes produces Cartesian-product nonsense. Per-slot enumeration is
+  fine when only one axis is open.
+- **Resolution.** A lead closes the slot by writing a `:R attr_updates`
+  row with `key=class` (for class refinements) or `key=attrs.<name>`
+  (for attribute refinements) and the concrete value. Three-state
+  progression: `??` → `{a, b, c}` → concrete value.
+
+**Worked example.** A rule-5710 failed-auth alert names a source IP
+with no role/zone context. The defender doesn't yet know whether
+v-001 is a monitoring agent, an unknown internet probe, or a
+compromised pivot — but the discriminating lead is the same in every
+case: ask CMDB whether the IP is documented, then check egress policy
+and behavior. The lead is mechanical, so framing this as competing
+hypotheses earns nothing. Mark the slot open and let the lead close it:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|endpoint:??/??/??|10.42.7.183|knowledge=partial
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|cmdb-lookup|v-001||stub-cmdb|host-lookup|ip=10.42.7.183|n/a
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-001|class|monitoring-agent/internal/known-corp
+```
+
+Reserve `:H` (see §Discovery hypotheses) for cases where the
+how-to-answer is genuinely non-obvious — multiple competing upstreams
+where the lead choice itself depends on which story you're testing.
+
+**Disposition gate.** An unresolved `??` on any vertex blocks
+`disposition: benign`. Resolve via `:R attr_updates` before
+concluding, or escalate.
 
 ### Process — baseline schema
 
@@ -159,8 +215,19 @@ have no meaningful `when` — leave it empty. Event interactions
 `authoritative-source` support `++`/`--` resolutions; `client-asserted`
 and `inferred-structural` are weaker and do not.
 
-`:H` topology commitments — thin header plus namespaced sub-blocks
-(`{id}.preds`, `{id}.refuts`, `{id}.authz`):
+### Discovery hypotheses
+
+`:H` proposes a new parent vertex plus an edge anchoring it to a
+known v-* vertex. Use it when the alert points at an interaction or
+state whose upstream cause is genuinely non-obvious — multiple
+candidate stories that imply different next leads. (For
+"what kind of entity is v-N?" with a mechanical lead, use `??`
+notation on the prologue entry — see §Open questions.)
+
+The `attached_to` cell is the **anchor**: the existing `v-*` vertex
+the proposed parent attaches to. Edge ids (`e-*`) are rejected at
+parse time. Thin header plus namespaced sub-blocks (`{id}.preds`,
+`{id}.refuts`, `{id}.authz`):
 
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
@@ -227,7 +294,9 @@ l-001|v-003|class|bastion/internal/known-corp
 
 Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
 facts learned about existing graph objects — don't create vertices
-just for facts.
+just for facts. This is also the surface for closing `??` slots
+(`key=class` for class refinements; `key=attrs.<name>` for attribute
+refinements) — see §Open questions.
 
 Authz contract resolution:
 
