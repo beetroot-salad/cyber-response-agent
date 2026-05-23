@@ -200,44 +200,57 @@ def query_alerts(client, config, query_input, time_start, time_end, limit=500):
     Aggregations run server-side over the full match set, independent of
     `limit`.
     """
-    if isinstance(query_input, dict):
-        if "query" not in query_input:
-            raise ValueError("JSON query body must contain a top-level `query` key")
-        query = query_input["query"]
-        aggs = query_input.get("aggs")
-    else:
-        query = {
-            "bool": {
-                "must": [
-                    {"query_string": {"query": query_input}} if query_input else {"match_all": {}},
-                ],
-                "filter": [
-                    {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
-                ],
-            }
-        }
-        aggs = None
+    query, aggs = _build_query_and_aggs(query_input, time_start, time_end)
     sort = [{"timestamp": {"order": "desc"}}, {"_id": {"order": "desc"}}]
 
     # limit=0 means "count only, no results"
     if limit == 0:
-        body = {"size": 0, "query": query}
-        if aggs:
-            body["aggs"] = aggs
-        try:
-            resp = client.search(index=config["WAZUH_INDEX"], body=body)
-        except Exception as e:
-            print(f"error: Indexer query failed: {e}", file=sys.stderr)
-            sys.exit(2)
-        total = resp.get("hits", {}).get("total", {}).get("value", 0)
-        agg_results = resp.get("aggregations") if aggs else None
-        return [], total, agg_results
+        return _query_count_only(client, config, query, aggs)
 
-    all_items = []
+    return _query_paginated(client, config, query, aggs, sort, limit)
+
+
+def _build_query_and_aggs(query_input, time_start, time_end):
+    if isinstance(query_input, dict):
+        if "query" not in query_input:
+            raise ValueError("JSON query body must contain a top-level `query` key")
+        return query_input["query"], query_input.get("aggs")
+    query = {
+        "bool": {
+            "must": [
+                {"query_string": {"query": query_input}} if query_input else {"match_all": {}},
+            ],
+            "filter": [
+                {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
+            ],
+        }
+    }
+    return query, None
+
+
+def _do_search(client, config, body):
+    try:
+        return client.search(index=config["WAZUH_INDEX"], body=body)
+    except Exception as e:
+        print(f"error: Indexer query failed: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _query_count_only(client, config, query, aggs):
+    body = {"size": 0, "query": query}
+    if aggs:
+        body["aggs"] = aggs
+    resp = _do_search(client, config, body)
+    total = resp.get("hits", {}).get("total", {}).get("value", 0)
+    agg_results = resp.get("aggregations") if aggs else None
+    return [], total, agg_results
+
+
+def _query_paginated(client, config, query, aggs, sort, limit):
+    all_items: list = []
     total = 0
     search_after = None
     agg_results = None
-
     while len(all_items) < limit:
         page_size = min(PAGE_SIZE, limit - len(all_items))
         body = {"size": page_size, "sort": sort, "query": query}
@@ -247,28 +260,18 @@ def query_alerts(client, config, query_input, time_start, time_end, limit=500):
         # the full match set, no point recomputing them per page
         if aggs and search_after is None:
             body["aggs"] = aggs
-
-        try:
-            resp = client.search(index=config["WAZUH_INDEX"], body=body)
-        except Exception as e:
-            print(f"error: Indexer query failed: {e}", file=sys.stderr)
-            sys.exit(2)
-
+        resp = _do_search(client, config, body)
         hits = resp.get("hits", {})
-        page_total = hits.get("total", {}).get("value", 0)
         if search_after is None:
-            total = page_total
+            total = hits.get("total", {}).get("value", 0)
             if aggs:
                 agg_results = resp.get("aggregations")
         page_hits = hits.get("hits", [])
-
         if not page_hits:
             break
-
         remaining = limit - len(all_items)
         all_items.extend(h["_source"] for h in page_hits[:remaining])
         search_after = page_hits[-1]["sort"]
-
     return all_items, total, agg_results
 
 
@@ -363,119 +366,55 @@ def format_aggregations(agg_results: dict) -> str:
     """
     if not agg_results:
         return "(no aggregations)"
-
-    lines = []
-
-    def render_buckets(buckets, indent="  "):
-        out = []
-        for b in buckets:
-            key = b.get("key_as_string") or b.get("key")
-            count = b.get("doc_count", 0)
-            out.append(f"{indent}{key}: {count}")
-            for sub_name, sub in b.items():
-                if isinstance(sub, dict) and "buckets" in sub:
-                    out.append(f"{indent}  ↳ {sub_name}:")
-                    out.extend(render_buckets(sub["buckets"], indent + "    "))
-        return out
-
+    lines: list[str] = []
     for name, agg in agg_results.items():
         if not isinstance(agg, dict):
             continue
-        if "buckets" in agg:
-            buckets = agg["buckets"]
-            other = agg.get("sum_other_doc_count", 0)
-            header = f"**{name}** ({len(buckets)} buckets"
-            if other:
-                header += f", +{other} in tail"
-            header += "):"
-            lines.append(header)
-            lines.extend(render_buckets(buckets))
-        elif "value" in agg:
-            lines.append(f"**{name}**: {agg['value']}")
-        else:
-            lines.append(f"**{name}**: {json.dumps(agg)[:200]}")
-
+        lines.extend(_format_one_aggregation(name, agg))
     return "\n".join(lines) if lines else "(empty aggregation response)"
 
 
-def format_output(query_string, time_start, time_end, config, items, match_count, index_count, agg_results=None, time_range_note=""):
+def _format_one_aggregation(name: str, agg: dict) -> list[str]:
+    if "buckets" in agg:
+        buckets = agg["buckets"]
+        other = agg.get("sum_other_doc_count", 0)
+        header = f"**{name}** ({len(buckets)} buckets"
+        if other:
+            header += f", +{other} in tail"
+        header += "):"
+        return [header, *_render_agg_buckets(buckets)]
+    if "value" in agg:
+        return [f"**{name}**: {agg['value']}"]
+    return [f"**{name}**: {json.dumps(agg)[:200]}"]
+
+
+def _render_agg_buckets(buckets: list, indent: str = "  ") -> list[str]:
+    out: list[str] = []
+    for b in buckets:
+        key = b.get("key_as_string") or b.get("key")
+        count = b.get("doc_count", 0)
+        out.append(f"{indent}{key}: {count}")
+        for sub_name, sub in b.items():
+            if isinstance(sub, dict) and "buckets" in sub:
+                out.append(f"{indent}  ↳ {sub_name}:")
+                out.extend(_render_agg_buckets(sub["buckets"], indent + "    "))
+    return out
+
+
+def format_output(  # noqa: PLR0913 — every arg is a load-bearing piece of the rendered output
+    query_string, time_start, time_end, config, items,
+    match_count, index_count, agg_results=None, time_range_note="",
+):
     latest_ts = items[0].get("timestamp", "none") if items else "no matching events"
-
-    if not items:
-        sample_text = "(no matching events)"
-    else:
-        lines = []
-        for i, evt in enumerate(items[:5], 1):
-            rule = evt.get("rule", {})
-            data = evt.get("data", {})
-            lines.append(
-                f"{i}. [{evt.get('timestamp', '?')}] rule:{rule.get('id', '?')} "
-                f"srcip:{data.get('srcip', '?')} srcuser:{data.get('srcuser', '?')} "
-                f"agent:{evt.get('agent', {}).get('name', '?')} "
-                f"desc:{rule.get('description', '?')[:80]}"
-            )
-        sample_text = "\n".join(lines)
-
-    if not items:
-        breakdown_text = "(no data)"
-    else:
-        parts = []
-        truncated = match_count > len(items)
-        if truncated:
-            parts.append(
-                f"⚠ counts below are over the returned sample (n={len(items)}); "
-                f"matching events: {match_count}. "
-                f"For true totals at scale, pass a JSON search body to --query "
-                f"with an `aggs` clause (server-side aggregation)."
-            )
-
-        rules = Counter(e.get("rule", {}).get("id", "?") for e in items)
-        parts.append("By rule:")
-        for rid, cnt in rules.most_common():
-            desc = next(
-                (e.get("rule", {}).get("description", "") for e in items
-                 if e.get("rule", {}).get("id") == rid), ""
-            )
-            parts.append(f"  rule.id:{rid} ({desc}): {cnt}")
-
-        srcips = Counter(e.get("data", {}).get("srcip", "?") for e in items)
-        parts.append(f"By source IP ({len(srcips)} unique):")
-        for ip, cnt in srcips.most_common(10):
-            parts.append(f"  {ip}: {cnt}")
-
-        users = Counter(e.get("data", {}).get("srcuser", "?") for e in items)
-        parts.append(f"By username ({len(users)} unique):")
-        for u, cnt in users.most_common(10):
-            parts.append(f"  {u}: {cnt}")
-
-        srcports = Counter(
-            str(p) for e in items
-            if (p := e.get("data", {}).get("srcport"))
-        )
-        if srcports:
-            parts.append(f"By source port ({len(srcports)} unique):")
-            for p, cnt in srcports.most_common(10):
-                parts.append(f"  {p}: {cnt}")
-
-        hours = Counter(e.get("timestamp", "")[:13] for e in items)
-        parts.append("By hour:")
-        for h, cnt in sorted(hours.items()):
-            parts.append(f"  {h}: {cnt}")
-
-        breakdown_text = "\n".join(parts)
-
-    if not items:
-        raw_text = "(no matching events)"
-    else:
-        raw_text = json.dumps(items[:RAW_SAMPLE_COUNT], indent=2)
-
+    sample_text = _format_sample_text(items)
+    breakdown_text = _format_breakdown_text(items, match_count)
+    raw_text = json.dumps(items[:RAW_SAMPLE_COUNT], indent=2) if items else "(no matching events)"
     aggs_section = ""
     if agg_results:
         aggs_section = (
             "\n### Aggregations (server-side, true totals over full match set)\n"
             f"{format_aggregations(agg_results)}\n"
         )
-
     return f"""## Query Results
 **Query:** {query_string}
 **Time range:** {time_start} to {time_end}{time_range_note}
@@ -501,6 +440,83 @@ the discriminator you need (e.g. source port, process name, connection tuple).
 ```json
 {raw_text}
 ```"""
+
+
+def _format_sample_text(items: list) -> str:
+    if not items:
+        return "(no matching events)"
+    lines = []
+    for i, evt in enumerate(items[:5], 1):
+        rule = evt.get("rule", {})
+        data = evt.get("data", {})
+        lines.append(
+            f"{i}. [{evt.get('timestamp', '?')}] rule:{rule.get('id', '?')} "
+            f"srcip:{data.get('srcip', '?')} srcuser:{data.get('srcuser', '?')} "
+            f"agent:{evt.get('agent', {}).get('name', '?')} "
+            f"desc:{rule.get('description', '?')[:80]}"
+        )
+    return "\n".join(lines)
+
+
+def _format_breakdown_text(items: list, match_count: int) -> str:
+    if not items:
+        return "(no data)"
+    parts: list[str] = []
+    if match_count > len(items):
+        parts.append(
+            f"⚠ counts below are over the returned sample (n={len(items)}); "
+            f"matching events: {match_count}. "
+            f"For true totals at scale, pass a JSON search body to --query "
+            f"with an `aggs` clause (server-side aggregation)."
+        )
+    parts.extend(_format_rule_breakdown(items))
+    parts.extend(_format_field_breakdown(items, "srcip", "By source IP"))
+    parts.extend(_format_field_breakdown(items, "srcuser", "By username"))
+    srcports_part = _format_optional_field_breakdown(items, "srcport", "By source port")
+    parts.extend(srcports_part)
+    parts.extend(_format_hour_breakdown(items))
+    return "\n".join(parts)
+
+
+def _format_rule_breakdown(items: list) -> list[str]:
+    rules = Counter(e.get("rule", {}).get("id", "?") for e in items)
+    out = ["By rule:"]
+    for rid, cnt in rules.most_common():
+        desc = next(
+            (e.get("rule", {}).get("description", "") for e in items
+             if e.get("rule", {}).get("id") == rid), ""
+        )
+        out.append(f"  rule.id:{rid} ({desc}): {cnt}")
+    return out
+
+
+def _format_field_breakdown(items: list, data_key: str, header: str) -> list[str]:
+    counts = Counter(e.get("data", {}).get(data_key, "?") for e in items)
+    out = [f"{header} ({len(counts)} unique):"]
+    for val, cnt in counts.most_common(10):
+        out.append(f"  {val}: {cnt}")
+    return out
+
+
+def _format_optional_field_breakdown(items: list, data_key: str, header: str) -> list[str]:
+    counts = Counter(
+        str(v) for e in items
+        if (v := e.get("data", {}).get(data_key))
+    )
+    if not counts:
+        return []
+    out = [f"{header} ({len(counts)} unique):"]
+    for val, cnt in counts.most_common(10):
+        out.append(f"  {val}: {cnt}")
+    return out
+
+
+def _format_hour_breakdown(items: list) -> list[str]:
+    hours = Counter(e.get("timestamp", "")[:13] for e in items)
+    out = ["By hour:"]
+    for h, cnt in sorted(hours.items()):
+        out.append(f"  {h}: {cnt}")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +636,37 @@ def has_time_range_filter(body: dict) -> bool:
     return walk(body)
 
 
+def _resolve_query_input(args) -> tuple:
+    """Parse `--query` into either a Lucene string or a JSON search body.
+
+    Returns (query_input, query_display, json_mode). Exits on malformed
+    input or a JSON body missing its time-range filter.
+    """
+    raw_query = args.query.strip()
+    if not raw_query.startswith("{"):
+        return raw_query, raw_query, False
+    try:
+        parsed = json.loads(raw_query)
+    except json.JSONDecodeError as e:
+        print(f"error: --query starts with '{{' but is not valid JSON: {e}", file=sys.stderr)
+        sys.exit(2)
+    if not isinstance(parsed, dict):
+        print("error: --query JSON must be an object (search body)", file=sys.stderr)
+        sys.exit(2)
+    if not args.no_time_filter and not has_time_range_filter(parsed):
+        print(
+            "error: JSON --query body has no time-range filter on "
+            "`timestamp`/`@timestamp`. This usually means scope inflation "
+            "— lifetime totals reported as windowed. Add a "
+            '`{"range": {"timestamp": {"gte": "...", "lte": "..."}}}` '
+            "clause inside `query.bool.filter`, or pass --no-time-filter "
+            "to opt into all-time results.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return parsed, "<JSON body>", True
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -631,38 +678,7 @@ def main():
 
     # query subcommand
     args.limit = min(args.limit, 10000)
-
-    # --query polymorphism: if the value parses as a JSON object, treat it
-    # as a full search body (with `query` and optional `aggs`). Otherwise
-    # it's a Lucene string that the CLI wraps with the time-range filter.
-    raw_query = args.query.strip()
-    query_input = raw_query
-    query_display = raw_query
-    json_mode = False
-    if raw_query.startswith("{"):
-        try:
-            parsed = json.loads(raw_query)
-        except json.JSONDecodeError as e:
-            print(f"error: --query starts with '{{' but is not valid JSON: {e}", file=sys.stderr)
-            sys.exit(2)
-        if not isinstance(parsed, dict):
-            print("error: --query JSON must be an object (search body)", file=sys.stderr)
-            sys.exit(2)
-        query_input = parsed
-        query_display = "<JSON body>"  # the formatter shows this; raw body is large
-        json_mode = True
-
-        if not args.no_time_filter and not has_time_range_filter(parsed):
-            print(
-                "error: JSON --query body has no time-range filter on "
-                "`timestamp`/`@timestamp`. This usually means scope inflation "
-                "— lifetime totals reported as windowed. Add a "
-                '`{"range": {"timestamp": {"gte": "...", "lte": "..."}}}` '
-                "clause inside `query.bool.filter`, or pass --no-time-filter "
-                "to opt into all-time results.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
+    query_input, query_display, json_mode = _resolve_query_input(args)
 
     if json_mode:
         # Agent owns time filtering inside the JSON body; CLI's --window/--start/--end are ignored.
