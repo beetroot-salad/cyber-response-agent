@@ -41,7 +41,9 @@ post-mortem debugging always has a paper trail.
 
 from __future__ import annotations
 
+import contextlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -399,15 +401,9 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
                 f"`??` / `{{...}}` notation on the prologue entry instead."
             )
         out["anchor"] = anchor
-    if rec.get("rel"):
-        out.setdefault("proposed_edge", {})["relation"] = rec["rel"]
-    if rec.get("parent_type") or rec.get("parent_class"):
-        pv: dict[str, Any] = {}
-        if rec.get("parent_type"):
-            pv["type"] = rec["parent_type"]
-        if rec.get("parent_class"):
-            pv["classification"] = rec["parent_class"]
-        out.setdefault("proposed_edge", {})["parent_vertex"] = pv
+    proposed_edge = _build_proposed_edge(rec)
+    if proposed_edge:
+        out["proposed_edge"] = proposed_edge
     if rec.get("integrity_waived"):
         out["integrity_waived"] = rec["integrity_waived"]
     if rec.get("weight"):
@@ -415,6 +411,20 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
     if rec.get("status"):
         out["status"] = rec["status"]
     return out
+
+
+def _build_proposed_edge(rec: dict) -> dict[str, Any]:
+    edge: dict[str, Any] = {}
+    if rec.get("rel"):
+        edge["relation"] = rec["rel"]
+    if rec.get("parent_type") or rec.get("parent_class"):
+        pv: dict[str, Any] = {}
+        if rec.get("parent_type"):
+            pv["type"] = rec["parent_type"]
+        if rec.get("parent_class"):
+            pv["classification"] = rec["parent_class"]
+        edge["parent_vertex"] = pv
+    return edge
 
 
 # ---------------------------------------------------------------------------
@@ -565,10 +575,8 @@ def _lead_header_record(
         if rec.get(k_in):
             v = rec[k_in]
             if k_in == "loop":
-                try:
+                with contextlib.suppress(ValueError):
                     v = int(v)
-                except ValueError:
-                    pass
             identity[k_out] = v
     if rec.get("tests"):
         identity["tests_hypotheses"] = _split_csv(rec["tests"])
@@ -748,27 +756,38 @@ def _project_conclude_sub(
 ) -> None:
     sub = block.name[len("conclude."):]
     dict_key = _CONCLUDE_SUB_TABLES.get(sub)
-    if not dict_key:
-        return
-    if not block.rows:
+    if not dict_key or not block.rows:
         return
     if len(block.rows) == 1 and block.rows[0].strip().lower() == "none":
         if dict_key != "ceiling_test":
             conclude[dict_key] = []
         return
-    cols = block.columns or []
     if dict_key == "ceiling_test":
-        try:
-            cells = _row_cells(block, block.rows[0], len(cols))
-        except RowError as e:
-            warnings.append(ParseWarning(
-                block=f":{block.tag} {block.name}", row_index=0,
-                row=block.rows[0], reason=str(e),
-            ))
-            return
-        conclude[dict_key] = dict(zip(cols, cells, strict=False))
+        _project_conclude_ceiling_test(block, conclude, dict_key, warnings)
         return
+    conclude[dict_key] = _project_conclude_bucket(block, dict_key, warnings)
 
+
+def _project_conclude_ceiling_test(
+    block: Block, conclude: dict[str, Any], dict_key: str,
+    warnings: list[ParseWarning],
+) -> None:
+    cols = block.columns or []
+    try:
+        cells = _row_cells(block, block.rows[0], len(cols))
+    except RowError as e:
+        warnings.append(ParseWarning(
+            block=f":{block.tag} {block.name}", row_index=0,
+            row=block.rows[0], reason=str(e),
+        ))
+        return
+    conclude[dict_key] = dict(zip(cols, cells, strict=False))
+
+
+def _project_conclude_bucket(
+    block: Block, dict_key: str, warnings: list[ParseWarning],
+) -> list[Any]:
+    cols = block.columns or []
     bucket: list[Any] = []
     for idx, row in enumerate(block.rows):
         try:
@@ -784,7 +803,7 @@ def _project_conclude_sub(
                 bucket.append(cells[0])
         else:
             bucket.append(dict(zip(cols, cells, strict=False)))
-    conclude[dict_key] = bucket
+    return bucket
 
 
 # ---------------------------------------------------------------------------
@@ -816,6 +835,14 @@ def _project_lead_subblock(
     # are not part of the advisory-retrieval surface.
 
 
+_RESOLUTION_BUCKET_KEY = {
+    "authz": "authorization_resolutions",
+    "consultations": "anchor_consultations",
+    "impact": "impact_resolutions",
+    "attr_updates": "attribute_updates",
+}
+
+
 def companion_from_blocks(
     blocks: list[Block],
 ) -> tuple[dict[str, Any], list[ParseWarning]]:
@@ -834,197 +861,263 @@ def companion_from_blocks(
         return lead
 
     for block in blocks:
-        tag, name = block.tag, block.name
-
-        if tag == "V" and name == "prologue.vertices":
-            out.setdefault("prologue", {})["vertices"] = (
-                _project_rows(block, _vertex_record, warnings)
-            )
-            continue
-        if tag == "E" and name == "prologue.edges":
-            out.setdefault("prologue", {})["edges"] = (
-                _project_rows(block, _edge_record, warnings)
-            )
-            continue
-        if tag == "H" and name == "hypothesize.hypotheses":
-            if not _is_current_hyp_header(block.columns):
-                warnings.append(ParseWarning(
-                    block=f":H {name}", row_index=-1, row="",
-                    reason=(
-                        f"column header {block.columns!r} does not match the "
-                        f"current schema (id|name|attached_to|rel|parent_type|"
-                        f"parent_class|integrity_waived?|weight|status); whole "
-                        f"block rejected"
-                    ),
-                ))
-                continue
-            hyps = _project_rows(block, _hypothesis_record, warnings)
-            out.setdefault("hypothesize", {})["hypotheses"] = hyps
-            for h in hyps:
-                hid = h.get("id")
-                if isinstance(hid, str):
-                    hypotheses_by_id[hid] = h
-            continue
-
-        m_hyp_sub = _HYP_PREFIX_RE.match(name) if tag == "H" else None
-        if m_hyp_sub:
-            _project_hyp_subblock(
-                block,
-                hyp_id=m_hyp_sub.group("hyp"),
-                sub=m_hyp_sub.group("sub"),
-                hypotheses_by_id=hypotheses_by_id,
-                warnings=warnings,
-            )
-            continue
-
-        if tag == "L" and name == "findings":
-            last_lead_id: str | None = None
-            for idx, row in enumerate(block.rows):
-                try:
-                    identity, query_details = _lead_header_record(block, row)
-                except RowError as e:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason=str(e),
-                    ))
-                    continue
-                lead = lead_bucket(identity["id"])
-                lead.update(identity)
-                if query_details:
-                    lead.setdefault("query_details", {}).update(query_details)
-                last_lead_id = identity["id"]
-            if last_lead_id:
-                current_lead = last_lead_id
-            continue
-
-        m = _LEAD_PREFIX_RE.match(name)
-        if m:
-            lead_id = "l-" + m.group("id")
-            sub = m.group("sub")
-            lead = lead_bucket(lead_id)
-            _project_lead_subblock(tag, sub, block, lead, warnings)
-            current_lead = lead_id
-            continue
-
-        if tag == "R" and name in ("authz", "consultations", "impact", "attr_updates"):
-            cols = block.columns or []
-            bucket_key = {
-                "authz": "authorization_resolutions",
-                "consultations": "anchor_consultations",
-                "impact": "impact_resolutions",
-                "attr_updates": "attribute_updates",
-            }[name]
-            for idx, row in enumerate(block.rows):
-                try:
-                    cells = _row_cells(block, row, len(cols))
-                except RowError as e:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason=str(e),
-                    ))
-                    continue
-                rec = dict(zip(cols, cells, strict=False))
-                # `resolved_by` / `lead` are the dense column names for
-                # the back-pointer; look them up *before* canonicalization
-                # so attribution still works.
-                lead_id = rec.get("resolved_by") or rec.get("lead") or current_lead
-                if not lead_id:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason="row has no lead attribution",
-                    ))
-                    continue
-                lead = lead_bucket(lead_id)
-                if name == "attr_updates":
-                    tgt = rec.get("target")
-                    key = rec.get("key")
-                    val = rec.get("value", "")
-                    if not tgt or not key:
-                        warnings.append(ParseWarning(
-                            block=f":{tag} {name}", row_index=idx,
-                            row=row, reason="attr_updates missing target/key",
-                        ))
-                        continue
-                    au = lead.setdefault("outcome", {}).setdefault(
-                        "attribute_updates", []
-                    )
-                    for entry in au:
-                        if entry.get("target") == tgt and isinstance(
-                            entry.get("updates"), dict
-                        ):
-                            entry["updates"][key] = val
-                            break
-                    else:
-                        au.append({"target": tgt, "updates": {key: val}})
-                else:
-                    lead.setdefault("outcome", {}).setdefault(
-                        bucket_key, []
-                    ).append(_canonicalize_resolution_row(rec))
-            continue
-
-        if tag == "T" and name == "conclude":
-            _project_conclude_scalars(out.setdefault("conclude", {}), block.rows)
-            continue
-        if tag == "T" and name.startswith("conclude."):
-            _project_conclude_sub(block, out.setdefault("conclude", {}), warnings)
-            continue
-
-        if tag == "T" and name == "resolutions":
-            for idx, row in enumerate(block.rows):
-                try:
-                    lead_id, record = _resolution_record(row)
-                except RowError as e:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason=str(e),
-                    ))
-                    continue
-                lid = lead_id or current_lead
-                if not lid:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason="resolution has no lead attribution",
-                    ))
-                    continue
-                lead = lead_bucket(lid)
-                lead.setdefault("resolutions", []).append(record)
-                current_lead = lid
-            continue
-
-        if tag == "T" and name == "shelved":
-            cols = block.columns or []
-            for idx, row in enumerate(block.rows):
-                try:
-                    cells = _row_cells(block, row, len(cols))
-                except RowError as e:
-                    warnings.append(ParseWarning(
-                        block=f":{tag} {name}", row_index=idx,
-                        row=row, reason=str(e),
-                    ))
-                    continue
-                rec = dict(zip(cols, cells, strict=False))
-                hyp = rec.get("hyp_id")
-                if not hyp:
-                    continue
-                lid = rec.get("by_lead") or current_lead
-                if not lid:
-                    continue
-                lead = lead_bucket(lid)
-                lead.setdefault("shelved", []).append(hyp)
-                if rec.get("rationale"):
-                    lead.setdefault("shelved_rationales", {})[hyp] = _unquote(
-                        rec["rationale"]
-                    )
-            continue
-
-        warnings.append(ParseWarning(
-            block=f":{tag} {name}", row_index=-1, row="",
-            reason="unknown block — no projection rule",
-        ))
+        current_lead = _project_block(
+            block, out, warnings, lead_bucket, hypotheses_by_id, current_lead,
+        )
 
     if findings:
         out["findings"] = list(findings.values())
     return out, warnings
+
+
+def _project_block(
+    block: Block,
+    out: dict[str, Any],
+    warnings: list[ParseWarning],
+    lead_bucket: Callable[[str], dict[str, Any]],
+    hypotheses_by_id: dict[str, dict[str, Any]],
+    current_lead: str | None,
+) -> str | None:
+    """Project one block; returns the (possibly updated) current_lead pointer."""
+    tag, name = block.tag, block.name
+
+    if tag == "V" and name == "prologue.vertices":
+        out.setdefault("prologue", {})["vertices"] = (
+            _project_rows(block, _vertex_record, warnings)
+        )
+        return current_lead
+    if tag == "E" and name == "prologue.edges":
+        out.setdefault("prologue", {})["edges"] = (
+            _project_rows(block, _edge_record, warnings)
+        )
+        return current_lead
+    if tag == "H" and name == "hypothesize.hypotheses":
+        _project_hypothesize_block(block, out, hypotheses_by_id, warnings)
+        return current_lead
+
+    m_hyp_sub = _HYP_PREFIX_RE.match(name) if tag == "H" else None
+    if m_hyp_sub:
+        _project_hyp_subblock(
+            block,
+            hyp_id=m_hyp_sub.group("hyp"),
+            sub=m_hyp_sub.group("sub"),
+            hypotheses_by_id=hypotheses_by_id,
+            warnings=warnings,
+        )
+        return current_lead
+
+    if tag == "L" and name == "findings":
+        return _project_findings_block(block, lead_bucket, warnings, current_lead)
+
+    m = _LEAD_PREFIX_RE.match(name)
+    if m:
+        lead_id = "l-" + m.group("id")
+        sub = m.group("sub")
+        _project_lead_subblock(tag, sub, block, lead_bucket(lead_id), warnings)
+        return lead_id
+
+    if tag == "R" and name in _RESOLUTION_BUCKET_KEY:
+        _project_resolution_block(block, lead_bucket, warnings, current_lead)
+        return current_lead
+
+    if tag == "T":
+        handled, current_lead = _project_t_block(
+            block, out, lead_bucket, warnings, current_lead,
+        )
+        if handled:
+            return current_lead
+
+    warnings.append(ParseWarning(
+        block=f":{tag} {name}", row_index=-1, row="",
+        reason="unknown block — no projection rule",
+    ))
+    return current_lead
+
+
+def _project_t_block(
+    block: Block,
+    out: dict[str, Any],
+    lead_bucket: Callable[[str], dict[str, Any]],
+    warnings: list[ParseWarning],
+    current_lead: str | None,
+) -> tuple[bool, str | None]:
+    """Project a `:T` block. Returns (handled, current_lead)."""
+    name = block.name
+    if name == "conclude":
+        _project_conclude_scalars(out.setdefault("conclude", {}), block.rows)
+        return True, current_lead
+    if name.startswith("conclude."):
+        _project_conclude_sub(block, out.setdefault("conclude", {}), warnings)
+        return True, current_lead
+    if name == "resolutions":
+        return True, _project_resolutions_block(block, lead_bucket, warnings, current_lead)
+    if name == "shelved":
+        _project_shelved_block(block, lead_bucket, warnings, current_lead)
+        return True, current_lead
+    return False, current_lead
+
+
+def _project_hypothesize_block(
+    block: Block,
+    out: dict[str, Any],
+    hypotheses_by_id: dict[str, dict[str, Any]],
+    warnings: list[ParseWarning],
+) -> None:
+    if not _is_current_hyp_header(block.columns):
+        warnings.append(ParseWarning(
+            block=f":H {block.name}", row_index=-1, row="",
+            reason=(
+                f"column header {block.columns!r} does not match the "
+                f"current schema (id|name|attached_to|rel|parent_type|"
+                f"parent_class|integrity_waived?|weight|status); whole "
+                f"block rejected"
+            ),
+        ))
+        return
+    hyps = _project_rows(block, _hypothesis_record, warnings)
+    out.setdefault("hypothesize", {})["hypotheses"] = hyps
+    for h in hyps:
+        hid = h.get("id")
+        if isinstance(hid, str):
+            hypotheses_by_id[hid] = h
+
+
+def _project_findings_block(
+    block: Block,
+    lead_bucket: Callable[[str], dict[str, Any]],
+    warnings: list[ParseWarning],
+    current_lead: str | None,
+) -> str | None:
+    last_lead_id: str | None = None
+    for idx, row in enumerate(block.rows):
+        try:
+            identity, query_details = _lead_header_record(block, row)
+        except RowError as e:
+            warnings.append(ParseWarning(
+                block=f":{block.tag} {block.name}", row_index=idx,
+                row=row, reason=str(e),
+            ))
+            continue
+        lead = lead_bucket(identity["id"])
+        lead.update(identity)
+        if query_details:
+            lead.setdefault("query_details", {}).update(query_details)
+        last_lead_id = identity["id"]
+    return last_lead_id or current_lead
+
+
+def _project_resolution_block(
+    block: Block,
+    lead_bucket: Callable[[str], dict[str, Any]],
+    warnings: list[ParseWarning],
+    current_lead: str | None,
+) -> None:
+    tag, name = block.tag, block.name
+    cols = block.columns or []
+    bucket_key = _RESOLUTION_BUCKET_KEY[name]
+    for idx, row in enumerate(block.rows):
+        try:
+            cells = _row_cells(block, row, len(cols))
+        except RowError as e:
+            warnings.append(ParseWarning(
+                block=f":{tag} {name}", row_index=idx, row=row, reason=str(e),
+            ))
+            continue
+        rec = dict(zip(cols, cells, strict=False))
+        # `resolved_by` / `lead` are the dense column names for the
+        # back-pointer; look them up *before* canonicalization so
+        # attribution still works.
+        lead_id = rec.get("resolved_by") or rec.get("lead") or current_lead
+        if not lead_id:
+            warnings.append(ParseWarning(
+                block=f":{tag} {name}", row_index=idx, row=row,
+                reason="row has no lead attribution",
+            ))
+            continue
+        lead = lead_bucket(lead_id)
+        if name == "attr_updates":
+            _apply_attr_update(lead, rec, tag, name, idx, row, warnings)
+        else:
+            lead.setdefault("outcome", {}).setdefault(bucket_key, []).append(
+                _canonicalize_resolution_row(rec)
+            )
+
+
+def _apply_attr_update(
+    lead: dict[str, Any], rec: dict, tag: str, name: str,
+    idx: int, row: str, warnings: list[ParseWarning],
+) -> None:
+    tgt = rec.get("target")
+    key = rec.get("key")
+    val = rec.get("value", "")
+    if not tgt or not key:
+        warnings.append(ParseWarning(
+            block=f":{tag} {name}", row_index=idx, row=row,
+            reason="attr_updates missing target/key",
+        ))
+        return
+    au = lead.setdefault("outcome", {}).setdefault("attribute_updates", [])
+    for entry in au:
+        if entry.get("target") == tgt and isinstance(entry.get("updates"), dict):
+            entry["updates"][key] = val
+            return
+    au.append({"target": tgt, "updates": {key: val}})
+
+
+def _project_resolutions_block(
+    block: Block,
+    lead_bucket: Callable[[str], dict[str, Any]],
+    warnings: list[ParseWarning],
+    current_lead: str | None,
+) -> str | None:
+    tag, name = block.tag, block.name
+    for idx, row in enumerate(block.rows):
+        try:
+            lead_id, record = _resolution_record(row)
+        except RowError as e:
+            warnings.append(ParseWarning(
+                block=f":{tag} {name}", row_index=idx, row=row, reason=str(e),
+            ))
+            continue
+        lid = lead_id or current_lead
+        if not lid:
+            warnings.append(ParseWarning(
+                block=f":{tag} {name}", row_index=idx, row=row,
+                reason="resolution has no lead attribution",
+            ))
+            continue
+        lead_bucket(lid).setdefault("resolutions", []).append(record)
+        current_lead = lid
+    return current_lead
+
+
+def _project_shelved_block(
+    block: Block,
+    lead_bucket: Callable[[str], dict[str, Any]],
+    warnings: list[ParseWarning],
+    current_lead: str | None,
+) -> None:
+    tag, name = block.tag, block.name
+    cols = block.columns or []
+    for idx, row in enumerate(block.rows):
+        try:
+            cells = _row_cells(block, row, len(cols))
+        except RowError as e:
+            warnings.append(ParseWarning(
+                block=f":{tag} {name}", row_index=idx, row=row, reason=str(e),
+            ))
+            continue
+        rec = dict(zip(cols, cells, strict=False))
+        hyp = rec.get("hyp_id")
+        if not hyp:
+            continue
+        lid = rec.get("by_lead") or current_lead
+        if not lid:
+            continue
+        lead = lead_bucket(lid)
+        lead.setdefault("shelved", []).append(hyp)
+        if rec.get("rationale"):
+            lead.setdefault("shelved_rationales", {})[hyp] = _unquote(rec["rationale"])
 
 
 def parse_dense_companion(

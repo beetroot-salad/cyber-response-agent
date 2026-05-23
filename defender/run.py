@@ -74,7 +74,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"alert not found: {alert}")
     runs_base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
     if run_id is None:
-        ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{ts}-{alert.stem}"
     run_dir = runs_base / run_id
     if run_dir.exists():
@@ -105,12 +105,11 @@ def build_settings_file() -> Path:
         .replace("${DEFENDER_DIR}", str(DEFENDER_DIR))
         .replace("${PYTHON}", sys.executable)
     )
-    fh = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".settings.json", delete=False, prefix="defender-"
-    )
-    fh.write(resolved)
-    fh.close()
-    return Path(fh.name)
+    ) as fh:
+        fh.write(resolved)
+        return Path(fh.name)
 
 
 def build_prompt(run_id: str, run_dir: Path) -> str:

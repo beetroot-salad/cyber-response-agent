@@ -40,6 +40,7 @@ def test_build_settings_file_substitutes_placeholders(run_mod):
         # Matcher must cover both Task and Agent — Claude Code dispatches
         # subagents under either name and the regex needs alternation.
         matcher = data["hooks"]["PreToolUse"][0]["matcher"]
-        assert "Agent" in matcher and "Task" in matcher
+        assert "Agent" in matcher
+        assert "Task" in matcher
     finally:
         path.unlink()

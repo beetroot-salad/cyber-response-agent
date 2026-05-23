@@ -41,6 +41,7 @@ dev = [
     "python-frontmatter>=1.1",
     "markdown-it-py>=3.0",
     "mdit-py-plugins>=0.4",
+    "types-PyYAML",
 ]
 [tool.setuptools]
 packages = []  # Not a traditional package — scripts are invoked directly
@@ -78,8 +79,19 @@ max-statements = 60
 
 [tool.mypy]
 python_version = "3.11"
+# defender/ is intentionally excluded for now: its sibling-import
+# pattern (`import _author_shared`) trips mypy's module discovery.
+# Tracked as follow-up — see bucket-1 notes in PR comment.
 files = ["soc-agent"]
-exclude = ["soc-agent/tests/", "soc-agent/.venv/"]
+exclude = [
+    "soc-agent/tests/",
+    "soc-agent/.venv/",
+    # knowledge/ holds runtime-loaded config artifacts, not importable
+    # modules. mypy otherwise discovers
+    # knowledge/environment/systems/wazuh/schemas.py and collides it
+    # with the top-level `schemas` package.
+    "soc-agent/knowledge/",
+]
 ignore_missing_imports = true
 follow_imports = "silent"
 # Soft-launch posture: surface type errors without blocking on every
@@ -89,8 +101,8 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [tool.vulture]
-paths = ["soc-agent"]
-exclude = ["soc-agent/tests/", "soc-agent/.venv/"]
+paths = ["soc-agent", "defender"]
+exclude = ["soc-agent/tests/", "soc-agent/.venv/", "defender/tests/", "defender/.venv/"]
 min_confidence = 80
 # key_field, key_value: abstract-method params on AdapterContract.lookup
 # (vulture can't see subclass usage).

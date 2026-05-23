@@ -57,7 +57,7 @@ def _fake_claude_script(repo, *, behavior: str) -> str:
 
 
 @pytest.fixture
-def _shim_claude(tmp_repo, monkeypatch):
+def shim_claude(tmp_repo, monkeypatch):
     """Replace the `claude` invocation with a controllable python script.
 
     Patches subprocess.Popen at the author module level: when the
@@ -83,11 +83,11 @@ def _shim_claude(tmp_repo, monkeypatch):
     return make
 
 
-def test_silent_hang_is_killed_by_wall_clock(tmp_repo, _shim_claude, monkeypatch):
+def test_silent_hang_is_killed_by_wall_clock(tmp_repo, shim_claude, monkeypatch):
     """Child emits one line then stops — AUTHOR_TIMEOUT must still fire."""
     a = tmp_repo.author
     monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 2)  # seconds
-    _shim_claude("silent_hang")
+    shim_claude("silent_hang")
 
     t0 = time.monotonic()
     with pytest.raises(a.AuthorError, match="timed out after 2s"):
@@ -97,11 +97,11 @@ def test_silent_hang_is_killed_by_wall_clock(tmp_repo, _shim_claude, monkeypatch
     assert elapsed < 6.0, f"timeout did not fire promptly (elapsed={elapsed:.2f}s)"
 
 
-def test_stdin_write_is_bounded_by_deadline(tmp_repo, _shim_claude, monkeypatch):
+def test_stdin_write_is_bounded_by_deadline(tmp_repo, shim_claude, monkeypatch):
     """Child never reads stdin; prompt > pipe buffer must not block writer."""
     a = tmp_repo.author
     monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 2)
-    _shim_claude("ignore_stdin")
+    shim_claude("ignore_stdin")
 
     # Findings list large enough that json.dumps(...) exceeds the
     # default 64KiB Linux pipe buffer — forces the writer to wait
@@ -115,11 +115,11 @@ def test_stdin_write_is_bounded_by_deadline(tmp_repo, _shim_claude, monkeypatch)
     assert elapsed < 6.0, f"stdin-write deadlock — elapsed={elapsed:.2f}s"
 
 
-def test_stderr_flood_does_not_deadlock(tmp_repo, _shim_claude, monkeypatch):
+def test_stderr_flood_does_not_deadlock(tmp_repo, shim_claude, monkeypatch):
     """Child writes 256 KiB to stderr before stdout — reader drains both."""
     a = tmp_repo.author
     monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 5)
-    _shim_claude("stderr_flood")
+    shim_claude("stderr_flood")
 
     # The fake never emits AUTHOR_RESULT, so we expect that specific
     # error — but only if the reader completed without deadlock first.

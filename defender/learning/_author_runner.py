@@ -25,8 +25,9 @@ import select as _select
 import subprocess
 import sys
 import time as _time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 
 class RunnerError(Exception):
@@ -51,7 +52,10 @@ def extract_marked_result(text: str, marker: str) -> str | None:
     matches = list(pat.finditer(text))
     if not matches:
         return None
-    start = matches[-1].end()
+    return _find_balanced_json_object(text, matches[-1].end())
+
+
+def _find_balanced_json_object(text: str, start: int) -> str | None:
     depth = 0
     in_str = False
     esc = False
@@ -87,43 +91,62 @@ def summarize_event(evt: dict) -> str | None:
     if etype == "system":
         return f"system subtype={evt.get('subtype')}"
     if etype == "assistant":
-        msg = evt.get("message") or {}
-        for blk in msg.get("content") or []:
-            btype = blk.get("type")
-            if btype == "tool_use":
-                name = blk.get("name", "?")
-                inp = blk.get("input") or {}
-                if name == "Bash":
-                    cmd = (inp.get("command") or "").splitlines()[0][:120]
-                    return f"tool:Bash {cmd}"
-                if name in ("Read", "Glob", "Grep"):
-                    target = inp.get("file_path") or inp.get("pattern") or ""
-                    return f"tool:{name} {target}"
-                if name in ("Edit", "Write"):
-                    return f"tool:{name} {inp.get('file_path', '')}"
-                return f"tool:{name}"
-            if btype == "text":
-                txt = (blk.get("text") or "").strip().splitlines()
-                head = txt[0][:140] if txt else ""
-                return f"text {head}" if head else None
-        return "assistant (empty)"
+        return _summarize_assistant_event(evt)
     if etype == "user":
-        msg = evt.get("message") or {}
-        for blk in msg.get("content") or []:
-            if blk.get("type") == "tool_result":
-                content = blk.get("content")
-                if isinstance(content, list):
-                    body = "".join(
-                        b.get("text", "") for b in content if isinstance(b, dict)
-                    )
-                else:
-                    body = str(content or "")
-                size = len(body)
-                err = " ERR" if blk.get("is_error") else ""
-                return f"tool_result{err} {size}B"
-        return None
+        return _summarize_user_event(evt)
     if etype == "result":
         return f"result subtype={evt.get('subtype')} duration_ms={evt.get('duration_ms')}"
+    return None
+
+
+def _summarize_assistant_event(evt: dict) -> str | None:
+    msg = evt.get("message") or {}
+    for blk in msg.get("content") or []:
+        summary = _summarize_assistant_block(blk)
+        if summary is not None:
+            return summary
+    return "assistant (empty)"
+
+
+def _summarize_assistant_block(blk: dict) -> str | None:
+    btype = blk.get("type")
+    if btype == "tool_use":
+        return _summarize_tool_use(blk)
+    if btype == "text":
+        txt = (blk.get("text") or "").strip().splitlines()
+        head = txt[0][:140] if txt else ""
+        return f"text {head}" if head else None
+    return None
+
+
+def _summarize_tool_use(blk: dict) -> str:
+    name = blk.get("name", "?")
+    inp = blk.get("input") or {}
+    if name == "Bash":
+        cmd = (inp.get("command") or "").splitlines()[0][:120]
+        return f"tool:Bash {cmd}"
+    if name in ("Read", "Glob", "Grep"):
+        target = inp.get("file_path") or inp.get("pattern") or ""
+        return f"tool:{name} {target}"
+    if name in ("Edit", "Write"):
+        return f"tool:{name} {inp.get('file_path', '')}"
+    return f"tool:{name}"
+
+
+def _summarize_user_event(evt: dict) -> str | None:
+    msg = evt.get("message") or {}
+    for blk in msg.get("content") or []:
+        if blk.get("type") != "tool_result":
+            continue
+        content = blk.get("content")
+        if isinstance(content, list):
+            body = "".join(
+                b.get("text", "") for b in content if isinstance(b, dict)
+            )
+        else:
+            body = str(content or "")
+        err = " ERR" if blk.get("is_error") else ""
+        return f"tool_result{err} {len(body)}B"
     return None
 
 
@@ -179,59 +202,102 @@ def resolve_verifier_python(repo_root: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class RunnerOptions:
+    """Bundle the static knobs that `invoke_claude_print` needs.
+
+    Keeps the public function under PLR0913's arg cap; the two callers
+    (author.py / author_actor.py) construct one per invocation.
+    """
+    system_prompt_file: Path
+    allowed_tools: str
+    model: str
+    effort: str | None
+    timeout_seconds: int
+    cwd: Path
+    log_path: Path
+    result_marker: str
+    batch_id: str
+
+
 def invoke_claude_print(
-    *,
-    system_prompt_file: Path,
+    options: RunnerOptions,
     user_prompt: str,
-    allowed_tools: str,
-    model: str,
-    effort: str | None,
-    timeout_seconds: int,
-    cwd: Path,
-    log_path: Path,
-    result_marker: str,
     log_fn: Callable[[str], None],
-    batch_id: str,
 ) -> dict:
     """Spawn ``claude -p`` with stream-json output and return the parsed
-    result JSON the agent emitted after ``result_marker``.
+    result JSON the agent emitted after ``options.result_marker``.
 
-    Streams events to ``log_path`` (one JSONL line per event, plus a
-    leading metadata line) and feeds one-line summaries to ``log_fn``
-    for stderr surfacing.
+    Streams events to ``options.log_path`` (one JSONL line per event,
+    plus a leading metadata line) and feeds one-line summaries to
+    ``log_fn`` for stderr surfacing.
 
     Raises ``RunnerError`` on timeout, non-zero rc, missing marker, or
     invalid JSON. The caller is responsible for treating the queue as
     intact on any of these failures.
     """
-    cmd = [
+    cmd = _build_claude_cmd(options)
+    options.log_path.parent.mkdir(parents=True, exist_ok=True)
+    with options.log_path.open("wb") as log_fh:
+        log_fh.write(
+            (json.dumps({"batch_id": options.batch_id, "started_at": _now_iso()}) + "\n").encode()
+        )
+        log_fh.flush()
+        rc, full_text, stderr_tail = _drive_subprocess(
+            cmd, options.cwd, user_prompt.encode(),
+            options.timeout_seconds, options.log_path, log_fh, log_fn,
+        )
+
+    if rc != 0:
+        raise RunnerError(f"agent failed (rc={rc}):\nstderr: {stderr_tail}")
+    body = extract_marked_result(full_text, options.result_marker)
+    if body is None:
+        raise RunnerError(
+            f"agent did not emit {options.result_marker} line:\n" + full_text[-2000:]
+        )
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as e:
+        raise RunnerError(f"{options.result_marker} JSON invalid: {e}\n{body}") from e
+
+
+def _build_claude_cmd(options: RunnerOptions) -> list[str]:
+    return [
         "claude",
         "--print",
-        "--model", model,
-        "--system-prompt-file", str(system_prompt_file),
+        "--model", options.model,
+        "--system-prompt-file", str(options.system_prompt_file),
         "--output-format", "stream-json",
         "--verbose",
         "--include-hook-events",
-        *(["--effort", effort] if effort else []),
-        "--allowed-tools", allowed_tools,
+        *(["--effort", options.effort] if options.effort else []),
+        "--allowed-tools", options.allowed_tools,
     ]
 
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = log_path.open("wb")
-    log_fh.write(
-        (json.dumps({"batch_id": batch_id, "started_at": _now_iso()}) + "\n").encode()
-    )
-    log_fh.flush()
 
-    # Binary streams + manual line buffering: a text-mode iterator
-    # (`for raw in proc.stdout`) blocks waiting for a newline, so the
-    # wall-clock check below never fires when the child stops emitting
-    # mid-line (stuck child, hung tool). select() on raw fds bounds
-    # every read by the remaining deadline. stderr is drained in the
-    # same loop so a full stderr pipe (64KiB on Linux) cannot deadlock
-    # the child either. stdin is written through the same select loop
-    # so a child that hangs before reading the prompt cannot block the
-    # parent in write() — the prompt JSON regularly clears 64KiB.
+def _drive_subprocess(
+    cmd: list[str],
+    cwd: Path,
+    prompt_bytes: bytes,
+    timeout_seconds: int,
+    log_path: Path,
+    log_fh,
+    log_fn: Callable[[str], None],
+) -> tuple[int | None, str, str]:
+    """Spawn the subprocess and run the select-loop until exit or deadline.
+
+    Binary streams + manual line buffering: a text-mode iterator
+    (``for raw in proc.stdout``) blocks waiting for a newline, so the
+    wall-clock check would never fire when the child stops emitting
+    mid-line (stuck child, hung tool). select() on raw fds bounds every
+    read by the remaining deadline. stderr is drained in the same loop
+    so a full stderr pipe (64KiB on Linux) cannot deadlock the child
+    either. stdin is written through the same select loop so a child
+    that hangs before reading the prompt cannot block the parent in
+    write() — the prompt JSON regularly clears 64KiB.
+
+    Returns ``(rc, full_assistant_text, stderr_tail)``.
+    """
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -240,22 +306,21 @@ def invoke_claude_print(
         stderr=subprocess.PIPE,
         bufsize=0,
     )
-    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
 
     # Start the deadline *before* we touch stdin — a hung child must
     # not give us an unbounded grace period during prompt delivery.
     deadline = _time.monotonic() + timeout_seconds
-
     stdin_fd = proc.stdin.fileno()
     _fcntl.fcntl(stdin_fd, _fcntl.F_SETFL, _fcntl.fcntl(stdin_fd, _fcntl.F_GETFL) | os.O_NONBLOCK)
-    prompt_bytes = user_prompt.encode()
 
     text_buf: list[str] = []
     stderr_chunks: list[bytes] = []
-    stdout_buf = b""
     t0 = _time.monotonic()
 
-    def _handle_line(raw: bytes) -> None:
+    def handle_line(raw: bytes) -> None:
         log_fh.write(raw + b"\n")
         log_fh.flush()
         try:
@@ -271,16 +336,35 @@ def invoke_claude_print(
         text_buf.append(assistant_text(evt))
         summary = summarize_event(evt)
         if summary:
-            elapsed = _time.monotonic() - t0
-            log_fn(f"+{elapsed:5.1f}s {summary}")
+            log_fn(f"+{_time.monotonic() - t0:5.1f}s {summary}")
 
-    rc: int | None = None
+    rc = _run_select_loop(
+        proc, stdin_fd, prompt_bytes, deadline, timeout_seconds,
+        log_path, stderr_chunks, handle_line,
+    )
+    stderr_tail = b"".join(stderr_chunks).decode("utf-8", errors="replace")[-2000:]
+    return rc, "".join(text_buf), stderr_tail
+
+
+def _run_select_loop(  # noqa: PLR0913 — every parameter is load-bearing per-call state
+    proc: subprocess.Popen,
+    stdin_fd: int,
+    prompt_bytes: bytes,
+    deadline: float,
+    timeout_seconds: int,
+    log_path: Path,
+    stderr_chunks: list[bytes],
+    handle_line: Callable[[bytes], None],
+) -> int | None:
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    stdout_fd = proc.stdout.fileno()
+    stderr_fd = proc.stderr.fileno()
+    open_read_fds: set[int] = {stdout_fd, stderr_fd}
+    stdout_buf = b""
+    stdin_offset = 0
+    stdin_closed = False
     try:
-        stdout_fd = proc.stdout.fileno()
-        stderr_fd = proc.stderr.fileno()
-        open_read_fds: set[int] = {stdout_fd, stderr_fd}
-        stdin_offset = 0
-        stdin_closed = False
         while open_read_fds or not stdin_closed:
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
@@ -296,59 +380,69 @@ def invoke_claude_print(
             )
             if not ready_r and not ready_w:
                 continue
-            for fd in ready_r:
-                chunk = os.read(fd, 65536)
-                if not chunk:
-                    open_read_fds.discard(fd)
-                    continue
-                if fd == stdout_fd:
-                    stdout_buf += chunk
-                    while b"\n" in stdout_buf:
-                        raw, stdout_buf = stdout_buf.split(b"\n", 1)
-                        _handle_line(raw)
-                else:
-                    stderr_chunks.append(chunk)
+            stdout_buf = _drain_reads(
+                ready_r, stdout_fd, open_read_fds, stdout_buf, stderr_chunks, handle_line,
+            )
             if ready_w and not stdin_closed:
-                try:
-                    n = os.write(stdin_fd, prompt_bytes[stdin_offset:])
-                except BlockingIOError:
-                    n = 0
-                except BrokenPipeError:
-                    # Child closed stdin before we finished — finish the
-                    # read loop and surface rc/stderr the caller sees.
-                    stdin_closed = True
-                    proc.stdin.close()
-                    n = 0
-                stdin_offset += n
-                if stdin_offset >= len(prompt_bytes):
-                    proc.stdin.close()
-                    stdin_closed = True
+                stdin_offset, stdin_closed = _pump_stdin(
+                    proc, stdin_fd, prompt_bytes, stdin_offset,
+                )
         if stdout_buf.strip():
-            _handle_line(stdout_buf)
-        rc = proc.wait(timeout=max(1.0, deadline - _time.monotonic()))
-    except subprocess.TimeoutExpired:
+            handle_line(stdout_buf)
+        return proc.wait(timeout=max(1.0, deadline - _time.monotonic()))
+    except subprocess.TimeoutExpired as exc:
         proc.kill()
         raise RunnerError(
             f"agent timed out after {timeout_seconds}s (see {log_path})"
-        )
-    finally:
-        log_fh.close()
+        ) from exc
 
-    stderr_tail = b"".join(stderr_chunks).decode("utf-8", errors="replace")[-2000:]
-    if rc != 0:
-        raise RunnerError(f"agent failed (rc={rc}):\nstderr: {stderr_tail}")
-    full_text = "".join(text_buf)
-    body = extract_marked_result(full_text, result_marker)
-    if body is None:
-        raise RunnerError(
-            f"agent did not emit {result_marker} line:\n" + full_text[-2000:]
-        )
+
+def _drain_reads(
+    ready_r: list[int],
+    stdout_fd: int,
+    open_read_fds: set[int],
+    stdout_buf: bytes,
+    stderr_chunks: list[bytes],
+    handle_line: Callable[[bytes], None],
+) -> bytes:
+    for fd in ready_r:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            open_read_fds.discard(fd)
+            continue
+        if fd == stdout_fd:
+            stdout_buf += chunk
+            while b"\n" in stdout_buf:
+                raw, stdout_buf = stdout_buf.split(b"\n", 1)
+                handle_line(raw)
+        else:
+            stderr_chunks.append(chunk)
+    return stdout_buf
+
+
+def _pump_stdin(
+    proc: subprocess.Popen,
+    stdin_fd: int,
+    prompt_bytes: bytes,
+    stdin_offset: int,
+) -> tuple[int, bool]:
+    assert proc.stdin is not None
     try:
-        return json.loads(body)
-    except json.JSONDecodeError as e:
-        raise RunnerError(f"{result_marker} JSON invalid: {e}\n{body}") from e
+        n = os.write(stdin_fd, prompt_bytes[stdin_offset:])
+    except BlockingIOError:
+        n = 0
+    except BrokenPipeError:
+        # Child closed stdin before we finished — finish the read loop
+        # and surface rc/stderr the caller sees.
+        proc.stdin.close()
+        return stdin_offset, True
+    stdin_offset += n
+    if stdin_offset >= len(prompt_bytes):
+        proc.stdin.close()
+        return stdin_offset, True
+    return stdin_offset, False
 
 
 def _now_iso() -> str:
     import datetime as _dt
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")

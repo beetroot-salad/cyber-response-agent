@@ -349,7 +349,7 @@ def run_head_defender(
     run_id: str,
     runs_base: Path,
     *,
-    runner: "subprocess._RunFn" = subprocess.run,
+    runner: subprocess._RunFn = subprocess.run,
 ) -> Path:
     """Invoke ``defender/run.py --no-learn`` and return the run dir.
 
@@ -409,7 +409,7 @@ def run_frozen_actor(
     pin: GenerationPin,
     case_id: str,
     *,
-    runner: "subprocess._RunFn" = subprocess.run,
+    runner: subprocess._RunFn = subprocess.run,
 ) -> Path:
     """Invoke replay_actor.py in the gen-{N-K} worktree. Returns staging.
 

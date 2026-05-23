@@ -129,46 +129,53 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _handle_enum_cmd(args) -> int:
+    if args.slot is None:
+        slots = vocab.list_slots()
+        if args.as_json:
+            json.dump({"slots": slots}, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            for s in slots:
+                print(s)
+        return 0
+    try:
+        values = vocab.get_enum(args.slot)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.as_json:
+        json.dump({"slot": args.slot, "values": list(values)},
+                  sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        for v in values:
+            print(v)
+    return 0
+
+
+def _handle_advisory_cmd(args) -> int:
+    # The adapter does its own (cached) corpus load + telemetry; skip
+    # the upfront load + summary print so its own banner isn't shadowed.
+    result = advisory_recall(
+        args.corpus_root,
+        signature_id=args.signature,
+        frontier=tuple(args.frontier),
+        classes=tuple(args.classes) if args.classes else VALID_CLASSES,
+        top_k=args.top_k,
+    )
+    sys.stdout.write(result.as_json() if args.as_json else result.as_markdown())
+    sys.stdout.write("\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     if args.cmd == "enum":
-        if args.slot is None:
-            slots = vocab.list_slots()
-            if args.as_json:
-                json.dump({"slots": slots}, sys.stdout, indent=2)
-                sys.stdout.write("\n")
-            else:
-                for s in slots:
-                    print(s)
-            return 0
-        try:
-            values = vocab.get_enum(args.slot)
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        if args.as_json:
-            json.dump({"slot": args.slot, "values": list(values)},
-                      sys.stdout, indent=2)
-            sys.stdout.write("\n")
-        else:
-            for v in values:
-                print(v)
-        return 0
-
+        return _handle_enum_cmd(args)
     if args.cmd == "advisory":
-        # The adapter does its own (cached) corpus load + telemetry; skip
-        # the upfront load + summary print so its own banner isn't shadowed.
-        result = advisory_recall(
-            args.corpus_root,
-            signature_id=args.signature,
-            frontier=tuple(args.frontier),
-            classes=tuple(args.classes) if args.classes else VALID_CLASSES,
-            top_k=args.top_k,
-        )
-        sys.stdout.write(result.as_json() if args.as_json else result.as_markdown())
-        sys.stdout.write("\n")
-        return 0
+        return _handle_advisory_cmd(args)
 
     corpus, report = load_corpus(args.corpus_root)
     if not args.quiet:
@@ -202,35 +209,47 @@ def main(argv: list[str] | None = None) -> int:
             max_hypotheses_per_lead=args.max_hypotheses_per_lead,
         )
     elif args.cmd == "hypothesis-vocabulary":
-        out = _hypothesis_vocabulary(corpus, args.signature, args.top_k)
-        if not args.as_json:
-            sys.stdout.write(_render_vocab(out, args.signature))
-            sys.stdout.write("\n")
-            return 0
+        return _handle_hypothesis_vocabulary_cmd(args, corpus)
     elif args.cmd == "hypothesis-shape":
-        if not (args.parent_type or args.parent_class or args.rel
-                or args.attached_to_type):
-            print(
-                "error: hypothesis-shape requires at least one of "
-                "--parent-type, --parent-class, --rel, --attached-to-type",
-                file=sys.stderr,
-            )
-            return 2
-        out = hypothesis_shape_match(
-            corpus,
-            parent_type=args.parent_type,
-            parent_class=args.parent_class,
-            rel=args.rel,
-            attached_to_type=args.attached_to_type,
-        )
-        if not args.as_json:
-            sys.stdout.write(_render_shape(out))
-            sys.stdout.write("\n")
-            return 0
+        return _handle_hypothesis_shape_cmd(args, corpus)
     else:
         raise AssertionError(args.cmd)
 
     json.dump(out, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+def _handle_hypothesis_vocabulary_cmd(args, corpus) -> int:
+    out = _hypothesis_vocabulary(corpus, args.signature, args.top_k)
+    if args.as_json:
+        json.dump(out, sys.stdout, indent=2)
+    else:
+        sys.stdout.write(_render_vocab(out, args.signature))
+    sys.stdout.write("\n")
+    return 0
+
+
+def _handle_hypothesis_shape_cmd(args, corpus) -> int:
+    if not (args.parent_type or args.parent_class or args.rel
+            or args.attached_to_type):
+        print(
+            "error: hypothesis-shape requires at least one of "
+            "--parent-type, --parent-class, --rel, --attached-to-type",
+            file=sys.stderr,
+        )
+        return 2
+    out = hypothesis_shape_match(
+        corpus,
+        parent_type=args.parent_type,
+        parent_class=args.parent_class,
+        rel=args.rel,
+        attached_to_type=args.attached_to_type,
+    )
+    if args.as_json:
+        json.dump(out, sys.stdout, indent=2)
+    else:
+        sys.stdout.write(_render_shape(out))
     sys.stdout.write("\n")
     return 0
 
@@ -243,7 +262,7 @@ def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
     """
     from collections import Counter
 
-    counts: "Counter[str]" = Counter()
+    counts: Counter[str] = Counter()
     examples: dict[str, str] = {}
     n_cases = 0
     for c in corpus:

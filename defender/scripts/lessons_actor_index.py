@@ -104,25 +104,20 @@ def main(argv: list[str]) -> int:
     for path, fm in iter_lessons():
         # Stale filter (default hide; mutable=false lessons never have
         # status=stale, so they pass through unconditionally).
-        if not ns.include_stale:
-            if str(fm.get("status") or "live").strip() == "stale":
-                continue
+        if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":
+            continue
 
         # Subject is the equivalence key — exact match only when filter set.
-        if want_subject is not None:
-            if str(fm.get("subject") or "").strip() != want_subject:
-                continue
+        if want_subject is not None and str(fm.get("subject") or "").strip() != want_subject:
+            continue
 
         # Multi-key filters: AND across, OR within.
-        if want_techniques:
-            if _as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
-                continue
-        if want_rule_ids:
-            if _as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
-                continue
-        if want_lead_tags:
-            if _as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
-                continue
+        if want_techniques and _as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
+            continue
+        if want_rule_ids and _as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
+            continue
+        if want_lead_tags and _as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
+            continue
 
         criteria = fm.get("relevance_criteria") or ""
         criteria = str(criteria).strip().replace("\t", " ").replace("\n", " ")
