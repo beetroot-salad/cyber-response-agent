@@ -105,12 +105,11 @@ def build_settings_file() -> Path:
         .replace("${DEFENDER_DIR}", str(DEFENDER_DIR))
         .replace("${PYTHON}", sys.executable)
     )
-    fh = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".settings.json", delete=False, prefix="defender-"
-    )
-    fh.write(resolved)
-    fh.close()
-    return Path(fh.name)
+    ) as fh:
+        fh.write(resolved)
+        return Path(fh.name)
 
 
 def build_prompt(run_id: str, run_dir: Path) -> str:

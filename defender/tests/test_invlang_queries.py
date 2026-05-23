@@ -464,7 +464,7 @@ def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
 
 def test_hypothesis_shape_requires_at_least_one_filter():
     import pytest
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least one of"):
         hypothesis_shape_match([])
 
 

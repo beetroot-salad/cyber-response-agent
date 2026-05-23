@@ -328,11 +328,11 @@ def invoke_claude_print(
         if stdout_buf.strip():
             _handle_line(stdout_buf)
         rc = proc.wait(timeout=max(1.0, deadline - _time.monotonic()))
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         proc.kill()
         raise RunnerError(
             f"agent timed out after {timeout_seconds}s (see {log_path})"
-        )
+        ) from exc
     finally:
         log_fh.close()
 

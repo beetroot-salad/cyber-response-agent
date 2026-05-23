@@ -607,9 +607,8 @@ def has_time_range_filter(body: dict) -> bool:
     def walk(node):
         if isinstance(node, dict):
             for k, v in node.items():
-                if k == "range" and isinstance(v, dict):
-                    if any(field in v for field in TIME_FIELDS):
-                        return True
+                if k == "range" and isinstance(v, dict) and any(field in v for field in TIME_FIELDS):
+                    return True
                 if walk(v):
                     return True
         elif isinstance(node, list):

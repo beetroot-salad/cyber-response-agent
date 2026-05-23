@@ -55,13 +55,13 @@ def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fh
-        except BlockingIOError:
+        except BlockingIOError as exc:
             if time.monotonic() >= deadline:
                 fh.close()
                 raise TimeoutError(
                     f"repo lock {REPO_LOCK_FILE} held by another author "
                     f"for >{timeout_seconds}s"
-                )
+                ) from exc
             time.sleep(0.2)
 
 
