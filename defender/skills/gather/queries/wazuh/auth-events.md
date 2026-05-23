@@ -11,7 +11,7 @@ and source IP. Used to characterize who is logging in where, from where,
 with what success rate. Covers the by-host and by-user analyst questions
 under one template — bind whichever filters the lead needs.
 
-## What to characterize
+## What to summarize
 
 - Source IP diversity (count of distinct `data.srcip`, top sources)
 - Username diversity (count of distinct `data.dstuser`, top usernames)
@@ -23,6 +23,7 @@ under one template — bind whichever filters the lead needs.
   `authentication_failed`)
 - Timing pattern (burst, periodic, irregular) over the window
 - Volume — total events and events/hour
+- Source port diversity (count of distinct `data.srcport`, top ports)
 
 ## Query
 
@@ -82,6 +83,13 @@ than executing the query and reporting "0 events."
   with `environment/context/identity-patterns` if available.
 - Stale credentials cause periodic failures after password rotation —
   looks like low-grade brute force but isn't.
+- **`--window` param vs. actual query window.** Observed: passing
+  `--window 24h` produced `query_window.duration_hours: 48` in the
+  payload — wazuh_cli anchors the window relative to the alert
+  timestamp, not the current time, so the effective span can exceed
+  the literal param value. Always check `query_window.start` /
+  `query_window.end` in the raw payload before asserting coverage
+  bounds; do not assume the param value equals the queried duration.
 
 ## Baseline
 

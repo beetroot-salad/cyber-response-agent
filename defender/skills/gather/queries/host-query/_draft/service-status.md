@@ -7,7 +7,7 @@ status: draft
 
 Current systemd/sysv service state (active, inactive, failed, not-found). Answers whether a service is installed and running on a host.
 
-## What to characterize
+## What to summarize
 
 - service installation state (found or not found)
 - service state if present (active, inactive, or failed)

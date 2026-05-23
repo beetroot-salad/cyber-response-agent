@@ -11,7 +11,7 @@ network redirection, file reads, binary drops) from the same container,
 which suggest a coordinated attack chain. Captures rule IDs, descriptions,
 timestamps, and severity for the full window.
 
-## What to characterize
+## What to summarize
 
 - Total alert count from the container in the window
 - Distinct rule IDs and descriptions (especially escalation-grade Falco rules 100000–100099)

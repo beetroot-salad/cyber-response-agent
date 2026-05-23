@@ -9,7 +9,7 @@ Look up a host in the CMDB registry by IP or hostname. Used to determine
 whether a host is documented infrastructure, its assigned role, owner team,
 active status, and authorized network paths (inbound/outbound).
 
-## What to characterize
+## What to summarize
 
 - Whether the host is documented in CMDB (present/absent)
 - Hostname and owning team (if documented)

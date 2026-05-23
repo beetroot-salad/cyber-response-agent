@@ -14,9 +14,9 @@ only what `:L findings` rows make structural and fails loudly when a
 row is missing the cells the schema requires.
 
 For the POC, `lead_description.goal` is taken from the `name` cell of
-the `:L` row. `what_to_characterize` is left empty unless a per-lead
+the `:L` row. `what_to_summarize` is left empty unless a per-lead
 `gather_raw/{position}.lead.json` sidecar exists with a
-`what_to_characterize` list — gather/SKILL.md may grow that contract
+`what_to_summarize` list — gather/SKILL.md may grow that contract
 in a later batch; the projection script accepts it eagerly today.
 """
 from __future__ import annotations
@@ -108,13 +108,13 @@ def project(run_dir: Path) -> dict:
 
         sidecar = load_lead_sidecar(run_dir, position) or {}
         goal = sidecar.get("goal") or row.get("name") or row["id"]
-        what_to_characterize = sidecar.get("what_to_characterize") or []
+        what_to_summarize = sidecar.get("what_to_summarize") or []
 
         entries.append({
             "position": position,
             "lead_description": {
                 "goal": goal,
-                "what_to_characterize": list(what_to_characterize),
+                "what_to_summarize": list(what_to_summarize),
             },
             "queries": [{"id": query_id, "params": params}],
             "result_ref": f"gather_raw/{position}.json",
@@ -186,13 +186,13 @@ def dump_yaml(doc: dict) -> str:
         out.append(f"  - position: {entry['position']}")
         out.append("    lead_description:")
         out.append(f"      goal: {_yaml_scalar(entry['lead_description']['goal'])}")
-        wtc = entry["lead_description"]["what_to_characterize"]
+        wtc = entry["lead_description"]["what_to_summarize"]
         if wtc:
-            out.append("      what_to_characterize:")
+            out.append("      what_to_summarize:")
             for item in wtc:
                 out.append(f"        - {_yaml_scalar(item)}")
         else:
-            out.append("      what_to_characterize: []")
+            out.append("      what_to_summarize: []")
         out.append("    queries:")
         for q in entry["queries"]:
             out.append(f"      - id: {q['id']}")

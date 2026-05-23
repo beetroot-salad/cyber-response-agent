@@ -13,7 +13,7 @@ fires (rule ids 550 modified, 553 deleted, 554 added, plus FIM-related
 escalations). Used to answer "did anything change on host X?" and
 "who/what touched /etc/passwd lately?" style leads.
 
-## What to characterize
+## What to summarize
 
 - Total FIM event count over the window
 - Distinct files touched (count + top `syscheck.path` values)

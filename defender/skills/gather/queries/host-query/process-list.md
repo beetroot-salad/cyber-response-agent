@@ -7,7 +7,7 @@ status: established
 
 Current process names running on the host that match a given pattern. Answers what processes are active now, useful for identifying browsers, agents, or anomalous executables. Matches process executable basenames (e.g., `chrome`, `firefox`, `datadog-agent`).
 
-## What to characterize
+## What to summarize
 
 - process names matching the pattern
 - count of matching processes

@@ -96,7 +96,7 @@ class ExecutedLead:
     query_id: str
     params: dict[str, Any]
     goal_text: str
-    what_to_characterize: tuple[str, ...]
+    what_to_summarize: tuple[str, ...]
     result_ref: Path              # this invocation's payload file
     sidecar_path: Path            # this invocation's .observations.json
 
@@ -155,7 +155,7 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
             continue
         lead_desc = raw_entry.get("lead_description") or {}
         goal = lead_desc.get("goal") or ""
-        wtc_raw = lead_desc.get("what_to_characterize") or []
+        wtc_raw = lead_desc.get("what_to_summarize") or []
         wtc = tuple(str(x) for x in wtc_raw if isinstance(x, (str, int)))
 
         queries = raw_entry.get("queries") or []
@@ -181,7 +181,7 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
                     query_id=query_id,
                     params=params,
                     goal_text=goal,
-                    what_to_characterize=wtc,
+                    what_to_summarize=wtc,
                     result_ref=result_ref,
                     sidecar_path=_sidecar_for(result_ref),
                 )
@@ -438,7 +438,7 @@ def build_handoff(
                     "position": lead.position,
                     "query_index": lead.query_index,
                     "goal_text": lead.goal_text,
-                    "what_to_characterize": list(lead.what_to_characterize),
+                    "what_to_summarize": list(lead.what_to_summarize),
                     "params": dict(lead.params),
                     "rendered_query": rendered_query,
                     "payload_status": sidecar["payload_status"],

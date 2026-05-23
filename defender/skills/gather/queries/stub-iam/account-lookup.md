@@ -9,7 +9,7 @@ Look up an account in the IAM registry by name. Used to determine whether
 an account is provisioned, its kind (service or human), active status,
 which source/target hosts it is authorized to use, and owning team.
 
-## What to characterize
+## What to summarize
 
 - Whether the account is documented in IAM (present/absent)
 - Kind (service account vs human-provisioned)

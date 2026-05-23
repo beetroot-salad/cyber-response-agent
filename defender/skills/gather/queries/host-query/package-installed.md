@@ -7,7 +7,7 @@ status: established
 
 Current debian package installation state and version. Answers whether a package is installed and at what version on a single host.
 
-## What to characterize
+## What to summarize
 
 - package installation status (installed or not installed)
 - installed version if present

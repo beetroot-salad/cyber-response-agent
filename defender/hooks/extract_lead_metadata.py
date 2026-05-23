@@ -4,7 +4,7 @@
 Fires on Task tool calls whose prompt dispatches the defender gather
 subagent (identified by the literal `defender/skills/gather/SKILL.md`
 in the prompt). Parses the dispatch's YAML block — `run_dir`,
-`position`, `goal`, `what_to_characterize` — and writes
+`position`, `goal`, `what_to_summarize` — and writes
 `{run_dir}/gather_raw/{position}.lead.json`.
 
 This replaces the heredoc instruction that gather/SKILL.md used to
@@ -92,7 +92,7 @@ def write_sidecar(dispatch: dict) -> None:
     run_dir = dispatch.get("run_dir")
     position = dispatch.get("position")
     goal = dispatch.get("goal")
-    wtc = dispatch.get("what_to_characterize") or []
+    wtc = dispatch.get("what_to_summarize") or []
 
     if not run_dir or position is None or not goal:
         return
@@ -115,7 +115,7 @@ def write_sidecar(dispatch: dict) -> None:
         return
 
     sidecar_path = sidecar_dir / f"{pos_int}.lead.json"
-    payload = {"goal": str(goal).strip(), "what_to_characterize": list(wtc)}
+    payload = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
     try:
         sidecar_path.write_text(json.dumps(payload, indent=2) + "\n")
     except OSError:

@@ -73,7 +73,7 @@ def test_extract_single_query_per_entry(run_dir: Path):
         {
             "position": 0,
             "lead_description": {"goal": "list auth events",
-                                 "what_to_characterize": ["src_ip", "user"]},
+                                 "what_to_summarize": ["src_ip", "user"]},
             "queries": [
                 {"id": "wazuh.auth-events", "params": {"host": "h1", "window": "1h"}}
             ],
@@ -88,7 +88,7 @@ def test_extract_single_query_per_entry(run_dir: Path):
     assert lead.query_id == "wazuh.auth-events"
     assert lead.params == {"host": "h1", "window": "1h"}
     assert lead.goal_text == "list auth events"
-    assert lead.what_to_characterize == ("src_ip", "user")
+    assert lead.what_to_summarize == ("src_ip", "user")
     assert lead.result_ref.name == "0.json"
     assert lead.sidecar_path.name == "0.observations.json"
 

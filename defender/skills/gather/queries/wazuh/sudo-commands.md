@@ -11,7 +11,7 @@ and syslog-sourced sudo events. Used to characterize what privileged actions a
 session performed — config changes, service restarts, user additions — and whether
 the command list is consistent with a stated work item.
 
-## What to characterize
+## What to summarize
 
 - Count of sudo invocations in the window
 - Commands executed (full command strings if available in `data.command` /
