@@ -219,20 +219,19 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         f"Bash(rm {LESSONS_DIR}/*.md)"
     )
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    options = _runner.RunnerOptions(
+        system_prompt_file=AUTHOR_PROMPT,
+        allowed_tools=allowed_tools,
+        model=AUTHOR_MODEL,
+        effort=AUTHOR_EFFORT,
+        timeout_seconds=AUTHOR_TIMEOUT,
+        cwd=REPO_ROOT,
+        log_path=AUTHOR_RUN_LOG,
+        result_marker="AUTHOR_RESULT:",
+        batch_id=batch_id,
+    )
     try:
-        return _runner.invoke_claude_print(
-            system_prompt_file=AUTHOR_PROMPT,
-            user_prompt=user_prompt,
-            allowed_tools=allowed_tools,
-            model=AUTHOR_MODEL,
-            effort=AUTHOR_EFFORT,
-            timeout_seconds=AUTHOR_TIMEOUT,
-            cwd=REPO_ROOT,
-            log_path=AUTHOR_RUN_LOG,
-            result_marker="AUTHOR_RESULT:",
-            log_fn=_log,
-            batch_id=batch_id,
-        )
+        return _runner.invoke_claude_print(options, user_prompt, _log)
     except _runner.RunnerError as e:
         raise AuthorError(str(e)) from e
 
