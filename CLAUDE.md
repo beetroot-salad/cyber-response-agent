@@ -218,6 +218,10 @@ git worktree add .claude/worktrees/{branch-name} -b {branch-name}
 
 Promote a worktree's outputs into `experiments/{name}/` only if there's a writeup with reusable findings. Loose probe scripts with no companion writeup should be deleted, not relocated.
 
+## Defender v2 environment
+
+When the user says "v2 run", "v2 lessons", "v2 leads", "v2 adapters", or anything else v2-scoped about defender, the work happens in `/workspace/defender-v2-tree/` — a long-lived worktree on branch `defender-v2-env`. v1 environment content (Wazuh/docker-exec skills, lessons, gather query packs, adapter CLIs) is deleted on that branch; v2-flavored replacements land in the same paths. Run defender from there with `DEFENDER_RUNS_BASE=/tmp/defender-runs-v2` to keep runs separate from v1 sessions. The `defender-v2-env` branch is local-only — do not push it, do not merge it into main, and do not merge main into it (cherry-pick one-way for runtime improvements).
+
 ## Task Tracking
 
 Open work lives in `tasks/` — one markdown file per task with `title`, `status` (`backlog` / `todo` / `doing` / `done`), and `groups` (comma-separated tags) frontmatter. Body is free-form context. Run `python3 tasks/build.py` to regenerate `board.html`. A task may carry multiple group tags; each renders as its own badge. This replaced the legacy `todo.md` — open issues (state-machine bypass mitigation, validation-hook promotion, SCREEN cost-reduction workstream, Sonnet-migration stages, etc.) all live as task files now.
