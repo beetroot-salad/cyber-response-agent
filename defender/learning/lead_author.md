@@ -63,6 +63,8 @@ Then pick one action.
 
 **Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 
+**Measurement check:** every `## What to characterize` bullet you add or revise names a measurement primitive — a count, a cardinality, a distribution, a ratio, or a field to surface. What values *mean* is ANALYZE's job, not the catalog's. If a candidate bullet names meaning rather than measurement, skip the fold.
+
 `merge` of two established templates is intentionally **not** an option — combining them would require deleting one, and the driver refuses to delete established files. If two siblings are near-duplicates, fold lessons into the one with broader coverage and skip the redundant; a human can clean up in a follow-up PR.
 
 ## Commit envelope
@@ -96,9 +98,17 @@ For promotions, use `git add -A defender/skills/gather/queries/` (or `git mv` al
   payload and confirm at least one record exhibits that state. If none
   does, the claim is speculation; drop it. The catalog documents observed
   reality, not schema possibility.
+- **Measurement, not interpretation.** `## What to characterize`
+  bullets name what to compute or which field to surface — counts,
+  cardinalities, distributions, ratios. What values mean is
+  ANALYZE's job, not the catalog's.
 - **Stay in scope.** Every edit, rename, and removal must land under `defender/skills/gather/queries/`. Driver enforces with whole-tree `git status` and `git diff`.
 - **Established templates are delete-prohibited.** `git rm` may only target paths under `{system}/_draft/`. Demotions (renaming an established template into `_draft/`) are rejected.
 - **No-edit runs exit zero.** If you decide every handoff is `skip`, exit zero without committing.
 - **Non-zero exit ⇒ retry blocked.** If you exit non-zero, the driver writes `failure.txt` and refuses to retry until a human clears it. Do not exit non-zero just because some handoffs were skipped.
-- **Trust pre-computed fields.** `executed_template_path`, `neighbors`, `rendered_query`, `payload_status`, `payload_digest`, and `composite_kind` were computed by the driver. Read them, do not recompute.
+- **Trust pre-computed fields' structure.** `executed_template_path`,
+  `neighbors`, `rendered_query`, `payload_status`, `payload_digest`,
+  and `composite_kind` were computed by the driver. Read them, do
+  not recompute. Their content carries the same measurement
+  discipline as the catalog (see above).
 - **Do not push.** The driver may push after verifying your commit.

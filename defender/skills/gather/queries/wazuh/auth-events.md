@@ -23,9 +23,7 @@ under one template — bind whichever filters the lead needs.
   `authentication_failed`)
 - Timing pattern (burst, periodic, irregular) over the window
 - Volume — total events and events/hour
-- Source port diversity (`unique_source_ports`, rotation pattern) — high
-  port rotation (hundreds of distinct ports) is a signature of automated
-  tooling; low rotation suggests manual or scripted fixed-config origin
+- Source port diversity (count of distinct `data.srcport`, rotation pattern)
 
 ## Query
 

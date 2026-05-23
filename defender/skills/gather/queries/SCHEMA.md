@@ -42,12 +42,13 @@ needs to find the right template at scale.
 
 ## What to characterize
 
-- <dimension 1>
-- <dimension 2>
+- <measurement: what to count / which field to surface / which distribution>
+- <measurement: ...>
 
-These are the bullets gather's summary back to the defender must address.
-Each item is reported, even if "not observed" — omission is ambiguous to
-the parent.
+Each bullet names a measurement primitive — a count, a cardinality,
+a distribution, a ratio, or a field to surface. Every item is
+reported, even if "not observed"; omission is ambiguous to the
+parent. The defender weighs what the values mean in ANALYZE.
 
 ## Query
 

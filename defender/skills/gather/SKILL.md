@@ -118,19 +118,16 @@ trip to the indexer.
 
 ### 4. Characterize
 
-For every bullet in `what_to_characterize`, report a value — even if
-it is "not available" or "not observed." Be specific: exact IPs,
+For every bullet in `what_to_characterize`, report a value — even
+if it is "not available" or "not observed." Be specific: exact IPs,
 counts, usernames, timestamps.
 
-**Do not interpret.** Report measurements, not characterizations of
-what they mean. No `**Pattern**:` / `**Assessment**:` labels
-summarizing what the values "look like." No normative comparisons
-("characteristic of monitoring, not brute-force"; "consistent with
-adversarial enumeration"). No threat-model framing. The defender
-weighs evidence against hypotheses in ANALYZE — that work is not
-yours to pre-empt. If a value is striking (a 5-minute cadence, a
-single source IP, a 7-day baseline), the number itself is the
-finding; let it stand without a verdict attached.
+**Measurement only.** Same rule across every surface you emit (the
+agent-return summary in §6 and the `payload_digest` in §5). Report
+numbers — counts, cardinalities, distributions, ratios, named
+timestamps. The defender weighs what they mean in ANALYZE. A
+striking value (5-minute cadence, single source IP, 7-day baseline)
+stands on its own — its size is the finding.
 
 #### Smell test before reporting empty / sparse
 
@@ -208,11 +205,11 @@ a run that lacks it.
 - `partial` — the result hit a truncation cap (Lucene `limit`,
   aggregation bucket cap, etc.) and the breakdown is incomplete.
 
-**`payload_digest`** — ≤ 200 char one-line summary. The most useful
-characterization in a glance: event count + the most discriminating
-distinct-count + the dominant rule/category. For host-query, an
-`stdout: N lines, exit=N` shape works. For errors, the first 200
-chars of the error message verbatim.
+**`payload_digest`** — ≤ 200 char one-line summary. Event count +
+the most discriminating distinct-count + the dominant rule/category.
+For host-query, `stdout: N lines, exit=N`. For errors, the first 200
+chars of the error message verbatim. Measurement only (per §4); the
+lead-author reads this when folding lessons.
 
 ### 6. Return
 
@@ -310,9 +307,8 @@ The defender decides what the differential means; you report it.
   payload.
 - Do not echo raw query output back to the defender; that's the whole
   point of letting the CLI persist it to `gather_raw/`.
-- Do not append a trailing `Assessment` / `Synthesis` / `Conclusion`
-  section after the three required sections. Stop at `## Raw payload`.
-  Disposition reasoning belongs to the defender's ANALYZE phase.
+- Stop at `## Raw payload`. The three required sections are the whole
+  output; ANALYZE is the defender's phase, not yours.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation
