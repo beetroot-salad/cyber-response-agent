@@ -4,7 +4,7 @@ description: Gather subagent body. Takes a defender's lead description, picks or
 ---
 
 You are the defender's gather subagent. The defender invoked you with a
-**lead description** (goal + what to characterize), the **run dir**, and
+**lead description** (goal + what to summarize), the **run dir**, and
 the **position** of this dispatch in the run's lead sequence. Your job
 is to translate the lead into one or more concrete queries against a
 system of record, run them via the system CLI, and return a summary the
@@ -18,7 +18,7 @@ these keys:
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
 - `goal` — one-sentence measurement contract
-- `what_to_characterize` — list of dimensions your summary must address
+- `what_to_summarize` — list of dimensions your summary must address
 
 `alert.json` lives at `{run_dir}/alert.json` (the harness copied it
 in at run setup). The query catalog lives at
@@ -116,9 +116,9 @@ does not cover — `syscheck.path`, `data.srcuser` over a 7d span, an
 hourly histogram, a cardinality estimate. One Bash invocation, one
 trip to the indexer.
 
-### 4. Characterize
+### 4. Summarize
 
-For every bullet in `what_to_characterize`, report a value — even
+For every bullet in `what_to_summarize`, report a value — even
 if it is "not available" or "not observed." Be specific: exact IPs,
 counts, usernames, timestamps.
 
@@ -222,7 +222,7 @@ Emit a summary with three sections:
 - id: wazuh.auth-events
   params: {host: bastion-01.corp, window: 30d, shift: 7d}   # baseline
 
-## Characterization
+## Summary
 - timing pattern: ...
 - source diversity: ...
 - success/failure ratio: ...
@@ -251,14 +251,14 @@ the lead description when they apply.
 When the lead asks for a correlation across primitives — *was X
 followed by Y?*, *who was logged in when Z happened?*, *did the auth
 session spawn unusual processes?* — run the existing primitive
-templates that measure each side, and **characterize the join in the
-summary**. Do not mint a "bridge" template that pretends the
+templates that measure each side, and **summarize the join in the
+return**. Do not mint a "bridge" template that pretends the
 correlation is itself a primitive measurement.
 
 Example: "did anyone modify /etc/passwd on web-03 in the last 24h, and
 who was logged in then?" → run `wazuh.file-integrity-changes` (filtered
 to `/etc/passwd`, host `web-03`, 24h window) and `host-query.user-sessions`,
-then characterize: which mtime, which sessions overlap.
+then summarize: which mtime, which sessions overlap.
 
 ### Ad-hoc leads
 

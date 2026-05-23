@@ -10,7 +10,7 @@ Captures query volume, cadence, all observed subdomain variants, and
 multi-host activity. Useful for characterizing DGA/tunneling activity,
 C2 communications, and legitimate service discovery patterns.
 
-## What to characterize
+## What to summarize
 
 - Total query count over the window
 - Time span (first and last query timestamp)

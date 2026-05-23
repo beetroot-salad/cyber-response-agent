@@ -23,7 +23,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
         "position": 0,
         "query_index": 0,
         "goal_text": "...",
-        "what_to_characterize": ["..."],
+        "what_to_summarize": ["..."],
         "params": {"host": "...", "window": "1h"},
         "rendered_query": "<the literal query body, params substituted>",
         "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
@@ -63,7 +63,7 @@ Then pick one action.
 
 **Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 
-**Measurement check:** every `## What to characterize` bullet you add or revise names a measurement primitive — a count, a cardinality, a distribution, a ratio, or a field to surface. What values *mean* is ANALYZE's job, not the catalog's. If a candidate bullet names meaning rather than measurement, skip the fold.
+**Measurement check:** every `## What to summarize` bullet you add or revise names a measurement primitive — a count, a cardinality, a distribution, a ratio, or a field to surface. What values *mean* is ANALYZE's job, not the catalog's. If a candidate bullet names meaning rather than measurement, skip the fold.
 
 `merge` of two established templates is intentionally **not** an option — combining them would require deleting one, and the driver refuses to delete established files. If two siblings are near-duplicates, fold lessons into the one with broader coverage and skip the redundant; a human can clean up in a follow-up PR.
 
@@ -98,7 +98,7 @@ For promotions, use `git add -A defender/skills/gather/queries/` (or `git mv` al
   payload and confirm at least one record exhibits that state. If none
   does, the claim is speculation; drop it. The catalog documents observed
   reality, not schema possibility.
-- **Measurement, not interpretation.** `## What to characterize`
+- **Measurement, not interpretation.** `## What to summarize`
   bullets name what to compute or which field to surface — counts,
   cardinalities, distributions, ratios. What values mean is
   ANALYZE's job, not the catalog's.

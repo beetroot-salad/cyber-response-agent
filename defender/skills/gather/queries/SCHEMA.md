@@ -40,7 +40,7 @@ searching: daemon names (sshd, sudo), file paths (/etc/passwd), log fields,
 syscalls. Gather greps `## Goal` body across the catalog when the dispatch
 needs to find the right template at scale.
 
-## What to characterize
+## What to summarize
 
 - <measurement: what to count / which field to surface / which distribution>
 - <measurement: ...>
@@ -97,7 +97,7 @@ one CLI invocation. Cross-primitive correlations are not templates.
 
 When a lead asks for "X correlated with Y at time T" (e.g. *who was logged
 in when /etc/passwd changed?*), the right move is: run the two primitives
-that already exist, characterize the join in the gather summary. **Do not
+that already exist, summarize the join in the gather return. **Do not
 mint a "bridge" template** — it bloats the catalog with one-offs that
 won't be reused. See `defender/skills/gather/SKILL.md` §Composition leads.
 

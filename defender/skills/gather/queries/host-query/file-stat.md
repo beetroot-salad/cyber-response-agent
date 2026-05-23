@@ -7,7 +7,7 @@ status: established
 
 Current file metadata (permissions, ownership, size, modification time) at a specific path. Answers what the file looks like now on the host.
 
-## What to characterize
+## What to summarize
 
 - file existence and accessibility status
 - file size (bytes)

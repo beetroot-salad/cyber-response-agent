@@ -7,7 +7,7 @@ status: established
 
 Currently established TCP connections on the host (source and destination IPs and ports). Answers what outbound channels the host has open now, used to characterize active communication or detect command-and-control channels.
 
-## What to characterize
+## What to summarize
 
 - established connection count (total)
 - local IP and port pairs (source side)

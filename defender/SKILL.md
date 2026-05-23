@@ -49,7 +49,7 @@ uncertain.
      the per-event content is what carries the deviation.
 
    When the discriminating dimension isn't yet known, ask gather for
-   a baseline characterization alongside the foreground query. A
+   a baseline summary alongside the foreground query. A
    correlated signal that drives disposition gets the same baseline
    treatment as the focal alert — never weigh a count without the
    reference distribution it's deviating from.
@@ -102,12 +102,12 @@ involved, the behavior under question, and what disposition turns on.
 Pick the next lead (or small batch). For each:
 
 - Write a free-form lead description: the **goal** (one-sentence
-  measurement contract) and **what to characterize** (the dimensions
+  measurement contract) and **what to summarize** (the dimensions
   gather's summary must address).
 - Predict, in advance, the observation shape that would resolve each
   competing explanation — relative to the standard pattern for these
   entities. When the standard pattern isn't already known, ask gather
-  for a baseline characterization alongside the foreground query.
+  for a baseline summary alongside the foreground query.
 
 Author `:H` (hypotheses with predictions) and `:L` (lead description)
 blocks. Do not pick a query template here — that's gather's job.
@@ -252,7 +252,7 @@ Task(
          "run_dir: {run_dir}\n"
          "position: N\n"
          "goal: <one-sentence measurement contract>\n"
-         "what_to_characterize:\n"
+         "what_to_summarize:\n"
          "  - <dimension 1>\n"
          "  - <dimension 2>\n"
          "```\n"
@@ -263,7 +263,7 @@ A PreToolUse hook (`defender/hooks/extract_lead_metadata.py`) parses
 that YAML block and writes `{run_dir}/gather_raw/{position}.lead.json`
 before gather runs. The projection script reads that sidecar to
 populate `lead_description` in `lead_sequence.yaml`. Keep the YAML
-well-formed and put `goal` / `what_to_characterize` at the top level
+well-formed and put `goal` / `what_to_summarize` at the top level
 — gather reads the same fields from the same block.
 
 Haiku is the default because gather's job is mechanical — pick a
@@ -420,7 +420,7 @@ Task(model="haiku",
             "run_dir: {run_dir}\n"
             "position: 0\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
-            "what_to_characterize:\n"
+            "what_to_summarize:\n"
             "  - apt history events ±10m around the FIM timestamp\n"
             "  - checksum_after vs the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5\n"
             "  - fleet upgrade pattern for the same window\n"
@@ -462,7 +462,7 @@ entries:
   - position: 0
     lead_description:
       goal: Did the FIM fire at 02:14:01Z trace to a managed apt upgrade?
-      what_to_characterize:
+      what_to_summarize:
         - apt history events ±10m around the FIM timestamp
         - checksum_after vs the published Ubuntu package SHA
         - fleet upgrade pattern for the same window
@@ -697,8 +697,8 @@ alert_ref: alert.json
 entries:
   - position: 0
     lead_description:
-      goal: Characterize the npm package and its maintainer.
-      what_to_characterize:
+      goal: Summarize the npm package and its maintainer.
+      what_to_summarize:
         - maintainer publication history
         - source repo declared telemetry mechanism
         - post-install or lifecycle scripts touching network
@@ -709,7 +709,7 @@ entries:
   - position: 1
     lead_description:
       goal: Trace the node[2188] process tree and check whether DNS queries are bounded by the github-runner job lifetime.
-      what_to_characterize:
+      what_to_summarize:
         - parent chain of pid 2188
         - process exit time vs. last DNS query time
     queries:
@@ -719,7 +719,7 @@ entries:
   - position: 2
     lead_description:
       goal: Reputation and history for the queried domain and its resolved IP.
-      what_to_characterize:
+      what_to_summarize:
         - domain first-seen vs. resolved-IP registration date
         - prior corp traffic to the IP
         - SNI vs. queried domain alignment

@@ -11,7 +11,7 @@ and source IP. Used to characterize who is logging in where, from where,
 with what success rate. Covers the by-host and by-user analyst questions
 under one template — bind whichever filters the lead needs.
 
-## What to characterize
+## What to summarize
 
 - Source IP diversity (count of distinct `data.srcip`, top sources)
 - Username diversity (count of distinct `data.dstuser`, top usernames)

@@ -9,7 +9,7 @@ Retrieve recent fires of a specific Wazuh rule across the fleet over a
 time window. Used to gauge whether the alert under investigation is a
 one-off or part of a broader pattern (and where else it has fired).
 
-## What to characterize
+## What to summarize
 
 - Total fire count
 - Hosts affected (count + top names)

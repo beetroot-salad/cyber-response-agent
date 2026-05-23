@@ -11,7 +11,7 @@ broader pattern (e.g., intrusion chain with recon, lateral movement, C2 or
 other co-occurring alerts). Captures rule IDs, descriptions, and timings for
 the full window around an event.
 
-## What to characterize
+## What to summarize
 
 - Total alert count in the window
 - Rule IDs and descriptions of all unique alerts
