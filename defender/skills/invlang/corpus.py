@@ -88,7 +88,7 @@ def _read_created_at(run_dir: Path) -> str | None:
         st = run_dir.stat()
     except OSError:
         return None
-    return _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.timezone.utc).isoformat()
+    return _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.UTC).isoformat()
 
 
 _REQUIRED_KEYS = {"prologue", "findings", "conclude"}

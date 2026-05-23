@@ -243,7 +243,7 @@ def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
     """
     from collections import Counter
 
-    counts: "Counter[str]" = Counter()
+    counts: Counter[str] = Counter()
     examples: dict[str, str] = {}
     n_cases = 0
     for c in corpus:

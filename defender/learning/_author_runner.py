@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time as _time
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 
 class RunnerError(Exception):
@@ -240,7 +240,9 @@ def invoke_claude_print(
         stderr=subprocess.PIPE,
         bufsize=0,
     )
-    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
 
     # Start the deadline *before* we touch stdin — a hung child must
     # not give us an unbounded grace period during prompt delivery.
@@ -351,4 +353,4 @@ def invoke_claude_print(
 
 def _now_iso() -> str:
     import datetime as _dt
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")

@@ -342,7 +342,7 @@ def verify_agent_state(result: dict) -> None:
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
 
 
 def rotate_queue(

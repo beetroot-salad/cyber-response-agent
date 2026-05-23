@@ -74,7 +74,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"alert not found: {alert}")
     runs_base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
     if run_id is None:
-        ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{ts}-{alert.stem}"
     run_dir = runs_base / run_id
     if run_dir.exists():

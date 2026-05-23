@@ -173,7 +173,8 @@ def test_summary_md_renders_executed_breakdown():
     md = sec.format_summary_md(s)
     assert "catch rate (executed, ex-skip): 1/2 = 50.0%" in md
     assert "pinned generation: 1" in md
-    assert "alpha" in md and "beta" in md
+    assert "alpha" in md
+    assert "beta" in md
 
 
 # ---------------------------------------------------------------------------
@@ -413,11 +414,11 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, lead_text):
+        def assemble_exemplar_bundle(run_dir, _lead_text):
             return ""
 
         @staticmethod
-        def invoke_oracle(*a, **kw):
+        def invoke_oracle(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
     with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
@@ -445,11 +446,11 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, lead_text):
+        def assemble_exemplar_bundle(run_dir, _lead_text):
             return ""
 
         @staticmethod
-        def invoke_oracle(*a, **kw):
+        def invoke_oracle(*_a, **_kw):
             return valid_oracle
 
         @staticmethod
@@ -461,7 +462,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return doc
 
         @staticmethod
-        def invoke_judge(*a, **kw):
+        def invoke_judge(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):

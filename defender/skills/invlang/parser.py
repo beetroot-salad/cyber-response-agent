@@ -44,6 +44,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any
+import contextlib
 
 INVLANG_FENCE_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
 HEADER_RE = re.compile(
@@ -565,10 +566,8 @@ def _lead_header_record(
         if rec.get(k_in):
             v = rec[k_in]
             if k_in == "loop":
-                try:
+                with contextlib.suppress(ValueError):
                     v = int(v)
-                except ValueError:
-                    pass
             identity[k_out] = v
     if rec.get("tests"):
         identity["tests_hypotheses"] = _split_csv(rec["tests"])

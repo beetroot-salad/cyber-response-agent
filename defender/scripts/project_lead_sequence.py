@@ -50,7 +50,7 @@ def parse_l_rows(invlang_text: str) -> list[dict]:
             cells = [c.strip() for c in line.split("|")]
             if len(cells) != len(header):
                 continue
-            row = dict(zip(header, cells))
+            row = dict(zip(header, cells, strict=False))
             if not row.get("id"):
                 continue
             rows.append(row)

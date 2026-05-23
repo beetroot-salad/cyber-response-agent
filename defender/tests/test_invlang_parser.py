@@ -425,7 +425,8 @@ def test_authz_slim_column_form_round_trips():
     l2 = next(f for f in body["findings"] if f["id"] == "l-002")
     rows1 = l1["outcome"]["authorization_resolutions"]
     rows2 = l2["outcome"]["authorization_resolutions"]
-    assert len(rows1) == 1 and len(rows2) == 1
+    assert len(rows1) == 1
+    assert len(rows2) == 1
     assert rows1[0]["fulfills_contract"] == "ac1"
     assert rows1[0]["verdict"] == "unauthorized"
     assert rows1[0]["anchor_kind"] == "approved-source-list"

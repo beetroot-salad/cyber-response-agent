@@ -834,7 +834,7 @@ def lesson_changes(run_dir: Path, run_id: str) -> dict:
     if not trace.is_file():
         return {"available": False, "reason": "no tool_trace.jsonl"}
     since_iso = (
-        _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.timezone.utc)
+        _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.UTC)
         .isoformat()
     )
     try:

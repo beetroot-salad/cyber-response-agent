@@ -41,7 +41,7 @@ def load_registry():
     try:
         with open(IAM_REGISTRY_PATH) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"error: failed to load IAM registry: {e}", file=sys.stderr)
         sys.exit(1)
 
