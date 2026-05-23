@@ -99,3 +99,26 @@ jobs:
 
       - name: jscpd (copy-paste detection)
         run: jscpd soc-agent defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**" || true
+
+      # Defender hygiene + discipline lints (soft — reported, not enforced).
+      # Each script is independently inspectable under defender/scripts/lint_*.py;
+      # source PRs that prompted each check are cited in the module docstrings.
+      - name: Fetch base ref (for stale-ref diff)
+        run: git fetch origin main:refs/remotes/origin/main --depth=50 || true
+
+      - name: Hygiene lint (paths, interpreter, hook matchers)
+        run: python defender/scripts/lint_ci_hygiene.py || true
+
+      - name: Shippable-surface lint (env-agnostic discipline)
+        run: python defender/scripts/lint_shippable_surface.py || true
+
+      - name: Static permission smoke (Bash invocations vs run-settings allowlist)
+        run: python defender/scripts/lint_static_smoke.py || true
+
+      - name: Ground-truth-leak scan
+        run: python defender/scripts/lint_ground_truth_leak.py || true
+
+      - name: Stale-reference scan (vs origin/main)
+        env:
+          STALE_REF_BASE: origin/main
+        run: python defender/scripts/lint_stale_refs.py || true

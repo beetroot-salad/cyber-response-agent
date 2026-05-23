@@ -16,6 +16,7 @@
       "Bash(python3 defender/scripts/tools/cmdb_cli.py *)",
       "Bash(python3 defender/scripts/tools/stub_iam_cli.py *)",
       "Bash(python3 -m defender.skills.invlang.cli *)",
+      "Bash(jq *)",
       "Bash(ls *)",
       "Bash(cat *)",
       "Task(*)",
@@ -25,7 +26,14 @@
       "Read(**/.env)",
       "Read(**/credentials*)",
       "Read(**/.ssh/**)",
-      "Read(/workspace/soc-agent/**)"
+      "Read(/workspace/soc-agent/**)",
+      "Read(**/ground_truth*)",
+      "Read(**/ground-truth*)",
+      "Read(**/cases.json)",
+      "Grep(**/ground_truth*)",
+      "Grep(**/ground-truth*)",
+      "Glob(**/ground_truth*)",
+      "Glob(**/ground-truth*)"
     ]
   },
   "hooks": {
