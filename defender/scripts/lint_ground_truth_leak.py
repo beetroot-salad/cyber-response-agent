@@ -52,9 +52,11 @@ def _is_label_name(name: str) -> str | None:
     return None
 
 
-def _agent_accessible_roots() -> list[str]:
-    """String prefixes for paths the agent can Read during a run."""
-    roots: set[str] = set()
+def _load_permission_specs() -> tuple[list[str], list[re.Pattern]]:
+    """Return (allow_read_roots, deny_read_patterns) from run-settings.json
+    + any --add-dir paths from run.py / run shell scripts."""
+    allow: set[str] = set()
+    deny: list[re.Pattern] = []
     for path in (DEFENDER / "run.py", DEFENDER / "run-settings.json"):
         if not path.exists():
             continue
@@ -65,29 +67,66 @@ def _agent_accessible_roots() -> list[str]:
         for m in re.finditer(r"--add-dir\s+([\w/.\-${}]+)", text):
             raw = m.group(1).replace("${", "").replace("}", "")
             if raw.startswith("/"):
-                roots.add(raw.rstrip("/"))
-        for m in re.finditer(r'"Read\(([^)]+)\)"', text):
+                allow.add(raw.rstrip("/"))
+        # Parse JSON-shaped Read(...) entries; track whether they came
+        # from allow or deny by reading the JSON structure.
+    settings_path = DEFENDER / "run-settings.json"
+    if settings_path.exists():
+        try:
+            import json as _json
+            data = _json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        perms = data.get("permissions", {})
+        for entry in perms.get("allow", []) or []:
+            m = re.match(r"Read\((.+)\)$", entry)
+            if not m:
+                continue
             spec = m.group(1).rstrip("*/")
             if spec.startswith("/"):
-                roots.add(spec)
-    # Default: the repo root is accessible during local dev runs.
-    roots.add(str(REPO_ROOT))
-    return sorted(roots, key=len, reverse=True)
+                allow.add(spec)
+        for entry in perms.get("deny", []) or []:
+            m = re.match(r"Read\((.+)\)$", entry)
+            if not m:
+                continue
+            spec = m.group(1)
+            # Convert glob to regex: ** = .*, * = [^/]*
+            regex = re.escape(spec)
+            regex = regex.replace(r"\*\*", ".*").replace(r"\*", "[^/]*")
+            deny.append(re.compile(regex + "$"))
+    # If run-settings.json had no Read(...) allow entries (and run.py
+    # didn't pass --add-dir), the agent runs under whatever cwd permission
+    # the harness grants. We don't second-guess that — only flag files
+    # under explicitly-allowed Read roots.
+    return sorted(allow, key=len, reverse=True), deny
 
 
-def _reachable(path: Path, roots: list[str]) -> str | None:
+def _reachable(path: Path, allow_roots: list[str], deny_patterns: list[re.Pattern]) -> str | None:
     p = str(path)
-    for r in roots:
+    # Deny wins over allow.
+    p_under_root = p
+    try:
+        p_under_root = "/" + str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        pass
+    candidates = {p, p_under_root, path.name}
+    for pat in deny_patterns:
+        for c in candidates:
+            if pat.match(c) or pat.search(c):
+                return None
+    for r in allow_roots:
         if p == r or p.startswith(r + "/"):
             return r
     return None
 
 
 def main() -> int:
-    roots = _agent_accessible_roots()
+    allow_roots, deny_patterns = _load_permission_specs()
     print("Agent-accessible roots (heuristic):")
-    for r in roots:
+    for r in allow_roots:
         print(f"  - {r}")
+    if deny_patterns:
+        print(f"Deny patterns: {len(deny_patterns)} (Read entries from run-settings.json)")
     print()
 
     findings: list[str] = []
@@ -100,7 +139,7 @@ def main() -> int:
             reason = _is_label_name(path.name)
             if not reason:
                 continue
-            access_root = _reachable(path, roots)
+            access_root = _reachable(path, allow_roots, deny_patterns)
             if not access_root:
                 continue
             rel = path.relative_to(REPO_ROOT).as_posix()

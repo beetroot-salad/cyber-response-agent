@@ -83,13 +83,20 @@ def _allow_matches(invocation: str, allow_patterns: list[str]) -> str | None:
 
 def _iter_bash_invocations() -> list[tuple[Path, int, str]]:
     """Yield (file, lineno, invocation_text) for every Bash code block in
-    skill prompts under defender/."""
+    skill prompts under defender/. CLAUDE.md is excluded (human-facing
+    setup docs, not agent runtime)."""
     out: list[tuple[Path, int, str]] = []
     targets = list(DEFENDER.rglob("SKILL.md"))
     targets.extend(DEFENDER.rglob("*.md"))  # also catches knowledge docs
+    excluded_parts = {"run-visualizations", "fixtures", "tests", "docs",
+                      "run-transcripts", "lessons", "lessons-actor", ".venv"}
     seen: set[Path] = set()
     for path in targets:
-        if path in seen or "run-visualizations" in path.parts or "fixtures" in path.parts:
+        if path in seen:
+            continue
+        if path.name in {"CLAUDE.md", "README.md"}:
+            continue
+        if any(p in excluded_parts for p in path.parts):
             continue
         seen.add(path)
         try:
