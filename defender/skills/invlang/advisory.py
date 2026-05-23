@@ -311,40 +311,39 @@ def _build_lead_discrimination(
 
 
 def _render_section(section: AdvisorySection, frontier: list[str]) -> list[str]:
+    lines = [_render_section_header(section, frontier)]
+    if section.empty:
+        lines.append(f"_{section.note or 'no data'}_")
+        return lines
+    lines.extend(_render_section_body(section))
+    return lines
+
+
+def _render_section_header(section: AdvisorySection, frontier: list[str]) -> str:
     if section.name == CLASS_SIMILAR_CASES:
-        header = f"### Similar cases (n={len(section.hits)})"
-    elif section.name == CLASS_HYPOTHESIS_VOCAB:
-        header = f"### Hypothesis vocabulary (n={len(section.hits)})"
-    elif section.name == CLASS_LEAD_DISCRIMINATION:
+        return f"### Similar cases (n={len(section.hits)})"
+    if section.name == CLASS_HYPOTHESIS_VOCAB:
+        return f"### Hypothesis vocabulary (n={len(section.hits)})"
+    if section.name == CLASS_LEAD_DISCRIMINATION:
         suffix = (
             f"| frontier: {', '.join(frontier)}"
             if frontier
             else "| no frontier — top recurring leads"
         )
-        header = f"### Lead discrimination {suffix}"
-    else:
-        header = f"### {section.name}"
+        return f"### Lead discrimination {suffix}"
+    return f"### {section.name}"
 
-    lines = [header]
-    if section.empty:
-        lines.append(f"_{section.note or 'no data'}_")
-        return lines
 
+def _render_section_body(section: AdvisorySection) -> list[str]:
     if section.name == CLASS_SIMILAR_CASES:
-        for h in section.hits:
-            lines.append(
-                f"- {h['case_id']} ({h['disposition']}, {h['lead_count']} leads): "
-                f"{h['trace']}"
-            )
-    elif section.name == CLASS_HYPOTHESIS_VOCAB:
-        for h in section.hits:
-            buckets = h["buckets"]
-            histogram = ", ".join(f"{b}:{buckets[b]}" for b in _WEIGHT_BUCKETS)
-            unresolved = (
-                f" (unresolved: {h['unresolved']})" if h["unresolved"] else ""
-            )
-            lines.append(f"{h['name']}: {h['n']}× (final: {histogram}){unresolved}")
-    elif section.name == CLASS_LEAD_DISCRIMINATION:
+        return [
+            f"- {h['case_id']} ({h['disposition']}, {h['lead_count']} leads): {h['trace']}"
+            for h in section.hits
+        ]
+    if section.name == CLASS_HYPOTHESIS_VOCAB:
+        return [_render_hypothesis_vocab_row(h) for h in section.hits]
+    if section.name == CLASS_LEAD_DISCRIMINATION:
+        lines: list[str] = []
         for lead in section.hits:
             lines.append(
                 f"{lead['lead_name']} (n={lead['n']}, empty {lead['empty_rate']})"
@@ -354,4 +353,12 @@ def _render_section(section: AdvisorySection, frontier: list[str]) -> list[str]:
                     f"  {hyp}: "
                     + " ".join(f"{b}:{bucket[b]}" for b in _WEIGHT_BUCKETS)
                 )
-    return lines
+        return lines
+    return []
+
+
+def _render_hypothesis_vocab_row(h: dict) -> str:
+    buckets = h["buckets"]
+    histogram = ", ".join(f"{b}:{buckets[b]}" for b in _WEIGHT_BUCKETS)
+    unresolved = f" (unresolved: {h['unresolved']})" if h["unresolved"] else ""
+    return f"{h['name']}: {h['n']}× (final: {histogram}){unresolved}"

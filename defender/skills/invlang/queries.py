@@ -234,71 +234,107 @@ def lead_branch_effects(
     counts: dict[str, int] = {}
     empties: dict[str, int] = {}
     per_hyp: dict[str, dict[str, dict[str, int]]] = {}
-
     patterns_active = bool(hypothesis_patterns)
-
-    def hyp_matches(name: str) -> bool:
-        if not patterns_active:
-            return True
-        return any(fnmatch.fnmatchcase(name, p) for p in hypothesis_patterns)
 
     for c in corpus:
         h_names = {h["id"]: _hypothesis_name(h) for h in _all_hypotheses(c) if "id" in h}
         for lead in c.leads:
-            name = lead.get("name")
-            if not name:
-                # Nameless leads can't be cross-case keys — drop them silently
-                # rather than collapsing them into a "?" bucket that the caller
-                # can't act on. Parser-side issue, not retrieval's to fix.
-                continue
+            _accumulate_lead_effects(
+                lead, h_names, hypothesis_patterns, patterns_active,
+                counts, empties, per_hyp,
+            )
 
-            # Which hypothesis names did this lead occurrence touch? Two
-            # sources: declared via `tests_hypotheses` (the lead's fork
-            # declaration, surfaces empty-gather attempts that produced no
-            # resolution) plus actual `resolutions[]` entries (rows that
-            # produced an assessment shift). Resolution-only would lose the
-            # high-empty-rate signal precisely when it matters — a lead that
-            # forked for ?H but returned nothing.
-            touched: set[str] = set()
-            for h_id in lead.get("tests_hypotheses", []) or []:
-                if (hn := h_names.get(h_id)):
-                    touched.add(hn)
-            for r in lead.get("resolutions", []) or []:
-                if (hn := h_names.get(r.get("hypothesis", ""))):
-                    touched.add(hn)
+    rows = _build_lead_effect_rows(
+        counts, empties, per_hyp,
+        min_support=min_support,
+        max_hypotheses_per_lead=max_hypotheses_per_lead,
+        patterns_active=patterns_active,
+    )
+    rows.sort(key=lambda r: (-r["n"], r["lead_name"]))
+    return {
+        "leads": rows,
+        "count": len(rows),
+        "frontier": list(hypothesis_patterns) if patterns_active else None,
+    }
 
-            if patterns_active:
-                matching = {h for h in touched if hyp_matches(h)}
-                if not matching:
-                    # No frontier match — this occurrence is irrelevant to
-                    # the caller's question. Skip entirely so `n` and
-                    # `empty_rate` reflect frontier-specific support only.
-                    continue
-            else:
-                matching = touched
 
-            counts[name] = counts.get(name, 0) + 1
-            if _lead_outcome_empty(lead):
-                empties[name] = empties.get(name, 0) + 1
+def _accumulate_lead_effects(
+    lead: dict,
+    h_names: dict[str, str],
+    hypothesis_patterns: tuple[str, ...],
+    patterns_active: bool,
+    counts: dict[str, int],
+    empties: dict[str, int],
+    per_hyp: dict[str, dict[str, dict[str, int]]],
+) -> None:
+    name = lead.get("name")
+    if not name:
+        # Nameless leads can't be cross-case keys — drop them silently
+        # rather than collapsing them into a "?" bucket that the caller
+        # can't act on. Parser-side issue, not retrieval's to fix.
+        return
+    touched = _touched_hypothesis_names(lead, h_names)
+    matching = (
+        {h for h in touched if _hyp_pattern_matches(h, hypothesis_patterns)}
+        if patterns_active else touched
+    )
+    if patterns_active and not matching:
+        # No frontier match — this occurrence is irrelevant to the
+        # caller's question. Skip entirely so n + empty_rate reflect
+        # frontier-specific support only.
+        return
+    counts[name] = counts.get(name, 0) + 1
+    if _lead_outcome_empty(lead):
+        empties[name] = empties.get(name, 0) + 1
+    # Initialize a zero-bucket entry for every matching touched hypothesis.
+    # Leads that forked for ?H but never resolved still surface here with
+    # all-zero counts; combined with empty_rate they carry the "this lead
+    # failed on ?H" signal. Sorted for PYTHONHASHSEED-stable order.
+    for hn in sorted(matching):
+        per_hyp.setdefault(name, {}).setdefault(hn, _empty_bucket())
+    for r in lead.get("resolutions", []) or []:
+        hn = h_names.get(r.get("hypothesis", ""), "")
+        if not hn or (patterns_active and not _hyp_pattern_matches(hn, hypothesis_patterns)):
+            continue
+        shift = r.get("after")
+        if shift not in _WEIGHT_BUCKETS:
+            continue
+        per_hyp[name][hn][shift] += 1
 
-            # Initialize a zero-bucket entry for every matching touched
-            # hypothesis. Leads that forked for ?H but never resolved still
-            # surface here with all-zero counts; combined with `empty_rate`
-            # they carry the "this lead failed on ?H" signal. Iterate
-            # sorted so per-lead dict insertion order is stable across
-            # PYTHONHASHSEED (matching is a set).
-            for hn in sorted(matching):
-                per_hyp.setdefault(name, {}).setdefault(hn, _empty_bucket())
 
-            for r in lead.get("resolutions", []) or []:
-                hn = h_names.get(r.get("hypothesis", ""), "")
-                if not hn or (patterns_active and not hyp_matches(hn)):
-                    continue
-                shift = r.get("after")
-                if shift not in _WEIGHT_BUCKETS:
-                    continue
-                per_hyp[name][hn][shift] += 1
+def _hyp_pattern_matches(name: str, patterns: tuple[str, ...]) -> bool:
+    if not patterns:
+        return True
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
 
+
+def _touched_hypothesis_names(lead: dict, h_names: dict[str, str]) -> set[str]:
+    """Hypothesis names this lead occurrence touched.
+
+    Union of two sources: declared via `tests_hypotheses` (surfaces
+    empty-gather forks that never resolved) plus actual `resolutions[]`
+    entries. Resolution-only would lose the high-empty-rate signal
+    precisely when it matters.
+    """
+    touched: set[str] = set()
+    for h_id in lead.get("tests_hypotheses", []) or []:
+        if (hn := h_names.get(h_id)):
+            touched.add(hn)
+    for r in lead.get("resolutions", []) or []:
+        if (hn := h_names.get(r.get("hypothesis", ""))):
+            touched.add(hn)
+    return touched
+
+
+def _build_lead_effect_rows(
+    counts: dict[str, int],
+    empties: dict[str, int],
+    per_hyp: dict[str, dict[str, dict[str, int]]],
+    *,
+    min_support: int,
+    max_hypotheses_per_lead: int,
+    patterns_active: bool,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name, n in counts.items():
         if n < min_support:
@@ -306,9 +342,7 @@ def lead_branch_effects(
         hyp_table = per_hyp.get(name, {})
         if not patterns_active and len(hyp_table) > max_hypotheses_per_lead:
             # Keep the K hypotheses this lead most often resolved against.
-            # Name is the tiebreaker so equal-count entries stay deterministic
-            # across Python hash seeds (matching sets and dicts inherit set
-            # iteration order).
+            # Name as tiebreaker for PYTHONHASHSEED stability.
             ordered = sorted(
                 hyp_table.items(),
                 key=lambda kv: (-sum(kv[1].values()), kv[0]),
@@ -320,18 +354,47 @@ def lead_branch_effects(
             "empty_rate": f"{empties.get(name, 0)}/{n}",
             "per_hypothesis_effect": hyp_table,
         })
-
-    rows.sort(key=lambda r: (-r["n"], r["lead_name"]))
-    return {
-        "leads": rows,
-        "count": len(rows),
-        "frontier": list(hypothesis_patterns) if patterns_active else None,
-    }
+    return rows
 
 
 # ---------------------------------------------------------------------------
 # Topology-shape -> ?hypothesis-names (PLAN: "what have we called this fork?")
 # ---------------------------------------------------------------------------
+
+def _compute_final_weights(c: Companion) -> dict[str, Any]:
+    """Initial hypothesis weight, overlaid by the last resolution shift."""
+    final: dict[str, Any] = {
+        h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h
+    }
+    for lead in c.leads:
+        for r in lead.get("resolutions", []) or []:
+            h_id = r.get("hypothesis")
+            if h_id:
+                final[h_id] = r.get("after")
+    return final
+
+
+def _hypothesis_matches_shape(
+    h: dict,
+    v_type: dict[str, str],
+    *,
+    parent_type: str | None,
+    parent_class: str | None,
+    rel: str | None,
+    attached_to_type: str | None,
+) -> bool:
+    pe = h.get("proposed_edge") or {}
+    pv = pe.get("parent_vertex") or {}
+    return (
+        (not parent_type or pv.get("type", "") == parent_type)
+        and (not parent_class or fnmatch.fnmatchcase(pv.get("classification", ""), parent_class))
+        and (not rel or pe.get("relation", "") == rel)
+        and (
+            not attached_to_type
+            or v_type.get(h.get("anchor", ""), "") == attached_to_type
+        )
+    )
+
 
 def hypothesis_shape_match(
     corpus: list[Companion],
@@ -379,40 +442,19 @@ def hypothesis_shape_match(
             if isinstance(v, dict) and v.get("id"):
                 v_type[v["id"]] = v.get("type", "")
 
-        # Final weight per hypothesis id (mirror hypothesis_name_wildcard).
-        final: dict[str, Any] = {
-            h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h
-        }
-        for lead in c.leads:
-            for r in lead.get("resolutions", []) or []:
-                h_id = r.get("hypothesis")
-                if h_id:
-                    final[h_id] = r.get("after")
+        final = _compute_final_weights(c)
+        disp = c.conclude.get("disposition") or "unknown"
 
         for h in _all_hypotheses(c):
-            pe = h.get("proposed_edge") or {}
-            pv = pe.get("parent_vertex") or {}
-
-            h_parent_type = pv.get("type", "")
-            h_parent_class = pv.get("classification", "")
-            h_rel = pe.get("relation", "")
-            h_attached_to_type = v_type.get(h.get("anchor", ""), "")
-
-            if parent_type and h_parent_type != parent_type:
-                continue
-            if parent_class and not fnmatch.fnmatchcase(
-                h_parent_class, parent_class
+            if not _hypothesis_matches_shape(
+                h, v_type,
+                parent_type=parent_type, parent_class=parent_class,
+                rel=rel, attached_to_type=attached_to_type,
             ):
                 continue
-            if rel and h_rel != rel:
-                continue
-            if attached_to_type and h_attached_to_type != attached_to_type:
-                continue
-
             name = _hypothesis_name(h)
             if not name:
                 continue
-
             entry = agg.setdefault(name, {
                 "n": 0,
                 "weights": {**{b: 0 for b in _WEIGHT_BUCKETS}, "null": 0},
@@ -421,9 +463,7 @@ def hypothesis_shape_match(
             })
             entry["n"] += 1
             w = final.get(h.get("id"))
-            bucket = w if w in _WEIGHT_BUCKETS else "null"
-            entry["weights"][bucket] += 1
-            disp = c.conclude.get("disposition") or "unknown"
+            entry["weights"][w if w in _WEIGHT_BUCKETS else "null"] += 1
             entry["dispositions"][disp] = entry["dispositions"].get(disp, 0) + 1
             entry["cases"].add(c.case_id)
 
