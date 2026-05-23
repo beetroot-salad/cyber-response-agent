@@ -681,14 +681,6 @@ def render_runtime_investigation(run_dir: Path) -> tuple[str, list[dict]]:
 def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
     calls = extract_main_subagents(events)
     gather_dir = run_dir / "gather_raw"
-    payloads_by_pos: dict[str, Path] = {}
-    if gather_dir.is_dir():
-        for entry in sorted(gather_dir.iterdir()):
-            if entry.is_file() and entry.suffix in (".json", ".txt"):
-                # match by leading position prefix (e.g. "0.json", "0a.json")
-                stem = entry.stem
-                payloads_by_pos.setdefault(stem, entry)
-
     if not calls:
         body = '<div class="empty">(no Task/Agent calls)</div>'
         return (
@@ -700,41 +692,7 @@ def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
 """,
             0,
         )
-    blocks: list[str] = []
-    for i, call in enumerate(calls):
-        inp = call.get("input", {}) or {}
-        description = inp.get("description") or "(no description)"
-        subagent_type = inp.get("subagent_type") or "(default)"
-        prompt = inp.get("prompt", "")
-        result = call.get("result")
-        err = " [error]" if call.get("is_error") else ""
-        title = f"#{i} [{subagent_type}] {description}{err}"
-        inner = block("subagent-input", "input prompt", pre_text(prompt))
-        if result is not None:
-            inner += block(
-                "subagent-output",
-                "subagent output (summary back to defender)",
-                pre_text(result if isinstance(result, str) else json.dumps(result, indent=2)),
-                open_=True,
-            )
-        else:
-            inner += '<div class="empty">(no result captured)</div>'
-
-        # Pair with gather_raw payload by position prefix
-        if gather_dir.is_dir():
-            for entry in sorted(gather_dir.iterdir()):
-                if not entry.is_file() or entry.suffix not in (".json", ".txt"):
-                    continue
-                stem = entry.stem
-                if stem == str(i) or stem.startswith(f"{i}-") or stem.startswith(f"{i}.") or stem.startswith(f"{i}a") or stem.startswith(f"{i}b"):
-                    try:
-                        raw = entry.read_text()
-                        if entry.suffix == ".json":
-                            raw = json.dumps(json.loads(raw), indent=2)
-                    except (OSError, json.JSONDecodeError):
-                        raw = "<unreadable>"
-                    inner += block("gather-raw", f"gather_raw/{entry.name}", pre_text(raw))
-        blocks.append(block("subcall gather", title, inner, anchor=f"gather-{i}"))
+    blocks = [_render_gather_call(i, call, gather_dir) for i, call in enumerate(calls)]
     return (
         f"""
 <section id="sec-gather" class="stage stage-defender">
@@ -744,6 +702,50 @@ def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
 """,
         len(calls),
     )
+
+
+def _render_gather_call(i: int, call: dict, gather_dir: Path) -> str:
+    inp = call.get("input", {}) or {}
+    description = inp.get("description") or "(no description)"
+    subagent_type = inp.get("subagent_type") or "(default)"
+    prompt = inp.get("prompt", "")
+    result = call.get("result")
+    err = " [error]" if call.get("is_error") else ""
+    title = f"#{i} [{subagent_type}] {description}{err}"
+    inner = block("subagent-input", "input prompt", pre_text(prompt))
+    if result is not None:
+        inner += block(
+            "subagent-output",
+            "subagent output (summary back to defender)",
+            pre_text(result if isinstance(result, str) else json.dumps(result, indent=2)),
+            open_=True,
+        )
+    else:
+        inner += '<div class="empty">(no result captured)</div>'
+    inner += _render_gather_raw_payloads(i, gather_dir)
+    return block("subcall gather", title, inner, anchor=f"gather-{i}")
+
+
+def _render_gather_raw_payloads(i: int, gather_dir: Path) -> str:
+    if not gather_dir.is_dir():
+        return ""
+    out = ""
+    for entry in sorted(gather_dir.iterdir()):
+        if not entry.is_file() or entry.suffix not in (".json", ".txt"):
+            continue
+        stem = entry.stem
+        # match leading position prefix (e.g. "0.json", "0-1.json", "0a.json")
+        if not (stem == str(i) or stem.startswith(
+                (f"{i}-", f"{i}.", f"{i}a", f"{i}b"))):
+            continue
+        try:
+            raw = entry.read_text()
+            if entry.suffix == ".json":
+                raw = json.dumps(json.loads(raw), indent=2)
+        except (OSError, json.JSONDecodeError):
+            raw = "<unreadable>"
+        out += block("gather-raw", f"gather_raw/{entry.name}", pre_text(raw))
+    return out
 
 
 def render_runtime_lead_sequence(run_dir: Path) -> str:
@@ -852,10 +854,16 @@ def lesson_changes(run_dir: Path, run_id: str) -> dict:
         return {"available": False, "reason": f"git unavailable: {e}"}
     if log.returncode != 0:
         return {"available": False, "reason": log.stderr.strip() or "git log failed"}
+    commits = _parse_git_log_records(log.stdout)
+    for c in commits:
+        c["diff"] = _git_show_lessons_diff(c["sha"])
+    return {"available": True, "since": since_iso, "commits": commits, "run_id": run_id}
 
+
+def _parse_git_log_records(stdout: str) -> list[dict]:
     commits: list[dict] = []
     cur: dict | None = None
-    for line in log.stdout.splitlines():
+    for line in stdout.splitlines():
         if not line.strip():
             if cur:
                 commits.append(cur)
@@ -870,16 +878,16 @@ def lesson_changes(run_dir: Path, run_id: str) -> dict:
             cur["files"].append(line)
     if cur:
         commits.append(cur)
+    return commits
 
-    for c in commits:
-        diff = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "show", c["sha"],
-             "--pretty=format:", "--", "defender/lessons/"],
-            capture_output=True, text=True,
-        )
-        c["diff"] = diff.stdout if diff.returncode == 0 else ""
 
-    return {"available": True, "since": since_iso, "commits": commits, "run_id": run_id}
+def _git_show_lessons_diff(sha: str) -> str:
+    diff = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "show", sha,
+         "--pretty=format:", "--", "defender/lessons/"],
+        capture_output=True, text=True,
+    )
+    return diff.stdout if diff.returncode == 0 else ""
 
 
 def render_footer(run_dir: Path, run_id: str) -> str:

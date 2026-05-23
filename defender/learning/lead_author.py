@@ -546,12 +546,39 @@ def verify_postflight(
 ) -> tuple[bool, str, dict]:
     """Check post-flight git state. Returns (ok, reason, details)."""
     head_sha = _git_head()
+    fail = _check_base_sha_ancestor(base_sha, head_sha)
+    if fail:
+        return fail
+    count = _git_rev_list_count(base_sha)
+    if count > 1:
+        return False, "more than one commit since base", {
+            "rev_list_count": count, "head": head_sha,
+        }
+    diff_paths: list[str] = []
+    if count == 1:
+        diff_paths = _diff_name_only_z(base_sha, head_sha)
+        fail = _check_commit_contents(base_sha, head_sha, count, diff_paths)
+        if fail:
+            return fail
+    new_paths, fail = _check_post_status(baseline, count)
+    if fail:
+        return fail
+    return True, "ok", {
+        "rev_list_count": count,
+        "head": head_sha,
+        "diff_paths": diff_paths,
+        "new_paths": new_paths,
+    }
 
-    # base_sha must still be an ancestor of HEAD. If it isn't, the agent
-    # rewrote history (`git commit --amend`, `git rebase`, `git reset`),
-    # which is a hard-rule violation and would make rev-list / diff
-    # comparisons against base_sha lie. ``merge-base --is-ancestor``
-    # exits 0 when ancestor, 1 when not, ≥2 on error.
+
+def _check_base_sha_ancestor(
+    base_sha: str, head_sha: str,
+) -> tuple[bool, str, dict] | None:
+    # If base_sha isn't an ancestor of HEAD, the agent rewrote history
+    # (`git commit --amend`, `git rebase`, `git reset`), a hard-rule
+    # violation that would make rev-list / diff comparisons against
+    # base_sha lie. `merge-base --is-ancestor` exits 0 when ancestor,
+    # 1 when not, ≥2 on error.
     anc = _git("merge-base", "--is-ancestor", base_sha, head_sha, check=False)
     if anc.returncode == 1:
         return False, "base_sha is not an ancestor of HEAD (history rewritten)", {
@@ -562,70 +589,59 @@ def verify_postflight(
             "base": base_sha, "head": head_sha,
             "stderr": anc.stderr.strip(),
         }
+    return None
 
-    count = _git_rev_list_count(base_sha)
-    if count > 1:
-        return False, "more than one commit since base", {
-            "rev_list_count": count, "head": head_sha,
-        }
 
-    diff_paths: list[str] = []
-    if count == 1:
-        diff_paths = _diff_name_only_z(base_sha, head_sha)
-        for path in diff_paths:
-            if not _is_catalog_path(path):
-                return False, "commit touches paths outside catalog", {
-                    "rev_list_count": count, "head": head_sha,
-                    "diff_paths": diff_paths,
-                }
-        # Deletions are only allowed for drafts. Renames may move a
-        # draft to the system root (promotion) but not the reverse.
-        status_records = _diff_name_status_z(base_sha, head_sha)
-        for code, paths in status_records:
-            if code == "D":
-                if not _under_draft(paths[0]):
-                    return False, "commit deletes an established template", {
-                        "rev_list_count": count, "head": head_sha,
-                        "diff_paths": diff_paths,
-                        "deleted_path": paths[0],
-                    }
-            elif code.startswith("R") or code.startswith("C"):
-                src, dst = paths[0], paths[1]
-                # Allow within-_draft renames and _draft → system-root
-                # (promotion). Reject system-root → _draft (demotion of
-                # an established template).
-                if _under_draft(dst) and not _under_draft(src):
-                    return False, "commit demotes an established template to _draft", {
-                        "rev_list_count": count, "head": head_sha,
-                        "rename_src": src,
-                        "rename_dst": dst,
-                    }
+def _check_commit_contents(
+    base_sha: str, head_sha: str, count: int, diff_paths: list[str],
+) -> tuple[bool, str, dict] | None:
+    for path in diff_paths:
+        if not _is_catalog_path(path):
+            return False, "commit touches paths outside catalog", {
+                "rev_list_count": count, "head": head_sha,
+                "diff_paths": diff_paths,
+            }
+    # Deletions are only allowed for drafts. Renames may move a draft
+    # to the system root (promotion) but not the reverse.
+    for code, paths in _diff_name_status_z(base_sha, head_sha):
+        if code == "D" and not _under_draft(paths[0]):
+            return False, "commit deletes an established template", {
+                "rev_list_count": count, "head": head_sha,
+                "diff_paths": diff_paths,
+                "deleted_path": paths[0],
+            }
+        if (code.startswith(("R", "C"))
+                and _under_draft(paths[1]) and not _under_draft(paths[0])):
+            return False, "commit demotes an established template to _draft", {
+                "rev_list_count": count, "head": head_sha,
+                "rename_src": paths[0],
+                "rename_dst": paths[1],
+            }
+    return None
 
+
+def _check_post_status(
+    baseline: set[tuple[str, str]], count: int,
+) -> tuple[list[str], tuple[bool, str, dict] | None]:
     post = _git_status_records()
     new_records = post - baseline
     new_paths = sorted({p for _, p in new_records})
-
     if count == 0:
         if new_records:
-            return False, "no commit but new dirty/untracked records exist", {
+            return new_paths, (False, "no commit but new dirty/untracked records exist", {
                 "new_paths": new_paths,
-            }
-    else:
-        for _, path in new_records:
-            if _is_catalog_path(path):
-                return False, "uncommitted catalog dirt alongside commit", {
-                    "new_paths": new_paths,
-                }
-            if path.startswith("defender/"):
-                return False, "new dirt under defender/ outside catalog", {
-                    "new_paths": new_paths,
-                }
-    return True, "ok", {
-        "rev_list_count": count,
-        "head": head_sha,
-        "diff_paths": diff_paths,
-        "new_paths": new_paths,
-    }
+            })
+        return new_paths, None
+    for _, path in new_records:
+        if _is_catalog_path(path):
+            return new_paths, (False, "uncommitted catalog dirt alongside commit", {
+                "new_paths": new_paths,
+            })
+        if path.startswith("defender/"):
+            return new_paths, (False, "new dirt under defender/ outside catalog", {
+                "new_paths": new_paths,
+            })
+    return new_paths, None
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +719,6 @@ def run(run_dir: Path) -> int:
     queue_lock = acquire_queue_lock()
     if queue_lock is None:
         return 0
-
     repo_lock = None
     try:
         _log(f"acquire repo-lock={_author_shared.REPO_LOCK_FILE}")
@@ -713,90 +728,102 @@ def run(run_dir: Path) -> int:
             _log(f"repo-lock unavailable: {e}; releasing queue-lock")
             return 0
         _log("repo-lock acquired")
-
-        # Preflight brakes — failure first, then done sentinel.
-        if _failure_marker(run_dir).is_file():
-            _log(f"FATAL preflight: {_failure_marker(run_dir)} present — human cleanup required")
-            return 2
-        if _done_sentinel(run_dir).is_file():
-            _log("already processed (done sentinel exists) — nothing to do")
-            return 0
-
-        # Baseline snapshot.
-        base_sha = _git_head()
-        baseline = _git_status_records()
-        # Refuse if the established catalog is already dirty. Untracked drafts
-        # under {system}/_draft/ are the expected gather output that this
-        # author is being run to process — they belong in the baseline.
-        dirty_catalog = _dirty_established_paths(baseline)
-        if dirty_catalog:
-            _log(f"FATAL preflight: catalog dirty before authoring: {dirty_catalog}")
-            return 2
-
-        # Extract leads.
-        try:
-            executed = extract(run_dir)
-        except (FileNotFoundError, ValueError) as e:
-            _log(f"FATAL: cannot extract leads: {e}")
-            return 2
-        if not executed:
-            _log("no executed leads with on-disk payloads — nothing to do")
-            return 0
-
-        try:
-            handoffs = build_handoff(run_dir, executed)
-        except LeadAuthorError as e:
-            _log(f"FATAL: cannot build handoffs: {e}")
-            return 2
-        if not handoffs:
-            _log(
-                f"all {len(executed)} extracted lead(s) had unresolved "
-                "query_ids — nothing to do"
-            )
-            _write_state(
-                _done_sentinel(run_dir),
-                f"head_sha: {base_sha}\nat: {_now_iso()}\ncommit_made: False\n",
-            )
-            return 0
-        _log(f"built {len(handoffs)} handoff block(s); base_sha={base_sha[:12]}")
-
-        # Spawn agent.
-        rc = invoke_agent(run_dir, handoffs)
-        if rc != 0:
-            _write_state(
-                _failure_marker(run_dir),
-                f"claude exited rc={rc} at {_now_iso()}\n"
-                f"see {RUN_LOG_FILE} for stdout/stderr\n"
-                "Human action required: review the catalog state, either drop\n"
-                "any questionable commit from HEAD or remove this failure.txt\n"
-                "to opt in to a retry on the next tick.\n",
-            )
-            _log(f"FATAL: claude exited non-zero; wrote {_failure_marker(run_dir)}")
-            return 2
-
-        # Post-flight.
-        ok, reason, detail = verify_postflight(base_sha, baseline)
-        if not ok:
-            _write_state(
-                _violation_marker(run_dir),
-                f"reason: {reason}\nat: {_now_iso()}\ndetail: {json.dumps(detail, indent=2)}\n",
-            )
-            _log(f"FATAL post-flight: {reason}; wrote {_violation_marker(run_dir)}")
-            return 2
-
-        commit_made = detail["rev_list_count"] == 1
-        maybe_push(commit_made)
-
-        _write_state(
-            _done_sentinel(run_dir),
-            f"head_sha: {detail['head']}\nat: {_now_iso()}\ncommit_made: {commit_made}\n",
-        )
-        _log(f"done; commit_made={commit_made} head={detail['head'][:12]}")
-        return 0
+        return _run_locked(run_dir)
     finally:
         _author_shared.release_repo_lock(repo_lock)
         _log("release repo-lock")
         release_queue_lock(queue_lock)
+
+
+def _run_locked(run_dir: Path) -> int:
+    # Preflight brakes — failure first, then done sentinel.
+    if _failure_marker(run_dir).is_file():
+        _log(f"FATAL preflight: {_failure_marker(run_dir)} present — human cleanup required")
+        return 2
+    if _done_sentinel(run_dir).is_file():
+        _log("already processed (done sentinel exists) — nothing to do")
+        return 0
+
+    base_sha = _git_head()
+    baseline = _git_status_records()
+    # Refuse if the established catalog is already dirty. Untracked drafts
+    # under {system}/_draft/ are the expected gather output that this
+    # author is being run to process — they belong in the baseline.
+    dirty_catalog = _dirty_established_paths(baseline)
+    if dirty_catalog:
+        _log(f"FATAL preflight: catalog dirty before authoring: {dirty_catalog}")
+        return 2
+
+    handoffs, rc = _prepare_handoffs(run_dir, base_sha)
+    if rc is not None:
+        return rc
+    _log(f"built {len(handoffs)} handoff block(s); base_sha={base_sha[:12]}")
+
+    rc = invoke_agent(run_dir, handoffs)
+    if rc != 0:
+        _write_state(
+            _failure_marker(run_dir),
+            f"claude exited rc={rc} at {_now_iso()}\n"
+            f"see {RUN_LOG_FILE} for stdout/stderr\n"
+            "Human action required: review the catalog state, either drop\n"
+            "any questionable commit from HEAD or remove this failure.txt\n"
+            "to opt in to a retry on the next tick.\n",
+        )
+        _log(f"FATAL: claude exited non-zero; wrote {_failure_marker(run_dir)}")
+        return 2
+
+    ok, reason, detail = verify_postflight(base_sha, baseline)
+    if not ok:
+        _write_state(
+            _violation_marker(run_dir),
+            f"reason: {reason}\nat: {_now_iso()}\ndetail: {json.dumps(detail, indent=2)}\n",
+        )
+        _log(f"FATAL post-flight: {reason}; wrote {_violation_marker(run_dir)}")
+        return 2
+
+    commit_made = detail["rev_list_count"] == 1
+    maybe_push(commit_made)
+    _write_state(
+        _done_sentinel(run_dir),
+        f"head_sha: {detail['head']}\nat: {_now_iso()}\ncommit_made: {commit_made}\n",
+    )
+    _log(f"done; commit_made={commit_made} head={detail['head'][:12]}")
+    return 0
+
+
+def _prepare_handoffs(
+    run_dir: Path, base_sha: str,
+) -> tuple[list, int | None]:
+    """Extract leads + build handoffs. Returns (handoffs, early-rc).
+
+    early-rc is None when work remains; an int rc when the caller should
+    return immediately (FATAL extract, no executed leads, or no handoffs
+    after dropping unresolved query_ids).
+    """
+    try:
+        executed = extract(run_dir)
+    except (FileNotFoundError, ValueError) as e:
+        _log(f"FATAL: cannot extract leads: {e}")
+        return [], 2
+    if not executed:
+        _log("no executed leads with on-disk payloads — nothing to do")
+        return [], 0
+    try:
+        handoffs = build_handoff(run_dir, executed)
+    except LeadAuthorError as e:
+        _log(f"FATAL: cannot build handoffs: {e}")
+        return [], 2
+    if not handoffs:
+        _log(
+            f"all {len(executed)} extracted lead(s) had unresolved "
+            "query_ids — nothing to do"
+        )
+        _write_state(
+            _done_sentinel(run_dir),
+            f"head_sha: {base_sha}\nat: {_now_iso()}\ncommit_made: False\n",
+        )
+        return [], 0
+    return handoffs, None
 
 
 # ---------------------------------------------------------------------------

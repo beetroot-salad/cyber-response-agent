@@ -505,7 +505,6 @@ def run_batch() -> int:
     if queue_lock is None:
         _log("queue lock held by another process — skipping this tick")
         return 0
-
     repo_lock = None
     try:
         try:
@@ -513,128 +512,147 @@ def run_batch() -> int:
         except TimeoutError as e:
             _log(f"repo lock unavailable: {e}; queue intact")
             return 0
-
         try:
             assert_clean_lessons_actor_dir()
         except AuthorError as e:
             _log(f"FATAL: {e}")
             return 2
-
-        batch = read_batch()
-        if not batch:
-            _log("queue empty — nothing to author")
-            return 0
-
-        all_obs = _by_id(batch)
-        existing = existing_observation_ids()
-
-        held: list[dict] = []
-        consumed_pre: list[dict] = []
-        to_author: list[dict] = []
-
-        for entry in batch:
-            oid = entry["observation_id"]
-
-            if oid in existing:
-                rec = dict(entry)
-                rec["consumed_category"] = "consumed_idempotent"
-                consumed_pre.append(rec)
-                continue
-
-            outcome = entry.get("judge_outcome")
-            if outcome in OUTCOME_SKIP_BY_POLICY:
-                rec = dict(entry)
-                rec["consumed_category"] = "consumed_skip"
-                rec["skip_reason"] = f"outcome_policy:{outcome}"
-                consumed_pre.append(rec)
-                continue
-
-            if is_held_out_source(entry.get("source_run_dir", "")):
-                # Producer should have dropped held-out runs; defense-in-depth
-                # hold so a held-out observation can never seed a lesson.
-                rec = dict(entry)
-                rec["held_reason"] = "held_out_double_check"
-                held.append(rec)
-                continue
-
-            if outcome not in OUTCOME_AUTHOR:
-                # Unknown / unexpected outcome — hold for human review.
-                rec = dict(entry)
-                rec["held_reason"] = f"unexpected_outcome:{outcome}"
-                held.append(rec)
-                continue
-
-            to_author.append(entry)
-
-        batch_id = uuid.uuid4().hex[:12]
-        generation = _shared.actor_generation_count()
-        _log(
-            f"batch={batch_id} generation={generation} actor_model={ACTOR_MODEL} "
-            f"total={len(batch)} to_author={len(to_author)} "
-            f"held={len(held)} pre_consumed={len(consumed_pre)}"
-        )
-
-        commit_sha: str | None = None
-        committed: list[dict] = []
-        consumed_skip: list[dict] = []
-
-        if to_author:
-            pre_agent_head = git_head_sha()
-            try:
-                result = invoke_agent(to_author, batch_id, generation, ACTOR_MODEL)
-            except AuthorError as e:
-                _log(f"FATAL: {e}")
-                return 2
-            try:
-                verify_agent_state(result, generation, ACTOR_MODEL, pre_agent_head)
-                validate_agent_result_partition(result, to_author)
-            except AuthorError as e:
-                _log(f"FATAL: {e}")
-                return 2
-
-            commit_sha = result.get("commit_sha")
-            for oid in _result_list(result, "committed"):
-                src = all_obs.get(oid)
-                if src is None:
-                    raise AuthorError(
-                        f"author committed unknown observation_id={oid!r}"
-                    )
-                rec = dict(src)
-                rec["consumed_category"] = "consumed_committed"
-                committed.append(rec)
-            for entry in _result_list(result, "consumed_skip"):
-                oid = entry.get("observation_id")
-                src = all_obs.get(oid)
-                if src is None:
-                    raise AuthorError(
-                        f"author skipped unknown observation_id={oid!r}"
-                    )
-                rec = dict(src)
-                rec["consumed_category"] = "consumed_skip"
-                rec["skip_reason"] = entry.get("reason", "")
-                consumed_skip.append(rec)
-
-        try:
-            rotate_queue(
-                held=held,
-                consumed=consumed_pre + committed + consumed_skip,
-                commit_sha=commit_sha,
-            )
-        except AuthorError as e:
-            _log(f"FATAL during rotate: {e}")
-            return 2
-
-        _log(
-            f"done batch={batch_id} committed={len(committed)} "
-            f"consumed_skip={len(consumed_skip)} "
-            f"pre_consumed={len(consumed_pre)} held={len(held)} "
-            f"commit_sha={commit_sha}"
-        )
-        return 0
+        return _run_batch_inner()
     finally:
         if repo_lock is not None:
             _shared.release_repo_lock(repo_lock)
         release_queue_lock(queue_lock)
+
+
+def _run_batch_inner() -> int:
+    batch = read_batch()
+    if not batch:
+        _log("queue empty — nothing to author")
+        return 0
+    all_obs = _by_id(batch)
+    held, consumed_pre, to_author = _partition_pre_author(batch)
+
+    batch_id = uuid.uuid4().hex[:12]
+    generation = _shared.actor_generation_count()
+    _log(
+        f"batch={batch_id} generation={generation} actor_model={ACTOR_MODEL} "
+        f"total={len(batch)} to_author={len(to_author)} "
+        f"held={len(held)} pre_consumed={len(consumed_pre)}"
+    )
+
+    commit_sha: str | None = None
+    committed: list[dict] = []
+    consumed_skip: list[dict] = []
+    if to_author:
+        rc, commit_sha, committed, consumed_skip = _author_to_author(
+            to_author, all_obs, batch_id, generation,
+        )
+        if rc != 0:
+            return rc
+
+    try:
+        rotate_queue(
+            held=held,
+            consumed=consumed_pre + committed + consumed_skip,
+            commit_sha=commit_sha,
+        )
+    except AuthorError as e:
+        _log(f"FATAL during rotate: {e}")
+        return 2
+    _log(
+        f"done batch={batch_id} committed={len(committed)} "
+        f"consumed_skip={len(consumed_skip)} "
+        f"pre_consumed={len(consumed_pre)} held={len(held)} "
+        f"commit_sha={commit_sha}"
+    )
+    return 0
+
+
+def _partition_pre_author(
+    batch: list[dict],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split the queue into (held, consumed_pre, to_author) before the
+    agent runs.
+
+    consumed_pre bundles already-committed observations and skip-by-policy
+    outcomes. held covers held-out double-checks and unexpected outcomes
+    (kept for human review).
+    """
+    existing = existing_observation_ids()
+    held: list[dict] = []
+    consumed_pre: list[dict] = []
+    to_author: list[dict] = []
+    for entry in batch:
+        oid = entry["observation_id"]
+        if oid in existing:
+            rec = dict(entry)
+            rec["consumed_category"] = "consumed_idempotent"
+            consumed_pre.append(rec)
+            continue
+        outcome = entry.get("judge_outcome")
+        if outcome in OUTCOME_SKIP_BY_POLICY:
+            rec = dict(entry)
+            rec["consumed_category"] = "consumed_skip"
+            rec["skip_reason"] = f"outcome_policy:{outcome}"
+            consumed_pre.append(rec)
+            continue
+        if is_held_out_source(entry.get("source_run_dir", "")):
+            # Producer should have dropped held-out runs; defense-in-depth
+            # hold so a held-out observation can never seed a lesson.
+            rec = dict(entry)
+            rec["held_reason"] = "held_out_double_check"
+            held.append(rec)
+            continue
+        if outcome not in OUTCOME_AUTHOR:
+            rec = dict(entry)
+            rec["held_reason"] = f"unexpected_outcome:{outcome}"
+            held.append(rec)
+            continue
+        to_author.append(entry)
+    return held, consumed_pre, to_author
+
+
+def _author_to_author(
+    to_author: list[dict], all_obs: dict[str, dict],
+    batch_id: str, generation: int,
+) -> tuple[int, str | None, list[dict], list[dict]]:
+    """Run the agent on `to_author` and partition its result.
+
+    Returns (rc, commit_sha, committed, consumed_skip). rc != 0 means
+    a FATAL happened and the caller should bail with that code.
+    """
+    pre_agent_head = git_head_sha()
+    try:
+        result = invoke_agent(to_author, batch_id, generation, ACTOR_MODEL)
+    except AuthorError as e:
+        _log(f"FATAL: {e}")
+        return 2, None, [], []
+    try:
+        verify_agent_state(result, generation, ACTOR_MODEL, pre_agent_head)
+        validate_agent_result_partition(result, to_author)
+    except AuthorError as e:
+        _log(f"FATAL: {e}")
+        return 2, None, [], []
+    commit_sha = result.get("commit_sha")
+    committed: list[dict] = []
+    consumed_skip: list[dict] = []
+    for oid in _result_list(result, "committed"):
+        src = all_obs.get(oid)
+        if src is None:
+            raise AuthorError(f"author committed unknown observation_id={oid!r}")
+        rec = dict(src)
+        rec["consumed_category"] = "consumed_committed"
+        committed.append(rec)
+    for entry in _result_list(result, "consumed_skip"):
+        oid = entry.get("observation_id")
+        src = all_obs.get(oid)
+        if src is None:
+            raise AuthorError(f"author skipped unknown observation_id={oid!r}")
+        rec = dict(src)
+        rec["consumed_category"] = "consumed_skip"
+        rec["skip_reason"] = entry.get("reason", "")
+        consumed_skip.append(rec)
+    return 0, commit_sha, committed, consumed_skip
 
 
 def main(argv: list[str]) -> int:

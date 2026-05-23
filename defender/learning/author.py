@@ -460,7 +460,6 @@ def run_batch() -> int:
     if lock_fh is None:
         _log("lock held by another process — skipping this tick")
         return 0
-
     repo_lock = None
     try:
         try:
@@ -468,135 +467,148 @@ def run_batch() -> int:
         except TimeoutError as e:
             _log(f"repo lock unavailable: {e}; queue intact")
             return 0
-
         try:
             assert_clean_lessons_dir()
         except AuthorError as e:
             _log(f"FATAL: {e}")
             return 2
-
-        batch = read_batch()
-        if not batch:
-            _log("queue empty — nothing to author")
-            return 0
-
-        all_findings = _by_id(batch)
-        existing_ids = existing_finding_ids()
-
-        held: list[dict] = []  # stay in findings.jsonl
-        consumed_idempotent: list[dict] = []
-        for entry in batch:
-            fid = entry["finding_id"]
-            if fid in existing_ids:
-                rec = dict(entry)
-                rec["consumed_category"] = "consumed_idempotent"
-                consumed_idempotent.append(rec)
-                continue
-            disp = disposition_for(entry["run_id"])
-            if disp != "benign":
-                # No confident ground truth (inconclusive / unknown). Hold,
-                # don't consume — a future fixture/policy may re-enable.
-                rec = dict(entry)
-                rec["held_reason"] = (
-                    f"no_ground_truth(disposition={disp!r})"
-                )
-                held.append(rec)
-                continue
-
-        # Findings that pass both gates go to the agent.
-        gated_ids = {h["finding_id"] for h in held} | {
-            c["finding_id"] for c in consumed_idempotent
-        }
-        to_author = [f for f in batch if f["finding_id"] not in gated_ids]
-
-        batch_id = uuid.uuid4().hex[:12]
-        _log(
-            f"batch={batch_id} total={len(batch)} "
-            f"to_author={len(to_author)} held={len(held)} "
-            f"idempotent={len(consumed_idempotent)}"
-        )
-
-        commit_sha: str | None = None
-        committed: list[dict] = []
-        held_forward_bad: list[dict] = []
-        consumed_skip: list[dict] = []
-
-        if to_author:
-            try:
-                result = invoke_agent(to_author, batch_id)
-            except AuthorError as e:
-                _log(f"FATAL: {e}")
-                return 2
-            try:
-                verify_agent_state(result)
-                validate_agent_result_partition(result, to_author)
-            except AuthorError as e:
-                _log(f"FATAL: {e}")
-                return 2
-            commit_sha = result.get("commit_sha")
-            for fid in _result_list(result, "committed"):
-                src = all_findings.get(fid)
-                if src is None:
-                    raise AuthorError(
-                        f"author committed unknown finding_id={fid!r}"
-                    )
-                rec = dict(src)
-                rec["consumed_category"] = "consumed_committed"
-                committed.append(rec)
-            for entry in _result_list(result, "held_forward_bad"):
-                fid = entry.get("finding_id")
-                src = all_findings.get(fid)
-                if src is None:
-                    raise AuthorError(
-                        f"author held unknown finding_id={fid!r}"
-                    )
-                rec = dict(src)
-                rec["held_reason"] = (
-                    f"forward_bad: {entry.get('reason', '')}"
-                )
-                held_forward_bad.append(rec)
-            for entry in _result_list(result, "consumed_skip"):
-                fid = entry.get("finding_id")
-                src = all_findings.get(fid)
-                if src is None:
-                    raise AuthorError(
-                        f"author skipped unknown finding_id={fid!r}"
-                    )
-                rec = dict(src)
-                rec["consumed_category"] = "consumed_skip"
-                rec["skip_reason"] = entry.get("reason", "")
-                consumed_skip.append(rec)
-
-        try:
-            rotate_queue(
-                held=held + held_forward_bad,
-                consumed=consumed_idempotent + committed + consumed_skip,
-                commit_sha=commit_sha,
-            )
-        except AuthorError as e:
-            _log(f"FATAL during rotate: {e}")
-            return 2
-
-        if commit_sha is None:
-            write_held_report(
-                batch_id=batch_id,
-                held_forward_bad=held_forward_bad,
-                skipped=consumed_skip,
-            )
-
-        _log(
-            f"done batch={batch_id} committed={len(committed)} "
-            f"held_forward_bad={len(held_forward_bad)} "
-            f"consumed_skip={len(consumed_skip)} "
-            f"idempotent={len(consumed_idempotent)} "
-            f"held_no_ground_truth={len(held)} "
-            f"commit_sha={commit_sha}"
-        )
-        return 0
+        return _run_batch_inner()
     finally:
         if repo_lock is not None:
             _shared.release_repo_lock(repo_lock)
         release_lock(lock_fh)
+
+
+def _run_batch_inner() -> int:
+    batch = read_batch()
+    if not batch:
+        _log("queue empty — nothing to author")
+        return 0
+    all_findings = _by_id(batch)
+    held, consumed_idempotent = _partition_pre_author(batch)
+    gated_ids = {h["finding_id"] for h in held} | {
+        c["finding_id"] for c in consumed_idempotent
+    }
+    to_author = [f for f in batch if f["finding_id"] not in gated_ids]
+
+    batch_id = uuid.uuid4().hex[:12]
+    _log(
+        f"batch={batch_id} total={len(batch)} "
+        f"to_author={len(to_author)} held={len(held)} "
+        f"idempotent={len(consumed_idempotent)}"
+    )
+
+    commit_sha: str | None = None
+    committed: list[dict] = []
+    held_forward_bad: list[dict] = []
+    consumed_skip: list[dict] = []
+    if to_author:
+        rc, commit_sha, committed, held_forward_bad, consumed_skip = (
+            _author_to_author(to_author, all_findings, batch_id)
+        )
+        if rc != 0:
+            return rc
+
+    try:
+        rotate_queue(
+            held=held + held_forward_bad,
+            consumed=consumed_idempotent + committed + consumed_skip,
+            commit_sha=commit_sha,
+        )
+    except AuthorError as e:
+        _log(f"FATAL during rotate: {e}")
+        return 2
+    if commit_sha is None:
+        write_held_report(
+            batch_id=batch_id,
+            held_forward_bad=held_forward_bad,
+            skipped=consumed_skip,
+        )
+    _log(
+        f"done batch={batch_id} committed={len(committed)} "
+        f"held_forward_bad={len(held_forward_bad)} "
+        f"consumed_skip={len(consumed_skip)} "
+        f"idempotent={len(consumed_idempotent)} "
+        f"held_no_ground_truth={len(held)} "
+        f"commit_sha={commit_sha}"
+    )
+    return 0
+
+
+def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split the queue into (held, consumed_idempotent) before the agent runs.
+
+    held → no confident ground truth (inconclusive / unknown disposition);
+    stays in findings.jsonl. consumed_idempotent → already-committed
+    findings the agent shouldn't see again.
+    """
+    existing_ids = existing_finding_ids()
+    held: list[dict] = []
+    consumed_idempotent: list[dict] = []
+    for entry in batch:
+        fid = entry["finding_id"]
+        if fid in existing_ids:
+            rec = dict(entry)
+            rec["consumed_category"] = "consumed_idempotent"
+            consumed_idempotent.append(rec)
+            continue
+        disp = disposition_for(entry["run_id"])
+        if disp != "benign":
+            rec = dict(entry)
+            rec["held_reason"] = f"no_ground_truth(disposition={disp!r})"
+            held.append(rec)
+    return held, consumed_idempotent
+
+
+def _author_to_author(
+    to_author: list[dict], all_findings: dict[str, dict], batch_id: str,
+) -> tuple[int, str | None, list[dict], list[dict], list[dict]]:
+    """Run the agent on `to_author` and partition its result.
+
+    Returns (rc, commit_sha, committed, held_forward_bad, consumed_skip).
+    rc != 0 means a FATAL happened and the caller should bail with that
+    code; the queue stays intact via the outer lock/rotate flow.
+    """
+    try:
+        result = invoke_agent(to_author, batch_id)
+    except AuthorError as e:
+        _log(f"FATAL: {e}")
+        return 2, None, [], [], []
+    try:
+        verify_agent_state(result)
+        validate_agent_result_partition(result, to_author)
+    except AuthorError as e:
+        _log(f"FATAL: {e}")
+        return 2, None, [], [], []
+    commit_sha = result.get("commit_sha")
+    committed: list[dict] = []
+    held_forward_bad: list[dict] = []
+    consumed_skip: list[dict] = []
+    for fid in _result_list(result, "committed"):
+        src = all_findings.get(fid)
+        if src is None:
+            raise AuthorError(f"author committed unknown finding_id={fid!r}")
+        rec = dict(src)
+        rec["consumed_category"] = "consumed_committed"
+        committed.append(rec)
+    for entry in _result_list(result, "held_forward_bad"):
+        fid = entry.get("finding_id")
+        src = all_findings.get(fid)
+        if src is None:
+            raise AuthorError(f"author held unknown finding_id={fid!r}")
+        rec = dict(src)
+        rec["held_reason"] = f"forward_bad: {entry.get('reason', '')}"
+        held_forward_bad.append(rec)
+    for entry in _result_list(result, "consumed_skip"):
+        fid = entry.get("finding_id")
+        src = all_findings.get(fid)
+        if src is None:
+            raise AuthorError(f"author skipped unknown finding_id={fid!r}")
+        rec = dict(src)
+        rec["consumed_category"] = "consumed_skip"
+        rec["skip_reason"] = entry.get("reason", "")
+        consumed_skip.append(rec)
+    return 0, commit_sha, committed, held_forward_bad, consumed_skip
 
 
 def main(argv: list[str]) -> int:
