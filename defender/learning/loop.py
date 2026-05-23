@@ -188,6 +188,36 @@ def _run_claude(
     # actor emits Section 0, consults the lessons corpus, then emits Sections
     # 1-3 — text mode loses Section 0). Concatenating across messages keeps
     # the prompt's design intent intact regardless of tool use.
+    cmd = _build_run_claude_cmd(
+        system_prompt_path, model,
+        settings_path=settings_path, add_dir=add_dir,
+        permission_mode=permission_mode, session_id=session_id,
+    )
+    proc = subprocess.run(
+        cmd,
+        input=user_prompt,
+        capture_output=True,
+        text=True,
+        timeout=SUBAGENT_TIMEOUT,
+        cwd=str(REPO_ROOT),
+    )
+    if proc.returncode != 0:
+        raise LoopError(
+            f"claude -p failed (rc={proc.returncode}):\n"
+            f"stderr: {proc.stderr[-2000:]}"
+        )
+    return "\n\n".join(_extract_assistant_text_parts(proc.stdout))
+
+
+def _build_run_claude_cmd(
+    system_prompt_path: Path,
+    model: str,
+    *,
+    settings_path: Path | None,
+    add_dir: Path | None,
+    permission_mode: str | None,
+    session_id: str | None,
+) -> list[str]:
     cmd = [
         "claude",
         "-p",
@@ -204,22 +234,13 @@ def _run_claude(
         cmd += ["--permission-mode", permission_mode]
     if session_id is not None:
         cmd += ["--session-id", session_id]
-    proc = subprocess.run(
-        cmd,
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=SUBAGENT_TIMEOUT,
-        cwd=str(REPO_ROOT),
-    )
-    if proc.returncode != 0:
-        raise LoopError(
-            f"claude -p failed (rc={proc.returncode}):\n"
-            f"stderr: {proc.stderr[-2000:]}"
-        )
+    return cmd
+
+
+def _extract_assistant_text_parts(stdout: str) -> list[str]:
     parts: list[str] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
+    for raw in stdout.splitlines():
+        line = raw.strip()
         if not line:
             continue
         try:
@@ -238,7 +259,7 @@ def _run_claude(
                         parts.append(txt)
         elif isinstance(content, str) and content:
             parts.append(content)
-    return "\n\n".join(parts)
+    return parts
 
 
 def _transcript_path(session_id: str) -> Path:
@@ -550,81 +571,100 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
             f"lead_sequence positions count {len(expected_positions)}"
         )
     for i, p in enumerate(projections):
-        if not isinstance(p, dict):
-            raise LoopError(f"projection[{i}] is not a mapping")
-        missing = _ORACLE_PROJECTION_KEYS - set(p.keys())
-        if missing:
-            raise LoopError(f"projection[{i}] missing keys: {sorted(missing)}")
-        extra = set(p.keys()) - _ORACLE_PROJECTION_KEYS
-        if extra:
-            raise LoopError(f"projection[{i}] has unexpected keys: {sorted(extra)}")
-        if p["position"] != expected_positions[i]:
-            raise LoopError(
-                f"projection[{i}].position={p['position']!r} != "
-                f"expected {expected_positions[i]!r}"
-            )
-        events = p["events"]
-        if not isinstance(events, list):
-            raise LoopError(f"projection[{i}].events is not a list")
-        for j, ev in enumerate(events):
-            if not isinstance(ev, dict):
-                raise LoopError(
-                    f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
-                )
+        _validate_oracle_projection(i, p, expected_positions[i])
     return doc
+
+
+def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
+    if not isinstance(p, dict):
+        raise LoopError(f"projection[{i}] is not a mapping")
+    missing = _ORACLE_PROJECTION_KEYS - set(p.keys())
+    if missing:
+        raise LoopError(f"projection[{i}] missing keys: {sorted(missing)}")
+    extra = set(p.keys()) - _ORACLE_PROJECTION_KEYS
+    if extra:
+        raise LoopError(f"projection[{i}] has unexpected keys: {sorted(extra)}")
+    if p["position"] != expected_position:
+        raise LoopError(
+            f"projection[{i}].position={p['position']!r} != "
+            f"expected {expected_position!r}"
+        )
+    events = p["events"]
+    if not isinstance(events, list):
+        raise LoopError(f"projection[{i}].events is not a list")
+    for j, ev in enumerate(events):
+        if not isinstance(ev, dict):
+            raise LoopError(
+                f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
+            )
 
 
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise LoopError("judge YAML did not parse to a mapping")
-    for key in ("outcome", "outcome_rationale", "defender_findings"):
-        if key not in doc:
-            raise LoopError(f"judge YAML missing required key: {key}")
-    outcome = _outcome_keyword(doc["outcome"])
-    if outcome != "skip-passthrough":
-        for key in ("encounter_analysis", "confidence"):
-            if key not in doc:
-                raise LoopError(f"judge YAML missing required key: {key}")
+    _require_judge_keys(doc)
     findings = doc["defender_findings"]
     if not isinstance(findings, list):
         raise LoopError("judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
-        if not isinstance(f, dict):
-            raise LoopError(f"finding[{i}] is not a mapping")
-        for k in ("type", "subject_anchor", "subject_topic", "finding", "citations"):
-            if k not in f:
-                raise LoopError(f"finding[{i}] missing key: {k}")
-        for k in ("subject_anchor", "subject_topic"):
-            v = f[k]
-            if not isinstance(v, str) or not v.strip():
-                raise LoopError(f"finding[{i}].{k} must be a non-empty string")
-        if f["type"] not in ALL_FINDING_TYPES:
-            raise LoopError(
-                f"finding[{i}].type={f['type']!r} not in {sorted(ALL_FINDING_TYPES)}"
-            )
-        if not isinstance(f["citations"], list):
-            raise LoopError(f"finding[{i}].citations is not a list")
+        _validate_judge_finding(i, f)
     if "actor_observations" in doc:
-        observations = doc["actor_observations"]
-        if not isinstance(observations, list):
-            raise LoopError("judge `actor_observations` is not a list")
-        for i, o in enumerate(observations):
-            if not isinstance(o, dict):
-                raise LoopError(f"actor_observations[{i}] is not a mapping")
-            for k in ("type", "subject_anchor", "subject_topic", "observation"):
-                if k not in o:
-                    raise LoopError(f"actor_observations[{i}] missing key: {k}")
-                v = o[k]
-                if not isinstance(v, str) or not v.strip():
-                    raise LoopError(
-                        f"actor_observations[{i}].{k} must be a non-empty string"
-                    )
-            if o["type"] not in ACTOR_OBSERVATION_TYPES:
-                raise LoopError(
-                    f"actor_observations[{i}].type={o['type']!r} not in "
-                    f"{sorted(ACTOR_OBSERVATION_TYPES)}"
-                )
+        _validate_judge_actor_observations(doc["actor_observations"])
     return doc
+
+
+def _require_judge_keys(doc: dict) -> None:
+    for key in ("outcome", "outcome_rationale", "defender_findings"):
+        if key not in doc:
+            raise LoopError(f"judge YAML missing required key: {key}")
+    if _outcome_keyword(doc["outcome"]) == "skip-passthrough":
+        return
+    for key in ("encounter_analysis", "confidence"):
+        if key not in doc:
+            raise LoopError(f"judge YAML missing required key: {key}")
+
+
+def _validate_judge_actor_observations(observations: Any) -> None:
+    if not isinstance(observations, list):
+        raise LoopError("judge `actor_observations` is not a list")
+    for i, o in enumerate(observations):
+        _validate_actor_observation(i, o)
+
+
+def _validate_judge_finding(i: int, f: Any) -> None:
+    if not isinstance(f, dict):
+        raise LoopError(f"finding[{i}] is not a mapping")
+    for k in ("type", "subject_anchor", "subject_topic", "finding", "citations"):
+        if k not in f:
+            raise LoopError(f"finding[{i}] missing key: {k}")
+    for k in ("subject_anchor", "subject_topic"):
+        v = f[k]
+        if not isinstance(v, str) or not v.strip():
+            raise LoopError(f"finding[{i}].{k} must be a non-empty string")
+    if f["type"] not in ALL_FINDING_TYPES:
+        raise LoopError(
+            f"finding[{i}].type={f['type']!r} not in {sorted(ALL_FINDING_TYPES)}"
+        )
+    if not isinstance(f["citations"], list):
+        raise LoopError(f"finding[{i}].citations is not a list")
+
+
+def _validate_actor_observation(i: int, o: Any) -> None:
+    if not isinstance(o, dict):
+        raise LoopError(f"actor_observations[{i}] is not a mapping")
+    for k in ("type", "subject_anchor", "subject_topic", "observation"):
+        if k not in o:
+            raise LoopError(f"actor_observations[{i}] missing key: {k}")
+        v = o[k]
+        if not isinstance(v, str) or not v.strip():
+            raise LoopError(
+                f"actor_observations[{i}].{k} must be a non-empty string"
+            )
+    if o["type"] not in ACTOR_OBSERVATION_TYPES:
+        raise LoopError(
+            f"actor_observations[{i}].type={o['type']!r} not in "
+            f"{sorted(ACTOR_OBSERVATION_TYPES)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1021,53 +1061,59 @@ def run_one(run_dir: Path) -> int:
         f"{n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}"
     )
 
-    threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
-    pending_count = sum(
-        1 for line in PENDING_FILE.read_text().splitlines() if line.strip()
+    _maybe_trigger_author(
+        pending_file=PENDING_FILE,
+        threshold_env="LEARNING_AUTHOR_THRESHOLD",
+        module_name="author",
+        label="author",
+        log_prefix="step=author",
+        pending_label="pending",
     )
-    if pending_count >= threshold:
-        _log(f"step=author pending={pending_count} threshold={threshold}")
-        # Sibling module — loop.py is invoked as a script, so we
-        # import author by file path rather than via package syntax.
-        sys.path.insert(0, str(LEARNING_DIR))
-        try:
-            import author as _author  # type: ignore[import-not-found]
-        finally:
-            sys.path.pop(0)
-        rc = _author.run_batch()
-        if rc != 0:
-            _log(f"author returned rc={rc} (queue intact, retry next tick)")
-    else:
-        _log(f"pending={pending_count} threshold={threshold} — author not invoked")
-
-    actor_threshold = int(os.environ.get("LEARNING_AUTHOR_ACTOR_THRESHOLD", "5"))
-    actor_pending_count = 0
-    if ACTOR_OBSERVATIONS_FILE.is_file():
-        actor_pending_count = sum(
-            1
-            for line in ACTOR_OBSERVATIONS_FILE.read_text().splitlines()
-            if line.strip()
-        )
-    if actor_pending_count >= actor_threshold:
-        _log(
-            f"step=author_actor pending={actor_pending_count} "
-            f"threshold={actor_threshold}"
-        )
-        sys.path.insert(0, str(LEARNING_DIR))
-        try:
-            import author_actor as _author_actor  # type: ignore[import-not-found]
-        finally:
-            sys.path.pop(0)
-        rc = _author_actor.run_batch()
-        if rc != 0:
-            _log(f"author_actor returned rc={rc} (queue intact, retry next tick)")
-    else:
-        _log(
-            f"actor_pending={actor_pending_count} threshold={actor_threshold} "
-            f"— author_actor not invoked"
-        )
+    _maybe_trigger_author(
+        pending_file=ACTOR_OBSERVATIONS_FILE,
+        threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
+        module_name="author_actor",
+        label="author_actor",
+        log_prefix="step=author_actor",
+        pending_label="actor_pending",
+    )
 
     return 0
+
+
+def _maybe_trigger_author(
+    *,
+    pending_file: Path,
+    threshold_env: str,
+    module_name: str,
+    label: str,
+    log_prefix: str,
+    pending_label: str,
+) -> None:
+    """Run the named curator module if the pending queue meets its threshold."""
+    threshold = int(os.environ.get(threshold_env, "5"))
+    pending_count = 0
+    if pending_file.is_file():
+        pending_count = sum(
+            1 for line in pending_file.read_text().splitlines() if line.strip()
+        )
+    if pending_count < threshold:
+        _log(
+            f"{pending_label}={pending_count} threshold={threshold} "
+            f"— {label} not invoked"
+        )
+        return
+    _log(f"{log_prefix} {pending_label}={pending_count} threshold={threshold}")
+    # Sibling module — loop.py is invoked as a script, so we
+    # import by file path rather than via package syntax.
+    sys.path.insert(0, str(LEARNING_DIR))
+    try:
+        mod = __import__(module_name)
+    finally:
+        sys.path.pop(0)
+    rc = mod.run_batch()
+    if rc != 0:
+        _log(f"{label} returned rc={rc} (queue intact, retry next tick)")
 
 
 _HELP_EPILOG = """\
