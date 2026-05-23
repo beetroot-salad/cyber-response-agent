@@ -49,7 +49,7 @@ uncertain.
      the per-event content is what carries the deviation.
 
    When the discriminating dimension isn't yet known, ask gather for
-   a baseline summary alongside the foreground query. A
+   a baseline characterization alongside the foreground query. A
    correlated signal that drives disposition gets the same baseline
    treatment as the focal alert — never weigh a count without the
    reference distribution it's deviating from.
@@ -102,12 +102,12 @@ involved, the behavior under question, and what disposition turns on.
 Pick the next lead (or small batch). For each:
 
 - Write a free-form lead description: the **goal** (one-sentence
-  measurement contract) and **what to summarize** (the dimensions
+  measurement contract) and **what to characterize** (the dimensions
   gather's summary must address).
 - Predict, in advance, the observation shape that would resolve each
   competing explanation — relative to the standard pattern for these
   entities. When the standard pattern isn't already known, ask gather
-  for a baseline summary alongside the foreground query.
+  for a baseline characterization alongside the foreground query.
 
 Author `:H` (hypotheses with predictions) and `:L` (lead description)
 blocks. Do not pick a query template here — that's gather's job.
@@ -178,7 +178,7 @@ Call (arg order is **corpus_root first, then `advisory`**):
 
 ```bash
 python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
-    --signature wazuh-rule-NNNN \
+    --signature <signature_id> \
     --class lead_discrimination \
     --frontier '?hypothesis-one' \
     --frontier '?hypothesis-two' \
@@ -222,7 +222,7 @@ python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-shape \
 
 # Signature-scoped: names this rule has historically used.
 python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-vocabulary \
-    --signature wazuh-rule-NNNN
+    --signature <signature_id>
 ```
 
 Call both when normalizing — signature first (canonical for this
@@ -371,12 +371,7 @@ needs it.
 
 ### Example A — FIM checksum change after apt upgrade
 
-The alert is `wazuh-rule-550` (file integrity changed) on
-`/usr/sbin/nginx`. The question is whether the checksum change
-indicates binary tampering or is consistent with benign activity such
-as a managed package upgrade.
-
-`investigation.md` (excerpts):
+Alert `siem-fim-checksum-changed` on `/usr/sbin/nginx`: managed package upgrade, or adversary-controlled write?
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -384,7 +379,7 @@ v-001|endpoint|endpoint:linux|web-frontend-04.prod|role=static-asset-server
 v-002|file|file:binary|/usr/sbin/nginx|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|modified|v-001|v-002|2026-05-05T02:14:01Z|siem-event:wazuh|checksum_before=sha256:1111...aaaa;checksum_after=sha256:2222...bbbb
+e-001|modified|v-001|v-002|2026-05-05T02:14:01Z|siem-event:siem|checksum_before=sha256:1111...aaaa;checksum_after=sha256:2222...bbbb
 ```
 
 ```invlang
@@ -453,25 +448,6 @@ matched_archetype      managed-package-upgrade
 summary                "FIM fire explained by signed unattended-upgrade nginx 1.24.0-2ubuntu7.5; checksum matches upstream and fleet pattern."
 ```
 
-`lead_sequence.yaml`:
-
-```yaml
-case_id: 2026-05-05-A
-alert_ref: alert.json
-entries:
-  - position: 0
-    lead_description:
-      goal: Did the FIM fire at 02:14:01Z trace to a managed apt upgrade?
-      what_to_summarize:
-        - apt history events ±10m around the FIM timestamp
-        - checksum_after vs the published Ubuntu package SHA
-        - fleet upgrade pattern for the same window
-    queries:
-      - id: host-query.apt-history-around
-        params: {host: web-frontend-04.prod, t0: 2026-05-05T02:14:01Z, window: ±10m}
-    result_ref: gather_raw/0.json
-```
-
 The companion fixture `10-bait-mirror-postinst` carries the same
 surface and would resolve identically through `l-001` — the
 supply-chain integrity layer clears in both cases. What differs is the
@@ -484,11 +460,7 @@ the same single lead and miss it.
 
 ### Example B — SSH login by a non-stereotyped account from a documented monitoring source
 
-An SSH auth-success on `app-host-12.prod` from `mon-poller-04.sre`
-using account `metrics-shipper` — a name the SRE team's monitoring
-runbook does not stereotype. The question is whether this is a
-sanctioned SRE rollout whose IAM catalog update lagged the deployment,
-or an unfamiliar process on the source that shouldn't be there.
+SSH auth-success on `app-host-12.prod` from `mon-poller-04.sre` using account `metrics-shipper`. The account isn't stereotyped in the SRE monitoring runbook — sanctioned rollout whose IAM update lagged, or unfamiliar process on the source?
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -497,7 +469,7 @@ v-002|endpoint|endpoint:ipv4|10.20.7.118|hostname=app-host-12.prod
 v-003|identity|identity:account|metrics-shipper|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|ssh_auth_success|v-001|v-002|2026-05-05T03:42:11Z|siem-event:wazuh|account=metrics-shipper;port=22
+e-001|ssh_auth_success|v-001|v-002|2026-05-05T03:42:11Z|siem-event:siem|account=metrics-shipper;port=22
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
 h-001|?sre-rollout-lag-in-iam|e-001|ssh_auth_success|process|monitoring-agent||null|active
@@ -603,11 +575,7 @@ a louder query against the same registry.
 
 ### Example C — Novel outbound DNS from a CI runner
 
-The signature is behavioral — `egress-dns-query-to-rare-tld` fires on a
-domain (`telemetry-collect.live`) first observed org-wide 29h ago, with
-zero fleet peers querying it and a regular `~30 min ± 3 min` cadence
-from one process tree. This is not a known-pattern alert; the lead set
-has to enumerate the plausible parents.
+Behavioral signature `egress-dns-query-to-rare-tld` fires on a domain (`telemetry-collect.live`) first observed org-wide 29h ago, zero fleet peers, regular `~30 min ± 3 min` cadence from one process tree. Not a known-pattern alert; the lead set has to enumerate plausible parents.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -617,7 +585,7 @@ v-003|endpoint|endpoint:dns-name|telemetry-collect.live|first_seen_org=2026-05-0
 v-004|package|package:npm|@quickmetrics/runtime-collector@0.1.2|published=2026-05-04T20:50Z
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:wazuh|cadence=~30min;count_24h=47
+e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:siem|cadence=~30min;count_24h=47
 e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-install
 ```
 
@@ -689,42 +657,3 @@ matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
 ```
 
-`lead_sequence.yaml` (abridged):
-
-```yaml
-case_id: 2026-05-05-C
-alert_ref: alert.json
-entries:
-  - position: 0
-    lead_description:
-      goal: Summarize the npm package and its maintainer.
-      what_to_summarize:
-        - maintainer publication history
-        - source repo declared telemetry mechanism
-        - post-install or lifecycle scripts touching network
-    queries:
-      - id: host-query.npm-package-meta
-        params: {name: '@quickmetrics/runtime-collector', version: 0.1.2}
-    result_ref: gather_raw/0.json
-  - position: 1
-    lead_description:
-      goal: Trace the node[2188] process tree and check whether DNS queries are bounded by the github-runner job lifetime.
-      what_to_summarize:
-        - parent chain of pid 2188
-        - process exit time vs. last DNS query time
-    queries:
-      - id: host-query.process-tree-around
-        params: {host: build-runner-07.ci, pid: 2188, t0: alert, window: ±2h}
-    result_ref: gather_raw/1.json
-  - position: 2
-    lead_description:
-      goal: Reputation and history for the queried domain and its resolved IP.
-      what_to_summarize:
-        - domain first-seen vs. resolved-IP registration date
-        - prior corp traffic to the IP
-        - SNI vs. queried domain alignment
-    queries:
-      - id: wazuh.dns-and-reputation-history
-        params: {domain: telemetry-collect.live, ip: 203.0.113.42, window: 90d}
-    result_ref: gather_raw/2.json
-```
