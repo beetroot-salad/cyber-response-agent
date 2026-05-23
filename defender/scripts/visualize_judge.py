@@ -15,7 +15,6 @@ from visualize_primitives import (
     esc,
     load_yaml,
     pre_text,
-    render_alert_block,
     render_lead_sequence_compact,
     render_report_card,
 )
