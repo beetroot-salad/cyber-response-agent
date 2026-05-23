@@ -43,6 +43,40 @@ JUDGE_FILENAME = "transcript.html"
 RUNTIME_FILENAME = "runtime.html"
 
 
+# Per-million-token prices, USD. Matches Anthropic's published pricing for
+# claude-sonnet-4-6 / claude-haiku-4-5; the ``result`` event's
+# ``total_cost_usd`` matches these factors to 4 decimal places on
+# observed traces, so we use them rather than relying on per-message
+# cost fields (which the stream-json schema doesn't carry).
+PRICING = {
+    "claude-sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_w": 3.75, "cache_r": 0.30},
+    "claude-haiku-4-5":  {"in": 1.0, "out":  5.0, "cache_w": 1.25, "cache_r": 0.10},
+}
+
+
+def _model_key(model: str) -> str:
+    """Normalize a model id (which may carry a date suffix) to a PRICING key."""
+    if not model:
+        return "claude-sonnet-4-6"
+    m = model.lower()
+    if "haiku" in m:
+        return "claude-haiku-4-5"
+    return "claude-sonnet-4-6"
+
+
+def usage_cost(model: str, usage: dict) -> float:
+    """Compute USD cost for an assistant message from its usage block."""
+    if not isinstance(usage, dict):
+        return 0.0
+    p = PRICING[_model_key(model)]
+    return (
+        usage.get("input_tokens", 0) * p["in"]
+        + usage.get("output_tokens", 0) * p["out"]
+        + usage.get("cache_creation_input_tokens", 0) * p["cache_w"]
+        + usage.get("cache_read_input_tokens", 0) * p["cache_r"]
+    ) / 1_000_000
+
+
 # ---------------------------------------------------------------------------
 # Primitives
 # ---------------------------------------------------------------------------
@@ -374,6 +408,312 @@ def extract_main_subagents(events: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+_LOOP_VERBS = ("PLAN", "GATHER", "ANALYZE")
+_LOOP_VERB_RE = re.compile(
+    r"^(?P<verb>PLAN|GATHER|ANALYZE)\b\s*(?:\((?:loop\s+)?(?P<n>\d+)\))?\s*(?P<rest>.*)$",
+    re.IGNORECASE,
+)
+
+
+def normalize_phase_names(phases: list[dict]) -> list[dict]:
+    """Stamp every PLAN/GATHER/ANALYZE block with an explicit ``(loop N)``.
+
+    investigation.md is inconsistent in source: some runs label only
+    GATHER/ANALYZE with a loop counter, leaving PLAN bare ("## PLAN").
+    For the runtime view's TOC and phase summaries we want the loop
+    number on every loop-scoped phase. We infer it from the position in
+    the phase sequence — a new PLAN starts a new loop; explicit
+    annotations override.
+
+    Mutates and returns the same list.
+    """
+    loop = 0
+    for ph in phases:
+        m = _LOOP_VERB_RE.match(ph["name"])
+        if not m:
+            continue
+        verb = m.group("verb").upper()
+        n = m.group("n")
+        rest = (m.group("rest") or "").strip()
+        if n is not None:
+            loop = int(n)
+        else:
+            if verb == "PLAN":
+                loop += 1
+            elif loop == 0:
+                loop = 1
+        suffix = f" — {rest}" if rest else ""
+        ph["name"] = f"{verb} (loop {loop}){suffix}"
+    return phases
+
+
+# Mapping for cost-bar colors and ordering hints. Falls back to a neutral
+# color for unrecognized phase headers.
+def _phase_color(verb: str) -> str:
+    return {
+        "ORIENT":  "#58a6ff",
+        "PLAN":    "#a371f7",
+        "GATHER":  "#3fb950",
+        "ANALYZE": "#d29922",
+        "REPORT":  "#f0883e",
+    }.get(verb.upper(), "#8b949e")
+
+
+def _phase_verb(name: str) -> str:
+    return name.split(" ", 1)[0].upper() if name else ""
+
+
+def phase_attribution(
+    events: list[dict],
+    phase_order: list[str],
+) -> dict[str, dict]:
+    """Attribute each main-agent assistant message to a phase bucket.
+
+    Walks the trace in order. The "current phase" advances whenever the
+    main agent issues a ``Write`` or ``Edit`` on ``investigation.md`` whose
+    new content carries a ``## PHASE`` header — the latest header in
+    that write becomes the new current phase. Each assistant message
+    contributes its token usage and tool-call count to the bucket that
+    was active when the message was issued.
+
+    ``phase_order`` is the normalized name list from
+    ``normalize_phase_names`` — used to map raw ``## `` headers from
+    investigation.md back to display names so attribution and the
+    rendered TOC line up.
+    """
+    # Map raw header text -> normalized display name. We walk phase_order
+    # in sequence; for each raw header we strip the (loop N) and rest.
+    # Build a fallback (raw -> display) by processing phase_order with
+    # the same regex.
+    name_index: dict[str, str] = {}
+    loop = 0
+    for display in phase_order:
+        m = _LOOP_VERB_RE.match(display)
+        if m and m.group("n"):
+            loop = int(m.group("n"))
+        # Use display as both key and value — we'll look up phases by
+        # their normalized name via investigation re-scan in the caller.
+        name_index[display] = display
+
+    buckets: dict[str, dict] = {
+        ph: {
+            "turns": 0, "tool_calls": 0, "subagent_calls": 0,
+            "in": 0, "out": 0, "cache_r": 0, "cache_w": 0, "cost": 0.0,
+        }
+        for ph in phase_order
+    }
+    if not phase_order:
+        return buckets
+
+    # We need to map raw header text seen in Write/Edit (e.g. "PLAN")
+    # back to the normalized phase name (e.g. "PLAN (loop 1)"). Because
+    # raw headers don't carry loop counters, we step through phase_order
+    # in document order: the n-th LOOP_VERB header we see in writes
+    # corresponds to the n-th matching entry in phase_order.
+    expected_loop_verbs = [p for p in phase_order if _phase_verb(p) in _LOOP_VERBS]
+    expected_non_loop = [p for p in phase_order if _phase_verb(p) not in _LOOP_VERBS]
+    seen_loop_idx = 0
+
+    current = phase_order[0]
+    # Capture the full header (verb + optional "(loop N)") so two loops
+    # of the same verb are distinct entries in the set-diff used to
+    # detect newly-introduced headers.
+    header_re = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
+
+    deduped = _merge_assistant_events(events)
+
+    # First pass: walk main-agent messages (parent_tool_use_id is None).
+    # For each Task tool_use we record the phase it was issued in so the
+    # second pass can attribute subagent messages by parent_tool_use_id.
+    task_phase: dict[str, str] = {}
+    for ev in deduped:
+        if ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message") or {}
+        content = msg.get("content") or []
+        usage = msg.get("usage") or {}
+        model = msg.get("model", "")
+
+        b = buckets.get(current)
+        if b is not None:
+            b["turns"] += 1
+            b["in"] += usage.get("input_tokens", 0)
+            b["out"] += usage.get("output_tokens", 0)
+            b["cache_r"] += usage.get("cache_read_input_tokens", 0)
+            b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
+            b["cost"] += usage_cost(model, usage)
+            for blk in content:
+                if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                    b["tool_calls"] += 1
+                    if blk.get("name") in ("Task", "Agent"):
+                        b["subagent_calls"] += 1
+                        task_phase[blk.get("id", "")] = current
+
+        # Advance phase when this turn introduces a previously-unseen
+        # ``## PHASE`` header into investigation.md. Diffing new-vs-old
+        # is necessary because Edits often surround a fresh header with
+        # earlier ones (the agent edits "## PLAN" → "## GATHER ... ##
+        # PLAN" while filling in the body) — taking the last header in
+        # ``new_string`` would walk back to PLAN.
+        for blk in content:
+            if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+                continue
+            if blk.get("name") not in ("Write", "Edit"):
+                continue
+            inp = blk.get("input", {}) or {}
+            fp = str(inp.get("file_path", ""))
+            if not fp.endswith("investigation.md"):
+                continue
+            new_text = inp.get("content") or inp.get("new_string") or ""
+            old_text = inp.get("old_string") or ""
+            new_headers = [m.group(1).strip() for m in header_re.finditer(new_text)]
+            old_set = {m.group(1).strip() for m in header_re.finditer(old_text)}
+            introduced = [h for h in new_headers if h not in old_set]
+            for raw in introduced:
+                verb = raw.upper().split(" ", 1)[0]
+                target = None
+                if verb in _LOOP_VERBS:
+                    while seen_loop_idx < len(expected_loop_verbs):
+                        cand = expected_loop_verbs[seen_loop_idx]
+                        if _phase_verb(cand) == verb:
+                            target = cand
+                            seen_loop_idx += 1
+                            break
+                        seen_loop_idx += 1
+                else:
+                    for cand in expected_non_loop:
+                        if _phase_verb(cand) == verb:
+                            target = cand
+                            break
+                if target is not None:
+                    current = target
+
+    # Second pass: attribute subagent messages by parent_tool_use_id.
+    for ev in deduped:
+        pid = ev.get("parent_tool_use_id")
+        if not pid:
+            continue
+        ph = task_phase.get(pid)
+        if ph is None:
+            continue
+        msg = ev.get("message") or {}
+        usage = msg.get("usage") or {}
+        model = msg.get("model", "")
+        b = buckets[ph]
+        b["turns"] += 1
+        b["in"] += usage.get("input_tokens", 0)
+        b["out"] += usage.get("output_tokens", 0)
+        b["cache_r"] += usage.get("cache_read_input_tokens", 0)
+        b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
+        b["cost"] += usage_cost(model, usage)
+        for blk in (msg.get("content") or []):
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                b["tool_calls"] += 1
+
+    return buckets
+
+
+def _merge_assistant_events(events: list[dict]) -> list[dict]:
+    """Merge streamed deltas of the same assistant message into one event.
+
+    Stream-json emits each content block (thinking / text / tool_use) as
+    its own event for a given ``message.id``. Each event carries the
+    same ``usage`` block but a *single* content block. To attribute
+    cost correctly (one charge per message) and to see every tool_use a
+    message issued, we union the content blocks across events of the
+    same id while keeping the first ``usage`` we saw.
+    """
+    by_id: dict[str, dict] = {}
+    order: list[str] = []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        msg = ev.get("message") or {}
+        mid = msg.get("id") or ev.get("uuid")
+        if mid not in by_id:
+            order.append(mid)
+            by_id[mid] = {
+                "type": "assistant",
+                "parent_tool_use_id": ev.get("parent_tool_use_id"),
+                "uuid": ev.get("uuid"),
+                "message": {
+                    "id": mid,
+                    "model": msg.get("model", ""),
+                    "usage": msg.get("usage") or {},
+                    "content": [],
+                },
+            }
+        entry = by_id[mid]
+        for blk in msg.get("content") or []:
+            if isinstance(blk, dict):
+                entry["message"]["content"].append(blk)
+    return [by_id[mid] for mid in order]
+
+
+def _result_totals(events: list[dict]) -> dict[str, float]:
+    """Reliable totals from the run's final ``result`` event."""
+    total_cost = 0.0
+    sonnet_cost = 0.0
+    haiku_cost = 0.0
+    for ev in events:
+        if ev.get("type") != "result":
+            continue
+        total_cost += ev.get("total_cost_usd") or 0
+        for k, v in (ev.get("modelUsage") or {}).items():
+            if not isinstance(v, dict):
+                continue
+            c = v.get("costUSD") or 0
+            if "haiku" in k.lower():
+                haiku_cost += c
+            else:
+                sonnet_cost += c
+    return {"total": total_cost, "sonnet": sonnet_cost, "haiku": haiku_cost}
+
+
+def scale_costs_to_reported(
+    events: list[dict],
+    attribution: dict[str, dict],
+    subagent_costs: dict[str, float],
+) -> None:
+    """Rescale per-phase + per-subagent cost so totals match the result event.
+
+    The stream-json ``assistant`` events under-report ``output_tokens``
+    (only the first chunk's count survives in the per-event usage
+    block), so cost computed message-by-message is short by 15–25%. The
+    *shape* of the per-phase distribution is still informative because
+    ``cache_read_input_tokens`` — the dominant cost driver in cached
+    sessions — is accurate per message. We rescale to match the result
+    event's authoritative totals.
+    """
+    totals = _result_totals(events)
+    total_reported = totals["total"]
+    haiku_reported = totals["haiku"]
+
+    attr_total = sum(b["cost"] for b in attribution.values())
+    if attr_total > 0 and total_reported > 0:
+        scale = total_reported / attr_total
+        for b in attribution.values():
+            b["cost"] *= scale
+
+    sub_total = sum(subagent_costs.values())
+    if sub_total > 0 and haiku_reported > 0:
+        scale = haiku_reported / sub_total
+        for k in list(subagent_costs.keys()):
+            subagent_costs[k] *= scale
+
+
+def subagent_cost_by_task(events: list[dict]) -> dict[str, float]:
+    """Per-Task subagent cost, keyed by the Task tool_use id."""
+    out: dict[str, float] = {}
+    for ev in _merge_assistant_events(events):
+        pid = ev.get("parent_tool_use_id")
+        if not pid:
+            continue
+        msg = ev.get("message") or {}
+        out[pid] = out.get(pid, 0.0) + usage_cost(msg.get("model", ""), msg.get("usage") or {})
+    return out
+
+
 def split_investigation_phases(run_dir: Path) -> list[dict]:
     """Split investigation.md on ``## `` headers into ordered phase blocks.
 
@@ -649,8 +989,11 @@ def render_judge_toc(n_findings: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_runtime_investigation(run_dir: Path) -> tuple[str, list[dict]]:
-    phases = split_investigation_phases(run_dir)
+def render_runtime_investigation(
+    run_dir: Path,
+    attribution: dict[str, dict] | None = None,
+) -> tuple[str, list[dict]]:
+    phases = normalize_phase_names(split_investigation_phases(run_dir))
     if not phases:
         body = '<div class="empty">no investigation.md or empty</div>'
         return (
@@ -664,9 +1007,10 @@ def render_runtime_investigation(run_dir: Path) -> tuple[str, list[dict]]:
         )
     blocks: list[str] = []
     for ph in phases:
-        title = ph["name"]
-        body_html = f'<pre class="text invlang">{esc(ph["body"])}</pre>'
-        blocks.append(block("phase", title, body_html, open_=True, anchor=ph["anchor"]))
+        stats = (attribution or {}).get(ph["name"])
+        stats_html = _phase_stats_html(stats) if stats else ""
+        body_html = stats_html + f'<pre class="text invlang">{esc(ph["body"])}</pre>'
+        blocks.append(block("phase", ph["name"], body_html, open_=True, anchor=ph["anchor"]))
     return (
         f"""
 <section id="sec-investigation" class="stage stage-defender">
@@ -676,6 +1020,29 @@ def render_runtime_investigation(run_dir: Path) -> tuple[str, list[dict]]:
 """,
         phases,
     )
+
+
+def _phase_stats_html(stats: dict) -> str:
+    if not stats:
+        return ""
+    pieces = [
+        f'<span class="ps-cost">${stats["cost"]:.4f}</span>',
+        f'<span class="ps-sep">·</span>',
+        f'<span>{stats["turns"]} turn(s)</span>',
+        f'<span class="ps-sep">·</span>',
+        f'<span>{stats["tool_calls"]} tool call(s)</span>',
+    ]
+    if stats.get("subagent_calls"):
+        pieces += [
+            f'<span class="ps-sep">·</span>',
+            f'<span>{stats["subagent_calls"]} subagent(s)</span>',
+        ]
+    pieces += [
+        f'<span class="ps-sep">·</span>',
+        f'<span class="ps-tok">in {stats["in"]:,} / out {stats["out"]:,}'
+        f' / cache_r {stats["cache_r"]:,} / cache_w {stats["cache_w"]:,}</span>',
+    ]
+    return f'<div class="phase-stats">{"".join(pieces)}</div>'
 
 
 def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
@@ -692,7 +1059,19 @@ def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
 """,
             0,
         )
-    blocks = [_render_gather_call(i, call, gather_dir) for i, call in enumerate(calls)]
+    costs = subagent_cost_by_task(events)
+    # Rescale per-call costs to match the reported haiku total (the
+    # stream-json output-token undercount affects subagent traces too).
+    haiku_reported = _result_totals(events)["haiku"]
+    sub_total = sum(costs.values())
+    if sub_total > 0 and haiku_reported > 0:
+        scale = haiku_reported / sub_total
+        for k in list(costs.keys()):
+            costs[k] *= scale
+    blocks = [
+        _render_gather_call(i, call, gather_dir, costs.get(call.get("id", ""), 0.0))
+        for i, call in enumerate(calls)
+    ]
     return (
         f"""
 <section id="sec-gather" class="stage stage-defender">
@@ -704,7 +1083,7 @@ def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
     )
 
 
-def _render_gather_call(i: int, call: dict, gather_dir: Path) -> str:
+def _render_gather_call(i: int, call: dict, gather_dir: Path, cost: float = 0.0) -> str:
     inp = call.get("input", {}) or {}
     description = inp.get("description") or "(no description)"
     subagent_type = inp.get("subagent_type") or "(default)"
@@ -712,7 +1091,17 @@ def _render_gather_call(i: int, call: dict, gather_dir: Path) -> str:
     result = call.get("result")
     err = " [error]" if call.get("is_error") else ""
     title = f"#{i} [{subagent_type}] {description}{err}"
-    inner = block("subagent-input", "input prompt", pre_text(prompt))
+    result_chars = len(result) if isinstance(result, str) else 0
+    stats_html = (
+        f'<div class="phase-stats">'
+        f'<span class="ps-cost">${cost:.4f}</span>'
+        f'<span class="ps-sep">·</span>'
+        f'<span>prompt {len(prompt):,} char</span>'
+        f'<span class="ps-sep">·</span>'
+        f'<span>result {result_chars:,} char</span>'
+        f'</div>'
+    )
+    inner = stats_html + block("subagent-input", "input prompt", pre_text(prompt))
     if result is not None:
         inner += block(
             "subagent-output",
@@ -968,25 +1357,108 @@ def render_judge_headline(run_dir: Path, judge: dict | None) -> str:
 """
 
 
-def render_runtime_headline(run_dir: Path) -> str:
+def render_runtime_headline(
+    run_dir: Path,
+    events: list[dict],
+    attribution: dict[str, dict],
+    phase_order: list[str],
+) -> str:
     report = parse_report(run_dir)
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
     body = report.get("body", "").strip() or "(no report body)"
     return f"""
 <section class="headline">
-  <div class="tiles">
+  <div class="headline-grid">
     <div class="tile tile-disp disp-{esc(disposition)}">
       <div class="tile-label">defender disposition</div>
       <div class="tile-value">{esc(disposition)}</div>
       <div class="tile-sub">confidence: {esc(confidence)}</div>
     </div>
+    <div class="headline-body">
+      <div class="hb-label">report.md</div>
+      <div class="hb-text">{esc(body)}</div>
+    </div>
   </div>
-  <div class="headline-body">
-    <div class="hb-label">report.md</div>
-    <div class="hb-text">{esc(body)}</div>
-  </div>
+  {render_timing_cost_block(events, attribution, phase_order)}
 </section>
+"""
+
+
+def _fmt_duration(ms: float | int) -> str:
+    if not ms or ms <= 0:
+        return "—"
+    s = int(ms // 1000)
+    if s < 60:
+        return f"{s}s"
+    return f"{s // 60}m{s % 60:02d}s"
+
+
+def render_timing_cost_block(
+    events: list[dict],
+    attribution: dict[str, dict],
+    phase_order: list[str],
+) -> str:
+    result_evs = [e for e in events if e.get("type") == "result"]
+    duration_ms = sum(e.get("duration_ms") or 0 for e in result_evs)
+    duration_api_ms = sum(e.get("duration_api_ms") or 0 for e in result_evs)
+    total_cost_reported = sum(e.get("total_cost_usd") or 0 for e in result_evs)
+
+    # Model-level usage from result events (main + subagents).
+    sonnet_cost = 0.0
+    haiku_cost = 0.0
+    for ev in result_evs:
+        mu = ev.get("modelUsage") or {}
+        for k, v in mu.items():
+            if not isinstance(v, dict):
+                continue
+            c = v.get("costUSD") or 0
+            if "haiku" in k.lower():
+                haiku_cost += c
+            else:
+                sonnet_cost += c
+
+    # Per-phase cost summed from attribution (main agent + subagents
+    # mapped via parent_tool_use_id). Used as the segment-bar
+    # denominator; should approximate the reported total.
+    attr_total = sum(b["cost"] for b in attribution.values())
+    bar_total = attr_total if attr_total > 0 else (total_cost_reported or 0.001)
+
+    # Build segmented cost bar in phase_order.
+    segs: list[str] = []
+    for ph in phase_order:
+        b = attribution.get(ph)
+        if not b or b["cost"] <= 0:
+            continue
+        pct = (b["cost"] / bar_total) * 100
+        verb = _phase_verb(ph)
+        color = _phase_color(verb)
+        label = verb
+        title = f"{ph} · ${b['cost']:.4f} · {pct:.1f}%"
+        segs.append(
+            f'<div class="cb-seg" style="width:{pct:.4f}%;background:{color}" '
+            f'title="{esc(title)}"><span class="cb-label">{esc(label)}</span>'
+            f'<span class="cb-pct">${b["cost"]:.3f}</span></div>'
+        )
+    bar_html = "".join(segs) or '<div class="empty">(no per-phase cost attribution)</div>'
+
+    summary = (
+        f'<span class="tc-key">total cost</span> <span class="tc-val">${total_cost_reported:.4f}</span>'
+        f'<span class="tc-sep">·</span>'
+        f'<span class="tc-key">wall</span> <span class="tc-val">{_fmt_duration(duration_ms)}</span>'
+        f'<span class="tc-sep">·</span>'
+        f'<span class="tc-key">api</span> <span class="tc-val">{_fmt_duration(duration_api_ms)}</span>'
+        f'<span class="tc-sep">·</span>'
+        f'<span class="tc-key">sonnet</span> <span class="tc-val">${sonnet_cost:.4f}</span>'
+        f'<span class="tc-sep">·</span>'
+        f'<span class="tc-key">haiku</span> <span class="tc-val">${haiku_cost:.4f}</span>'
+    )
+    return f"""
+<div class="timing-cost">
+  <div class="tc-summary">{summary}</div>
+  <div class="cost-bar">{bar_html}</div>
+  <div class="cost-bar-caveat">per-phase segments include main-agent turns plus subagent turns attributed via parent_tool_use_id; cost is rescaled to match the result event's authoritative total (stream-json under-reports per-message output tokens)</div>
+</div>
 """
 
 
@@ -1101,10 +1573,75 @@ section.headline {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-2);
-  margin-top: 12px;
 }
 .hb-label { text-transform: uppercase; font-size: 10px; color: var(--text-dim); letter-spacing: 0.6px; margin-bottom: 8px; }
 .hb-text { white-space: pre-wrap; color: var(--text); font-size: 13px; line-height: 1.6; }
+
+/* Two-column headline: disposition tile (narrow) + report.md (wide). */
+.headline-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+.headline-grid .tile { display: flex; flex-direction: column; justify-content: center; }
+.headline-grid .headline-body { margin-top: 0; }
+
+/* Timing / cost breakdown — second row of the headline. */
+.timing-cost {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.tc-summary { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text); margin-bottom: 10px; }
+.tc-summary .tc-key { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; margin-right: 4px; }
+.tc-summary .tc-val { color: var(--text-bright); font-weight: 600; }
+.tc-summary .tc-sep { color: var(--text-dim); margin: 0 8px; }
+.cost-bar {
+  display: flex;
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+}
+.cost-bar .cb-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: rgba(13, 17, 23, 0.92);
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.15);
+}
+.cost-bar .cb-seg:last-child { border-right: none; }
+.cost-bar .cb-label { text-transform: uppercase; }
+.cost-bar .cb-pct { opacity: 0.8; font-weight: 500; }
+.cost-bar-caveat { font-size: 10px; color: var(--text-dim); margin-top: 6px; font-style: italic; }
+
+/* Per-phase / per-call inline stats line. */
+.phase-stats {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  margin: 0 0 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+}
+.phase-stats .ps-cost { color: var(--text-bright); font-weight: 600; }
+.phase-stats .ps-sep { margin: 0 6px; opacity: 0.5; }
+.phase-stats .ps-tok { color: var(--text-dim); }
 
 /* ----- Layout ----- */
 .layout {
@@ -1420,14 +1957,18 @@ def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = load_jsonl(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
-    investigation_html, phases = render_runtime_investigation(run_dir)
+    raw_phases = normalize_phase_names(split_investigation_phases(run_dir))
+    phase_order = [p["name"] for p in raw_phases]
+    attribution = phase_attribution(events, phase_order)
+    scale_costs_to_reported(events, attribution, {})
+    investigation_html, phases = render_runtime_investigation(run_dir, attribution)
     gather_html, n_gather = render_runtime_gather(run_dir, events)
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, n_events, n_tool_calls, cost, run_dir, active="runtime")}
-{render_runtime_headline(run_dir)}
+{render_runtime_headline(run_dir, events, attribution, phase_order)}
 <div class="layout">
   {render_runtime_toc(phases, n_gather)}
   <article class="content">
