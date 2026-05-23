@@ -1,0 +1,15 @@
+{
+  "rule_id": "v2-falco-suspicious-network-tool",
+  "name": "v2 Falco: suspicious network tool in container",
+  "description": "Falco rule 'Launch Suspicious Network Tool in Container' fired — nc, ncat, socat, nmap, telnet, etc. inside one of the playground role-host containers. Triage: which container, which process spawned the tool, what destination.",
+  "type": "query",
+  "language": "kuery",
+  "index": ["logs-falco.alerts-*"],
+  "query": "falco.rule: \"Launch Suspicious Network Tool in Container\"",
+  "from": "now-10m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": ["v2", "falco", "container", "execution"],
+  "enabled": true
+}
