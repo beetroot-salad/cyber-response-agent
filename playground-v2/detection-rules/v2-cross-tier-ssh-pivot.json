@@ -1,0 +1,15 @@
+{
+  "rule_id": "v2-cross-tier-ssh-pivot",
+  "name": "v2 cross-tier SSH pivot",
+  "description": "Successful sshd login on a workstation host (dev-ws-*, office-ws-*) followed within 15 minutes by an sshd authentication event (Accepted or Failed) on a prod-tier host (web-*, db-*, jump-box-*). Cross-tier lateral movement detector; alerts on the staging-then-pivot pattern in playground-v2/attacks/catalog.yaml cross-tier-ssh-probe.",
+  "type": "eql",
+  "language": "eql",
+  "index": ["logs-system.auth-*"],
+  "query": "sequence with maxspan=15m\n  [any where (host.name like \"dev-ws-*\" or host.name like \"office-ws-*\") and process.name == \"sshd\" and stringContains(message, \"Accepted password\")]\n  [any where (host.name like \"web-*\" or host.name like \"db-*\" or host.name like \"jump-box-*\") and process.name == \"sshd\" and (stringContains(message, \"Accepted password\") or stringContains(message, \"Failed password\"))]",
+  "from": "now-20m",
+  "interval": "5m",
+  "risk_score": 73,
+  "severity": "high",
+  "tags": ["v2", "auth", "lateral-movement", "correlation"],
+  "enabled": true
+}

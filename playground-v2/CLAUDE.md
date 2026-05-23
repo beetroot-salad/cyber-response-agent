@@ -485,6 +485,20 @@ cat runs/<run_id>/meta.json
 - Chaos control plane that drives the CMDB overlay, toxiproxy-style service outages, schema drift, and data drops (docs/playground-environment-v2.md §Phased build Phase 4).
 - MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
 
+## Detection rules
+
+Custom rules deployed to the Kibana detection engine live in `playground-v2/detection-rules/`, one JSON per rule. Install or refresh with:
+
+```bash
+python3 playground-v2/scripts/install_detection_rules.py
+```
+
+The script reads `V2_ELASTIC_PASSWORD` from env or `playground-v2/.env`, then for each `*.json` shells `docker --context soc-playground exec kibana curl` against Kibana's detection-engine API (DELETE-by-rule_id then POST). Idempotent; safe to re-run. Use `--dry-run` to enumerate without calling Kibana.
+
+Current rules (5): `v2-sshd-failed-auth-burst`, `v2-sshd-success-after-failures`, `v2-falco-suspicious-network-tool`, `v2-falco-authorized-keys-modification`, `v2-cross-tier-ssh-pivot`. The two EQL sequence rules (`success-after-failures`, `cross-tier-ssh-pivot`) key on `host.name` rather than user identity because the system.auth integration does not extract `user.name` reliably from sshd's `Failed password for X` message across openssh/PAM variants.
+
+Rules fire into `.internal.alerts-security.alerts-default-*`. The defender consumes individual hits from that index as `alert.json` input.
+
 ## Adding a new agent
 
 ### Host-based (on the VPS itself) — first-time setup already done

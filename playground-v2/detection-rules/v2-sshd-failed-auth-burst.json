@@ -1,0 +1,19 @@
+{
+  "rule_id": "v2-sshd-failed-auth-burst",
+  "name": "v2 sshd failed-auth burst",
+  "description": "Five or more sshd authentication failures on a single host within 5 minutes. The threshold groups by host.name; the srcip is not parsed into a separate field by the system.auth integration, so the failures may be from one external source or many. Triage answers: same source? same user? brute-force vs misconfigured client?",
+  "type": "threshold",
+  "language": "kuery",
+  "index": ["logs-system.auth-*"],
+  "query": "process.name: \"sshd\" AND message: *\"Failed password\"*",
+  "threshold": {
+    "field": ["host.name"],
+    "value": 5
+  },
+  "from": "now-10m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": ["v2", "auth", "ssh", "brute-force"],
+  "enabled": true
+}
