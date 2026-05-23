@@ -11,6 +11,7 @@
       "Edit(/tmp/defender-runs/**)",
       "Write(/workspace/defender/skills/gather/queries/*/_draft/**)",
       "Edit(/workspace/defender/skills/gather/queries/*/_draft/**)",
+      "Bash(python3 defender/scripts/tools/elastic_cli.py *)",
       "Bash(python3 -m defender.skills.invlang.cli *)",
       "Bash(jq *)",
       "Bash(ls *)",
