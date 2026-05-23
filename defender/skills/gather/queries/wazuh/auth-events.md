@@ -23,7 +23,7 @@ under one template — bind whichever filters the lead needs.
   `authentication_failed`)
 - Timing pattern (burst, periodic, irregular) over the window
 - Volume — total events and events/hour
-- Source port diversity (count of distinct `data.srcport`, rotation pattern)
+- Source port diversity (count of distinct `data.srcport`, top ports)
 
 ## Query
 
