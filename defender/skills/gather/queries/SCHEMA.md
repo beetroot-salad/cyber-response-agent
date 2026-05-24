@@ -17,8 +17,9 @@ queries/
 ```
 
 `{system}` is a system the gather subagent knows how to dispatch against
-(e.g. `wazuh/`, `host-query/`). It doubles as the routing prefix for the
-template id and as a coarse `ls`-time filter.
+(currently `elastic/`; additional systems land under sibling dirs as
+adapters are added). It doubles as the routing prefix for the template
+id and as a coarse `ls`-time filter.
 
 `{template-id}` is kebab-case. Name it for **what the query measures**
 (`auth-events`), not the axis you happen to filter on (`auth-events-by-host`)
@@ -29,7 +30,7 @@ single template can carry several optional filter knobs.
 
 ```markdown
 ---
-id: wazuh.auth-events
+id: elastic.sshd-auth-events
 ---
 
 ## Goal
@@ -53,10 +54,11 @@ parent. The defender weighs what the values mean in ANALYZE.
 ## Query
 
 The query body the system of record executes, with `${param}` placeholders.
-This is system-native — Elasticsearch DSL for wazuh, a shell pipeline for
-host-query, SQL for relational stores, etc. The system's CLI client is a
-thin dispatcher; it does not interpret a query DSL of its own. Gather
-substitutes the bound params and hands the body to the client.
+This is system-native — Lucene / KQL for elastic, a shell pipeline for
+host-style adapters, SQL for relational stores, etc. The system's CLI
+client is a thin dispatcher; it does not interpret a query DSL of its
+own. Gather substitutes the bound params and hands the body to the
+client.
 
 Parameters are discovered automatically from the `${param}` placeholders;
 there is no separate `params:` declaration to keep in sync.

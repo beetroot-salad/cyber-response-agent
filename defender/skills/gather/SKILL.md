@@ -217,10 +217,10 @@ Emit a summary with three sections:
 
 ```
 ## Queries run
-- id: wazuh.auth-events
-  params: {host: bastion-01.corp, window: 30d}
-- id: wazuh.auth-events
-  params: {host: bastion-01.corp, window: 30d, shift: 7d}   # baseline
+- id: elastic.sshd-auth-events
+  params: {host: canary-1, window: 5m}
+- id: elastic.sshd-auth-events
+  params: {host: canary-1, window: 24h, shift: -24h}   # baseline
 
 ## Summary
 - timing pattern: ...
@@ -236,7 +236,7 @@ defender knows the catalog grew during this run:
 
 ```
 ## Authored
-- defender/skills/gather/queries/wazuh/_draft/{kebab-name}.md
+- defender/skills/gather/queries/{system}/_draft/{kebab-name}.md
 ```
 
 ## Lead kinds
@@ -256,9 +256,10 @@ return**. Do not mint a "bridge" template that pretends the
 correlation is itself a primitive measurement.
 
 Example: "did anyone modify /etc/passwd on web-03 in the last 24h, and
-who was logged in then?" → run `wazuh.file-integrity-changes` (filtered
-to `/etc/passwd`, host `web-03`, 24h window) and `host-query.user-sessions`,
-then summarize: which mtime, which sessions overlap.
+who was logged in then?" → run `elastic.file-integrity-changes` (filtered
+to `/etc/passwd`, host `web-03`, 24h window) and a session-history query
+against the same window, then summarize: which mtime, which sessions
+overlap.
 
 ### Ad-hoc leads
 
@@ -272,8 +273,8 @@ can still read what ran:
 ```
 ## Queries run
 - id: ad-hoc
-  system: wazuh
-  body: 'rule.id:5503 AND data.dstuser:jsmith AND data.srcip:10.42.7.183'
+  system: elastic
+  body: 'user.name:"jsmith" AND source.ip:"10.42.7.183"'
   window: 6h
 ```
 

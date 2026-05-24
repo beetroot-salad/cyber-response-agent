@@ -18,7 +18,7 @@ A fenced YAML dispatch block on stdin:
 
 ```yaml
 run_dir: {run_dir}
-signature_id: wazuh-rule-NNNN
+signature_id: <signature-id from the alert, e.g. v2-sshd-failed-auth-burst>
 frontier:
   - "?hypothesis-one"
   - "?hypothesis-two"

@@ -1,8 +1,0 @@
-# Default budget limits for investigation runs.
-#
-# Override per-signature in config/signatures/{id}/permissions.yaml.
-# Warnings print at 75% and 100% of each limit.
-
-max_tool_calls: 150
-max_subagent_spawns: 10
-wall_clock_timeout: 720

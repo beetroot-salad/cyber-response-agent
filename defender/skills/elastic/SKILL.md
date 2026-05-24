@@ -132,6 +132,13 @@ defender/scripts/tools/elastic_cli.py query '<query_string>' [--index P] [--star
 defender/scripts/tools/elastic_cli.py alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
 ```
 
+**Do not Read `elastic_cli.py` source to discover flags.** This
+SKILL plus `elastic_cli.py {subcommand} --help` is the authoritative
+surface. The source is ~500 lines and reading it shows up as the
+single largest source of wasted Read calls across runs. If a flag
+you need isn't here or in `--help`, treat it as unsupported and
+escalate — don't infer one from the source.
+
 Output is formatted markdown (summary + 5 sample lines + first 3 raw
 _source docs) by default; `--raw` emits a JSON envelope
 `{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`
