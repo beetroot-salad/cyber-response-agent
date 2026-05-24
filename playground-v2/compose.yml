@@ -73,11 +73,27 @@ services:
       - certs:/usr/share/elasticsearch/config/certs
     command: >
       bash -c '
-        if [ ! -f config/certs/ca.zip ] || [ ! -f config/certs/fleet-server/fleet-server.crt ]; then
-          echo "-> (re)generating CA + node certs";
-          rm -rf config/certs/ca config/certs/elasticsearch config/certs/fleet-server config/certs/ca.zip config/certs/certs.zip;
+        # CA is pinned in the certs named volume. Regenerate only if the CA
+        # itself is missing — never as a side effect of a leaf being missing.
+        # Explicit rotation: `docker volume rm <project>_certs && compose up setup`.
+        # Drift between this CA and any out-of-volume copies (e.g. the
+        # host-side elastic-agent at /etc/elastic-agent/ca.crt on the VPS) is
+        # exactly the failure mode that broke Falco ingest for 14 days on
+        # 2026-05-10 — keeping the CA stable across normal setup re-runs
+        # prevents that recurrence.
+        CA_REGENERATED=0;
+        if [ ! -f config/certs/ca/ca.crt ] || [ ! -f config/certs/ca/ca.key ]; then
+          echo "-> generating CA (no existing CA in certs volume)";
+          rm -rf config/certs/ca config/certs/ca.zip;
           bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
           unzip -q config/certs/ca.zip -d config/certs;
+          CA_REGENERATED=1;
+        else
+          echo "-> reusing pinned CA from certs volume";
+        fi;
+        if [ "$$CA_REGENERATED" = "1" ] || [ ! -f config/certs/elasticsearch/elasticsearch.crt ] || [ ! -f config/certs/fleet-server/fleet-server.crt ]; then
+          echo "-> (re)issuing leaf certs from pinned CA";
+          rm -rf config/certs/elasticsearch config/certs/fleet-server config/certs/certs.zip;
           printf "instances:\n  - name: elasticsearch\n    dns:\n      - elasticsearch\n      - localhost\n    ip:\n      - 127.0.0.1\n  - name: fleet-server\n    dns:\n      - fleet-server\n      - localhost\n    ip:\n      - 127.0.0.1\n" > config/certs/instances.yml;
           bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
           unzip -q config/certs/certs.zip -d config/certs;
@@ -492,6 +508,17 @@ services:
     # host filesystem so the existing host-side elastic-agent (enrolled into
     # `vps-host-policy` in batch 4e) can tail it via a custom-logs integration
     # — see playground-v2/CLAUDE.md §Syscall monitoring (Falco).
+    #
+    # CA dependency: the host-side agent reads `/etc/elastic-agent/ca.crt` —
+    # a copy made at enrollment time, not a mount of the `certs` named volume.
+    # If you ever rotate the CA (`docker volume rm <project>_certs && compose
+    # up setup`), the host-side agent's copy must be refreshed manually:
+    #   docker --context soc-playground exec elasticsearch \
+    #     cat /usr/share/elasticsearch/config/certs/ca/ca.crt > /tmp/ca.crt
+    #   scp /tmp/ca.crt soc-playground:/etc/elastic-agent/ca.crt
+    #   ssh soc-playground sudo systemctl restart elastic-agent
+    # The `setup` script's pinned-CA logic prevents this drift under normal
+    # re-runs; an explicit rotation still requires this manual step.
     build:
       context: ./falco
       args:
