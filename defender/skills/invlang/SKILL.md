@@ -137,8 +137,8 @@ hypotheses earns nothing. Mark the slot open and let the lead close it:
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|??/??/??|10.42.7.183|knowledge=partial
 
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|cmdb-lookup|v-001||stub-cmdb|host-lookup|ip=10.42.7.183|n/a
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|cmdb-lookup|v-001||stub-cmdb|n/a
 
 :R attr_updates [resolved_by|target|key|value]
 l-001|v-001|class|monitoring-agent/internal/known-corp
@@ -196,8 +196,14 @@ payload rather than packing into `attrs?`.
 ### `:L` leads
 
 ```invlang
-:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
-l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|auth-history|user=jsmith host=bastion-01|90d
+:L findings [id|loop|name|target|mode?|tests|system|window]
+l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|90d
+
+# PLAN names the lead by measurement and the `system` it targets; gather
+# chooses the template and binds params, and writes both into
+# `gather_raw/{position}.observations.json#queries`. Do not include
+# `template` or `query` columns at PLAN time — they are gather's record,
+# not the defender's.
 ```
 
 A lead is a procedure: what was run, against what target, for which
