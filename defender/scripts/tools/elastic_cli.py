@@ -163,6 +163,30 @@ def _auth_header(user: str, password: str) -> str:
     return f"Basic {creds}"
 
 
+def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
+    """Exit with a useful hint when ES/Kibana is unreachable.
+
+    The playground exposes ES/Kibana only on the VPS's 127.0.0.1; the
+    devcontainer reaches them through an SSH tunnel documented in
+    config.env. A bare "Connection refused" is opaque — surface the
+    tunnel command so a missing tunnel doesn't get rediagnosed
+    every time.
+    """
+    msg = f"error: {target} unreachable: {exc}"
+    host = urllib.parse.urlparse(url).hostname or ""
+    refused = "Connection refused" in str(exc) or getattr(
+        getattr(exc, "reason", None), "errno", None
+    ) == 111
+    if refused and host in ("localhost", "127.0.0.1", "::1"):
+        msg += (
+            "\nhint: no listener on localhost:" + str(urllib.parse.urlparse(url).port or "?")
+            + " — the playground stack runs on the soc-playground VPS."
+            "\n      start the documented SSH tunnel and retry:"
+            "\n        ssh -fN -L 9200:localhost:9200 -L 5601:localhost:5601 soc-playground"
+        )
+    sys.exit(msg)
+
+
 # ---------------------------------------------------------------------------
 # HTTP helper
 # ---------------------------------------------------------------------------
@@ -234,7 +258,7 @@ def search(config, index_pattern, query_string, time_start, time_end, time_field
     try:
         status, resp = _http_json("POST", url, config, body=body)
     except urllib.error.URLError as e:
-        sys.exit(f"error: Elasticsearch unreachable: {e}")
+        _exit_unreachable("Elasticsearch", url, e)
 
     if status != 200:
         err = resp.get("error", resp)
@@ -264,7 +288,7 @@ def health_check(config):
     try:
         status, body = _http_json("GET", es_url, config, timeout=10)
     except urllib.error.URLError as e:
-        sys.exit(f"error: elasticsearch unreachable: {e}")
+        _exit_unreachable("elasticsearch", es_url, e)
 
     if status != 200:
         print(f"error: elasticsearch HTTP {status}: {body}", file=sys.stderr)
