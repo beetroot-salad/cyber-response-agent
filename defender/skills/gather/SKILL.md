@@ -15,6 +15,10 @@ defender can reason from.
 The defender's Task prompt carries a fenced YAML dispatch block with
 these keys:
 
+- `defender_dir` — absolute path to the defender repo root. Your cwd
+  may be a Claude-Code-managed worktree that is *not* under this path;
+  always anchor `Read` and `Bash` calls to `{defender_dir}/...` rather
+  than to relative paths.
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
 - `system` — name of the system of record (matches the `:L` row's `system` cell and a subdirectory under `defender/skills/`). The harness injects this system's SKILL `description:` into your prompt; if `system` is missing, the injection silently no-ops and you must discover the right env SKILL yourself.
@@ -23,7 +27,7 @@ these keys:
 
 `alert.json` lives at `{run_dir}/alert.json` (the harness copied it
 in at run setup). The query catalog lives at
-`defender/skills/gather/queries/`.
+`{defender_dir}/skills/gather/queries/`.
 
 ## Procedure
 
@@ -33,12 +37,12 @@ Read `{run_dir}/alert.json`.
 
 The dispatch you receive carries the active system's SKILL.md
 `description:` auto-injected at the end (see
-`defender/hooks/inject_system_skill_description.py`). The description
-tells you **what this system is for** and **when it's the right
-target** — use it to confirm your lead actually wants this system. If
-the lead does target this system, Read the full
-`defender/skills/{system}/SKILL.md` before running anything; the body
-carries the CLI conventions, field vocabularies, and load-bearing
+`{defender_dir}/hooks/inject_system_skill_description.py`). The
+description tells you **what this system is for** and **when it's the
+right target** — use it to confirm your lead actually wants this
+system. If the lead does target this system, Read the full
+`{defender_dir}/skills/{system}/SKILL.md` before running anything; the
+body carries the CLI conventions, field vocabularies, and load-bearing
 rules (e.g. "use `--help`, don't read source") that the description
 does not.
 
@@ -64,7 +68,7 @@ prior dispatch did. Don't fork on parameter axis; fork on capability.
 
 If nothing in the catalog fits, **author a new template as a draft**
 at `{catalog_dir}/{system}/_draft/{kebab-name}.md` with `status: draft`
-in the frontmatter, per `defender/skills/gather/queries/SCHEMA.md`.
+in the frontmatter, per `{defender_dir}/skills/gather/queries/SCHEMA.md`.
 You may **not** write directly to the established system root
 (`{system}/{kebab-name}.md`) — the offline lead-author promotes
 drafts to established after reviewing them. Bias toward authoring a
@@ -102,29 +106,23 @@ template's declared shape, refuse the dispatch with a
 "unrunnable: param shape mismatch" summary and stop.
 
 Substitute bound params into each template's `## Query` body and
-execute via the system's CLI (`Bash`). Pass `--run-dir ${run_dir}`
-and `--position ${position}` — the CLI writes the formatted (or
-`--raw`) output to `{run_dir}/gather_raw/{position}.json` itself; do
-not redirect stdout manually. For multi-query dispatches at the same
-position, suffix `--position` with a single lowercase letter (`0a`,
-`0b`, `0c`) per `defender/skills/gather/queries/SCHEMA.md`
-§Multi-query dispatches.
+execute via the system's CLI (`Bash`). Redirect `--raw` output to
+`{run_dir}/gather_raw/{position}.json` yourself:
 
-**Aggregate at the source, not in your head.** When the lead asks for
-counts, distributions, or top-N over a population that may exceed the
-CLI's `--limit` cap, pass a JSON search body to `--query` with an
-`aggs` clause (OpenSearch terms / date_histogram / cardinality / etc.)
-rather than a Lucene string. Server-side aggs return true totals over
-the *full* match set; the default Lucene-string + Count-Breakdown path
-is a Counter over the limit-capped sample and will silently mislead
-when match_count > limit. The CLI labels its breakdown clearly when
-truncated, but the structural fix is: ask for the aggregation you
-actually need.
+```bash
+python3 {defender_dir}/scripts/tools/elastic_cli.py query '<query_string>' \
+    --start ... --end ... --raw > {run_dir}/gather_raw/{position}.json
+```
 
-Also reach for aggs whenever you need an axis the default breakdown
-does not cover — `syscheck.path`, `data.srcuser` over a 7d span, an
-hourly histogram, a cardinality estimate. One Bash invocation, one
-trip to the indexer.
+For multi-query dispatches at the same position, suffix the position
+with a single lowercase letter (`0a`, `0b`, `0c`) per
+`{defender_dir}/skills/gather/queries/SCHEMA.md` §Multi-query dispatches.
+
+**Watch for limit-capped breakdowns.** When a count or distribution
+matters, verify the indexer's `total` is ≤ the `--limit` you passed
+before reporting a Counter over the returned hits. If the run is
+truncated, widen `--limit` (up to the CLI's `MAX_LIMIT`) and re-run,
+or report the partial result with `payload_status: partial`.
 
 ### 4. Summarize
 
@@ -191,12 +189,24 @@ Shape:
 ```jsonc
 {
   "payload_status": "ok",            // see classification below
-  "payload_digest": "847 events; 12 distinct dstuser; 95% authentication_failed"
+  "payload_digest": "847 events; 12 distinct dstuser; 95% authentication_failed",
+  "queries": [
+    {
+      "id": "elastic.sshd-auth-events",  // {system}.{template-id}, or "ad-hoc"
+      "params": {"host": "canary-1", "window": "5m"}
+    }
+  ]
 }
 ```
 
-The sidecar is mandatory; the lead-author refuses to author against
-a run that lacks it.
+The sidecar is mandatory; the lead-author and the lead-sequence
+projection both refuse to operate on a run that lacks it.
+
+The `queries[]` list is the canonical record of what gather actually
+ran (one entry per query — composite dispatches at `0a`/`0b`/`0c`
+each write their own sidecar). It replaces the PLAN-side template
+guess: the defender names the lead by measurement only; gather names
+the query.
 
 **`payload_status` classification rules:**
 
@@ -246,7 +256,7 @@ defender knows the catalog grew during this run:
 
 ```
 ## Authored
-- defender/skills/gather/queries/wazuh/_draft/{kebab-name}.md
+- {defender_dir}/skills/gather/queries/{system}/_draft/{kebab-name}.md
 ```
 
 ## Lead kinds
