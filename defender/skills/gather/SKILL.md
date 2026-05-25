@@ -28,9 +28,16 @@ in at run setup). The query catalog lives at
 
 ### 1. Load context
 
-Read `{run_dir}/alert.json` and any environment skills you need
-(`defender/skills/{system}/SKILL.md`) to understand what data sources
-exist and what their CLIs look like.
+Read `{run_dir}/alert.json`.
+
+The dispatch you receive carries the active system's SKILL.md
+`description:` auto-injected at the end (see
+`defender/hooks/inject_system_skill_description.py`). That is the
+load-bearing reference for the system's CLI shape and conventions.
+Read the full `defender/skills/{system}/SKILL.md` only if you need
+detail beyond what was injected — query examples, field vocabularies,
+authentication mechanics — but not to discover rules already in the
+injected block.
 
 The lead-description sidecar
 (`{run_dir}/gather_raw/{position}.lead.json`) that the projection
