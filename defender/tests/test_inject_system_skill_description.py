@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 
 HOOK_PATH = Path(__file__).resolve().parents[1] / "hooks" / "inject_system_skill_description.py"
 
