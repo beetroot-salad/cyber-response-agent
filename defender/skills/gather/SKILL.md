@@ -21,6 +21,7 @@ these keys:
   than to relative paths.
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
+- `system` — name of the system of record (matches the `:L` row's `system` cell and a subdirectory under `defender/skills/`). The harness injects this system's SKILL `description:` into your prompt; if `system` is missing, the injection silently no-ops and you must discover the right env SKILL yourself.
 - `goal` — one-sentence measurement contract
 - `what_to_summarize` — list of dimensions your summary must address
 
@@ -32,9 +33,18 @@ in at run setup). The query catalog lives at
 
 ### 1. Load context
 
-Read `{run_dir}/alert.json` and any environment skills you need
-(`{defender_dir}/skills/{system}/SKILL.md`) to understand what data
-sources exist and what their CLIs look like.
+Read `{run_dir}/alert.json`.
+
+The dispatch you receive carries the active system's SKILL.md
+`description:` auto-injected at the end (see
+`{defender_dir}/hooks/inject_system_skill_description.py`). The
+description tells you **what this system is for** and **when it's the
+right target** — use it to confirm your lead actually wants this
+system. If the lead does target this system, Read the full
+`{defender_dir}/skills/{system}/SKILL.md` before running anything; the
+body carries the CLI conventions, field vocabularies, and load-bearing
+rules (e.g. "use `--help`, don't read source") that the description
+does not.
 
 The lead-description sidecar
 (`{run_dir}/gather_raw/{position}.lead.json`) that the projection

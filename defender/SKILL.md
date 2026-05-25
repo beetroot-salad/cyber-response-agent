@@ -267,6 +267,7 @@ Task(
          "defender_dir: {DEFENDER_DIR}\n"
          "run_dir: {run_dir}\n"
          "position: N\n"
+         "system: <system-name>   # the :L row's system cell\n"
          "goal: <one-sentence measurement contract>\n"
          "what_to_summarize:\n"
          "  - <dimension 1>\n"
@@ -275,12 +276,15 @@ Task(
 )
 ```
 
-A PreToolUse hook (`defender/hooks/extract_lead_metadata.py`) parses
-that YAML block and writes `{run_dir}/gather_raw/{position}.lead.json`
-before gather runs. The projection script reads that sidecar to
-populate `lead_description` in `lead_sequence.yaml`. Keep the YAML
-well-formed and put `goal` / `what_to_summarize` at the top level
-— gather reads the same fields from the same block.
+Two PreToolUse hooks parse that YAML block. `extract_lead_metadata.py`
+writes `{run_dir}/gather_raw/{position}.lead.json` for the projection
+script. `inject_system_skill_description.py` looks up `system` and
+appends `defender/skills/{system}/SKILL.md`'s frontmatter
+`description:` to the dispatch — the subagent uses it to confirm
+relevance and then Reads the full SKILL body. Keep the YAML
+well-formed and put `system` / `goal` / `what_to_summarize` at the top
+level; omitting `system` silently disables the SKILL injection and
+forces the subagent to discover the right env SKILL on its own.
 
 Haiku is the default because gather's job is mechanical — pick a
 template, bind params, run the CLI, summarize. Structural correctness
@@ -439,6 +443,7 @@ Task(model="haiku",
             "```yaml\n"
             "run_dir: {run_dir}\n"
             "position: 0\n"
+            "system: host-query\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
             "what_to_summarize:\n"
             "  - apt history events ±10m around the FIM timestamp\n"
