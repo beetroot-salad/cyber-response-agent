@@ -7,17 +7,14 @@ subagent. Parses the dispatch YAML, finds `system: <name>`, reads
 `defender/skills/<name>/SKILL.md`'s frontmatter `description:` field,
 and appends it to the dispatch prompt as an auto-injected block.
 
-This replaces the discretionary "Read any environment skills you need"
-instruction. The discretionary form left subagents free to skip the env
-SKILL when the query template alone looked sufficient — which meant
-load-bearing rules that lived only in the env SKILL (e.g. "use --help,
-don't read CLI source") never reached those subagents. Injecting the
-`description:` puts the rules in the dispatch unconditionally.
-
-The convention is: SKILL authors put subagent-actionable rules in the
-`description:` frontmatter field alongside the system identity blurb.
-The hook lifts it verbatim. There is no separate "rules" field — the
-description is the single surface, kept lean.
+The description is a **relevance signal**, not a rules carrier — it
+tells the subagent what the system is for and when it's the right
+target. When the subagent confirms the lead targets this system, it
+then Reads the full SKILL.md body to pick up CLI conventions, field
+vocabularies, and load-bearing rules (the "use --help, don't read
+source" kind of thing). The body is where rules live; this hook just
+saves the discovery turn (ls / Glob across `skills/`) by pre-naming
+the relevant SKILL via its description.
 
 Silent on every failure (missing system field, missing SKILL file,
 malformed frontmatter) — the subagent then proceeds with its
