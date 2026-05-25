@@ -96,10 +96,12 @@ def read_description(system: str) -> str | None:
 def build_augmented_prompt(original: str, system: str, description: str) -> str:
     header = (
         f"\n\n---\n## System `{system}` (auto-injected from SKILL frontmatter)\n\n"
-        f"The system you're dispatching against carries the following\n"
-        f"description. It is the load-bearing reference — Read the full\n"
-        f"`defender/skills/{system}/SKILL.md` only if you need detail beyond\n"
-        f"what's here.\n\n"
+        f"The description below tells you what this system is for and when\n"
+        f"it's the right target. Use it to confirm your lead actually wants\n"
+        f"this system. If it does, **Read the full**\n"
+        f"`defender/skills/{system}/SKILL.md` before running anything — the\n"
+        f"body carries CLI conventions, field vocabularies, and load-bearing\n"
+        f"rules that the description does not.\n\n"
     )
     return f"{original}{header}{description}\n"
 
