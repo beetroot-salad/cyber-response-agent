@@ -43,6 +43,12 @@ DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 CONFIG_PATH = (
     DEFENDER_DIR / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
 )
+# playground-v2 .env lives one level above the worktree on this host.
+# Probed for V2_ELASTIC_PASSWORD when the env var isn't already set.
+PLAYGROUND_ENV_CANDIDATES = (
+    DEFENDER_DIR.parent.parent / "playground-v2" / ".env",
+    Path("/workspace/playground-v2/.env"),
+)
 
 REQUIRED_CONFIG_KEYS = [
     "ELASTICSEARCH_URL",
@@ -100,13 +106,38 @@ def load_config() -> dict:
     return config
 
 
+def _read_password_from_env_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key.strip() == PASSWORD_ENV:
+                return val.strip().strip('"').strip("'")
+    except OSError:
+        return None
+    return None
+
+
 def get_credentials() -> tuple[str, str]:
     user = os.environ.get(USERNAME_ENV, DEFAULT_USERNAME)
     password = os.environ.get(PASSWORD_ENV)
     if not password:
+        # Fallback: source from playground-v2/.env. Avoids the
+        # subshell/source dance that every gather subagent otherwise
+        # repeats — see traces of OPT-* runs.
+        for candidate in PLAYGROUND_ENV_CANDIDATES:
+            password = _read_password_from_env_file(candidate)
+            if password:
+                break
+    if not password:
+        searched = ", ".join(str(p) for p in PLAYGROUND_ENV_CANDIDATES)
         sys.exit(
-            f"error: {PASSWORD_ENV} must be set as an environment variable\n"
-            f"hint: export {PASSWORD_ENV}=... (or source from playground-v2/.env).\n"
+            f"error: {PASSWORD_ENV} not set and not found in any of: {searched}\n"
+            f"hint: export {PASSWORD_ENV}=... or restore playground-v2/.env.\n"
             f"      {USERNAME_ENV} defaults to {DEFAULT_USERNAME!r} if unset.\n"
             f"hint: non-secret config lives in {CONFIG_PATH}"
         )

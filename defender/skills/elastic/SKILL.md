@@ -160,18 +160,17 @@ deployment.
 
 ### Credentials
 
-Read from environment, never from config.env:
+The CLI handles credentials itself — agents do **not** need to source
+`.env` or export anything. Resolution order:
 
-- `V2_ELASTIC_PASSWORD` — required (playground-v2 convention; v1's
-  unprefixed `ELASTIC_PASSWORD` in `/workspace/.env` would shadow
-  otherwise).
-- `V2_ELASTIC_USERNAME` — optional, defaults to `elastic`.
+1. `V2_ELASTIC_PASSWORD` environment variable (highest priority).
+2. `V2_ELASTIC_PASSWORD=...` line in `playground-v2/.env` (auto-read).
 
-Source the password from `playground-v2/.env`:
+`V2_ELASTIC_USERNAME` defaults to `elastic` when unset.
 
-```bash
-export V2_ELASTIC_PASSWORD=$(grep '^V2_ELASTIC_PASSWORD=' /workspace/playground-v2/.env | cut -d= -f2)
-```
+If the CLI exits with a credentials error, the password is genuinely
+missing from both — restore `playground-v2/.env` or export the var;
+do not chain shell substitutions to work around it.
 
 ### Query syntax
 

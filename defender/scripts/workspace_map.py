@@ -58,6 +58,16 @@ def workspace_map(run_dir: Path) -> str:
         "for the paths below — they are the canonical surfaces."
     )
     lines.append("")
+    # Absolute roots. Subagents spawned by Task/Agent land in a
+    # Claude-Code-managed worktree whose cwd is *not* under DEFENDER_DIR;
+    # relative paths in dispatch prompts (`Read defender/...`) resolve
+    # against the subagent's cwd, not yours, and silently land in the
+    # wrong tree. Always pass absolute paths to subagents.
+    lines.append("## Absolute roots")
+    lines.append(f"- DEFENDER_DIR: `{DEFENDER_DIR}`")
+    lines.append(f"- REPO_ROOT: `{REPO_ROOT}`")
+    lines.append(f"- RUN_DIR: `{run_dir}`")
+    lines.append("")
 
     # Run dir
     lines.append(f"## Run dir — `{run_dir}`")
