@@ -36,6 +36,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
@@ -46,12 +48,6 @@ SYSTEM_KEY_RE = re.compile(r"^system:\s*([A-Za-z0-9_.-]+)\s*$", re.MULTILINE)
 
 # Capture the frontmatter block — first --- to next ---.
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*$", re.DOTALL | re.MULTILINE)
-# `description:` may be a one-liner or a block scalar (`description: |\n  ...`).
-# Capture everything from the colon to the next top-level key or end-of-block.
-DESCRIPTION_RE = re.compile(
-    r"^description:\s*(\|[+-]?\s*\n((?:[ \t]+.*\n?)+)|(.+))",
-    re.MULTILINE,
-)
 
 
 def extract_system(prompt: str) -> str | None:
@@ -84,22 +80,17 @@ def read_description(system: str) -> str | None:
     fm = FRONTMATTER_RE.search(text)
     if not fm:
         return None
-    desc = DESCRIPTION_RE.search(fm.group(1))
-    if not desc:
+    try:
+        front = yaml.safe_load(fm.group(1))
+    except yaml.YAMLError:
         return None
-
-    # Group 2 is the block-scalar body; group 3 is the one-liner.
-    body = desc.group(2)
-    if body is not None:
-        # Strip the shared leading indent.
-        lines = body.rstrip("\n").splitlines()
-        if not lines:
-            return None
-        indent = min(
-            (len(line) - len(line.lstrip())) for line in lines if line.strip()
-        )
-        return "\n".join(line[indent:] for line in lines).strip() or None
-    return desc.group(3).strip() or None
+    if not isinstance(front, dict):
+        return None
+    desc = front.get("description")
+    if not isinstance(desc, str):
+        return None
+    desc = desc.strip()
+    return desc or None
 
 
 def build_augmented_prompt(original: str, system: str, description: str) -> str:

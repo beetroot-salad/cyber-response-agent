@@ -17,6 +17,7 @@ these keys:
 
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
+- `system` — name of the system of record (matches the `:L` row's `system` cell and a subdirectory under `defender/skills/`). The harness injects this system's SKILL `description:` into your prompt; if `system` is missing, the injection silently no-ops and you must discover the right env SKILL yourself.
 - `goal` — one-sentence measurement contract
 - `what_to_summarize` — list of dimensions your summary must address
 

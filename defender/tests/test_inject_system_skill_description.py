@@ -77,6 +77,27 @@ def test_injects_block_scalar_description(tmp_path, monkeypatch, capsys):
     assert "Rule 2: absolute paths only." in augmented
 
 
+def test_block_scalar_with_blank_line_between_paragraphs(tmp_path, monkeypatch, capsys):
+    """Multi-paragraph block scalars survive — regression for the original
+    regex that stopped at the first unindented blank line and silently
+    dropped everything after it."""
+    hook = _load(monkeypatch, tmp_path)
+    _write_skill(
+        tmp_path, "elastic",
+        "First paragraph names the system and when it applies.\n"
+        "\n"
+        "Second paragraph carries an extra runtime caveat.",
+        block_scalar=True,
+    )
+    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(_gather_prompt(tmp_path, "elastic"))))
+
+    assert hook.main() == 0
+    out = json.loads(capsys.readouterr().out)
+    augmented = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+    assert "First paragraph names the system" in augmented
+    assert "Second paragraph carries an extra runtime caveat" in augmented
+
+
 def test_silent_noop_when_dispatch_has_no_system_field(tmp_path, monkeypatch, capsys):
     hook = _load(monkeypatch, tmp_path)
     _write_skill(tmp_path, "elastic", "ignored")
