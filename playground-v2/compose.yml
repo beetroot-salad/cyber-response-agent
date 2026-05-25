@@ -262,7 +262,7 @@ services:
     command: >
       sh -c '
         set -eu;
-        ROLES="web db jump-box dev-ws office-ws canary";
+        ROLES="web db jump-box dev-ws office-ws canary config-mgmt ci-host scanner-host";
         for role in $$ROLES; do
           policy_id="host-$${role}-policy";
           echo "-> creating policy $${policy_id}";
@@ -794,6 +794,80 @@ services:
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_canary_1:/var/lib/elastic-agent
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Noise-generator hosts. Sources of rule-fire-shaped benign activity:
+  # config-mgmt-1 pushes config + rotates keys across the fleet, ci-1 deploys
+  # to the web tier, scanner-1 runs authorized vuln scans. All three reuse
+  # the `plain` host image — they need sshd + elastic-agent + the baseline
+  # scheduler but no role-specific service (nginx/postgres) on board.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  config-mgmt-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: config-mgmt-1
+    hostname: config-mgmt-1
+    environment:
+      HOST_NAME: config-mgmt-1
+      HOST_ROLE: config-mgmt
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_config_mgmt_1:/var/lib/elastic-agent
+
+  ci-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:22.04
+    container_name: ci-1
+    hostname: ci-1
+    environment:
+      HOST_NAME: ci-1
+      HOST_ROLE: ci-host
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_ci_1:/var/lib/elastic-agent
+
+  scanner-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: scanner-1
+    hostname: scanner-1
+    environment:
+      HOST_NAME: scanner-1
+      HOST_ROLE: scanner-host
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_scanner_1:/var/lib/elastic-agent
+
   # Batch 9 stubs: CMDB, threat intel, change management, ticketing.
   # All auth-less FastAPI servers on 8080 internal. Exposed on loopback
   # 127.0.0.1:8001-8004 on the VPS for debugging; in-cluster access via
@@ -912,4 +986,10 @@ volumes:
   agent_state_office_ws_2:
     driver: local
   agent_state_canary_1:
+    driver: local
+  agent_state_config_mgmt_1:
+    driver: local
+  agent_state_ci_1:
+    driver: local
+  agent_state_scanner_1:
     driver: local

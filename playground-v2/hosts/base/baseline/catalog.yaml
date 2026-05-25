@@ -21,6 +21,14 @@
 #   schedule:
 #     mean_s: mean seconds between dispatches (pre-shape).
 #     shape:  flat | workhours-utc | workhours-us | overnight-peak
+#   triggers_rules: optional list of detection-rule ids this action is shaped to fire.
+#                   Informational only — scheduler ignores it. Lets us grep "what's
+#                   expected to fire rule X" and tune cadence per pattern.
+#   category: optional. "background" (default; service-account cron, scripted SSH,
+#             dev workstation activity) or "noise" (deliberately rule-fire-shaped
+#             benign activity, used to stress the agent's FP precision). The two
+#             categories share one scheduler — `V2_BASELINE_ENABLED=false` disables
+#             both. Filter via `grep "category: noise"` to enumerate the noise set.
 #
 # Rate math: effective_mean = mean_s / shape_multiplier(now). expovariate
 # draws keep a Poisson inter-arrival process — no fixed period, bursts + gaps
@@ -108,3 +116,165 @@ actions:
     cmd: "sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${user}@${wrong} true 2>/dev/null || true"
     bad_targets: [web-3, web-0, db-2, prod-db, old-jumpbox]
     schedule: {mean_s: 7200, shape: workhours-utc}
+
+  # ── Rule-fire-shaped benign noise ─────────────────────────────────────────
+  # Each entry below is legitimate activity that happens to trip a detection
+  # rule — the agent's job is to identify the activity as authorized rather
+  # than malicious. Together with attack scenarios (attacks/runner.py) this
+  # stress-tests FP precision and exercises the learning workflow against
+  # realistic noise. tag `category: noise` is what distinguishes these from
+  # background activity; `triggers_rules:` documents the intended fire.
+
+  - id: config-mgmt-fleet-push
+    host_roles: [config-mgmt]
+    identities: [svc.config-mgmt]
+    # Single dispatch SSHes to every managed host in sequence — emits 8 sshd
+    # success events from config-mgmt-1's source.ip within seconds. Trips
+    # bulk-ssh-success cleanly per dispatch. Also satisfies event-1 of the
+    # cross-tier-ssh-pivot sequence (sshd success on dev-ws-1 / office-ws-*),
+    # which combines with any prod-tier sshd auth in the next 15min to fire.
+    cmd: |
+      for t in web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1; do
+        sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o ConnectTimeout=3 svc.config-mgmt@$t 'uptime >/dev/null' 2>/dev/null || true
+      done
+    triggers_rules: [v2-bulk-ssh-success, v2-cross-tier-ssh-pivot]
+    category: noise
+    schedule: {mean_s: 600, shape: workhours-utc}
+
+  - id: config-mgmt-key-rotate
+    host_roles: [config-mgmt]
+    identities: [svc.config-mgmt]
+    # Appends a rotated key line to authorized_keys on a random managed host
+    # as svc.config-mgmt. Falco's "Adding ssh keys to authorized_keys" fires
+    # on the write; the v2-falco-authorized-keys-modification rule alerts.
+    cmd: |
+      sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=3 svc.config-mgmt@${target} \
+        'mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+         echo "ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation" >> ~/.ssh/authorized_keys && \
+         chmod 600 ~/.ssh/authorized_keys' 2>/dev/null || true
+    targets_from: trust_edges_out
+    triggers_rules: [v2-falco-authorized-keys-modification]
+    category: noise
+    schedule: {mean_s: 3600, shape: workhours-utc}
+
+  - id: ci-deploy-push
+    host_roles: [ci-host]
+    identities: [svc.deploy]
+    # Deploy to both web hosts. nc-based pre-deploy health check fires
+    # suspicious-network-tool on ci-1; the three sudo invocations per target
+    # (curl artifact + restart service + journalctl tail) clear the threshold
+    # for off-hours-sudo on web-1 and web-2.
+    cmd: |
+      for t in web-1 web-2; do
+        nc -z -w1 $t 80 2>/dev/null || continue
+        sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o ConnectTimeout=3 svc.deploy@$t \
+          'sudo -n curl -fsS http://web-1/ -o /tmp/deploy.tgz 2>/dev/null; \
+           sudo -n systemctl restart nginx 2>/dev/null; \
+           sudo -n journalctl -u nginx -n 5 >/dev/null 2>&1' 2>/dev/null || true
+      done
+    triggers_rules: [v2-falco-suspicious-network-tool, v2-off-hours-sudo]
+    category: noise
+    schedule: {mean_s: 1200, shape: workhours-utc}
+
+  - id: vuln-scan-weekly
+    host_roles: [scanner-host]
+    identities: [svc.security]
+    # nc sweep across the fleet (8 hosts × 5 ports = 40 process spawns of nc
+    # per dispatch). Each spawn fires Falco's suspicious-network-tool rule,
+    # so 40 falco events from scanner-1 per dispatch clears the >=20 threshold
+    # on internal-port-scan. Naming is "weekly" by intent (real scans cadence)
+    # but mean_s=1800 keeps it visible in short test runs.
+    cmd: |
+      for t in web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1; do
+        for p in 22 80 443 5432 8080; do
+          nc -z -w1 $t $p 2>/dev/null
+        done
+      done
+    triggers_rules: [v2-internal-port-scan, v2-falco-suspicious-network-tool]
+    category: noise
+    schedule: {mean_s: 1800, shape: flat}
+
+  - id: monitoring-port-probe
+    host_roles: [web, db, jump-box, dev-ws, office-ws, canary, config-mgmt, ci-host, scanner-host]
+    identities: [svc.monitoring]
+    # Cross-host nc probe complementing svc-health-probe's loopback-only check.
+    # One nc per dispatch → one falco fire of suspicious-network-tool. Spread
+    # broadly across host roles so the alert source is diverse, not just one
+    # noisy container.
+    cmd: "nc -z -w1 ${target} 22 2>/dev/null"
+    targets_from: trust_edges_out
+    triggers_rules: [v2-falco-suspicious-network-tool]
+    category: noise
+    schedule: {mean_s: 300, shape: flat}
+
+  - id: oncall-offhours-sudo
+    host_roles: [jump-box]
+    identities: ["sre.*"]
+    # Oncall pattern — sre on jump-box checks a few services with sudo when
+    # paged. Three sudo invocations per dispatch trips the off-hours-sudo
+    # threshold (>=3 per host per 10min). overnight-peak shape keeps the bulk
+    # of dispatches in 22:00-06:00 UTC; some daytime fires are still expected.
+    cmd: |
+      sudo -n systemctl status elastic-agent >/dev/null 2>&1 || true
+      sudo -n journalctl -u elastic-agent -n 10 >/dev/null 2>&1 || true
+      sudo -n ss -tnlp >/dev/null 2>&1 || true
+    triggers_rules: [v2-off-hours-sudo]
+    category: noise
+    schedule: {mean_s: 1800, shape: overnight-peak}
+
+  - id: fat-finger-then-success
+    host_roles: [dev-ws]
+    identities: ["dev.*"]
+    # Human-style password recovery: three wrong attempts then the right one,
+    # all targeting jump-box-1. The 3 failures + 1 success on jump-box-1 within
+    # a few seconds match the EQL sequence for sshd-success-after-failures
+    # (runs=3 failures then a success, keyed on host.name).
+    cmd: |
+      for pw in wrnng1 wrng2 wrng3; do
+        sshpass -p "$pw" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 \
+          -o ConnectTimeout=3 ${user}@jump-box-1 true 2>/dev/null || true
+      done
+      sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=3 ${user}@jump-box-1 true 2>/dev/null || true
+    triggers_rules: [v2-sshd-success-after-failures, v2-sshd-failed-auth-burst]
+    category: noise
+    schedule: {mean_s: 2400, shape: workhours-us}
+
+  - id: stale-automation-token
+    host_roles: [web]
+    identities: [svc.reports]
+    # Stuck automation: svc.reports retries with a now-wrong password against
+    # web-1 from web-2 (or vice versa) until exponential backoff would kick in.
+    # Six failed-auths on the target host trip sshd-failed-auth-burst (>=5/host
+    # per 10min). Rare (mean_s=7200) — this is "until ops notices" cadence.
+    cmd: |
+      for i in 1 2 3 4 5 6; do
+        sshpass -p ROTATED_$(date +%s) ssh -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password \
+          -o NumberOfPasswordPrompts=1 -o ConnectTimeout=3 \
+          svc.reports@${target} true 2>/dev/null || true
+      done
+    targets_from: [web-1, web-2]
+    triggers_rules: [v2-sshd-failed-auth-burst]
+    category: noise
+    schedule: {mean_s: 7200, shape: flat}
+
+  - id: dba-tunnel
+    host_roles: [dev-ws]
+    identities: [dba.ivy]
+    # DBA opens a local port-forward to db-1 from her workstation. The SSH
+    # accept on db-1 satisfies event-2 of cross-tier-ssh-pivot (dev-ws source
+    # tier → db prod tier); event-1 is satisfied by config-mgmt-fleet-push
+    # SSH'ing INTO dev-ws-1 within the 15min window. The -L tunnel + 5s sleep
+    # keeps the session open long enough to be unambiguous in conn logs.
+    cmd: |
+      sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=3 -L 15432:localhost:5432 dba.ivy@db-1 \
+        'sleep 1' 2>/dev/null || true
+    triggers_rules: [v2-cross-tier-ssh-pivot]
+    category: noise
+    schedule: {mean_s: 2400, shape: workhours-us}

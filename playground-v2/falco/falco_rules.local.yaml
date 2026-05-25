@@ -47,3 +47,22 @@
   override:
     condition: append
   condition: and not proc.exepath = /usr/bin/curl
+
+# Custom rule: every sudo execve in a container emits a NOTICE. The Kibana
+# detection rule `v2-off-hours-sudo` thresholds on this stream (>=3 per host
+# per 10min) to surface burst-shaped sudo activity — legitimate oncall response
+# and post-compromise interactive privilege use both look like bursts. Scoped
+# to direct execve of /usr/bin/sudo to avoid PAM-internal sudo invocations
+# (e.g. sshd's PAM stack briefly exec'ing sudo on some images).
+- rule: Sudo execution
+  desc: A process invoked sudo to gain elevated privileges inside a container
+  condition: >
+    spawned_process and
+    proc.exepath = /usr/bin/sudo and
+    container.id != host
+  output: >
+    Sudo invoked (user=%user.name container=%container.name
+    cmd=%proc.cmdline parent=%proc.pname)
+  priority: NOTICE
+  tags: [process, sudo, mitre_privilege_escalation]
+  source: syscall

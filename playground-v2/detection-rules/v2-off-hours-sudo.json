@@ -1,0 +1,28 @@
+{
+  "rule_id": "v2-off-hours-sudo",
+  "name": "v2 sudo activity burst",
+  "description": "Three or more Falco sudo-execution events on a single host within 10 minutes. Concentrated sudo bursts are unusual under steady-state baseline and capture two patterns of interest: legitimate oncall response (svc identities + sre.* taking corrective action) and interactive attacker activity post-shell. Rule fires regardless of hour; the off-hours-vs-work-hours distinction is left to investigation analysis via the alert @timestamp. Triage answers which identity drove the burst, what change-mgmt window was active (if any), and whether the host is currently in an incident state.",
+  "type": "threshold",
+  "language": "kuery",
+  "index": [
+    "logs-falco.alerts-*"
+  ],
+  "query": "falco.rule: \"Sudo execution\"",
+  "threshold": {
+    "field": [
+      "host.name"
+    ],
+    "value": 3
+  },
+  "from": "now-15m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": [
+    "v2",
+    "falco",
+    "privilege-escalation",
+    "sudo"
+  ],
+  "enabled": true
+}

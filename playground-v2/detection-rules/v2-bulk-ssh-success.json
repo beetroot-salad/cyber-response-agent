@@ -1,0 +1,28 @@
+{
+  "rule_id": "v2-bulk-ssh-success",
+  "name": "v2 bulk SSH success from single source",
+  "description": "Five or more successful sshd authentications from a single source.ip within 10 minutes. Authorized config-mgmt + CI/CD push activity matches this shape (svc.config-mgmt and svc.deploy hitting their target fleets in a burst); credential-spray-with-hits and post-compromise lateral movement also match. Triage answers which identity drove the burst, whether the source host is in CMDB as a fleet-push role (config-mgmt-1, ci-1), and whether the burst correlates with a change-mgmt window.",
+  "type": "threshold",
+  "language": "lucene",
+  "index": [
+    "logs-system.auth-*"
+  ],
+  "query": "process.name:sshd AND event.outcome:success",
+  "threshold": {
+    "field": [
+      "source.ip"
+    ],
+    "value": 5
+  },
+  "from": "now-15m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": [
+    "v2",
+    "auth",
+    "ssh",
+    "lateral-movement"
+  ],
+  "enabled": true
+}

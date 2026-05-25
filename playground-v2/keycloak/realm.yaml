@@ -156,6 +156,30 @@ users:
     lastName: Service
     realmRoles: [service-account]
     credentials: [{type: password, value: changeme, temporary: false}]
+  - username: svc.config-mgmt
+    enabled: true
+    emailVerified: true
+    email: svc-config-mgmt@soc-playground.local
+    firstName: ConfigMgmt
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: svc.deploy
+    enabled: true
+    emailVerified: true
+    email: svc-deploy@soc-playground.local
+    firstName: Deploy
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: svc.security
+    enabled: true
+    emailVerified: true
+    email: svc-security@soc-playground.local
+    firstName: Security
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
 
   # Contractor (1 — within v2 design range of 1–2)
   - username: ctr.kai
