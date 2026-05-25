@@ -5,7 +5,7 @@
   "type": "eql",
   "language": "eql",
   "index": ["logs-system.auth-*"],
-  "query": "sequence with maxspan=15m\n  [any where (host.name like \"dev-ws-*\" or host.name like \"office-ws-*\") and process.name == \"sshd\" and stringContains(message, \"Accepted password\")]\n  [any where (host.name like \"web-*\" or host.name like \"db-*\" or host.name like \"jump-box-*\") and process.name == \"sshd\" and (stringContains(message, \"Accepted password\") or stringContains(message, \"Failed password\"))]",
+  "query": "sequence with maxspan=15m\n  [any where (host.name like \"dev-ws-*\" or host.name like \"office-ws-*\") and process.name == \"sshd\" and event.outcome == \"success\"]\n  [any where (host.name like \"web-*\" or host.name like \"db-*\" or host.name like \"jump-box-*\") and process.name == \"sshd\" and event.outcome in (\"success\", \"failure\")]",
   "from": "now-20m",
   "interval": "5m",
   "risk_score": 73,
