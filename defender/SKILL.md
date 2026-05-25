@@ -118,6 +118,12 @@ Pick the next lead (or small batch). For each:
 
 Author `:H` (hypotheses with predictions) and `:L` (lead description)
 blocks. Do not pick a query template here — that's gather's job.
+The `:L` row carries `system` (which adapter to use) but **not**
+`template` or `query` — gather chooses the template, binds params,
+and records both in `gather_raw/{position}.observations.json#queries`.
+Do not Read files under `defender/skills/gather/` from the main loop;
+if you find yourself opening a query template to check its shape,
+you have already crossed into gather's surface — dispatch instead.
 
 If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
@@ -250,12 +256,22 @@ at its own SKILL on disk plus a fenced YAML dispatch block. Don't
 inline the SKILL body — the file on disk is the single source of
 truth.
 
+**Use absolute paths in the dispatch.** The Task tool routes the
+subagent into a Claude-Code-managed worktree whose cwd is not under
+`DEFENDER_DIR`. Relative paths (`defender/skills/...`) resolve
+against the subagent's cwd and silently land in the wrong tree (a
+stale checkout of another branch). The workspace map prints the
+absolute `DEFENDER_DIR` — use it for every `Read` path the dispatch
+references, and put the same value in the dispatch YAML so gather
+can reach scripts and templates.
+
 ```
 Task(
   model="haiku",
-  prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
+  prompt="Read {DEFENDER_DIR}/skills/gather/SKILL.md and follow it.\n\n"
          "## Dispatch\n"
          "```yaml\n"
+         "defender_dir: {DEFENDER_DIR}\n"
          "run_dir: {run_dir}\n"
          "position: N\n"
          "goal: <one-sentence measurement contract>\n"
@@ -346,8 +362,17 @@ confidence: high | medium | low
 - `malicious` — confident escalate, story confirmed. The learning loop
   skips these at MVP.
 
-Author the corresponding `:T` block in `investigation.md`. Stop after
-that — the harness (`defender/run.py`) runs the projection script
+**Write discipline — fold ANALYZE and REPORT into one Edit.** Every
+Edit/Write on `investigation.md` re-runs the pre-write hooks
+(invlang validator + parallel Haiku judges); splitting "first add
+`:R`/`:T resolutions`, then add `:T conclude`" into two Edits doubles
+that cost for no information gain. Compose the full ANALYZE + REPORT
+text in context, then land it in a single Edit on `investigation.md`
+followed by one Write of `report.md`. Earlier loops (ANALYZE that
+loops back to PLAN) are the exception — those are genuine separate
+turns.
+
+Stop after that — the harness (`defender/run.py`) runs the projection script
 (`defender/scripts/project_lead_sequence.py`) and the visualizer
 after you exit. Don't hand-author `lead_sequence.yaml`; if the script
 can't project a faithful sequence from your investigation log, the
@@ -410,8 +435,8 @@ p2|proposed_edge|"checksum_after diverges from any published package SHA"
 :H h-002.refuts [id|refutes|claim]
 r1|p1,p2|"write traces to package-manager process tree, checksum matches upstream"
 
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|apt-history-around|host=web-frontend-04.prod t0=2026-05-05T02:14:01Z|±10m
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|±10m
 ```
 
 GATHER dispatch (single-lead, parallel-of-one):
@@ -467,202 +492,25 @@ all, not anything `l-001` returns. A defender whose `:H` set on the
 bait fixture only proposes upstream-of-write parents will close on
 the same single lead and miss it.
 
-### Example B — SSH login by a non-stereotyped account from a documented monitoring source
 
-SSH auth-success on `app-host-12.prod` from `mon-poller-04.sre` using account `metrics-shipper`. The account isn't stereotyped in the SRE monitoring runbook — sanctioned rollout whose IAM update lagged, or unfamiliar process on the source?
+### More worked examples — load on demand
 
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:ipv4|10.20.5.41|hostname=mon-poller-04.sre
-v-002|endpoint|endpoint:ipv4|10.20.7.118|hostname=app-host-12.prod
-v-003|identity|identity:account|metrics-shipper|
+The remaining two examples live under `defender/examples/` so that the
+common case doesn't pay for them at every turn. Glob the directory,
+read the YAML frontmatter `description:` of each file, and load the
+body only when the alert shape matches:
 
-:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|ssh_auth_success|v-001|v-002|2026-05-05T03:42:11Z|siem-event:siem|account=metrics-shipper;port=22
+- `defender/examples/example-b-parallel-iam-cmdb.md` — two parallel
+  registry leads (CMDB + IAM), `indeterminate`-authz forcing a Loop-2
+  host-query follow-up. Read when an alert involves a registry/identity
+  question or you're about to bundle multiple registry checks into one
+  composite lead.
+- `defender/examples/example-c-cumulative-escalation.md` — three
+  parallel competing hypotheses where none reaches `++` but the
+  cumulative circumstantial pattern justifies escalation. Read when
+  an alert has multiple plausible parent topologies and the tooling
+  can refute the benign stories but cannot confirm the malicious one.
 
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?sre-rollout-lag-in-iam|e-001|ssh_auth_success|process|monitoring-agent||null|active
-h-002|?adversary-on-monitoring-source|e-001|ssh_auth_success|process|adversary-shell||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_parent|"source is documented monitoring infrastructure"
-p2|proposed_parent|"metrics-shipper runs as a packaged systemd daemon on source, fleet-wide on the monitoring role"
-
-:H h-001.refuts [id|refutes|claim]
-r1|p1,p2|"source undocumented, or no such daemon on host"
-
-:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|iam|"metrics-shipper is provisioned and authorized for this source→target SSH path"|escalate|escalate
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_parent|"process initiating SSH is not a packaged systemd unit"
-
-:H h-002.refuts [id|refutes|claim]
-r1|p1|"process is a distro-packaged, systemd-spawned daemon"
-
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|cmdb-source-lookup|v-001|h-001,h-002|cmdb|host-by-ip|ip=10.20.5.41|n/a
-l-002|1|iam-account-lookup|v-003|h-001|iam|account-by-name|name=metrics-shipper|n/a
-```
-
-PLAN dispatches `l-001` and `l-002` as **two parallel `Task` calls** —
-independent single-fact registry questions, not a correlation across
-raw data. Templates `cmdb.host-by-ip` and `iam.account-by-name` are
-minted by gather (catalog had neither).
-
-GATHER returned:
-- `l-001` (cmdb): `10.20.5.41` documented as `mon-poller-04.sre`,
-  role `monitoring`, status `active`, `authorized_outbound:
-  ["app-host-12.prod:22 (account=sre-healthcheck)"]`. Source is
-  documented; the listed path constrains to `sre-healthcheck`, not
-  `metrics-shipper`.
-- `l-002` (iam): `metrics-shipper` not present in the IAM catalog — a
-  lookup miss, distinct from an `active: false` "explicitly
-  disauthorized" entry.
-
-ANALYZE:
-
-```invlang
-:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
-l-002|e-001|ac1|indeterminate|iam-policy|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
-
-:T resolutions
-h-001  null → +    [l-001 p1 weak ⟂ source documented as monitoring infra; p2 unresolved without host-side evidence]
-h-002  null → -    [l-001 weak ⟂ source is sanctioned monitoring infra, not raw adversary footprint — but documented hosts can still be compromised]
-```
-
-`ac1` lands `indeterminate`, which blocks `disposition: benign`
-regardless of the behavioral grading on `h-001`. The loop-back is
-structural: ask host-query the question IAM couldn't answer — is
-`metrics-shipper` a packaged daemon on the source?
-
-Loop 2 PLAN:
-
-```invlang
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-003|2|metrics-shipper-daemon-on-source|v-001|h-001,h-002|host-query|systemd-unit-history|host=mon-poller-04.sre name=metrics-shipper|±14d
-```
-
-GATHER returned: `metrics-shipper.service` enabled and active since
-`2026-04-29T11:02:14Z`; installed by `apt install
-metrics-shipper-agent` triggered by the SRE config-management run;
-the same package + version landed on every host carrying `role:
-monitoring` in the same window.
-
-```invlang
-:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
-l-003|e-001|ac1|authorized|iam-policy|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
-
-:T resolutions
-h-001  + → ++   [l-003 p2 severe ⟂ packaged daemon, install traced to SRE config-management, fleet-wide]
-h-002  - → --   [l-003 r1 severe ⟂ process is a packaged systemd-spawned daemon, not an adversary shell]
-```
-
-REPORT:
-
-```invlang
-:T conclude
-termination.category   adversarial-refuted
-disposition            benign
-confidence             high
-matched_archetype      sre-rollout-lag-in-iam
-summary                "SSH from mon-poller-04.sre using metrics-shipper traces to a fleet-wide metrics-shipper-agent rollout on 2026-04-29 via SRE config-management. IAM not yet updated; flag to sre-iam-team. Behavior sanctioned; documentation stale."
-```
-
-Three things to read off this shape. **One**, the three legitimacy
-statuses do distinct work: `authorized` would have closed `ac1` in
-Loop 1; `unauthorized` would have escalated immediately; `indeterminate`
-did neither — it kept the contract open and structurally forced the
-next move into PLAN with a sharper question. **Two**, CMDB and IAM
-dispatched as two parallel single-fact leads, not one composite — the
-defender combines those facts by reasoning, so per the
-"one-question = one-lead" rule they're separate `:L` rows. **Three**,
-the Loop-2 follow-up is the registry-sparseness escape hatch: when
-the registry of record has a gap, the right move is a different
-system (host-query) answering the underlying mechanism question, not
-a louder query against the same registry.
-
-### Example C — Novel outbound DNS from a CI runner
-
-Behavioral signature `egress-dns-query-to-rare-tld` fires on a domain (`telemetry-collect.live`) first observed org-wide 29h ago, zero fleet peers, regular `~30 min ± 3 min` cadence from one process tree. Not a known-pattern alert; the lead set has to enumerate plausible parents.
-
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:linux|build-runner-07.ci|role=stateless-ci-runner
-v-002|process|process:node|node[2188]|cmdline_via=npm-exec
-v-003|endpoint|endpoint:dns-name|telemetry-collect.live|first_seen_org=2026-05-04T22:11Z
-v-004|package|package:npm|@quickmetrics/runtime-collector@0.1.2|published=2026-05-04T20:50Z
-
-:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:siem|cadence=~30min;count_24h=47
-e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-install
-```
-
-PLAN authors three competing topologies under `v-002`'s `loaded`/`queried_dns` parents — they are mutually exclusive on parent class:
-
-```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?legitimate-dependency-telemetry|v-002|loaded|package|legitimate-published-library||null|active
-h-002|?developer-tooling-phone-home|v-002|queried_dns|process|build-tool||null|active
-h-003|?malicious-dependency-c2|v-002|loaded|package|adversary-published-library||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_parent|"package source repo declares telemetry endpoint and opt-out"
-
-:H h-001.refuts [id|refutes|claim]
-r1|p1|"no documented telemetry, or endpoint not declared in source"
-
-:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|org-policy|"CI runner egress to package telemetry endpoints permitted"|escalate|escalate
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_parent|"node child of npm-exec under github-runner job, no other runtime in process tree"
-p2|proposed_edge|"queries cease when build job ends"
-
-:H h-002.refuts [id|refutes|claim]
-r1|p1,p2|"queries persist past job lifetime, or process tree includes a non-build runtime"
-
-:H h-003.preds [id|subject|claim]
-p1|proposed_parent|"maintainer published recently and has no other packages"
-p2|proposed_edge|"destination IP has no historical reputation and was registered shortly before package publication"
-
-:H h-003.refuts [id|refutes|claim]
-r1|p1,p2|"maintainer has long publication history, or destination IP has prior reputation"
-
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|package-source-and-maintainer|v-004|h-001,h-003|host-query|npm-package-meta|name=@quickmetrics/runtime-collector version=0.1.2|n/a
-l-002|1|process-tree-and-job-correlation|v-002|h-002,h-003|host-query|process-tree-around|host=build-runner-07.ci pid=2188 t0=alert|±2h
-l-003|1|destination-ip-reputation|v-003|h-001,h-003|wazuh|dns-and-reputation-history|domain=telemetry-collect.live ip=203.0.113.42|90d
-```
-
-PLAN issued three leads in one turn — each discriminates a different pair, and together they triangulate the parent class. Dispatched as three parallel `Task` calls. `host-query.npm-package-meta` and `host-query.process-tree-around` are minted by gather (catalog had neither).
-
-ANALYZE on returned summaries (`gather_raw/0..2.json`):
-
-- `l-001`: maintainer profile shows zero other packages, account created 2026-04-19; package source repo (a single-commit GitHub repo) declares no telemetry mechanism and the binding to `telemetry-collect.live` is in a post-install script obfuscated via base64.
-- `l-002`: process tree confirms `node[2188]` is a child of the github-runner job, but the queries continue 17 minutes past job exit — the daemon does not terminate.
-- `l-003`: destination IP `203.0.113.42` registered 2026-04-21, two days after the maintainer account; no historical traffic from any corp host in 90d; SNI `metrics.nginx-cdn-collector.io` (a different domain than the DNS query, registered same week).
-
-```invlang
-:T resolutions
-h-001  null → --   [l-001 r1 severe ⟂ source repo declares no telemetry; binding is in obfuscated post-install]
-h-002  null → -    [l-002 r1 weak ⟂ daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
-h-003  null → +    [l-001 p1 + l-003 p1,p2 moderate ⟂ recent maintainer with no other packages, IP registered just before publication, SNI/host mismatch — circumstantial pattern, no confirmed C2 channel observed]
-```
-
-No single lead reaches `++` on `?malicious-dependency-c2`: confirming
-C2 would require sandbox detonation or traffic-content inspection, and
-neither is in the runtime tool surface. The path of least resistance
-(stop at three `+`/`-`) underweights the integration. REPORT escalates
-on the cumulative pattern.
-
-```invlang
-:T conclude
-termination.category   exhaustion-escalation
-termination.rationale  "?malicious-dependency-c2 cannot be driven to -- with available tooling; circumstantial pattern is decision-relevant"
-disposition            escalate
-confidence             medium
-matched_archetype      novel-dependency-with-anomalous-egress
-summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
-```
-
+Skip if Example A above already grounds the shape you need. Loading
+all three has the same cache cost as inlining them — the discipline
+is loading at most one beyond A per case.

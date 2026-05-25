@@ -83,6 +83,41 @@ def load_lead_sidecar(run_dir: Path, position: int) -> dict | None:
         return None
 
 
+def load_queries_from_observations(run_dir: Path, position: int) -> list[dict]:
+    """Read `queries[]` from `{position}*.observations.json` files.
+
+    Gather writes one observations sidecar per query — single-query
+    dispatches land at `{position}.observations.json`, composite
+    dispatches at `{position}{a..z}.observations.json`. Each sidecar
+    contains `queries[]` describing what gather actually ran. The
+    union across siblings is this lead's queries list.
+
+    Returns empty list if no observations.json exists yet (e.g. the
+    defender exited before gather completed) — the caller decides
+    whether to fall back to row cells.
+    """
+    gather_dir = run_dir / "gather_raw"
+    if not gather_dir.is_dir():
+        return []
+    prefix = str(position)
+    out: list[dict] = []
+    for path in sorted(gather_dir.glob(f"{prefix}*.observations.json")):
+        # Match `0.observations.json` or `0a.observations.json` — guard
+        # against `10.observations.json` for the position=1 prefix.
+        stem = path.name[: -len(".observations.json")]
+        suffix = stem[len(prefix):]
+        if suffix and not (len(suffix) == 1 and suffix.isalpha()):
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        queries = payload.get("queries") or []
+        if isinstance(queries, list):
+            out.extend(q for q in queries if isinstance(q, dict))
+    return out
+
+
 def project(run_dir: Path) -> dict:
     inv = run_dir / "investigation.md"
     if not inv.is_file():
@@ -95,16 +130,30 @@ def project(run_dir: Path) -> dict:
     entries: list[dict] = []
     for position, row in enumerate(rows):
         system = row.get("system") or ""
-        template = row.get("template") or ""
-        if not system or not template:
+        if not system:
             sys.exit(
-                f":L row {row.get('id')} missing system/template cells; "
-                "projection requires both"
+                f":L row {row.get('id')} missing `system` cell; "
+                "projection requires it"
             )
-        query_id = f"{system}.{template}" if template != "ad-hoc" else "ad-hoc"
-        params = parse_query_params(row.get("query") or "")
-        if (window := row.get("window") or "").strip() not in ("", "n/a"):
-            params.setdefault("window", window)
+
+        # Queries live in gather's observations sidecars. Backstop with
+        # the legacy `template`/`query` row cells when the sidecar isn't
+        # there (replay of older runs) — fresh runs should always have
+        # the sidecar per gather/SKILL.md §5.
+        queries = load_queries_from_observations(run_dir, position)
+        if not queries:
+            template = row.get("template") or ""
+            if template:
+                query_id = f"{system}.{template}" if template != "ad-hoc" else "ad-hoc"
+                params = parse_query_params(row.get("query") or "")
+                if (window := row.get("window") or "").strip() not in ("", "n/a"):
+                    params.setdefault("window", window)
+                queries = [{"id": query_id, "params": params}]
+            else:
+                # No sidecar, no row hint — surface the gap rather than
+                # invent a query_id. Lead-sequence consumers can decide
+                # whether to skip the entry or flag the run for review.
+                queries = [{"id": f"{system}.unknown", "params": {}}]
 
         sidecar = load_lead_sidecar(run_dir, position) or {}
         goal = sidecar.get("goal") or row.get("name") or row["id"]
@@ -116,7 +165,7 @@ def project(run_dir: Path) -> dict:
                 "goal": goal,
                 "what_to_summarize": list(what_to_summarize),
             },
-            "queries": [{"id": query_id, "params": params}],
+            "queries": queries,
             "result_ref": f"gather_raw/{position}.json",
         })
 

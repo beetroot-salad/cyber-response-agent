@@ -142,6 +142,11 @@ def build_prompt(run_id: str, run_dir: Path) -> str:
 
 def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, effort: str | None) -> int:
     trace = run_dir / "tool_trace.jsonl"
+    # `--add-dir REPO_ROOT` is what lets Task-tool subagents Read paths
+    # under DEFENDER_DIR. Subagents land in a Claude-Code-managed
+    # worktree whose cwd is *not* under REPO_ROOT, so relative paths
+    # resolve into the wrong tree; absolute reads under REPO_ROOT only
+    # work if the directory is on the allowlist.
     args = [
         "claude", "-p",
         "--model", model,
@@ -151,6 +156,7 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
         "--permission-mode", "acceptEdits",
         "--settings", str(settings_path),
         "--add-dir", str(run_dir),
+        "--add-dir", str(REPO_ROOT),
     ]
     if effort:
         args.extend(["--effort", effort])
