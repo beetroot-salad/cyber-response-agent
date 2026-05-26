@@ -41,6 +41,13 @@ SIEM-generated signals.
 | `logs-system.auth-*` | sshd, sudo, PAM via filebeat | `/var/log/auth.log` lines per host (Accepted/Failed sshd, sudo COMMAND=, pam_unix session open/close) |
 | `logs-system.syslog-*` | journal / syslog via filebeat | general syslog (cron, baseline activity, daemon noise) |
 | `logs-falco.alerts-*` | Falco eBPF syscall monitor | rule-fire records with `falco.rule`, `falco.priority`, `falco.output_fields.{container.name,proc.name,user.name,proc.cmdline}` |
+| `logs-zeek.connection-*` | Zeek conn.log via Elastic Zeek integration | per-flow records with ECS `source.{ip,port,bytes,packets}`, `destination.{...}`, `network.{protocol,transport,community_id,direction}`, plus `zeek.connection.*` |
+| `logs-zeek.dns-*` | Zeek dns.log | DNS query/answer pairs with `dns.question.name`, `dns.answers[]`, `dns.response_code` |
+| `logs-zeek.http-*` | Zeek http.log | HTTP requests with `http.request.method`, `url.original`, `user_agent.original`, and `user.name` extracted from Squid CONNECT basic-auth |
+| `logs-zeek.ssl-*` | Zeek ssl.log | TLS handshakes — `tls.server.subject`, `tls.cipher`, `tls.version`, SNI under `zeek.ssl.server_name` |
+| `logs-zeek.files-*` | Zeek files.log | file transfers seen on the wire — `file.hash.*`, `file.mime_type`, `file.size` |
+| `logs-zeek.ssh-*` | Zeek ssh.log | SSH handshakes (client/server versions, auth result) — separate from sshd's auth.log: this is the wire-side view |
+| `logs-squid.access-*` | Squid access log (custom `soc` format) | per-request: `user.name` (basic-auth), `source.ip`, `url.original`, `http.request.method`, `http.response.bytes`, `squid.result_status`, `squid.elapsed_ms` |
 | `logs-elastic_agent.*` | Agent self-telemetry | agent / filebeat / metricbeat / fleet_server status — useful only for grounding "did the agent ship anything in this window" |
 
 ### Detection rules currently installed (`alerts` surface)
@@ -74,10 +81,6 @@ Things this Elasticsearch deployment **cannot** answer:
   lives in `falco.output_fields.container.name`. When asking "which
   host fired this Falco alert", group/filter on
   `falco.output_fields.container.name`, not `host.name`.
-- **No Zeek logs in ES yet.** Zeek runs in the playground stack but
-  conn/dns/http/ssl logs are written to a Docker volume; they are not
-  shipped to Elasticsearch. Network-flow questions cannot be answered
-  from this adapter for the foreseeable batch.
 - **No CMDB / IdP integration on the events side.** Host role
   ("is web-1 prod?") and identity authorization ("is sre.alice
   permitted to sudo on db-1?") are out of band — see the cmdb /
@@ -182,6 +185,8 @@ forms used by v2 gather templates:
 - Substring on `message`: `message: *"Failed password"*`
 - Disjunction: `host.name: ("web-1" OR "web-2")`
 - Boolean: `data_stream.dataset: "system.auth" AND process.name: "sudo"`
+- Squid by user: `user.name: "sre.alice" AND data_stream.dataset: "squid.access"`
+- Zeek by destination: `destination.ip: "172.18.0.20" AND data_stream.dataset: "zeek.connection"`
 
 ### Index-pattern selection
 
@@ -190,4 +195,7 @@ forms used by v2 gather templates:
 - `--index 'logs-system.auth-*'` — sshd / sudo / PAM only
 - `--index 'logs-falco.alerts-*'` — Falco rule-fires only
 - `--index 'logs-system.syslog-*'` — general syslog only
+- `--index 'logs-zeek.connection-*'` — Zeek flow records only (the `connection` dataset is what other vendors call `conn.log`)
+- `--index 'logs-zeek.*'` — every Zeek dataset (conn/dns/http/ssl/files/ssh)
+- `--index 'logs-squid.access-*'` — Squid proxy attribution only
 - `--index '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` subcommand's default)
