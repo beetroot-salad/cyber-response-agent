@@ -440,6 +440,14 @@ services:
       # writes LOGIN/LOGOUT/etc. lines to stdout. Root stays INFO — we only want
       # the events stream, not all of Keycloak's internals.
       - KC_LOG_LEVEL=INFO,org.keycloak.events:debug
+      # Also write to a file in JSON format so the host-side elastic-agent can
+      # tail it into logs-keycloak.events via Custom Logs + decode_json_fields.
+      # File lands inside the existing keycloak_data named volume — on the VPS
+      # at /var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log
+      # — the host agent reads it from there. No extra volume needed.
+      - KC_LOG=console,file
+      - KC_LOG_FILE=/opt/keycloak/data/keycloak.log
+      - KC_LOG_FILE_OUTPUT=json
     command: ["start-dev", "--import-realm"]
     volumes:
       - keycloak_data:/opt/keycloak/data
@@ -469,6 +477,11 @@ services:
     container_name: unbound
     restart: unless-stopped
     mem_limit: 128m
+    volumes:
+      # /var/log/unbound is created in the image with unbound:unbound ownership;
+      # the named volume preserves those perms on first init. Host-side
+      # elastic-agent reads /var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log.
+      - unbound_logs:/var/log/unbound
     healthcheck:
       # pgrep is in the alpine base; confirms the daemon is up. (No netcat in minimal
       # alpine for a proper `dig`-style probe; pgrep is enough for a playground.)
@@ -967,6 +980,10 @@ volumes:
   # Squid access log — tailed by the host-side elastic-agent's squid Custom Logs
   # integration into Elastic. Symmetric to zeek_logs in shape.
   squid_logs:
+    driver: local
+  # Unbound query/reply log — tailed by the host-side elastic-agent's unbound
+  # Custom Logs integration. Same pattern as squid_logs.
+  unbound_logs:
     driver: local
   # Per-role Fleet enrollment tokens — written by fleet-host-policies init,
   # mounted read-only into each host at /fleet-tokens/<role>.token.

@@ -51,6 +51,8 @@ SIEM-generated signals.
 | `logs-postgresql.log-*` | Postgres `/var/log/postgresql/postgresql-*-main.log` on `db-1` | per-statement records with `postgresql.log.{database,user,query,error_severity}`, `message`. Carries auth failures, slow queries, connection lifecycle |
 | `logs-nginx.access-*` | nginx `/var/log/nginx/access.log` on `web-1` / `web-2` | combined-log-format requests parsed to ECS: `source.ip`, `http.{request.method,response.status_code,response.body.bytes,version}`, `url.original`, `user_agent.*` |
 | `logs-nginx.error-*` | nginx `/var/log/nginx/error.log` on `web-1` / `web-2` | error/warn/notice lines from nginx itself — config reload, upstream timeouts, worker crashes; queryable via `log.level` |
+| `logs-keycloak.events-*` | Keycloak file log (JSON format) | every Quarkus log line as a JSON envelope: `loggerName`, `level`, `message`, `timestamp`, `threadName`. Filter `loggerName: "org.keycloak.events"` to scope to the events stream (LOGIN, LOGOUT, REFRESH_TOKEN, LOGIN_ERROR, etc.); event detail (`type=`, `username=`, `clientId=`, `ipAddress=`) is in `message` as substring-queryable text |
+| `logs-unbound.queries-*` | Unbound `/var/log/unbound/unbound.log` | per-query + per-reply lines: `<ts> unbound[1:0] info: <client_ip> <name>. <qtype> <qclass>` (query) and `... <rcode> <rtt> <flags> <size>` (reply). No parser — query by substring on `message`. Complements `logs-zeek.dns-*` (zeek sees the wire; unbound sees the resolver's view) |
 | `logs-elastic_agent.*` | Agent self-telemetry | agent / filebeat / metricbeat / fleet_server status — useful only for grounding "did the agent ship anything in this window" |
 
 ### Detection rules currently installed (`alerts` surface)
@@ -192,6 +194,8 @@ forms used by v2 gather templates:
 - Zeek by destination: `destination.ip: "172.18.0.20" AND data_stream.dataset: "zeek.connection"`
 - Postgres auth failures: `data_stream.dataset: "postgresql.log" AND message: *"authentication failed"*`
 - Nginx 5xx on a host: `host.name: "web-1" AND data_stream.dataset: "nginx.access" AND http.response.status_code: [500 TO 599]`
+- Keycloak LOGIN events: `loggerName: "org.keycloak.events" AND message: *'type="LOGIN"'*` (note the quoted-substring shape — events are key=value text inside `message`)
+- Unbound query for a domain: `data_stream.dataset: "unbound.queries" AND message: *"example.com"*`
 
 ### Index-pattern selection
 
@@ -205,4 +209,6 @@ forms used by v2 gather templates:
 - `--index 'logs-squid.access-*'` — Squid proxy attribution only
 - `--index 'logs-postgresql.log-*'` — Postgres queries / auth / lifecycle only
 - `--index 'logs-nginx.access-*'` — nginx requests only (separate from `nginx.error`)
+- `--index 'logs-keycloak.events-*'` — Keycloak Quarkus log + events stream (scope further with `loggerName:`)
+- `--index 'logs-unbound.queries-*'` — Unbound resolver query/reply lines
 - `--index '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` subcommand's default)

@@ -78,7 +78,8 @@ Identity tier — OIDC/SAML IdP with scripted user/role seeding (see v2 §Identi
   # Account console (as a seed user): http://localhost:8080/realms/soc-playground/account → e.g., sre.alice / changeme
   ```
 - **Config files shipped via a build-context image** (`keycloak/Dockerfile`). The init container is `FROM python:3.12-alpine` + `COPY realm.yaml seed.py`, so the build context tar-streams those files to the remote daemon at `compose build` time — no pre-stage on the VPS needed. Note: the obvious alternative — Docker Compose `configs:` with `file: ./keycloak/realm.yaml` — does **not** work against a remote context. `file:` resolves the path on the daemon side, and `/workspace/` doesn't exist on the VPS. (`configs.*.content:` with inline YAML would also work but buries a 5KB seed inside compose.yml.)
-- **Events enabled**: realm config sets `eventsEnabled: true` with the `jboss-logging` listener. The listener writes at DEBUG level, so stdout is silent unless the log level is raised — we set `KC_LOG_LEVEL=INFO,org.keycloak.events:debug` so only the events stream is verbose (root stays INFO). Sample line: `type="LOGIN", realmName="soc-playground", clientId="soc-playground-app", username="sre.alice", ipAddress="127.0.0.1", grant_type="password", ...`. Events are also stored in the realm DB and viewable in Kibana → (later) or Keycloak UI → Events.
+- **Events enabled**: realm config sets `eventsEnabled: true` with the `jboss-logging` listener. The listener writes at DEBUG level, so stdout is silent unless the log level is raised — we set `KC_LOG_LEVEL=INFO,org.keycloak.events:debug` so only the events stream is verbose (root stays INFO). Sample line: `type="LOGIN", realmName="soc-playground", clientId="soc-playground-app", username="sre.alice", ipAddress="127.0.0.1", grant_type="password", ...`. Events are also stored in the realm DB and viewable in Kibana → Discover (see below) or Keycloak UI → Events.
+- **File logging in JSON** for ES ingestion: `KC_LOG=console,file` + `KC_LOG_FILE=/opt/keycloak/data/keycloak.log` + `KC_LOG_FILE_OUTPUT=json` writes a parallel JSON-per-line stream into the existing `keycloak_data` named volume. The host-side elastic-agent (on `vps-host-policy`) tails it into `logs-keycloak.events-default` via Custom Logs + `decode_json_fields`. No extra volume needed — `keycloak_data` is already the keycloak-writable mount. Lands on the VPS at `/var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log`.
 - **Named volumes**: `soc-playground_keycloak_data` (H2 DB + server state), `soc-playground_keycloak_import` (generated realm.json — rewritten on every `compose up`).
 
 #### Re-seed users/roles
@@ -107,11 +108,12 @@ The committed YAML is source-of-truth; if #2 is used for substantive changes, fo
 
 Recursive DNS resolver + playground-internal zone. Built from `playground-v2/unbound/Dockerfile` (`FROM alpine:3.20` + `apk add unbound`).
 
-- Config: `playground-v2/unbound/unbound.conf` — `log-queries`/`log-replies` on, writes to stdout (no file, no syslog).
+- Config: `playground-v2/unbound/unbound.conf` — `log-queries`/`log-replies` on, writes to `/var/log/unbound/unbound.log` (named volume `unbound_logs`).
 - Forwards `.` to `1.1.1.1` + `9.9.9.9` over plain Do53 (TLS upstream is a hardening follow-up).
 - Local zone: `soc-playground.local.` (empty — batch 7 populates A records per role host).
 - In-network access only (`http://unbound:53` from other containers). No host port.
-- Log shape: `172.18.0.8 github.com. A IN` (query); `172.18.0.8 github.com. A IN NOERROR 0.006902 0 55` (reply — adds rcode, RTT, flags, size).
+- Log shape: `<ts> unbound[1:0] info: 172.18.0.8 github.com. A IN` (query); `<ts> unbound[1:0] info: 172.18.0.8 github.com. A IN NOERROR 0.006902 0 55` (reply — adds rcode, RTT, flags, size).
+- **Ingested into Elastic** via Custom Logs on `vps-host-policy`, reading the named volume's path `/var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log` on the VPS. Lands in `logs-unbound.queries-default` as plain-text `message` (no parser — substring queries against `message` work fine).
 
 ### squid (ubuntu/squid:latest, 6.13)
 
@@ -317,6 +319,73 @@ curl -fsS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' -H 'Content-Type: a
 Without the `decode_json_fields` processor, the Falco JSON line is ingested as a literal `message` string and fields like `container.name`, `rule`, `priority` aren't queryable. With it, they're nested under `falco.*` (e.g. `falco.output_fields.container.name`, `falco.rule`).
 
 **Verify.** In Kibana → Discover, filter `data_stream.dataset: falco.alerts`. Events should show up within a few seconds of an activity trigger. Quick trigger: `docker --context soc-playground exec canary-1 bash -c 'touch /tmp/.falco-test && ls /etc/shadow || true'` — Falco's "Read sensitive file untrusted" or similar rule fires.
+
+### Shipping Keycloak + Unbound logs to Elastic — manual attach (one-time)
+
+Both ride the host-side elastic-agent on `vps-host-policy`. Keycloak writes JSON-per-line into the `keycloak_data` named volume; Unbound writes plain text into a dedicated `unbound_logs` named volume. The Custom Logs integrations read those files at `/var/lib/docker/volumes/soc-playground_{keycloak_data,unbound_logs}/_data/`.
+
+```bash
+# Keycloak (JSON file, parsed with decode_json_fields).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "vps-host-policy",
+    "package": {"name": "log", "version": "2.4.4"},
+    "name": "keycloak-logs", "namespace": "default",
+    "inputs": {
+      "logs-logfile": {
+        "enabled": true,
+        "streams": {
+          "log.logs": {
+            "enabled": true,
+            "vars": {
+              "paths": ["/var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log"],
+              "data_stream.dataset": "keycloak.events",
+              "processors": "- decode_json_fields:\n    fields: [message]\n    target: \"\"\n    overwrite_keys: true\n    add_error_key: true\n"
+            }
+          }
+        }
+      }
+    }
+  }'
+
+# Unbound (plain text, no processors).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "vps-host-policy",
+    "package": {"name": "log", "version": "2.4.4"},
+    "name": "unbound-logs", "namespace": "default",
+    "inputs": {
+      "logs-logfile": {
+        "enabled": true,
+        "streams": {
+          "log.logs": {
+            "enabled": true,
+            "vars": {
+              "paths": ["/var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log"],
+              "data_stream.dataset": "unbound.queries"
+            }
+          }
+        }
+      }
+    }
+  }'
+```
+
+The Keycloak processor uses `target: ""` (empty string) so decoded top-level JSON keys (`timestamp`, `loggerName`, `level`, `message`) land at the root rather than nested under a prefix. The events stream's structured detail (`type=`, `username=`, …) stays embedded as a substring inside `message` — filter `loggerName: "org.keycloak.events"` to scope, and substring-match `*'username="sre.alice"'*` etc. to extract.
+
+**Verify.**
+
+```bash
+docker --context soc-playground exec web-1 \
+  curl -s -o /dev/null 'http://keycloak:8080/realms/soc-playground/protocol/openid-connect/token' \
+  -d 'grant_type=password&client_id=admin-cli&username=sre.alice&password=changeme'
+docker --context soc-playground exec web-1 nslookup example.com unbound >/dev/null
+# Wait ~30s for the agent check-in cycle.
+curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" \
+  'https://localhost:9200/_cat/indices/logs-{keycloak,unbound}.*?h=index,docs.count'
+```
 
 ### Shipping Postgres + Nginx logs to Elastic — manual attach (one-time)
 
