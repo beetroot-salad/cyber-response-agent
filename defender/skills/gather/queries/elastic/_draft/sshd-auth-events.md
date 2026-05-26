@@ -1,0 +1,42 @@
+---
+id: elastic.sshd-auth-events
+status: draft
+---
+
+## Goal
+
+SSH authentication events (Accepted/Failed password/publickey) on a specific
+host within a time window. Use to establish session timing, detect brute-force
+patterns, and correlate interactive logins with downstream activity like file
+modifications.
+
+## What to summarize
+
+- count of successful authentications (Accepted password / Accepted publickey)
+- count of failed authentication attempts
+- timestamp range of earliest and latest events in the window
+- any visible user/source patterns in the message field
+
+## Query
+
+```
+data_stream.dataset: "system.auth" AND host.name: "${host}" AND (message: *"Accepted password"* OR message: *"Accepted publickey"* OR message: *"Failed password"*)
+```
+
+## Common pitfalls
+
+- **No parsed user.name / source.ip.** Filebeat does not extract OpenSSH
+  fields from the syslog message. User and source IP are embedded in the
+  `message` field as substring patterns like "Accepted password for user from
+  10.1.2.3" — treat them as queryable by wildcard only, not as structured
+  fields. For precise user/IP filtering, run a secondary analysis pass on the
+  raw message payloads.
+- **Time window precision:** Use explicit `--start` and `--end` timestamps in
+  ISO format (e.g., `2026-05-24T06:20:00Z`). The agent ship-time can drift
+  relative to the alert timestamp; rounding hides millisecond ordering.
+
+## Baseline (when applicable)
+
+For establishing normal authentication rate and pattern on a host, run the
+same query with a `shift` parameter offsetting the window backward (e.g., 1
+day or 7 days prior over the same duration).
