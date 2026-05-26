@@ -48,6 +48,9 @@ SIEM-generated signals.
 | `logs-zeek.files-*` | Zeek files.log | file transfers seen on the wire — `file.hash.*`, `file.mime_type`, `file.size` |
 | `logs-zeek.ssh-*` | Zeek ssh.log | SSH handshakes (client/server versions, auth result) — separate from sshd's auth.log: this is the wire-side view |
 | `logs-squid.access-*` | Squid access log (custom `soc` format) | per-request: `user.name` (basic-auth), `source.ip`, `url.original`, `http.request.method`, `http.response.bytes`, `squid.result_status`, `squid.elapsed_ms` |
+| `logs-postgresql.log-*` | Postgres `/var/log/postgresql/postgresql-*-main.log` on `db-1` | per-statement records with `postgresql.log.{database,user,query,error_severity}`, `message`. Carries auth failures, slow queries, connection lifecycle |
+| `logs-nginx.access-*` | nginx `/var/log/nginx/access.log` on `web-1` / `web-2` | combined-log-format requests parsed to ECS: `source.ip`, `http.{request.method,response.status_code,response.body.bytes,version}`, `url.original`, `user_agent.*` |
+| `logs-nginx.error-*` | nginx `/var/log/nginx/error.log` on `web-1` / `web-2` | error/warn/notice lines from nginx itself — config reload, upstream timeouts, worker crashes; queryable via `log.level` |
 | `logs-elastic_agent.*` | Agent self-telemetry | agent / filebeat / metricbeat / fleet_server status — useful only for grounding "did the agent ship anything in this window" |
 
 ### Detection rules currently installed (`alerts` surface)
@@ -187,6 +190,8 @@ forms used by v2 gather templates:
 - Boolean: `data_stream.dataset: "system.auth" AND process.name: "sudo"`
 - Squid by user: `user.name: "sre.alice" AND data_stream.dataset: "squid.access"`
 - Zeek by destination: `destination.ip: "172.18.0.20" AND data_stream.dataset: "zeek.connection"`
+- Postgres auth failures: `data_stream.dataset: "postgresql.log" AND message: *"authentication failed"*`
+- Nginx 5xx on a host: `host.name: "web-1" AND data_stream.dataset: "nginx.access" AND http.response.status_code: [500 TO 599]`
 
 ### Index-pattern selection
 
@@ -198,4 +203,6 @@ forms used by v2 gather templates:
 - `--index 'logs-zeek.connection-*'` — Zeek flow records only (the `connection` dataset is what other vendors call `conn.log`)
 - `--index 'logs-zeek.*'` — every Zeek dataset (conn/dns/http/ssl/files/ssh)
 - `--index 'logs-squid.access-*'` — Squid proxy attribution only
+- `--index 'logs-postgresql.log-*'` — Postgres queries / auth / lifecycle only
+- `--index 'logs-nginx.access-*'` — nginx requests only (separate from `nginx.error`)
 - `--index '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` subcommand's default)

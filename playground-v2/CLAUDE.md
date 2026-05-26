@@ -318,6 +318,50 @@ Without the `decode_json_fields` processor, the Falco JSON line is ingested as a
 
 **Verify.** In Kibana → Discover, filter `data_stream.dataset: falco.alerts`. Events should show up within a few seconds of an activity trigger. Quick trigger: `docker --context soc-playground exec canary-1 bash -c 'touch /tmp/.falco-test && ls /etc/shadow || true'` — Falco's "Read sensitive file untrusted" or similar rule fires.
 
+### Shipping Postgres + Nginx logs to Elastic — manual attach (one-time)
+
+Each role host runs its own embedded `elastic-agent` enrolled into a role policy (`host-db-policy`, `host-web-policy`), so attaching the official integrations to those policies gets the agents reading the in-container log paths directly. No file bind-mounts needed — the agent is *inside* the container. Default `paths` in both packages already match the in-container layout (`/var/log/postgresql/postgresql-*-*.log*` matches Ubuntu's `postgresql-14-main.log`; `/var/log/nginx/{access,error}.log*` is the nginx default). Metrics inputs are left disabled — they require credentials we don't surface to the agents.
+
+```bash
+# Install packages (idempotent on re-runs).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/epm/packages/postgresql/1.32.1' -d '{"force": false}'
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/epm/packages/nginx/3.1.0' -d '{"force": false}'
+
+# Postgres → host-db-policy (one agent: db-1).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "host-db-policy",
+    "package": {"name": "postgresql", "version": "1.32.1"},
+    "name": "postgresql-logs", "namespace": "default",
+    "inputs": {"postgresql-logfile": {"enabled": true, "streams": {"postgresql.log": {"enabled": true}}}}
+  }'
+
+# Nginx access + error → host-web-policy (two agents: web-1, web-2).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "host-web-policy",
+    "package": {"name": "nginx", "version": "3.1.0"},
+    "name": "nginx-logs", "namespace": "default",
+    "inputs": {"nginx-logfile": {"enabled": true, "streams": {"nginx.access": {"enabled": true}, "nginx.error": {"enabled": true}}}}
+  }'
+```
+
+**Verify.**
+
+```bash
+docker --context soc-playground exec web-1 curl -s http://localhost/ -o /dev/null
+docker --context soc-playground exec db-1  bash -c 'PGPASSWORD=wrong psql -h db-1 -U appuser -d app -c "SELECT 1" 2>&1 | head -1'
+# Wait ~30s for the agent check-in cycle.
+curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" \
+  'https://localhost:9200/_cat/indices/logs-{postgresql,nginx}.*?h=index,docs.count'
+```
+
 ### Shipping Zeek + Squid logs to Elastic — manual attach (one-time)
 
 Both ride the same `vps-host-policy` host-side elastic-agent as Falco, reading docker named volumes on the VPS filesystem (`/var/lib/docker/volumes/soc-playground_{zeek,squid}_logs/_data/`). The agent runs as root, so volume perms are not a concern. Attach via Fleet API, run from the devcontainer with Kibana tunneled on 5601:
