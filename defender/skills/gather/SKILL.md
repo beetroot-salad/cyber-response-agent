@@ -355,9 +355,12 @@ execution path, not by the defender. See §3.5.
 
 ## Discipline
 
-- One dispatch in, one summary out. Do not loop, do not propose
-  follow-ups (debug leads are the defender's explicit dispatch, not
-  your initiative).
+- One dispatch in, one summary out. Do not propose follow-ups to
+  the defender. The §3.5 data-source-debug subagent spawn is the
+  one exception — it's internal to your execution path, transparent
+  to the defender, and runs only when a declared `what_to_summarize`
+  field comes back as a sentinel and the system SKILL.md doesn't
+  already document the workaround.
 - Keep the summary tight — single screen. Push detail to the raw
   payload.
 - Do not echo raw query output back to the defender; that's the whole
