@@ -59,7 +59,7 @@ def cmd_get_user(args, config):
         return
     print(f"username: {payload.get('username', '?')}")
     print(f"realm_role: {payload.get('realm_role', '?')}")
-    print(f"enabled: {payload.get('enabled', '?')}")
+    print(f"enabled: {str(payload.get('enabled', '?')).lower()}")
     print(f"email: {payload.get('email', '—')}")
     auth_hosts = payload.get("authorized_hosts") or []
     sudo_hosts = payload.get("sudo_hosts") or []
@@ -98,7 +98,7 @@ def cmd_list_users(args, config):
         print(
             f"- {u.get('username', '?'):<18} "
             f"role:{u.get('realm_role', '?'):<14} "
-            f"enabled:{u.get('enabled', '?')}"
+            f"enabled:{str(u.get('enabled', '?')).lower()}"
         )
 
 

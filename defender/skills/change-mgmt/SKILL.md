@@ -22,7 +22,7 @@ the defender, the author skill, and the actor-reviewer judge.
 |---|---|
 | `active-changes --host <h> --at <iso>` | CRs covering host at the given instant — the discriminating "was this in a CR" lookup |
 | `get-change <id>` | One CR by id |
-| `list-changes [--status open] [--host h] [--active-at iso]` | Filtered CR list |
+| `list-changes [--status approved] [--host h] [--active-at iso]` | Filtered CR list |
 
 ### gaps
 
@@ -65,8 +65,10 @@ the defender, the author skill, and the actor-reviewer judge.
   timestamp.
 - **Use for cross-checking a referenced CR id** — `get-change` on
   a CR id named in an alert payload or a ticket comment.
-- **Use to enumerate currently-open CRs** — `list-changes --status
-  open` for a sense of the change calendar.
+- **Use to enumerate currently-active CRs** — `list-changes --status
+  in_progress` for what's executing right now; `--status approved`
+  for what's been signed off but not yet started. Status enum:
+  `planned`, `approved`, `in_progress`, `implemented`, `cancelled`.
 
 ### when_not_to_use
 

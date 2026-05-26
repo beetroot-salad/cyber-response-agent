@@ -128,7 +128,10 @@ def build_parser():
     gc.add_argument("--raw", action="store_true")
 
     lc = sub.add_parser("list-changes", help="All CRs (filterable).")
-    lc.add_argument("--status")
+    lc.add_argument(
+        "--status",
+        choices=["planned", "approved", "in_progress", "implemented", "cancelled"],
+    )
     lc.add_argument("--host")
     lc.add_argument("--active-at", help="UTC ISO 8601 — filter to CRs active at this instant.")
     lc.add_argument(
