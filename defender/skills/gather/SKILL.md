@@ -116,6 +116,40 @@ does not cover — `syscheck.path`, `data.srcuser` over a 7d span, an
 hourly histogram, a cardinality estimate. One Bash invocation, one
 trip to the indexer.
 
+### 3.5 Validate declared fields
+
+Before summarizing, scan the raw payload for each field named in
+the dispatched lead's `what_to_summarize`. If any field comes back
+with a sentinel value (`<NA>`, `null`, empty string where a value
+was expected) rather than the data the lead asked for, the dispatch
+is *populated-but-incomplete* and you cannot summarize honestly
+without either resolving the gap or naming it.
+
+Resolution chain — in this order:
+
+1. **Cache hit?** Read
+   `{defender_dir}/skills/{system}/SKILL.md` and look for a
+   "Known data-source quirks" entry matching the sentinel pattern
+   (same field, same sentinel). If documented, apply the
+   substitute: use the named replacement field, run the documented
+   cross-source query. Continue to §4 with the resolved data. No
+   subagent spawn.
+2. **Cache miss → spawn `defender-data-source-debug` via Task.**
+   Pass `defender_dir`, `system`, `payload_path`, `unresolved_fields`,
+   `declared_summary`. The subagent verifies the gap, checks the
+   catalog for prior workarounds, tests alternate paths, optionally
+   runs a cheap cross-source query, and returns a structured
+   verdict (substitute field, cross-source query, or
+   `genuine-missing-data`) plus a `_draft/` deposit path if one was
+   written.
+3. **Apply the verdict.** Use the substitute / run the cross-source
+   query / acknowledge genuine missing data. If a draft was
+   deposited, capture the path — you surface it in §6 under
+   `## Proposed`.
+
+A sentinel in a field the dispatch did **not** declare in
+`what_to_summarize` is not a trigger. Only declared fields gate.
+
 ### 4. Summarize
 
 For every bullet in `what_to_summarize`, report a value — even
@@ -239,9 +273,10 @@ defender knows the catalog grew during this run:
 - defender/skills/gather/queries/wazuh/_draft/{kebab-name}.md
 ```
 
-If this was a debug lead and you deposited a workaround draft (see
-§Debug leads §Deploy), surface it under `## Proposed` so the defender
-records the proposal alongside the disposition:
+If §3.5 spawned `defender-data-source-debug` and the subagent
+returned a `## Deposited` draft path, surface it under
+`## Proposed` so the defender records the proposal alongside the
+disposition:
 
 ```
 ## Proposed
@@ -251,8 +286,9 @@ records the proposal alongside the disposition:
   summary: <one-line description of the quirk + workaround>
 ```
 
-Emit `## Proposed` only on debug-lead dispatches that produced a
-draft. Template-lead dispatches do not.
+Emit `## Proposed` only when the debug subagent actually deposited
+a draft. If §3.5 found a cache hit, or the subagent returned
+`genuine-missing-data` with no draft, do not emit this section.
 
 ## Lead kinds
 
@@ -297,12 +333,9 @@ shape worth memorizing after seeing it twice.
 
 ### Debug leads
 
-The defender dispatches a debug lead when a prior dispatch's result
-is structurally wrong — empty when it shouldn't be, or populated but
-with unresolved values in fields the lead declared. Two trigger
-shapes, two sub-protocols.
-
-#### Empty-result protocol
+When a prior dispatch returned empty and the defender suspects
+misconfiguration rather than no-events, the defender will dispatch a
+**debug lead** explicitly. The protocol:
 
 1. Confirm the index/host the query targets actually exists (system
    health check).
@@ -314,52 +347,11 @@ shapes, two sub-protocols.
    dropped — likely IP normalization / NAT issue" or "no rows at any
    widening — index empty or misrouted."
 
-#### Populated-but-incomplete protocol
-
-Trigger: the dispatch returned rows, but one or more fields named in
-`what_to_summarize` came back with sentinel values (`<NA>`, `null`,
-empty string in a field that should carry a value) rather than the
-data the lead asked for.
-
-1. Verify the field is *present with a sentinel*, not absent — re-read
-   the raw payload directly.
-2. Decide data-source-emitted vs query-emitted. A sentinel sitting
-   next to fields that *did* resolve from the same source points to
-   the platform's own resolution failure (e.g. Falco's container
-   plugin writes `<NA>` when its Docker-socket lookup fails); a
-   sentinel in a field that derives from a parser rule points at the
-   parser.
-3. Grep the system's query templates and existing `_draft/` notes
-   for the sentinel string. Workarounds often already exist in one
-   corner of the catalog and just haven't propagated.
-4. Test alternate paths *within the same document* — an ECS-enriched
-   parallel field, a sibling output field, the raw `message` body
-   the parsed fields came from.
-5. If no within-document resolution exists, test a cross-source
-   query when the cost is small; otherwise name the resolution path
-   (e.g. "resolve via docker inspect") and stop.
-6. Report the verdict: name the quirk and the workaround.
-
-#### Deploy
-
-When a debug lead identifies a workaround worth keeping, deposit it
-as a draft. Pick the surface by scope:
-
-- **System-wide** (affects every template touching this data source
-  — vendor sentinels, field-resolution gotchas, parser drift) →
-  `{defender_dir}/skills/{system}/_draft/{kebab-name}.md`. Sibling
-  to the system SKILL.md; lifted by the offline author into the
-  SKILL body.
-- **Single-template** (one query shape, one bound-param edge case)
-  → `{defender_dir}/skills/gather/queries/{system}/_draft/{kebab-name}.md`.
-  Same surface as fresh template drafts; lifted by the offline
-  author into the template body.
-
-Frontmatter `status: draft` either way. Cite the draft path under
-`## Proposed` in your return (§6) so the defender records the
-proposal alongside the disposition.
-
 The defender decides what the differential means; you report it.
+
+The other failure shape — populated result with sentinel values in
+declared `what_to_summarize` fields — is handled inside your own
+execution path, not by the defender. See §3.5.
 
 ## Discipline
 
@@ -372,9 +364,9 @@ The defender decides what the differential means; you report it.
   point of letting the CLI persist it to `gather_raw/`.
 - Stop at `## Raw payload`. The three required sections are the whole
   output; ANALYZE is the defender's phase, not yours. Exception:
-  debug leads may append `## Authored` for a freshly-drafted template
-  and `## Proposed` for a deposited system-skill draft (see §Debug
-  leads §Deploy). Nothing else.
+  you may append `## Authored` for a freshly-drafted template and
+  `## Proposed` for a draft deposited by the data-source-debug
+  subagent spawned in §3.5. Nothing else.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation
