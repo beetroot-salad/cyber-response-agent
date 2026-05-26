@@ -16,16 +16,18 @@ adds what's specific to the state-surface tier.
 ## Systems to onboard
 
 Five stubs (auth-less FastAPI on the compose network, see
-`playground-v2/CLAUDE.md` §Stub services) plus host live state:
+`playground-v2/CLAUDE.md` §Stub services) plus host live state.
+SKILL.md dirs are **unprefixed** — match the `defender/skills/elastic/`
+precedent, not the table-name column:
 
-| System | Service | Internal URL | VPS loopback | Skill name |
+| System | Service | Internal URL | VPS loopback | SKILL dir |
 |---|---|---|---|---|
-| CMDB | `cmdb` | `http://cmdb:8080` | `127.0.0.1:8001` | `defender-cmdb` |
-| Identity | `identity` | `http://identity:8080` | `127.0.0.1:8005` | `defender-identity` |
-| Change-mgmt | `change-mgmt` | `http://change-mgmt:8080` | `127.0.0.1:8003` | `defender-change-mgmt` |
-| Threat-intel | `threat-intel` | `http://threat-intel:8080` | `127.0.0.1:8002` | `defender-threat-intel` |
-| Ticket-server | `ticket-server` | `http://ticket-server:8080` | `127.0.0.1:8004` | `defender-ticket` |
-| Host live state | n/a | n/a | n/a (`docker exec`) | `defender-host-state` |
+| CMDB | `cmdb` | `http://cmdb:8080` | `127.0.0.1:8001` | `defender/skills/cmdb/` |
+| Identity | `identity` | `http://identity:8080` | `127.0.0.1:8005` | `defender/skills/identity/` |
+| Change-mgmt | `change-mgmt` | `http://change-mgmt:8080` | `127.0.0.1:8003` | `defender/skills/change-mgmt/` |
+| Threat-intel | `threat-intel` | `http://threat-intel:8080` | `127.0.0.1:8002` | `defender/skills/threat-intel/` |
+| Ticket-server | `ticket-server` | `http://ticket-server:8080` | `127.0.0.1:8004` | `defender/skills/ticket/` |
+| Host live state | n/a | n/a | n/a (`docker exec`) | `defender/skills/host-state/` |
 
 Endpoints + return shapes are listed per service in
 `playground-v2/CLAUDE.md` §Stub services. Copy the verbs you need into
@@ -116,7 +118,11 @@ adapter.
 
 ## Permissions
 
-Add to `defender/run-settings.json` permissions.allow:
+`defender/run-settings.json` already has a wildcard
+`Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/*.py *)`
+that covers any new adapter. Still add the explicit per-CLI entries as
+a fallback (some Bash matchers expand the wildcard inconsistently, and
+the explicit list doubles as discoverable documentation of what ships):
 
 ```
 "Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/cmdb_cli.py *)",
@@ -172,7 +178,11 @@ These are deployment-specific facts every adapter SKILL should put in
   `read_guidance` that host-state observations carry a
   `captured_at` and the agent should not cross-time-window them.
 
-## Suggested onboarding order
+## Batching and implementation order
+
+All six adapters land in **one batch / one PR**. The order below is
+the recommended build sequence within that batch (validate the transport
+pattern on small surfaces first), not a multi-PR split:
 
 1. **identity** — load-bearing for legitimacy checks; the
    `can_access` primitive is the cleanest API to start against.
@@ -183,8 +193,8 @@ These are deployment-specific facts every adapter SKILL should put in
 4. **change-mgmt**, **threat-intel** — straightforward once 1–3 are
    stable.
 5. **ticket-server** — last; v1's `playground_ticket_cli.py` already
-   works but doesn't match v2 conventions. Decide port-vs-rewrite when
-   the other four are in.
+   works but doesn't match v2 conventions. Decide port-vs-rewrite at
+   this point in the batch, but it ships with the others, not after.
 
 ## What's deliberately out of scope
 
