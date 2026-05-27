@@ -19,7 +19,7 @@ defender, the author skill, and the actor-reviewer judge.
 
 | Subcommand | Measurement |
 |---|---|
-| `get-host <name>` | Effective record (role, criticality, owner, os, change_window, trust_edges_out, users) |
+| `get-host <name>` | Effective record (role, criticality, owner, os, change_window, trust_edges_out, users). Keyed by host name (e.g. `scanner-1`, `web-1`). |
 | `list-hosts [--role X] [--criticality X] [--owner X]` | Filtered host list |
 | `list-roles` | Inventory-role catalog |
 
@@ -77,6 +77,11 @@ defender, the author skill, and the actor-reviewer judge.
   `falco.output_fields.container.name` is the runtime view; CMDB is
   the policy view. They can disagree — that disagreement is itself
   the signal to surface, not something to paper over.
+- **Hosts only — no container records.** CMDB has no `container.id`,
+  `container.name`, or image fields. A host that happens to run as a
+  container is in CMDB under its host name (e.g. `scanner-1`), not
+  under its docker id. Feeding `container.id` or `container.name` into
+  `get-host` always 404s, even when the underlying host exists.
 - **Not for identity-on-host.** Use the identity stub for "which
   users are authorized on host X"; cmdb's `users:` block is a
   per-host override surface, not the authoritative join.
