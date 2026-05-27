@@ -1,0 +1,35 @@
+{
+  "index": ".ds-logs-system.auth-default-2026.05.01-000002",
+  "total": 3,
+  "returned": 3,
+  "truncated": false,
+  "hits": [
+    {
+      "@timestamp": "2026-04-12T03:00:14.118Z",
+      "host": {"name": "office-ws-1"},
+      "source": {"ip": "10.42.1.7"},
+      "user": {"name": "svc_backup"},
+      "process": {"name": "sshd"},
+      "event": {"action": "authentication", "outcome": "success", "category": ["authentication"]},
+      "message": "Accepted publickey for svc_backup from 10.42.1.7 port 51234 ssh2"
+    },
+    {
+      "@timestamp": "2026-04-29T03:00:11.842Z",
+      "host": {"name": "office-ws-1"},
+      "source": {"ip": "10.42.1.7"},
+      "user": {"name": "svc_backup"},
+      "process": {"name": "sshd"},
+      "event": {"action": "authentication", "outcome": "success", "category": ["authentication"]},
+      "message": "Accepted publickey for svc_backup from 10.42.1.7 port 49887 ssh2"
+    },
+    {
+      "@timestamp": "2026-05-15T03:00:09.327Z",
+      "host": {"name": "office-ws-1"},
+      "source": {"ip": "10.42.1.7"},
+      "user": {"name": "svc_backup"},
+      "process": {"name": "sshd"},
+      "event": {"action": "authentication", "outcome": "success", "category": ["authentication"]},
+      "message": "Accepted publickey for svc_backup from 10.42.1.7 port 52106 ssh2"
+    }
+  ]
+}

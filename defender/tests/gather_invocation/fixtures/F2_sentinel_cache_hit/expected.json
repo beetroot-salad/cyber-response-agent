@@ -1,0 +1,4 @@
+{
+  "wrapper_invoked": false,
+  "rationale": "container.name is in what_to_summarize and the payload carries `<NA>`, but the system SKILL's `## Known data-source quirks` section explicitly documents this case and names container.id as the substitute. §3.5 Step 1 (cache check) should hit, and gather must apply the substitute without invoking the wrapper."
+}

@@ -1,0 +1,13 @@
+{
+  "system": "elastic",
+  "position": 0,
+  "goal": "Retrieve the raw Falco event (ancestor_event_id=AZ5kw6KN12qf_dcEkZyC) to identify the container name, network tool process name, parent process name, full cmdline, running user, and any network destination fields captured by Falco.",
+  "what_to_summarize": [
+    "container name (falco.output_fields.container.name)",
+    "process name (falco.output_fields.proc.name)",
+    "parent process name (falco.output_fields.proc.pname)",
+    "full command line (falco.output_fields.proc.cmdline)",
+    "running user (falco.output_fields.user.name)",
+    "event timestamp (@timestamp)"
+  ]
+}

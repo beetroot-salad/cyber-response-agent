@@ -1,0 +1,11 @@
+{
+  "system": "cmdb",
+  "position": 0,
+  "goal": "Retrieve sshd authentication events for svc_backup on office-ws-1 in the 5 minutes around the alert to count failure cadence and source diversity.",
+  "what_to_summarize": [
+    "event count",
+    "distinct source IPs",
+    "success/failure ratio",
+    "cadence"
+  ]
+}

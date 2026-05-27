@@ -1,0 +1,12 @@
+{
+  "system": "elastic",
+  "position": 0,
+  "goal": "Retrieve the nginx access log entries for the 401 burst (url.path=/v1/auth/token, status=401) to identify the source IP, source host, and client agent.",
+  "what_to_summarize": [
+    "source IP (source.ip)",
+    "source host (source.host)",
+    "client agent (user_agent.name)",
+    "request method (http.request.method)",
+    "response status (http.response.status_code)"
+  ]
+}

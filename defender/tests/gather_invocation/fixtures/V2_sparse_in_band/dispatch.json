@@ -1,0 +1,11 @@
+{
+  "system": "elastic",
+  "position": 0,
+  "goal": "Retrieve svc_backup's sshd auth events on office-ws-1 over the trailing 90 days to characterize the service account's normal cadence (count, source diversity, outcome ratio).",
+  "what_to_summarize": [
+    "event count",
+    "distinct source IPs (source.ip)",
+    "success/failure ratio (event.outcome)",
+    "cadence (time between events)"
+  ]
+}
