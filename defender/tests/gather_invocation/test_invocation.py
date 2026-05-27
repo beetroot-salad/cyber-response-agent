@@ -29,25 +29,8 @@ def _discover_fixtures() -> list[str]:
     return out
 
 
-# Fixtures that fail today and document a known gap. Mark xfail rather
-# than skip — we want CI to flag if the gap accidentally closes (the
-# xfail will become an unexpected pass, which pytest surfaces).
-_XFAIL_FIXTURES = {
-    "V3_sparse_out_of_band": "template-band mechanism not yet in SKILL",
-    "A1_stale_data": "freshness check not yet in SKILL",
-}
-
-
-def _param(fixture: str):
-    if fixture in _XFAIL_FIXTURES:
-        return pytest.param(
-            fixture, marks=pytest.mark.xfail(reason=_XFAIL_FIXTURES[fixture], strict=False)
-        )
-    return fixture
-
-
 @pytest.mark.llm
-@pytest.mark.parametrize("fixture", [_param(f) for f in _discover_fixtures()])
+@pytest.mark.parametrize("fixture", _discover_fixtures())
 def test_gather_invocation(fixture: str):
     expected = load_expected(fixture)
     result = run_fixture(fixture)

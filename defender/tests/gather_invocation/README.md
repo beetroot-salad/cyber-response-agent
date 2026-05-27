@@ -63,6 +63,18 @@ and decides whether to invoke the wrapper. There is no Python branch to
 unit-test. Mock everything below the LLM (stub CLIs, fixture payloads), then
 observe the model's behavior.
 
+## Planned (not yet authored — would test mechanisms that don't exist in
+the SKILL today; author the fixture *with* the mechanism, not before)
+
+- **V3 sparse out-of-band** — auth events well below a template's
+  declared `expected_volume` band. Expected: gather flags
+  `payload_status: suspect_volume` and escalates. Requires a
+  template-band mechanism in `gather/queries/SCHEMA.md` first.
+- **A1 stale data** — populated rows but `max(@timestamp)` is far
+  before the alert timestamp, indicating ingest lag. Expected:
+  gather flags `payload_status: suspect_empty` with a lag reason.
+  Requires a freshness check in the SKILL.
+
 ## Adding a fixture
 
 1. Create `fixtures/{name}/` with the five files above.
