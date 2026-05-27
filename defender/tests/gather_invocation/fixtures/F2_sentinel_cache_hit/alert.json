@@ -1,0 +1,27 @@
+{
+  "alert_id": "7fae8ccb2a314cd688cf257d4605f71c9f877eb3023a32397b6fdf60f46488e9",
+  "alert_timestamp": "2026-05-26T14:50:44.061Z",
+  "rule": {
+    "id": "v2-falco-suspicious-network-tool",
+    "name": "v2 Falco: suspicious network tool in container",
+    "type": "query",
+    "severity": "medium",
+    "risk_score": 47,
+    "tags": ["v2", "falco", "container", "execution"],
+    "description": "Falco rule 'Launch Suspicious Network Tool in Container' fired — nc, ncat, socat, nmap, telnet, etc. inside one of the playground role-host containers. Triage: which container, which process spawned the tool, what destination.",
+    "language": "kuery",
+    "query": "falco.rule: \"Launch Suspicious Network Tool in Container\""
+  },
+  "reason": "event on soc-playground created medium alert v2 Falco: suspicious network tool in container.",
+  "host": { "name": null },
+  "user": { "name": null },
+  "ancestor_events": [
+    {
+      "id": "AZ5kw6KN12qf_dcEkZyC",
+      "type": "event",
+      "index": ".ds-logs-falco.alerts-default-2026.04.30-000003",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}
