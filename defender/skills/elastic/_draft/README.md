@@ -5,13 +5,13 @@ status: surface-declaration
 
 # `defender/skills/elastic/_draft/`
 
-Runtime draft surface for system-wide quirks. The
-`defender-data-source-debug` subagent (spawned by gather when a
-declared `what_to_summarize` field comes back as a sentinel)
-writes here when it identifies a data-source behavior that
-applies across multiple templates touching the Elastic surface —
-vendor sentinels, field-resolution gotchas, parser drift, anything
-that affects more than one query shape.
+Runtime draft surface for system-wide quirks. The gather subagent
+writes here from its §3.5 resolution protocol (run when a declared
+`what_to_summarize` field comes back as a sentinel) when it
+identifies a data-source behavior that applies across multiple
+templates touching the Elastic surface — vendor sentinels,
+field-resolution gotchas, parser drift, anything that affects more
+than one query shape.
 
 ## Two `_draft/` surfaces, two scopes
 
@@ -68,7 +68,6 @@ skill scans for drafts, reviews them, and folds accepted content
 into `defender/skills/elastic/SKILL.md`. Rejected drafts are removed.
 
 The runtime mechanism that *writes* drafts is wired first (see
-`defender/skills/gather/SKILL.md` §3.5 +
-`defender/skills/data-source-debug/SKILL.md`); the author-side
-pickup is a follow-on task. Until that lands, drafts accumulate
-here without being lifted — expected.
+`defender/skills/gather/SKILL.md` §3.5); the author-side pickup is
+a follow-on task. Until that lands, drafts accumulate here without
+being lifted — expected.

@@ -119,36 +119,77 @@ trip to the indexer.
 ### 3.5 Validate declared fields
 
 Before summarizing, scan the raw payload for each field named in
-the dispatched lead's `what_to_summarize`. If any field comes back
-with a sentinel value (`<NA>`, `null`, empty string where a value
+the dispatched lead's `what_to_summarize`. **The trigger is
+structural**: if a declared field is *present in the document* but
+carries a sentinel value (`<NA>`, `null`, empty string where a value
 was expected) rather than the data the lead asked for, the dispatch
-is *populated-but-incomplete* and you cannot summarize honestly
-without either resolving the gap or naming it.
-
-Resolution chain — in this order:
-
-1. **Cache hit?** Read
-   `{defender_dir}/skills/{system}/SKILL.md` and look for a
-   "Known data-source quirks" entry matching the sentinel pattern
-   (same field, same sentinel). If documented, apply the
-   substitute: use the named replacement field, run the documented
-   cross-source query. Continue to §4 with the resolved data. No
-   subagent spawn.
-2. **Cache miss → spawn `defender-data-source-debug` via Task.**
-   Pass `defender_dir`, `system`, `payload_path`, `unresolved_fields`,
-   `declared_summary`. The subagent verifies the gap, checks the
-   catalog for prior workarounds, tests alternate paths, optionally
-   runs a cheap cross-source query, and returns a structured
-   verdict (substitute field, cross-source query, or
-   `genuine-missing-data`) plus a `_draft/` deposit path if one was
-   written.
-3. **Apply the verdict.** Use the substitute / run the cross-source
-   query / acknowledge genuine missing data. If a draft was
-   deposited, capture the path — you surface it in §6 under
-   `## Proposed`.
+is *populated-but-incomplete*. You cannot summarize honestly without
+running the resolution protocol below — even if neighboring fields
+suggest a plausible reason for the sentinel. Interpretation is
+ANALYZE's job; you measure, including measuring the gap.
 
 A sentinel in a field the dispatch did **not** declare in
 `what_to_summarize` is not a trigger. Only declared fields gate.
+
+#### Resolution protocol
+
+When the trigger fires, do **two** things in order:
+
+**Step 1 — Cache check.** Read
+`{defender_dir}/skills/{system}/SKILL.md` and look for a "Known
+data-source quirks" entry matching the sentinel pattern (same
+field, same sentinel). If documented, apply the substitute: use
+the named replacement field, run the documented cross-source
+query. Continue to §4 with the resolved data. No subagent
+invocation; cached quirks do not need a fresh draft.
+
+**Step 2 — Cache miss: invoke the data-source-debug subagent via
+the CLI wrapper.**
+
+```bash
+python3 {defender_dir}/scripts/tools/data_source_debug.py \
+    --defender-dir {defender_dir} \
+    --system {system} \
+    --payload {run_dir}/gather_raw/{position}.json \
+    --question "<one-paragraph natural-language question>"
+```
+
+Phrase the `--question` as a specific NL question grounded in the
+payload — e.g. "The `falco.output_fields.container.name` field
+returned `<NA>` for container id `45388dd0bf3a`; find a substitute
+field in the same document or a cheap cross-source resolution."
+Do not pass a structured dispatch; the wrapper is NL-in,
+structured-out.
+
+The wrapper spawns a fresh top-level claude (`claude -p`) loaded
+with the `data-source-debug` SKILL prompt and the payload as
+context. It returns a structured verdict on stdout:
+
+```
+## Verdict
+<data-source-quirk | parser-quirk | genuine-missing-data>
+
+## Workaround
+substitute_field: <field path, or null>
+cross_source_query: <runnable command, or null>
+explanation: <one line>
+
+## Deposited
+draft: <_draft/ path, or null>
+scope: <system-wide | single-template:{template-id} | none>
+```
+
+**Apply the verdict** to your §4 summary: use the substitute field,
+run the cross-source query, or acknowledge the gap as
+`genuine-missing-data`. If the subagent deposited a draft (path
+under `## Deposited`), capture it — you surface it in §6 under
+`## Proposed`.
+
+This entire chain runs inside your own execution. Do not return
+early to the defender to ask for permission; the defender
+dispatched a measurement and either gets the measurement
+(resolved) or an honest gap report (genuine-missing-data) — never
+silent sentinel laundering.
 
 ### 4. Summarize
 
@@ -273,10 +314,9 @@ defender knows the catalog grew during this run:
 - defender/skills/gather/queries/wazuh/_draft/{kebab-name}.md
 ```
 
-If §3.5 spawned `defender-data-source-debug` and the subagent
-returned a `## Deposited` draft path, surface it under
-`## Proposed` so the defender records the proposal alongside the
-disposition:
+If the §3.5 data-source-debug subagent deposited a draft (path
+under `## Deposited`), surface it under `## Proposed` so the
+defender records the proposal alongside the disposition:
 
 ```
 ## Proposed
@@ -286,9 +326,9 @@ disposition:
   summary: <one-line description of the quirk + workaround>
 ```
 
-Emit `## Proposed` only when the debug subagent actually deposited
-a draft. If §3.5 found a cache hit, or the subagent returned
-`genuine-missing-data` with no draft, do not emit this section.
+Emit `## Proposed` only when the subagent's `## Deposited` block
+named a draft path. If §3.5 hit the cache (step 1) or the subagent
+returned `genuine-missing-data`, do not emit this section.
 
 ## Lead kinds
 
@@ -356,11 +396,13 @@ execution path, not by the defender. See §3.5.
 ## Discipline
 
 - One dispatch in, one summary out. Do not propose follow-ups to
-  the defender. The §3.5 data-source-debug subagent spawn is the
-  one exception — it's internal to your execution path, transparent
-  to the defender, and runs only when a declared `what_to_summarize`
-  field comes back as a sentinel and the system SKILL.md doesn't
-  already document the workaround.
+  the defender. The §3.5 data-source-debug invocation is internal
+  to your execution path (transparent to the defender) — when a
+  declared `what_to_summarize` field comes back as a sentinel, you
+  run the cache check then shell out to the data-source-debug
+  wrapper, and report either the resolved value or a
+  genuine-missing-data gap. The defender sees the result, not the
+  steps.
 - Keep the summary tight — single screen. Push detail to the raw
   payload.
 - Do not echo raw query output back to the defender; that's the whole
@@ -368,8 +410,8 @@ execution path, not by the defender. See §3.5.
 - Stop at `## Raw payload`. The three required sections are the whole
   output; ANALYZE is the defender's phase, not yours. Exception:
   you may append `## Authored` for a freshly-drafted template and
-  `## Proposed` for a draft deposited by the data-source-debug
-  subagent spawned in §3.5. Nothing else.
+  `## Proposed` for a draft deposited by the §3.5 data-source-debug
+  subagent. Nothing else.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation
