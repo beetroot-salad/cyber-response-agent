@@ -1,0 +1,5 @@
+{
+  "wrapper_invoked": false,
+  "wrapper_call_count": 0,
+  "rationale": "Empty result (hits=[]). §3.5 fires on sentinel-or-absent values *in returned rows*; an empty result is the smell-test's domain (§4), not §3.5. Gather should report payload_status=empty (or suspect_empty) and stop without invoking the wrapper."
+}

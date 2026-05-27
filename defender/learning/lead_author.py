@@ -73,6 +73,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 CATALOG_DIR = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
 CATALOG_REL = "defender/skills/gather/queries/"
+SKILLS_DIR = REPO_ROOT / "defender" / "skills"
+SKILLS_REL = "defender/skills/"
 PENDING_DIR = LEARNING_DIR / "_pending_leads"
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
@@ -80,6 +82,16 @@ LEAD_AUTHOR_PROMPT = LEARNING_DIR / "lead_author.md"
 
 LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
 LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
+
+
+def _lift_threshold() -> int:
+    """Min count of pending system-skill drafts before the lift activates.
+
+    Mirrors ``LEARNING_AUTHOR_THRESHOLD`` from ``loop.py``: drain the
+    queue only once enough have accumulated to make the spawn worthwhile.
+    Read at call time so tests can monkeypatch via ``monkeypatch.setenv``.
+    """
+    return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +324,63 @@ def _diff_name_status_z(base_sha: str, head_sha: str) -> list[tuple[str, list[st
 
 
 def _under_draft(path: str) -> bool:
-    """True if ``path`` lies under any ``{system}/_draft/`` subdirectory."""
+    """True if ``path`` lies under any catalog ``{system}/_draft/`` subdirectory."""
     if not path.startswith(CATALOG_REL):
         return False
     rest = path[len(CATALOG_REL):]
     parts = rest.split("/")
     return len(parts) >= 3 and parts[1] == "_draft"
+
+
+def _is_catalog_path(path: str) -> bool:
+    return path.startswith(CATALOG_REL)
+
+
+def _is_system_skill_md(path: str) -> bool:
+    """True if ``path`` is exactly ``defender/skills/{system}/SKILL.md``.
+
+    Excludes ``gather/queries/SCHEMA.md`` and nested files like
+    ``skills/{system}/queries/foo.md`` — only the top-level system SKILL
+    is in lift scope.
+    """
+    if not path.startswith(SKILLS_REL):
+        return False
+    rest = path[len(SKILLS_REL):]
+    parts = rest.split("/")
+    return len(parts) == 2 and parts[1] == "SKILL.md"
+
+
+def _is_system_skill_draft(path: str) -> bool:
+    """True if ``path`` is under a system-skill ``_draft/`` (one segment deep).
+
+    Catalog drafts at ``skills/gather/queries/{system}/_draft/`` are NOT
+    system-skill drafts — they're handled by the catalog-side draft flow.
+    """
+    if not path.startswith(SKILLS_REL):
+        return False
+    rest = path[len(SKILLS_REL):]
+    parts = rest.split("/")
+    return len(parts) >= 3 and parts[1] == "_draft"
+
+
+def _is_draft_readme(path: str) -> bool:
+    """True if ``path`` is a ``_draft/README.md`` surface-declaration file."""
+    if not _is_system_skill_draft(path) and not _under_draft(path):
+        return False
+    return Path(path).name == "README.md"
+
+
+def _is_in_scope(path: str) -> bool:
+    """True if ``path`` is within lead_author's edit scope.
+
+    Two scopes: the gather query catalog and the system-skill surface
+    (``SKILL.md`` + sibling ``_draft/``).
+    """
+    return (
+        _is_catalog_path(path)
+        or _is_system_skill_md(path)
+        or _is_system_skill_draft(path)
+    )
 
 
 def _git_head() -> str:
@@ -467,6 +530,61 @@ def build_handoff(
 
 
 # ---------------------------------------------------------------------------
+# System-skill draft discovery (lift queue)
+# ---------------------------------------------------------------------------
+
+
+_DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
+
+
+def discover_system_drafts() -> list[Path]:
+    """Pending drafts under ``defender/skills/{system}/_draft/`` (one level).
+
+    Excludes the surface-declaration README and any template skeletons.
+    The single-level glob naturally excludes catalog drafts at
+    ``defender/skills/gather/queries/{system}/_draft/`` — those are
+    handled by the executed-template handoff stream.
+    """
+    out: list[Path] = []
+    if not SKILLS_DIR.is_dir():
+        return out
+    for system_dir in sorted(SKILLS_DIR.iterdir()):
+        if not system_dir.is_dir():
+            continue
+        draft_dir = system_dir / "_draft"
+        if not draft_dir.is_dir():
+            continue
+        for draft in sorted(draft_dir.iterdir()):
+            if not draft.is_file():
+                continue
+            if draft.suffix != ".md":
+                continue
+            if draft.name in _DRAFT_README_NAMES:
+                continue
+            out.append(draft)
+    return out
+
+
+def build_system_draft_handoffs(drafts: list[Path]) -> list[dict]:
+    """One handoff per pending draft. ``{draft_path, system, skill_path}`` (repo-relative)."""
+    out: list[dict] = []
+    for draft in drafts:
+        rel = draft.relative_to(REPO_ROOT)
+        # Parent is .../skills/{system}/_draft → grandparent is the system dir.
+        system_dir = draft.parent.parent
+        system = system_dir.name
+        skill_md = system_dir / "SKILL.md"
+        out.append(
+            {
+                "draft_path": str(rel),
+                "system": system,
+                "skill_path": str(skill_md.relative_to(REPO_ROOT)),
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Agent invocation
 # ---------------------------------------------------------------------------
 
@@ -475,7 +593,9 @@ _ALLOWLIST = (
     "Read,Glob,Grep,"
     f"Edit({CATALOG_REL}**),"
     f"Write({CATALOG_REL}**),"
-    f"Bash(git add {CATALOG_REL}:*),"
+    f"Edit({SKILLS_REL}*/SKILL.md),"
+    f"Write({SKILLS_REL}*/SKILL.md),"
+    f"Bash(git add {SKILLS_REL}:*),"
     "Bash(git mv:*),"
     "Bash(git rm:*),"
     "Bash(git commit:*),"
@@ -484,13 +604,21 @@ _ALLOWLIST = (
 )
 
 
-def invoke_agent(run_dir: Path, handoffs: list[dict]) -> int:
+def invoke_agent(
+    run_dir: Path,
+    handoffs: list[dict],
+    pending_drafts: list[dict] | None = None,
+) -> int:
     """Spawn ``claude -p`` with the lead-author prompt. Returns rc."""
+    pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
         f"catalog_dir: {CATALOG_REL}\n"
-        f"handoffs ({len(handoffs)}):\n"
+        f"skills_dir: {SKILLS_REL}\n"
+        f"executed_template_handoffs ({len(handoffs)}):\n"
         f"{json.dumps(handoffs, indent=2)}\n"
+        f"pending_system_drafts ({len(pending_drafts)}):\n"
+        f"{json.dumps(pending_drafts, indent=2)}\n"
     )
     cmd = [
         "claude",
@@ -532,13 +660,23 @@ def invoke_agent(run_dir: Path, handoffs: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _is_catalog_path(p: str) -> bool:
-    return p.startswith(CATALOG_REL)
+def _dirty_protected_paths(baseline: set[tuple[str, str]]) -> list[str]:
+    """Established paths in ``baseline`` that lead_author must not stomp.
 
+    Covers:
+      * catalog paths outside ``{system}/_draft/`` (established templates),
+      * system-skill ``SKILL.md`` files (lift targets).
 
-def _dirty_established_paths(baseline: set[tuple[str, str]]) -> list[str]:
-    """Catalog paths present in ``baseline`` that aren't under ``_draft/``."""
-    return [p for _, p in baseline if _is_catalog_path(p) and not _under_draft(p)]
+    Untracked deposits under any ``_draft/`` are expected queue content
+    and intentionally not flagged.
+    """
+    out: list[str] = []
+    for _, p in baseline:
+        if _is_catalog_path(p) and not _under_draft(p):
+            out.append(p)
+        elif _is_system_skill_md(p):
+            out.append(p)
+    return out
 
 
 def verify_postflight(
@@ -596,27 +734,46 @@ def _check_commit_contents(
     base_sha: str, head_sha: str, count: int, diff_paths: list[str],
 ) -> tuple[bool, str, dict] | None:
     for path in diff_paths:
-        if not _is_catalog_path(path):
-            return False, "commit touches paths outside catalog", {
+        if not _is_in_scope(path):
+            return False, "commit touches paths outside lead_author scope", {
                 "rev_list_count": count, "head": head_sha,
                 "diff_paths": diff_paths,
             }
-    # Deletions are only allowed for drafts. Renames may move a draft
-    # to the system root (promotion) but not the reverse.
+        if _is_draft_readme(path):
+            return False, "commit touches a _draft/README.md (surface declaration)", {
+                "rev_list_count": count, "head": head_sha,
+                "diff_paths": diff_paths,
+                "touched_readme": path,
+            }
+    # Deletions are only allowed for drafts (catalog drafts or system-skill
+    # drafts). SKILL.md and established templates are delete-prohibited.
+    # Renames may move a draft into the system root (catalog promotion) but
+    # not the reverse.
     for code, paths in _diff_name_status_z(base_sha, head_sha):
-        if code == "D" and not _under_draft(paths[0]):
-            return False, "commit deletes an established template", {
-                "rev_list_count": count, "head": head_sha,
-                "diff_paths": diff_paths,
-                "deleted_path": paths[0],
-            }
-        if (code.startswith(("R", "C"))
-                and _under_draft(paths[1]) and not _under_draft(paths[0])):
-            return False, "commit demotes an established template to _draft", {
-                "rev_list_count": count, "head": head_sha,
-                "rename_src": paths[0],
-                "rename_dst": paths[1],
-            }
+        if code == "D":
+            src = paths[0]
+            if not (_under_draft(src) or _is_system_skill_draft(src)):
+                return False, "commit deletes an established file", {
+                    "rev_list_count": count, "head": head_sha,
+                    "diff_paths": diff_paths,
+                    "deleted_path": src,
+                }
+        if code.startswith(("R", "C")):
+            src, dst = paths[0], paths[1]
+            # Catalog: established → _draft demotion.
+            if _under_draft(dst) and not _under_draft(src):
+                return False, "commit demotes an established template to _draft", {
+                    "rev_list_count": count, "head": head_sha,
+                    "rename_src": src,
+                    "rename_dst": dst,
+                }
+            # System-skill: SKILL.md → _draft demotion.
+            if _is_system_skill_draft(dst) and not _is_system_skill_draft(src):
+                return False, "commit demotes a system-skill file into _draft", {
+                    "rev_list_count": count, "head": head_sha,
+                    "rename_src": src,
+                    "rename_dst": dst,
+                }
     return None
 
 
@@ -633,12 +790,12 @@ def _check_post_status(
             })
         return new_paths, None
     for _, path in new_records:
-        if _is_catalog_path(path):
-            return new_paths, (False, "uncommitted catalog dirt alongside commit", {
+        if _is_in_scope(path):
+            return new_paths, (False, "uncommitted in-scope dirt alongside commit", {
                 "new_paths": new_paths,
             })
         if path.startswith("defender/"):
-            return new_paths, (False, "new dirt under defender/ outside catalog", {
+            return new_paths, (False, "new dirt under defender/ outside lead_author scope", {
                 "new_paths": new_paths,
             })
     return new_paths, None
@@ -749,17 +906,21 @@ def _run_locked(run_dir: Path) -> int:
     # Refuse if the established catalog is already dirty. Untracked drafts
     # under {system}/_draft/ are the expected gather output that this
     # author is being run to process — they belong in the baseline.
-    dirty_catalog = _dirty_established_paths(baseline)
-    if dirty_catalog:
-        _log(f"FATAL preflight: catalog dirty before authoring: {dirty_catalog}")
+    dirty_protected = _dirty_protected_paths(baseline)
+    if dirty_protected:
+        _log(f"FATAL preflight: protected paths dirty before authoring: {dirty_protected}")
         return 2
 
-    handoffs, rc = _prepare_handoffs(run_dir, base_sha)
+    handoffs, pending_drafts, rc = _prepare_handoffs(run_dir, base_sha)
     if rc is not None:
         return rc
-    _log(f"built {len(handoffs)} handoff block(s); base_sha={base_sha[:12]}")
+    _log(
+        f"built {len(handoffs)} executed-template handoff(s) and "
+        f"{len(pending_drafts)} pending system-skill draft(s); "
+        f"base_sha={base_sha[:12]}"
+    )
 
-    rc = invoke_agent(run_dir, handoffs)
+    rc = invoke_agent(run_dir, handoffs, pending_drafts)
     if rc != 0:
         _write_state(
             _failure_marker(run_dir),
@@ -793,37 +954,68 @@ def _run_locked(run_dir: Path) -> int:
 
 def _prepare_handoffs(
     run_dir: Path, base_sha: str,
-) -> tuple[list, int | None]:
-    """Extract leads + build handoffs. Returns (handoffs, early-rc).
+) -> tuple[list, list, int | None]:
+    """Extract leads + build executed-template + system-draft handoffs.
 
-    early-rc is None when work remains; an int rc when the caller should
-    return immediately (FATAL extract, no executed leads, or no handoffs
-    after dropping unresolved query_ids).
+    Returns ``(handoffs, pending_drafts, early-rc)``. ``early-rc`` is
+    ``None`` when work remains; an ``int`` rc when the caller should
+    return immediately. Both lists may be empty independently:
+
+    - Executed handoffs come from ``lead_sequence.yaml`` + ``gather_raw/``.
+    - Pending drafts come from ``discover_system_drafts()`` and are gated
+      on ``_lift_threshold()`` — below threshold, the list is forced
+      empty so the lift portion is silently skipped this tick.
+
+    Early exit-zero fires only when **both** lists are empty after the
+    threshold gate. Failures extracting executed leads return rc=2.
     """
+    pending_drafts_raw = discover_system_drafts()
+    threshold = _lift_threshold()
+    if len(pending_drafts_raw) < threshold:
+        if pending_drafts_raw:
+            _log(
+                f"lift queue below threshold "
+                f"(n={len(pending_drafts_raw)}, threshold={threshold}) — "
+                "skipping lift"
+            )
+        pending_drafts: list[dict] = []
+    else:
+        pending_drafts = build_system_draft_handoffs(pending_drafts_raw)
+
     try:
         executed = extract(run_dir)
     except (FileNotFoundError, ValueError) as e:
         _log(f"FATAL: cannot extract leads: {e}")
-        return [], 2
+        return [], [], 2
+
     if not executed:
-        _log("no executed leads with on-disk payloads — nothing to do")
-        return [], 0
+        if not pending_drafts:
+            _log("no executed leads and no pending drafts — nothing to do")
+            return [], [], 0
+        _log(
+            "no executed leads with on-disk payloads — proceeding with "
+            f"{len(pending_drafts)} pending system-skill draft(s) only"
+        )
+        return [], pending_drafts, None
+
     try:
         handoffs = build_handoff(run_dir, executed)
     except LeadAuthorError as e:
         _log(f"FATAL: cannot build handoffs: {e}")
-        return [], 2
-    if not handoffs:
+        return [], [], 2
+
+    if not handoffs and not pending_drafts:
         _log(
             f"all {len(executed)} extracted lead(s) had unresolved "
-            "query_ids — nothing to do"
+            "query_ids and no pending drafts — nothing to do"
         )
         _write_state(
             _done_sentinel(run_dir),
             f"head_sha: {base_sha}\nat: {_now_iso()}\ncommit_made: False\n",
         )
-        return [], 0
-    return handoffs, None
+        return [], [], 0
+
+    return handoffs, pending_drafts, None
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +1025,8 @@ def _prepare_handoffs(
 
 _HELP_EPILOG = """\
 Preconditions
-  * ``defender/skills/gather/queries/`` must be git-clean.
+  * ``defender/skills/gather/queries/`` and each ``defender/skills/{system}/SKILL.md``
+    must be git-clean (untracked deposits under ``_draft/`` are expected).
   * No other lead-author tick may be running (per-author queue lock at
     defender/learning/_pending_leads/.lock).
   * No defender-side author tick may be running (shared repo lock at
@@ -848,10 +1041,12 @@ State files written under ``<run_dir>/lead_author/``
   violation.txt  written when post-flight scope check fails.
 
 Environment
-  LEAD_AUTHOR_MODEL              claude model id (default claude-sonnet-4-6)
-  LEAD_AUTHOR_TIMEOUT_SECONDS    spawn timeout (default 1800)
-  LEAD_AUTHOR_PUSH=1             attempt to push the commit upstream
-                                 (refuses origin/main / origin/master)
+  LEAD_AUTHOR_MODEL                          claude model id (default claude-sonnet-4-6)
+  LEAD_AUTHOR_TIMEOUT_SECONDS                spawn timeout (default 1800)
+  LEAD_AUTHOR_PUSH=1                         attempt to push the commit upstream
+                                             (refuses origin/main / origin/master)
+  LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
+                                             system-skill lift queue (default 5)
 """
 
 

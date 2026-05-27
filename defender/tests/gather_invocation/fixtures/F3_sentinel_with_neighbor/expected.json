@@ -1,0 +1,5 @@
+{
+  "wrapper_invoked": true,
+  "wrapper_call_count": 1,
+  "rationale": "Single declared sentinel (container.name=<NA>). The payload carries a 'plausible neighbor' (container.id=7e76d1cea7c4 populated) that the model could use to rationalize the sentinel away — §3.5's anti-laundering rule + per-field check should force a wrapper invocation anyway, so the substitute gets deposited as a draft."
+}

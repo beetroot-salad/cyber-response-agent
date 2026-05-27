@@ -46,13 +46,6 @@ body carries the CLI conventions, field vocabularies, and load-bearing
 rules (e.g. "use `--help`, don't read source") that the description
 does not.
 
-The lead-description sidecar
-(`{run_dir}/gather_raw/{position}.lead.json`) that the projection
-script reads is written for you by the `extract_lead_metadata`
-PreToolUse hook before you start — you do not need to author it. If
-you ever notice it missing, the dispatch YAML upstream was malformed;
-fix the dispatch shape, not the sidecar.
-
 ### 2. Find or author a query template
 
 Walk `{catalog_dir}/{system}/` for each plausible system. **At small
@@ -124,6 +117,67 @@ before reporting a Counter over the returned hits. If the run is
 truncated, widen `--limit` (up to the CLI's `MAX_LIMIT`) and re-run,
 or report the partial result with `payload_status: partial`.
 
+### 3.5 Validate declared fields
+
+Before §4, run a mechanical per-field check against the raw
+payload. Walk `what_to_summarize` and identify each field's
+status:
+
+- **concrete** — the field carries the data the lead asked for
+- **sentinel** — `<NA>`, `null`, empty string, `-`, or similar
+  placeholder where a value was expected
+- **absent** — the field is not present in the document at all
+
+For each declared field whose status is **sentinel** or **absent**,
+run the resolution protocol below. The protocol fires **per field,
+not per dispatch**: a payload with two sentinel-or-absent declared
+fields produces two wrapper invocations (or two cache hits), never
+one. Status of fields the dispatch did **not** declare in
+`what_to_summarize` does not gate; only declared fields gate.
+
+§4 may not summarize a declared field whose status is sentinel or
+absent until the resolution protocol has produced a value for that
+field. **Do not inline a substitute you "know" from prior knowledge
+without invoking the wrapper.** The wrapper's job is to deposit
+the substitute as a draft so the lesson propagates into the system
+SKILL's `## Known data-source quirks` section — your local
+resolution is not a system-level resolution, and skipping the
+wrapper traps the lesson in this one run.
+
+When the trigger fires (cache miss or no prior knowledge), run the
+resolution protocol in order.
+
+**Step 1 — cache check.** Read
+`{defender_dir}/skills/{system}/SKILL.md` and look for a "Known
+data-source quirks" entry matching the sentinel pattern (same
+field, same sentinel). If documented, apply the substitute and
+continue to §4 with the resolved data.
+
+**Step 2 — cache miss: invoke the data-source-debug wrapper.**
+
+```bash
+python3 {defender_dir}/scripts/tools/data_source_debug.py \
+    --defender-dir {defender_dir} \
+    --system {system} \
+    --payload {run_dir}/gather_raw/{position}.json \
+    --question "<NL question grounded in the payload>"
+```
+
+The wrapper spawns a fresh top-level `claude -p` with the
+data-source-debug SKILL loaded and returns three sections on
+stdout: `## Verdict`
+(`data-source-quirk` | `parser-quirk` | `genuine-missing-data`),
+`## Workaround` (substitute field, cross-source query, or
+explanation), `## Deposited` (`_draft/` path + scope, or none).
+Apply Workaround to your §4 summary; capture any Deposited path
+for §6's `## Proposed`.
+
+Phrase `--question` as natural language grounded in the payload —
+e.g. "`falco.output_fields.container.name` returned `<NA>` for
+container id `45388dd0bf3a`; find a substitute field in the same
+document or a cheap cross-source resolution." NL-in,
+structured-out.
+
 ### 4. Summarize
 
 For every bullet in `what_to_summarize`, report a value — even
@@ -149,21 +203,21 @@ mis-queries:
   user is suspicious; an alert that just fired naming the entity
   guarantees the index has *some* events for it. If the math doesn't
   add up, the query is probably wrong.
-- **Does the unfiltered index have events in this window?** The
-  Wazuh CLI summary shows "Index event count (unfiltered, same
-  window)" alongside matching events. If unfiltered is non-zero
-  and your filter returns zero, your filter is the suspect, not the
-  data.
+- **Does the unfiltered index have events in this window?** If the
+  system CLI surfaces an unfiltered event count for the same window,
+  compare against it. Non-zero unfiltered with zero filtered means
+  your filter is the suspect, not the data.
 - **Drop the most specific clause and re-run.** If the broader query
   returns events that should have matched the original, one of the
   filter values is mis-shaped (wrong field, wrong literal type, NAT
   collapse, decoder version drift). Identify which clause was
   load-bearing and report the differential.
-- **Is there a sibling field the data is actually under?** `data.srcip`
-  vs `data.src_ip`, `data.dstuser` vs `data.user`, `agent.name` vs
-  `agent.id` — decoder shifts move events between fields. If a query
-  returns zero on the named field but the unfiltered window is
-  populated, sample one raw event and check field placement.
+- **Is there a sibling field the data is actually under?** `source.ip`
+  vs `client.ip`, `user.name` vs `user.target.name`, `host.name` vs
+  `host.hostname` — decoder shifts and pipeline rewrites move events
+  between similar fields. If a query returns zero on the named field
+  but the unfiltered window is populated, sample one raw event and
+  check field placement.
 
 If after the smell test the empty result is genuine — index is
 populated, broader query also returns nothing relevant — report
@@ -259,6 +313,18 @@ defender knows the catalog grew during this run:
 - {defender_dir}/skills/gather/queries/{system}/_draft/{kebab-name}.md
 ```
 
+If the §3.5 data-source-debug subagent deposited a draft (path
+under `## Deposited`), surface it under `## Proposed` so the
+defender records the proposal alongside the disposition:
+
+```
+## Proposed
+- system: elastic
+  draft: {defender_dir}/skills/elastic/_draft/{kebab-name}.md
+  scope: system-wide                            # or: single-template:{template-id}
+  summary: <one-line description of the quirk + workaround>
+```
+
 ## Lead kinds
 
 Most dispatches are **template leads** — one or more existing or
@@ -320,15 +386,18 @@ The defender decides what the differential means; you report it.
 
 ## Discipline
 
-- One dispatch in, one summary out. Do not loop, do not propose
-  follow-ups (debug leads are the defender's explicit dispatch, not
-  your initiative).
+- One dispatch in, one summary out. The §3.5 wrapper invocation is
+  internal — the defender sees the resolved measurement or a
+  `genuine-missing-data` gap, never the protocol steps. Do not
+  propose any other follow-up.
 - Keep the summary tight — single screen. Push detail to the raw
   payload.
 - Do not echo raw query output back to the defender; that's the whole
   point of letting the CLI persist it to `gather_raw/`.
-- Stop at `## Raw payload`. The three required sections are the whole
-  output; ANALYZE is the defender's phase, not yours.
+- Three required sections (`## Queries run`, `## Summary`,
+  `## Raw payload`); two optional trailers (`## Authored` for a
+  fresh template draft, `## Proposed` for a §3.5 deposit). Nothing
+  else — ANALYZE is the defender's phase, not yours.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation

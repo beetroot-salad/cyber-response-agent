@@ -1,0 +1,8 @@
+{
+  "system": "elastic",
+  "position": 0,
+  "goal": "Retrieve the raw Falco event (ancestor_event_id=AZ5kw6KN12qf_dcEkZyC) and report the container the network tool ran in.",
+  "what_to_summarize": [
+    "container name (falco.output_fields.container.name)"
+  ]
+}
