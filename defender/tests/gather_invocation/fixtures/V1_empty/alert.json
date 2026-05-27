@@ -1,0 +1,18 @@
+{
+  "alert_id": "sshd-burst-87f2c1ab",
+  "alert_timestamp": "2026-05-26T16:12:00.000Z",
+  "rule": {
+    "id": "v2-sshd-failed-auth-burst",
+    "name": "v2 sshd: failed-auth burst",
+    "type": "query",
+    "severity": "medium",
+    "risk_score": 42,
+    "tags": ["v2", "sshd", "auth"],
+    "description": "sshd auth log shows a failed-auth burst from a single source IP.",
+    "language": "kuery",
+    "query": "process.name:sshd AND event.outcome:failure"
+  },
+  "reason": "sshd failed-auth burst from 10.42.7.183 against svc_backup",
+  "host": {"name": "office-ws-1"},
+  "user": {"name": "svc_backup"}
+}

@@ -82,9 +82,11 @@ def _build_sandbox(sandbox: Path, fixture_dir: Path, system: str) -> None:
         sandbox / "skills" / system / "SKILL.md",
     )
     # Stub CLIs at the paths gather constructs from {defender_dir}.
-    for name in ("elastic_cli.py", "data_source_debug.py"):
-        dst = sandbox / "scripts" / "tools" / name
-        shutil.copy(STUBS_DIR / name, dst)
+    # Copy every .py stub so per-fixture system variation (elastic, cmdb,
+    # ...) all resolve without harness changes.
+    for stub in STUBS_DIR.glob("*.py"):
+        dst = sandbox / "scripts" / "tools" / stub.name
+        shutil.copy(stub, dst)
         dst.chmod(0o755)
 
 
