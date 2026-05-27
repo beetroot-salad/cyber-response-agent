@@ -1,0 +1,5 @@
+{
+  "wrapper_invoked": true,
+  "wrapper_call_count": 2,
+  "rationale": "what_to_summarize declares two sentinel fields (container.name=<NA>, user.name=<NA>). Per §3.5's per-field rule the wrapper must fire once per sentinel — two invocations expected. System SKILL has no Known data-source quirks section so Step-1 cache check misses on both."
+}
