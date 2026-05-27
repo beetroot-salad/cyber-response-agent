@@ -63,11 +63,11 @@ workaround. Anything the author should know when folding into
 ## Author pickup
 
 Drafts here are runtime artifacts, not load-bearing knowledge — the
-runtime defender does *not* read this directory. The offline author
-skill scans for drafts, reviews them, and folds accepted content
-into `defender/skills/elastic/SKILL.md`. Rejected drafts are removed.
-
-The runtime mechanism that *writes* drafts is wired first (see
-`defender/skills/gather/SKILL.md` §3.5); the author-side pickup is
-a follow-on task. Until that lands, drafts accumulate here without
-being lifted — expected.
+runtime defender does *not* read this directory. `lead_author.py`
+scans for drafts on every tick and, once the queue depth crosses
+`LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD` (default 5), folds accepted
+content into `defender/skills/elastic/SKILL.md` (action: **lift**)
+or removes the draft (action: **discard**). The decision procedure
+lives in `defender/learning/lead_author.md` §"Pending system-skill
+drafts". The runtime writer (data-source-debug subagent) is described
+in `defender/skills/gather/SKILL.md` §3.5.

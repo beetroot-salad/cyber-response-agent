@@ -358,22 +358,107 @@ def test_under_draft_classifier():
     assert not lead_author._under_draft("defender/lessons/x.md")
 
 
-def test_dirty_established_paths_excludes_drafts():
-    """gather-authored drafts must NOT trip the pre-author dirty-catalog brake."""
+def test_is_system_skill_md_classifier():
+    assert lead_author._is_system_skill_md("defender/skills/elastic/SKILL.md")
+    assert lead_author._is_system_skill_md("defender/skills/wazuh/SKILL.md")
+    # Catalog templates are NOT system-skill SKILL.md files.
+    assert not lead_author._is_system_skill_md(
+        "defender/skills/gather/queries/wazuh/auth-events.md"
+    )
+    # The schema doc lives at depth 3, not 2.
+    assert not lead_author._is_system_skill_md(
+        "defender/skills/gather/queries/SCHEMA.md"
+    )
+    # Drafts inside a system skill dir are not the skill itself.
+    assert not lead_author._is_system_skill_md(
+        "defender/skills/elastic/_draft/foo.md"
+    )
+
+
+def test_is_system_skill_draft_classifier():
+    assert lead_author._is_system_skill_draft("defender/skills/elastic/_draft/foo.md")
+    assert lead_author._is_system_skill_draft("defender/skills/cmdb/_draft/bar.md")
+    # Catalog drafts (two segments deeper) are NOT system-skill drafts.
+    assert not lead_author._is_system_skill_draft(
+        "defender/skills/gather/queries/elastic/_draft/foo.md"
+    )
+    # SKILL.md is not a draft.
+    assert not lead_author._is_system_skill_draft("defender/skills/elastic/SKILL.md")
+
+
+def test_is_in_scope_covers_both_surfaces():
+    assert lead_author._is_in_scope("defender/skills/gather/queries/wazuh/auth-events.md")
+    assert lead_author._is_in_scope("defender/skills/elastic/SKILL.md")
+    assert lead_author._is_in_scope("defender/skills/elastic/_draft/foo.md")
+    assert not lead_author._is_in_scope("defender/lessons/x.md")
+    assert not lead_author._is_in_scope("defender/other/stray.md")
+
+
+def test_discover_system_drafts_finds_files_excluding_readme(tmp_path, monkeypatch):
+    """README.md and _TEMPLATE.md are surface declarations, not drafts."""
+    skills = tmp_path / "defender" / "skills"
+    (skills / "elastic" / "_draft").mkdir(parents=True)
+    (skills / "elastic" / "_draft" / "README.md").write_text("surface declaration\n")
+    (skills / "elastic" / "_draft" / "real-draft.md").write_text("---\nstatus: draft\n---\n")
+    (skills / "elastic" / "SKILL.md").write_text("# elastic\n")
+    # Another system with no drafts — must be ignored.
+    (skills / "wazuh").mkdir()
+    (skills / "wazuh" / "SKILL.md").write_text("# wazuh\n")
+    # A nested catalog draft must NOT be picked up (two levels deeper).
+    (skills / "gather" / "queries" / "elastic" / "_draft").mkdir(parents=True)
+    (skills / "gather" / "queries" / "elastic" / "_draft" / "ignore.md").write_text("ignore\n")
+    # _TEMPLATE.md in a draft dir should be skipped.
+    (skills / "cmdb" / "_draft").mkdir(parents=True)
+    (skills / "cmdb" / "_draft" / "_TEMPLATE.md").write_text("template\n")
+
+    monkeypatch.setattr(lead_author, "SKILLS_DIR", skills)
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    found = lead_author.discover_system_drafts()
+    rel = [str(p.relative_to(tmp_path)) for p in found]
+    assert rel == ["defender/skills/elastic/_draft/real-draft.md"]
+
+
+def test_build_system_draft_handoffs_emits_triple(tmp_path, monkeypatch):
+    skills = tmp_path / "defender" / "skills"
+    (skills / "elastic" / "_draft").mkdir(parents=True)
+    draft = skills / "elastic" / "_draft" / "falco-na.md"
+    draft.write_text("---\nstatus: draft\n---\n")
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    handoffs = lead_author.build_system_draft_handoffs([draft])
+    assert handoffs == [{
+        "draft_path": "defender/skills/elastic/_draft/falco-na.md",
+        "system": "elastic",
+        "skill_path": "defender/skills/elastic/SKILL.md",
+    }]
+
+
+def test_dirty_protected_paths_excludes_drafts():
+    """Catalog drafts AND untracked system-skill drafts are expected queue content."""
     baseline = {
         ("??", "defender/skills/gather/queries/wazuh/_draft/newthing.md"),
-        ("??", "defender/skills/gather/queries/wazuh/_draft/another.md"),
+        ("??", "defender/skills/elastic/_draft/falco-na.md"),
     }
-    assert lead_author._dirty_established_paths(baseline) == []
+    assert lead_author._dirty_protected_paths(baseline) == []
 
 
-def test_dirty_established_paths_catches_established_dirt():
+def test_dirty_protected_paths_catches_established_catalog_dirt():
     baseline = {
         ("??", "defender/skills/gather/queries/wazuh/_draft/ok.md"),
         (" M", "defender/skills/gather/queries/wazuh/auth-events.md"),
     }
-    assert lead_author._dirty_established_paths(baseline) == [
+    assert lead_author._dirty_protected_paths(baseline) == [
         "defender/skills/gather/queries/wazuh/auth-events.md"
+    ]
+
+
+def test_dirty_protected_paths_catches_dirty_skill_md():
+    """A pre-existing dirty SKILL.md must trip preflight — lifts demand a clean target."""
+    baseline = {
+        ("??", "defender/skills/elastic/_draft/falco-na.md"),  # expected
+        (" M", "defender/skills/elastic/SKILL.md"),            # not expected
+    }
+    assert lead_author._dirty_protected_paths(baseline) == [
+        "defender/skills/elastic/SKILL.md"
     ]
 
 
@@ -455,7 +540,7 @@ def test_verify_postflight_rejects_multi_commit(tmp_git_repo: Path):
     assert detail["rev_list_count"] == 2
 
 
-def test_verify_postflight_rejects_commit_outside_catalog(tmp_git_repo: Path):
+def test_verify_postflight_rejects_commit_outside_scope(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     base_sha = lead_author._git_head()
     baseline = lead_author._git_status_records()
@@ -465,7 +550,7 @@ def test_verify_postflight_rejects_commit_outside_catalog(tmp_git_repo: Path):
 
     ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
     assert not ok
-    assert "outside catalog" in reason
+    assert "outside lead_author scope" in reason
     assert "defender/other/stray.md" in detail["diff_paths"]
 
 
@@ -491,7 +576,7 @@ def test_verify_postflight_rejects_sibling_dirt_alongside_commit(tmp_git_repo: P
 
     ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
     assert not ok
-    assert "outside catalog" in reason
+    assert "outside lead_author scope" in reason
     assert "defender/other/leak.md" in detail["new_paths"]
 
 
@@ -580,3 +665,218 @@ def test_verify_postflight_rejects_root_to_draft_demotion(tmp_git_repo: Path):
     ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
     assert not ok
     assert "demote" in reason or "established" in reason
+
+
+# ---------------------------------------------------------------------------
+# System-skill lift postflight checks
+# ---------------------------------------------------------------------------
+
+
+def _seed_system_skill(repo: Path, system: str, draft_name: str) -> None:
+    skill_dir = repo / "defender" / "skills" / system
+    (skill_dir / "_draft").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(f"---\nname: defender-{system}\n---\n# {system}\n")
+    (skill_dir / "_draft" / "README.md").write_text("# surface declaration\n")
+    (skill_dir / "_draft" / draft_name).write_text(
+        f"---\nid: {system}.{draft_name[:-3]}\nstatus: draft\n---\n# pending\n"
+    )
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", f"seed {system} system-skill + draft")
+
+
+def test_verify_postflight_accepts_system_skill_lift(tmp_git_repo: Path):
+    """Lift = Edit SKILL.md + git rm draft, committed together."""
+    _seed_system_skill(tmp_git_repo, "elastic", "falco-na.md")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Lift: append a section to SKILL.md, remove the draft.
+    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
+    skill.write_text(skill.read_text() + "\n## Falco quirk\nworkaround text\n")
+    _run_git(tmp_git_repo, "rm", "-q",
+             "defender/skills/elastic/_draft/falco-na.md")
+    _run_git(tmp_git_repo, "add", "defender/skills/elastic/SKILL.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "lift elastic.falco-na")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert ok, f"expected ok, got reason={reason}"
+
+
+def test_verify_postflight_accepts_system_skill_discard(tmp_git_repo: Path):
+    """Discard = git rm of a system-skill draft, no SKILL.md touch."""
+    _seed_system_skill(tmp_git_repo, "elastic", "stale.md")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    _run_git(tmp_git_repo, "rm", "-q",
+             "defender/skills/elastic/_draft/stale.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "discard elastic.stale")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert ok, f"expected ok, got reason={reason}"
+
+
+def test_verify_postflight_rejects_skill_md_deletion(tmp_git_repo: Path):
+    """git rm of an established SKILL.md must fail."""
+    _seed_system_skill(tmp_git_repo, "elastic", "x.md")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    _run_git(tmp_git_repo, "rm", "-q", "defender/skills/elastic/SKILL.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "DESTROY SKILL")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "established" in reason
+    assert detail["deleted_path"].endswith("SKILL.md")
+
+
+def test_verify_postflight_rejects_draft_readme_mutation(tmp_git_repo: Path):
+    """_draft/README.md is a surface declaration — modifying it is rejected."""
+    _seed_system_skill(tmp_git_repo, "elastic", "x.md")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    readme = tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "README.md"
+    readme.write_text(readme.read_text() + "\nstomped\n")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "stomp README")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "_draft/README.md" in reason or "surface declaration" in reason
+    assert detail["touched_readme"].endswith("_draft/README.md")
+
+
+def test_verify_postflight_rejects_skill_md_to_draft_demotion(tmp_git_repo: Path):
+    """Renaming SKILL.md into _draft/ is rejected."""
+    _seed_system_skill(tmp_git_repo, "elastic", "x.md")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    _run_git(tmp_git_repo, "mv",
+             "defender/skills/elastic/SKILL.md",
+             "defender/skills/elastic/_draft/SKILL.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "demote SKILL.md")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "demote" in reason or "established" in reason
+
+
+# ---------------------------------------------------------------------------
+# _prepare_handoffs — lift threshold + early-exit gates
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
+    run_dir: Path, monkeypatch
+):
+    """Pending drafts below threshold are silenced; executed handoffs unaffected.
+
+    Stubs out the executed-flow primitives so this test exercises only the
+    threshold gate, independent of which query templates exist in the catalog.
+    """
+    fake_executed = [object()]
+    fake_handoff = [{
+        "query_id": "fake.lead", "status": "established",
+        "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
+        "neighbors": [], "invocations": [],
+    }]
+    monkeypatch.setattr(lead_author, "extract", lambda rd: fake_executed)
+    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex: fake_handoff)
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
+    monkeypatch.setattr(
+        lead_author, "discover_system_drafts",
+        lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
+    )
+    handoffs, drafts, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    assert rc is None
+    assert handoffs == fake_handoff
+    assert drafts == []
+
+
+def test_prepare_handoffs_at_threshold_surfaces_drafts(
+    run_dir: Path, monkeypatch, tmp_path
+):
+    """At-or-above threshold → drafts surface alongside executed handoffs."""
+    fake_handoff = [{
+        "query_id": "fake.lead", "status": "established",
+        "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
+        "neighbors": [], "invocations": [],
+    }]
+    monkeypatch.setattr(lead_author, "extract", lambda rd: [object()])
+    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex: fake_handoff)
+    # Seed two real draft files so build_system_draft_handoffs can compute
+    # repo-relative paths.
+    skills = tmp_path / "defender" / "skills"
+    (skills / "elastic" / "_draft").mkdir(parents=True)
+    drafts = [
+        skills / "elastic" / "_draft" / "a.md",
+        skills / "elastic" / "_draft" / "b.md",
+    ]
+    for d in drafts:
+        d.write_text("---\nstatus: draft\n---\n")
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: drafts)
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "2")
+
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    assert rc is None
+    assert handoffs == fake_handoff
+    assert len(pending) == 2
+    assert pending[0]["system"] == "elastic"
+    assert pending[0]["skill_path"] == "defender/skills/elastic/SKILL.md"
+
+
+def test_prepare_handoffs_drafts_only_no_executed_proceeds(
+    run_dir: Path, monkeypatch, tmp_path
+):
+    """No executed leads + drafts at threshold → proceed with drafts only."""
+    # Lead sequence with no entries — extract() returns [].
+    _write_lead_sequence(run_dir, [])
+    skills = tmp_path / "defender" / "skills"
+    (skills / "elastic" / "_draft").mkdir(parents=True)
+    drafts = [skills / "elastic" / "_draft" / f"d{i}.md" for i in range(2)]
+    for d in drafts:
+        d.write_text("---\nstatus: draft\n---\n")
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: drafts)
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
+
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    assert rc is None
+    assert handoffs == []
+    assert len(pending) == 2
+
+
+def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, monkeypatch):
+    """No executed leads AND no pending drafts → early exit 0, no work."""
+    _write_lead_sequence(run_dir, [])
+    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: [])
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    assert rc == 0
+    assert handoffs == []
+    assert pending == []
+
+
+def test_invoke_agent_includes_pending_drafts_in_prompt(
+    run_dir: Path, monkeypatch
+):
+    """User prompt must carry the new pending_system_drafts section."""
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(lead_author.subprocess, "run", _fake_run)
+    handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
+                 "executed_template_path": "defender/skills/gather/queries/wazuh/auth-events.md",
+                 "neighbors": [], "invocations": []}]
+    pending = [{"draft_path": "defender/skills/elastic/_draft/falco-na.md",
+                "system": "elastic",
+                "skill_path": "defender/skills/elastic/SKILL.md"}]
+    rc = lead_author.invoke_agent(run_dir, handoffs, pending)
+    assert rc == 0
+    prompt = captured["input"]
+    assert "executed_template_handoffs (1)" in prompt
+    assert "pending_system_drafts (1)" in prompt
+    assert "elastic/_draft/falco-na.md" in prompt
+    assert "skills_dir: defender/skills/" in prompt
