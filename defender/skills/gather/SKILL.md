@@ -42,9 +42,14 @@ description tells you **what this system is for** and **when it's the
 right target** — use it to confirm your lead actually wants this
 system. If the lead does target this system, Read the full
 `{defender_dir}/skills/{system}/SKILL.md` before running anything; the
-body carries the CLI conventions, field vocabularies, and load-bearing
-rules (e.g. "use `--help`, don't read source") that the description
-does not.
+body carries the visibility surface (what questions the system
+answers, gaps, when_to_use / when_not_to_use). If
+`{defender_dir}/skills/{system}/execution.md` exists, Read it too —
+it carries the CLI conventions, field vocabularies, and load-bearing
+rules (e.g. "use `--help`, don't read source"). The execution file is
+gather-only by design; the defender doesn't see it, so the dispatch
+will name the question only — picking inputs (hostname vs id, uid vs
+realm name, resolution chains) is your call.
 
 ### 2. Find or author a query template
 

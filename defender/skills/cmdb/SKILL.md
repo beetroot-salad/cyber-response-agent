@@ -9,19 +9,26 @@ startup and shallow-merges an in-memory `OVERLAY` over it on every
 read. The merged view is what callers see — overlay endpoints exist
 for chaos scenarios and are **not** exposed by this adapter.
 
-This file is split by audience. **Visibility surface** is read by the
-defender, the author skill, and the actor-reviewer judge.
-**Execution** is read only by code paths that dispatch queries.
+This file is the **visibility surface** — read by the defender, the
+author skill, and the actor-reviewer judge. CLI invocation details
+(subcommand flags, transport, exit codes) live in `execution.md`,
+read only by gather. The defender treats this system as a question
+source; gather decides how to ask.
 
 ## Visibility surface
 
-### available_queries
+### questions_answered
 
-| Subcommand | Measurement |
-|---|---|
-| `get-host <name>` | Effective record (role, criticality, owner, os, change_window, trust_edges_out, users). Keyed by host name (e.g. `scanner-1`, `web-1`). |
-| `list-hosts [--role X] [--criticality X] [--owner X]` | Filtered host list |
-| `list-roles` | Inventory-role catalog |
+This system answers inventory questions about a host — what role does
+the inventory assign it, what criticality / owner / change-window
+applies, what trust edges does it declare outbound. The principal is
+the host as inventory knows it. Lookups about a session's *runtime*
+representation (a container id observed in telemetry, a docker name)
+are not the principal here; if a lead needs the inventory record for a
+runtime entity, that entity must first be resolved to its inventory
+name. Whether that resolution happens at gather time or via a prior
+lead is gather's choice — the defender names the inventory question,
+not the input path.
 
 ### gaps
 
@@ -77,47 +84,11 @@ defender, the author skill, and the actor-reviewer judge.
   `falco.output_fields.container.name` is the runtime view; CMDB is
   the policy view. They can disagree — that disagreement is itself
   the signal to surface, not something to paper over.
-- **Hosts only — no container records.** CMDB has no `container.id`,
-  `container.name`, or image fields. A host that happens to run as a
-  container is in CMDB under its host name (e.g. `scanner-1`), not
-  under its docker id. Feeding `container.id` or `container.name` into
-  `get-host` always 404s, even when the underlying host exists.
 - **Not for identity-on-host.** Use the identity stub for "which
   users are authorized on host X"; cmdb's `users:` block is a
   per-host override surface, not the authoritative join.
 
 ## Execution
 
-### CLI
-
-```bash
-defender/scripts/tools/cmdb_cli.py health-check
-defender/scripts/tools/cmdb_cli.py get-host <name> [--raw]
-defender/scripts/tools/cmdb_cli.py list-hosts [--role X] [--criticality X] [--owner X] [--limit N] [--raw]
-defender/scripts/tools/cmdb_cli.py list-roles [--raw]
-```
-
-**Do not Read `cmdb_cli.py` source to discover flags.** This SKILL
-plus `cmdb_cli.py {subcommand} --help` is the authoritative surface.
-
-`--raw` emits the upstream JSON response unchanged, suitable for
-`gather_raw/{position}.json`. Default output is short formatted text
-that includes the full JSON record for `get-host` and a per-row
-summary for `list-hosts`.
-
-### Connectivity
-
-Transport is `docker --context soc-playground exec <bastion> curl
-http://cmdb:8080/...`. Bastion default `web-1`. No SSH tunnel needed.
-
-### Config
-
-`defender/knowledge/environment/systems/cmdb/config.env` declares
-`CMDB_URL_BASE`, `CMDB_BASTION_HOST`, `CMDB_TIMEOUT_SEC`. All three
-can be overridden by environment variables of the same names.
-
-### Exit codes
-
-- `0` — success
-- `1` — query error (host not found, malformed arg)
-- `2` — connectivity / docker / upstream 5xx
+CLI invocation, connectivity, config, and exit codes live in
+`execution.md` — read by gather only.

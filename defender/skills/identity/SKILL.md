@@ -11,22 +11,25 @@ user appearing in `/etc/passwd` on a host is necessary but not
 sufficient evidence of authorization; the identity stub's
 `can_access` answer is.
 
-This file is split by audience. **Visibility surface** is read by the
-defender (gather routing, judge), the author skill, and the
-actor-reviewer judge. **Execution** is read only by code paths that
-dispatch queries.
+This file is the **visibility surface** — read by the defender, the
+author skill, and the actor-reviewer judge. CLI invocation details
+(subcommand flags, transport, exit codes) live in `execution.md`,
+read only by gather. The defender treats this system as a question
+source; gather decides how to ask.
 
 ## Visibility surface
 
-### available_queries
+### questions_answered
 
-| Subcommand | Measurement |
-|---|---|
-| `can-access <user> <host>` | `{authorized, via, role, sudo, shell}` — the discriminating legitimacy answer |
-| `get-user <user>` | Full user record with `authorized_hosts` + `sudo_hosts` derived |
-| `list-authorized-hosts <user>` | Just the host list (faster than `get-user` when only the set matters) |
-| `list-users [--role X] [--enabled true]` | Realm user catalog (filterable) |
-| `list-roles` | Inventory-role ↔ realm-role mapping |
+This system answers legitimacy questions about a principal — does a
+named user (realm identity) have an authorized role on a named host
+in the inventory, and what shape does that role grant (sudo, shell)?
+Lookups about a session's *runtime* representation (a container id,
+a numeric uid observed in telemetry) are not directly answerable here;
+the principal must first be resolved to a realm identity. Whether that
+resolution happens at gather time or in a prior lead is gather's
+choice — the defender names the legitimacy question, not the input
+path.
 
 ### gaps
 
@@ -89,46 +92,5 @@ dispatch queries.
 
 ## Execution
 
-### CLI
-
-```bash
-defender/scripts/tools/identity_cli.py health-check
-defender/scripts/tools/identity_cli.py can-access <user> <host> [--raw]
-defender/scripts/tools/identity_cli.py get-user <user> [--raw]
-defender/scripts/tools/identity_cli.py list-authorized-hosts <user> [--raw]
-defender/scripts/tools/identity_cli.py list-users [--role X] [--enabled true|false] [--limit N] [--raw]
-defender/scripts/tools/identity_cli.py list-roles [--raw]
-```
-
-**Do not Read `identity_cli.py` source to discover flags.** This
-SKILL plus `identity_cli.py {subcommand} --help` is the authoritative
-surface. If a flag you need isn't here or in `--help`, treat it as
-unsupported and escalate.
-
-`--raw` emits the upstream JSON response unchanged (the FastAPI
-response body), suitable for `gather_raw/{position}.json`. Default
-output is short formatted text.
-
-### Connectivity
-
-Transport is `docker --context soc-playground exec <bastion> curl
-http://identity:8080/...`. The bastion (default `web-1`) is any role
-host on the compose network — every host has Docker DNS for the
-stub. No SSH tunnel needed; the same docker context already used by
-elastic_cli for rule installs is reused here.
-
-If `health-check` exits 2, check `docker --context soc-playground ps`
-for the bastion + the `identity` container.
-
-### Config
-
-`defender/knowledge/environment/systems/identity/config.env` declares
-`IDENTITY_URL_BASE`, `IDENTITY_BASTION_HOST`, `IDENTITY_TIMEOUT_SEC`.
-All three can be overridden by environment variables of the same
-names for ops convenience.
-
-### Exit codes
-
-- `0` — success (including `authorized: false` as a legitimate answer)
-- `1` — query error (user not found, malformed arg)
-- `2` — connectivity / docker / upstream 5xx
+CLI invocation, connectivity, config, and exit codes live in
+`execution.md` — read by gather only.

@@ -70,7 +70,18 @@ uncertain.
    the first place.
 6. **Discover knowledge on demand.** Domain knowledge lives as on-disk
    skills. Load them via `Skill` when the next move needs them.
-7. **Escalate when uncertain.** The report is the headline; the
+7. **Don't pre-judge what unowned tools can or can't accept.** Per-system
+   SKILLs describe what *questions* a system answers, not how its CLI
+   binds inputs — that lives in `execution.md` next to each system's
+   SKILL, which only gather reads. If you find yourself reasoning about
+   whether a tool would accept a particular input shape ("the identity
+   tool takes hostnames, not container ids", "CMDB wouldn't know what
+   to do with this uid"), you've crossed into gather's surface. Write
+   the lead naming the question and let gather figure out the input
+   path; if it can't, gather returns `not-resolvable` and you've
+   learned the real gap. "I assumed the tool couldn't help" is not a
+   valid resolution for a `legitimacy_contract`.
+8. **Escalate when uncertain.** The report is the headline; the
    investigation log is where you show your work.
 
 ## Loop
