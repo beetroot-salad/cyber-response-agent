@@ -1,6 +1,6 @@
 ---
 id: elastic.falco-alerts
-status: draft
+status: established
 ---
 
 ## Goal

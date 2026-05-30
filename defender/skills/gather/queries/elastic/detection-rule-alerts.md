@@ -49,6 +49,7 @@ a neighborhood.
 - **Alert index vs. raw event index:** This template queries the alerts
   surface (`.internal.alerts-security.alerts-default-*`). For raw events
   (syslog, auth, Falco), use a different template against `logs-*`.
+- **Single-host `${host}` placeholder:** The `"match": {"host.name": "${host}"}` clause performs an exact match on one hostname. When sweeping multiple hosts in a single lead, pass a `body` param override with `host.name: ("host-a" OR "host-b")` Lucene syntax rather than binding `${host}` — this pattern was used in this run to query web-2 and db-1 together.
 
 ## Baseline (when applicable)
 
