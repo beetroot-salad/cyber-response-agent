@@ -83,6 +83,19 @@ def load_lead_sidecar(run_dir: Path, position: int) -> dict | None:
         return None
 
 
+def _normalize_query(q: dict) -> dict:
+    """Coerce a query dict into the `{id, params}` shape.
+
+    Structured queries already carry `params`. Ad-hoc queries instead
+    carry free-form descriptive fields (`system`, `body`, `measurement`)
+    — fold those into `params` so the actor projection and the YAML dump
+    surface what actually ran rather than an empty mapping.
+    """
+    if isinstance(q.get("params"), dict):
+        return q
+    return {"id": q.get("id", "ad-hoc"), "params": {k: v for k, v in q.items() if k != "id"}}
+
+
 def load_queries_from_observations(run_dir: Path, position: int) -> list[dict]:
     """Read `queries[]` from `{position}*.observations.json` files.
 
@@ -114,7 +127,7 @@ def load_queries_from_observations(run_dir: Path, position: int) -> list[dict]:
             continue
         queries = payload.get("queries") or []
         if isinstance(queries, list):
-            out.extend(q for q in queries if isinstance(q, dict))
+            out.extend(_normalize_query(q) for q in queries if isinstance(q, dict))
     return out
 
 
@@ -211,7 +224,7 @@ def dump_actor_yaml(doc: dict) -> str:
         out.append("    queries:")
         for q in entry["queries"]:
             out.append(f"      - id: {q['id']}")
-            if q["params"]:
+            if q.get("params"):
                 params_inline = ", ".join(
                     f"{k}: {_yaml_scalar(v)}" for k, v in q["params"].items()
                 )
@@ -245,7 +258,7 @@ def dump_yaml(doc: dict) -> str:
         out.append("    queries:")
         for q in entry["queries"]:
             out.append(f"      - id: {q['id']}")
-            if q["params"]:
+            if q.get("params"):
                 params_inline = ", ".join(
                     f"{k}: {_yaml_scalar(v)}" for k, v in q["params"].items()
                 )
