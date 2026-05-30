@@ -52,9 +52,12 @@ from visualize_data import (
     tag_events_by_phase,
 )
 from visualize_judge import (
+    render_judge_actor_benign_section,
     render_judge_actor_section,
+    render_judge_benign_section,
     render_judge_defender_summary,
     render_judge_judge_section,
+    render_judge_oracle_benign_section,
     render_judge_oracle_section,
     render_judge_raw_bundle,
     render_judge_toc,
@@ -63,6 +66,7 @@ from visualize_primitives import (
     esc,
     fmt_duration,
     load_jsonl,
+    load_judge_benign_findings,
     load_judge_findings,
     parse_report,
     render_alert_block,
@@ -110,19 +114,30 @@ def render_header(case_id: str, n_events: int, n_tool_calls: int, cost: float, r
 # ---------------------------------------------------------------------------
 
 
-def render_judge_headline(run_dir: Path, judge: dict | None) -> str:
+def render_judge_headline(run_dir: Path, judge: dict | None, judge_benign: dict | None = None) -> str:
     report = parse_report(run_dir)
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
-    outcome = str((judge or {}).get("outcome", "—"))
-    n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
+    # Prefer the adversarial outcome (FN-hunt); fall back to the benign
+    # (FP-hunt) direction when that's the one that ran (malicious disposition).
+    if judge:
+        outcome = str(judge.get("outcome", "—"))
+        n_findings = len(judge.get("defender_findings") or [])
+        direction_sub = f"{n_findings} finding(s)"
+    elif judge_benign:
+        outcome = str(judge_benign.get("outcome", "—"))
+        n_findings = len(judge_benign.get("defender_findings") or [])
+        direction_sub = f"{n_findings} finding(s) · benign direction"
+    else:
+        outcome = "—"
+        direction_sub = "0 finding(s)"
     return f"""
 <section class="headline">
   <div class="tiles">
     <div class="tile tile-out out-{esc(outcome)}">
       <div class="tile-label">judge outcome</div>
       <div class="tile-value">{esc(outcome)}</div>
-      <div class="tile-sub">{n_findings} finding(s)</div>
+      <div class="tile-sub">{esc(direction_sub)}</div>
     </div>
     <div class="tile tile-disp disp-{esc(disposition)}">
       <div class="tile-label">defender disposition</div>
@@ -690,6 +705,8 @@ pre.story { background: var(--bg-3); }
 .finding-head .ftopic { color: var(--text-bright); font-weight: 500; font-size: 13px; }
 .finding-head .fanchor { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--text-dim); font-size: 11px; text-align: right; }
 .finding-body { white-space: pre-wrap; line-height: 1.6; color: var(--text); }
+.env-obs-crit, .env-obs-ents { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.env-obs-crit .key { text-transform: uppercase; letter-spacing: 0.4px; margin-right: 4px; }
 .citations { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .citation {
   background: var(--bg-4);
@@ -798,20 +815,27 @@ def render_judge_page(run_dir: Path) -> str:
     n_events, n_tool_calls, cost = _stats(events)
     judge = load_judge_findings(case_id)
     n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
+    judge_benign = load_judge_benign_findings(case_id)
+    n_benign_findings = (
+        len(judge_benign.get("defender_findings") or []) if judge_benign else None
+    )
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>judge eval — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, n_events, n_tool_calls, cost, run_dir, active="judge")}
-{render_judge_headline(run_dir, judge)}
+{render_judge_headline(run_dir, judge, judge_benign)}
 <div class="layout">
-  {render_judge_toc(n_findings)}
+  {render_judge_toc(n_findings, n_benign_findings)}
   <article class="content">
     {render_alert_block(run_dir, open_=True)}
     {render_judge_defender_summary(run_dir)}
     {render_judge_actor_section(case_id)}
     {render_judge_judge_section(judge)}
     {render_judge_oracle_section(case_id)}
+    {render_judge_actor_benign_section(case_id)}
+    {render_judge_benign_section(judge_benign)}
+    {render_judge_oracle_benign_section(case_id)}
     {render_judge_raw_bundle(case_id)}
   </article>
 </div>
