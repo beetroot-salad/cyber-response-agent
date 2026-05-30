@@ -535,12 +535,26 @@ def _run_batch_inner() -> int:
     return 0
 
 
+def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool:
+    """Whether a finding's disposition confidently confirms its direction.
+
+    The two learning directions confirm on opposite dispositions: an
+    adversarial finding (missed attack) is a confident false-negative only when
+    the defender's disposition was ``benign``; a benign finding (over-escalation)
+    is a confident false-positive only when the disposition was ``malicious``.
+    ``inconclusive`` and unknown dispositions confirm neither and are held.
+    """
+    if direction == "benign":
+        return disposition == "malicious"
+    return disposition == "benign"
+
+
 def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
     """Split the queue into (held, consumed_idempotent) before the agent runs.
 
-    held → no confident ground truth (inconclusive / unknown disposition);
-    stays in findings.jsonl. consumed_idempotent → already-committed
-    findings the agent shouldn't see again.
+    held → no confident ground truth for the finding's direction; stays in
+    findings.jsonl. consumed_idempotent → already-committed findings the agent
+    shouldn't see again.
     """
     existing_ids = existing_finding_ids()
     held: list[dict] = []
@@ -553,9 +567,12 @@ def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
             consumed_idempotent.append(rec)
             continue
         disp = disposition_for(entry["run_id"])
-        if disp != "benign":
+        direction = entry.get("direction", "adversarial")
+        if not _has_confident_ground_truth(direction, disp):
             rec = dict(entry)
-            rec["held_reason"] = f"no_ground_truth(disposition={disp!r})"
+            rec["held_reason"] = (
+                f"no_ground_truth(direction={direction!r}, disposition={disp!r})"
+            )
             held.append(rec)
     return held, consumed_idempotent
 

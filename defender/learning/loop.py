@@ -59,17 +59,38 @@ ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
 ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
 ACTOR_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".actor.lock"
 
+# Benign (false-positive) direction — environment-observation queue.
+ENVIRONMENT_OBSERVATIONS_FILE = PENDING_DIR / "environment_observations.jsonl"
+ENVIRONMENT_OBSERVATIONS_CONSUMED_FILE = (
+    PENDING_DIR / "environment_observations.consumed.jsonl"
+)
+ENVIRONMENT_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".environment.lock"
+
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
+JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
 PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
 
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
-DISPOSITION_RUN = {"benign", "inconclusive"}  # malicious skipped at MVP
+# Direction dispatch: the adversarial actor hunts false negatives on
+# closed/uncertain dispositions; the benign actor hunts false positives on
+# escalated/uncertain ones. ``inconclusive`` runs both.
+ADVERSARIAL_DISPOSITIONS = {"benign", "inconclusive"}
+BENIGN_DISPOSITIONS = {"malicious", "inconclusive"}
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
 
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
+# Benign judge outcomes mirror the adversarial enum: ``survived`` always means
+# "the defender failed to handle the story" — FN-risk adversarially, FP-risk here.
+BENIGN_OUTCOME_ENUM = {
+    "survived",
+    "refuted",
+    "undecidable",
+    "incoherent",
+    "skip-passthrough",
+}
 QUEUEABLE_FINDING_TYPES = {
     "lead-set",
     "lead-quality",
@@ -77,12 +98,17 @@ QUEUEABLE_FINDING_TYPES = {
     "observability",
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
+# Benign defender findings share the queueable types; ``disposition-confirmed``
+# is the FP-direction audit-only type (the adversarial ``detection-confirmed``
+# analog — a justified escalation, filtered out of the queued lessons).
+BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"disposition-confirmed"}
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
+BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
@@ -552,6 +578,48 @@ def invoke_judge(
     return out
 
 
+def invoke_judge_benign(
+    alert_path: Path,
+    investigation_path: Path,
+    actor_story_path: Path,
+    projected_telemetry_path: Path,
+    learning_run_dir: Path,
+) -> str:
+    """Run the false-positive-direction judge on the benign actor's story.
+
+    Same four-artifact contract as ``invoke_judge``; the prompt inverts the
+    outcome (a routine story that SURVIVES is the FP signal) and emits the
+    environment-observation stream alongside defender findings.
+    """
+    user = (
+        "<alert>\n"
+        f"{alert_path.read_text().rstrip()}\n"
+        "</alert>\n"
+        "<investigation>\n"
+        f"{investigation_path.read_text().rstrip()}\n"
+        "</investigation>\n"
+        "<actor_story>\n"
+        f"{actor_story_path.read_text().rstrip()}\n"
+        "</actor_story>\n"
+        "<projected_telemetry>\n"
+        f"{projected_telemetry_path.read_text().rstrip()}\n"
+        "</projected_telemetry>\n"
+    )
+    import uuid as _uuid
+    session_id = str(_uuid.uuid4())
+    _log(f"step=judge-benign session_id={session_id}")
+    try:
+        out = _run_claude(
+            JUDGE_BENIGN_PROMPT, user, model=BENIGN_JUDGE_MODEL, session_id=session_id
+        )
+    finally:
+        src = _transcript_path(session_id)
+        dst = learning_run_dir / "judge_benign_trace.jsonl"
+        if src.is_file():
+            shutil.copy2(src, dst)
+    return out
+
+
 def is_skip_story(actor_story: str) -> bool:
     for line in actor_story.splitlines():
         s = line.strip()
@@ -566,18 +634,24 @@ def is_skip_story(actor_story: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _outcome_keyword(outcome_value: Any) -> str:
+def _outcome_keyword_in(outcome_value: Any, enum: set[str]) -> str:
     if not isinstance(outcome_value, str):
         raise LoopError(f"judge `outcome` is not a string: {type(outcome_value)}")
     # Tolerate the model fusing the keyword with a rationale clause
     # ("survived. The defender's investigation…"): split on the first
     # whitespace or sentence-punctuation boundary, take the head token.
     first = re.split(r"[\s.,;:]", outcome_value.strip(), maxsplit=1)[0]
-    if first not in OUTCOME_ENUM:
-        raise LoopError(
-            f"judge outcome keyword {first!r} not in {sorted(OUTCOME_ENUM)}"
-        )
+    if first not in enum:
+        raise LoopError(f"judge outcome keyword {first!r} not in {sorted(enum)}")
     return first
+
+
+def _outcome_keyword(outcome_value: Any) -> str:
+    return _outcome_keyword_in(outcome_value, OUTCOME_ENUM)
+
+
+def _benign_outcome_keyword(outcome_value: Any) -> str:
+    return _outcome_keyword_in(outcome_value, BENIGN_OUTCOME_ENUM)
 
 
 _FENCE_RE = None  # filled lazily; tiny stdlib re import kept local to use site
@@ -742,6 +816,83 @@ def _validate_actor_observation(i: int, o: Any) -> None:
         )
 
 
+def validate_judge_benign_doc(doc: Any) -> dict[str, Any]:
+    """Validate the benign (FP-direction) judge document.
+
+    Mirrors ``validate_judge_doc`` against the benign outcome enum + finding
+    types, and adds the optional ``environment_observations`` stream that the
+    benign judge emits for the lessons-environment corpus.
+    """
+    if not isinstance(doc, dict):
+        raise LoopError("benign judge YAML did not parse to a mapping")
+    for key in ("outcome", "outcome_rationale", "defender_findings"):
+        if key not in doc:
+            raise LoopError(f"benign judge YAML missing required key: {key}")
+    if _benign_outcome_keyword(doc["outcome"]) != "skip-passthrough":
+        for key in ("encounter_analysis", "confidence"):
+            if key not in doc:
+                raise LoopError(f"benign judge YAML missing required key: {key}")
+    findings = doc["defender_findings"]
+    if not isinstance(findings, list):
+        raise LoopError("benign judge `defender_findings` is not a list")
+    for i, f in enumerate(findings):
+        _validate_benign_finding(i, f)
+    if "environment_observations" in doc:
+        obs = doc["environment_observations"]
+        if not isinstance(obs, list):
+            raise LoopError("benign judge `environment_observations` is not a list")
+        for i, o in enumerate(obs):
+            _validate_environment_observation(i, o)
+    return doc
+
+
+def _validate_benign_finding(i: int, f: Any) -> None:
+    if not isinstance(f, dict):
+        raise LoopError(f"benign finding[{i}] is not a mapping")
+    for k in ("type", "subject_anchor", "subject_topic", "finding", "citations"):
+        if k not in f:
+            raise LoopError(f"benign finding[{i}] missing key: {k}")
+    for k in ("subject_anchor", "subject_topic"):
+        v = f[k]
+        if not isinstance(v, str) or not v.strip():
+            raise LoopError(f"benign finding[{i}].{k} must be a non-empty string")
+    if f["type"] not in BENIGN_ALL_FINDING_TYPES:
+        raise LoopError(
+            f"benign finding[{i}].type={f['type']!r} not in "
+            f"{sorted(BENIGN_ALL_FINDING_TYPES)}"
+        )
+    if not isinstance(f["citations"], list):
+        raise LoopError(f"benign finding[{i}].citations is not a list")
+
+
+def _validate_environment_observation(i: int, o: Any) -> None:
+    if not isinstance(o, dict):
+        raise LoopError(f"environment_observations[{i}] is not a mapping")
+    for k in ("alert_rule_ids", "relevance_criteria", "fact"):
+        if k not in o:
+            raise LoopError(f"environment_observations[{i}] missing key: {k}")
+    rule_ids = o["alert_rule_ids"]
+    if not isinstance(rule_ids, list) or not rule_ids:
+        raise LoopError(
+            f"environment_observations[{i}].alert_rule_ids must be a non-empty "
+            "list (the retrieval anchor)"
+        )
+    for k in ("relevance_criteria", "fact"):
+        if not isinstance(o[k], str) or not o[k].strip():
+            raise LoopError(
+                f"environment_observations[{i}].{k} must be a non-empty string"
+            )
+    # ``entities`` is optional (a fact may apply regardless of entities), but
+    # when present each selector must carry type + class. The no-identity
+    # discipline is the curator's + forward-check's job, not this structural gate.
+    for sel in o.get("entities") or []:
+        if not isinstance(sel, dict) or "type" not in sel or "class" not in sel:
+            raise LoopError(
+                f"environment_observations[{i}].entities selectors must be "
+                "{type, class} mappings"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Step 5: Persistence
 # ---------------------------------------------------------------------------
@@ -755,33 +906,21 @@ PERSIST_COPY_FILES = (
 )
 
 
-def persist_run(
-    run_dir: Path,
-    learning_run_dir: Path,
-    actor_story: str,
-    judge_yaml_text: str | None,
-    normalized_disposition: str,
-    alert_rule_key: str,
-    oracle_yaml_text: str | None = None,
-) -> None:
-    """Persist the per-run artifacts.
-
-    `oracle_yaml_text` and `judge_yaml_text` are expected to be the
-    fence-stripped, validated YAML — i.e. the text that downstream
-    consumers will parse. Caller-side code fences (if any) belong in a
-    `*.raw.txt` companion, not in the canonical `.yaml`.
-    """
+def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
     for name in PERSIST_COPY_FILES:
         src = run_dir / name
         if not src.is_file():
             raise LoopError(f"missing source artifact for persist: {src}")
         shutil.copy2(src, learning_run_dir / name)
-    (learning_run_dir / "actor_story.md").write_text(actor_story)
-    if oracle_yaml_text is not None:
-        (learning_run_dir / "projected_telemetry.yaml").write_text(oracle_yaml_text)
-    if judge_yaml_text is not None:
-        (learning_run_dir / "judge_findings.yaml").write_text(judge_yaml_text)
+
+
+def _write_source_refs(
+    run_dir: Path,
+    learning_run_dir: Path,
+    normalized_disposition: str,
+    alert_rule_key: str,
+) -> None:
     source_refs = {
         "paths": {
             "source_run_dir": str(run_dir),
@@ -794,6 +933,60 @@ def persist_run(
         "alert_rule_key": alert_rule_key,
     }
     (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs))
+
+
+def persist_run(
+    run_dir: Path,
+    learning_run_dir: Path,
+    actor_story: str,
+    judge_yaml_text: str | None,
+    normalized_disposition: str,
+    alert_rule_key: str,
+    oracle_yaml_text: str | None = None,
+) -> None:
+    """Persist the adversarial-direction per-run artifacts.
+
+    `oracle_yaml_text` and `judge_yaml_text` are expected to be the
+    fence-stripped, validated YAML — i.e. the text that downstream
+    consumers will parse. Caller-side code fences (if any) belong in a
+    `*.raw.txt` companion, not in the canonical `.yaml`.
+    """
+    _copy_shared_inputs(run_dir, learning_run_dir)
+    (learning_run_dir / "actor_story.md").write_text(actor_story)
+    if oracle_yaml_text is not None:
+        (learning_run_dir / "projected_telemetry.yaml").write_text(oracle_yaml_text)
+    if judge_yaml_text is not None:
+        (learning_run_dir / "judge_findings.yaml").write_text(judge_yaml_text)
+    _write_source_refs(run_dir, learning_run_dir, normalized_disposition, alert_rule_key)
+
+
+def persist_run_benign(
+    run_dir: Path,
+    learning_run_dir: Path,
+    actor_benign_story: str,
+    judge_benign_yaml_text: str | None,
+    normalized_disposition: str,
+    alert_rule_key: str,
+    oracle_benign_yaml_text: str | None = None,
+) -> None:
+    """Persist the benign-direction artifacts under direction-suffixed names.
+
+    Shares the four input copies + source_refs with ``persist_run`` (an
+    ``inconclusive`` run that ran both directions writes them once each; the
+    copies are idempotent). The actor story, projection, and judge output use
+    ``*_benign`` names so the two directions never collide in one run dir.
+    """
+    _copy_shared_inputs(run_dir, learning_run_dir)
+    (learning_run_dir / "actor_benign_story.md").write_text(actor_benign_story)
+    if oracle_benign_yaml_text is not None:
+        (learning_run_dir / "projected_telemetry_benign.yaml").write_text(
+            oracle_benign_yaml_text
+        )
+    if judge_benign_yaml_text is not None:
+        (learning_run_dir / "judge_benign_findings.yaml").write_text(
+            judge_benign_yaml_text
+        )
+    _write_source_refs(run_dir, learning_run_dir, normalized_disposition, alert_rule_key)
 
 
 # ---------------------------------------------------------------------------
@@ -887,23 +1080,40 @@ def append_findings(
     run_id: str,
     alert_rule_key: str,
     learning_run_dir: Path,
+    *,
+    direction: str = "adversarial",
 ) -> int:
-    """Append non-detection-confirmed findings to the pending queue.
+    """Append queueable defender findings to the shared pending queue.
 
-    Returns the number of findings appended.
+    Both directions feed ``defender/learning/_pending/findings.jsonl`` →
+    ``defender/lessons/``. The audit-only finding type is filtered out
+    (``detection-confirmed`` adversarially, ``disposition-confirmed`` for the
+    benign FP direction). Each row is tagged with ``direction`` so the shared
+    curator (author.py) can apply the right ground-truth gate — a confident FN
+    needs a ``benign`` disposition, a confident FP needs ``malicious``.
+    Benign finding ids live in a ``benign/`` namespace so the two directions
+    never collide on the same ``run_id``. Returns the number appended.
     """
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    outcome = _outcome_keyword(judge_doc["outcome"])
+    if direction == "benign":
+        outcome = _benign_outcome_keyword(judge_doc["outcome"])
+        audit_only_type = "disposition-confirmed"
+        namespace = "benign/"
+    else:
+        outcome = _outcome_keyword(judge_doc["outcome"])
+        audit_only_type = "detection-confirmed"
+        namespace = ""
     appended = 0
     with PENDING_FILE.open("a") as fh:
         for n, f in enumerate(judge_doc["defender_findings"]):
-            if f["type"] == "detection-confirmed":
+            if f["type"] == audit_only_type:
                 continue
             entry = {
                 "schema_version": 1,
-                "finding_id": f"{run_id}/{n}",
+                "finding_id": f"{run_id}/{namespace}{n}",
                 "run_id": run_id,
                 "alert_rule_key": alert_rule_key,
+                "direction": direction,
                 "type": f["type"],
                 "subject_anchor": f["subject_anchor"],
                 "subject_topic": f["subject_topic"],
@@ -970,6 +1180,65 @@ def append_actor_observations(
         _release_actor_observations_lock(lock_fh)
 
 
+def _acquire_environment_observations_lock() -> Any:
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    fh = ENVIRONMENT_OBSERVATIONS_LOCK_FILE.open("a+")
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    return fh
+
+
+def append_environment_observations(
+    judge_benign_doc: dict,
+    run_id: str,
+    alert_rule_key: str,
+    learning_run_dir: Path,
+) -> int:
+    """Append benign-judge ``environment_observations`` to the env queue.
+
+    The FP-direction mirror of ``append_actor_observations``: one row per
+    observation, deduped on ``observation_id`` against the active + consumed
+    env queues. Rows carry the retrieval keys the curator and
+    ``verify_forward_env.py`` read directly (``alert_rule_ids``, ``entities``,
+    ``subject``, ``relevance_criteria``, ``fact``). ``skip-passthrough`` emits
+    nothing (defensive — the judge emits no observations on SKIP).
+    """
+    outcome = _benign_outcome_keyword(judge_benign_doc["outcome"])
+    if outcome == "skip-passthrough":
+        return 0
+    observations = judge_benign_doc.get("environment_observations") or []
+    if not observations:
+        return 0
+    lock_fh = _acquire_environment_observations_lock()
+    try:
+        existing = _load_jsonl_ids(ENVIRONMENT_OBSERVATIONS_FILE, "observation_id")
+        existing |= _load_jsonl_ids(
+            ENVIRONMENT_OBSERVATIONS_CONSUMED_FILE, "observation_id"
+        )
+        src = _source_run_dir(learning_run_dir)
+        rows: list[dict] = []
+        for i, obs in enumerate(observations):
+            obs_id = f"{run_id}/{i}"
+            if obs_id in existing:
+                continue
+            rows.append({
+                "observation_id": obs_id,
+                "run_id": run_id,
+                "observation_index": i,
+                "alert_rule_key": alert_rule_key,
+                "subject": obs.get("subject"),
+                "alert_rule_ids": obs["alert_rule_ids"],
+                "entities": obs.get("entities") or [],
+                "relevance_criteria": obs["relevance_criteria"],
+                "fact": obs["fact"],
+                "citations": obs.get("citations") or [],
+                "judge_outcome": outcome,
+                "source_run_dir": src,
+            })
+        return _append_jsonl(ENVIRONMENT_OBSERVATIONS_FILE, rows)
+    finally:
+        _release_actor_observations_lock(lock_fh)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -1023,6 +1292,193 @@ def _invoke_lead_author(run_dir: Path) -> None:
         _log(f"lead-author crashed: {e!r} (continuing)")
 
 
+def _directions_for(disposition: str) -> list[str]:
+    """Which learning directions a disposition triggers, in run order.
+
+    ``benign`` → adversarial only (hunt the missed attack); ``malicious`` →
+    benign only (hunt the over-escalation); ``inconclusive`` → both.
+    """
+    directions: list[str] = []
+    if disposition in ADVERSARIAL_DISPOSITIONS:
+        directions.append("adversarial")
+    if disposition in BENIGN_DISPOSITIONS:
+        directions.append("benign")
+    return directions
+
+
+def _run_oracle(
+    run_dir: Path,
+    learning_run_dir: Path,
+    actor_story_path: Path,
+    out_name: str,
+) -> Path:
+    """Project the story's telemetry footprint; write + validate the YAML.
+
+    Shared by both directions — only the actor story and output filename
+    differ. Returns the path to the written ``projected_telemetry`` YAML.
+    """
+    lead_sequence_path = run_dir / "lead_sequence.yaml"
+    lead_sequence_text = lead_sequence_path.read_text()
+    exemplar_bundle = assemble_exemplar_bundle(run_dir, lead_sequence_text)
+    oracle_yaml_text = invoke_oracle(
+        run_dir / "alert.json", actor_story_path, lead_sequence_path, exemplar_bundle
+    )
+    expected_positions = [
+        e.get("position")
+        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
+    ]
+    stripped = strip_yaml_fence(oracle_yaml_text)
+    raw_path = learning_run_dir / (Path(out_name).stem + ".raw.txt")
+    try:
+        validate_oracle_doc(yaml.safe_load(stripped), expected_positions)
+    except (yaml.YAMLError, LoopError) as e:
+        raw_path.write_text(oracle_yaml_text)
+        raise LoopError(f"oracle YAML invalid: {e}") from e
+    out_path = learning_run_dir / out_name
+    out_path.write_text(stripped)
+    if stripped != oracle_yaml_text:
+        raw_path.write_text(oracle_yaml_text)
+    return out_path
+
+
+def _run_adversarial(
+    run_dir: Path,
+    learning_run_dir: Path,
+    disposition: str,
+    alert_rule_key: str,
+    run_id: str,
+    held_out: bool,
+) -> bool:
+    """Adversarial direction: actor → oracle → judge → persist → append.
+
+    Returns True if findings/observations were appended (i.e. the direction
+    produced queue rows worth triggering the curators for).
+    """
+    _log("step=project (adversarial)")
+    actor_input_path = learning_run_dir / "actor_input.yaml"
+    project_actor_input(run_dir, actor_input_path)
+
+    _log("step=actor")
+    actor_story = invoke_actor(run_dir / "alert.json", actor_input_path, learning_run_dir)
+    actor_story_path = learning_run_dir / "actor_story.md"
+    actor_story_path.write_text(actor_story)
+
+    if is_skip_story(actor_story):
+        _log("actor emitted SKIP — persisting, no findings")
+        persist_run(
+            run_dir, learning_run_dir, actor_story,
+            judge_yaml_text=None,
+            normalized_disposition=disposition, alert_rule_key=alert_rule_key,
+        )
+        return False
+
+    _log("step=oracle")
+    projected_path = _run_oracle(
+        run_dir, learning_run_dir, actor_story_path, "projected_telemetry.yaml"
+    )
+
+    judge_yaml_text = invoke_judge(
+        run_dir / "alert.json", run_dir / "investigation.md",
+        actor_story_path, projected_path, learning_run_dir,
+    )
+    judge_stripped = strip_yaml_fence(judge_yaml_text)
+    try:
+        judge_doc = validate_judge_doc(yaml.safe_load(judge_stripped))
+    except (yaml.YAMLError, LoopError) as e:
+        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
+        raise LoopError(f"judge YAML invalid: {e}") from e
+    if judge_stripped != judge_yaml_text:
+        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
+
+    _log("step=persist (adversarial)")
+    persist_run(
+        run_dir, learning_run_dir, actor_story, judge_stripped,
+        disposition, alert_rule_key, oracle_yaml_text=projected_path.read_text(),
+    )
+
+    if held_out:
+        _log("held_out=true — adversarial appends suppressed")
+        return False
+
+    n_f = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)
+    n_o = append_actor_observations(judge_doc, run_id, alert_rule_key, learning_run_dir)
+    _log(f"appended {n_f} finding(s), {n_o} actor observation(s)")
+    return True
+
+
+def _run_benign(
+    run_dir: Path,
+    learning_run_dir: Path,
+    disposition: str,
+    alert_rule_key: str,
+    run_id: str,
+    held_out: bool,
+) -> bool:
+    """Benign (FP) direction: actor → oracle → benign judge → persist → append.
+
+    Mirrors ``_run_adversarial``; the benign actor reconstructs the routine
+    operation (no MITRE menu, retrieves environment lessons by the case's
+    prologue entities) and the benign judge inverts the outcome. Returns True
+    if queue rows were appended.
+    """
+    _log("step=case-entities (benign)")
+    case_entities = extract_case_entities(run_dir / "investigation.md")
+
+    _log("step=actor-benign")
+    actor_story = invoke_actor_benign(
+        run_dir / "alert.json", case_entities, learning_run_dir
+    )
+    actor_story_path = learning_run_dir / "actor_benign_story.md"
+    actor_story_path.write_text(actor_story)
+
+    if is_skip_story(actor_story):
+        _log("benign actor emitted SKIP — persisting, no findings")
+        persist_run_benign(
+            run_dir, learning_run_dir, actor_story,
+            judge_benign_yaml_text=None,
+            normalized_disposition=disposition, alert_rule_key=alert_rule_key,
+        )
+        return False
+
+    _log("step=oracle (benign)")
+    projected_path = _run_oracle(
+        run_dir, learning_run_dir, actor_story_path,
+        "projected_telemetry_benign.yaml",
+    )
+
+    judge_yaml_text = invoke_judge_benign(
+        run_dir / "alert.json", run_dir / "investigation.md",
+        actor_story_path, projected_path, learning_run_dir,
+    )
+    judge_stripped = strip_yaml_fence(judge_yaml_text)
+    try:
+        judge_doc = validate_judge_benign_doc(yaml.safe_load(judge_stripped))
+    except (yaml.YAMLError, LoopError) as e:
+        (learning_run_dir / "judge_benign_findings.raw.txt").write_text(judge_yaml_text)
+        raise LoopError(f"benign judge YAML invalid: {e}") from e
+    if judge_stripped != judge_yaml_text:
+        (learning_run_dir / "judge_benign_findings.raw.txt").write_text(judge_yaml_text)
+
+    _log("step=persist (benign)")
+    persist_run_benign(
+        run_dir, learning_run_dir, actor_story, judge_stripped,
+        disposition, alert_rule_key, oracle_benign_yaml_text=projected_path.read_text(),
+    )
+
+    if held_out:
+        _log("held_out=true — benign appends suppressed")
+        return False
+
+    n_f = append_findings(
+        judge_doc, run_id, alert_rule_key, learning_run_dir, direction="benign"
+    )
+    n_e = append_environment_observations(
+        judge_doc, run_id, alert_rule_key, learning_run_dir
+    )
+    _log(f"appended {n_f} finding(s), {n_e} environment observation(s)")
+    return True
+
+
 def run_one(run_dir: Path) -> int:
     run_id = run_dir.name
 
@@ -1032,126 +1488,63 @@ def run_one(run_dir: Path) -> int:
 
     _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(run_dir / "report.md")
-
-    if disposition not in DISPOSITION_RUN:
-        _log(f"disposition={disposition} — skipping (MVP only runs {sorted(DISPOSITION_RUN)})")
+    directions = _directions_for(disposition)
+    if not directions:
+        _log(f"disposition={disposition} — no learning direction; skipping")
         return 0
 
     alert = json.loads((run_dir / "alert.json").read_text())
     alert_rule_key = derive_alert_rule_key(alert)
     learning_run_dir = RUNS_DIR / run_id
     learning_run_dir.mkdir(parents=True, exist_ok=True)
-
-    _log(f"step=project disposition={disposition} alert_rule_key={alert_rule_key}")
-    actor_input_path = learning_run_dir / "actor_input.yaml"
-    project_actor_input(run_dir, actor_input_path)
-
-    _log("step=actor")
-    actor_story = invoke_actor(
-        run_dir / "alert.json", actor_input_path, learning_run_dir
-    )
-    actor_story_path = learning_run_dir / "actor_story.md"
-    actor_story_path.write_text(actor_story)
-
-    if is_skip_story(actor_story):
-        _log("actor emitted SKIP — persisting and exiting with no findings")
-        persist_run(
-            run_dir,
-            learning_run_dir,
-            actor_story,
-            judge_yaml_text=None,
-            normalized_disposition=disposition,
-            alert_rule_key=alert_rule_key,
-        )
-        return 0
-
-    _log("step=oracle")
-    lead_sequence_path = run_dir / "lead_sequence.yaml"
-    lead_sequence_text = lead_sequence_path.read_text()
-    exemplar_bundle = assemble_exemplar_bundle(run_dir, lead_sequence_text)
-    oracle_yaml_text = invoke_oracle(
-        run_dir / "alert.json",
-        actor_story_path,
-        lead_sequence_path,
-        exemplar_bundle,
-    )
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
-    ]
-    oracle_yaml_stripped = strip_yaml_fence(oracle_yaml_text)
-    try:
-        oracle_doc = yaml.safe_load(oracle_yaml_stripped)
-        validate_oracle_doc(oracle_doc, expected_positions)
-    except (yaml.YAMLError, LoopError) as e:
-        (learning_run_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml_text)
-        raise LoopError(f"oracle YAML invalid: {e}") from e
-    projected_telemetry_path = learning_run_dir / "projected_telemetry.yaml"
-    projected_telemetry_path.write_text(oracle_yaml_stripped)
-    if oracle_yaml_stripped != oracle_yaml_text:
-        (learning_run_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml_text)
-
-    judge_yaml_text = invoke_judge(
-        run_dir / "alert.json",
-        run_dir / "investigation.md",
-        actor_story_path,
-        projected_telemetry_path,
-        learning_run_dir,
-    )
-    judge_yaml_stripped = strip_yaml_fence(judge_yaml_text)
-    try:
-        judge_doc = yaml.safe_load(judge_yaml_stripped)
-        judge_doc = validate_judge_doc(judge_doc)
-    except (yaml.YAMLError, LoopError) as e:
-        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
-        raise LoopError(f"judge YAML invalid: {e}") from e
-    if judge_yaml_stripped != judge_yaml_text:
-        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
-
-    _log("step=persist")
-    persist_run(
-        run_dir,
-        learning_run_dir,
-        actor_story,
-        judge_yaml_stripped,
-        disposition,
-        alert_rule_key,
-        oracle_yaml_text=oracle_yaml_stripped,
-    )
-
-    if is_held_out(run_dir):
-        _log(
-            "step=append held_out=true — defender_findings and "
-            "actor_observations suppressed from _pending/ queues"
-        )
-        return 0
-
-    _log("step=append")
-    n_appended = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)
-    n_obs = append_actor_observations(
-        judge_doc, run_id, alert_rule_key, learning_run_dir
-    )
+    held_out = is_held_out(run_dir)
     _log(
-        f"appended {n_appended} finding(s) to {PENDING_FILE}, "
-        f"{n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}"
+        f"step=dispatch disposition={disposition} directions={directions} "
+        f"alert_rule_key={alert_rule_key} held_out={held_out}"
     )
 
-    _maybe_trigger_author(
-        pending_file=PENDING_FILE,
-        threshold_env="LEARNING_AUTHOR_THRESHOLD",
-        module_name="author",
-        label="author",
-        log_prefix="step=author",
-        pending_label="pending",
-    )
-    _maybe_trigger_author(
-        pending_file=ACTOR_OBSERVATIONS_FILE,
-        threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
-        module_name="author_actor",
-        label="author_actor",
-        log_prefix="step=author_actor",
-        pending_label="actor_pending",
-    )
+    ran_adversarial = False
+    ran_benign = False
+    for direction in directions:
+        if direction == "adversarial":
+            ran_adversarial = _run_adversarial(
+                run_dir, learning_run_dir, disposition, alert_rule_key, run_id, held_out
+            )
+        else:
+            ran_benign = _run_benign(
+                run_dir, learning_run_dir, disposition, alert_rule_key, run_id, held_out
+            )
+
+    # Curator triggers (threshold-gated). The shared defender-findings curator
+    # fires if either direction appended; the per-corpus actor/environment
+    # curators fire only for the direction that produced their queue.
+    if ran_adversarial or ran_benign:
+        _maybe_trigger_author(
+            pending_file=PENDING_FILE,
+            threshold_env="LEARNING_AUTHOR_THRESHOLD",
+            module_name="author",
+            label="author",
+            log_prefix="step=author",
+            pending_label="pending",
+        )
+    if ran_adversarial:
+        _maybe_trigger_author(
+            pending_file=ACTOR_OBSERVATIONS_FILE,
+            threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
+            module_name="author_actor",
+            label="author_actor",
+            log_prefix="step=author_actor",
+            pending_label="actor_pending",
+        )
+    if ran_benign:
+        _maybe_trigger_author(
+            pending_file=ENVIRONMENT_OBSERVATIONS_FILE,
+            threshold_env="LEARNING_AUTHOR_ENV_THRESHOLD",
+            module_name="author_actor_benign",
+            label="author_actor_benign",
+            log_prefix="step=author_actor_benign",
+            pending_label="env_pending",
+        )
 
     return 0
 
