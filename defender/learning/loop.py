@@ -1217,12 +1217,20 @@ def append_environment_observations(
             obs_id = f"{run_id}/{i}"
             if obs_id in existing:
                 continue
-            rows.append({
+            row = {
                 "observation_id": obs_id,
                 "run_id": run_id,
                 "observation_index": i,
                 "alert_rule_key": alert_rule_key,
-                "subject": obs.get("subject"),
+            }
+            # The judge omits `subject` for observations not about one named
+            # referent. Carry the key only when it supplied a real subject — a
+            # `null` subject would let the environment curator fold subjectless
+            # facts together or write `subject: null` into the frontmatter.
+            subject = obs.get("subject")
+            if subject:
+                row["subject"] = subject
+            row.update({
                 "alert_rule_ids": _anchor_with_case_key(
                     obs["alert_rule_ids"], alert_rule_key
                 ),
@@ -1233,6 +1241,7 @@ def append_environment_observations(
                 "judge_outcome": outcome,
                 "source_run_dir": src,
             })
+            rows.append(row)
         return _append_jsonl(ENVIRONMENT_OBSERVATIONS_FILE, rows)
     finally:
         _release_observations_lock(lock_fh)
