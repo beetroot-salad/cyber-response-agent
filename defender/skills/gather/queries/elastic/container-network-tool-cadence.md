@@ -1,6 +1,6 @@
 ---
 id: elastic.container-network-tool-cadence
-status: draft
+status: established
 ---
 
 ## Goal
@@ -18,6 +18,7 @@ to distinguish automated health-check probes from reconnaissance activity.
 - distinct command lines executed (target hosts, ports, flags)
 - whether executions cluster temporally or distribute evenly
 - evidence of a repeating schedule (e.g., every 30 minutes, daily cron)
+- distribution of execution types by behavioral mode (TCP probe, STDIN/STDOUT redirect, UDP, file-copy) — nc/socat/nmap appear in each; count each category separately
 
 ## Query
 
