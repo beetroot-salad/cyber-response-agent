@@ -131,10 +131,79 @@ def load_queries_from_observations(run_dir: Path, position: int) -> list[dict]:
     return out
 
 
+def materialize_from_executed_queries(run_dir: Path) -> None:
+    """Turn the wrapper's deterministic log into the canonical gather_raw
+    artifacts the rest of the pipeline already reads.
+
+    ``gather_exec.py`` appends one record per executed query to
+    ``executed_queries.jsonl`` (lead = dispatch position; faithful
+    ``query_id``/``params`` from argv; raw payload at
+    ``gather_raw/{lead}/{seq}.json``). For each lead this writes the
+    canonical ``gather_raw/{lead}{suffix}.json`` (copied from the wrapper's
+    payload) + ``{lead}{suffix}.observations.json`` (faithful queries[] +
+    structural status/digest) — the shape ``load_queries_from_observations``
+    and ``lead_author`` already consume. The log is authoritative, so a
+    lead present in the log overwrites any stale model-written sidecar; a
+    lead absent from the log (e.g. elastic still on the redirect path) is
+    left untouched.
+    """
+    from collections import defaultdict
+
+    log = run_dir / "executed_queries.jsonl"
+    if not log.is_file():
+        return
+    gather_dir = run_dir / "gather_raw"
+    gather_dir.mkdir(parents=True, exist_ok=True)
+
+    by_lead: dict[str, list[dict]] = defaultdict(list)
+    for line in log.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict) and rec.get("lead") is not None:
+            by_lead[str(rec["lead"])].append(rec)
+
+    for lead, recs in by_lead.items():
+        recs.sort(key=lambda r: r.get("seq", 0))
+        is_multi = len(recs) > 1
+        for idx, rec in enumerate(recs):
+            suffix = chr(ord("a") + idx) if is_multi else ""
+            canon_payload = gather_dir / f"{lead}{suffix}.json"
+            canon_obs = gather_dir / f"{lead}{suffix}.observations.json"
+
+            src = run_dir / str(rec.get("payload_path") or "")
+            if src.is_file():
+                try:
+                    canon_payload.write_bytes(src.read_bytes())
+                except OSError:
+                    pass
+
+            params = dict(rec.get("params") or {})
+            if rec.get("body") is not None:
+                params.setdefault("body", rec["body"])
+            obs = {
+                "payload_status": rec.get("payload_status") or "ok",
+                "payload_digest": rec.get("payload_digest") or "",
+                "queries": [{"id": rec.get("query_id") or "unknown", "params": params}],
+            }
+            try:
+                canon_obs.write_text(json.dumps(obs, indent=2))
+            except OSError:
+                pass
+
+
 def project(run_dir: Path) -> dict:
     inv = run_dir / "investigation.md"
     if not inv.is_file():
         sys.exit(f"investigation.md not found in {run_dir}")
+
+    # Deterministic capture (gather_exec.py) is the source of truth; render
+    # its log into the canonical gather_raw artifacts before reading them.
+    materialize_from_executed_queries(run_dir)
 
     rows = parse_l_rows(inv.read_text())
     if not rows:

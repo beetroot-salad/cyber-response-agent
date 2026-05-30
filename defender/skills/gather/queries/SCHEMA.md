@@ -75,20 +75,18 @@ self-contained.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
-A dispatch at sequence `position` typically runs one query and persists raw
-to `{run_dir}/gather_raw/{position}.json`. When the lead requires more than
-one query at the same position (composition leads, foreground+baseline,
-multi-system comparisons), suffix each query's position with a single
-lowercase letter so the run dir stays unambiguous:
+Gather runs each query through `gather_exec.py --run-dir R --lead {position}`
+(see `defender/skills/gather/SKILL.md` §3). The wrapper persists raw output
+to `{run_dir}/gather_raw/{lead}/{seq}.json` and appends a faithful record to
+`executed_queries.jsonl`; gather neither redirects stdout nor names files.
+The `lead_sequence` projection renders the wrapper's per-lead records into the
+canonical artifacts consumers read — single-query at `gather_raw/{position}.json`,
+multi-query suffixed `{position}{a..z}.json`:
 
 - `gather_raw/0.json` — single-query dispatch at position 0
 - `gather_raw/0a.json`, `gather_raw/0b.json`, `gather_raw/0c.json` — three
   queries at position 0
 - `gather_raw/1.json` — single-query dispatch at position 1
-
-System CLIs accept `--position <pos>` (in addition to `--run-dir`) and write
-the file themselves; gather does not redirect stdout. The `lead_sequence`
-projection groups files back under one `position` regardless of suffix.
 
 ## What is *not* a template
 
