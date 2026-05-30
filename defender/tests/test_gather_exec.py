@@ -94,7 +94,7 @@ def test_main_writes_payload_record_and_passes_through(tmp_path, capsys):
     assert payload.is_file()
     assert json.loads(payload.read_text())["name"] == "web-1"
 
-    rows = [json.loads(l) for l in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
+    rows = [json.loads(ln) for ln in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
     assert len(rows) == 1
     r = rows[0]
     assert r["lead"] == "l-003" and r["seq"] == 0
@@ -113,7 +113,7 @@ def test_main_per_lead_seq_increments(tmp_path):
     base = ["--run-dir", str(run_dir), "--lead", "l-002", "--", sys.executable, str(cli)]
     ge.main(base + ["proc-tree", "db-1"])
     ge.main(base + ["passwd", "db-1"])
-    rows = [json.loads(l) for l in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
+    rows = [json.loads(ln) for ln in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
     assert [r["seq"] for r in rows] == [0, 1]
     assert (run_dir / "gather_raw" / "l-002" / "0.json").is_file()
     assert (run_dir / "gather_raw" / "l-002" / "1.json").is_file()
