@@ -1,39 +1,11 @@
 #!/usr/bin/env python3
 """Retrieve environment lessons relevant to a case, by classification.
 
-Cheap discovery primitive for the benign (ops-teamer) actor: prints one
-`<path>\\t<relevance_criteria>` line per lesson that applies to the case,
-so the actor scans descriptions before deciding which files to Read.
+Discovery primitive for the benign (ops-teamer) actor — see ``--help`` for
+the retrieval model, when/how to use it, and examples.
 
-Retrieval is **classification-first**. The caller passes the case's
-classified entities (invlang `type:class` tokens from the prologue) and
-the alert rule id(s); a lesson applies when every constraint it *declares*
-is satisfied by the case:
-
-  * `entities:` — a conjunctive list of invlang `{type, class}` selectors.
-    Each selector must be satisfied by some case entity (same `type`, and
-    a `class` slot-match). Class match is slot-wise on `/`: a selector slot
-    of `*` matches anything, and a selector may name fewer slots than the
-    case entity (it only constrains the slots it names). So selector
-    `service-account/*` matches case `service-account/known-corp`, and
-    `web-server` matches `web-server/internal/container`.
-  * `alert_rule_ids:` — if the lesson names rule ids, the case rule must be
-    among them. A lesson with no rule ids applies regardless of rule.
-
-A lesson that declares no `entities` applies regardless of entities (e.g.
-a pure rule-FP lesson). This is a NO PERSISTENT INDEX scan — fine at the
-current corpus scale; revisit (duckdb / a built yaml index) when the
-corpus is large enough that a per-call directory scan hurts.
-
-Usage:
-    lessons_env_retrieve.py                                  # whole corpus (live only)
-    lessons_env_retrieve.py --entities identity:service-account/known-corp,socket:ssh \\
-                            --alert-rule-ids v2-falco-suspicious-network-tool
-    lessons_env_retrieve.py --subject svc.monitoring
-    lessons_env_retrieve.py --include-stale                  # author-only
-
-Lessons with `status: stale` are hidden by default; the runtime actor must
-never see stale claims. `--corpus DIR` overrides the corpus location.
+A plain corpus scan (NO PERSISTENT INDEX) — fine at the current scale;
+revisit (duckdb / a built index) when a per-call directory scan hurts.
 """
 from __future__ import annotations
 
@@ -149,12 +121,62 @@ def _lesson_applies(
     return True
 
 
+_HELP_DESCRIPTION = """\
+Retrieve the environment lessons relevant to a case, by classification.
+
+The benign (ops-teamer) actor runs this once, before constructing a benign
+story, to pull the standing deployment facts that ground it — what a senior
+engineer checks in the runbook.
+
+Retrieval model: --alert-rule-ids is the ANCHOR (always present,
+discriminating); --entities REFINE. A lesson applies when every constraint
+it declares is satisfied by the case:
+  * entities — conjunctive invlang {type,class} selectors; each must be met
+    by some case entity. Class match is slot-wise on '/': a selector slot of
+    '*' matches anything, and a selector with fewer slots matches more
+    ('web-server' matches 'web-server/internal/container').
+  * rule ids — if the lesson names rule ids, the case rule must be among
+    them; a lesson with no rule ids applies regardless of rule.
+A lesson that declares no entities applies regardless of entities."""
+
+_HELP_EPILOG = """\
+when:
+  Run once before writing the story. Anchor on the alert's rule id; add the
+  case entities to narrow the match. No output = nothing matched: reason from
+  the alert and general operations knowledge.
+
+entities:
+  Pass only what the prologue actually classifies — process, socket, file,
+  credential, compute. Do NOT pass an identity unless the alert names a
+  principal: in a false positive the investigation never grounded the
+  identity, so it is not an observable selector.
+
+output:
+  One <path>\\t<relevance_criteria> line per matching lesson. Scan the
+  criteria, then Read the files that fit. Stale lessons are hidden by default.
+
+examples:
+  # anchor on the rule, refine with the case's observable entities:
+  lessons_env_retrieve.py --alert-rule-ids v2-falco-suspicious-network-tool --entities process:nc,socket:tcp
+  # rule-only (no entity refinement):
+  lessons_env_retrieve.py --alert-rule-ids v2-off-hours-sudo
+  # by subject (the fold key) — e.g. to find an existing lesson to update:
+  lessons_env_retrieve.py --subject svc.monitoring
+  # whole corpus (live only):
+  lessons_env_retrieve.py"""
+
+
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--entities", help="Case entities as comma-separated invlang type:class tokens")
-    ap.add_argument("--alert-rule-ids", help="Comma-separated SIEM rule IDs for the case; OR within the list")
-    ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key)")
-    ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only)")
+    ap = argparse.ArgumentParser(
+        prog="lessons_env_retrieve.py",
+        description=_HELP_DESCRIPTION,
+        epilog=_HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--entities", help="Case entities (prologue-observable) as comma-separated invlang type:class tokens; refine the rule-anchored match")
+    ap.add_argument("--alert-rule-ids", help="Alert rule id(s) for the case — the retrieval anchor; comma-separated, OR within the list")
+    ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key / fold key)")
+    ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only; the runtime actor must never see stale claims)")
     ap.add_argument("--corpus", help="Corpus directory (default: defender/lessons-environment)")
     ns = ap.parse_args(argv[1:])
 

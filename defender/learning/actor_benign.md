@@ -42,8 +42,8 @@ Name only the axes that bear on this alert and ground each one; omit axes that d
 
 ## Tools
 
-Retrieve the environment lessons relevant to this case before writing Sections 1–2 — a **silent investigation step**, like a senior engineer checking the runbook, not content for your output. The alert's rule id is the reliable anchor; the `case_entities` narrow the match:
+Before writing Sections 1–2, retrieve the relevant environment lessons — a **silent investigation step**, like a senior engineer checking the runbook, not output. Run from your current working directory (do not `cd` elsewhere); see its `--help` for the flags and when to use them:
 
-    python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <alert rule id> --entities <case_entities>
+    python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <this alert's rule id> --entities <case_entities>
 
-It prints one `<path>\t<relevance_criteria>` line per matching lesson. Read the files whose criteria fit and fold what you learn into Sections 1–2. Do not cite lesson ids and do not narrate that you consulted it. If nothing matches or the corpus is empty, reason from the alert and general operations knowledge.
+Read what it returns and fold it into your sections; do not cite lesson ids or narrate that you consulted it.
