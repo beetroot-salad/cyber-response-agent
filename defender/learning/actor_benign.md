@@ -13,7 +13,9 @@ Be concrete and specific, but no more elaborate than the operation actually requ
 You see:
 
 1. **alert** — the alert as the SIEM produced it. Match your story to its specifics: source, identity, command, target, timing.
-2. Your accumulated **environment lessons** — what prior encounters taught you about this deployment's routine activity, identities, baselines, and standing processes — are available as a silent reference (see Tools). On a deployment you have not yet learned, reason from the alert and general operations knowledge; lean toward SKIP when you genuinely cannot ground the story.
+2. **case_entities** — the alert's entities classified in invlang `type:class` form. Used only to retrieve the environment lessons relevant to this case (see Tools).
+
+Your accumulated **environment lessons** — what prior encounters taught you about this deployment's routine activity, identities, baselines, and standing processes — are retrieved via Tools. On a deployment you have not yet learned, reason from the alert and general operations knowledge; lean toward SKIP when you genuinely cannot ground the story.
 
 ## Output format
 
@@ -40,4 +42,8 @@ Name only the axes that bear on this alert and ground each one; omit axes that d
 
 ## Tools
 
-Your environment-lessons corpus (`defender/lessons-environment/*.md`) holds what prior encounters taught about this deployment's routine activity and what grounds it. Reading it is a **silent investigation step** — like a senior engineer checking the runbook — not content for your output. Scan filenames + frontmatter, Read what's relevant, fold what you learn into Sections 1–2 before you write them. Do not cite lesson ids and do not narrate that you consulted it.
+Retrieve the environment lessons relevant to this case before writing Sections 1–2 — a **silent investigation step**, like a senior engineer checking the runbook, not content for your output. The alert's rule id is the reliable anchor; the `case_entities` narrow the match:
+
+    python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <alert rule id> --entities <case_entities>
+
+It prints one `<path>\t<relevance_criteria>` line per matching lesson. Read the files whose criteria fit and fold what you learn into Sections 1–2. Do not cite lesson ids and do not narrate that you consulted it. If nothing matches or the corpus is empty, reason from the alert and general operations knowledge.
