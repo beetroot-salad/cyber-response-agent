@@ -205,7 +205,7 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
         f"verify_forward_command: {verifier_py} defender/learning/verify_forward.py "
-        f"<lesson_path> <run_id>\n"
+        f"--direction <direction> <lesson_path> <run_id>\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )

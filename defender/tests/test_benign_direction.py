@@ -14,6 +14,7 @@ sys.path.insert(0, str(LEARNING_SRC))
 
 import author  # type: ignore[import-not-found]
 import loop  # type: ignore[import-not-found]
+import verify_forward  # type: ignore[import-not-found]
 
 
 # --------------------------------------------------------------------------
@@ -197,3 +198,47 @@ def test_ground_truth_gate_direction_aware() -> None:
     assert not author._has_confident_ground_truth("adversarial", "inconclusive")
     assert not author._has_confident_ground_truth("benign", "inconclusive")
     assert not author._has_confident_ground_truth("benign", None)
+
+
+def test_verifier_expected_disposition_direction_aware() -> None:
+    # Adversarial lessons must PRESERVE the recorded (benign) call — pass it
+    # through. Benign (FP) lessons exist to drive the agent OFF the recorded
+    # `malicious` over-escalation toward `benign`, so the verifier must target
+    # `benign`, not the recorded malicious (else every FP lesson is held BAD).
+    assert verify_forward.expected_disposition("adversarial", "benign") == "benign"
+    assert verify_forward.expected_disposition("benign", "malicious") == "benign"
+    # Direction, not the recorded value, decides the benign target.
+    assert verify_forward.expected_disposition("benign", "inconclusive") == "benign"
+
+
+# --------------------------------------------------------------------------
+# extract_case_entities — prologue (:V) parsing for benign-actor retrieval
+# --------------------------------------------------------------------------
+
+
+def test_extract_case_entities_emits_qualified_class_tokens(tmp_path: Path) -> None:
+    """The dense `class` column is already `type:class`-qualified; emit it
+    verbatim (no double-prefix) so it matches lessons_env_retrieve selectors."""
+    inv = tmp_path / "investigation.md"
+    inv.write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|endpoint|endpoint:linux|web-04.prod|role=asset-server\n"
+        "v-002|process|process:nc|nc[2188]|cmdline_via=shell\n"
+        "v-003|socket|socket:tcp|10.20.7.118:9100|\n"
+        "v-002|process|process:nc|nc[2190]|\n"  # dup type:class — de-duped
+        "\n"
+        ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+        "e-001|connected|v-002|v-003|2026-05-05T03:42:11Z|siem-event:wazuh|\n"
+        "```\n"
+    )
+    # Each token is the retrieval's `type:class` input verbatim — a single
+    # type prefix, never `process:process:nc`. Dup rows collapse.
+    assert loop.extract_case_entities(inv) == "endpoint:linux,process:nc,socket:tcp"
+
+
+def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
+    inv = tmp_path / "investigation.md"
+    inv.write_text("```invlang\n:H hypothesize.hypotheses\n```\n")
+    assert loop.extract_case_entities(inv) == ""
+    assert loop.extract_case_entities(tmp_path / "missing.md") == ""

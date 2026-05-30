@@ -366,6 +366,12 @@ def extract_case_entities(investigation_path: Path) -> str:
     actor preserves its blind-to-leads stance. Returns a comma-joined,
     de-duplicated `type:class` string (e.g. ``process:nc,socket:tcp``); empty
     string if the file or block is absent.
+
+    The dense row is ``id|type|class|ident|attrs?`` and the `class` column is
+    already the `type:class`-qualified token (`process:nc`, `socket:tcp`) — i.e.
+    exactly the selector vocabulary ``lessons_env_retrieve`` parses. Emit it
+    verbatim; re-joining it to the `type` column would double-prefix
+    (`process:process:nc`) and never match a `{type, class}` lesson selector.
     """
     if not investigation_path.is_file():
         return ""
@@ -381,8 +387,8 @@ def extract_case_entities(investigation_path: Path) -> str:
                 break
             cols = s.split("|")
             if len(cols) >= 3 and cols[0].strip().startswith("v-"):
-                tok = f"{cols[1].strip()}:{cols[2].strip()}"
-                if tok not in seen:
+                tok = cols[2].strip()
+                if tok and tok not in seen:
                     seen.append(tok)
     return ",".join(seen)
 
@@ -1068,7 +1074,8 @@ def _acquire_actor_observations_lock() -> Any:
     return fh
 
 
-def _release_actor_observations_lock(fh: Any) -> None:
+def _release_observations_lock(fh: Any) -> None:
+    """Release any flock-held observation-queue lock (actor or environment)."""
     try:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
@@ -1177,7 +1184,7 @@ def append_actor_observations(
             })
         return _append_jsonl(ACTOR_OBSERVATIONS_FILE, rows)
     finally:
-        _release_actor_observations_lock(lock_fh)
+        _release_observations_lock(lock_fh)
 
 
 def _acquire_environment_observations_lock() -> Any:
@@ -1236,7 +1243,7 @@ def append_environment_observations(
             })
         return _append_jsonl(ENVIRONMENT_OBSERVATIONS_FILE, rows)
     finally:
-        _release_actor_observations_lock(lock_fh)
+        _release_observations_lock(lock_fh)
 
 
 # ---------------------------------------------------------------------------
@@ -1585,39 +1592,47 @@ def _maybe_trigger_author(
 
 
 _HELP_EPILOG = """\
+Direction dispatch (by the defender's normalized disposition):
+  benign        → adversarial direction only (hunt the missed attack / FN)
+  malicious     → benign direction only      (hunt the over-escalation / FP)
+  inconclusive  → both directions
+A disposition that maps to no direction is skipped.
+
 Inputs (must exist in <run_dir>):
   alert.json            verbatim alert input
   report.md             YAML frontmatter with disposition ∈ {benign, inconclusive, malicious}
-                        ('malicious' is skipped at MVP — actor has nothing to bypass)
   investigation.md      defender's invlang audit log
   lead_sequence.yaml    projected lead set (emitted by defender/scripts/project_lead_sequence.py)
   gather_raw/{N}.json   raw query payloads referenced by lead_sequence
 
 Outputs:
   defender/learning/runs/<run_id>/
-    actor_input.yaml          actor-facing projection (queries only, no goals/results)
-    actor_story.md            adversarial counterfactual narrative (or "SKIP: ...")
-    projected_telemetry.yaml  oracle's per-lead synthesized events
-    judge_findings.yaml       judge classification + queueable findings
+    actor_input.yaml               adversarial actor-facing projection (queries only)
+    actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
+    projected_telemetry[_benign].yaml  oracle's per-lead synthesized events
+    judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
-    appended queueable findings; when count >= LEARNING_AUTHOR_THRESHOLD,
-    the lessons curator (author.py) is invoked automatically.
-  defender/learning/_pending/actor_observations.jsonl
-    appended actor observations; when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD,
-    the actor lessons curator (author_actor.py) is invoked automatically.
+    appended queueable defender findings (both directions, tagged `direction`);
+    when count >= LEARNING_AUTHOR_THRESHOLD the lessons curator (author.py) runs.
+  defender/learning/_pending/actor_observations.jsonl   (adversarial direction)
+    when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD, author_actor.py runs.
+  defender/learning/_pending/environment_observations.jsonl   (benign direction)
+    when count >= LEARNING_AUTHOR_ENV_THRESHOLD, author_actor_benign.py runs.
 
 Environment:
-  ACTOR_MODEL                          claude model for the adversarial actor
+  ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
                                        (default: claude-sonnet-4-6)
   ORACLE_MODEL                         claude model for the telemetry oracle —
                                        cheap projection work, no reasoning
                                        (default: claude-haiku-4-5)
-  JUDGE_MODEL                          claude model for the outcome judge
+  JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge
                                        (default: claude-sonnet-4-6)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 300)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before
                                        author_actor runs (default: 5)
+  LEARNING_AUTHOR_ENV_THRESHOLD        pending environment observations before
+                                       author_actor_benign runs (default: 5)
   LEARNING_AUTHOR_ACTOR_MODEL          claude model for the actor lessons curator
                                        (default: claude-sonnet-4-6)
 
@@ -1625,7 +1640,7 @@ Typical use: invoked in-process by `defender/run.py` after the runtime loop
 exits. Run standalone with `python3 defender/learning/loop.py <run_dir>` to
 re-process an existing run dir (e.g. after a judge-parse failure).
 
-Exit codes: 0 success / 0 skipped (malicious or actor SKIP) /
+Exit codes: 0 success / 0 skipped (no direction for disposition, or actor SKIP) /
             2 LoopError / 64 usage.
 """
 
