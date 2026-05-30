@@ -116,17 +116,24 @@ def test_run_one_gate_short_circuits_before_append(
     assert calls["append"] == 0, "append_findings must not be called for held-out runs"
 
 
-def test_lead_author_runs_when_disposition_skips_actor_judge(
+def test_malicious_dispatches_benign_not_adversarial(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Lead-author is a catalog-refinement flow independent of disposition;
-    it must fire even when normalize short-circuits the actor/judge path."""
-    calls = {"lead_author": 0, "actor": 0}
+    """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
+    adversarial one; lead-author still fires unconditionally."""
+    calls = {"lead_author": 0, "actor": 0, "actor_benign": 0}
 
     monkeypatch.setattr(loop, "_invoke_lead_author",
                         lambda *a, **kw: calls.__setitem__("lead_author", calls["lead_author"] + 1))
     monkeypatch.setattr(loop, "invoke_actor",
                         lambda *a, **kw: calls.__setitem__("actor", calls["actor"] + 1) or "")
+    # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
+    monkeypatch.setattr(
+        loop, "invoke_actor_benign",
+        lambda *a, **kw: calls.__setitem__("actor_benign", calls["actor_benign"] + 1) or "SKIP: not ours\n",
+    )
+    monkeypatch.setattr(loop, "persist_run_benign", lambda *a, **kw: None)
+    monkeypatch.setattr(loop, "RUNS_DIR", tmp_path / "lrun")
 
     run_dir = tmp_path / "case"
     run_dir.mkdir()
@@ -138,4 +145,11 @@ def test_lead_author_runs_when_disposition_skips_actor_judge(
     rc = loop.run_one(run_dir)
     assert rc == 0
     assert calls["lead_author"] == 1, "lead-author must run regardless of disposition"
-    assert calls["actor"] == 0, "actor must not run when disposition is malicious"
+    assert calls["actor"] == 0, "adversarial actor must not run on a malicious disposition"
+    assert calls["actor_benign"] == 1, "benign actor must run on a malicious disposition"
+
+
+def test_directions_for_dispatch() -> None:
+    assert loop._directions_for("benign") == ["adversarial"]
+    assert loop._directions_for("malicious") == ["benign"]
+    assert loop._directions_for("inconclusive") == ["adversarial", "benign"]

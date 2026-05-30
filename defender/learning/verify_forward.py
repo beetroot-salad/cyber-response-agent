@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """Forward-check Haiku gate for a single candidate lesson.
 
-Usage: ``verify_forward.py <lesson_path> <run_id>``
+Usage: ``verify_forward.py [--direction adversarial|benign] <lesson_path> <run_id>``
 
 Reads the lesson file, the source case's investigation transcript at
-``defender/learning/runs/<run_id>/investigation.md``, and the
-ground-truth disposition from
+``defender/learning/runs/<run_id>/investigation.md``, and the recorded
+disposition from
 ``defender/learning/runs/<run_id>/source_refs.yaml``. Calls
 ``claude -p --model claude-haiku-4-5`` with
 ``defender/learning/verify_forward.md`` as the system prompt.
 Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
+
+The disposition handed to the verifier is direction-aware (see
+``expected_disposition``): a benign-direction (FP) lesson is generated from a
+run the defender called ``malicious`` but which it exists to *correct toward*
+``benign``, so the recorded ``malicious`` is exactly what it must NOT preserve.
 
 Single rep — replication is for statistical TNR/TPR measurement, not
 per-edit gating (see ``experiments/defender-author-verification/results/final.md``).
 """
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
@@ -54,6 +60,31 @@ def load_run_context(run_id: str) -> tuple[str, str]:
             f"verify_forward: source_refs.yaml missing normalized_disposition: {refs}"
         )
     return investigation.read_text(), m.group(1).strip()
+
+
+def expected_disposition(direction: str, recorded: str) -> str:
+    """The disposition the lesson must drive the agent toward on its source case.
+
+    Adversarial findings author only on a ``benign`` source disposition, and the
+    lesson must *preserve* that benign call (generalize suspicion without
+    over-escalating this known-good case) — so the recorded disposition is the
+    target the verifier checks against. Benign (FP-direction) findings author on
+    a ``malicious`` source disposition that the FP signal says was an
+    over-escalation: the lesson exists to drive the agent *off* that malicious
+    call toward ``benign``, so the recorded ``malicious`` is exactly what it must
+    NOT preserve. Handing the verifier the recorded ``malicious`` would mark
+    every de-escalation lesson BAD, holding the entire FP lesson path. The
+    corrected target for the benign direction is therefore ``benign``.
+
+    (Residual: this makes the benign forward-check an *efficacy* check — does the
+    lesson reach the corrected disposition on its own source case — not a
+    cross-case FN-safety guard against under-escalating real attacks. That guard
+    needs known-malicious cases the source FP case is not; it is out of scope for
+    a per-source-case forward check. See tasks/benign-actor-success-retrieval.md.)
+    """
+    if direction == "benign":
+        return "benign"
+    return recorded
 
 
 def render_user_prompt(lesson_text: str, transcript: str, disposition: str) -> str:
@@ -105,15 +136,27 @@ def parse_verdict(text: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print("usage: verify_forward.py <lesson_path> <run_id>", file=sys.stderr)
-        return 64
-    lesson_path = Path(argv[1]).resolve()
-    run_id = argv[2]
+    ap = argparse.ArgumentParser(prog="verify_forward.py")
+    ap.add_argument(
+        "--direction",
+        default="adversarial",
+        choices=["adversarial", "benign"],
+        help=(
+            "learning direction of the finding (default: adversarial). A benign "
+            "finding targets the corrected `benign` disposition instead of the "
+            "recorded one — pass the finding row's `direction`."
+        ),
+    )
+    ap.add_argument("lesson_path")
+    ap.add_argument("run_id")
+    ns = ap.parse_args(argv[1:])
+    lesson_path = Path(ns.lesson_path).resolve()
+    run_id = ns.run_id
     if not lesson_path.is_file():
         print(f"verify_forward: lesson not found: {lesson_path}", file=sys.stderr)
         return 1
-    transcript, disposition = load_run_context(run_id)
+    transcript, recorded = load_run_context(run_id)
+    disposition = expected_disposition(ns.direction, recorded)
     user_prompt = render_user_prompt(lesson_path.read_text(), transcript, disposition)
     import time as _time
     t0 = _time.monotonic()
