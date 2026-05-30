@@ -80,12 +80,17 @@ ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
+BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
 LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
+
+ACTOR_BENIGN_PROMPT = LEARNING_DIR / "actor_benign.md"
+BENIGN_ACTOR_SETTINGS = LEARNING_DIR / "benign-actor-settings.json"
+LESSONS_ENVIRONMENT_DIR = REPO_ROOT / "defender" / "lessons-environment"
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +328,76 @@ def invoke_actor(
         shutil.copy2(src, dst)
     else:
         _log(f"actor transcript not found at {src}; skipping actor_trace.jsonl")
+    return story
+
+
+def extract_case_entities(investigation_path: Path) -> str:
+    """Extract the prologue's classified entities as `type:class` tokens.
+
+    The benign actor retrieves environment lessons by classification. The
+    case entities come from the CONTEXTUALIZE prologue (`:V prologue.vertices`),
+    which is alert-derived — not lead/gather output — so handing them to the
+    actor preserves its blind-to-leads stance. Returns a comma-joined,
+    de-duplicated `type:class` string (e.g. ``process:nc,socket:tcp``); empty
+    string if the file or block is absent.
+    """
+    if not investigation_path.is_file():
+        return ""
+    seen: list[str] = []
+    in_block = False
+    for line in investigation_path.read_text().splitlines():
+        s = line.strip()
+        if s.startswith(":V prologue.vertices"):
+            in_block = True
+            continue
+        if in_block:
+            if not s or s.startswith(":") or s.startswith("```"):
+                break
+            cols = s.split("|")
+            if len(cols) >= 3 and cols[0].strip().startswith("v-"):
+                tok = f"{cols[1].strip()}:{cols[2].strip()}"
+                if tok not in seen:
+                    seen.append(tok)
+    return ",".join(seen)
+
+
+def invoke_actor_benign(
+    alert_path: Path,
+    case_entities: str,
+    learning_run_dir: Path,
+) -> str:
+    """Run the benign (ops-teamer) actor for the false-positive direction.
+
+    Mirrors ``invoke_actor`` but takes no MITRE menu: the actor reconstructs
+    the authorized operation from the alert and the environment lessons it
+    retrieves (by ``case_entities`` + the alert's rule id) via
+    ``lessons_env_retrieve.py``. Returns the story (or a ``SKIP:`` line).
+    """
+    user = (
+        "<alert>\n"
+        f"{alert_path.read_text().rstrip()}\n"
+        "</alert>\n"
+        "<case_entities>\n"
+        f"{case_entities}\n"
+        "</case_entities>\n"
+    )
+    import uuid as _uuid
+    session_id = str(_uuid.uuid4())
+    story = _run_claude(
+        ACTOR_BENIGN_PROMPT,
+        user,
+        model=BENIGN_ACTOR_MODEL,
+        settings_path=BENIGN_ACTOR_SETTINGS,
+        add_dir=LESSONS_ENVIRONMENT_DIR,
+        permission_mode="acceptEdits",
+        session_id=session_id,
+    )
+    src = _transcript_path(session_id)
+    dst = learning_run_dir / "actor_benign_trace.jsonl"
+    if src.is_file():
+        shutil.copy2(src, dst)
+    else:
+        _log(f"benign actor transcript not found at {src}; skipping actor_benign_trace.jsonl")
     return story
 
 
