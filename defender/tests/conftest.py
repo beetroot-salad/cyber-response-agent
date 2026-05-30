@@ -133,14 +133,19 @@ def write_finding(
     type_: str = "lead-set",
     subject: str = "subj",
     finding: str = "narrative",
+    direction: str = "adversarial",
 ) -> dict:
     pending_file.parent.mkdir(parents=True, exist_ok=True)
     import json
+    # Mirror loop.append_actor_observations' row layout — every real finding
+    # carries `direction` (after `alert_rule_key`); the author gate reads it
+    # fail-loud, so the fixture must too.
     entry = {
         "schema_version": 1,
         "finding_id": finding_id,
         "run_id": run_id,
         "alert_rule_key": "rule-5710",
+        "direction": direction,
         "type": type_,
         "subject": subject,
         "finding": finding,

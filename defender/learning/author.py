@@ -567,7 +567,7 @@ def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
             consumed_idempotent.append(rec)
             continue
         disp = disposition_for(entry["run_id"])
-        direction = entry.get("direction", "adversarial")
+        direction = entry["direction"]
         if not _has_confident_ground_truth(direction, disp):
             rec = dict(entry)
             rec["held_reason"] = (
