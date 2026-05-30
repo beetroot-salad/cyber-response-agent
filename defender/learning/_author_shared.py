@@ -94,3 +94,22 @@ def actor_generation_count() -> int:
     )
     prior = int(proc.stdout.strip() or "0")
     return prior + 1
+
+
+def benign_generation_count() -> int:
+    """Generation this environment-lesson commit would assert.
+
+    The false-positive-direction analog of ``actor_generation_count`` —
+    counts prior environment-lesson commits by their required
+    ``Benign-Actor-Model:`` trailer. The two directions advance independent
+    generation counters off disjoint trailers.
+    """
+    proc = subprocess.run(
+        ["git", "rev-list", "--count", "--grep=^Benign-Actor-Model: ", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    prior = int(proc.stdout.strip() or "0")
+    return prior + 1
