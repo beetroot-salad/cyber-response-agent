@@ -17,9 +17,27 @@ defender/
     advisory/          # advisory skill
   scripts/             # project_lead_sequence, run_stats, visualize_*, lint_*
                        # NOTE: scripts/tools/ (adapters) deleted with v1-strip; v2 adapters TBD
-  learning/            # offline learning loop (actor, oracle, judge, verify, author)
-  lessons/             # curator-authored pitfall lessons (empty until v2 loop authors them)
-  lessons-actor/
+  learning/            # offline learning loop — two directions off the disposition
+                       #   loop.py             # run_one dispatch: benign disp → adversarial,
+                       #                        #   malicious → benign (FP), inconclusive → both
+                       #   oracle.md           # shared telemetry projector (both directions)
+                       #   --- adversarial (false-negative) direction ---
+                       #   actor.md            # red-team actor (MITRE-sampled attack story)
+                       #   judge.md            # caught|survived|… ; defender_findings + actor_observations
+                       #   author_actor.md/.py # curate actor_observations → lessons-actor/
+                       #   verify_forward_actor.{md,py}  # Haiku forward-check
+                       #   --- benign (false-positive) direction ---
+                       #   actor_benign.md     # ops-teamer actor (routine-op story; retrieves env lessons)
+                       #   judge_benign.md     # survived ⇒ FP ; defender_findings + environment_observations
+                       #   author_actor_benign.{md,py}   # curate env observations → lessons-environment/
+                       #   verify_forward_env.py         # deterministic retrieval forward-check
+                       #   --- shared ---
+                       #   author.{md,py}      # defender_findings (both directions) → lessons/, direction-gated
+                       #   _author_shared.py   # repo lock + per-direction generation counters
+                       #   _pending/           # findings.jsonl, actor_observations.jsonl, environment_observations.jsonl
+  lessons/             # curator-authored defender pitfall lessons (empty until v2 loop authors them)
+  lessons-actor/       # actor-tradecraft lessons (adversarial direction)
+  lessons-environment/ # standing deployment facts the benign actor retrieves (FP direction)
   fixtures/            # alert.json inputs (currently v1-flavored)
   run-visualizations/
   run-transcripts/     # curated past-run transcripts (if present)
