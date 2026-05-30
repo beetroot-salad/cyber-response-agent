@@ -94,6 +94,76 @@ def _lift_threshold() -> int:
     return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
 
 
+_DRAFT_SKELETON = """\
+---
+id: {query_id}
+status: draft
+---
+
+## Goal
+
+{system} `{verb}` lookup. Auto-drafted from an executed gather query that
+matched no catalog template (params: {params}). The defender's lead goal was:
+"{goal}". Refine this Goal for keyword recall, or discard if it duplicates an
+established template.
+
+## What to summarize
+
+- (fill in the measurement primitives this lookup surfaces)
+
+## Query
+
+```
+{system}_cli.py {verb} {param_hint}
+```
+"""
+
+# Query-string verbs are not measurement-named (one verb backs many templates,
+# distinguished by the body) — don't mint a `{system}.{verb}` draft for them.
+_NON_TEMPLATE_VERBS = frozenset({"query", "alerts"})
+
+
+def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
+    """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
+    query_id that resolves to no catalog template.
+
+    This replaces the lead-author's WARN-and-drop on an unresolved verb
+    (`build_handoff`) with WARN-and-draft: the gather subagent ran a real
+    CLI verb that no template covers, so we deterministically draft it and
+    let the lead-author's existing promote/discard/skip machinery curate it.
+    Idempotent — skips drafts that already exist on disk or were minted
+    earlier in this call.
+    """
+    by_id = {t.id for t in lead_neighbors.load_catalog()}
+    created: list[Path] = []
+    for lead in executed:
+        qid = lead.query_id
+        if not qid or "." not in qid or qid in by_id:
+            continue
+        system, verb = qid.split(".", 1)
+        if verb in _NON_TEMPLATE_VERBS:
+            continue
+        draft = CATALOG_DIR / system / "_draft" / f"{verb}.md"
+        if draft.exists() or draft in created:
+            continue
+        param_hint = " ".join(str(v) for v in (lead.params or {}).values())
+        try:
+            draft.parent.mkdir(parents=True, exist_ok=True)
+            draft.write_text(
+                _DRAFT_SKELETON.format(
+                    query_id=qid, system=system, verb=verb,
+                    params=dict(lead.params or {}),
+                    goal=(lead.goal_text or "").replace("\n", " ").strip()[:200],
+                    param_hint=param_hint,
+                )
+            )
+            created.append(draft)
+            by_id.add(qid)
+        except OSError:
+            continue
+    return created
+
+
 # ---------------------------------------------------------------------------
 # Lead extraction (inlined from PR-209's lead_extract.py)
 # ---------------------------------------------------------------------------
@@ -900,6 +970,20 @@ def _run_locked(run_dir: Path) -> int:
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
+
+    # Mint drafts for executed-but-uncatalogued verbs BEFORE capturing the
+    # git baseline, so the new {system}/_draft/ files are expected queue
+    # content (the dirty-protected preflight ignores _draft/) and the
+    # post-flight verifies against a baseline that already includes them.
+    try:
+        synth = synthesize_drafts(extract(run_dir))
+        if synth:
+            _log(
+                f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
+                + ", ".join(p.name for p in synth)
+            )
+    except (FileNotFoundError, ValueError) as e:
+        _log(f"draft synthesis skipped (extract failed: {e})")
 
     base_sha = _git_head()
     baseline = _git_status_records()

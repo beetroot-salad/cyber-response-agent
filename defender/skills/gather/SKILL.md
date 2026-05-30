@@ -20,7 +20,8 @@ these keys:
   always anchor `Read` and `Bash` calls to `{defender_dir}/...` rather
   than to relative paths.
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
-- `position` — integer, scopes your output filenames
+- `position` — integer; pass it to `gather_exec.py` as `--lead` (it is
+  the per-lead group id that scopes the wrapper's output)
 - `system` — name of the system of record (matches the `:L` row's `system` cell and a subdirectory under `defender/skills/`). The harness injects this system's SKILL `description:` into your prompt; if `system` is missing, the injection silently no-ops and you must discover the right env SKILL yourself.
 - `goal` — one-sentence measurement contract
 - `what_to_summarize` — list of dimensions your summary must address
@@ -104,17 +105,23 @@ template's declared shape, refuse the dispatch with a
 "unrunnable: param shape mismatch" summary and stop.
 
 Substitute bound params into each template's `## Query` body and
-execute via the system's CLI (`Bash`). Redirect `--raw` output to
-`{run_dir}/gather_raw/{position}.json` yourself:
+execute the system CLI **through the capture wrapper** (`Bash`). The
+wrapper persists the raw payload and records the executed query
+(system, verb, params, raw command) deterministically — you do **not**
+redirect output or hand-name files:
 
 ```bash
-python3 {defender_dir}/scripts/tools/elastic_cli.py query '<query_string>' \
-    --start ... --end ... --raw > {run_dir}/gather_raw/{position}.json
+python3 {defender_dir}/scripts/tools/gather_exec.py \
+    --run-dir {run_dir} --lead {position} -- \
+    python3 {defender_dir}/scripts/tools/cmdb_cli.py get-host web-1 --raw
 ```
 
-For multi-query dispatches at the same position, suffix the position
-with a single lowercase letter (`0a`, `0b`, `0c`) per
-`{defender_dir}/skills/gather/queries/SCHEMA.md` §Multi-query dispatches.
+Pass your dispatch `position` as `--lead`. For **query-string** systems
+(elastic), one CLI verb backs many templates, so also pass the template
+id you chose: `--query-id elastic.{template-id}`. Subcommand CLIs
+(cmdb, host-state, identity, change-mgmt, threat-intel) need no
+`--query-id` — the wrapper derives `{system}.{verb}`. Run one wrapper
+invocation per query; the wrapper handles per-lead sequencing.
 
 **Watch for limit-capped breakdowns.** When a count or distribution
 matters, verify the indexer's `total` is ≤ the `--limit` you passed
@@ -232,82 +239,34 @@ knows which kind of empty it is. Do not run the full debug protocol
 on your own (that's the defender's explicit dispatch — §Debug
 leads); one round of smell-check, then report.
 
-### 5. Write the observation sidecar
+### 5. The executed-query record (wrapper-owned)
 
-For every dispatched query, write a small JSON sidecar next to its
-raw payload so the offline lead-author can see the outcome at a
-glance without parsing the body:
+You do **not** author an observation sidecar. `gather_exec.py` appends
+one record per query to `{run_dir}/executed_queries.jsonl` — the
+faithful `query_id`, `params`, raw command, canonical payload path, and
+a coarse structural `payload_status` (`ok`/`empty`/`error`). The
+lead-sequence projection renders these into the canonical
+`gather_raw/{position}[a..z].{json,observations.json}` the offline
+lead-author reads.
 
-```
-gather_raw/{position}.observations.json     # single-query dispatch
-gather_raw/{position}{a..z}.observations.json   # multi-query
-```
-
-Shape:
-
-```jsonc
-{
-  "payload_status": "ok",            // see classification below
-  "payload_digest": "847 events; 12 distinct dstuser; 95% authentication_failed",
-  "queries": [
-    {
-      "id": "elastic.sshd-auth-events",  // {system}.{template-id}, or "ad-hoc"
-      "params": {"host": "canary-1", "window": "5m"}
-    }
-  ]
-}
-```
-
-The sidecar is mandatory; the lead-author and the lead-sequence
-projection both refuse to operate on a run that lacks it.
-
-The `queries[]` list is the canonical record of what gather actually
-ran (one entry per query — composite dispatches at `0a`/`0b`/`0c`
-each write their own sidecar). It replaces the PLAN-side template
-guess: the defender names the lead by measurement only; gather names
-the query.
-
-**`payload_status` classification rules:**
-
-- `ok` — query returned structured data; the result is informative.
-- `empty` — query returned no rows and the smell test confirms the
-  emptiness is genuine (broader query also empty, or unfiltered
-  window populated and the filter legitimately rules events out).
-- `suspect_empty` — query returned no rows *and* you suspect silent
-  failure: a bound param violates the template's declared shape
-  (hostname literal on an IP-typed field, etc.), or the unfiltered
-  window is populated and the most-specific clause is the load-
-  bearing exclusion. Mark this when you'd run the debug protocol
-  if the defender dispatched one.
-- `error` — the CLI returned a non-success exit code, the JSON body
-  has an `error` key, or stderr matches an indexer rejection.
-- `partial` — the result hit a truncation cap (Lucene `limit`,
-  aggregation bucket cap, etc.) and the breakdown is incomplete.
-
-**`payload_digest`** — ≤ 200 char one-line summary. Event count +
-the most discriminating distinct-count + the dominant rule/category.
-For host-query, `stdout: N lines, exit=N`. For errors, the first 200
-chars of the error message verbatim. Measurement only (per §4); the
-lead-author reads this when folding lessons.
+The structural status is a floor, not the smell test. When a query
+comes back empty or suspect (a bound param may have silently mismatched
+a typed field — see §3.5), **say so in your `## Summary`** (§6): which
+kind of empty, and whether you'd want a debug lead. That judgment is
+yours; the wrapper only records what mechanically happened.
 
 ### 6. Return
 
-Emit a summary with three sections:
+Report a `## Summary` — the measurement read the defender reasons
+from. The executed queries and raw payload paths are already on disk
+via the wrapper (§5); don't restate them.
 
 ```
-## Queries run
-- id: elastic.sshd-auth-events
-  params: {host: canary-1, window: 5m}
-- id: elastic.sshd-auth-events
-  params: {host: canary-1, window: 24h, shift: -24h}   # baseline
-
 ## Summary
 - timing pattern: ...
 - source diversity: ...
 - success/failure ratio: ...
-
-## Raw payload
-gather_raw/{position}.json
+- empty/suspect note: ...        # only when §3.5 flagged something
 ```
 
 If you authored a new draft template, mention it explicitly so the
@@ -355,18 +314,15 @@ overlap.
 ### Ad-hoc leads
 
 When no template fits and the question is genuinely one-off (not a
-shape worth memorizing), run the query inline against the system CLI
-without authoring a template. Capture raw output the same way — the
-CLI handles `gather_raw/`. In your summary, set the `queries[]` entry
-`id: ad-hoc` and include the literal query body so the learning loop
-can still read what ran:
+shape worth memorizing), run the query inline through the wrapper with
+`--query-id ad-hoc` — the wrapper captures the raw output and records
+the literal command so the learning loop can still read what ran:
 
-```
-## Queries run
-- id: ad-hoc
-  system: elastic
-  body: 'user.name:"jsmith" AND source.ip:"10.42.7.183"'
-  window: 6h
+```bash
+python3 {defender_dir}/scripts/tools/gather_exec.py \
+    --run-dir {run_dir} --lead {position} --query-id ad-hoc -- \
+    python3 {defender_dir}/scripts/tools/elastic_cli.py query \
+    'user.name:"jsmith" AND source.ip:"10.42.7.183"' --start ... --raw
 ```
 
 Use this when authoring would be premature — you only know it's a
@@ -399,11 +355,12 @@ The defender decides what the differential means; you report it.
 - Keep the summary tight — single screen. Push detail to the raw
   payload.
 - Do not echo raw query output back to the defender; that's the whole
-  point of letting the CLI persist it to `gather_raw/`.
-- Three required sections (`## Queries run`, `## Summary`,
-  `## Raw payload`); two optional trailers (`## Authored` for a
-  fresh template draft, `## Proposed` for a §3.5 deposit). Nothing
-  else — ANALYZE is the defender's phase, not yours.
+  point of letting the wrapper persist it to `gather_raw/`.
+- One required section (`## Summary`); two optional trailers
+  (`## Authored` for a fresh template draft, `## Proposed` for a §3.5
+  deposit). The executed queries + raw paths are wrapper-recorded
+  (§5), not restated. Nothing else — ANALYZE is the defender's phase,
+  not yours.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation
