@@ -48,6 +48,7 @@ from typing import Any
 import yaml
 
 import mitre_corpus
+from _prologue import extract_case_entities
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -357,58 +358,29 @@ def invoke_actor(
     return story
 
 
-def extract_case_entities(investigation_path: Path) -> str:
-    """Extract the prologue's classified entities as `type:class` tokens.
-
-    The benign actor retrieves environment lessons by classification. The
-    case entities come from the CONTEXTUALIZE prologue (`:V prologue.vertices`),
-    which is alert-derived — not lead/gather output — so handing them to the
-    actor preserves its blind-to-leads stance. Returns a comma-joined,
-    de-duplicated `type:class` string (e.g. ``process:nc,socket:tcp``); empty
-    string if the file or block is absent.
-
-    The dense row is ``id|type|class|ident|attrs?`` and the `class` column is
-    already the `type:class`-qualified token (`process:nc`, `socket:tcp`) — i.e.
-    exactly the selector vocabulary ``lessons_env_retrieve`` parses. Emit it
-    verbatim; re-joining it to the `type` column would double-prefix
-    (`process:process:nc`) and never match a `{type, class}` lesson selector.
-    """
-    if not investigation_path.is_file():
-        return ""
-    seen: list[str] = []
-    in_block = False
-    for line in investigation_path.read_text().splitlines():
-        s = line.strip()
-        if s.startswith(":V prologue.vertices"):
-            in_block = True
-            continue
-        if in_block:
-            if not s or s.startswith(":") or s.startswith("```"):
-                break
-            cols = s.split("|")
-            if len(cols) >= 3 and cols[0].strip().startswith("v-"):
-                tok = cols[2].strip()
-                if tok and tok not in seen:
-                    seen.append(tok)
-    return ",".join(seen)
-
-
 def invoke_actor_benign(
     alert_path: Path,
     case_entities: str,
+    alert_rule_key: str,
     learning_run_dir: Path,
 ) -> str:
     """Run the benign (ops-teamer) actor for the false-positive direction.
 
     Mirrors ``invoke_actor`` but takes no MITRE menu: the actor reconstructs
     the authorized operation from the alert and the environment lessons it
-    retrieves (by ``case_entities`` + the alert's rule id) via
-    ``lessons_env_retrieve.py``. Returns the story (or a ``SKIP:`` line).
+    retrieves via ``lessons_env_retrieve.py``. Retrieval is keyed by
+    ``case_entities`` + ``alert_rule_key`` — both handed in so the actor uses
+    the same deterministic anchor (``derive_alert_rule_key``) the observation
+    and forward-check use, instead of re-deriving the rule id from the alert.
+    Returns the story (or a ``SKIP:`` line).
     """
     user = (
         "<alert>\n"
         f"{alert_path.read_text().rstrip()}\n"
         "</alert>\n"
+        "<alert_rule_id>\n"
+        f"{alert_rule_key}\n"
+        "</alert_rule_id>\n"
         "<case_entities>\n"
         f"{case_entities}\n"
         "</case_entities>\n"
@@ -1194,6 +1166,24 @@ def _acquire_environment_observations_lock() -> Any:
     return fh
 
 
+def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]:
+    """Guarantee the case's deterministic rule key leads the stored anchor.
+
+    The judge free-reads ``alert_rule_ids`` from the alert; the benign actor
+    retrieves at runtime with ``derive_alert_rule_key`` (handed to it as
+    ``alert_rule_id``). Unioning the canonical key into the anchor the curator
+    copies onto the lesson keeps the lesson retrievable for its own source case
+    regardless of how the judge phrased the rule id — and lets the
+    deterministic forward-check (which queries with the same canonical key)
+    confirm it. The judge's extra ids (cross-rule generalizations) are kept.
+    """
+    ids = judge_rule_ids if isinstance(judge_rule_ids, list) else [judge_rule_ids]
+    ids = [str(r) for r in ids if str(r).strip()]
+    if alert_rule_key and alert_rule_key not in ids:
+        ids = [alert_rule_key, *ids]
+    return ids
+
+
 def append_environment_observations(
     judge_benign_doc: dict,
     run_id: str,
@@ -1233,7 +1223,9 @@ def append_environment_observations(
                 "observation_index": i,
                 "alert_rule_key": alert_rule_key,
                 "subject": obs.get("subject"),
-                "alert_rule_ids": obs["alert_rule_ids"],
+                "alert_rule_ids": _anchor_with_case_key(
+                    obs["alert_rule_ids"], alert_rule_key
+                ),
                 "entities": obs.get("entities") or [],
                 "relevance_criteria": obs["relevance_criteria"],
                 "fact": obs["fact"],
@@ -1433,7 +1425,7 @@ def _run_benign(
 
     _log("step=actor-benign")
     actor_story = invoke_actor_benign(
-        run_dir / "alert.json", case_entities, learning_run_dir
+        run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
     )
     actor_story_path = learning_run_dir / "actor_benign_story.md"
     actor_story_path.write_text(actor_story)

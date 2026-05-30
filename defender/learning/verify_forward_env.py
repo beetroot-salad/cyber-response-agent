@@ -7,11 +7,18 @@ The environment-lesson analog of ``verify_forward_actor.py`` — but where
 the actor check is a Haiku judgment, this one is deterministic and free.
 The failure mode that matters for an environment lesson is **mis-keying**:
 a lesson the benign actor cannot retrieve for the case it bears on is dead
-weight. So the check re-runs the environment retrieval with the source
-observation's OWN ``alert_rule_ids`` + ``entities`` and confirms the lesson
-file is returned. A correctly-keyed lesson MUST come back; an empty/wrong
-rule anchor, an ``identity`` selector (absent from an FP prologue), or a
-``class`` slot narrower than the case entity drops it.
+weight. So the check re-runs the environment retrieval with the **exact
+inputs the runtime benign actor uses** — the source case's deterministic
+``alert_rule_key`` and its actual prologue entities (re-extracted from
+``{source_run_dir}/investigation.md``) — and confirms the lesson file is
+returned. Deriving the case entities from the prologue rather than echoing
+the observation's own selectors is load-bearing: if the judge carried a bad
+selector (an ``identity`` row absent from an FP prologue, or a double-prefixed
+``class`` like ``process:nc``) into both the observation and the lesson,
+echoing them would self-confirm GOOD while the runtime actor — which keys off
+the prologue — never retrieves it. A correctly-keyed lesson MUST come back; an
+empty/wrong rule anchor, an ``identity`` selector, or a ``class`` slot narrower
+than the case entity drops it.
 
 Resolves the observation row from the active pending queue (default
 ``_pending/environment_observations.jsonl`` — the row is still present
@@ -25,6 +32,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _prologue import extract_case_entities  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent
@@ -50,17 +60,18 @@ def load_observation(observation_id: str, pending: Path) -> dict:
     )
 
 
-def _entities_arg(entities: object) -> str:
-    """[{type, class}, ...] -> 'type:class,type:class' for the retrieval CLI."""
-    out: list[str] = []
-    for sel in entities or []:
-        if not isinstance(sel, dict):
-            continue
-        typ = str(sel.get("type") or "").strip()
-        cls = str(sel.get("class") or "").strip()
-        if typ:
-            out.append(f"{typ}:{cls}")
-    return ",".join(out)
+def case_entities_arg(row: dict, repo_root: Path) -> str:
+    """Re-extract the source case's prologue entities — what the actor sees.
+
+    Mirrors ``loop.invoke_actor_benign``: the runtime retrieval entities come
+    from ``{source_run_dir}/investigation.md``'s ``:V prologue.vertices``, not
+    from the observation's own selectors. The forward-check must use the same
+    source so a curator's mis-keyed selector cannot self-confirm.
+    """
+    src = (row.get("source_run_dir") or "").strip()
+    if not src:
+        return ""
+    return extract_case_entities(repo_root / src / "investigation.md")
 
 
 def _rule_ids_arg(rule_ids: object) -> str:
@@ -106,8 +117,10 @@ def main(argv: list[str]) -> int:
         return 1
 
     row = load_observation(ns.observation_id, pending)
-    rule_ids = _rule_ids_arg(row.get("alert_rule_ids"))
-    entities = _entities_arg(row.get("entities"))
+    # The canonical key (matches the runtime actor's --alert-rule-ids) — not the
+    # judge's free-read alert_rule_ids, and not whatever the curator keyed.
+    rule_ids = _rule_ids_arg(row.get("alert_rule_key"))
+    entities = case_entities_arg(row, REPO_ROOT)
 
     returned = run_retrieval(rule_ids, entities, corpus)
     try:

@@ -13,7 +13,8 @@ Be concrete and specific, but no more elaborate than the operation actually requ
 You see:
 
 1. **alert** — the alert as the SIEM produced it. Match your story to its specifics: source, identity, command, target, timing.
-2. **case_entities** — the alert's entities classified in invlang `type:class` form. Used only to retrieve the environment lessons relevant to this case (see Tools).
+2. **alert_rule_id** — the canonical rule key for this alert. Pass it **verbatim** as `--alert-rule-ids` when you retrieve environment lessons (see Tools); do not re-derive a rule id from the alert.
+3. **case_entities** — the alert's entities classified in invlang `type:class` form. Used only to retrieve the environment lessons relevant to this case (see Tools).
 
 Your accumulated **environment lessons** — what prior encounters taught you about this deployment's routine activity, identities, baselines, and standing processes — are retrieved via Tools. On a deployment you have not yet learned, reason from the alert and general operations knowledge; lean toward SKIP when you genuinely cannot ground the story.
 
@@ -44,6 +45,6 @@ Name only the axes that bear on this alert and ground each one; omit axes that d
 
 Before writing Sections 1–2, retrieve the relevant environment lessons — a **silent investigation step**, like a senior engineer checking the runbook, not output. Run from your current working directory (do not `cd` elsewhere); see its `--help` for the flags and when to use them:
 
-    python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <this alert's rule id> --entities <case_entities>
+    python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <alert_rule_id> --entities <case_entities>
 
 Read what it returns and fold it into your sections; do not cite lesson ids or narrate that you consulted it.
