@@ -238,6 +238,17 @@ def load_judge_findings(run_id: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def load_judge_benign_findings(run_id: str) -> dict | None:
+    """Benign (FP-direction) judge output — the mirror of load_judge_findings.
+
+    The two directions persist under different names so they never collide in
+    one run dir; the benign direction writes ``judge_benign_findings.yaml``.
+    """
+    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    data = load_yaml(learn_dir / "judge_benign_findings.yaml")
+    return data if isinstance(data, dict) else None
+
+
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:
     p = run_dir / "alert.json"
     if not p.is_file():
