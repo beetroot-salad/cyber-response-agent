@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"x"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"deciding"},{"type":"text","text":"first part"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"second part"}]}}
+{"type":"assistant","message":{"role":"assistant","content":"string-form content"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"should be ignored"}]}}
+not-json-garbage-line
+{"type":"result","subtype":"success","result":"OK"}
