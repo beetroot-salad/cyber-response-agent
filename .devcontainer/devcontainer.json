@@ -2,6 +2,11 @@
   "name": "Try out stuff",
   "dockerComposeFile": ["docker-compose.yml", "wazuh-stack.yml", "wazuh-overrides.yml"],
   "service": "devcontainer",
+  // Only start the devcontainer itself on "Reopen in Container". The rest of the
+  // stack (wazuh.*, target-endpoint, monitoring-host, falco, registry, ticket-server)
+  // stays defined in the compose files but must be started manually when needed:
+  //   bash playground/scripts/compose.sh start <service>
+  "runServices": ["devcontainer"],
   "workspaceFolder": "/workspace",
 
   "customizations": {
