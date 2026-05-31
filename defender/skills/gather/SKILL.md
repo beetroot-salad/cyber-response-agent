@@ -102,21 +102,27 @@ template's declared shape, refuse the dispatch with a
 Substitute bound params into each template's `## Query` body and
 execute the system CLI **through the capture wrapper** (`Bash`). The
 wrapper persists the raw payload and records the executed query
-(system, verb, params, raw command) deterministically — you do **not**
-redirect output or hand-name files:
+(system, query_id, params, raw command) deterministically — you do
+**not** redirect output or hand-name files:
+
+Everything after `--` is the system CLI invocation exactly as that
+system's SKILL.md documents it (the CLI's filename is named there — it
+is *not* always `{system}_cli.py`). For example, for a `stub-cmdb` lead:
 
 ```bash
 python3 {defender_dir}/scripts/tools/gather_exec.py \
-    --run-dir {run_dir} --lead {position} -- \
-    python3 {defender_dir}/scripts/tools/cmdb_cli.py get-host web-1 --raw
+    --run-dir {run_dir} --lead {position} \
+    --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
+    python3 {defender_dir}/scripts/tools/cmdb_cli.py host-lookup web-1 --raw
 ```
 
-Pass your dispatch `position` as `--lead`. For **query-string** systems
-(elastic), one CLI verb backs many templates, so also pass the template
-id you chose: `--query-id elastic.{template-id}`. Subcommand CLIs
-(cmdb, host-state, identity, change-mgmt, threat-intel) need no
-`--query-id` — the wrapper derives `{system}.{verb}`. Run one wrapper
-invocation per query; the wrapper handles per-lead sequencing.
+Pass three values from the dispatch: your `position` as `--lead`, the
+lead's `system` as `--system`, and the **id of the template you bound**
+as `--query-id` (`{system}.{template-id}`, exactly the `id:` from the
+template's frontmatter). Recording the id you actually ran — rather than
+having the wrapper guess it from the CLI argv — is what keeps cross-case
+joins keyed correctly. Run one wrapper invocation per query; the wrapper
+handles per-lead sequencing.
 
 **Watch for limit-capped breakdowns.** When a count or distribution
 matters, verify the indexer's `total` is ≤ the `--limit` you passed
@@ -166,9 +172,12 @@ continue to §4 with the resolved data.
 python3 {defender_dir}/scripts/tools/data_source_debug.py \
     --defender-dir {defender_dir} \
     --system {system} \
-    --payload {run_dir}/gather_raw/{position}.json \
+    --payload {run_dir}/{raw-payload-path} \
     --question "<NL question grounded in the payload>"
 ```
+
+`{raw-payload-path}` is the path the capture wrapper reported on stderr
+for the query you just ran (`[gather_exec] raw payload: gather_raw/…`).
 
 The wrapper spawns a fresh top-level `claude -p` with the
 data-source-debug SKILL loaded and returns three sections on
@@ -238,17 +247,11 @@ leads); one round of smell-check, then report.
 
 You do **not** author an observation sidecar. `gather_exec.py` appends
 one record per query to `{run_dir}/executed_queries.jsonl` — the
-faithful `query_id`, `params`, raw command, canonical payload path, and
-a coarse structural `payload_status` (`ok`/`empty`/`error`). The
-lead-sequence projection renders these into the canonical
+`query_id`, `params`, raw command, payload path, and a coarse structural
+`payload_status` (`ok`/`empty`/`error`). The lead-sequence projection
+renders these into the canonical
 `gather_raw/{position}[a..z].{json,observations.json}` the offline
-lead-author reads.
-
-The structural status is a floor, not the smell test. When a query
-comes back empty or suspect (a bound param may have silently mismatched
-a typed field — see §3.5), **say so in your `## Summary`** (§6): which
-kind of empty, and whether you'd want a debug lead. That judgment is
-yours; the wrapper only records what mechanically happened.
+lead-author reads. Nothing for you to write here.
 
 ### 6. Return
 
@@ -261,7 +264,6 @@ via the wrapper (§5); don't restate them.
 - timing pattern: ...
 - source diversity: ...
 - success/failure ratio: ...
-- empty/suspect note: ...        # only when §3.5 flagged something
 ```
 
 If you authored a new draft template, mention it explicitly so the
@@ -307,20 +309,25 @@ then summarize: which mtime, which sessions overlap.
 
 ### Ad-hoc leads
 
-When no template fits and the question is genuinely one-off (not a
-shape worth memorizing), run the query inline through the wrapper with
-`--query-id ad-hoc` — the wrapper captures the raw output and records
-the literal command so the learning loop can still read what ran:
+When no template fits and you can't yet name a reusable shape — you're
+still finding the query that answers the lead — run it inline through
+the wrapper with `--query-id ad-hoc`. The wrapper captures the raw
+output and records the literal command so the learning loop can still
+read what ran; the offline lead-author, not you, decides whether the
+shape was worth memorizing:
 
 ```bash
 python3 {defender_dir}/scripts/tools/gather_exec.py \
-    --run-dir {run_dir} --lead {position} --query-id ad-hoc -- \
+    --run-dir {run_dir} --lead {position} \
+    --system {system} --query-id ad-hoc -- \
     python3 {defender_dir}/scripts/tools/wazuh_cli.py query \
     --query 'rule.id:5503 AND data.dstuser:jsmith AND data.srcip:10.42.7.183' --raw
 ```
 
-Use this when authoring would be premature — you only know it's a
-shape worth memorizing after seeing it twice.
+If a couple of inline iterations land on a query shape you *can* name,
+author it as a draft (§2) and run the final query under its
+`{system}.{kebab-name}` id instead — that routes it to the lead-author
+for promotion rather than leaving it as an unnamed ad-hoc record.
 
 ### Debug leads
 

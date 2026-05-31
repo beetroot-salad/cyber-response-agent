@@ -1,8 +1,9 @@
 """Tests for lead_author.synthesize_drafts — the WARN-and-draft fix.
 
-An executed CLI verb that matches no catalog template must be minted as a
-`{system}/_draft/{verb}.md` skeleton (so the lead-author curates it) rather
-than dropped. Pins the cmdb.get-host bug fix.
+An executed query whose `{system}.{verb}` id matches no catalog template must
+be minted as a `{system}/_draft/{verb}.md` skeleton (so the lead-author curates
+it) rather than dropped. Ad-hoc leads (id with no `{system}.` prefix) are not
+catalog candidates and are skipped.
 """
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ def _lead(query_id: str, params: dict | None = None) -> "lead_author.ExecutedLea
 
 def _catalog(tmp_path, monkeypatch) -> Path:
     cat = tmp_path / "queries"
-    (cat / "host-state").mkdir(parents=True)
-    (cat / "host-state" / "container-identity-and-uid.md").write_text(
-        "---\nid: host-state.container-identity-and-uid\nstatus: established\n---\n\n## Goal\nx\n"
+    (cat / "host-query").mkdir(parents=True)
+    (cat / "host-query" / "proc-tree.md").write_text(
+        "---\nid: host-query.proc-tree\nstatus: established\n---\n\n## Goal\nx\n"
     )
     monkeypatch.setattr(lead_neighbors, "CATALOG_ROOT", cat)
     # synthesize_drafts calls load_catalog() through lead_author's own
@@ -38,28 +39,29 @@ def _catalog(tmp_path, monkeypatch) -> Path:
 
 def test_unresolved_verb_is_drafted(tmp_path, monkeypatch):
     cat = _catalog(tmp_path, monkeypatch)
-    created = lead_author.synthesize_drafts([_lead("cmdb.get-host", {"name": "web-1"})])
-    draft = cat / "cmdb" / "_draft" / "get-host.md"
+    created = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})])
+    draft = cat / "stub-cmdb" / "_draft" / "network-map.md"
     assert created == [draft]
     text = draft.read_text()
-    assert "id: cmdb.get-host" in text
+    assert "id: stub-cmdb.network-map" in text
     assert "status: draft" in text
 
 
 def test_resolved_verb_not_drafted(tmp_path, monkeypatch):
     _catalog(tmp_path, monkeypatch)
-    assert lead_author.synthesize_drafts([_lead("host-state.container-identity-and-uid")]) == []
+    assert lead_author.synthesize_drafts([_lead("host-query.proc-tree")]) == []
 
 
-def test_query_body_verb_skipped(tmp_path, monkeypatch):
+def test_adhoc_query_id_skipped(tmp_path, monkeypatch):
     cat = _catalog(tmp_path, monkeypatch)
-    assert lead_author.synthesize_drafts([_lead("elastic.query")]) == []
-    assert not (cat / "elastic" / "_draft" / "query.md").exists()
+    # `ad-hoc` has no `{system}.` prefix — not a catalog candidate.
+    assert lead_author.synthesize_drafts([_lead("ad-hoc")]) == []
+    assert not (cat / "ad-hoc").exists()
 
 
 def test_idempotent(tmp_path, monkeypatch):
     _catalog(tmp_path, monkeypatch)
-    first = lead_author.synthesize_drafts([_lead("cmdb.get-host", {"name": "web-1"})])
+    first = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})])
     assert first
-    second = lead_author.synthesize_drafts([_lead("cmdb.get-host", {"name": "web-1"})])
+    second = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})])
     assert second == []

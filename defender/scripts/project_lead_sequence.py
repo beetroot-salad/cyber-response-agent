@@ -136,16 +136,15 @@ def materialize_from_executed_queries(run_dir: Path) -> None:
     artifacts the rest of the pipeline already reads.
 
     ``gather_exec.py`` appends one record per executed query to
-    ``executed_queries.jsonl`` (lead = dispatch position; faithful
-    ``query_id``/``params`` from argv; raw payload at
+    ``executed_queries.jsonl`` (lead = dispatch position; ``query_id``
+    and bound ``params`` from the dispatch contract; raw payload at
     ``gather_raw/{lead}/{seq}.json``). For each lead this writes the
     canonical ``gather_raw/{lead}{suffix}.json`` (copied from the wrapper's
-    payload) + ``{lead}{suffix}.observations.json`` (faithful queries[] +
+    payload) + ``{lead}{suffix}.observations.json`` (queries[] +
     structural status/digest) — the shape ``load_queries_from_observations``
     and ``lead_author`` already consume. The log is authoritative, so a
     lead present in the log overwrites any stale model-written sidecar; a
-    lead absent from the log (e.g. elastic still on the redirect path) is
-    left untouched.
+    lead absent from the log is left untouched.
     """
     from collections import defaultdict
 
@@ -183,8 +182,6 @@ def materialize_from_executed_queries(run_dir: Path) -> None:
                     pass
 
             params = dict(rec.get("params") or {})
-            if rec.get("body") is not None:
-                params.setdefault("body", rec["body"])
             obs = {
                 "payload_status": rec.get("payload_status") or "ok",
                 "payload_digest": rec.get("payload_digest") or "",
