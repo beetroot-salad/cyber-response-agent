@@ -36,10 +36,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+# Size safety: a query that over-returns (server-side filter didn't bind,
+# broad window, high-cardinality index) would otherwise dump its whole
+# stdout into the subagent's context — the 6000-hit / 500KB flood that
+# drives hand-counting. Above this byte ceiling the pass-through is
+# replaced by a count + samples + a pointer to the on-disk payload and a
+# nudge to filter that file with jq/grep instead. The full payload is
+# always persisted regardless; only the in-context view is capped.
+PASSTHROUGH_MAX_BYTES = int(os.environ.get("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536"))
+PASSTHROUGH_SAMPLE_COUNT = 3
+_SAMPLE_MAX_CHARS = 600
+_RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
 
 
 def parse_params(inner: list[str]) -> dict:
@@ -102,6 +115,52 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
     return f"{len(stdout)} bytes, {lines} line(s)"
+
+
+def _find_records(stdout: str):
+    """Best-effort record array for sampling. Returns None if stdout isn't
+    JSON or holds no obvious list (callers fall back to char truncation)."""
+    try:
+        obj = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in _RECORD_KEYS:
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        lists = [v for v in obj.values() if isinstance(v, list)]
+        if lists:
+            return max(lists, key=len)
+    return None
+
+
+def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
+    """Replace an oversized pass-through with count + samples + a nudge to
+    filter the persisted payload with code."""
+    size = len(stdout)
+    records = _find_records(stdout)
+    lines: list[str] = []
+    if records is not None:
+        lines.append(f"[gather_exec] {len(records)} records, {size} bytes — pass-through truncated")
+        for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
+            sample = json.dumps(rec, default=str)
+            if len(sample) > _SAMPLE_MAX_CHARS:
+                sample = sample[:_SAMPLE_MAX_CHARS] + "…"
+            lines.append(f"sample[{idx}]: {sample}")
+    else:
+        lines.append(f"[gather_exec] {size} bytes — pass-through truncated")
+        lines.append(stdout[:_SAMPLE_MAX_CHARS * PASSTHROUGH_SAMPLE_COUNT] + "…")
+    if payload_rel:
+        abs_payload = run_dir / payload_rel
+        lines.append(f"full payload: {abs_payload}")
+        lines.append(
+            "→ payload is large; do not rely on this truncated view or count the "
+            "samples. Filter the full payload on disk (jq, grep, the Grep tool), e.g.:\n"
+            f"  jq '[.hits[] | select(.message | test(\"<substr>\"))] | length' {abs_payload}"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _next_seq(lead_dir: Path) -> int:
@@ -173,10 +232,15 @@ def main(argv: list[str]) -> int:
     except OSError as e:
         print(f"gather_exec.py: could not append record: {e}", file=sys.stderr)
 
-    # Transparent passthrough so the subagent's reasoning is unaffected, plus
-    # a prefixed pointer to the raw payload on disk (the §3.5 data-source-debug
-    # protocol points `--payload` at this path).
-    sys.stdout.write(proc.stdout)
+    # Pass the result through for the subagent's reasoning, but cap the
+    # in-context view: an oversized payload is replaced by count + samples +
+    # a nudge to filter the persisted file with code (the full payload is
+    # already on disk at payload_path). The §3.5 data-source-debug protocol
+    # and §filter-with-code both point at that path.
+    if proc.returncode == 0 and len(proc.stdout) > PASSTHROUGH_MAX_BYTES:
+        sys.stdout.write(build_truncated_view(proc.stdout, payload_rel, run_dir))
+    else:
+        sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if payload_rel:
         print(f"[gather_exec] raw payload: {payload_rel}", file=sys.stderr)

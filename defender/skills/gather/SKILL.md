@@ -120,6 +120,24 @@ before reporting a Counter over the returned hits. If the run is
 truncated, widen `--limit` (up to the CLI's `MAX_LIMIT`) and re-run,
 or report the partial result with `payload_status: partial`.
 
+**Large payloads: filter the file, never hand-count.** When a query
+over-returns (server-side filter didn't bind, broad window,
+high-cardinality index), the capture wrapper caps what it passes back:
+above its byte ceiling you get a `[gather_exec] N records … pass-through
+truncated` line, a few `sample[i]` records, and the on-disk payload
+path — not the full dump. **That truncated view is not a countable
+sample.** Do not eyeball it or estimate from the samples. Filter the
+persisted payload on disk with jq, grep, or the Grep tool — the samples
+show the field shape you need to write the filter:
+
+```bash
+jq '[.hits[] | select(.message | test("Failed password") and test("::1"))] | length' \
+    {run_dir}/{raw-payload-path}
+```
+
+Report the number the filter returns — that is the measured value,
+derived from the whole payload rather than the truncated view.
+
 ### 3.5 Validate declared fields
 
 Before §4, run a mechanical per-field check against the raw
@@ -196,6 +214,15 @@ numbers — counts, cardinalities, distributions, ratios, named
 timestamps. The defender weighs what they mean in ANALYZE. A
 striking value (5-minute cadence, single source IP, 7-day baseline)
 stands on its own — its size is the finding.
+
+**Do not interpret.** State observables, never their meaning. Banned:
+labelling activity ("interactive vs automated", "brute-force pattern",
+"consistent with local console access"), benign/malicious calls, and
+attack-name pattern-matching. Report "4 connections, sequential source
+ports, 2-second span" and stop — do not append "indicating automated
+tooling." Characterizing the data is ANALYZE, the defender's phase; an
+interpretation in your summary pre-empts it, and when it contradicts the
+numbers you reported it sends the defender back into the raw payload.
 
 #### Smell test before reporting empty / sparse
 

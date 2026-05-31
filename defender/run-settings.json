@@ -59,6 +59,15 @@
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/inject_system_skill_description.py"
           }
         ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_main_loop_raw_access.py"
+          }
+        ]
       }
     ]
   }

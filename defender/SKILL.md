@@ -68,6 +68,15 @@ uncertain.
    the raw payload yourself; pulling raw into the main context
    defeats the subagent isolation that made the dispatch cheap in
    the first place.
+
+   **The only way to query a data source is a `Task`→gather dispatch.**
+   Do not run the system CLIs (`scripts/tools/*_cli.py`) yourself from
+   the main loop, and do not redirect their output to a file you then
+   Read — querying-then-reading-your-own-dump is the same violation as
+   reading `gather_raw`, just renamed, and it leaves the query out of
+   the audit trail. Both moves are blocked by a hook; if you hit that
+   block, the fix is always to dispatch gather, never to find another
+   path to the bytes.
 6. **Discover knowledge on demand.** Domain knowledge lives as on-disk
    skills. Load them via `Skill` when the next move needs them.
 7. **Don't pre-judge what unowned tools can or can't accept.** Per-system
