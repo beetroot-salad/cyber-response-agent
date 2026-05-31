@@ -151,7 +151,7 @@ def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
                 _DRAFT_SKELETON.format(
                     query_id=qid, system=system, verb=verb,
                     params=dict(lead.params or {}),
-                    goal=(lead.goal_text or "").replace("\n", " ").strip()[:200],
+                    goal=(lead.goal_text or "").replace("\n", " ").strip(),
                     param_hint=param_hint,
                 )
             )

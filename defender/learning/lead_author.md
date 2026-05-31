@@ -10,7 +10,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 ## What you receive
 
 - **`run_dir`** — absolute path of the defender run that triggered this tick. Read-only.
-- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `wazuh/auth-events.md`). Established templates live at `{system}/{id}.md`; gather-authored drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
+- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `wazuh/auth-events.md`). Established templates live at `{system}/{id}.md`; drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Drafts are auto-synthesized (skeletons) from the run's executed-query record when gather ran a `{system}.{verb}` id with no matching template — gather no longer authors them mid-run. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
 - **`skills_dir`** — `defender/skills/`. System-skill SKILL.md bodies (e.g. `elastic/SKILL.md`) live one level under here, each with an optional sibling `_draft/` that holds pending lifts.
 - **`executed_template_handoffs`** — a JSON array, one entry per *executed template* (not per invocation). When the same template was dispatched multiple times in this run, those invocations collapse to one handoff so you make one decision per file. Schema:
 

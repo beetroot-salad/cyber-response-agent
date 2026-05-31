@@ -102,9 +102,13 @@ that already exist, summarize the join in the gather return. **Do not
 mint a "bridge" template** — it bloats the catalog with one-offs that
 won't be reused. See `defender/skills/gather/SKILL.md` §Composition leads.
 
-## Authoring a new template
+## Naming a new measurement
 
-When the lead has no matching template:
+When the lead has no matching template, gather does **not** author a
+template file — it coins a measurement id and runs under it (see
+`defender/skills/gather/SKILL.md` §2). The offline lead-author mints the
+`_draft/{id}.md` file from the execution record and curates it. To coin
+the id:
 
 1. Pick a `{system}` based on which data source the query must hit.
 2. Pick a kebab-case `{template-id}` describing what the query measures,
@@ -112,12 +116,12 @@ When the lead has no matching template:
    `file-integrity-changes`. Bad: `check-bastion-pivot`,
    `auth-events-by-host` (the by-X axis is a parameter, not a separate
    template).
-3. Write `## Goal` for keyword recall. Future-you will grep this body.
-4. Run it, summarize for the defender, and record the id in
-   `lead_sequence.yaml` like any other entry.
 
-Bias toward authoring a fresh id rather than wedging a near-match —
+Bias toward coining a fresh id rather than wedging a near-match —
 duplicates are cheaper to normalize later than mis-keyed cross-case joins
-are to recover. But before authoring, check whether an existing template
-already carries the **capability** you need with a different parameter
-binding (the template body, not the filename, is what determines fit).
+are to recover. But first check whether an existing template already
+carries the **capability** you need with a different parameter binding
+(the template body, not the filename, is what determines fit).
+
+This file documents the template *shape* the lead-author produces when
+it promotes a coined measurement; gather only supplies the id.
