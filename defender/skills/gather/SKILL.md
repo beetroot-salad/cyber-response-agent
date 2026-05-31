@@ -95,14 +95,14 @@ wrapper persists the raw payload and records the executed query
 **not** redirect output or hand-name files:
 
 Everything after `--` is the system CLI invocation exactly as that
-system's SKILL.md documents it (the CLI's filename is named there — it
-is *not* always `{system}_cli.py`). For example, for a `stub-cmdb` lead:
+system's SKILL.md documents it — the CLI's filename, subcommands, and
+flags all come from there (don't assume it's `{system}_cli.py`):
 
 ```bash
 python3 {defender_dir}/scripts/tools/gather_exec.py \
     --run-dir {run_dir} --lead {position} \
-    --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
-    python3 {defender_dir}/scripts/tools/cmdb_cli.py host-lookup web-1 --raw
+    --system {system} --query-id {system}.{template-id} -- \
+    python3 {defender_dir}/scripts/tools/<system-cli> <verb> <args> --raw
 ```
 
 Pass three values: your `position` as `--lead`, the lead's `system` as
@@ -262,8 +262,8 @@ defender records the proposal alongside the disposition:
 
 ```
 ## Proposed
-- system: elastic
-  draft: {defender_dir}/skills/elastic/_draft/{kebab-name}.md
+- system: {system}
+  draft: {defender_dir}/skills/{system}/_draft/{kebab-name}.md
   scope: system-wide                            # or: single-template:{template-id}
   summary: <one-line description of the quirk + workaround>
 ```
@@ -284,10 +284,11 @@ templates that measure each side, and **summarize the join in the
 return**. Do not mint a "bridge" template that pretends the
 correlation is itself a primitive measurement.
 
-Example: "did anyone modify /etc/passwd on web-03 in the last 24h, and
-who was logged in then?" → run `wazuh.file-integrity-changes` (filtered
-to `/etc/passwd`, host `web-03`, 24h window) and `host-query.user-sessions`,
-then summarize: which mtime, which sessions overlap.
+Example: "did anyone modify /etc/passwd on host-7 in the last 24h, and
+who was logged in then?" → run a `file-integrity-changes` template
+(filtered to `/etc/passwd`, host `host-7`, 24h window) on the
+file-integrity system and a `user-sessions` template on the host
+system, then summarize: which mtime, which sessions overlap.
 
 ### Ad-hoc leads
 
@@ -311,9 +312,8 @@ How to search without a template:
 ```bash
 python3 {defender_dir}/scripts/tools/gather_exec.py \
     --run-dir {run_dir} --lead {position} \
-    --system wazuh --query-id wazuh.failed-auth-by-srcip -- \
-    python3 {defender_dir}/scripts/tools/wazuh_cli.py query \
-    --query 'rule.id:5503 AND data.dstuser:jsmith AND data.srcip:10.42.7.183' --raw
+    --system {system} --query-id {system}.failed-auth-by-srcip -- \
+    python3 {defender_dir}/scripts/tools/<system-cli> <query invocation> --raw
 ```
 
 Reserve the literal `--query-id ad-hoc` for the genuinely unnameable —
