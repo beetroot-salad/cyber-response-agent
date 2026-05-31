@@ -62,6 +62,8 @@ last line. Single rep — do not retry.
 
 For folds where one finding produces GOOD and another BAD on the same target file, keep the GOOD edit. Each finding is gated independently against its own source case.
 
+**Don't poll for completion.** Read each `verify_forward.py` result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
+
 ## Commit
 
 After processing every finding:

@@ -17,8 +17,8 @@ queries/
 ```
 
 `{system}` is a system the gather subagent knows how to dispatch against
-(e.g. `wazuh/`, `host-query/`). It doubles as the routing prefix for the
-template id and as a coarse `ls`-time filter.
+(one dir per onboarded system of record). It doubles as the routing
+prefix for the template id and as a coarse `ls`-time filter.
 
 `{template-id}` is kebab-case. Name it for **what the query measures**
 (`auth-events`), not the axis you happen to filter on (`auth-events-by-host`)
@@ -29,7 +29,7 @@ single template can carry several optional filter knobs.
 
 ```markdown
 ---
-id: wazuh.auth-events
+id: {system}.auth-events
 ---
 
 ## Goal
@@ -53,9 +53,9 @@ parent. The defender weighs what the values mean in ANALYZE.
 ## Query
 
 The query body the system of record executes, with `${param}` placeholders.
-This is system-native — Elasticsearch DSL for wazuh, a shell pipeline for
-host-query, SQL for relational stores, etc. The system's CLI client is a
-thin dispatcher; it does not interpret a query DSL of its own. Gather
+This is system-native — a search DSL for a SIEM, a shell pipeline for a
+host-state agent, SQL for a relational store, etc. The system's CLI client
+is a thin dispatcher; it does not interpret a query DSL of its own. Gather
 substitutes the bound params and hands the body to the client.
 
 Parameters are discovered automatically from the `${param}` placeholders;
@@ -75,20 +75,19 @@ self-contained.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
-A dispatch at sequence `position` typically runs one query and persists raw
-to `{run_dir}/gather_raw/{position}.json`. When the lead requires more than
-one query at the same position (composition leads, foreground+baseline,
-multi-system comparisons), suffix each query's position with a single
-lowercase letter so the run dir stays unambiguous:
+Gather runs each query through
+`gather_exec.py --run-dir R --lead {position} --system {system} --query-id {id}`
+(see `defender/skills/gather/SKILL.md` §3). The wrapper persists raw output
+to `{run_dir}/gather_raw/{lead}/{seq}.json` and appends a record to
+`executed_queries.jsonl`; gather neither redirects stdout nor names files.
+The `lead_sequence` projection renders the wrapper's per-lead records into the
+canonical artifacts consumers read — single-query at `gather_raw/{position}.json`,
+multi-query suffixed `{position}{a..z}.json`:
 
 - `gather_raw/0.json` — single-query dispatch at position 0
 - `gather_raw/0a.json`, `gather_raw/0b.json`, `gather_raw/0c.json` — three
   queries at position 0
 - `gather_raw/1.json` — single-query dispatch at position 1
-
-System CLIs accept `--position <pos>` (in addition to `--run-dir`) and write
-the file themselves; gather does not redirect stdout. The `lead_sequence`
-projection groups files back under one `position` regardless of suffix.
 
 ## What is *not* a template
 
@@ -101,9 +100,13 @@ that already exist, summarize the join in the gather return. **Do not
 mint a "bridge" template** — it bloats the catalog with one-offs that
 won't be reused. See `defender/skills/gather/SKILL.md` §Composition leads.
 
-## Authoring a new template
+## Naming a new measurement
 
-When the lead has no matching template:
+When the lead has no matching template, gather does **not** author a
+template file — it coins a measurement id and runs under it (see
+`defender/skills/gather/SKILL.md` §2). The offline lead-author mints the
+`_draft/{id}.md` file from the execution record and curates it. To coin
+the id:
 
 1. Pick a `{system}` based on which data source the query must hit.
 2. Pick a kebab-case `{template-id}` describing what the query measures,
@@ -111,12 +114,12 @@ When the lead has no matching template:
    `file-integrity-changes`. Bad: `check-bastion-pivot`,
    `auth-events-by-host` (the by-X axis is a parameter, not a separate
    template).
-3. Write `## Goal` for keyword recall. Future-you will grep this body.
-4. Run it, summarize for the defender, and record the id in
-   `lead_sequence.yaml` like any other entry.
 
-Bias toward authoring a fresh id rather than wedging a near-match —
+Bias toward coining a fresh id rather than wedging a near-match —
 duplicates are cheaper to normalize later than mis-keyed cross-case joins
-are to recover. But before authoring, check whether an existing template
-already carries the **capability** you need with a different parameter
-binding (the template body, not the filename, is what determines fit).
+are to recover. But first check whether an existing template already
+carries the **capability** you need with a different parameter binding
+(the template body, not the filename, is what determines fit).
+
+This file documents the template *shape* the lead-author produces when
+it promotes a coined measurement; gather only supplies the id.

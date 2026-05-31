@@ -94,6 +94,74 @@ def _lift_threshold() -> int:
     return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
 
 
+_DRAFT_SKELETON = """\
+---
+id: {query_id}
+status: draft
+---
+
+## Goal
+
+`{query_id}` lookup. Auto-drafted from an executed gather query that matched
+no catalog template (bound params: {params}). The defender's lead goal was:
+"{goal}". Refine this Goal for keyword recall, or discard if it duplicates an
+established template.
+
+## What to summarize
+
+- (fill in the measurement primitives this lookup surfaces)
+
+## Query
+
+```
+# Fill in the real `{system}` CLI invocation (see defender/skills/{system}/SKILL.md).
+# This query ran with bound params: {param_hint}
+```
+"""
+
+
+def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
+    """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
+    query_id that resolves to no catalog template.
+
+    This replaces the lead-author's WARN-and-drop on an unresolved verb
+    (`build_handoff`) with WARN-and-draft: the gather subagent ran a query
+    under a ``{system}.{verb}`` id that no template covers, so we
+    deterministically draft it and let the lead-author's existing
+    promote/discard/skip machinery curate it. ``query_id`` comes from the
+    dispatch contract via the wrapper (``--query-id``); ad-hoc leads
+    (``query_id`` with no ``{system}.`` prefix) are skipped — they are not
+    catalog candidates. Idempotent — skips drafts that already exist on disk
+    or were minted earlier in this call.
+    """
+    by_id = {t.id for t in lead_neighbors.load_catalog()}
+    created: list[Path] = []
+    for lead in executed:
+        qid = lead.query_id
+        if not qid or "." not in qid or qid in by_id:
+            continue
+        system, verb = qid.split(".", 1)
+        draft = CATALOG_DIR / system / "_draft" / f"{verb}.md"
+        if draft.exists() or draft in created:
+            continue
+        param_hint = " ".join(str(v) for v in (lead.params or {}).values())
+        try:
+            draft.parent.mkdir(parents=True, exist_ok=True)
+            draft.write_text(
+                _DRAFT_SKELETON.format(
+                    query_id=qid, system=system, verb=verb,
+                    params=dict(lead.params or {}),
+                    goal=(lead.goal_text or "").replace("\n", " ").strip(),
+                    param_hint=param_hint,
+                )
+            )
+            created.append(draft)
+            by_id.add(qid)
+        except OSError:
+            continue
+    return created
+
+
 # ---------------------------------------------------------------------------
 # Lead extraction (inlined from PR-209's lead_extract.py)
 # ---------------------------------------------------------------------------
@@ -394,6 +462,27 @@ def _git_rev_list_count(base_sha: str) -> int:
 def _git_status_records() -> set[tuple[str, str]]:
     proc = _git("status", "--porcelain=v1", "-z", "--untracked-files=all")
     return _parse_status_z(proc.stdout)
+
+
+def _stage_pending_drafts() -> list[str]:
+    """Stage untracked ``_draft/`` deposits so the curator's ``git mv``
+    (promote/lift) and ``git rm -f`` (discard) operate on index-tracked
+    files — git refuses both on an untracked source.
+
+    Covers both catalog drafts (gather-authored mid-run or auto-synthesized
+    by ``synthesize_drafts``) and system-skill drafts (data-source-debug
+    deposits). Called *before* the baseline snapshot so the staged drafts
+    are recorded as expected queue content, not flagged as post-flight dirt.
+    """
+    proc = _git("ls-files", "--others", "--exclude-standard", "-z")
+    untracked = [p for p in proc.stdout.split("\0") if p]
+    drafts = [
+        p for p in untracked
+        if (_under_draft(p) or _is_system_skill_draft(p)) and not _is_draft_readme(p)
+    ]
+    if drafts:
+        _git("add", "--", *drafts)
+    return drafts
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +989,28 @@ def _run_locked(run_dir: Path) -> int:
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
+
+    # Mint drafts for executed-but-uncatalogued verbs BEFORE capturing the
+    # git baseline, so the new {system}/_draft/ files are expected queue
+    # content (the dirty-protected preflight ignores _draft/) and the
+    # post-flight verifies against a baseline that already includes them.
+    try:
+        synth = synthesize_drafts(extract(run_dir))
+        if synth:
+            _log(
+                f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
+                + ", ".join(p.name for p in synth)
+            )
+    except (FileNotFoundError, ValueError) as e:
+        _log(f"draft synthesis skipped (extract failed: {e})")
+
+    # Stage all pending drafts (synthesized + gather-authored + system-skill
+    # deposits) so the curator can `git mv` (promote/lift) and `git rm -f`
+    # (discard) them — git refuses both on an untracked source. Stage before
+    # the baseline so they read as expected queue content, not post-flight dirt.
+    staged = _stage_pending_drafts()
+    if staged:
+        _log(f"staged {len(staged)} pending draft(s) for curation")
 
     base_sha = _git_head()
     baseline = _git_status_records()

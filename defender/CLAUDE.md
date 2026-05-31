@@ -214,15 +214,17 @@ Field contracts:
   increment.
 - **`lead_description.goal`** — the defender's intent in its own
   words, not a post-hoc paraphrase of what gather returned.
-- **`queries[].id`** — durable identifier
-  (`{system}.{kebab-name}`), matching a template under
-  `defender/skills/gather/queries/{system}/` or
-  `defender/skills/gather/queries/{system}/_draft/` (drafts authored by
-  gather mid-run carry `status: draft` frontmatter and live in
-  `_draft/`; the offline lead-author promotes them via `git mv` to
-  `status: established`). If gather authored the draft during this run,
-  the file is written back before the sequence is emitted, so every id
-  resolves.
+- **`queries[].id`** — durable identifier (`{system}.{kebab-name}`),
+  the id gather passed to the capture wrapper as `--query-id`. It is an
+  established template (`defender/skills/gather/queries/{system}/{id}.md`)
+  when one fit, or a measurement name gather coined for a no-template
+  query. Coined ids need **not** resolve to a file at projection time:
+  gather no longer authors templates mid-run, so the projection records
+  the id from the wrapper's executed-query log without touching disk.
+  The offline lead-author (`learning/lead_author.py`) mints a
+  `_draft/{id}.md` skeleton from that record and curates it
+  (promote/discard/skip). The literal id `ad-hoc` is a one-off probe
+  with no catalog candidacy.
 - **`queries[].params`** — *bound* values, not declarations. The
   template file declares the parameter set; the entry records what
   they resolved to.

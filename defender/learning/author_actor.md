@@ -54,6 +54,8 @@ After writing or rewriting a lesson file, run the exact command the orchestrator
 
 Stale-only flips don't need a forward check — there's no new body to evaluate.
 
+**Don't poll for completion.** Read each `verify_forward_actor.py` result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
+
 For folds where one observation produces GOOD and another BAD on the same target file, keep the GOOD edit and skip the BAD one. Each observation is gated independently.
 
 When decomposing into an env-fact + pattern pair, gate each file independently. If the env-fact passes and the pattern fails, keep the env-fact and route the pattern half to `consumed_skip`; the next batch can revisit. The observation is still considered `committed` if any file derived from it lands.

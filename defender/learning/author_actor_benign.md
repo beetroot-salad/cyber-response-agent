@@ -58,6 +58,8 @@ This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the
 
 Stale-only flips don't need a forward check — there's no new body to evaluate. For a fold where one observation passes and another fails on the same file, keep the passing edit and skip the failing one; each observation is gated independently.
 
+**Don't poll for completion.** Read each forward check's result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
+
 ## Discipline
 
 - One file per lesson. Flat layout under `{lessons_dir}`. No subdirectories.
