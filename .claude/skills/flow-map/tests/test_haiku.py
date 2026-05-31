@@ -70,11 +70,13 @@ def test_classify_reproduces_recorded_8_of_8(defender_root, fixtures_dir, monkey
     assert summary["reference"] == 6
     assert summary["dropped"] == 0
 
-    # the two dispatch edges are the gather 'follow it' sites (lines 282, 461)
+    # the two dispatch edges are the gather 'follow it' sites (lines 291, 470).
+    # The index-keyed verdict fixture is unchanged (candidate ORDER is stable:
+    # idx 2 & 7 = gather dispatches, idx 5 = trap); only line refs drifted.
     disp_refs = sorted(e.ref.split(":")[-1] for e in g.edges if e.kind == "dispatches")
-    assert disp_refs == ["282", "461"]
-    # the line-402 trap ("the gather subagent reads this") is NOT an edge
-    assert not any(e.ref.endswith(":402") for e in g.edges if e.kind == "dispatches")
+    assert disp_refs == ["291", "470"]
+    # the line-411 trap ("the gather subagent reads this") is NOT an edge
+    assert not any(e.ref.endswith(":411") for e in g.edges if e.kind == "dispatches")
 
 
 def test_classify_tags_edges_as_llm(defender_root, fixtures_dir, monkeypatch):

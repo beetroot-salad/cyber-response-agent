@@ -32,8 +32,9 @@ def test_hook_nodes_resolve_to_real_files(defender_root):
 def test_candidates_found_at_expected_sites(defender_root):
     _, cands = seed_orchestration(defender_root, defender_root / "defender")
     lines = sorted(int(c.ref.split(":")[-1]) for c in cands)
-    # 8 skills/X/SKILL.md mentions in defender/SKILL.md
-    assert lines == [111, 152, 282, 347, 400, 402, 418, 461]
+    # 8 skills/X/SKILL.md mentions in defender/SKILL.md (drift-detector: these
+    # line numbers track the live file; re-baseline when SKILL.md moves them)
+    assert lines == [120, 161, 291, 356, 409, 411, 427, 470]
 
 
 def test_candidate_targets_are_script_minted(defender_root):

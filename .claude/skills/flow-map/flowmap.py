@@ -2,6 +2,11 @@
 """flow-map CLI.
 
 Commands:
+  map      "<question>" <module.py> --root DIR [--entry FN]
+           natural-language query: build (+verify) the graph, parse the question
+           to an intent (haiku), resolve the seed deterministically, and render
+           the view — a contract card (component-card) or the branch-aware logic
+           view of the driving function + agent table (subsystem-map).
   build    <module.py> --root DIR [--entry FN] [--out graph.json] [--mermaid]
            full pipeline: seed -> resolve -> VERIFY -> render. Verification is
            integral, not a separate step: structural checks ALWAYS run and gate
@@ -36,6 +41,9 @@ from flowmap.verify import (              # noqa: E402
     differential_verify,
     select_load_bearing_subflows,
 )
+from flowmap.intent import resolve_question  # noqa: E402
+from flowmap.scope import component_card, render_card_markdown  # noqa: E402
+from flowmap.logic import render_logic_view  # noqa: E402
 
 
 def _build(module: Path, root: Path, entry: str, *, resolve: bool) -> Graph:
@@ -115,6 +123,71 @@ def _cmd_build(args) -> int:
     return 2 if any(not d.agree for d in result.differentials) else 0
 
 
+def _cmd_map(args) -> int:
+    """Natural-language query: build (+verify) the graph, then render the view the
+    question asks for.
+
+    The graph is produced with the same structural gate as `build`. The question
+    is parsed to an Intent by haiku (mode + target), the seed is resolved
+    deterministically against real node ids, and the view is rendered:
+
+      * component-card — a source-faithful contract card + its call neighborhood.
+      * subsystem-map  — the branch-aware logic view of the driving function: its
+        control flow (decisions, loops, agent vs code steps) with branch/agent
+        labels re-phrased by haiku, plus the agent companion table.
+    """
+    root = Path(args.root).resolve()
+    module = Path(args.module).resolve()
+
+    g = _build(module, root, args.entry, resolve=not args.no_resolve)
+    structural = validate(g, module, root)
+    if structural:
+        print(f"MAP FAILED — graph not faithful ({len(structural)} error(s)):",
+              file=sys.stderr)
+        for e in structural:
+            print(f"  {e}", file=sys.stderr)
+        return 1
+
+    try:
+        intent, seed_id = resolve_question(g, args.question)
+    except Exception as e:  # IntentError or parser failure -> actionable message
+        print(f"could not answer {args.question!r}: {e}", file=sys.stderr)
+        return 1
+
+    bare = seed_id.split("::")[-1].split("/")[-1]
+    print(f"intent: mode={intent.mode} target={bare}", file=sys.stderr)
+
+    if intent.mode == "component-card":
+        scoped = component_card(g, seed_id)
+        print(render_card_markdown(g, seed_id))
+        print()
+        print(render_mermaid(scoped.graph, title=f"{bare} — component"))
+        return 0
+
+    # subsystem-map: the driving function's logic view. The seed must be a
+    # function (its body sequences the flow); anything else is a clean error.
+    if not (seed_id.startswith("py:") and "::" in seed_id):
+        print(f"subsystem-map needs a function target; {bare!r} is not a "
+              f"function (resolved to {seed_id!r}). Ask about the function that "
+              f"drives the flow.", file=sys.stderr)
+        return 1
+    relfile, funcname = seed_id[len("py:"):].split("::", 1)
+    view_module = root / relfile
+    try:
+        md, summary = render_logic_view(g, view_module, root, funcname)
+    except Exception as e:
+        print(f"could not render logic view for {funcname!r}: {e}", file=sys.stderr)
+        return 1
+    note = (f"; represented {summary.get('applied', 0)}/"
+            f"{summary.get('requested', 0)} labels"
+            + (f" (representer error: {summary['error']})"
+               if summary.get("error") else ""))
+    print(f"logic view: {funcname} in {relfile}{note}", file=sys.stderr)
+    print(f"## {funcname}\n")
+    print(md)
+    return 0
+
+
 def _cmd_validate(args) -> int:
     root = Path(args.root).resolve()
     module = Path(args.module).resolve()
@@ -164,6 +237,15 @@ def main(argv: list[str]) -> int:
     s.add_argument("--no-resolve", action="store_true",
                    help="skip deterministic cross-module dispatch resolution")
     s.set_defaults(fn=_cmd_seed)
+
+    m = sub.add_parser("map", help="natural-language query -> scoped flow view")
+    m.add_argument("question")
+    m.add_argument("module")
+    m.add_argument("--root", required=True)
+    m.add_argument("--entry", default="run_one")
+    m.add_argument("--no-resolve", action="store_true",
+                   help="skip deterministic cross-module dispatch resolution")
+    m.set_defaults(fn=_cmd_map)
 
     v = sub.add_parser("validate")
     v.add_argument("module")

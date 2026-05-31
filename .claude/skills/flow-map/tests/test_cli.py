@@ -78,6 +78,71 @@ def test_build_differential_runs_when_forced(defender_root, loop_module, monkeyp
     assert "run_one" in captured["specs"]  # entry always verified
 
 
+def test_map_component_card(defender_root, loop_module, monkeypatch):
+    """`map` routes a component question to a card + mermaid, no live call."""
+    from flowmap.intent import Intent
+    # patch the resolve step (the LLM seam) to a fixed intent + real seed id;
+    # component-card rendering is fully deterministic, so no live call follows.
+    monkeypatch.setattr(
+        cli, "resolve_question",
+        lambda g, q: (Intent("component-card", "invoke_actor"),
+                      "py:defender/learning/loop.py::invoke_actor"))
+    rc = cli.main([
+        "map", "how does invoke_actor work?", str(loop_module),
+        "--root", str(defender_root), "--entry", "run_one",
+    ])
+    assert rc == 0
+
+
+def test_map_subsystem(defender_root, loop_module, monkeypatch):
+    """`map` routes a subsystem question to the logic view. The intent seam and
+    the representation seam are both injected, so there are zero live calls."""
+    from flowmap.intent import Intent
+    from flowmap.logic import render_logic_view as real_view
+
+    monkeypatch.setattr(
+        cli, "resolve_question",
+        lambda g, q: (Intent("subsystem-map", "run_one"),
+                      "py:defender/learning/loop.py::run_one"))
+    # inject a no-op representer (degrade to raw labels) -> no haiku call
+    monkeypatch.setattr(
+        cli, "render_logic_view",
+        lambda cg, m, r, fn, **k: real_view(cg, m, r, fn, representer=lambda reqs: {}))
+    rc = cli.main([
+        "map", "how does the learning loop work?", str(loop_module),
+        "--root", str(defender_root), "--entry", "run_one",
+    ])
+    assert rc == 0
+
+
+def test_map_unresolvable_target_fails_cleanly(defender_root, loop_module, monkeypatch):
+    from flowmap.intent import IntentError
+
+    def boom(g, q):
+        raise IntentError("no node matches 'imaginary_xyz'")
+    monkeypatch.setattr(cli, "resolve_question", boom)
+    rc = cli.main([
+        "map", "how does imaginary_xyz work?", str(loop_module),
+        "--root", str(defender_root), "--entry", "run_one",
+    ])
+    assert rc == 1  # actionable failure, not a crash
+
+
+def test_map_subsystem_rejects_non_function_target(defender_root, loop_module, monkeypatch):
+    """A subsystem-map whose target resolves to a prompt/script (not a function)
+    fails cleanly rather than crashing in the CFG builder."""
+    from flowmap.intent import Intent
+    monkeypatch.setattr(
+        cli, "resolve_question",
+        lambda g, q: (Intent("subsystem-map", "actor.md"),
+                      "agent-prompt:defender/learning/prompts/actor.md"))
+    rc = cli.main([
+        "map", "how does actor.md work?", str(loop_module),
+        "--root", str(defender_root), "--entry", "run_one",
+    ])
+    assert rc == 1
+
+
 def test_seed_command_does_not_verify(defender_root, loop_module, monkeypatch):
     """`seed` is extraction-only — it must not invoke verification."""
     def boom(*a, **k):

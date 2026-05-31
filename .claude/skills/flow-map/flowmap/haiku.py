@@ -69,7 +69,7 @@ def _build_user_prompt(cands: list[DispatchCandidate]) -> str:
     )
 
 
-def _run_haiku(system: str, user: str) -> str:
+def _run_haiku(system: str, user: str, *, timeout: int = HAIKU_TIMEOUT) -> str:
     # The system prompt is prepended to the user message rather than passed via
     # --system-prompt-file: it keeps the call to a single stdin channel, and the
     # classification instructions work equally well as a leading user block.
@@ -81,7 +81,7 @@ def _run_haiku(system: str, user: str) -> str:
     ]
     full = system + "\n\n" + user
     proc = subprocess.run(cmd, input=full, capture_output=True, text=True,
-                          timeout=HAIKU_TIMEOUT)
+                          timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed (rc={proc.returncode}): "
                            f"{proc.stderr[-800:]}")
