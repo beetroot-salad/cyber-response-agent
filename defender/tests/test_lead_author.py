@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 import lead_author  # type: ignore[import-not-found]
+import lead_neighbors  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,32 @@ def run_dir(tmp_path: Path) -> Path:
     return rd
 
 
+@pytest.fixture
+def catalog(tmp_path: Path, monkeypatch) -> Path:
+    """Self-contained query catalog so build_handoff resolves ids without
+    depending on the live, environment-specific on-disk catalog. Points both
+    CATALOG_ROOT and REPO_ROOT at the temp tree (build_handoff renders
+    template paths relative to REPO_ROOT)."""
+    cat = tmp_path / "queries"
+    (cat / "elastic").mkdir(parents=True)
+    (cat / "host-state").mkdir(parents=True)
+    (cat / "elastic" / "auth-events.md").write_text(
+        "---\nid: elastic.auth-events\nstatus: established\n---\n\n"
+        "## Goal\nAuthentication events for a host over a window.\n\n"
+        "## Query\n\n```\nelastic_cli.py query --window ${window} ${host_clause}\n```\n"
+    )
+    (cat / "host-state" / "process-list.md").write_text(
+        "---\nid: host-state.process-list\nstatus: established\n---\n\n"
+        "## Goal\nRunning processes matching a pattern.\n\n"
+        "## Query\n\n```\nhost_state_cli.py process-list ${pattern}\n```\n"
+    )
+    monkeypatch.setattr(lead_neighbors, "CATALOG_ROOT", cat)
+    monkeypatch.setattr(lead_author.lead_neighbors, "CATALOG_ROOT", cat)
+    monkeypatch.setattr(lead_author, "CATALOG_DIR", cat)
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    return cat
+
+
 # ---------------------------------------------------------------------------
 # extract()
 # ---------------------------------------------------------------------------
@@ -75,7 +102,7 @@ def test_extract_single_query_per_entry(run_dir: Path):
             "lead_description": {"goal": "list auth events",
                                  "what_to_summarize": ["src_ip", "user"]},
             "queries": [
-                {"id": "wazuh.auth-events", "params": {"host": "h1", "window": "1h"}}
+                {"id": "elastic.auth-events", "params": {"host": "h1", "window": "1h"}}
             ],
         }
     ])
@@ -85,7 +112,7 @@ def test_extract_single_query_per_entry(run_dir: Path):
     assert lead.position == 0
     assert lead.query_index == 0
     assert lead.is_multi_query is False
-    assert lead.query_id == "wazuh.auth-events"
+    assert lead.query_id == "elastic.auth-events"
     assert lead.params == {"host": "h1", "window": "1h"}
     assert lead.goal_text == "list auth events"
     assert lead.what_to_summarize == ("src_ip", "user")
@@ -101,8 +128,8 @@ def test_extract_multi_query_fans_out(run_dir: Path):
             "position": 0,
             "lead_description": {"goal": "fan out"},
             "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "wazuh.sudo-commands", "params": {}},
+                {"id": "elastic.auth-events", "params": {}},
+                {"id": "elastic.sudo-commands", "params": {}},
             ],
         }
     ])
@@ -112,7 +139,7 @@ def test_extract_multi_query_fans_out(run_dir: Path):
     assert leads[0].is_multi_query is True
     assert leads[0].result_ref.name == "0a.json"
     assert leads[1].query_index == 1
-    assert leads[1].query_id == "wazuh.sudo-commands"
+    assert leads[1].query_id == "elastic.sudo-commands"
     assert leads[1].result_ref.name == "0b.json"
 
 
@@ -120,7 +147,7 @@ def test_extract_skips_entry_with_no_payload(run_dir: Path):
     # No payload written — entry must be silently skipped.
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
+         "queries": [{"id": "elastic.auth-events", "params": {}}]}
     ])
     assert lead_author.extract(run_dir) == []
 
@@ -134,14 +161,14 @@ def test_extract_multi_query_skips_missing_invocation(run_dir: Path):
             "position": 0,
             "lead_description": {"goal": "partial fan-out"},
             "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "wazuh.sudo-commands", "params": {}},
+                {"id": "elastic.auth-events", "params": {}},
+                {"id": "elastic.sudo-commands", "params": {}},
             ],
         }
     ])
     leads = lead_author.extract(run_dir)
     assert len(leads) == 1
-    assert leads[0].query_id == "wazuh.auth-events"
+    assert leads[0].query_id == "elastic.auth-events"
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +176,7 @@ def test_extract_multi_query_skips_missing_invocation(run_dir: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_build_handoff_groups_by_template(run_dir: Path):
+def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
     """Same template invoked 3× → one handoff with 3 invocations."""
     for i in range(3):
         _write_invocation(run_dir, i, payload_digest=f"call-{i}")
@@ -157,7 +184,7 @@ def test_build_handoff_groups_by_template(run_dir: Path):
         {
             "position": i,
             "lead_description": {"goal": f"call {i}"},
-            "queries": [{"id": "wazuh.auth-events", "params": {"host": f"h{i}"}}],
+            "queries": [{"id": "elastic.auth-events", "params": {"host": f"h{i}"}}],
         }
         for i in range(3)
     ])
@@ -165,9 +192,9 @@ def test_build_handoff_groups_by_template(run_dir: Path):
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert len(handoffs) == 1
     h = handoffs[0]
-    assert h["query_id"] == "wazuh.auth-events"
+    assert h["query_id"] == "elastic.auth-events"
     assert h["status"] == "established"
-    assert h["executed_template_path"].endswith("wazuh/auth-events.md")
+    assert h["executed_template_path"].endswith("elastic/auth-events.md")
     assert len(h["invocations"]) == 3
     assert [inv["payload_digest"] for inv in h["invocations"]] == [
         "call-0", "call-1", "call-2",
@@ -176,7 +203,7 @@ def test_build_handoff_groups_by_template(run_dir: Path):
     json.dumps(h)
 
 
-def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
+def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path, catalog: Path):
     _write_invocation(
         run_dir, 0,
         payload_status="suspect_empty",
@@ -184,7 +211,7 @@ def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
     )
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events",
+         "queries": [{"id": "elastic.auth-events",
                       "params": {"host": "bastion-01", "window": "1h"}}]}
     ])
     leads = lead_author.extract(run_dir)
@@ -194,7 +221,7 @@ def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
     assert inv["payload_status"] == "suspect_empty"
     assert "data.srcip" in inv["payload_digest"]
     # rendered_query should contain the substituted params from the
-    # ## Query body — wazuh.auth-events references ${window}; unbound
+    # ## Query body — elastic.auth-events references ${window}; unbound
     # placeholders like ${host_clause} pass through verbatim so the
     # leak is visible.
     assert inv["rendered_query"]  # non-empty
@@ -202,7 +229,7 @@ def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
     assert "${host_clause}" in inv["rendered_query"]
 
 
-def test_build_handoff_missing_sidecar_raises(run_dir: Path):
+def test_build_handoff_missing_sidecar_raises(run_dir: Path, catalog: Path):
     """Missing observation sidecar is a gather-regression — fail loud."""
     raw = run_dir / "gather_raw"
     raw.mkdir(exist_ok=True)
@@ -210,14 +237,14 @@ def test_build_handoff_missing_sidecar_raises(run_dir: Path):
     # No 0.observations.json written.
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
+         "queries": [{"id": "elastic.auth-events", "params": {}}]}
     ])
     leads = lead_author.extract(run_dir)
     with pytest.raises(lead_author.LeadAuthorError, match="observation sidecar"):
         lead_author.build_handoff(run_dir, leads)
 
 
-def test_build_handoff_invalid_payload_status_raises(run_dir: Path):
+def test_build_handoff_invalid_payload_status_raises(run_dir: Path, catalog: Path):
     raw = run_dir / "gather_raw"
     raw.mkdir(exist_ok=True)
     (raw / "0.json").write_text("{}")
@@ -227,32 +254,32 @@ def test_build_handoff_invalid_payload_status_raises(run_dir: Path):
     }))
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
+         "queries": [{"id": "elastic.auth-events", "params": {}}]}
     ])
     leads = lead_author.extract(run_dir)
     with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
         lead_author.build_handoff(run_dir, leads)
 
 
-def test_build_handoff_drops_unresolved_query_id(run_dir: Path):
+def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     """Unresolved query_id ⇒ skip with a corpus-health warning, don't crash."""
     _write_invocation(run_dir, 0)
     _write_invocation(run_dir, 1)
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "novel"},
-         "queries": [{"id": "wazuh.does-not-exist", "params": {}}]},
+         "queries": [{"id": "elastic.does-not-exist", "params": {}}]},
         {"position": 1, "lead_description": {"goal": "real one"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]},
+         "queries": [{"id": "elastic.auth-events", "params": {}}]},
     ])
     leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     handoffs = lead_author.build_handoff(run_dir, leads)
     # Only the resolved lead survives.
     assert len(handoffs) == 1
-    assert handoffs[0]["query_id"] == "wazuh.auth-events"
+    assert handoffs[0]["query_id"] == "elastic.auth-events"
 
 
-def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
+def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path, catalog: Path):
     _write_invocation(run_dir, 0)
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "ad-hoc"},
@@ -263,7 +290,7 @@ def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     assert handoffs == []
 
 
-def test_build_handoff_co_dispatched_with_for_join(run_dir: Path):
+def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path):
     """Cross-system join: each invocation lists its sibling template path."""
     _write_invocation(run_dir, 0, query_index=0, is_multi=True)
     _write_invocation(run_dir, 0, query_index=1, is_multi=True)
@@ -272,8 +299,8 @@ def test_build_handoff_co_dispatched_with_for_join(run_dir: Path):
             "position": 0,
             "lead_description": {"goal": "cross-system"},
             "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "host-query.process-list", "params": {"pattern": "x"}},
+                {"id": "elastic.auth-events", "params": {}},
+                {"id": "host-state.process-list", "params": {"pattern": "x"}},
             ],
         }
     ])
@@ -282,9 +309,9 @@ def test_build_handoff_co_dispatched_with_for_join(run_dir: Path):
     # Two handoffs (one per template).
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
-    auth_inv = by_id["wazuh.auth-events"]["invocations"][0]
+    auth_inv = by_id["elastic.auth-events"]["invocations"][0]
     assert auth_inv["composite_kind"] == "join"
-    assert any("host-query/process-list.md" in p for p in auth_inv["co_dispatched_with"])
+    assert any("host-state/process-list.md" in p for p in auth_inv["co_dispatched_with"])
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +381,7 @@ def test_parse_status_z_handles_spaces_and_rename():
 def test_under_draft_classifier():
     assert lead_author._under_draft("defender/skills/gather/queries/wazuh/_draft/x.md")
     assert lead_author._under_draft("defender/skills/gather/queries/host-query/_draft/y.md")
-    assert not lead_author._under_draft("defender/skills/gather/queries/wazuh/auth-events.md")
+    assert not lead_author._under_draft("defender/skills/gather/queries/elastic/auth-events.md")
     assert not lead_author._under_draft("defender/lessons/x.md")
 
 
@@ -363,7 +390,7 @@ def test_is_system_skill_md_classifier():
     assert lead_author._is_system_skill_md("defender/skills/wazuh/SKILL.md")
     # Catalog templates are NOT system-skill SKILL.md files.
     assert not lead_author._is_system_skill_md(
-        "defender/skills/gather/queries/wazuh/auth-events.md"
+        "defender/skills/gather/queries/elastic/auth-events.md"
     )
     # The schema doc lives at depth 3, not 2.
     assert not lead_author._is_system_skill_md(
@@ -387,7 +414,7 @@ def test_is_system_skill_draft_classifier():
 
 
 def test_is_in_scope_covers_both_surfaces():
-    assert lead_author._is_in_scope("defender/skills/gather/queries/wazuh/auth-events.md")
+    assert lead_author._is_in_scope("defender/skills/gather/queries/elastic/auth-events.md")
     assert lead_author._is_in_scope("defender/skills/elastic/SKILL.md")
     assert lead_author._is_in_scope("defender/skills/elastic/_draft/foo.md")
     assert not lead_author._is_in_scope("defender/lessons/x.md")
@@ -444,10 +471,10 @@ def test_dirty_protected_paths_excludes_drafts():
 def test_dirty_protected_paths_catches_established_catalog_dirt():
     baseline = {
         ("??", "defender/skills/gather/queries/wazuh/_draft/ok.md"),
-        (" M", "defender/skills/gather/queries/wazuh/auth-events.md"),
+        (" M", "defender/skills/gather/queries/elastic/auth-events.md"),
     }
     assert lead_author._dirty_protected_paths(baseline) == [
-        "defender/skills/gather/queries/wazuh/auth-events.md"
+        "defender/skills/gather/queries/elastic/auth-events.md"
     ]
 
 
@@ -630,15 +657,15 @@ def test_verify_postflight_accepts_draft_discard(tmp_git_repo: Path):
 
 def test_verify_postflight_rejects_established_deletion(tmp_git_repo: Path):
     """git rm of an established template is rejected."""
-    catalog = tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "wazuh"
+    catalog = tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "elastic"
     catalog.mkdir(parents=True, exist_ok=True)
-    (catalog / "auth-events.md").write_text("---\nid: wazuh.auth-events\nstatus: established\n---\n")
+    (catalog / "auth-events.md").write_text("---\nid: elastic.auth-events\nstatus: established\n---\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed established")
     base_sha = lead_author._git_head()
     baseline = lead_author._git_status_records()
     _run_git(tmp_git_repo, "rm", "-q",
-             "defender/skills/gather/queries/wazuh/auth-events.md")
+             "defender/skills/gather/queries/elastic/auth-events.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "DESTROY")
 
     ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
@@ -867,8 +894,8 @@ def test_invoke_agent_includes_pending_drafts_in_prompt(
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(lead_author.subprocess, "run", _fake_run)
-    handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
-                 "executed_template_path": "defender/skills/gather/queries/wazuh/auth-events.md",
+    handoffs = [{"query_id": "elastic.auth-events", "status": "established",
+                 "executed_template_path": "defender/skills/gather/queries/elastic/auth-events.md",
                  "neighbors": [], "invocations": []}]
     pending = [{"draft_path": "defender/skills/elastic/_draft/falco-na.md",
                 "system": "elastic",
