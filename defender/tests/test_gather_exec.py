@@ -162,3 +162,57 @@ def test_main_propagates_nonzero_exit_and_error_status(tmp_path):
     assert rc == 3
     row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
     assert row["exit_code"] == 3 and row["payload_status"] == "error"
+
+
+# --- size-safety: oversized pass-through is truncated, payload still persisted ---
+
+def _big_hits_payload(n: int) -> str:
+    return json.dumps({"hits": [{"i": i, "message": f"event {i}", "pad": "x" * 50} for i in range(n)]})
+
+
+def test_build_truncated_view_samples_records(tmp_path):
+    payload = _big_hits_payload(200)
+    view = ge.build_truncated_view(payload, "gather_raw/0/0.json", tmp_path)
+    assert "200 records" in view
+    assert view.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
+    assert "jq" in view
+    assert str(tmp_path / "gather_raw/0/0.json") in view
+
+
+def test_build_truncated_view_non_json_falls_back_to_chars(tmp_path):
+    view = ge.build_truncated_view("x" * 5000, "gather_raw/0/0.json", tmp_path)
+    assert "bytes — pass-through truncated" in view
+    assert "sample[" not in view
+
+
+def test_main_truncates_oversized_passthrough_but_persists_full(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 500)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    big = _big_hits_payload(100)
+    assert len(big) > 500
+    cli = _fake_cli(tmp_path, "elastic_cli.py", big)
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "0",
+                  "--system", "elastic", "--query-id", "elastic.q", "--",
+                  sys.executable, str(cli), "query", "--raw"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pass-through truncated" in out
+    assert "100 records" in out
+    # Full payload is persisted on disk regardless of the capped view.
+    persisted = (run_dir / "gather_raw" / "0" / "0.json").read_text()
+    assert persisted == big
+
+
+def test_main_passes_small_payload_through_verbatim(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 65536)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "elastic_cli.py", '{"hits":[{"i":1}]}')
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "0",
+                  "--system", "elastic", "--query-id", "elastic.q", "--",
+                  sys.executable, str(cli), "query", "--raw"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pass-through truncated" not in out
+    assert '{"hits":[{"i":1}]}' in out

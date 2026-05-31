@@ -57,10 +57,26 @@ uncertain.
    prediction of what gather will see under the competing explanations.
    Compare actual observations to that prediction; ungrounded post-hoc
    analysis is the failure mode.
-5. **Save context — delegate the raw payload.** Every data-source
-   query goes through the gather subagent. Gather returns a summary;
-   raw stays on disk at `gather_raw/{position}.json` and you Read or
-   Grep it on demand.
+5. **Save context — delegate the raw payload, then trust the return.**
+   Every data-source query goes through the gather subagent. Gather
+   returns a summary that names the queries it ran and enumerates the
+   fields you asked for in `what_to_summarize`. **Treat that return
+   as the authoritative record.** Do not Read or Grep
+   `gather_raw/*.json` from the main loop to spot-check or re-derive
+   fields. If the summary is missing something you need, re-dispatch
+   gather with a stricter `what_to_summarize` rather than diving into
+   the raw payload yourself; pulling raw into the main context
+   defeats the subagent isolation that made the dispatch cheap in
+   the first place.
+
+   **The only way to query a data source is a `Task`→gather dispatch.**
+   Do not run the system CLIs (`scripts/tools/*_cli.py`) yourself from
+   the main loop, and do not redirect their output to a file you then
+   Read — querying-then-reading-your-own-dump is the same violation as
+   reading `gather_raw`, just renamed, and it leaves the query out of
+   the audit trail. Both moves are blocked by a hook; if you hit that
+   block, the fix is always to dispatch gather, never to find another
+   path to the bytes.
 6. **Discover knowledge on demand.** Domain knowledge lives as on-disk
    skills. Load them via `Skill` when the next move needs them.
 7. **Escalate when uncertain.** The report is the headline; the
