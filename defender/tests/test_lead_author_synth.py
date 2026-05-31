@@ -28,6 +28,11 @@ def _catalog(tmp_path, monkeypatch) -> Path:
         "---\nid: host-query.proc-tree\nstatus: established\n---\n\n## Goal\nx\n"
     )
     monkeypatch.setattr(lead_neighbors, "CATALOG_ROOT", cat)
+    # synthesize_drafts calls load_catalog() through lead_author's own
+    # lead_neighbors reference, which may be a distinct module object from the
+    # one imported here — patch that one too so the catalog redirect actually
+    # takes (otherwise load_catalog reads the real on-disk catalog).
+    monkeypatch.setattr(lead_author.lead_neighbors, "CATALOG_ROOT", cat)
     monkeypatch.setattr(lead_author, "CATALOG_DIR", cat)
     return cat
 
