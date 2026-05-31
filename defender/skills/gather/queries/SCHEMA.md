@@ -77,9 +77,10 @@ self-contained.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
-Gather runs each query through `gather_exec.py --run-dir R --lead {position}`
+Gather runs each query through
+`gather_exec.py --run-dir R --lead {position} --system {system} --query-id {id}`
 (see `defender/skills/gather/SKILL.md` §3). The wrapper persists raw output
-to `{run_dir}/gather_raw/{lead}/{seq}.json` and appends a faithful record to
+to `{run_dir}/gather_raw/{lead}/{seq}.json` and appends a record to
 `executed_queries.jsonl`; gather neither redirects stdout nor names files.
 The `lead_sequence` projection renders the wrapper's per-lead records into the
 canonical artifacts consumers read — single-query at `gather_raw/{position}.json`,

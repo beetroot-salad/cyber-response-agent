@@ -4,21 +4,30 @@
 The gather subagent invokes this instead of redirecting a system-CLI's
 stdout itself:
 
-    gather_exec.py --run-dir {R} --lead {L} -- python3 .../cmdb_cli.py get-host web-1 --raw
+    gather_exec.py --run-dir {R} --lead {L} \
+        --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
+        python3 .../cmdb_cli.py host-lookup web-1 --raw
 
 It runs the inner command, captures stdout to a canonical per-lead path,
-and appends a faithful executed-query record to ``{R}/executed_queries.jsonl``
-— with ``system``/``verb``/``params`` derived from the inner *argv* (not a
-model self-report) and the raw command preserved for audit. The inner
-command's stdout/stderr/exit code pass straight through, so the subagent
-still sees the result for its reasoning.
+and appends an executed-query record to ``{R}/executed_queries.jsonl``.
+The inner command's stdout/stderr/exit code pass straight through, so the
+subagent still sees the result for its reasoning, and the wrapper reports
+the raw payload path it wrote on stderr.
 
-This retires the two brittle model-authored steps it replaces: the
-redirect to a model-chosen ``gather_raw/{position}.json`` (Bug #1: filename
-drift → silent drop) and the self-reported ``queries[]`` id (Bug #2:
-mislabel → catalog miss). The per-lead group id ``L`` comes from the
-dispatch (see ``hooks/extract_lead_metadata.py``); it replaces ``position``
-as both the address namespace and the co-dispatch group key.
+It retires the two brittle model-authored steps it replaces: the redirect
+to a model-chosen ``gather_raw/{position}.json`` (Bug #1: filename drift →
+silent drop) and the post-hoc, free-floating ``queries[]`` sidecar id
+(Bug #2: mislabel → catalog miss). Both `--system` and `--query-id` come
+from the dispatch contract — `system` is the harness-injected lead system,
+`query_id` is the catalog template id the subagent bound (`{system}.{verb}`,
+or ``ad-hoc``). They are recorded *at execution time*, bound to the actual
+command and its captured payload, rather than reconstructed from a fragile
+per-CLI argv grammar — so the wrapper stays portable across whatever system
+CLIs are onboarded, with no hardcoded system/verb roster.
+
+The per-lead group id ``L`` comes from the dispatch (the integer lead
+position; see ``hooks/extract_lead_metadata.py``); it is the address
+namespace for this lead's payloads and the co-dispatch group key.
 
 Exit code: the inner command's exit code (or 2 on wrapper usage error).
 """
@@ -32,101 +41,48 @@ import subprocess
 import sys
 from pathlib import Path
 
-# `--raw` is the only store_true flag across the system CLIs; every other
-# `--flag` takes a value (verified against scripts/tools/*_cli.py argparse defs).
-_BOOLEAN_FLAGS = frozenset({"raw"})
 
-# Positional argument names per (system, verb). Query-string CLIs (elastic)
-# are handled separately — their positional is the query body, not a param.
-_POSITIONAL_NAMES = {
-    ("cmdb", "get-host"): ["name"],
-    ("identity", "can-access"): ["user", "host"],
-    ("identity", "get-user"): ["user"],
-    ("identity", "list-authorized-hosts"): ["user"],
-    ("host-state", "proc-tree"): ["host"],
-    ("host-state", "passwd"): ["host"],
-    ("host-state", "authorized-keys"): ["host"],
-    ("host-state", "fim-checksum"): ["host", "path"],
-    ("host-state", "package-list"): ["host"],
-    ("change-mgmt", "get-change"): ["cr_id"],
-    ("threat-intel", "lookup"): ["value"],
-}
+def parse_params(inner: list[str]) -> dict:
+    """Extract bound params from an inner CLI argv, generically.
 
-# Systems whose verb takes a free-form query body as its first positional;
-# the body distinguishes the template, so query_id stays {system}.{verb}.
-_QUERY_BODY_VERBS = {("elastic", "query"), ("elastic", "alerts")}
+    Pure — no IO, no per-system tables. Locates the CLI script (first
+    token ending in ``.py``), drops the leading subcommand token (the
+    verb, already captured in ``query_id``), then folds the remainder:
+    ``--flag value`` / ``-f value`` pairs become named entries, bare
+    ``--flag`` (followed by another flag or end-of-args) become ``True``,
+    and positionals become ``arg0``/``arg1``/… in order.
 
-
-def _system_from_cli(token: str) -> str | None:
-    """`.../cmdb_cli.py` -> `cmdb`; `host_state_cli.py` -> `host-state`."""
-    name = Path(token).name
-    if not name.endswith("_cli.py"):
-        return None
-    return name[: -len("_cli.py")].replace("_", "-")
-
-
-def parse_invocation(inner: list[str]) -> dict:
-    """Parse an inner CLI argv into {system, verb, query_id, params, body}.
-
-    Pure — no IO. Tolerant: an unrecognized shape still yields a record
-    rather than raising, so the wrapper never drops a call on a parse miss.
+    Param *names* for positionals are intentionally generic — the
+    durable join key is ``(query_id, params)``, and positional order is
+    stable per template, so ``arg0`` is sufficient and portable. The
+    verbatim command is preserved separately as ``raw_command``.
     """
-    cli_idx = next(
-        (i for i, t in enumerate(inner) if _system_from_cli(t) is not None), None
+    script_idx = next(
+        (i for i, t in enumerate(inner) if t.endswith(".py")), None
     )
-    if cli_idx is None:
-        return {
-            "system": "unknown",
-            "verb": inner[0] if inner else "",
-            "query_id": "unknown",
-            "params": {},
-            "body": None,
-        }
+    rest = inner[script_idx + 1 :] if script_idx is not None else list(inner)
+    # Drop the leading subcommand token (the verb); it is already in query_id.
+    if rest and not rest[0].startswith("-"):
+        rest = rest[1:]
 
-    system = _system_from_cli(inner[cli_idx])
-    rest = inner[cli_idx + 1 :]
-    verb = next((t for t in rest if not t.startswith("-")), "")
-    after_verb = rest[rest.index(verb) + 1 :] if verb in rest else []
-
-    positionals: list[str] = []
     params: dict[str, object] = {}
+    pos = 0
     i = 0
-    while i < len(after_verb):
-        tok = after_verb[i]
-        if tok.startswith("--"):
-            flag = tok[2:]
-            if flag in _BOOLEAN_FLAGS:
-                i += 1
-                continue
-            if i + 1 < len(after_verb) and not after_verb[i + 1].startswith("-"):
-                params[flag] = after_verb[i + 1]
+    while i < len(rest):
+        tok = rest[i]
+        if tok.startswith("-"):
+            flag = tok.lstrip("-")
+            if i + 1 < len(rest) and not rest[i + 1].startswith("-"):
+                params[flag] = rest[i + 1]
                 i += 2
             else:
                 params[flag] = True
                 i += 1
         else:
-            positionals.append(tok)
+            params[f"arg{pos}"] = tok
+            pos += 1
             i += 1
-
-    body = None
-    if (system, verb) in _QUERY_BODY_VERBS:
-        body = positionals[0] if positionals else None
-        # remaining positionals (rare) keep generic names
-        for n, val in enumerate(positionals[1:]):
-            params[f"arg{n}"] = val
-    else:
-        names = _POSITIONAL_NAMES.get((system, verb))
-        for n, val in enumerate(positionals):
-            key = names[n] if names and n < len(names) else f"arg{n}"
-            params[key] = val
-
-    return {
-        "system": system,
-        "verb": verb,
-        "query_id": f"{system}.{verb}",
-        "params": params,
-        "body": body,
-    }
+    return params
 
 
 def payload_status(exit_code: int, stdout: str) -> str:
@@ -166,10 +122,11 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="gather_exec.py")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--lead", required=True)
-    # Subcommand CLIs (cmdb/host-state/...) let the wrapper derive query_id
-    # from the verb. Query-string CLIs (elastic) back many templates with one
-    # verb, so the subagent passes the template id it chose here.
-    parser.add_argument("--query-id", default=None)
+    # Both come from the dispatch contract: --system is the harness-injected
+    # lead system; --query-id is the catalog template id the subagent bound
+    # ({system}.{verb}, or `ad-hoc`). The wrapper records them verbatim.
+    parser.add_argument("--system", required=True)
+    parser.add_argument("--query-id", required=True)
     try:
         ns = parser.parse_args(wrapper_argv)
     except SystemExit:
@@ -180,29 +137,31 @@ def main(argv: list[str]) -> int:
 
     run_dir = Path(ns.run_dir)
     lead = ns.lead
-    parsed = parse_invocation(inner)
+    query_id = ns.query_id
+    verb = query_id.split(".", 1)[1] if "." in query_id else query_id
 
     proc = subprocess.run(inner, capture_output=True, text=True)
 
     lead_dir = run_dir / "gather_raw" / lead
     seq = _next_seq(lead_dir)
     payload_path = lead_dir / f"{seq}.json"
+    payload_rel = None
     try:
         lead_dir.mkdir(parents=True, exist_ok=True)
         payload_path.write_text(proc.stdout)
+        payload_rel = str(payload_path.relative_to(run_dir))
     except OSError as e:
         print(f"gather_exec.py: could not write payload: {e}", file=sys.stderr)
 
     record = {
         "lead": lead,
         "seq": seq,
-        "system": parsed["system"],
-        "verb": parsed["verb"],
-        "query_id": ns.query_id or parsed["query_id"],
-        "params": parsed["params"],
-        "body": parsed["body"],
+        "system": ns.system,
+        "verb": verb,
+        "query_id": query_id,
+        "params": parse_params(inner),
         "raw_command": shlex.join(inner),
-        "payload_path": str(payload_path.relative_to(run_dir)),
+        "payload_path": payload_rel,
         "exit_code": proc.returncode,
         "payload_status": payload_status(proc.returncode, proc.stdout),
         "payload_digest": payload_digest(proc.stdout, proc.stderr, proc.returncode),
@@ -214,9 +173,13 @@ def main(argv: list[str]) -> int:
     except OSError as e:
         print(f"gather_exec.py: could not append record: {e}", file=sys.stderr)
 
-    # Transparent passthrough so the subagent's reasoning is unaffected.
+    # Transparent passthrough so the subagent's reasoning is unaffected, plus
+    # a prefixed pointer to the raw payload on disk (the §3.5 data-source-debug
+    # protocol points `--payload` at this path).
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
+    if payload_rel:
+        print(f"[gather_exec] raw payload: {payload_rel}", file=sys.stderr)
     return proc.returncode
 
 
