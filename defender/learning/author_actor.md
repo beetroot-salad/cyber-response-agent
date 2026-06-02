@@ -39,22 +39,23 @@ When you flip a `mutable: true` lesson to stale and the same `subject` already h
 
 ## Forward check
 
-After writing or rewriting a lesson file, run the exact command the orchestrator put in the user prompt under `verify_forward_command:`:
+Each lesson file you write or rewrite is gated by a Haiku forward-check that prints `GOOD` or `BAD`. **Write all your candidate lesson files first, then verify the whole set in one batched call** — do not verify one-at-a-time as you go, and never spawn the checks in a shell `for` loop or a background poll-loop.
+
+Run the batch driver the orchestrator put in the user prompt under `verify_batch_command:`, passing one `{lesson_path}={observation_id}` pair per file you wrote:
 
 ```
-{absolute-python-path} defender/learning/verify_forward_actor.py {lesson_path} {observation_id}
+{absolute-python-path} defender/learning/verify_batch.py defender/learning/verify_forward_actor.py {lesson_a}={obs_a} {lesson_b}={obs_b} ...
 ```
 
-`{observation_id}` is the source row's id. The script prints `GOOD` or `BAD` on its last line.
+`{observation_id}` is each source row's id. The driver runs all checks concurrently and prints one line per pair — `GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` — then a `BATCH:` summary. Read that single output; do not poll.
 
 - **GOOD** → keep the file as-is.
-- **BAD** → one rewrite attempt allowed. Re-read the observation, sharpen the body, re-run the check.
-  - If the second run is GOOD, keep the file.
+- **BAD** → one rewrite attempt allowed. Re-read the observation, sharpen the body, then re-check just that file (the single-file `verify_forward_command:` is fine for a one-off recheck, or re-run `verify_batch_command:` over the rewritten set).
+  - If the recheck is GOOD, keep the file.
   - If still BAD, revert: delete the file (for a `new`) or `git checkout -- {path}` (for a `fold`), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
+- **ERROR** → treat as a non-verdict: re-run that pair once; if it errors again, revert the file and route the observation to `consumed_skip` with reason `forward_check_error:{one-line summary}`.
 
-Stale-only flips don't need a forward check — there's no new body to evaluate.
-
-**Don't poll for completion.** Read each `verify_forward_actor.py` result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
+Stale-only flips don't need a forward check — there's no new body to evaluate; omit them from the batch.
 
 For folds where one observation produces GOOD and another BAD on the same target file, keep the GOOD edit and skip the BAD one. Each observation is gated independently.
 

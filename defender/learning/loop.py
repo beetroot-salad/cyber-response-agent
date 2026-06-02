@@ -43,6 +43,8 @@ import random
 import re
 import shutil
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import yaml
@@ -55,6 +57,9 @@ LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 RUNS_DIR = LEARNING_DIR / "runs"
 PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
+# Shared by BOTH directions (adversarial + benign append_findings), so when the
+# two legs run concurrently their appends must serialize on this lock.
+FINDINGS_LOCK_FILE = PENDING_DIR / ".findings.lock"
 ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
 ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
 ACTOR_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".actor.lock"
@@ -109,6 +114,12 @@ BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
+# The judges do 0 tool calls and follow a heavily-scaffolded prompt that already
+# walks every analytic step, so high-effort reasoning over-thinks: ~90% of judge
+# output tokens were extended thinking at the inherited global `high` default.
+# Pin a low budget explicitly; override per-direction via env for A/B.
+JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "low")
+BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "low")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
@@ -204,6 +215,7 @@ def _run_claude(
     add_dir: Path | None = None,
     permission_mode: str | None = None,
     session_id: str | None = None,
+    effort: str | None = None,
 ) -> str:
     """One-shot ``claude -p`` call. Returns stdout.
 
@@ -211,7 +223,10 @@ def _run_claude(
     add-dir + permission-mode) and pin the session id so the caller
     can locate the persistent transcript at
     ``~/.claude/projects/-{cwd}/{session_id}.jsonl`` after the call
-    returns. The whole subprocess is bounded by ``SUBAGENT_TIMEOUT``.
+    returns. ``effort`` pins the reasoning depth (``--effort``); when
+    None the call inherits the global default (``CLAUDE_EFFORT`` /
+    settings ``effortLevel``). The whole subprocess is bounded by
+    ``SUBAGENT_TIMEOUT``.
     """
     # stream-json + concat all assistant text messages. `--output-format text`
     # returns only the final assistant message, which silently drops earlier
@@ -223,6 +238,7 @@ def _run_claude(
         system_prompt_path, model,
         settings_path=settings_path, add_dir=add_dir,
         permission_mode=permission_mode, session_id=session_id,
+        effort=effort,
     )
     proc = subprocess.run(
         cmd,
@@ -248,6 +264,7 @@ def _build_run_claude_cmd(
     add_dir: Path | None,
     permission_mode: str | None,
     session_id: str | None,
+    effort: str | None = None,
 ) -> list[str]:
     cmd = [
         "claude",
@@ -257,6 +274,8 @@ def _build_run_claude_cmd(
         "--verbose",  # required for stream-json with -p
         "--system-prompt-file", str(system_prompt_path),
     ]
+    if effort is not None:
+        cmd += ["--effort", effort]
     if settings_path is not None:
         cmd += ["--settings", str(settings_path)]
     if add_dir is not None:
@@ -569,7 +588,10 @@ def invoke_judge(
     session_id = str(_uuid.uuid4())
     _log(f"step=judge session_id={session_id}")
     try:
-        out = _run_claude(JUDGE_PROMPT, user, model=JUDGE_MODEL, session_id=session_id)
+        out = _run_claude(
+            JUDGE_PROMPT, user, model=JUDGE_MODEL,
+            session_id=session_id, effort=JUDGE_EFFORT,
+        )
     finally:
         src = _transcript_path(session_id)
         dst = learning_run_dir / "judge_trace.jsonl"
@@ -610,7 +632,8 @@ def invoke_judge_benign(
     _log(f"step=judge-benign session_id={session_id}")
     try:
         out = _run_claude(
-            JUDGE_BENIGN_PROMPT, user, model=BENIGN_JUDGE_MODEL, session_id=session_id
+            JUDGE_BENIGN_PROMPT, user, model=BENIGN_JUDGE_MODEL,
+            session_id=session_id, effort=BENIGN_JUDGE_EFFORT,
         )
     finally:
         src = _transcript_path(session_id)
@@ -763,14 +786,16 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
 
 
 def _require_judge_keys(doc: dict) -> None:
-    for key in ("outcome", "outcome_rationale", "defender_findings"):
+    # `outcome_rationale`, `encounter_analysis`, `confidence` are thinking
+    # scaffolding the prompt walks the model through but no longer requires it to
+    # emit — the loop never parsed them (only the HTML viewer reads them, now
+    # optionally). Required output is the machine-consumed core.
+    for key in ("outcome", "defender_findings"):
         if key not in doc:
             raise LoopError(f"judge YAML missing required key: {key}")
-    if _outcome_keyword(doc["outcome"]) == "skip-passthrough":
-        return
-    for key in ("encounter_analysis", "confidence"):
-        if key not in doc:
-            raise LoopError(f"judge YAML missing required key: {key}")
+    # Validate the outcome enum (raises on an unknown keyword). This previously
+    # ran implicitly inside the now-removed scaffolding gate; keep it explicit.
+    _outcome_keyword(doc["outcome"])
 
 
 def _validate_judge_actor_observations(observations: Any) -> None:
@@ -825,13 +850,13 @@ def validate_judge_benign_doc(doc: Any) -> dict[str, Any]:
     """
     if not isinstance(doc, dict):
         raise LoopError("benign judge YAML did not parse to a mapping")
-    for key in ("outcome", "outcome_rationale", "defender_findings"):
+    # See `_require_judge_keys`: the scaffolding fields are no longer required.
+    for key in ("outcome", "defender_findings"):
         if key not in doc:
             raise LoopError(f"benign judge YAML missing required key: {key}")
-    if _benign_outcome_keyword(doc["outcome"]) != "skip-passthrough":
-        for key in ("encounter_analysis", "confidence"):
-            if key not in doc:
-                raise LoopError(f"benign judge YAML missing required key: {key}")
+    # Validate the benign outcome enum (raises on an unknown keyword) — formerly
+    # implicit via the removed scaffolding gate.
+    _benign_outcome_keyword(doc["outcome"])
     findings = doc["defender_findings"]
     if not isinstance(findings, list):
         raise LoopError("benign judge `defender_findings` is not a list")
@@ -906,13 +931,21 @@ PERSIST_COPY_FILES = (
 )
 
 
+# Both direction legs write the same disposition-level shared artifacts
+# (copied inputs + source_refs.yaml) at persist time. When the legs run
+# concurrently these truncating writes target identical paths, so serialize
+# them — identical content does not make a non-atomic write safe.
+_SHARED_INPUTS_LOCK = threading.Lock()
+
+
 def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
-    for name in PERSIST_COPY_FILES:
-        src = run_dir / name
-        if not src.is_file():
-            raise LoopError(f"missing source artifact for persist: {src}")
-        shutil.copy2(src, learning_run_dir / name)
+    with _SHARED_INPUTS_LOCK:
+        for name in PERSIST_COPY_FILES:
+            src = run_dir / name
+            if not src.is_file():
+                raise LoopError(f"missing source artifact for persist: {src}")
+            shutil.copy2(src, learning_run_dir / name)
 
 
 def _write_source_refs(
@@ -932,7 +965,8 @@ def _write_source_refs(
         "normalized_disposition": normalized_disposition,
         "alert_rule_key": alert_rule_key,
     }
-    (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs))
+    with _SHARED_INPUTS_LOCK:
+        (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs))
 
 
 def persist_run(
@@ -1075,6 +1109,20 @@ def _release_actor_observations_lock(fh: Any) -> None:
         fh.close()
 
 
+def _acquire_findings_lock() -> Any:
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    fh = FINDINGS_LOCK_FILE.open("a+")
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    return fh
+
+
+def _release_findings_lock(fh: Any) -> None:
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
 def append_findings(
     judge_doc: dict,
     run_id: str,
@@ -1104,28 +1152,33 @@ def append_findings(
         audit_only_type = "detection-confirmed"
         namespace = ""
     appended = 0
-    with PENDING_FILE.open("a") as fh:
-        for n, f in enumerate(judge_doc["defender_findings"]):
-            if f["type"] == audit_only_type:
-                continue
-            entry = {
-                "schema_version": 1,
-                "finding_id": f"{run_id}/{namespace}{n}",
-                "run_id": run_id,
-                "alert_rule_key": alert_rule_key,
-                "direction": direction,
-                "type": f["type"],
-                "subject_anchor": f["subject_anchor"],
-                "subject_topic": f["subject_topic"],
-                "finding": f["finding"],
-                "judge_outcome": outcome,
-                "citations": f["citations"],
-                "source_run_dir": str(
-                    learning_run_dir.relative_to(REPO_ROOT)
-                ) + "/",
-            }
-            fh.write(json.dumps(entry) + "\n")
-            appended += 1
+    # Both directions append here; the lock makes concurrent legs safe.
+    lock_fh = _acquire_findings_lock()
+    try:
+        with PENDING_FILE.open("a") as fh:
+            for n, f in enumerate(judge_doc["defender_findings"]):
+                if f["type"] == audit_only_type:
+                    continue
+                entry = {
+                    "schema_version": 1,
+                    "finding_id": f"{run_id}/{namespace}{n}",
+                    "run_id": run_id,
+                    "alert_rule_key": alert_rule_key,
+                    "direction": direction,
+                    "type": f["type"],
+                    "subject_anchor": f["subject_anchor"],
+                    "subject_topic": f["subject_topic"],
+                    "finding": f["finding"],
+                    "judge_outcome": outcome,
+                    "citations": f["citations"],
+                    "source_run_dir": str(
+                        learning_run_dir.relative_to(REPO_ROOT)
+                    ) + "/",
+                }
+                fh.write(json.dumps(entry) + "\n")
+                appended += 1
+    finally:
+        _release_findings_lock(lock_fh)
     return appended
 
 
@@ -1187,6 +1240,13 @@ def _acquire_environment_observations_lock() -> Any:
     return fh
 
 
+def _release_environment_observations_lock(fh: Any) -> None:
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
 def append_environment_observations(
     judge_benign_doc: dict,
     run_id: str,
@@ -1245,7 +1305,7 @@ def append_environment_observations(
             rows.append(row)
         return _append_jsonl(ENVIRONMENT_OBSERVATIONS_FILE, rows)
     finally:
-        _release_actor_observations_lock(lock_fh)
+        _release_environment_observations_lock(lock_fh)
 
 
 # ---------------------------------------------------------------------------
@@ -1491,16 +1551,9 @@ def _run_benign(
 def run_one(run_dir: Path) -> int:
     run_id = run_dir.name
 
-    # Lead-author runs unconditionally — catalog refinement is independent of
-    # disposition, actor SKIP, and held-out flags.
-    _invoke_lead_author(run_dir)
-
     _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(run_dir / "report.md")
     directions = _directions_for(disposition)
-    if not directions:
-        _log(f"disposition={disposition} — no learning direction; skipping")
-        return 0
 
     alert = json.loads((run_dir / "alert.json").read_text())
     alert_rule_key = derive_alert_rule_key(alert)
@@ -1512,17 +1565,51 @@ def run_one(run_dir: Path) -> int:
         f"alert_rule_key={alert_rule_key} held_out={held_out}"
     )
 
+    # Lead-author (catalog refinement, disposition-independent) and the two
+    # direction legs are mutually independent: lead-author only mutates the git
+    # catalog tree under its own repo lock and reads the run dir read-only, while
+    # each leg writes disjoint per-direction files and serializes its shared
+    # findings/observation/source-ref writes on locks. Run them concurrently —
+    # subprocess.run releases the GIL while the claude child runs, so threads give
+    # real wall-time overlap. Within a leg, actor→oracle→judge stays serial.
     ran_adversarial = False
     ran_benign = False
-    for direction in directions:
-        if direction == "adversarial":
-            ran_adversarial = _run_adversarial(
-                run_dir, learning_run_dir, disposition, alert_rule_key, run_id, held_out
-            )
-        else:
-            ran_benign = _run_benign(
-                run_dir, learning_run_dir, disposition, alert_rule_key, run_id, held_out
-            )
+    errors: list[tuple[str, BaseException]] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures: dict[Any, str] = {
+            pool.submit(_invoke_lead_author, run_dir): "lead_author"
+        }
+        if "adversarial" in directions:
+            futures[pool.submit(
+                _run_adversarial, run_dir, learning_run_dir,
+                disposition, alert_rule_key, run_id, held_out,
+            )] = "adversarial"
+        if "benign" in directions:
+            futures[pool.submit(
+                _run_benign, run_dir, learning_run_dir,
+                disposition, alert_rule_key, run_id, held_out,
+            )] = "benign"
+        for fut in as_completed(futures):
+            name = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as e:  # re-raised after all legs settle (fail loud)
+                errors.append((name, e))
+                continue
+            if name == "adversarial":
+                ran_adversarial = bool(result)
+            elif name == "benign":
+                ran_benign = bool(result)
+
+    # Surface the first leg failure once every leg has settled, preserving type.
+    if errors:
+        for name, e in errors:
+            _log(f"{name} leg failed: {e!r}")
+        raise errors[0][1]
+
+    if not directions:
+        _log(f"disposition={disposition} — no learning direction; skipping")
+        return 0
 
     # Curator triggers (threshold-gated). The shared defender-findings curator
     # fires if either direction appended; the per-corpus actor/environment
@@ -1619,8 +1706,11 @@ Environment:
   ACTOR_MODEL                          claude model for the adversarial actor
                                        (default: claude-sonnet-4-6)
   ORACLE_MODEL                         claude model for the telemetry oracle —
-                                       cheap projection work, no reasoning
-                                       (default: claude-haiku-4-5)
+                                       projection must be content-faithful;
+                                       Haiku fabricated 1/3 projections in an
+                                       N=3 test (contaminates judge findings),
+                                       so this is sonnet by design
+                                       (default: claude-sonnet-4-6)
   JUDGE_MODEL                          claude model for the outcome judge
                                        (default: claude-sonnet-4-6)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 300)

@@ -232,6 +232,9 @@ def invoke_agent(
         f"actor_model: {actor_model}\n"
         f"verify_forward_command: {verifier_py} defender/learning/verify_forward_actor.py "
         f"<lesson_path> <observation_id>\n"
+        f"verify_batch_command: {verifier_py} defender/learning/verify_batch.py "
+        f"defender/learning/verify_forward_actor.py "
+        f"<lesson_path>=<observation_id> [<lesson_path>=<observation_id> ...]\n"
         f"observations ({len(observations)}):\n"
         f"{json.dumps(observations, indent=2)}\n"
     )
@@ -241,6 +244,7 @@ def invoke_agent(
         "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
         "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
         "Bash(git log:*),"
+        f"Bash({verifier_py} defender/learning/verify_batch.py:*),"
         f"Bash({verifier_py} defender/learning/verify_forward_actor.py:*),"
         "Bash(rm defender/lessons-actor/*.md),"
         f"Bash(rm {LESSONS_ACTOR_DIR}/*.md)"
