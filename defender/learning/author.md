@@ -37,32 +37,39 @@ To decide: enumerate `defender/lessons/*.md` and read the `name + description` f
 
 ## Per-lesson forward-check gate
 
-After you write or rewrite a lesson file, run the exact command the
-orchestrator put in the user prompt under `verify_forward_command:`.
-It looks like:
+Each lesson file you write or rewrite is gated by a Haiku forward-check
+that prints `GOOD` or `BAD`. **Write all your lesson files first, then
+verify the whole set in one batched call** — do not verify one-at-a-time
+as you go, and never spawn the checks in a shell `for` loop or a
+background poll-loop.
+
+Run the batch driver the orchestrator put in the user prompt under
+`verify_batch_command:`, passing one `{lesson_path}={run_id}={direction}`
+pair per file you wrote:
 
 ```
-{absolute-python-path} defender/learning/verify_forward.py --direction {direction} {lesson_path} {run_id}
+{absolute-python-path} defender/learning/verify_batch.py defender/learning/verify_forward.py {lesson_a}={run_a}={dir_a} {lesson_b}={run_b}={dir_b} ...
 ```
 
-`{run_id}` and `{direction}` are the source finding's own `run_id` and
-`direction` fields — substitute each finding's values; do not hardcode a
-direction. (The direction selects which disposition the check holds the lesson
-against: an adversarial lesson must preserve the case's benign call, a benign
-lesson must drive it off the over-escalated malicious call.) The orchestrator
-hands you the resolved absolute python path so the gate works regardless of cwd
-or venv layout — do not substitute a relative path or a different
-interpreter; both will fail. The script prints `GOOD` or `BAD` on its
-last line. Single rep — do not retry.
+`{run_id}` and `{direction}` are each source finding's own `run_id` and
+`direction` fields — substitute each finding's values per pair; do not
+hardcode a direction. (The direction selects which disposition the check
+holds the lesson against: an adversarial lesson must preserve the case's
+benign call, a benign lesson must drive it off the over-escalated malicious
+call.) The orchestrator hands you the resolved absolute python path so the
+gate works regardless of cwd or venv layout — do not substitute a relative
+path or a different interpreter; both will fail. The driver runs all checks
+concurrently (single rep each — do not retry) and prints one line per pair —
+`GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` — then
+a `BATCH:` summary. Read that single output; do not poll.
 
 - **GOOD** → keep the file as-is.
 - **BAD** → revert that file:
   - For a **new** lesson: delete the file.
   - For a **fold** rewrite: `git checkout -- {path}` to restore the pre-edit body. Do *not* attempt to rewrite around the BAD verdict; the finding routes to the held-back report and the next batch will revisit.
+- **ERROR** (the check could not run) → re-run that one pair once via the single-file `verify_forward_command:`; if it errors again, revert the file like a BAD and note `forward_check_error` in its held-back reason.
 
 For folds where one finding produces GOOD and another BAD on the same target file, keep the GOOD edit. Each finding is gated independently against its own source case.
-
-**Don't poll for completion.** Read each `verify_forward.py` result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
 
 ## Commit
 
