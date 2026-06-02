@@ -190,7 +190,7 @@ def build_view() -> dict:
             _normalize(path, fm, body, group=name, title_keys=spec["title_keys"], desc_key=spec["desc_key"])
             for path, fm, body in _iter_corpus(DEFENDER / spec["dir"])
         ]
-        lessons.sort(key=lambda l: l["title"].lower())
+        lessons.sort(key=lambda rec: rec["title"].lower())
         groups[name] = {
             "label": spec["label"],
             "blurb": spec["blurb"],

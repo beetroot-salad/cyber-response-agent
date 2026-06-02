@@ -74,7 +74,7 @@ def test_lesson_record_shape():
 def test_actor_lesson_field_mapping():
     """The known actor seed maps subject→title, relevance_criteria→description."""
     actor = serialize.build_view()["groups"]["actor"]["lessons"]
-    seed = next((l for l in actor if l["title"] == "wazuh-rule-5712-threshold"), None)
+    seed = next((rec for rec in actor if rec["title"] == "wazuh-rule-5712-threshold"), None)
     assert seed is not None, "actor seed 'wazuh-rule-5712-threshold' missing from corpus"
     assert seed["description"].startswith("defender uses Wazuh rule 5712")
     assert seed["metadata"]["alert_rule_ids"] == [5712]
