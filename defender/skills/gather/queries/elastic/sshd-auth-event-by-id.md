@@ -29,3 +29,4 @@ Index: `logs-system.auth-*`
 - **`_id` vs. field value.** The `event_id` parameter is the Elasticsearch document ID (`_id`), not a value inside the `message` field. Retrieve via direct `_id` lookup, not a field query.
 - **Index scope.** Auth-log events live in `logs-system.auth-*`; Falco events in `logs-falco.alerts-*`. Do not substitute indexes.
 - **Sweep pair for multi-hop pivots.** When a lead resolves multiple ancestor sessions in one hop (e.g., a workstation-tier event and a prod-tier event), dispatch this template once per `_id` and reconcile `host.name` and user identity across the results in the gather summary.
+- **`event_id` is a query-body substitution, not a CLI flag.** Pass `event_id` as a query param for substitution into `_id: "${event_id}"`. Passing it as `--event-id` to the CLI returns exit=2 with "error: unrecognized arguments: --event-id".
