@@ -1,6 +1,6 @@
 ---
 id: elastic.sshd-auth-events
-status: draft
+status: established
 ---
 
 ## Goal
@@ -15,7 +15,7 @@ modifications.
 - count of successful authentications (Accepted password / Accepted publickey)
 - count of failed authentication attempts
 - timestamp range of earliest and latest events in the window
-- any visible user/source patterns in the message field
+- source IP address(es) from successful authentication messages (embedded in `message` field as OpenSSH syslog format `from <ip>` — not a structured field; extract by pattern match on `Accepted * for <user> from <ip>`)
 
 ## Query
 
