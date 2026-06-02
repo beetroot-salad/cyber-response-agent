@@ -75,10 +75,10 @@ def main(argv: list[str]) -> int:
 
     here = Path(__file__).resolve().parent
     repo_root = here.parents[1]
-    # Load loop.py + project_lead_sequence.py from *this worktree* so all
-    # sibling refs (actor.md, mitre_corpus.py, lessons-actor/) resolve to
-    # the pinned generation, not HEAD.
-    loop = _load_sibling("_defender_learning_loop_replay", here / "loop.py")
+    # Load the actor stage + projector from *this worktree* so all sibling refs
+    # (actor.md, mitre_corpus.py, lessons-actor/) resolve to the pinned generation,
+    # not HEAD. The actor lives in _loop_subagents.py (loop.py is a thin facade).
+    sub = _load_sibling("_defender_learning_subagents_replay", here / "_loop_subagents.py")
     pls = _load_sibling(
         "_defender_scripts_project_lead_sequence_replay",
         repo_root / "defender" / "scripts" / "project_lead_sequence.py",
@@ -112,15 +112,15 @@ def main(argv: list[str]) -> int:
     # Pin the seed by overriding _actor_seed for the duration of the
     # call; all other actor artifacts (archetype, menu, story,
     # transcript) still land in `staging` as the harness expects.
-    original_seed = loop._actor_seed
-    loop._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
+    original_seed = sub._actor_seed
+    sub._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
     try:
-        story = loop.invoke_actor(alert, actor_input, staging)
-    except loop.LoopError as e:
+        story = sub.invoke_actor(alert, actor_input, staging)
+    except sub.LoopError as e:
         print(f"actor invocation failed: {e}", file=sys.stderr)
         return 2
     finally:
-        loop._actor_seed = original_seed
+        sub._actor_seed = original_seed
 
     (staging / "actor_story.md").write_text(story)
     return 0

@@ -25,6 +25,7 @@ sys.modules["_defender_learning_loop"] = loop
 _spec.loader.exec_module(loop)
 
 LoopError = loop.LoopError
+LoopPaths = loop.LoopPaths
 assemble_exemplar_bundle = loop.assemble_exemplar_bundle
 redact_exemplar = loop.redact_exemplar
 validate_oracle_doc = loop.validate_oracle_doc
@@ -495,39 +496,28 @@ def _read_jsonl(path: Path) -> list[dict]:
     return out
 
 
-def _isolate(monkeypatch, tmp_path: Path) -> Path:
-    """Point both queue constants at a tmp dir and return a learning_run_dir
-    that resolves cleanly under loop.REPO_ROOT (so source_run_dir formatter
-    doesn't blow up on relative_to()).
+def _isolate(tmp_path: Path) -> tuple[object, Path]:
+    """Return (paths, learning_run_dir) rooted at tmp_path — no monkeypatching.
 
-    The _pending dir is intentionally NOT pre-created — `_append_jsonl` is
-    expected to mkdir it on demand, so empty-case assertions can verify the
-    producer doesn't touch disk at all when there are zero rows to write.
+    The _pending dir is intentionally NOT pre-created: `_append_jsonl` mkdirs it on
+    demand, so empty-case assertions verify the producer doesn't touch disk when
+    there are zero rows. learning_run_dir resolves under paths.repo_root so the
+    source_run_dir formatter's relative_to() works.
     """
-    pending = tmp_path / "_pending"
-    queue = pending / "actor_observations.jsonl"
-    consumed = pending / "actor_observations.consumed.jsonl"
-    monkeypatch.setattr(loop, "PENDING_DIR", pending)
-    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_FILE", queue)
-    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_CONSUMED_FILE", consumed)
-    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_LOCK_FILE", pending / ".actor.lock")
-    # Make REPO_ROOT == tmp_path so learning_run_dir.relative_to(REPO_ROOT) works.
-    monkeypatch.setattr(loop, "REPO_ROOT", tmp_path)
-    learning_run_dir = tmp_path / "defender" / "learning" / "runs" / "case-x"
+    paths = LoopPaths(repo_root=tmp_path)
+    learning_run_dir = paths.runs_dir / "case-x"
     learning_run_dir.mkdir(parents=True)
-    return learning_run_dir
+    return paths, learning_run_dir
 
 
-def test_append_actor_observations_writes_one_row_per_observation(
-    monkeypatch, tmp_path: Path
-):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_writes_one_row_per_observation(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", [_obs(0), _obs(1)])
 
-    n = append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir)
+    n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
 
     assert n == 2
-    rows = _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)
+    rows = _read_jsonl(paths.actor_observations_file)
     assert [r["observation_id"] for r in rows] == ["case-x/0", "case-x/1"]
     assert [r["observation_index"] for r in rows] == [0, 1]
     assert all(r["run_id"] == "case-x" for r in rows)
@@ -540,95 +530,77 @@ def test_append_actor_observations_writes_one_row_per_observation(
     assert rows[1]["observation"] == "observation paragraph 1\n"
 
 
-def test_append_actor_observations_dedupes_on_observation_id(
-    monkeypatch, tmp_path: Path
-):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_dedupes_on_observation_id(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", [_obs(0), _obs(1)])
 
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 2
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
     # Replay — same case_id + same indices.
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
-    assert len(_read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)) == 2
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
+    assert len(_read_jsonl(paths.actor_observations_file)) == 2
 
 
-def test_append_actor_observations_takes_actor_lock(monkeypatch, tmp_path: Path):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_creates_lock_file(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", [_obs(0)])
-    calls: list[int] = []
-    real_flock = loop.fcntl.flock
 
-    def fake_flock(fd, op):
-        calls.append(op)
-        return real_flock(fd, op)
-
-    monkeypatch.setattr(loop.fcntl, "flock", fake_flock)
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 1
-    assert calls == [loop.fcntl.LOCK_EX, loop.fcntl.LOCK_UN]
-    assert loop.ACTOR_OBSERVATIONS_LOCK_FILE.is_file()
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 1
+    # The append serializes concurrent legs under an flock on this file.
+    assert paths.actor_observations_lock_file.is_file()
 
 
-def test_append_actor_observations_skips_passthrough_outcome(
-    monkeypatch, tmp_path: Path
-):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_skips_passthrough_outcome(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("skip-passthrough", [_obs(0)])
 
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
-    assert _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE) == []
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
+    assert _read_jsonl(paths.actor_observations_file) == []
 
 
-def test_append_actor_observations_no_key_is_zero_rows(monkeypatch, tmp_path: Path):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_no_key_is_zero_rows(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", None)  # actor_observations omitted entirely
 
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
-    assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
-    assert not loop.PENDING_DIR.exists()
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
+    assert not paths.actor_observations_file.exists()
+    assert not paths.pending_dir.exists()
 
 
-def test_append_actor_observations_empty_list_is_zero_rows(
-    monkeypatch, tmp_path: Path
-):
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+def test_append_actor_observations_empty_list_is_zero_rows(tmp_path: Path):
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", [])
 
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
-    assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
-    assert not loop.PENDING_DIR.exists()
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
+    assert not paths.actor_observations_file.exists()
+    assert not paths.pending_dir.exists()
 
 
-def test_append_actor_observations_dedupes_against_consumed_history(
-    monkeypatch, tmp_path: Path
-):
+def test_append_actor_observations_dedupes_against_consumed_history(tmp_path: Path):
     """After the author rotates an observation into the consumed file,
     re-running the persist stage on the same case must NOT replay it."""
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("caught", [_obs(0), _obs(1)])
 
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 2
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
     # Simulate author rotation: move both rows into consumed and clear active.
-    loop.ACTOR_OBSERVATIONS_CONSUMED_FILE.write_text(
-        loop.ACTOR_OBSERVATIONS_FILE.read_text()
+    paths.actor_observations_consumed_file.write_text(
+        paths.actor_observations_file.read_text()
     )
-    loop.ACTOR_OBSERVATIONS_FILE.write_text("")
+    paths.actor_observations_file.write_text("")
 
     # Replay — same case_id + same indices; producer must see consumed.
-    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
-    assert _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE) == []
+    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
+    assert _read_jsonl(paths.actor_observations_file) == []
 
 
-def test_append_actor_observations_queues_survived_outcomes(
-    monkeypatch, tmp_path: Path
-):
+def test_append_actor_observations_queues_survived_outcomes(tmp_path: Path):
     """Producer's only outcome filter is skip-passthrough; the author owns
     the caught/incoherent/survived policy."""
-    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    paths, lrd = _isolate(tmp_path)
     doc = _judge_doc("survived", [_obs(0)])
 
-    n = append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir)
+    n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
 
     assert n == 1
-    rows = _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)
+    rows = _read_jsonl(paths.actor_observations_file)
     assert rows[0]["judge_outcome"] == "survived"

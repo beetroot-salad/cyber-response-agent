@@ -106,45 +106,41 @@ def test_validate_benign_doc_rejects_malformed_entity_selector() -> None:
 
 
 @pytest.fixture
-def loop_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect REPO_ROOT + queue files to tmp so appends stay isolated."""
-    monkeypatch.setattr(loop, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(loop, "PENDING_DIR", tmp_path / "_pending")
-    monkeypatch.setattr(loop, "PENDING_FILE", tmp_path / "_pending" / "findings.jsonl")
-    monkeypatch.setattr(loop, "ENVIRONMENT_OBSERVATIONS_FILE",
-                        tmp_path / "_pending" / "environment_observations.jsonl")
-    monkeypatch.setattr(loop, "ENVIRONMENT_OBSERVATIONS_CONSUMED_FILE",
-                        tmp_path / "_pending" / "environment_observations.consumed.jsonl")
-    monkeypatch.setattr(loop, "ENVIRONMENT_OBSERVATIONS_LOCK_FILE",
-                        tmp_path / "_pending" / ".environment.lock")
-    lrd = tmp_path / "runs" / "case-1"
+def loop_paths(tmp_path: Path) -> tuple[loop.LoopPaths, Path]:
+    """Queue files isolated under tmp via an injected LoopPaths — no monkeypatching.
+
+    The learning_run_dir resolves under paths.repo_root so the source_run_dir
+    formatter's relative_to() works.
+    """
+    paths = loop.LoopPaths(repo_root=tmp_path)
+    lrd = paths.runs_dir / "case-1"
     lrd.mkdir(parents=True)
-    return lrd
+    return paths, lrd
 
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def test_append_findings_benign_namespace_and_direction(loop_paths: Path) -> None:
-    lrd = loop_paths
+def test_append_findings_benign_namespace_and_direction(loop_paths) -> None:
+    paths, lrd = loop_paths
     doc = _valid_benign_doc()
     # add an audit-only finding that must be filtered out
     doc["defender_findings"].append({
         "type": "disposition-confirmed", "subject_anchor": "l-001",
         "subject_topic": "justified", "finding": "x", "citations": [],
     })
-    n = loop.append_findings(doc, "case-1", "rule-x", lrd, direction="benign")
+    n = loop.append_findings(doc, "case-1", "rule-x", lrd, direction="benign", paths=paths)
     assert n == 1  # disposition-confirmed filtered
-    rows = _read_jsonl(loop.PENDING_FILE)
+    rows = _read_jsonl(paths.pending_file)
     assert len(rows) == 1
     assert rows[0]["finding_id"] == "case-1/benign/0"
     assert rows[0]["direction"] == "benign"
     assert rows[0]["judge_outcome"] == "survived"
 
 
-def test_append_findings_adversarial_unchanged(loop_paths: Path) -> None:
-    lrd = loop_paths
+def test_append_findings_adversarial_unchanged(loop_paths) -> None:
+    paths, lrd = loop_paths
     doc = {
         "outcome": "survived",
         "defender_findings": [
@@ -154,22 +150,22 @@ def test_append_findings_adversarial_unchanged(loop_paths: Path) -> None:
              "subject_topic": "t", "finding": "f", "citations": []},
         ],
     }
-    n = loop.append_findings(doc, "case-1", "rule-x", lrd)
+    n = loop.append_findings(doc, "case-1", "rule-x", lrd, paths=paths)
     assert n == 1
-    rows = _read_jsonl(loop.PENDING_FILE)
+    rows = _read_jsonl(paths.pending_file)
     assert rows[0]["finding_id"] == "case-1/0"  # no benign/ namespace
     assert rows[0]["direction"] == "adversarial"
 
 
-def test_append_environment_observations(loop_paths: Path) -> None:
-    lrd = loop_paths
+def test_append_environment_observations(loop_paths) -> None:
+    paths, lrd = loop_paths
     doc = _valid_benign_doc()
     # canonical key already matches the judge's anchor → stored verbatim.
     n = loop.append_environment_observations(
-        doc, "case-1", "v2-falco-suspicious-network-tool", lrd
+        doc, "case-1", "v2-falco-suspicious-network-tool", lrd, paths=paths
     )
     assert n == 1
-    rows = _read_jsonl(loop.ENVIRONMENT_OBSERVATIONS_FILE)
+    rows = _read_jsonl(paths.environment_observations_file)
     assert rows[0]["observation_id"] == "case-1/0"
     assert rows[0]["alert_rule_ids"] == ["v2-falco-suspicious-network-tool"]
     assert rows[0]["entities"] == [
@@ -177,20 +173,20 @@ def test_append_environment_observations(loop_paths: Path) -> None:
     assert rows[0]["subject"] == "monitoring-port-probe"
     # idempotent re-append writes nothing new
     assert loop.append_environment_observations(
-        doc, "case-1", "v2-falco-suspicious-network-tool", lrd
+        doc, "case-1", "v2-falco-suspicious-network-tool", lrd, paths=paths
     ) == 0
 
 
-def test_append_environment_observations_unions_canonical_key(loop_paths: Path) -> None:
+def test_append_environment_observations_unions_canonical_key(loop_paths) -> None:
     """When the judge's free-read rule id differs from the deterministic
     alert_rule_key, the stored anchor must carry the canonical key (leading) so
     the runtime actor + forward-check — which both query by alert_rule_key —
     still retrieve the lesson for its own source case."""
-    lrd = loop_paths
+    paths, lrd = loop_paths
     doc = _valid_benign_doc()
-    n = loop.append_environment_observations(doc, "case-1", "rule-100110", lrd)
+    n = loop.append_environment_observations(doc, "case-1", "rule-100110", lrd, paths=paths)
     assert n == 1
-    rows = _read_jsonl(loop.ENVIRONMENT_OBSERVATIONS_FILE)
+    rows = _read_jsonl(paths.environment_observations_file)
     assert rows[0]["alert_rule_ids"] == [
         "rule-100110", "v2-falco-suspicious-network-tool"]
     assert rows[0]["alert_rule_key"] == "rule-100110"
@@ -206,10 +202,13 @@ def test_anchor_with_case_key_dedups_and_normalizes() -> None:
     assert loop._anchor_with_case_key([" ", "b"], "a") == ["a", "b"]
 
 
-def test_append_environment_observations_skip_passthrough(loop_paths: Path) -> None:
+def test_append_environment_observations_skip_passthrough(loop_paths) -> None:
+    paths, lrd = loop_paths
     doc = {"outcome": "skip-passthrough", "outcome_rationale": "x",
            "defender_findings": [], "environment_observations": []}
-    assert loop.append_environment_observations(doc, "case-1", "rule-x", loop_paths) == 0
+    assert loop.append_environment_observations(
+        doc, "case-1", "rule-x", lrd, paths=paths
+    ) == 0
 
 
 # --------------------------------------------------------------------------
