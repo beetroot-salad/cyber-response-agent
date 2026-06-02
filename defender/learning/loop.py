@@ -113,6 +113,11 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
+# Telemetry projection is mechanical (stays sonnet for content fidelity per the
+# d2d72ab model decision), but at the inherited effort=high the oracle
+# intermittently spends 5-6 min / ~25K tokens on extended thinking that does not
+# improve projection fidelity. Pin low; override via ORACLE_EFFORT.
+ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already
@@ -538,7 +543,7 @@ def invoke_oracle(
         f"{exemplar_bundle.rstrip()}\n"
         "</exemplars>\n"
     )
-    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL)
+    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
 
 
 def invoke_judge(
@@ -1709,6 +1714,14 @@ Environment:
                                        N=3 test (contaminates judge findings),
                                        so this is sonnet by design
                                        (default: claude-sonnet-4-6)
+  ORACLE_EFFORT                        reasoning effort for the oracle. Mechanical
+                                       projection does not benefit from extended
+                                       thinking; at high it intermittently spends
+                                       5-6 min with no fidelity gain (default: low)
+  JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   reasoning effort for the judges. The prompt
+                                       fully scaffolds the analysis, so high
+                                       over-thinks (~90% of output was thinking);
+                                       low cuts output ~70% (default: low)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge
                                        (default: claude-sonnet-4-6)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 300)
