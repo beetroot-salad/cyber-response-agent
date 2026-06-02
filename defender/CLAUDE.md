@@ -58,6 +58,7 @@ defender/
     verify_forward.{md,py}     # forward-check gate before queuing
     author.{md,py}      # lessons curator: folds queued findings into defender/lessons/
     eval/               # harness-on-the-harness: scenarios for evaluating the loop itself
+    frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
   lessons/              # checked-in pitfall lessons, authored by the loop, read by the runtime agent at PLAN time
   fixtures/             # alert.json + (optionally) gather_raw payloads, used as inputs
   run-transcripts/      # curated transcripts of past runs (real alerts)
