@@ -57,9 +57,6 @@ LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 RUNS_DIR = LEARNING_DIR / "runs"
 PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
-# Shared by BOTH directions (adversarial + benign append_findings), so when the
-# two legs run concurrently their appends must serialize on this lock.
-FINDINGS_LOCK_FILE = PENDING_DIR / ".findings.lock"
 ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
 ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
 ACTOR_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".actor.lock"
@@ -1115,8 +1112,11 @@ def _release_actor_observations_lock(fh: Any) -> None:
 
 
 def _acquire_findings_lock() -> Any:
+    # findings.jsonl is appended by both directions; serialize concurrent legs.
+    # Resolve the lock path from PENDING_DIR at call time so it tracks any
+    # test-time redirection of the pending dir.
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    fh = FINDINGS_LOCK_FILE.open("a+")
+    fh = (PENDING_DIR / ".findings.lock").open("a+")
     fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
     return fh
 
