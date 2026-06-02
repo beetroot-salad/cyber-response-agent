@@ -7,10 +7,12 @@ instead of monkeypatching module globals.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
@@ -128,6 +130,9 @@ def run_direction(
     """
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key)
+    # Write the story now so oracle + judge can read it from disk downstream; the
+    # later persist_run re-archives the same path (idempotent) and is the only writer
+    # on the SKIP short-circuit below.
     actor_story_path = learning_run_dir / spec.story_name
     actor_story_path.write_text(actor_story)
 
@@ -197,6 +202,11 @@ def _directions_for(disposition: str) -> list[str]:
 # Curators
 # ---------------------------------------------------------------------------
 
+# Serializes the transient `sys.path` mutation in `_run_curator_module`, which can
+# run from the run_one thread pool (lead-author leg) concurrently with the direction
+# legs.
+_CURATOR_IMPORT_LOCK = threading.Lock()
+
 
 def _invoke_lead_author(run_dir: Path) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge."""
@@ -233,12 +243,24 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 
     Narrow swallow for ``lead_author``-style child-process / filesystem hiccups; real
     regressions (ImportError, TypeError, …) propagate so they fail loudly.
+
+    The sibling dir is almost always already on ``sys.path`` (run.py inserts it; a
+    standalone ``loop.py`` puts it on ``sys.path[0]``), but ``_invoke_lead_author``
+    runs inside the run_one thread pool, so guard the temporary mutation with a lock
+    and remove our specific entry by value — never a positional ``pop(0)`` that a
+    concurrent insert could clobber.
     """
-    sys.path.insert(0, str(LEARNING_DIR))
-    try:
-        mod = __import__(module_name)
-    finally:
-        sys.path.pop(0)
+    learning_dir = str(LEARNING_DIR)
+    with _CURATOR_IMPORT_LOCK:
+        added = learning_dir not in sys.path
+        if added:
+            sys.path.insert(0, learning_dir)
+        try:
+            mod = __import__(module_name)
+        finally:
+            if added:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(learning_dir)
     try:
         return call(mod)
     except (subprocess.SubprocessError, OSError) as e:

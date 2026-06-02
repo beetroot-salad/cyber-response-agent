@@ -13,8 +13,8 @@ from typing import Any
 import yaml
 
 from _loop_config import (
-    ALL_FINDING_TYPES,
     ACTOR_OBSERVATION_TYPES,
+    ALL_FINDING_TYPES,
     BENIGN_ALL_FINDING_TYPES,
     BENIGN_OUTCOME_ENUM,
     DISPOSITION_ENUM,
