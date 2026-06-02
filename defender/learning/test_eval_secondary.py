@@ -344,7 +344,7 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
             return "case_id: " + doc["case_id"] + "\n"
 
     def fake_load_sibling(name, path):
-        if name.endswith("loop_replay"):
+        if name.endswith("subagents_replay"):
             return fake_loop
         return FakePLS()
 

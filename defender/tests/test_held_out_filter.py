@@ -14,6 +14,47 @@ sys.path.insert(0, str(LEARNING_SRC))
 import loop  # type: ignore[import-not-found]
 
 
+class FakeSubagents:
+    """In-memory Subagents double — canned per-step outputs, records call counts.
+
+    Replaces the monkeypatch wall over invoke_actor/oracle/judge; the SDK migration
+    will swap loop's real adapter the same way this swaps a fake.
+    """
+
+    def __init__(self, *, story="story body\n", story_benign="story body\n",
+                 oracle="projections: []\n", judge="", judge_benign=""):
+        self._story = story
+        self._story_benign = story_benign
+        self._oracle = oracle
+        self._judge = judge
+        self._judge_benign = judge_benign
+        self.calls: dict[str, int] = {}
+
+    def _bump(self, name: str) -> None:
+        self.calls[name] = self.calls.get(name, 0) + 1
+
+    def actor(self, run_dir, learning_run_dir):
+        self._bump("actor")
+        return self._story
+
+    def actor_benign(self, run_dir, learning_run_dir, alert_rule_key):
+        self._bump("actor_benign")
+        return self._story_benign
+
+    def oracle(self, run_dir, actor_story_path):
+        self._bump("oracle")
+        return self._oracle
+
+    def judge(self, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir):
+        self._bump("judge")
+        return self._judge
+
+    def judge_benign(self, run_dir, actor_story_path, projected_telemetry_path,
+                     learning_run_dir):
+        self._bump("judge_benign")
+        return self._judge_benign
+
+
 @pytest.fixture
 def run_dir(tmp_path: Path) -> Path:
     d = tmp_path / "20260512T120000Z-case"
@@ -53,100 +94,66 @@ def test_read_ground_truth_rejects_malformed_yaml(run_dir: Path) -> None:
         loop.read_ground_truth(run_dir)
 
 
-def test_run_one_gate_short_circuits_before_append(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Patch run_one's pre-append helpers and verify the held-out gate fires
-    before append_findings would have run.
-
-    Strategy: monkeypatch every step from normalize through judge to return
-    minimal valid outputs; then check that ``append_findings`` is NOT
-    called when ground_truth.yaml carries ``held_out: true``.
-    """
-    calls = {"append": 0}
-
-    def fake_append(*a, **kw):
-        calls["append"] += 1
-        return 0
-
-    # Build a minimal run dir.
+def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Path:
+    """A run dir with the four inputs persist_run copies, plus optional held-out mark."""
     run_dir = tmp_path / "case"
     run_dir.mkdir()
     (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
     (run_dir / "report.md").write_text(
-        "---\ncase_id: case\ndisposition: benign\nconfidence: high\n---\nbody\n"
+        f"---\ncase_id: case\ndisposition: {disposition}\nconfidence: high\n---\nbody\n"
     )
     (run_dir / "investigation.md").write_text("stub\n")
     (run_dir / "lead_sequence.yaml").write_text("entries: []\n")
-    (run_dir / "ground_truth.yaml").write_text(
-        "held_out: true\ndisposition: benign\nrationale: x\n"
-    )
+    if held_out:
+        (run_dir / "ground_truth.yaml").write_text(
+            "held_out: true\ndisposition: benign\nrationale: x\n"
+        )
+    return run_dir
 
-    # Patch the loop module's network-y / claude-spawning steps.
-    monkeypatch.setattr(loop, "_invoke_lead_author", lambda *a, **kw: None)
-    monkeypatch.setattr(loop, "project_actor_input", lambda *a, **kw: None)
-    monkeypatch.setattr(loop, "invoke_actor", lambda *a, **kw: "story body\n")
-    monkeypatch.setattr(loop, "is_skip_story", lambda *_: False)
-    monkeypatch.setattr(loop, "invoke_oracle", lambda *a, **kw: "- position: 0\n  events: []\n")
-    monkeypatch.setattr(
-        loop, "validate_oracle_doc", lambda *a, **kw: None
-    )
+
+def test_run_one_gate_short_circuits_before_append(tmp_path: Path) -> None:
+    """The held-out gate fires before append: a queueable finding that would
+    otherwise be queued must leave the pending file untouched on a held-out run."""
+    run_dir = _complete_run_dir(tmp_path, "benign", held_out=True)
     judge_yaml = (
-        "outcome: caught\n"
+        "outcome: survived\n"
         "defender_findings:\n"
-        "  - type: detection-confirmed\n"
+        "  - type: lead-set\n"          # queueable — would append if not held out
         "    subject_anchor: a\n"
         "    subject_topic: t\n"
         "    finding: n\n"
         "    citations: []\n"
     )
-    monkeypatch.setattr(loop, "invoke_judge", lambda *a, **kw: judge_yaml)
-    monkeypatch.setattr(
-        loop, "validate_judge_doc",
-        lambda doc: doc,
+    agents = FakeSubagents(judge=judge_yaml)
+    paths = loop.LoopPaths(repo_root=tmp_path)
+    lead_author_runs: list[Path] = []
+
+    rc = loop.run_one(
+        run_dir, paths=paths, agents=agents,
+        run_lead_author=lead_author_runs.append,
     )
-    monkeypatch.setattr(loop, "assemble_exemplar_bundle",
-                        lambda *a, **kw: "exemplars\n")
-    monkeypatch.setattr(loop, "persist_run", lambda *a, **kw: None)
-    monkeypatch.setattr(loop, "append_findings", fake_append)
-    monkeypatch.setattr(loop, "RUNS_DIR", tmp_path / "lrun")
-
-    rc = loop.run_one(run_dir)
     assert rc == 0
-    assert calls["append"] == 0, "append_findings must not be called for held-out runs"
+    assert agents.calls.get("judge") == 1  # adversarial leg ran end-to-end...
+    assert not paths.pending_file.exists()  # ...but held-out suppressed the append
 
 
-def test_malicious_dispatches_benign_not_adversarial(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path) -> None:
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
     adversarial one; lead-author still fires unconditionally."""
-    calls = {"lead_author": 0, "actor": 0, "actor_benign": 0}
-
-    monkeypatch.setattr(loop, "_invoke_lead_author",
-                        lambda *a, **kw: calls.__setitem__("lead_author", calls["lead_author"] + 1))
-    monkeypatch.setattr(loop, "invoke_actor",
-                        lambda *a, **kw: calls.__setitem__("actor", calls["actor"] + 1) or "")
+    run_dir = _complete_run_dir(tmp_path, "malicious", held_out=False)
     # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
-    monkeypatch.setattr(
-        loop, "invoke_actor_benign",
-        lambda *a, **kw: calls.__setitem__("actor_benign", calls["actor_benign"] + 1) or "SKIP: not ours\n",
-    )
-    monkeypatch.setattr(loop, "persist_run_benign", lambda *a, **kw: None)
-    monkeypatch.setattr(loop, "RUNS_DIR", tmp_path / "lrun")
+    agents = FakeSubagents(story_benign="SKIP: not ours\n")
+    paths = loop.LoopPaths(repo_root=tmp_path)
+    lead_author_runs: list[Path] = []
 
-    run_dir = tmp_path / "case"
-    run_dir.mkdir()
-    (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
-    (run_dir / "report.md").write_text(
-        "---\ncase_id: case\ndisposition: malicious\nconfidence: high\n---\nbody\n"
+    rc = loop.run_one(
+        run_dir, paths=paths, agents=agents,
+        run_lead_author=lead_author_runs.append,
     )
-
-    rc = loop.run_one(run_dir)
     assert rc == 0
-    assert calls["lead_author"] == 1, "lead-author must run regardless of disposition"
-    assert calls["actor"] == 0, "adversarial actor must not run on a malicious disposition"
-    assert calls["actor_benign"] == 1, "benign actor must run on a malicious disposition"
+    assert len(lead_author_runs) == 1, "lead-author must run regardless of disposition"
+    assert agents.calls.get("actor", 0) == 0, "adversarial actor must not run on malicious"
+    assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 
 
 def test_directions_for_dispatch() -> None:
