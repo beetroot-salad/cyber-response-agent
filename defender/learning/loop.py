@@ -55,7 +55,6 @@ from _loop_subagents import (  # noqa: E402
     invoke_oracle,
     is_skip_story,
     project_actor_input,
-    _actor_seed,
 )
 from _loop_validate import (  # noqa: E402
     normalize_disposition,
@@ -77,6 +76,10 @@ __all__ = [
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_oracle",
     "invoke_judge", "invoke_judge_benign", "is_skip_story", "project_actor_input",
+    # Underscore names are part of the test-facing surface (loop._outcome_keyword,
+    # loop._directions_for, loop._anchor_with_case_key); list them so they read as
+    # intentional re-exports, not dead imports.
+    "_outcome_keyword", "_directions_for", "_anchor_with_case_key",
 ]
 
 
