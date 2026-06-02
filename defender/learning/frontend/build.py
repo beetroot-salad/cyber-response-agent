@@ -7,14 +7,16 @@ inline into ``lessons.html`` so the page opens in a browser with no server
 (the run-visualizer pattern). The view renders purely from the injected
 contract — it is the only coupling point to the backend.
 
-Visual language + helpers are reused from the run visualizer
-(``defender/scripts/visualize_run.py`` CSS tokens, ``visualize_primitives``).
+Visual language is reused from the run visualizer
+(``defender/scripts/visualize_run.py`` CSS tokens); HTML escaping +
+markdown rendering happen client-side in the injected template.
 
 Usage:
     build.py            # write lessons.json + lessons.html
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,20 +25,26 @@ HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
 
-# Re-exec into the venv BEFORE importing serialize (whose own re-exec guard
-# would otherwise replace this process mid-import). No-op without a venv.
-_VENV_PY = DEFENDER / ".venv" / "bin" / "python3"
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), str(HERE), *sys.argv[1:]])
 
-import json
-from datetime import datetime, timezone
+def _reexec_into_venv() -> None:
+    """Switch to defender/.venv (for PyYAML, via serialize) when run as a script.
+
+    Must run before ``import serialize`` so serialize imports cleanly
+    under the venv. Guarded by ``__name__ == "__main__"`` — build.py is
+    only ever a CLI entry point, never imported. No-op without a venv.
+    """
+    venv_py = DEFENDER / ".venv" / "bin" / "python3"
+    if venv_py.is_file() and Path(sys.executable) != venv_py:
+        os.execv(str(venv_py), [str(venv_py), str(HERE), *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    _reexec_into_venv()
 
 sys.path.insert(0, str(HERE.parent))           # serialize.py
-sys.path.insert(0, str(DEFENDER / "scripts"))  # visualize helpers
+sys.path.insert(0, str(DEFENDER / "scripts"))  # visualize_run CSS tokens
 
 import serialize
-from visualize_primitives import esc  # noqa: F401  (reused visual-language helper)
 from visualize_run import CSS as RUN_CSS
 
 # Each group's left-accent reuses the run visualizer's stage palette:
@@ -143,7 +151,9 @@ PAGE = """<!doctype html>
 <script>
 const DATA = __LESSONS_JSON__;
 const STAGE = __STAGE_JSON__;
-const ORDER = ["defender", "actor", "environment"];
+// Order + identity come from the contract (serialize.GROUPS insertion order),
+// so a corpus added there renders without a matching edit here.
+const ORDER = Object.keys(DATA.groups);
 
 function escHtml(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
@@ -218,9 +228,9 @@ function renderGroup(name){
     + '</section>';
 }
 
-document.getElementById("root").innerHTML = ORDER.filter(n => DATA.groups[n]).map(renderGroup).join("");
+document.getElementById("root").innerHTML = ORDER.map(renderGroup).join("");
 
-const total = ORDER.reduce((a, n) => a + (DATA.groups[n] ? DATA.groups[n].lessons.length : 0), 0);
+const total = ORDER.reduce((a, n) => a + DATA.groups[n].lessons.length, 0);
 document.getElementById("headline").textContent =
   total + " lessons · generated " + (DATA.generated_at || "—");
 
@@ -247,7 +257,14 @@ document.getElementById("hide-stale").addEventListener("change", applyFilters);
 
 
 def render(view: dict) -> str:
-    payload = json.dumps(view, ensure_ascii=False).replace("</script>", "<\\/script>")
+    # Replace every "<" with its JS unicode escape so no lesson body or
+    # metadata can close the inline <script> early: this covers all
+    # script-end variants ("</script ", "</SCRIPT>", "<!--", ...), not
+    # just the exact "</script>" literal the old code handled. The
+    # decoded JS string is byte-identical, since the escape evaluates
+    # back to "<". __LESSONS_JSON__ is substituted last so the CSS/stage
+    # payloads are never re-scanned for the marker.
+    payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
     return (
         PAGE.replace("__CSS__", RUN_CSS + LESSONS_CSS)
         .replace("__STAGE_JSON__", json.dumps(GROUP_STAGE))
@@ -256,11 +273,10 @@ def render(view: dict) -> str:
 
 
 def main() -> int:
-    view = serialize.build_view()
-    view["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    view = serialize.stamped_view()
 
     json_out = HERE.parent / "lessons.json"
-    json_out.write_text(json.dumps(view, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    json_out.write_text(serialize.dump_contract(view), encoding="utf-8")
 
     html_out = HERE.parent / "lessons.html"
     html_out.write_text(render(view), encoding="utf-8")

@@ -33,16 +33,19 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
 - **`serialize.py`** is the api layer: it reads the three corpora (whose
   frontmatter schemas differ) and normalizes them into one
   schema-agnostic contract. `build_view()` is pure; the CLI stamps
-  `generated_at`. Reuses the `iter_lessons` discovery primitives from
-  `scripts/lessons_actor_index.py` / `scripts/lessons_env_retrieve.py`.
+  `generated_at`. Each corpus is enumerated with one read per file
+  (`_iter_corpus`), matching the indexer discovery rules (sorted `*.md`,
+  underscore-skip, warn+skip on malformed frontmatter). Stale lessons
+  are surfaced with a badge, not hidden — this is an author-facing view.
 - **`lessons.json`** is the only coupling point between backend and view.
   Each group declares its `fields[]`, so the view renders metadata
   generically without knowing any corpus's schema. A real HTTP api could
   serve this same contract to the identical frontend.
 - **`build.py`** + its inline template is the view. It reuses the run
-  visualizer's visual language (`scripts/visualize_run.py` CSS tokens,
-  `scripts/visualize_primitives.py` helpers) so the page matches the
-  transcript/runtime views: defender=blue, actor=red, environment=amber.
+  visualizer's visual language (`scripts/visualize_run.py` CSS tokens) so
+  the page matches the transcript/runtime views: defender=blue,
+  actor=red, environment=amber. Group order/identity come from the
+  contract, so adding a corpus is a `serialize.GROUPS` edit alone.
 
 ## Tests
 

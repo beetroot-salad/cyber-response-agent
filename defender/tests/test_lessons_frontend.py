@@ -24,9 +24,20 @@ CORPUS_DIR = {
 
 
 def _on_disk(corpus: Path) -> set[str]:
+    """Stems the serializer would enumerate: non-underscore ``*.md`` whose
+    frontmatter parses. The serializer warns+skips malformed files, so
+    counting raw ``*.md`` would diverge the moment a lesson lands with a
+    YAML typo — mirror the skip via the same ``_read_lesson`` primitive."""
     if not corpus.is_dir():
         return set()
-    return {p.stem for p in corpus.glob("*.md") if not p.name.startswith("_")}
+    out: set[str] = set()
+    for p in corpus.glob("*.md"):
+        if p.name.startswith("_"):
+            continue
+        fm, _ = serialize._read_lesson(p)
+        if fm:
+            out.add(p.stem)
+    return out
 
 
 def test_build_view_is_pure():
@@ -63,10 +74,32 @@ def test_lesson_record_shape():
 def test_actor_lesson_field_mapping():
     """The known actor seed maps subject→title, relevance_criteria→description."""
     actor = serialize.build_view()["groups"]["actor"]["lessons"]
-    seed = next(l for l in actor if l["title"] == "wazuh-rule-5712-threshold")
+    seed = next((l for l in actor if l["title"] == "wazuh-rule-5712-threshold"), None)
+    assert seed is not None, "actor seed 'wazuh-rule-5712-threshold' missing from corpus"
     assert seed["description"].startswith("defender uses Wazuh rule 5712")
     assert seed["metadata"]["alert_rule_ids"] == [5712]
     assert seed["body"]  # the lesson body is carried for the expander
+
+
+def test_environment_field_mapping_unit():
+    """Env mapping (subject→title, relevance_criteria→description) is pinned
+    via _normalize directly, since the live env corpus may be empty and the
+    build_view-based actor test wouldn't exercise it."""
+    spec = serialize.GROUPS["environment"]
+    path = DEFENDER / spec["dir"] / "corp-vpn-egress.md"
+    fm = {
+        "subject": "corp-vpn-egress",
+        "relevance_criteria": "egress from the corp VPN range is expected",
+        "alert_rule_ids": [5712],
+    }
+    rec = serialize._normalize(
+        path, fm, "body text", group="environment",
+        title_keys=spec["title_keys"], desc_key=spec["desc_key"],
+    )
+    assert rec["title"] == "corp-vpn-egress"
+    assert rec["description"] == "egress from the corp VPN range is expected"
+    assert rec["metadata"]["alert_rule_ids"] == [5712]
+    assert rec["body"] == "body text"
 
 
 def test_metadata_is_json_safe():
@@ -74,3 +107,20 @@ def test_metadata_is_json_safe():
     import json
 
     json.dumps(serialize.build_view())  # raises if any value is non-serializable
+
+
+def test_json_safe_coerces_exotic_types():
+    """_json_safe must neutralize non-JSON YAML scalars so a build can't crash
+    on an exotic frontmatter value (a !!set, a bare time, ...)."""
+    import datetime
+    import json
+
+    out = serialize._json_safe({
+        "s": {"b", "a"},
+        "t": datetime.time(9, 30),
+        "d": datetime.date(2026, 6, 2),
+    })
+    assert out["s"] == ["a", "b"]        # set → sorted list (deterministic)
+    assert out["d"] == "2026-06-02"      # date → iso string
+    assert isinstance(out["t"], str)     # time → str fallback
+    json.dumps(out)                      # must not raise

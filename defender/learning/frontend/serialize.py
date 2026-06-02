@@ -15,11 +15,12 @@ The three corpora (authored by distinct learning-loop curators):
     actor        defender/lessons-actor/       author_actor.py
     environment  defender/lessons-environment/ author_actor_benign.py
 
-Reuses the existing discovery primitives — ``iter_lessons`` from
-``lessons_actor_index`` / ``lessons_env_retrieve`` — for actor/env
-enumeration (underscore-skip, stale handling, malformed warnings). The
-defender corpus has no indexer, so we enumerate it locally with the
-same frontmatter shape.
+Each corpus is enumerated locally with one read per file
+(``_iter_corpus`` → ``_read_lesson``), matching the indexer discovery
+rules (sorted ``*.md``, underscore-skip, warn+skip on malformed
+frontmatter). Stale lessons are *surfaced* (with a badge), not hidden:
+this is an author-facing posture view, not the runtime retrieval path
+the actors use.
 
 Usage:
     serialize.py            # write defender/learning/frontend/lessons.json
@@ -27,6 +28,8 @@ Usage:
 """
 from __future__ import annotations
 
+import datetime as _dt
+import json
 import os
 import sys
 from pathlib import Path
@@ -35,43 +38,57 @@ HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which
-# python the caller used (mirrors the indexer scripts). No-op when the
-# venv is absent (e.g. a worktree) or we are already inside it.
-_VENV_PY = DEFENDER / ".venv" / "bin" / "python3"
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), str(HERE), *sys.argv[1:]])
 
-# defender/scripts holds the reusable enumerators + yaml frontmatter parse.
-sys.path.insert(0, str(DEFENDER / "scripts"))
+def _reexec_into_venv() -> None:
+    """Switch to defender/.venv (for PyYAML) — only when run as a script.
 
-import datetime as _dt
-import json
+    Guarded by ``__name__ == "__main__"`` at the call site so that
+    *importing* this module (pytest, uv, build.py) never replaces the
+    caller's process. ``build_view`` is an importable api; an
+    import-time ``os.execv`` would silently hijack the importing
+    interpreter (a test runner would exec into the CLI and exit). No-op
+    when the venv is absent or we are already inside it.
+    """
+    venv_py = DEFENDER / ".venv" / "bin" / "python3"
+    if venv_py.is_file() and Path(sys.executable) != venv_py:
+        os.execv(str(venv_py), [str(venv_py), str(HERE), *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    _reexec_into_venv()
 
 import yaml
 
-import lessons_actor_index
-import lessons_env_retrieve
-
 
 def _json_safe(obj):
-    """Coerce YAML-parsed values (e.g. dates) into JSON-serializable form."""
+    """Coerce YAML-parsed values into JSON-serializable form.
+
+    Dates/datetimes → ISO strings; sets/tuples → lists; anything else
+    YAML can produce that ``json`` cannot (``datetime.time``, ``bytes``,
+    ``!!set`` members, …) → ``str`` so a build can never crash on an
+    exotic frontmatter scalar.
+    """
     if isinstance(obj, dict):
         return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (set, frozenset)):
+        return [_json_safe(v) for v in sorted(obj, key=str)]
     if isinstance(obj, (list, tuple)):
         return [_json_safe(v) for v in obj]
     if isinstance(obj, (_dt.date, _dt.datetime)):
         return obj.isoformat()
-    return obj
+    if obj is None or isinstance(obj, (str, bool, int, float)):
+        return obj
+    return str(obj)
 
 
 def _read_lesson(path: Path) -> tuple[dict, str]:
-    """Return (frontmatter dict, markdown body) for a lesson file.
+    """Return (frontmatter dict, markdown body) for a lesson file — one read.
 
-    Mirrors the ``_parse_frontmatter`` shape used by both indexers,
-    plus the body split they don't need.
+    Mirrors the ``_parse_frontmatter`` boundary the indexers use
+    (``---\\n`` … ``\\n---``), plus the body split they don't need.
+    Newlines are normalized so CRLF-saved lessons parse identically.
     """
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if not text.startswith("---\n"):
         return {}, text.strip()
     end = text.find("\n---", 4)
@@ -88,25 +105,28 @@ def _read_lesson(path: Path) -> tuple[dict, str]:
     return fm, body.strip()
 
 
-def _iter_defender():
-    """Enumerate defender/lessons/*.md (no existing indexer)."""
-    corpus = DEFENDER / "lessons"
+def _iter_corpus(corpus: Path):
+    """Yield (path, frontmatter, body) for each lesson in a corpus dir.
+
+    One read per file. Skips ``_``-prefixed files and warns+skips any
+    file whose frontmatter is missing or malformed (the indexer
+    discovery rules). Stale lessons are yielded — the view badges them.
+    """
     if not corpus.is_dir():
         return
     for path in sorted(corpus.glob("*.md")):
         if path.name.startswith("_"):
             continue
-        fm, _ = _read_lesson(path)
+        fm, body = _read_lesson(path)
         if not fm:
             print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
             continue
-        yield path, fm
+        yield path, fm, body
 
 
-def _normalize(path: Path, fm: dict, *, group: str, title_keys: list[str], desc_key: str) -> dict:
+def _normalize(path: Path, fm: dict, body: str, *, group: str, title_keys: list[str], desc_key: str) -> dict:
     title = next((str(fm[k]).strip() for k in title_keys if fm.get(k)), path.stem)
     status = str(fm.get("status") or "live").strip()
-    _, body = _read_lesson(path)
     return {
         "group": group,
         "title": title,
@@ -118,11 +138,14 @@ def _normalize(path: Path, fm: dict, *, group: str, title_keys: list[str], desc_
     }
 
 
-# Per-group: where the title/description live, and which metadata fields the
-# view renders as chips/badges. `kind` tells the view how to render the value.
+# Per-group: the corpus dir (under defender/), where the title/description
+# live, and which metadata fields the view renders. `kind` tells the view
+# how to render the value. This dict is the single source of group order
+# and identity — the view derives both from the contract it produces.
 GROUPS = {
     "defender": {
         "label": "Defender lessons",
+        "dir": "lessons",
         "blurb": "Pitfalls the runtime defender agent learned to avoid — folded from judged findings.",
         "title_keys": ["name"],
         "desc_key": "description",
@@ -133,6 +156,7 @@ GROUPS = {
     },
     "actor": {
         "label": "Actor lessons",
+        "dir": "lessons-actor",
         "blurb": "Tradecraft and detector facts the adversarial actor learned — what cover holds and what trips the defender.",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
@@ -145,6 +169,7 @@ GROUPS = {
     },
     "environment": {
         "label": "Environment lessons",
+        "dir": "lessons-environment",
         "blurb": "Standing deployment facts the benign ops-teamer actor uses to ground routine activity.",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
@@ -159,16 +184,11 @@ GROUPS = {
 
 def build_view() -> dict:
     """Pure: read the corpora → the view contract (no timestamp inside)."""
-    enumerators = {
-        "defender": _iter_defender(),
-        "actor": lessons_actor_index.iter_lessons(),
-        "environment": lessons_env_retrieve.iter_lessons(DEFENDER / "lessons-environment"),
-    }
     groups: dict[str, dict] = {}
     for name, spec in GROUPS.items():
         lessons = [
-            _normalize(path, fm, group=name, title_keys=spec["title_keys"], desc_key=spec["desc_key"])
-            for path, fm in enumerators[name]
+            _normalize(path, fm, body, group=name, title_keys=spec["title_keys"], desc_key=spec["desc_key"])
+            for path, fm, body in _iter_corpus(DEFENDER / spec["dir"])
         ]
         lessons.sort(key=lambda l: l["title"].lower())
         groups[name] = {
@@ -180,17 +200,32 @@ def build_view() -> dict:
     return {"groups": groups}
 
 
-def main(argv: list[str]) -> int:
+def stamped_view() -> dict:
+    """``build_view()`` plus the CLI-layer ``generated_at`` stamp (UTC).
+
+    The single place the timestamp is applied — both ``serialize`` and
+    ``build`` go through here so the contract's wall-clock field cannot
+    drift between the two entry points.
+    """
     from datetime import datetime, timezone
 
     view = build_view()
     view["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    payload = json.dumps(view, indent=2, ensure_ascii=False)
+    return view
+
+
+def dump_contract(view: dict) -> str:
+    """The canonical on-disk ``lessons.json`` form (indented + trailing newline)."""
+    return json.dumps(view, indent=2, ensure_ascii=False) + "\n"
+
+
+def main(argv: list[str]) -> int:
+    view = stamped_view()
     if "--stdout" in argv[1:]:
-        print(payload)
+        sys.stdout.write(dump_contract(view))
     else:
         out = HERE.parent / "lessons.json"
-        out.write_text(payload + "\n", encoding="utf-8")
+        out.write_text(dump_contract(view), encoding="utf-8")
         counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
         print(f"wrote {out.relative_to(REPO_ROOT)} — {counts}")
     return 0
