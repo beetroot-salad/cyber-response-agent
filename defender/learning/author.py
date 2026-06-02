@@ -204,8 +204,10 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
-        f"verify_forward_command: {verifier_py} defender/learning/verify_forward.py "
         f"--direction <direction> <lesson_path> <run_id>\n"
+        f"verify_batch_command: {verifier_py} defender/learning/verify_batch.py "
+        f"defender/learning/verify_forward.py "
+        f"<lesson_path>=<run_id>=<direction> [<lesson_path>=<run_id>=<direction> ...]\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )
@@ -214,6 +216,7 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         "Edit(defender/lessons/**),Write(defender/lessons/**),"
         "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
         "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
+        f"Bash({verifier_py} defender/learning/verify_batch.py:*),"
         f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
         "Bash(rm defender/lessons/*.md),"
         f"Bash(rm {LESSONS_DIR}/*.md)"

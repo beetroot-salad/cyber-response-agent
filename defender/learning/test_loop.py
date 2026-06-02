@@ -296,27 +296,21 @@ def test_validate_judge_doc_accepts_split_schema():
     loop.validate_judge_doc(_full_judge_doc())
 
 
-def test_validate_judge_doc_requires_outcome_rationale():
+def test_validate_judge_doc_omits_scaffolding_fields_is_accepted():
+    # `outcome_rationale`, `encounter_analysis`, `confidence` are thinking
+    # scaffolding the loop never parsed — they are no longer required output.
     doc = _full_judge_doc()
-    del doc["outcome_rationale"]
-    with pytest.raises(LoopError, match="outcome_rationale"):
-        loop.validate_judge_doc(doc)
+    for k in ("outcome_rationale", "encounter_analysis", "confidence"):
+        doc.pop(k, None)
+    loop.validate_judge_doc(doc)
 
 
 def test_validate_judge_doc_skip_passthrough_omits_analysis_and_confidence():
     doc = {
         "outcome": "skip-passthrough",
-        "outcome_rationale": "actor SKIP rationale.",
         "defender_findings": [],
     }
     loop.validate_judge_doc(doc)
-
-
-def test_validate_judge_doc_non_skip_requires_encounter_analysis():
-    doc = _full_judge_doc()
-    del doc["encounter_analysis"]
-    with pytest.raises(LoopError, match="encounter_analysis"):
-        loop.validate_judge_doc(doc)
 
 
 def test_validate_judge_doc_requires_subject_anchor_and_topic():
