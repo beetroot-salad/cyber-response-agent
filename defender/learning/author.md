@@ -2,7 +2,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 
 ## What you receive
 
-- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
+- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `direction`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. `direction` is `adversarial` (a missed-attack / FN lesson) or `benign` (an over-escalation / FP lesson) — you pass it to the forward-check unchanged (see below). The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
 - **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_finding_ids`, `created_at`) and a freeform pitfall body.
 - **`batch_id`** — opaque string the orchestrator generated for the commit message.
 
@@ -44,20 +44,24 @@ as you go, and never spawn the checks in a shell `for` loop or a
 background poll-loop.
 
 Run the batch driver the orchestrator put in the user prompt under
-`verify_batch_command:`, passing one `{lesson_path}={run_id}` pair per
-file you wrote:
+`verify_batch_command:`, passing one `{lesson_path}={run_id}={direction}`
+pair per file you wrote:
 
 ```
-{absolute-python-path} defender/learning/verify_batch.py defender/learning/verify_forward.py {lesson_a}={run_a} {lesson_b}={run_b} ...
+{absolute-python-path} defender/learning/verify_batch.py defender/learning/verify_forward.py {lesson_a}={run_a}={dir_a} {lesson_b}={run_b}={dir_b} ...
 ```
 
-`{run_id}` is each source finding's `run_id`. The orchestrator hands you
-the resolved absolute python path so the gate works regardless of cwd or
-venv layout — do not substitute a relative path or a different
-interpreter; both will fail. The driver runs all checks concurrently
-(single rep each — do not retry) and prints one line per pair —
-`GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` —
-then a `BATCH:` summary. Read that single output; do not poll.
+`{run_id}` and `{direction}` are each source finding's own `run_id` and
+`direction` fields — substitute each finding's values per pair; do not
+hardcode a direction. (The direction selects which disposition the check
+holds the lesson against: an adversarial lesson must preserve the case's
+benign call, a benign lesson must drive it off the over-escalated malicious
+call.) The orchestrator hands you the resolved absolute python path so the
+gate works regardless of cwd or venv layout — do not substitute a relative
+path or a different interpreter; both will fail. The driver runs all checks
+concurrently (single rep each — do not retry) and prints one line per pair —
+`GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` — then
+a `BATCH:` summary. Read that single output; do not poll.
 
 - **GOOD** → keep the file as-is.
 - **BAD** → revert that file:

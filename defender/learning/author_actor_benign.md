@@ -49,7 +49,7 @@ After writing or rewriting a lesson file, run the exact command the orchestrator
 {forward_check_command} {lesson_path} {observation_id}
 ```
 
-This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the environment retrieval with the source observation's own `alert_rule_ids` + `entities` and confirms your lesson file is returned. It prints exactly `GOOD` or `BAD` on its last line.
+This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the environment retrieval with the **exact inputs the runtime benign actor uses** — the source case's canonical rule key and its actual prologue entities (re-extracted from the source investigation) — and confirms your lesson file is returned. Because it keys off the real prologue (not the keys you wrote), a selector you carried over from the observation that the prologue can't satisfy will fail here. It prints exactly `GOOD` or `BAD` on its last line.
 
 - **GOOD** → the lesson is retrievable by the case it bears on; keep it.
 - **BAD** → the lesson cannot be retrieved for its own source case — almost always a mis-keyed anchor or selector (empty/wrong `alert_rule_ids`, a `class` slot narrower than the case entity, or an `identity` selector that the case prologue can't satisfy). One rewrite attempt allowed: re-read the observation, fix the frontmatter keys, re-run.

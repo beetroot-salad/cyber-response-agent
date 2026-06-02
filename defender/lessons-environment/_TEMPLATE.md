@@ -4,7 +4,9 @@ subject: {kebab-referent}            # OPTIONAL — only for a fact about ONE re
                                      # The fold/equivalence key: two lessons with the same subject must be reconciled.
 
 # Retrieval. `alert_rule_ids` is the ANCHOR (always present, discriminating); `entities` REFINE.
-alert_rule_ids: []                   # anchor key — SIEM rule ids this lesson explains or bites
+alert_rule_ids: []                   # anchor key — REQUIRED, non-empty. SIEM rule ids this lesson
+                                     # explains or bites. A lesson with no anchor is unretrievable
+                                     # by rule-anchored queries (it matches nothing, not everything).
 
 # `entities` selectors share invlang vertex vocabulary (`type` from `enum types`; `class` is the
 # per-type slot, e.g. compute = <role>/<zone>/<kind>). Slot-wildcards: `*/internal`; fewer slots

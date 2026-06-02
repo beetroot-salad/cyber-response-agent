@@ -3,7 +3,7 @@
 
 Usage::
 
-    verify_batch.py <verify_script.py> <lesson_path>=<id> [<lesson_path>=<id> ...]
+    verify_batch.py <verify_script.py> <lesson_path>=<id>[=<direction>] [...]
 
 ``<verify_script.py>`` is one of the existing single-check scripts
 (``verify_forward.py`` for defender findings, ``verify_forward_actor.py``
@@ -13,9 +13,13 @@ pair **concurrently** (a thread pool over subprocesses) and prints one
 result line per pair, so a curator agent runs its whole first verification
 pass with a single tool call instead of a serial shell loop.
 
-Each pair is ``<lesson_path>=<id>``: the lesson file to gate and the source
-row id (observation_id for actor lessons, run_id for defender findings) the
-single-check script resolves from its pending queue.
+Each pair is ``<lesson_path>=<id>`` with an optional third ``=<direction>``
+field: the lesson file to gate, the source row id (observation_id for actor
+lessons, run_id for defender findings) the single-check script resolves from
+its pending queue, and — when present — a direction passed through to the
+child as ``--direction <direction>`` before the positionals (the
+defender-findings check is direction-aware; the actor check is not, so it
+omits the field).
 
 Output (stdout), one line per pair, in input order::
 
@@ -45,20 +49,36 @@ MAX_WORKERS = int(os.environ.get("LEARNING_VERIFY_BATCH_WORKERS", "8"))
 CHILD_TIMEOUT = int(os.environ.get("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", "240"))
 
 
-def _parse_pair(arg: str) -> tuple[str, str]:
-    lesson, sep, ident = arg.partition("=")
-    if not sep or not lesson.strip() or not ident.strip():
+def _parse_pair(arg: str) -> tuple[str, str, str | None]:
+    parts = arg.split("=")
+    if len(parts) == 2:
+        lesson, ident, direction = parts[0], parts[1], None
+    elif len(parts) == 3:
+        lesson, ident, direction = parts
+        direction = direction.strip() or None
+    else:
         raise SystemExit(
-            f"verify_batch: malformed pair {arg!r} — expected <lesson_path>=<id>"
+            f"verify_batch: malformed pair {arg!r} — expected "
+            "<lesson_path>=<id>[=<direction>]"
         )
-    return lesson.strip(), ident.strip()
+    if not lesson.strip() or not ident.strip():
+        raise SystemExit(
+            f"verify_batch: malformed pair {arg!r} — empty lesson or id"
+        )
+    return lesson.strip(), ident.strip(), direction
 
 
-def _run_one(script: str, lesson_path: str, ident: str) -> tuple[str, str]:
+def _run_one(
+    script: str, lesson_path: str, ident: str, direction: str | None
+) -> tuple[str, str]:
     """Run one single-check subprocess. Returns (verdict, detail)."""
+    cmd = [sys.executable, script]
+    if direction:
+        cmd += ["--direction", direction]
+    cmd += [lesson_path, ident]
     try:
         proc = subprocess.run(
-            [sys.executable, script, lesson_path, ident],
+            cmd,
             capture_output=True,
             text=True,
             timeout=CHILD_TIMEOUT,
@@ -81,7 +101,7 @@ def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
             "usage: verify_batch.py <verify_script.py> "
-            "<lesson_path>=<id> [<lesson_path>=<id> ...]",
+            "<lesson_path>=<id>[=<direction>] [...]",
             file=sys.stderr,
         )
         return 64
@@ -91,17 +111,19 @@ def main(argv: list[str]) -> int:
         return 64
     pairs = [_parse_pair(a) for a in argv[2:]]
 
-    results: list[tuple[str, str, str, str]] = [("", lp, idv, "") for lp, idv in pairs]
+    results: list[tuple[str, str, str, str]] = [
+        ("", lp, idv, "") for lp, idv, _ in pairs
+    ]
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(MAX_WORKERS, len(pairs))
     ) as pool:
         futs = {
-            pool.submit(_run_one, script, lp, idv): i
-            for i, (lp, idv) in enumerate(pairs)
+            pool.submit(_run_one, script, lp, idv, direction): i
+            for i, (lp, idv, direction) in enumerate(pairs)
         }
         for fut in concurrent.futures.as_completed(futs):
             i = futs[fut]
-            lp, idv = pairs[i]
+            lp, idv, _ = pairs[i]
             verdict, detail = fut.result()
             results[i] = (verdict, lp, idv, detail)
 

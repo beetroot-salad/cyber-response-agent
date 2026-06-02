@@ -204,11 +204,10 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
-        f"verify_forward_command: {verifier_py} defender/learning/verify_forward.py "
-        f"<lesson_path> <run_id>\n"
+        f"--direction <direction> <lesson_path> <run_id>\n"
         f"verify_batch_command: {verifier_py} defender/learning/verify_batch.py "
         f"defender/learning/verify_forward.py "
-        f"<lesson_path>=<run_id> [<lesson_path>=<run_id> ...]\n"
+        f"<lesson_path>=<run_id>=<direction> [<lesson_path>=<run_id>=<direction> ...]\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )

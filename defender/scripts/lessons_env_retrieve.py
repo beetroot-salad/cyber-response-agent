@@ -113,11 +113,16 @@ def _lesson_applies(
         for selector in _as_list(fm.get("entities")):
             if not _selector_satisfied(selector, case_entities):
                 return False
-    # A lesson that names rule ids must include the case rule; a lesson
-    # with no rule ids applies regardless of rule.
-    lesson_rules = _as_str_set(fm.get("alert_rule_ids"))
-    if want_rule_ids and lesson_rules and lesson_rules.isdisjoint(want_rule_ids):
-        return False
+    # Rule-anchored retrieval: a lesson must declare a matching anchor. Every
+    # environment lesson is required to carry a non-empty alert_rule_ids (the
+    # template + observation enforce it); a lesson with an empty/disjoint anchor
+    # is malformed and matches NOTHING here, rather than matching everything —
+    # otherwise an unanchored lesson would surface for every unrelated alert
+    # rule. (Whole-corpus listing passes no rule ids and is unfiltered.)
+    if want_rule_ids:
+        lesson_rules = _as_str_set(fm.get("alert_rule_ids"))
+        if not lesson_rules or lesson_rules.isdisjoint(want_rule_ids):
+            return False
     return True
 
 
@@ -135,8 +140,10 @@ it declares is satisfied by the case:
     by some case entity. Class match is slot-wise on '/': a selector slot of
     '*' matches anything, and a selector with fewer slots matches more
     ('web-server' matches 'web-server/internal/container').
-  * rule ids — if the lesson names rule ids, the case rule must be among
-    them; a lesson with no rule ids applies regardless of rule.
+  * rule ids — the anchor. A rule-anchored query returns only lessons whose
+    anchor includes the case rule; a lesson with no/disjoint anchor is skipped
+    (every env lesson is required to carry an anchor). A whole-corpus listing
+    with no --alert-rule-ids is unfiltered on this axis.
 A lesson that declares no entities applies regardless of entities."""
 
 _HELP_EPILOG = """\
