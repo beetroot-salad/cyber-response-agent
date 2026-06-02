@@ -1,0 +1,4 @@
+# Generated build artifacts — regenerate with build.py
+lessons.html
+lessons.json
+__pycache__/
