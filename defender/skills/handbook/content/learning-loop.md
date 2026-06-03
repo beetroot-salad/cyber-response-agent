@@ -73,9 +73,11 @@ fast online path does not.
 
 ## Evaluating the loop itself
 
-`defender/learning/eval/` is the harness-on-the-harness — scenarios for
-evaluating the learning loop, plus `eval_held_out.py` / `eval_secondary.py`
-and the `judge-alignment/` calibration set. `defender/tests/` covers
+`defender/learning/eval/` is the harness-on-the-harness — `harness.py` plus
+`scenarios/` for evaluating the learning loop. The held-out / secondary eval
+drivers (`eval_held_out.py`, `eval_secondary.py`) and the `judge-alignment/`
+calibration set live alongside it, directly under `defender/learning/`.
+`defender/tests/` covers
 learning-loop invariants (lesson schema, author pre/post-flight, atomic
 writes, forward-check) — the guarantees not enforced by a hook.
 
