@@ -35,14 +35,25 @@ flowchart LR
 
 After the runtime loop exits, `run.py` hands the run dir to the offline loop (skip with `--no-learn`):
 
-1. **Normalize** disposition from `report.md` frontmatter (`benign | inconclusive | malicious`).
-2. **Project** `lead_sequence.yaml` to an actor-facing view.
-3. **Actor** (gray-box, adversarial) — given the alert, the lead set, an `internal`/`external` archetype, and a sampled MITRE ATT&CK technique menu, writes a candidate attack story citing the techniques it used.
-4. **Telemetry oracle** — synthesizes the per-lead events that story would have produced, so the judge isn't grading its own imagination.
-5. **Judge** — classifies the outcome (`caught | survived | undecidable | incoherent | skip-passthrough`) and emits findings.
-6. **Forward-check gate** — re-runs each queued finding against the actor story to confirm it actually bites.
-7. **Persist + queue** findings under `defender/learning/runs/`.
-8. **Author** — once enough findings accumulate (`LEARNING_AUTHOR_THRESHOLD`, default 5), the curator folds them into `defender/lessons/*.md` and commits.
+```mermaid
+flowchart TD
+    REPORT[report.md] --> N[Normalize disposition<br/>benign / inconclusive / malicious]
+    N --> P[Project lead_sequence.yaml<br/>to an actor-facing view]
+    P --> A[Actor: gray-box adversarial<br/>attack story + MITRE menu]
+    A --> O[Telemetry oracle:<br/>synthesize per-lead events]
+    O --> J[Judge: classify outcome<br/>+ emit findings]
+    J --> F[Forward-check:<br/>confirm each finding bites]
+    F --> Q[Persist + queue findings]
+    Q -->|threshold reached, default 5| AU[Author: fold findings<br/>into lessons + commit]
+    AU --> L[(defender/lessons)]
+    L -.->|read at PLAN| PLAN[Runtime agent]
+```
+
+- **Normalize** disposition from `report.md` frontmatter (`benign | inconclusive | malicious`).
+- **Actor** (gray-box, adversarial) is given the alert, the lead set, an `internal`/`external` archetype, and a sampled MITRE ATT&CK technique menu, and writes a candidate attack story citing the techniques it used.
+- **Telemetry oracle** sits between actor and judge so the judge isn't grading its own imagination.
+- **Judge** classifies the outcome (`caught | survived | undecidable | incoherent | skip-passthrough`).
+- **Author** fires once `_pending` reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), folding queued findings into `defender/lessons/*.md`.
 
 Lessons feed back in: at `PLAN` time the agent enumerates `defender/lessons/*.md` frontmatter and reads the bodies relevant to the current alert.
 
