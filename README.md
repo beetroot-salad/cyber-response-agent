@@ -127,5 +127,6 @@ cd defender && .venv/bin/python -m pytest tests/ -q
 
 - `defender/SKILL.md` — the runtime agent spec
 - `defender/CLAUDE.md` — on-disk contracts, run-dir layout, and a "where to make changes" map
+- `defender/skills/handbook/` — on-demand reference for the whole defender (design, both loops, run artifacts, skills + lessons, invlang); read-only, question-driven
 - `defender/learning/loop.py` — the offline loop orchestrator
 - `defender/docs/learning-loop.md` — design rationale
