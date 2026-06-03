@@ -13,8 +13,9 @@ the *why* — the RL / evolutionary-algorithms framing — read
 
 ## The pipeline (adversarial direction)
 
-1. **Normalize** — read the disposition from `report.md` frontmatter. Skips
-   `malicious` at MVP (story already confirmed, nothing to learn).
+1. **Normalize** — read and validate the disposition from `report.md`
+   frontmatter (`benign | inconclusive | malicious`); it selects which
+   direction(s) run (see §Two directions).
 2. **Project** — turn `lead_sequence.yaml` into an actor-facing view of what
    the investigation looked at.
 3. **Actor** (`actor.md`, gray-box adversarial) — given the alert + lead set
@@ -22,29 +23,34 @@ the *why* — the RL / evolutionary-algorithms framing — read
    12-technique subset sampled from `mitre_corpus.py`), writes a candidate
    attack story citing the techniques used in a Section 0 table. The seed is
    derived from the run id, so the menu + archetype are reproducible per
-   case. Can short-circuit with **SKIP** — required when the menu lacks an
-   Initial Access technique for the archetype.
+   case. Can short-circuit with **SKIP** when no coherent story fits the
+   menu — required when a causal step the story needs (e.g. initial access)
+   has no covering technique to cite from it.
 4. **Telemetry oracle** (`oracle.md`) — synthesizes the per-lead events the
    actor's story would have produced. It sits *between* actor and judge so
    the judge isn't grading its own imagination.
 5. **Judge** (`judge.md`) — classifies the outcome and emits findings.
    Outcome is one of: `caught` | `survived` | `undecidable` | `incoherent`
    | `skip-passthrough`.
-6. **Forward-check gate** (`verify_forward.{md,py}`) — re-runs each queued
-   finding against the actor story to confirm it actually *bites* before it
-   reaches the queue. A finding that doesn't change the outcome is dropped.
-7. **Persist + queue** — write artifacts under `defender/learning/runs/` and
+6. **Persist + queue** — write artifacts under `defender/learning/runs/` and
    append queueable findings to `_pending/findings.jsonl`.
    `detection-confirmed` findings are audit-only (they don't queue — the
    investigation already worked).
-8. **Author** (`author.{md,py}`) — once `_pending` reaches
-   `LEARNING_AUTHOR_THRESHOLD` (default **5**), the lessons curator folds the
-   queued findings into `defender/lessons/*.md` and commits.
+7. **Author + forward-check gate** — once `_pending` reaches
+   `LEARNING_AUTHOR_THRESHOLD` (default **5**), the lessons curator
+   (`author.{md,py}`) folds the queued findings into `defender/lessons/*.md`
+   and commits. Before it admits a finding into a lesson it runs the
+   forward-check (`verify_forward.{md,py}`), which re-runs that finding
+   against the actor story to confirm it actually *bites*; a finding that
+   doesn't change the outcome is dropped, not authored.
 
 ## How lessons feed back
 
-The output of the loop is the `lessons/` corpus. At **PLAN** time the
-runtime agent enumerates `defender/lessons/*.md`, reads each file's
+The runtime-facing output of the loop is the `defender/lessons/` corpus (the
+defender-findings corpus from §Two directions; the `lessons-actor/` /
+`lessons-environment/` corpora are direction-specific and consumed elsewhere).
+At **PLAN** time the runtime agent enumerates `defender/lessons/*.md`, reads
+each file's
 frontmatter `description:`, and Reads the body of any lesson that looks
 relevant to the current alert shape — *before* writing its `:H`/`:L` blocks.
 Bodies are short and teach what to *check next time*, not what conclusion to
@@ -53,14 +59,47 @@ a lesson the next run reads. See `content/knowledge-and-skills.md` §Lessons.
 
 ## Two directions
 
-The pipeline above is the **adversarial** direction — it runs on
-`inconclusive` (and feeds the audit-only `detection-confirmed` type when the
-investigation already caught the attack). There is a parallel **benign**
-direction (`actor_benign.md`, `author_actor_benign.md`, with its own
-`_pending` queue) that probes the false-positive side. Both directions feed
-`lessons/` through the same author mechanism. The canonical enumeration of
-queues, thresholds, and finding types is `defender/learning/_loop_config.py`
-and `_loop_orchestrate.py`.
+The pipeline above is the **adversarial** direction — it hunts false
+negatives (what would an attacker have done that this investigation missed?),
+and feeds the audit-only `detection-confirmed` type when the investigation
+already caught the attack. There is a parallel **benign** direction
+(`actor_benign.md`, `author_actor_benign.md`, with its own `_pending` queue)
+that hunts false positives (could legitimate activity have produced this
+picture?).
+
+The **disposition selects which direction(s) run** (`_loop_orchestrate.py`
+`_directions_for`, gating on the `ADVERSARIAL_DISPOSITIONS` /
+`BENIGN_DISPOSITIONS` sets in `_loop_config.py`):
+
+| Disposition | Directions run |
+|---|---|
+| `benign` | adversarial only — hunt the missed attack (FN) |
+| `malicious` | benign only — hunt the over-escalation (FP) |
+| `inconclusive` | both directions |
+
+`malicious` is **not** skipped — it is exactly what triggers the benign,
+FP-hunting leg.
+
+Each leg emits two kinds of output on **separate** queue → author → corpus
+pipelines — don't assume one shared `lessons/`:
+
+- **Defender findings** (the judge findings about the *investigation*, steps
+  5–7 above) → `_pending/findings.jsonl`, which **both** directions append to
+  (tagged `direction`) → `author.py` at `LEARNING_AUTHOR_THRESHOLD` (default
+  **5**) → `defender/lessons/`. This is the corpus the runtime agent reads at
+  PLAN.
+- **Direction-specific observations** (about the actor / environment, not the
+  defender's moves) → a per-direction queue + curator: the adversarial leg
+  feeds `_pending/actor_observations.jsonl` → `author_actor.py`
+  (`LEARNING_AUTHOR_ACTOR_THRESHOLD`) → `defender/lessons-actor/`; the benign
+  leg feeds `_pending/environment_observations.jsonl` →
+  `author_actor_benign.py` (`LEARNING_AUTHOR_ENV_THRESHOLD`) →
+  `defender/lessons-environment/`.
+
+So "both directions feed the same corpus" holds only for defender findings;
+the actor/environment corpora are direction-specific. The canonical
+enumeration of queues, thresholds, dispositions, and finding types is
+`defender/learning/_loop_config.py` and `_loop_orchestrate.py`.
 
 ## Why a forward-check gate but no runtime validators
 
