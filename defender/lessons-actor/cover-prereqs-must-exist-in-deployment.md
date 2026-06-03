@@ -1,10 +1,10 @@
 ---
 techniques: [T1036, T1078]
-alert_rule_ids: [rule-v2-falco-suspicious-network-tool]
-applies_to: [svc-monitoring-network-probe-cadence-baseline]
+alert_rule_ids: [rule-v2-falco-suspicious-network-tool, rule-v2-falco-authorized-keys-modification]
+applies_to: [svc-monitoring-network-probe-cadence-baseline, authorized-keys-host-cr-baseline]
 mutable: false
 recorded_at: e8e5c01b9664
-source_observation_ids: [20260530T161715Z-noise-alert-suspnet/0]
+source_observation_ids: [20260530T161715Z-noise-alert-suspnet/0, live-authkeys-mod-1/0]
 relevance_criteria: bypass depends on exploiting pre-existing legitimate infrastructure (change ticket, long-running cadence, established baseline) as cover
 ---
 
