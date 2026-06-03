@@ -31,5 +31,5 @@ Use `logs-system.auth-*` as the index. Add `AND (message: *"Accepted"* OR messag
 
 ## Common pitfalls
 
-- **`source.ip` is not populated in system.auth**: Filebeat-indexed syslog events carry the IP only in the raw `message` field. Use `message: *"from ${ip}"*` — not `source.ip: "${ip}"` — for source-IP filtering.
+- **`source.ip` is sparsely populated in system.auth**: Filebeat-indexed syslog events carry the source IP in the raw `message` field; `source.ip` is only extracted for a subset of records. A `source.ip: "${ip}"` filter returns far fewer events than the message-wildcard approach (in one run: 49K vs 720K bytes for the same IP and window). Use `message: *"from ${ip}"*` for comprehensive coverage.
 - **Large result sets**: Busy hosts produce many auth events per hour. Add `AND (message: *"Accepted"* OR message: *"Failed password"*)` to filter to auth-outcome lines before hitting the limit.
