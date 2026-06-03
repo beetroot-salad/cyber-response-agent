@@ -1,8 +1,8 @@
 # defender
 
-This repository centers on `defender/`, an alert-triage agent built around a learning loop.
+This repository centers on `defender/`, an alert-triage agent, built around a learning loop.
 
-The core bet: don't hand-tune a triage prompt forever. Run real alerts through a phase-disciplined investigation agent, then mine each run offline — an adversarial actor invents an attack story the run might have missed, a telemetry oracle synthesizes the events that story would have produced, a judge decides whether the investigation would have caught it, and a curator folds the surviving findings back into a checked-in lessons corpus the agent reads on its next run. The agent's job is to generate honest signal; the loop discovers what it should have known.
+The idea is to provide the agent with a structured way to identify its runtime mistakes and learn from them. That way, the system improves over time, just from running by itself. Depending on the disposition, a counterfactual actor (gray-box for benign, ops person for malicious) is launched, writing a story aimed to undermine the defender's investigation - bypass or disprove it. A judge reviews the story and its generated telemetry against the investigation, and identifies gaps in both, creating seeds for an author to turn into validated lessons.
 
 > **Status: experimental / PoC.** The learning loop is the headlining experiment. Runtime reliability gates (hooks, validators, judge gates) are deliberately out of scope until the loop proves itself end-to-end on real cases.
 
