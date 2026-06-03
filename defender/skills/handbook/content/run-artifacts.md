@@ -53,47 +53,32 @@ out of git and the SIEM CLIs have writable scratch space.
 
 ## Lead-sequence schema
 
-The contract the learning loop consumes. Emitted by
-`project_lead_sequence.py` — the single source of truth; the schema below is
-a summary.
+The contract the learning loop consumes, emitted at end-of-run by
+`project_lead_sequence.py`. **`defender/CLAUDE.md` §Lead-sequence schema is the
+canonical field-by-field spec** (and the script is the source of truth); this
+is the shape at a glance, with the load-bearing semantics inline:
 
 ```yaml
 case_id: <run id, matches the run dir name>
 alert_ref: alert.json
 entries:
-  - position: 0                        # ordinal in dispatch order, 0-indexed, dense
-    lead_description:                  # what the defender asked gather for
+  - position: 0                        # dense, 0-indexed, dispatch order; ANALYZE re-iterations don't increment
+    lead_description:                  # the defender's own-words intent, not a paraphrase of gather's return
       goal: <one-sentence measurement contract>
       what_to_characterize:
         - <dimension>
-    queries:                           # what gather actually ran
-      - id: wazuh.auth-events-by-host  # {system}.{kebab-name}
-        params: {host: ..., window_start: ..., window_end: ...}
-    result_ref: gather_raw/0.json
+    queries:                           # what gather actually ran — one entry per query (no "composite" mode)
+      - id: wazuh.auth-events-by-host  # {system}.{kebab-name}; `ad-hoc` = one-off probe, no catalog candidacy
+        params: {host: ..., window_start: ..., window_end: ...}   # bound values, not declarations
+    result_ref: gather_raw/0.json      # raw payload; hidden from the actor during the gray-box phase, revealed after
 ```
 
-Field contracts:
-
-- **`position`** — dense, 0-indexed, monotonically increasing in dispatch
-  order. ANALYZE iterations on the same dispatch don't increment.
-- **`lead_description.goal`** — the defender's intent in its own words, not a
-  post-hoc paraphrase of what gather returned.
-- **`queries[].id`** — durable `{system}.{kebab-name}` identifier, the
-  `--query-id` gather passed to the capture wrapper. An established template
-  when one fit, or a measurement name gather coined for a no-template query.
-  Coined ids need **not** resolve to a file at projection time — the offline
-  lead-author mints and curates a `_draft/{id}.md` skeleton later. The literal
-  id `ad-hoc` is a one-off probe with no catalog candidacy.
-- **`queries[].params`** — *bound* values, not declarations.
-- **`result_ref`** — points to the raw payload; hidden from the actor during
-  the gray-box phase, revealed after.
-
-When gather fans one dispatch into multiple queries, each is a separate entry
-in the same `queries` list (no "composite" mode). When gather hits a wall
-before running anything, that dispatch does **not** appear in the sequence —
-the dead end is recorded under ANALYZE in `investigation.md` only. The
-learning loop joins across cases on `(query.id, query.params)`. Schema may
-tighten through the PoC phase; expect breaking changes.
+A coined `queries[].id` need **not** resolve to a template file at projection
+time — the offline lead-author mints and curates a `_draft/{id}.md` skeleton
+later. A dispatch that hit a wall before running anything does **not** appear
+here (the dead end lives under ANALYZE in `investigation.md`). The learning
+loop joins across cases on `(query.id, query.params)`; the schema may tighten
+through the PoC phase.
 
 ## Debugging a run
 
