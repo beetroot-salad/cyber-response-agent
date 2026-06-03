@@ -38,8 +38,8 @@ After the runtime loop exits, `run.py` hands the run dir to the offline loop (sk
 ```mermaid
 flowchart TD
     R([run_one]) --> LA[lead author · always-on]
-    LA --> ND[normalize disposition]
-    ND --> D{disposition?}
+    R --> D{disposition?}
+    LA --> E
     D -->|benign| ADV
     D -->|inconclusive| ADV
     D -->|inconclusive| BEN
