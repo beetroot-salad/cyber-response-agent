@@ -13,17 +13,19 @@ The core bet: don't hand-tune a triage prompt forever. Run real alerts through a
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
 - `defender/fixtures/`: alert inputs used to drive runs
 - `playground/` and `playground-v2/`: security lab scenarios and local simulation assets
-- `soc-agent/`: a separate, earlier production-plugin track that shares some framings and adapters (not the focus of this README)
 
 ## Runtime Loop
 
-A single agent works one alert through explicit phases:
+A single agent works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
 
-- `ORIENT`
-- `PLAN`
-- `GATHER`
-- `ANALYZE`
-- `REPORT`
+```mermaid
+flowchart LR
+    ORIENT --> PLAN
+    PLAN --> GATHER
+    GATHER --> ANALYZE
+    ANALYZE -->|need more evidence| PLAN
+    ANALYZE -->|confident| REPORT
+```
 
 `GATHER` is dispatched to a cheap subagent (Haiku) per query; the main agent works from the summary and reads raw payloads on demand. The run emits three artifacts: `investigation.md` (the dense audit log), `lead_sequence.yaml` (the machine-readable contract the learning loop consumes), and `report.md` (disposition + one paragraph).
 
@@ -82,7 +84,7 @@ A read-only posture view of the loop's current output:
 python3 defender/learning/frontend/build.py
 ```
 
-Writes a self-contained `lessons.html` showing the authored lesson corpora. See `defender/learning/frontend/README.md`.
+Nicer reading experience.
 
 ## Tests
 
