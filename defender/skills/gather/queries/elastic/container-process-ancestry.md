@@ -1,6 +1,6 @@
 ---
 id: elastic.container-process-ancestry
-status: draft
+status: established
 ---
 
 ## Goal
@@ -23,12 +23,13 @@ and identify session context (tty, loginuid).
 ## Query
 
 ```
-falco.output_fields.container.id: "${container_id}" AND evt.type: "execve" AND @timestamp:[${start} TO ${end}]
+falco.output_fields.container.id: "${container_id}" AND falco.output_fields.evt.type: "execve" AND @timestamp:[${start} TO ${end}]
 ```
 
 ## Common pitfalls
 
-- **Container attribution:** Falco events name the Docker host as `host.hostname` (value: "soc-playground"), not the role-host container. Per-container attribution lives in `falco.output_fields.container.id` or `falco.output_fields.container.name`. Filter on the ID/name, not `host.name`.
+- **`evt.type` field path:** Querying `evt.type: "execve"` (without the `falco.output_fields.` prefix) returns near-empty results (92 bytes). The correct field path nested inside Falco event documents is `falco.output_fields.evt.type: "execve"`.
+- **Container attribution:** Falco events name the Docker host as `host.hostname`, not the role-host container. Per-container attribution lives in `falco.output_fields.container.id` or `falco.output_fields.container.name`. Filter on the ID/name, not `host.name`.
 - **Limited parent chain:** Falco only exposes one parent level (`proc.pname`). Grandparent and earlier ancestors are not available via Falco alone; you must infer from other processes in the same window (if parent was also in container and logged).
 - **Time window precision:** Use explicit `--start` and `--end` timestamps. Alert timestamp is given as `${alert_time}`, typically ±5 minutes for context.
 - **Interactive vs. scripted:** Session context lives in `user.loginuid` (-1 = no login session, typically indicates docker exec with no tty) and `proc.tty` (0 = no tty, non-zero = interactive terminal). `-u` (UID in container) combined with `loginuid=-1` suggests interactive exec; match against container entrypoint/init processes to distinguish.
