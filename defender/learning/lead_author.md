@@ -131,10 +131,10 @@ defender/skills: fold lessons from {case_id}
 
 source-run: {run_dir}
 EOF
-)"
+)" -- defender/skills/gather/queries/ defender/skills/{touched-systems}/
 ```
 
-For promotions, `git mv` stages the rename; follow with `git add` for the status-frontmatter Edit. For lifts, `git rm` the draft and `git add` the SKILL.md edit. Use `case_id` from the `run_dir` name. Title prefix is `defender/skills/gather/queries:` when only catalog files are touched; `defender/skills:` when system-skill files are also touched. Do **not** commit anything outside the catalog + system-skill scopes. Do **not** push.
+For promotions, `git mv` stages the rename; follow with `git add` for the status-frontmatter Edit. For lifts, `git rm` the draft and `git add` the SKILL.md edit. Use `case_id` from the `run_dir` name. Title prefix is `defender/skills/gather/queries:` when only catalog files are touched; `defender/skills:` when system-skill files are also touched. Do **not** commit anything outside the catalog + system-skill scopes — the `--` pathspec scopes the commit to those dirs so a bare commit can't sweep in files another curator left staged in the shared worktree. Do **not** push.
 
 ## Hard rules
 
