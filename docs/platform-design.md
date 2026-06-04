@@ -143,6 +143,11 @@ investigations(investigation_id PK, tenant_id, alert_id FK, investigation_counte
        runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at, cost_so_far,
        disposition, confidence, cost, artifact_manifest, status_detail,
        created_at, started_at, finished_at, ...)
+
+learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, client_request_id,
+       status, stage, claim_epoch,
+       runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at,
+       status_detail, created_at, finished_at, ...)   -- field notes in §2.5
 ```
 
 **Field notes.**
