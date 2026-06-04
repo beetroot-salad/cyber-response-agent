@@ -140,13 +140,13 @@ alerts(alert_id PK, tenant_id, source_vendor, remote_alert_id NOT NULL, signatur
 investigations(investigation_id PK, tenant_id, alert_id FK, investigation_counter, client_request_id,
        job_status, claim_epoch,
        defender_image_digest, defender_git_sha, lessons_corpus_version,
-       runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at, cost_so_far,
+       runtime_kind, runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at, cost_so_far,
        disposition, confidence, cost, artifact_manifest, status_detail,
        created_at, started_at, finished_at, ...)
 
 learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, client_request_id,
        status, stage, claim_epoch,
-       runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at,
+       runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at,
        status_detail, created_at, finished_at, ...)   -- field notes in §2.5
 ```
 
@@ -189,7 +189,7 @@ learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, c
   row by the heartbeat.
 - **Infra lives on the row, fenced by `claim_epoch`.** The single `investigations` row carries both the
   durable data (ids, version pins, result, `job_status`) and the infra/liveness of its current run
-  (`runtime_kind` = docker / k8s-job / fargate, an opaque `runtime_handle`, `claimed_by`,
+  (`runtime_kind` = docker / k8s-job / fargate, an opaque `runtime_handle`, `claimed_by_worker`,
   `lease_expires_at`, `last_heartbeat_at`, `cost_so_far`). There is **no separate attempts table**: a
   crash-recovery run **overwrites** the infra columns in place rather than appending a row, so prior-run
   infra survives only in the audit/tool logs (the accepted cost of one table). `claim_epoch` is a
@@ -306,15 +306,17 @@ learning_jobs(
   status           queued | running | completed | failed | skipped,
   stage            nullable,              -- durable checkpoint: actor | oracle | judge | author
   claim_epoch,                            -- fences a recovered learning run, as on investigations (§4.1)
-  runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at,
+  runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at,
   status_detail    nullable,              -- one free-text field: skip reason or error summary
   created_at, finished_at, ...
 )
 ```
 
 - **Single table, like investigations (§4.1).** The row carries durable data (who/why/where-it-got-to),
-  the `stage` checkpoint, and the infra of its current run (`runtime_handle`, claim/lease/liveness). A
-  crash-recovery run overwrites the infra columns in place, fenced by `claim_epoch`, and resumes from the
+  the `stage` checkpoint, and the infra of its current run (`runtime_handle`, claim/lease/liveness) — it
+  omits `runtime_kind`, having a single substrate (the backend worker), unlike investigations whose
+  container runtime is swappable. A crash-recovery run overwrites the infra columns in place, fenced by
+  `claim_epoch`, and resumes from the
   job's `stage`. Liveness is a coarse lease (no live-view requirement — learning reads are an after-the-fact
   activity feed, §2.6), renewed only often enough for the reconciler to spot a dead worker. (A
   `learning_runs` history table graduates only with per-run forensics — §6.)
@@ -539,7 +541,7 @@ implements the same runner without touching APIs or schemas.
 
 **One row per investigation — state, infra, and result together.** All execution state lives on the
 `investigations` row: lifecycle (`job_status`), version pins, the infra/liveness of its current run
-(`runtime_kind`, `runtime_handle`, `claimed_by`, `lease_expires_at`, `last_heartbeat_at`,
+(`runtime_kind`, `runtime_handle`, `claimed_by_worker`, `lease_expires_at`, `last_heartbeat_at`,
 `cost_so_far`), a `claim_epoch` fencing counter, and the result. There is **no separate attempts table
 and no separate queue table** — the queue is the set of rows with `job_status='queued'`, claimed in
 place. A per-run history table graduates only if per-run forensics are needed (§6).
@@ -579,7 +581,7 @@ after a crash — same `investigation_id`, infra columns overwritten in place. T
 
 **Claim and lease — short transactions, not long ones.** A worker claims a queued (or stale-lease)
 investigation with `SELECT … FOR UPDATE SKIP LOCKED`, bumps `claim_epoch`, sets
-`claimed_by` / `lease_expires_at`, flips to `running`, and commits. It must **not** hold a transaction
+`claimed_by_worker` / `lease_expires_at`, flips to `running`, and commits. It must **not** hold a transaction
 open while the 5–15 min container runs. **Liveness is owned by the container's heartbeat**: the
 container holds scoped DB creds for its own row and renews the lease by writing
 `last_heartbeat_at` / `cost_so_far` (§4.5). A stale `last_heartbeat_at` past `lease_expires_at`, with no
@@ -603,7 +605,7 @@ that resolves it:
 ```sql
 -- claim or recover (initial claim and stale-lease recovery are one path)
 UPDATE investigations
-SET claimed_by = :worker, claim_epoch = claim_epoch + 1, job_status = 'running',
+SET claimed_by_worker = :worker, claim_epoch = claim_epoch + 1, job_status = 'running',
     runtime_kind = :kind, lease_expires_at = now() + :ttl, last_heartbeat_at = now()
 WHERE investigation_id = :id
   AND (job_status = 'queued'
