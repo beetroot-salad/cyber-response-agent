@@ -1,141 +1,132 @@
-# soc-agent
+# defender
 
-This repository centers on `soc-agent`, a hypothesis-driven security alert triage agent built as an applied AI / systems engineering project.
+This repository centers on `defender/`, an alert-triage agent, built around a learning loop.
 
-The core idea is simple: do not let an LLM "wing it" through an investigation. Instead, drive the workflow through explicit phases, persist state on every transition, validate structured outputs, and evaluate prompt changes against labeled cases before landing them.
+The idea is to provide the agent with a structured way to identify its runtime mistakes and learn from them. That way, the system improves over time, just from running by itself. Depending on the disposition, a counterfactual actor (gray-box for benign, ops person for malicious) is launched, writing a story aimed to undermine the defender's investigation - bypass or disprove it. A judge reviews the story and its generated telemetry against the investigation, and identifies gaps in both, creating seeds for an author to turn into validated lessons.
+
+> **Status: experimental / PoC.** The learning loop is the headlining experiment. Runtime reliability gates (hooks, validators, judge gates) are deliberately out of scope until the loop proves itself end-to-end on real cases.
 
 ## What This Project Contains
 
-- `soc-agent/`: main implementation, hooks, handlers, schemas, tests, and knowledge base
-- `evals/`: prompt and parser evaluation harnesses, bake-offs, and scoring scripts
+- `defender/`: the runtime triage agent, its skills/adapters, and the offline learning loop
+- `defender/learning/`: actor / oracle / judge / forward-check / author pipeline + eval harness + read-only frontend
+- `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
+- `defender/fixtures/`: alert inputs used to drive runs
 - `playground/` and `playground-v2/`: security lab scenarios and local simulation assets
-- `infra/`: environment and infrastructure setup
-- `runs/`: captured investigation runs and experiment outputs
-- `tasks/`: design notes, backlog items, and implementation history
 
-## Core Workflow
+## Runtime Loop
 
-The main investigation loop is orchestrated as a state machine:
+A single agent works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
 
-- `CONTEXTUALIZE`
-- `SCREEN`
-- `PREDICT`
-- `GATHER`
-- `ANALYZE`
-- `REPORT`
+```mermaid
+flowchart LR
+    ORIENT --> PLAN
+    PLAN --> GATHER
+    GATHER --> ANALYZE
+    ANALYZE -->|need more evidence| PLAN
+    ANALYZE -->|confident| REPORT
+```
 
-The orchestrator persists `state.json` on each phase transition and stops on illegal transitions or loop-cap violations. Production handlers live under `soc-agent/scripts/handlers/`.
+`GATHER` is dispatched to a cheap subagent (Haiku) per query; the main agent works from the summary and reads raw payloads on demand. The run emits three artifacts: `investigation.md` (the dense audit log), `lead_sequence.yaml` (the machine-readable contract the learning loop consumes), and `report.md` (disposition + one paragraph).
 
-## Highlights
+`defender/SKILL.md` is the spec for this loop. The on-disk shape and projection contract are documented in `defender/CLAUDE.md`.
 
-- Explicit orchestration instead of a single monolithic prompt
-- Structured phase contracts with parser and validator enforcement
-- Run artifacts written to disk for replay and auditability
-- Custom investigation-language tooling (`invlang`) for corpus analysis and recall
-- Prompt-evaluation harnesses with documented postmortems, not just ad hoc tweaking
-- Broad automated test coverage, including structural, end-to-end mock, and LLM-gated test paths
+## Learning Loop
+
+After the runtime loop exits, `run.py` hands the run dir to the offline loop (skip with `--no-learn`). The disposition routes the run into one or both counterfactual directions — hexagons are `claude -p` agents, rectangles are deterministic code:
+
+```mermaid
+flowchart TD
+    R([run_one]) --> LA[lead author · always-on]
+    R --> D{disposition?}
+    LA --> E
+    D -->|benign| ADV
+    D -->|inconclusive| ADV
+    D -->|inconclusive| BEN
+    D -->|malicious| BEN
+
+    subgraph ADV [adversarial direction]
+      direction TB
+      A1{{"actor — pass a malicious op off as benign"}}
+      A1 -->|skip| AX[no findings]
+      A1 -->|story| AO{{"oracle — story → per-lead telemetry"}}
+      AO --> AJ{{"judge — caught / survived"}}
+      AJ --> APP[persist + queue findings]
+    end
+
+    subgraph BEN [benign direction]
+      direction TB
+      B1{{"actor_benign — reconstruct the authorized routine op"}}
+      B1 -->|skip| BX[no findings]
+      B1 -->|story| BO{{"oracle — story → per-lead telemetry"}}
+      BO --> BJ{{"judge_benign — false positive?"}}
+      BJ --> BPP[persist + queue findings]
+    end
+
+    ADV --> T{pending ≥ threshold?}
+    BEN --> T
+    T -->|no| E([end])
+    T -->|yes| CUR["curators — author ×3<br/>fold findings into lessons"]
+    CUR --> L[(defender/lessons)]
+    L -.->|read at PLAN| RT[runtime agent]
+```
+
+The branch is the point: each disposition is probed with the opposite counterfactual. A `benign` verdict is tested adversarially (did the run miss a real attack?); a `malicious` verdict is tested with the benign actor (was it a false positive?); `inconclusive` runs both. Within a direction the oracle sits between actor and judge so the judge isn't grading its own imagination, and the actor can `skip` when it can't construct a coherent story. Curators fire once `_pending` reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), folding queued findings into the lessons corpora and committing.
+
+Lessons feed back in: at `PLAN` time the agent enumerates `defender/lessons/*.md` frontmatter and reads the bodies relevant to the current alert.
+
+Design rationale lives in `defender/docs/` — start with `defender/docs/learning-loop.md` (the RL / evolutionary-algorithms framing the architecture borrows from). When a doc and the code disagree, the code wins.
 
 ## Quick Start
 
-From the repository root:
+Defender has its own venv at `defender/.venv` (only runtime dep is `pyyaml`):
 
 ```bash
-uv venv
-uv pip install -e "soc-agent[dev]"
-export SOC_AGENT_RUNS_DIR=/workspace/runs
+cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
 ```
 
-If you want to use the live investigation path, you will also need:
+`run.py` re-execs into `defender/.venv/bin/python3`, so it works regardless of which python is on PATH.
 
-- `claude` CLI installed and authenticated
-- configured adapters under `soc-agent/scripts/tools/`
-- signature knowledge under `soc-agent/knowledge/signatures/`
+Live runs additionally need the `claude` CLI installed and authenticated, plus the SIEM/host adapters reachable (see `defender/skills/{system}/SKILL.md`).
 
-## Sanity Checks
+## Running The Agent
 
-Run the non-LLM test suite used by CI:
+Investigate one alert end-to-end (runtime loop + post-steps + learning loop):
 
 ```bash
-uv run pytest soc-agent/tests/ -v -m "not llm"
-```
-
-Run a smaller structural slice:
-
-```bash
-uv run pytest soc-agent/tests/test_state_transitions.py soc-agent/tests/test_e2e_mock.py -q -m "not llm"
-```
-
-Validate the current environment:
-
-```bash
-uv run python soc-agent/scripts/preflight.py --json
-```
-
-If you are only checking repository knowledge and do not have live systems connected yet:
-
-```bash
-uv run python soc-agent/scripts/preflight.py --kb --json
-```
-
-## Running The Orchestrator
-
-The main driver is:
-
-```bash
-uv run python soc-agent/scripts/run_orchestrator.py <signature_id> '<alert_json>'
+python3 defender/run.py <alert.json>
 ```
 
 Notes:
 
-- `SOC_AGENT_RUNS_DIR` must be set
-- the alert must be a JSON object with a top-level `id`
-- live runs depend on configured knowledge, handlers, and external tools
+- run dirs are created under `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`), outside the repo
+- pass `--no-learn` to skip the learning step while iterating on the runtime loop only
+- the learning loop can also run standalone: `python3 defender/learning/loop.py <run_dir>`
 
-Each run starts with at least:
+Each run dir contains at least `alert.json`, `investigation.md`, `lead_sequence.yaml`, `report.md`, `tool_trace.jsonl`, `transcript.html`, and a `gather_raw/` directory of per-query payloads.
 
-- `alert.json`
-- `meta.json`
-- `state.json`
+## Learning-Loop Frontend
 
-Investigation runs may also produce:
-
-- `investigation.md`
-- `report.md`
-- budget and audit artifacts under the run directory
-
-## Investigation Language (`invlang`)
-
-`invlang` is a local query tool for mining prior investigation runs as a structured corpus.
-
-Examples:
+A read-only posture view of the loop's current output:
 
 ```bash
-uv run python soc-agent/scripts/invlang/cli.py --enumerate hypotheses
-uv run python soc-agent/scripts/invlang/cli.py --class 8 --top 10
-uv run python soc-agent/scripts/invlang/cli.py --class 9 --reversals-only
+python3 defender/learning/frontend/build.py
 ```
 
-This is one of the more distinctive parts of the project: the system does not only run investigations, it also builds machinery to analyze how those investigations behave over time.
+Nicer reading experience.
 
-## Evaluation Work
+## Tests
 
-Prompt and output-shape experiments live under `evals/predict/`.
+The runtime agent has no unit tests — it's evaluated by running real alerts and reviewing the run dir. `defender/tests/` covers learning-loop invariants (lesson schema, author pre/post-flight, atomic writes, forward-check):
 
-Useful starting points:
+```bash
+cd defender && .venv/bin/python -m pytest tests/ -q
+```
 
-- `evals/predict/BAKEOFF.md`
-- `evals/predict/cases/README.md`
-- `evals/predict/postmortems/final-decision.md`
+## Where To Start Reading
 
-Those files document variant comparisons, scoring criteria, regressions, and decisions about what not to ship.
-
-## Repository Notes
-
-This repository is intentionally broader than a single package. The portfolio-quality implementation is primarily inside `soc-agent/`, while the surrounding directories capture the evaluation, lab, and operational context that the agent was built against.
-
-If you want one place to start reading code, start here:
-
-- `soc-agent/scripts/orchestrate.py`
-- `soc-agent/scripts/handlers/`
-- `soc-agent/hooks/scripts/`
-- `soc-agent/tests/`
+- `defender/SKILL.md` — the runtime agent spec
+- `defender/CLAUDE.md` — on-disk contracts, run-dir layout, and a "where to make changes" map
+- `defender/skills/handbook/` — on-demand reference for the whole defender (design, both loops, run artifacts, skills + lessons, invlang); read-only, question-driven
+- `defender/learning/loop.py` — the offline loop orchestrator
+- `defender/docs/learning-loop.md` — design rationale

@@ -23,3 +23,4 @@ source.ip: "${ip}" OR client.ip: "${ip}"
 ## Common pitfalls
 
 - **`query` subcommand, not `search`.** The elastic CLI accepts `health-check`, `query`, and `alerts` as subcommands. Passing `search` returns exit=2 with "invalid choice: 'search'". Always use the `query` subcommand.
+- **Filter is the sole positional argument.** Passing the index pattern (e.g. `logs-*`) as an extra positional argument before the filter causes exit=2 with "unrecognized arguments: <filter-text>". The `query` subcommand accepts only the filter expression as its positional argument; the index is not a separate positional arg.
