@@ -140,13 +140,13 @@ alerts(alert_id PK, tenant_id, source_vendor, remote_alert_id NOT NULL, signatur
 investigations(investigation_id PK, tenant_id, alert_id FK, investigation_counter, client_request_id,
        job_status, claim_epoch,
        defender_image_digest, defender_git_sha, lessons_corpus_version,
-       runtime_kind, runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at, cost_so_far,
+       container_kind, container_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at, cost_so_far,
        disposition, confidence, cost, artifact_manifest, status_detail,
        created_at, started_at, finished_at, ...)
 
 learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, client_request_id,
        status, stage, claim_epoch,
-       runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at,
+       claimed_by_worker, lease_expires_at, last_heartbeat_at,
        status_detail, created_at, finished_at, ...)   -- field notes in §2.5
 ```
 
@@ -189,14 +189,16 @@ learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, c
   row by the heartbeat.
 - **Infra lives on the row, fenced by `claim_epoch`.** The single `investigations` row carries both the
   durable data (ids, version pins, result, `job_status`) and the infra/liveness of its current run
-  (`runtime_kind` = docker / k8s-job / fargate, an opaque `runtime_handle`, `claimed_by_worker`,
+  (`container_kind` = docker / k8s-job / fargate, an opaque `container_handle`, `claimed_by_worker`,
   `lease_expires_at`, `last_heartbeat_at`, `cost_so_far`). There is **no separate attempts table**: a
   crash-recovery run **overwrites** the infra columns in place rather than appending a row, so prior-run
   infra survives only in the audit/tool logs (the accepted cost of one table). `claim_epoch` is a
   monotonic fencing counter bumped on every claim/recovery; the container is labeled
   `(investigation_id, claim_epoch)` and every infra/completion write is conditional on it, so a stale
-  zombie container cannot corrupt the row (§4.1). We do **not** rely on `runtime_handle` being globally or
-  temporally unique — the label is the source of truth. A `runs` history table graduates only if per-run
+  zombie container cannot corrupt the row (§4.1). `container_handle` is that substrate's id for the running
+  container (docker id / k8s job / fargate task); the reconciler uses it to promptly kill or adopt a zombie
+  container and reclaim paid compute. We do **not** rely on it being globally or temporally unique — the
+  label `(investigation_id, claim_epoch)` is the source of truth. A `runs` history table graduates only if per-run
   forensics across recoveries are needed (§6).
 
 **One alert → many investigations**, but normal use expects one live investigation at a time, and most
@@ -306,20 +308,24 @@ learning_jobs(
   status           queued | running | completed | failed | skipped,
   stage            nullable,              -- durable checkpoint: actor | oracle | judge | author
   claim_epoch,                            -- fences a recovered learning run, as on investigations (§4.1)
-  runtime_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at,
+  claimed_by_worker, lease_expires_at, last_heartbeat_at,
   status_detail    nullable,              -- one free-text field: skip reason or error summary
   created_at, finished_at, ...
 )
 ```
 
 - **Single table, like investigations (§4.1).** The row carries durable data (who/why/where-it-got-to),
-  the `stage` checkpoint, and the infra of its current run (`runtime_handle`, claim/lease/liveness) — it
-  omits `runtime_kind`, having a single substrate (the backend worker), unlike investigations whose
-  container runtime is swappable. A crash-recovery run overwrites the infra columns in place, fenced by
-  `claim_epoch`, and resumes from the
-  job's `stage`. Liveness is a coarse lease (no live-view requirement — learning reads are an after-the-fact
-  activity feed, §2.6), renewed only often enough for the reconciler to spot a dead worker. (A
-  `learning_runs` history table graduates only with per-run forensics — §6.)
+  the `stage` checkpoint, and minimal current-run infra: `claimed_by_worker`, the lease/liveness pair
+  (`lease_expires_at`, `last_heartbeat_at`), and `claim_epoch`. It carries **no `container_kind` /
+  `container_handle`** — learning has no container, just one backend-worker substrate (§4.3), so there is
+  nothing substrate-specific to address. A crash-recovery run overwrites the infra columns in place,
+  fenced by `claim_epoch`, and resumes from the job's `stage`.
+- **Liveness is a coarse lease, and recovery needs no kill handle.** There is no live-view to feed
+  (learning reads are an after-the-fact activity feed, §2.6), so the worker renews the lease only often
+  enough for the reconciler to spot a dead worker by a stale lease and requeue the job. A partitioned
+  zombie self-terminates at its next fenced write (`claim_epoch` → 0 rows, §4.1) — so, unlike an
+  investigation container, learning needs no `container_handle` for the reconciler to kill; worst-case
+  wasted spend is one stage. (A `learning_runs` history table graduates only with per-run forensics — §6.)
 - **One live learning job per tenant.** A partial unique index — at most one `queued`/`running` learning
   job per `tenant_id` — enforces the strict sequencing that makes corpus authoring conflict-free by
   construction (§4.4): there is never a second author, so nothing to merge. Jobs back up in the queue
@@ -480,7 +486,7 @@ sequenceDiagram
     Note over WK,DB: DB-as-queue — the worker polls, the DB never pushes
     WK->>DB: claim queued investigation SKIP LOCKED, bump claim_epoch, set lease, job_status running
     WK->>CT: spawn, label investigation_id and claim_epoch, inject alert, epoch, and scoped creds
-    WK->>DB: patch runtime_handle (fenced on claim_epoch)
+    WK->>DB: patch container_handle (fenced on claim_epoch)
 
     loop every ~30s until exit
         CT->>DB: heartbeat last_heartbeat_at and cost_so_far, renew lease (fenced on claim_epoch)
@@ -541,7 +547,7 @@ implements the same runner without touching APIs or schemas.
 
 **One row per investigation — state, infra, and result together.** All execution state lives on the
 `investigations` row: lifecycle (`job_status`), version pins, the infra/liveness of its current run
-(`runtime_kind`, `runtime_handle`, `claimed_by_worker`, `lease_expires_at`, `last_heartbeat_at`,
+(`container_kind`, `container_handle`, `claimed_by_worker`, `lease_expires_at`, `last_heartbeat_at`,
 `cost_so_far`), a `claim_epoch` fencing counter, and the result. There is **no separate attempts table
 and no separate queue table** — the queue is the set of rows with `job_status='queued'`, claimed in
 place. A per-run history table graduates only if per-run forensics are needed (§6).
@@ -606,7 +612,7 @@ that resolves it:
 -- claim or recover (initial claim and stale-lease recovery are one path)
 UPDATE investigations
 SET claimed_by_worker = :worker, claim_epoch = claim_epoch + 1, job_status = 'running',
-    runtime_kind = :kind, lease_expires_at = now() + :ttl, last_heartbeat_at = now()
+    container_kind = :kind, lease_expires_at = now() + :ttl, last_heartbeat_at = now()
 WHERE investigation_id = :id
   AND (job_status = 'queued'
        OR (job_status = 'running' AND lease_expires_at < now()))   -- stale → reclaim in place
@@ -624,7 +630,7 @@ WHERE investigation_id = :id AND claim_epoch = :my_epoch AND job_status = 'runni
 **Reconciler.** A periodic reconciler lists containers by their `(investigation_id, claim_epoch)` label.
 A container whose label epoch is below the row's `claim_epoch` is a zombie → kill. A `running` row with a
 stale lease and no live container at the current epoch → run the claim/recover statement (which bumps the
-epoch and fences the old container out). The label is the source of truth, so `runtime_handle` need not
+epoch and fences the old container out). The label is the source of truth, so `container_handle` need not
 be globally or temporally unique.
 
 > **Recovery is unconditionally safe here: defender is recommend-only.** There are no `act` verbs
