@@ -21,8 +21,8 @@ out of git and the SIEM CLIs have writable scratch space.
   transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
     {position}.lead.json          # dispatch goal + dimensions (extract_lead_metadata hook)
-    {position}.json               # raw payload per gather call, keyed by sequence position
-    {position}.observations.json  # executed queries[] + payload_status/payload_digest sidecar (written by gather)
+    {position}.json               # raw payload per gather call; materialized by the projector from gather's wrapper log
+    {position}.observations.json  # executed queries[] + payload_status/payload_digest sidecar; materialized by the projector from gather's wrapper log
 ```
 
 ## Who writes what
@@ -48,18 +48,25 @@ out of git and the SIEM CLIs have writable scratch space.
   the script can't project a faithful sequence from `investigation.md`, the
   investigation log is the bug, not the schema.
 - **`gather_raw/{position}.json`** — raw query payload per gather dispatch.
-  The agent works from gather's summary and Reads raw only on demand (and the
-  main loop is blocked from doing so casually — see `content/runtime-loop.md`).
-- **`gather_raw/{position}.observations.json`** — sidecar emitted by gather
-  alongside each payload. Carries the executed `queries[]` record (each with
-  `id` + bound `params`) — the projector's **primary** source for the
-  `queries:` field in `lead_sequence.yaml`, falling back to the `:L` row in
-  `investigation.md` only when the sidecar is missing
-  (`project_lead_sequence.py`) — plus `payload_status` (`ok` | `empty` |
-  `suspect_empty` | `error` | `partial`) and a ≤200-char `payload_digest`.
-  The status/digest let loud failures (type mismatches, `error` payloads)
-  reach the offline lead-author without forcing payload inspection.
-  Multi-query fan-outs use `{position}{a..z}.observations.json`.
+  Written at end-of-run by the projector
+  (`project_lead_sequence.py::materialize_from_executed_queries`), which copies
+  it from the payload that gather's capture wrapper
+  (`scripts/tools/gather_exec.py`) logged to `executed_queries.jsonl` during the
+  run. The agent works from gather's summary and Reads raw only on demand (and
+  the main loop is blocked from doing so casually — see
+  `content/runtime-loop.md`).
+- **`gather_raw/{position}.observations.json`** — sidecar carrying the executed
+  `queries[]` record (each with `id` + bound `params`) plus `payload_status`
+  (`ok` | `empty` | `suspect_empty` | `error` | `partial`) and a ≤200-char
+  `payload_digest`. Like the payload, it is **materialized by the projector**
+  from the wrapper's `executed_queries.jsonl` log — not hand-written by the
+  gather subagent (the projector overwrites any stale model-written sidecar). It
+  is the projector's **primary** source for the `queries:` field in
+  `lead_sequence.yaml`, falling back to the `:L` row in `investigation.md` only
+  when the sidecar is missing. The status/digest let loud failures (type
+  mismatches, `error` payloads) reach the offline lead-author without forcing
+  payload inspection. Multi-query fan-outs use
+  `{position}{a..z}.observations.json`.
 - **`tool_trace.jsonl` / `transcript.html`** — written by `run.py` from the
   stream-json events; the transcript is the post-run review surface.
 
@@ -77,7 +84,7 @@ entries:
   - position: 0                        # dense, 0-indexed, dispatch order; ANALYZE re-iterations don't increment
     lead_description:                  # the defender's own-words intent, not a paraphrase of gather's return
       goal: <one-sentence measurement contract>
-      what_to_characterize:
+      what_to_summarize:
         - <dimension>
     queries:                           # what gather actually ran — one entry per query (no "composite" mode)
       - id: wazuh.auth-events-by-host  # {system}.{kebab-name}; `ad-hoc` = one-off probe, no catalog candidacy

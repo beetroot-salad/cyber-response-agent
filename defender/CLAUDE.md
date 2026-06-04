@@ -171,8 +171,8 @@ out of git and SIEM CLIs have writable scratch space.
   transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
     {position}.lead.json          # dispatch goal + dimensions, written by extract_lead_metadata hook
-    {position}.json               # raw payload per gather call, keyed by lead_sequence position
-    {position}.observations.json  # payload_status + payload_digest sidecar, written by gather
+    {position}.json               # raw payload per gather call; materialized by the projector from gather's wrapper log
+    {position}.observations.json  # payload_status + payload_digest sidecar; materialized by the projector from gather's wrapper log
 ```
 
 Contracts:
@@ -188,13 +188,19 @@ Contracts:
 - **`lead_sequence.yaml`** — see §Lead-sequence schema below. If it
   doesn't project cleanly, the run is unusable for the learning loop.
 - **`gather_raw/{position}.json`** — raw query payload per gather
-  dispatch. The agent works from gather's summary and Reads raw on
+  dispatch. Written at end-of-run by the projector
+  (`scripts/project_lead_sequence.py`, `materialize_from_executed_queries`),
+  which copies it from the payload that gather's capture wrapper
+  (`scripts/tools/gather_exec.py`) logged to `executed_queries.jsonl`
+  during the run. The agent works from gather's summary and Reads raw on
   demand if the summary is too thin.
-- **`gather_raw/{position}.observations.json`** — sidecar emitted by
-  gather alongside each payload. Carries `payload_status` (`ok |
-  empty | suspect_empty | error | partial`) and a ≤200-char
-  `payload_digest`. The offline lead-author uses these so loud
-  failures (silent type mismatches, `error` payloads) reach the
+- **`gather_raw/{position}.observations.json`** — sidecar carrying
+  `payload_status` (`ok | empty | suspect_empty | error | partial`) and a
+  ≤200-char `payload_digest`. Like the payload, it is materialized by the
+  projector from the wrapper's `executed_queries.jsonl` log — not
+  hand-written by the gather subagent (the projector overwrites any stale
+  model-written sidecar). The offline lead-author uses the status/digest so
+  loud failures (silent type mismatches, `error` payloads) reach the
   catalog curator without forcing payload inspection. Multi-query
   fan-outs use `{position}{a..z}.observations.json`.
 
@@ -211,7 +217,7 @@ entries:
   - position: 0                        # ordinal in dispatch order, 0-indexed, dense
     lead_description:                  # what the defender asked gather for
       goal: <one-sentence measurement contract>
-      what_to_characterize:
+      what_to_summarize:
         - <dimension>
     queries:                           # what gather actually ran
       - id: wazuh.auth-events-by-host  # {system}.{kebab-name}, matches a template
