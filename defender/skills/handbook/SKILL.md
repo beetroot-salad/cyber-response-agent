@@ -36,7 +36,8 @@ just need a crisp "here's the rule, here's the source file."
 - Looking up the runtime loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT)
   and the gather-dispatch discipline
 - Understanding the offline learning loop (actor → oracle → judge →
-  forward-check → persist → author) and how lessons feed back
+  persist → author, with a forward-check gate at author time) and how
+  lessons feed back
 - Seeing the layout of a run dir — `investigation.md`, `lead_sequence.yaml`,
   `report.md`, `gather_raw/` — and the contracts each artifact carries
 - Understanding how skills, per-system references, and lessons compose at
@@ -66,7 +67,7 @@ Each file under `content/` is a standalone reference document.
 |---|---|---|
 | `content/design.md` | What the defender is, the learning-loop-first philosophy, how it relates to `soc-agent/`, and why runtime safety gates are deliberately out of scope | Overview question, or you need to ground a general answer about scope |
 | `content/runtime-loop.md` | The ORIENT → PLAN → GATHER → ANALYZE → REPORT loop: what each phase writes, the gather-dispatch discipline (Haiku, Task-only, gather-raw isolation), and the three plumbing hooks that materialize harness contracts | Questions about phases, how gather is dispatched, why the main loop can't read raw payloads, or what the hooks do |
-| `content/learning-loop.md` | The offline pipeline: normalize → project → actor → oracle → judge → forward-check → persist+queue → author. The MITRE actor menu, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the actor/oracle/judge do, why findings are forward-checked, or when the author fires |
+| `content/learning-loop.md` | The offline pipeline: normalize → project → actor → oracle → judge → persist+queue → author (with a forward-check gate at author time). The MITRE actor menu, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the actor/oracle/judge do, why lessons are forward-checked before they land, or when the author fires |
 | `content/run-artifacts.md` | Run-dir layout under `$DEFENDER_RUNS_BASE`, the contract each artifact carries, the `lead_sequence.yaml` schema, and the `gather_raw/` payload + observations sidecars | Questions about what's in a run dir, where a file comes from, the lead-sequence schema, or how to debug a run |
 | `content/knowledge-and-skills.md` | The on-disk skills (`invlang`, `gather`, per-system references), how knowledge is discovered on demand, and the `lessons/` corpus the runtime agent reads at PLAN time | Questions about how skills compose, where per-system knowledge lives, how a new system is added, or how lessons are consumed vs authored |
 | `content/invlang.md` | The dense invlang block surface (`:V`/`:E`/`:H`/`:L`/`:R`/`:T`), the enum/advisory/hypothesis-name CLI, `:H` discovery vs `??` refinement, and the authz-contract resolution shape | Questions about the blocks in `investigation.md`, the invlang CLI, or how legitimacy contracts resolve |

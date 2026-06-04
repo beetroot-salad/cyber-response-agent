@@ -29,8 +29,8 @@ The defender is really two loops stacked:
 2. **Learning loop** — the offline, self-improving pipeline that runs after
    each investigation (unless `--no-learn`). It plays an adversarial actor
    against the run's lead sequence, judges whether the investigation would
-   have caught the attack, forward-checks the findings, and folds confirmed
-   pitfalls into a `lessons/` corpus that feeds back into the runtime loop
+   have caught the attack, forward-checks the lessons it distills, and folds
+   the confirmed ones into a `lessons/` corpus that feeds back into the runtime loop
    at PLAN time. This is the headlining experiment. See
    `content/learning-loop.md`.
 

@@ -12,6 +12,7 @@ out of git and the SIEM CLIs have writable scratch space.
 ```
 {run_id}/
   alert.json              # input — copied by run.py, read-only for the agent
+  ground_truth.yaml       # optional — labeled-fixture marker copied by run.py; flags held-out cases so the loop suppresses queue appends
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
                           #   (:V/:E/:H/:L/:R/:T blocks)
   lead_sequence.yaml      # projected contract surface for the learning loop
@@ -21,13 +22,20 @@ out of git and the SIEM CLIs have writable scratch space.
   gather_raw/
     {position}.lead.json          # dispatch goal + dimensions (extract_lead_metadata hook)
     {position}.json               # raw payload per gather call, keyed by sequence position
-    {position}.observations.json  # payload_status + payload_digest sidecar (written by gather)
+    {position}.observations.json  # executed queries[] + payload_status/payload_digest sidecar (written by gather)
 ```
 
 ## Who writes what
 
 - **`alert.json`** — verbatim copy of the input, written by run setup;
   read-only for the agent.
+- **`ground_truth.yaml`** — optional, present only for labeled fixtures.
+  `run.py` copies it in when a sibling `ground_truth.yaml` sits next to the
+  input alert. It carries a `held_out` flag plus the fixture's true
+  `disposition` / `class_axes` / `rationale`; the learning loop's persist
+  stage uses it to recognize held-out cases and **suppress queue appends**, so
+  eval / held-out runs don't feed the authored corpus (`learning/author_actor.py`,
+  `learning/eval_held_out.py`). Absent for unlabeled runs.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.
@@ -43,11 +51,15 @@ out of git and the SIEM CLIs have writable scratch space.
   The agent works from gather's summary and Reads raw only on demand (and the
   main loop is blocked from doing so casually — see `content/runtime-loop.md`).
 - **`gather_raw/{position}.observations.json`** — sidecar emitted by gather
-  alongside each payload. Carries `payload_status` (`ok` | `empty` |
+  alongside each payload. Carries the executed `queries[]` record (each with
+  `id` + bound `params`) — the projector's **primary** source for the
+  `queries:` field in `lead_sequence.yaml`, falling back to the `:L` row in
+  `investigation.md` only when the sidecar is missing
+  (`project_lead_sequence.py`) — plus `payload_status` (`ok` | `empty` |
   `suspect_empty` | `error` | `partial`) and a ≤200-char `payload_digest`.
-  Lets loud failures (type mismatches, `error` payloads) reach the offline
-  lead-author without forcing payload inspection. Multi-query fan-outs use
-  `{position}{a..z}.observations.json`.
+  The status/digest let loud failures (type mismatches, `error` payloads)
+  reach the offline lead-author without forcing payload inspection.
+  Multi-query fan-outs use `{position}{a..z}.observations.json`.
 - **`tool_trace.jsonl` / `transcript.html`** — written by `run.py` from the
   stream-json events; the transcript is the post-run review surface.
 

@@ -57,7 +57,7 @@ defender/
     mitre_corpus.py     # hand-curated MITRE ATT&CK technique pool for actor-menu sampling
     oracle.md           # telemetry oracle: per-lead synthesized events
     judge.md            # outcome classifier + finding emitter
-    verify_forward.{md,py}     # forward-check gate (author-time: a finding must bite before it's authored)
+    verify_forward.{md,py}     # forward-check gate (author-time: a candidate lesson must still resolve its own source case before it's committed)
     author.{md,py}      # lessons curator: folds queued findings into defender/lessons/
     eval/               # harness-on-the-harness: scenarios for evaluating the loop itself
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
@@ -137,10 +137,14 @@ run standalone via `python3 defender/learning/loop.py <run_dir>`.
    `detection-confirmed` findings are audit-only.
 7. **Author + forward-check** (`author.{md,py}`) — once `_pending`
    reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), the lessons curator
-   folds findings into `defender/lessons/*.md` and commits. It runs the
-   forward-check (`verify_forward.{md,py}`) on each finding first —
-   re-running it against the actor story to confirm it actually bites —
-   and drops any that don't change the outcome before authoring.
+   folds findings into `defender/lessons/*.md`. After each lesson edit,
+   before committing, it runs the forward-check (`verify_forward.{md,py}`):
+   a same-case regression gate that re-runs the candidate lesson against
+   its source-case transcript + ground-truth disposition and checks whether
+   the agent, with the lesson loaded at PLAN, would still reach that
+   disposition. `GOOD` keeps the edit; `BAD` (the lesson would flip a
+   correctly-resolved case) reverts it. Needs a ground-truth disposition,
+   so `inconclusive` source cases are held rather than authored.
 
 Lessons feed back into the runtime agent: at PLAN time the agent
 enumerates `defender/lessons/*.md` frontmatter and reads the bodies

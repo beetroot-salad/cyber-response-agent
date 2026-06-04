@@ -30,19 +30,30 @@ the *why* — the RL / evolutionary-algorithms framing — read
    actor's story would have produced. It sits *between* actor and judge so
    the judge isn't grading its own imagination.
 5. **Judge** (`judge.md`) — classifies the outcome and emits findings.
-   Outcome is one of: `caught` | `survived` | `undecidable` | `incoherent`
-   | `skip-passthrough`.
+   The adversarial outcome is one of: `caught` | `survived` | `undecidable`
+   | `incoherent` | `skip-passthrough`. The benign direction (§Two
+   directions) uses the mirror enum: `caught` becomes `refuted` — the
+   defender's evidence refuted the actor's legitimate-activity story, so the
+   escalation was justified (the analog of adversarial `caught`). The other
+   four labels are shared, and `survived` carries the mirror meaning across
+   both directions — "the defender failed to handle the story" (a missed
+   attack / FN-risk adversarially, a routine operation escalated past /
+   FP-risk here). See `_loop_config.py` and `judge_benign.md`.
 6. **Persist + queue** — write artifacts under `defender/learning/runs/` and
    append queueable findings to `_pending/findings.jsonl`.
    `detection-confirmed` findings are audit-only (they don't queue — the
    investigation already worked).
 7. **Author + forward-check gate** — once `_pending` reaches
    `LEARNING_AUTHOR_THRESHOLD` (default **5**), the lessons curator
-   (`author.{md,py}`) folds the queued findings into `defender/lessons/*.md`
-   and commits. Before it admits a finding into a lesson it runs the
-   forward-check (`verify_forward.{md,py}`), which re-runs that finding
-   against the actor story to confirm it actually *bites*; a finding that
-   doesn't change the outcome is dropped, not authored.
+   (`author.{md,py}`) folds the queued findings into `defender/lessons/*.md`.
+   After each new or folded lesson edit, and *before* committing, it runs the
+   forward-check (`verify_forward.{md,py}`): a **same-case regression gate**
+   that re-runs the candidate *lesson* against its source-case transcript and
+   that case's ground-truth disposition, asking whether the agent — with the
+   lesson loaded at PLAN — would *still* reach that disposition. `GOOD` keeps
+   the edit and it commits; `BAD` (the lesson would flip a correctly-resolved
+   case off its disposition) reverts it. The gate needs a ground-truth
+   disposition, so `inconclusive` source cases are held rather than authored.
 
 ## How lessons feed back
 
@@ -104,9 +115,11 @@ enumeration of queues, thresholds, dispositions, and finding types is
 ## Why a forward-check gate but no runtime validators
 
 The defender has no runtime safety gates by design (`content/design.md`),
-but the *learning* loop does gate — the forward-check confirms a finding
-actually changes the adversarial outcome before it's allowed to mint a
-lesson. The asymmetry is deliberate: a bad lesson is durable (it shapes
+but the *learning* loop does gate — the forward-check confirms a candidate
+lesson would **not** flip its own source case off the correct disposition
+before it's allowed into the corpus. It's a same-case regression check (does
+this lesson still resolve the case it came from?), not a "does this finding
+bite?" test. The asymmetry is deliberate: a bad lesson is durable (it shapes
 every future run), so the offline path earns a verification step that the
 fast online path does not.
 
