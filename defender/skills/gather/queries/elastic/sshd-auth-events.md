@@ -16,6 +16,7 @@ modifications.
 - count of failed authentication attempts
 - timestamp range of earliest and latest events in the window
 - source IP address(es) from successful authentication messages (embedded in `message` field as OpenSSH syslog format `from <ip>` — not a structured field; extract by pattern match on `Accepted * for <user> from <ip>`)
+- auth method distribution (password vs. publickey) — readable from the `message` filter that matched; present by construction in any record matching this template's query
 
 ## Query
 
