@@ -37,9 +37,11 @@ defender/
   SKILL.md              # the runtime agent's entry point — ORIENT/PLAN/GATHER/ANALYZE/REPORT loop
   CLAUDE.md             # this file
   run.py                # canonical entrypoint: investigate one alert end-to-end (runtime + post-steps + learning loop)
-  run-settings.json     # claude --settings template (permissions + extract_lead_metadata hook)
-  hooks/
-    extract_lead_metadata.py   # PreToolUse on Task: parses gather dispatch YAML, writes {position}.lead.json
+  run-settings.json     # claude --settings template (permissions + the three PreToolUse hooks)
+  hooks/                # three plumbing hooks (extraction shims + one discipline gate; not safety/validation gates)
+    extract_lead_metadata.py            # PreToolUse on Task|Agent: parses gather dispatch YAML, writes {position}.lead.json
+    inject_system_skill_description.py  # PreToolUse on Task|Agent: appends the target system SKILL's frontmatter description: to the dispatch prompt
+    block_main_loop_raw_access.py       # PreToolUse on Bash|Read|Grep|Glob: blocks the main loop from running system CLIs or reading gather_raw/ directly
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory)
     gather/             # gather subagent (Haiku) + per-system query templates
@@ -55,7 +57,7 @@ defender/
     mitre_corpus.py     # hand-curated MITRE ATT&CK technique pool for actor-menu sampling
     oracle.md           # telemetry oracle: per-lead synthesized events
     judge.md            # outcome classifier + finding emitter
-    verify_forward.{md,py}     # forward-check gate before queuing
+    verify_forward.{md,py}     # forward-check gate (author-time: a candidate lesson must still resolve its own source case before it's committed)
     author.{md,py}      # lessons curator: folds queued findings into defender/lessons/
     eval/               # harness-on-the-harness: scenarios for evaluating the loop itself
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
@@ -109,31 +111,40 @@ This is the headlining experiment. `run.py` invokes it in-process
 after the runtime loop exits (skip with `--no-learn`); it can also be
 run standalone via `python3 defender/learning/loop.py <run_dir>`.
 
-1. **Normalizes** disposition from `report.md` frontmatter. Skips
-   `malicious` at MVP.
+1. **Normalizes** disposition from `report.md` frontmatter. The disposition
+   selects which direction(s) run: `benign` → adversarial only (hunt the
+   missed attack / FN), `malicious` → benign only (hunt the over-escalation /
+   FP), `inconclusive` → both. Steps 2–7 below trace the **adversarial**
+   direction; the benign direction (`actor_benign.md` /
+   `author_actor_benign.py`) is its FP-hunting mirror.
 2. **Projects** `lead_sequence.yaml` to an actor-facing view.
 3. **Actor** (`actor.md`, gray-box adversarial) — given alert + lead
    set + `actor_archetype` (`internal`/`external`) + `mitre_menu` (a
    12-technique subset sampled from `mitre_corpus.py`), writes a
    candidate attack story citing the techniques used in a Section 0
    table. Seed is derived from the run id so menu + archetype are
-   reproducible per case. Can short-circuit with SKIP — required when
-   the menu lacks an Initial Access technique for the archetype.
+   reproducible per case. Can short-circuit with SKIP when no coherent
+   story fits the menu — required when a causal step the story needs
+   (e.g. initial access) has no covering technique to cite from it.
 4. **Telemetry oracle** (`oracle.md`) — synthesizes per-lead events
    the actor's story would have produced. Sits between actor and
    judge so the judge isn't grading its own imagination.
 5. **Judge** (`judge.md`) — classifies outcome
    (`caught | survived | undecidable | incoherent | skip-passthrough`)
    and emits findings.
-6. **Forward-check gate** (`verify_forward.{md,py}`) — re-runs each
-   queued finding against the actor story to confirm it actually
-   bites.
-7. **Persist + queue** under `defender/learning/runs/`, append
+6. **Persist + queue** under `defender/learning/runs/`, append
    queueable findings to `_pending/findings.jsonl`.
    `detection-confirmed` findings are audit-only.
-8. **Author** (`author.md`/`author.py`) — once `_pending` reaches
-   `LEARNING_AUTHOR_THRESHOLD` (default 5), the lessons curator folds
-   findings into `defender/lessons/*.md` and commits.
+7. **Author + forward-check** (`author.{md,py}`) — once `_pending`
+   reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), the lessons curator
+   folds findings into `defender/lessons/*.md`. After each lesson edit,
+   before committing, it runs the forward-check (`verify_forward.{md,py}`):
+   a same-case regression gate that re-runs the candidate lesson against
+   its source-case transcript + ground-truth disposition and checks whether
+   the agent, with the lesson loaded at PLAN, would still reach that
+   disposition. `GOOD` keeps the edit; `BAD` (the lesson would flip a
+   correctly-resolved case) reverts it. Needs a ground-truth disposition,
+   so `inconclusive` source cases are held rather than authored.
 
 Lessons feed back into the runtime agent: at PLAN time the agent
 enumerates `defender/lessons/*.md` frontmatter and reads the bodies
@@ -160,8 +171,8 @@ out of git and SIEM CLIs have writable scratch space.
   transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
     {position}.lead.json          # dispatch goal + dimensions, written by extract_lead_metadata hook
-    {position}.json               # raw payload per gather call, keyed by lead_sequence position
-    {position}.observations.json  # payload_status + payload_digest sidecar, written by gather
+    {position}.json               # raw payload per gather call; materialized by the projector from gather's wrapper log
+    {position}.observations.json  # payload_status + payload_digest sidecar; materialized by the projector from gather's wrapper log
 ```
 
 Contracts:
@@ -177,13 +188,19 @@ Contracts:
 - **`lead_sequence.yaml`** — see §Lead-sequence schema below. If it
   doesn't project cleanly, the run is unusable for the learning loop.
 - **`gather_raw/{position}.json`** — raw query payload per gather
-  dispatch. The agent works from gather's summary and Reads raw on
+  dispatch. Written at end-of-run by the projector
+  (`scripts/project_lead_sequence.py`, `materialize_from_executed_queries`),
+  which copies it from the payload that gather's capture wrapper
+  (`scripts/tools/gather_exec.py`) logged to `executed_queries.jsonl`
+  during the run. The agent works from gather's summary and Reads raw on
   demand if the summary is too thin.
-- **`gather_raw/{position}.observations.json`** — sidecar emitted by
-  gather alongside each payload. Carries `payload_status` (`ok |
-  empty | suspect_empty | error | partial`) and a ≤200-char
-  `payload_digest`. The offline lead-author uses these so loud
-  failures (silent type mismatches, `error` payloads) reach the
+- **`gather_raw/{position}.observations.json`** — sidecar carrying
+  `payload_status` (`ok | empty | suspect_empty | error | partial`) and a
+  ≤200-char `payload_digest`. Like the payload, it is materialized by the
+  projector from the wrapper's `executed_queries.jsonl` log — not
+  hand-written by the gather subagent (the projector overwrites any stale
+  model-written sidecar). The offline lead-author uses the status/digest so
+  loud failures (silent type mismatches, `error` payloads) reach the
   catalog curator without forcing payload inspection. Multi-query
   fan-outs use `{position}{a..z}.observations.json`.
 
@@ -200,7 +217,7 @@ entries:
   - position: 0                        # ordinal in dispatch order, 0-indexed, dense
     lead_description:                  # what the defender asked gather for
       goal: <one-sentence measurement contract>
-      what_to_characterize:
+      what_to_summarize:
         - <dimension>
     queries:                           # what gather actually ran
       - id: wazuh.auth-events-by-host  # {system}.{kebab-name}, matches a template
