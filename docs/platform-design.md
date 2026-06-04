@@ -31,7 +31,7 @@ into a queryable store, and feeds completed runs into a separate learning loop. 
 | Live investigation view (`GET /investigations/:id`)            | **read (polling)** — job status + heartbeat at ~30s; artifacts after completion                                                                      |
 | Alert history / incident review (`GET /alerts...`)             | **read** — DB index, latest-disposition projection, drill-down                                                                                       |
 | Learning outcome + activity (`GET /learning-jobs`, `/lessons`) | **read** — corpora + activity feed                                                                                                                   |
-| Re-learn (`POST /investigations/:id/learning-jobs`)            | **write** — fire another learning job                                                                                                                |
+| Re-learn (`POST /learning-jobs`)                               | **write** — fire another learning job                                                                                                                |
 
 **The central reframe: most surfaces are reads over a DB index.** That framing holds cleanly for the
 **lessons** reads (a producer-swap off the existing `serialize.py`), but **not** for
@@ -76,17 +76,20 @@ as "case" here, "notable event" there, and "incident" elsewhere.
 - **Alert** — our local, lean audit/projection row: owns `alert_id`, source-vendor identity, raw-alert
   pointer, timestamps, investigation list, and projected latest disposition.
 - **Investigation** — one defender execution against an alert: owns job status, artifacts, cost,
-  version pins, and the disposition/confidence it produced. (Its infra/runtime linkage lives in a
-  separate attempts table — §2.2.)
-- **Learning** — the offline, batch, SIEM-free plane that reads completed investigations and authors
+  version pins, and the disposition/confidence it produced. Its infra/runtime linkage lives on the same
+  row; a crash-recovery run overwrites it in place, fenced by `claim_epoch` (§4.1).
+- **Rerun vs. resume** — a *rerun* is a new investigation for the same alert (new `investigation_id`;
+  product-level, after a fix/lessons/env change). A *resume/recovery* is the same investigation
+  re-executed after a crash (same `investigation_id`, infra overwritten). Never call either an "attempt."
+- **Learning** — the offline, sequential, SIEM-free plane that reads completed investigations and authors
   lesson-corpus changes through review. Distinct from the investigation plane (§3).
 - **Learning job** — one unit of learning work bound to a completed investigation: owns its own
   lifecycle (`queued → running → completed | failed | skipped`) and a within-run `stage` cursor (§2.5).
 
 The duplicate word "alert" at the remote/local boundary is acceptable (the boundary is narrow and
 audit-oriented). Disambiguate with clear field names: `alert_id` (our PK), `source_vendor` (upstream
-system), `remote_alert_id`/`vendor_alert_id` (upstream id), `raw_alert_json`/`raw_alert_blob_key`
-(original payload).
+system), `remote_alert_id`/`vendor_alert_id` (upstream id), `raw_alert_json` (original payload, inline
+JSONB).
 
 ### 1.5 Scope boundary
 
@@ -112,9 +115,11 @@ Everything explicitly out of scope for the first build is collected with graduat
   `lessons.json`; nothing walks run directories for a run/disposition index. So this index is
   **net-new code, not a producer swap**. The naive port (glob the run prefix + 2 GETs per investigation
   per page) is exactly what fails at scale; the DB index exists to avoid it.
-- **Blob = the payload.** Raw upstream alert JSON and heavy write-once artifacts (`report.md`,
-  `investigation.md`, `tool_trace.jsonl`, `gather_raw/`, `runtime.html`, `lead_sequence.yaml`), fetched
-  only when a specific alert or investigation is opened.
+- **Blob = the heavy artifacts.** Heavy write-once run artifacts (`report.md`, `investigation.md`,
+  `tool_trace.jsonl`, `gather_raw/`, `runtime.html`, `lead_sequence.yaml`), fetched only when an
+  investigation is opened. The raw upstream alert JSON does **not** live in blob — it is stored inline as
+  `alerts.raw_alert_json` JSONB (§2.2): it's the alert's defining input, written once by the adapter, and
+  small enough that a blob key + signed-URL round-trip isn't worth the mental overhead.
 
 This splits the **three roles** a local artifact dir conflates today, onto different substrates:
 an append-only **event log** (`tool_trace.jsonl`, `investigation.md`), an **artifact store**
@@ -127,17 +132,17 @@ completion; the live surface polls coarse DB state.
 
 ```
 alerts(alert_id PK, tenant_id, source_vendor, remote_alert_id NOT NULL, signature_id, severity,
-       title, description, created_at, changed_at, raw_alert_blob_key,
-       latest_investigation_id, latest_disposition, latest_confidence, disposition_source,
+       title, description, created_at, changed_at, raw_alert_json JSONB,
+       latest_investigation_id, latest_disposition, latest_confidence,
+       disposition_source, disposition_set_by, disposition_set_at, disposition_reason,
        investigation_count, last_investigated_at, ...)
 
 investigations(investigation_id PK, tenant_id, alert_id FK, investigation_counter, client_request_id,
-       defender_version, lessons_corpus_version, job_status, disposition, confidence, cost,
-       artifact_manifest, ...)
-
-investigation_attempts(attempt_id PK, tenant_id, investigation_id FK, attempt_number,
+       job_status, claim_epoch,
+       defender_image_digest, defender_git_sha, lessons_corpus_version,
        runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at, cost_so_far,
-       started_at, finished_at, exit_status, ...)
+       disposition, confidence, cost, artifact_manifest, status_detail,
+       created_at, started_at, finished_at, ...)
 ```
 
 **Field notes.**
@@ -148,11 +153,19 @@ investigation_attempts(attempt_id PK, tenant_id, investigation_id FK, attempt_nu
   remote alert was raised and last modified), denormalized for display/sort. Distinct from our own row
   audit timestamps (folded into `...`).
 - `alerts.description` — short denormalized display text, alongside `title`; loose SIEM-owned field.
-- **Where the raw URLs are.** `raw_alert_blob_key` (and every key in `artifact_manifest`) is a
-  **logical** blob key, not a stored URL. The actual raw/signed URL is **minted on demand at read time**
-  by the artifact API (§2.9): `GET …/artifacts/:key` authorizes tenant access, then streams the blob or
-  redirects to a short-lived signed URL. We don't persist signed URLs because they expire and aren't
-  access-controlled on their own — the durable record is the key; the URL is derived per read.
+- **`alerts.raw_alert_json` is inline JSONB, not a blob pointer.** The raw upstream payload is the
+  alert's defining input — written once by the source adapter, read whenever the alert is opened, and
+  typically small (KB-scale). It lives on the row as opaque JSONB rather than behind a blob key + signed-URL
+  round-trip; that's the simpler mental model and keeps the alert's ground truth co-located with the row.
+  Postgres TOASTs large values out-of-line, so list endpoints that don't `SELECT` the column never pay for
+  it — the one discipline is to project `raw_alert_json` only on the detail read. (If alerts ever routinely
+  exceed ~a few MB, revisit a blob spill — §6.) Heavy *run* artifacts still go to blob via
+  `artifact_manifest`, which stays a set of **logical** keys (§2.9).
+- **Where the artifact URLs are.** Every key in `artifact_manifest` is a **logical** blob key, not a
+  stored URL. The actual raw/signed URL is **minted on demand at read time** by the artifact API (§2.9):
+  `GET …/artifacts/:key` authorizes tenant access, then streams the blob or redirects to a short-lived
+  signed URL. We don't persist signed URLs because they expire and aren't access-controlled on their own —
+  the durable record is the key; the URL is derived per read.
 - `alerts.latest_*` — the projection fields (§2.4): `latest_investigation_id`, `latest_disposition`,
   `latest_confidence`. They are derived, not authoritative; `disposition_source` records who set the
   current value (§2.4).
@@ -167,33 +180,36 @@ investigation_attempts(attempt_id PK, tenant_id, investigation_id FK, attempt_nu
 - `investigations.artifact_manifest` — the set of logical artifact keys + sizes + content types +
   checksums uploaded at completion (§2.9). It records _which_ artifacts exist; URLs are resolved per read
   as above.
-- `investigations.cost` — final cost, projected at completion; live `cost_so_far` lives on the active
-  attempt.
-- **`investigation_attempts` separates data from infra.** The durable audit row (`investigations`)
-  carries no container identifier and no liveness fields. Each time a worker runs the investigation it
-  opens an _attempt_ row holding everything infra/runtime: `runtime_kind` (docker / k8s-job / fargate),
-  an opaque `runtime_handle` for that substrate, the claim/lease + liveness (`claimed_by`,
-  `lease_expires_at`, `last_heartbeat_at`, `cost_so_far`), and the attempt's outcome. We do **not** rely
-  on container ids being globally or temporally unique — the reconciler matches containers to attempts by
-  a label it sets to `(investigation_id, attempt_number)` (§4.1), so a reused or substrate-local handle
-  is harmless. There is no separate `claim_count`: `attempt_number` already counts the runs. Today an
-  investigation has exactly one attempt (terminal ids are never reused — retry means a new
-  investigation); when durability graduates (§6), crash-and-resume becomes additional attempt rows under
-  the same `investigation_id` without touching the data row.
+- `investigations.cost` — final cost, projected at completion; live `cost_so_far` is updated on the same
+  row by the heartbeat.
+- **Infra lives on the row, fenced by `claim_epoch`.** The single `investigations` row carries both the
+  durable data (ids, version pins, result, `job_status`) and the infra/liveness of its current run
+  (`runtime_kind` = docker / k8s-job / fargate, an opaque `runtime_handle`, `claimed_by`,
+  `lease_expires_at`, `last_heartbeat_at`, `cost_so_far`). There is **no separate attempts table**: a
+  crash-recovery run **overwrites** the infra columns in place rather than appending a row, so prior-run
+  infra survives only in the audit/tool logs (the accepted cost of one table). `claim_epoch` is a
+  monotonic fencing counter bumped on every claim/recovery; the container is labeled
+  `(investigation_id, claim_epoch)` and every infra/completion write is conditional on it, so a stale
+  zombie container cannot corrupt the row (§4.1). We do **not** rely on `runtime_handle` being globally or
+  temporally unique — the label is the source of truth. A `runs` history table graduates only if per-run
+  forensics across recoveries are needed (§6).
 
 **One alert → many investigations**, but normal use expects one live investigation at a time, and most
-alerts only ever have one. Additional investigations arise from: full retry after infra failure; manual
-rerun after a bug fix, a lessons-corpus change, or a SIEM backfill. They are sequential reruns through
-`POST /investigations`, never a separate class of execution. (Eval-style workflows — model A/B, prompt
+alerts only ever have one. Additional investigations arise from: a rerun after a _terminal_ `failed`;
+manual rerun after a bug fix, a lessons-corpus change, or a SIEM backfill. They are sequential reruns
+through `POST /investigations`, never a separate class of execution. (A mid-run _crash_ — a non-terminal
+stale lease — is **recovered in place** under the same `investigation_id`, not a new investigation; that
+is the resume/recovery path, distinct from a rerun — §4.1.) (Eval-style workflows — model A/B, prompt
 eval, held-out comparison — are out of scope for the MVP platform; §6.)
 
 **The alert table is a thin index, not a system-of-record.** We operate _on top of_ a SIEM that owns
 the remote alerts, so the alert row is a local projection: our PK, the source identity, just enough
 denormalized display fields to list/filter without round-tripping the SIEM (signature, severity, title,
-description, created_at), a raw-payload pointer, and our derived state (disposition projection,
-investigation count, last_investigated_at). Be **loose** on SIEM-owned fields (snapshot the full `alert.json` to blob, don't
-validate it), **strict** on our fields (tenant scoping, FK, state machine, projections). Do not mirror
-the full alert into columns — that drifts toward the e2e platform we are not.
+description, created_at), the raw payload inline as JSONB, and our derived state (disposition projection,
+investigation count, last_investigated_at). Be **loose** on SIEM-owned fields (store the full `alert.json`
+as `raw_alert_json` JSONB, don't validate it), **strict** on our fields (tenant scoping, FK, state
+machine, projections). Do not mirror the full alert into _typed_ columns — one opaque JSONB column is the
+loose-on-SIEM choice; minting per-field columns drifts toward the e2e platform we are not.
 
 **Tenant scope is part of the key space from day one.** Even with one tenant initially, the schema,
 blob keys, queue claims, and secret lookups carry `tenant_id`: upstream-identity uniqueness is
@@ -270,8 +286,10 @@ A worker drains queued rows; a reconciler backfills any `completed` investigatio
 so a crash after completion can't silently skip learning. `unparseable` investigations are excluded (no
 projectable disposition).
 
-Learning gets the **same data/infra split as investigations** (§2.2): a durable `learning_jobs` data
-row carrying lifecycle + checkpoint, and a `learning_attempts` table carrying everything infra/runtime.
+Learning uses the **same single-table model as investigations** (§4.1): one `learning_jobs` row carrying
+lifecycle + checkpoint + infra together, fenced by `claim_epoch`. Learning is **strictly sequential per
+tenant** — one live learning job at a time, no batching, a 1:1 chain per investigation (§4.3) — so the
+job is structurally identical to an investigation and reuses §4.1 wholesale.
 
 ```
 learning_jobs(
@@ -282,23 +300,27 @@ learning_jobs(
   client_request_id nullable,             -- NULL = auto (outbox/reconciler); set = explicit re-learn
   status           queued | running | completed | failed | skipped,
   stage            nullable,              -- durable checkpoint: actor | oracle | judge | author
+  claim_epoch,                            -- fences a recovered learning run, as on investigations (§4.1)
+  runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at,
   status_detail    nullable,              -- one free-text field: skip reason or error summary
   created_at, finished_at, ...
 )
-
-learning_attempts(attempt_id PK, tenant_id, learning_job_id FK, attempt_number,
-  runtime_kind, runtime_handle, claimed_by, lease_expires_at, last_heartbeat_at,
-  learning_batch_id,                      -- the batch run that processed this attempt
-  started_at, finished_at, exit_status, ...)
 ```
 
-- **Symmetric with `investigation_attempts`.** The job row is durable data (who/why/where-it-got-to);
-  the attempt row is one worker run with its `runtime_handle`, claim/lease/liveness, and `learning_batch_id`.
-  Crash-and-resume = a new attempt under the same `learning_job_id`, picking up from the job's `stage`.
-- **`stage` stays on the job, not the attempt** — it is the durable checkpoint that survives across
-  attempts, so a mid-`author` crash resumes at a stage boundary instead of re-running an expensive
-  earlier stage. (Unlike investigation `phase`, the stage boundary is a real orchestrator seam between
-  LLM calls, so it is reliable to record — §4.3.)
+- **Single table, like investigations (§4.1).** The row carries durable data (who/why/where-it-got-to),
+  the `stage` checkpoint, and the infra of its current run (`runtime_handle`, claim/lease/liveness). A
+  crash-recovery run overwrites the infra columns in place, fenced by `claim_epoch`, and resumes from the
+  job's `stage`. Liveness is a coarse lease (no live-view requirement — learning reads are an after-the-fact
+  activity feed, §2.6), renewed only often enough for the reconciler to spot a dead worker. (A
+  `learning_runs` history table graduates only with per-run forensics — §6.)
+- **One live learning job per tenant.** A partial unique index — at most one `queued`/`running` learning
+  job per `tenant_id` — enforces the strict sequencing that makes corpus authoring conflict-free by
+  construction (§4.4): there is never a second author, so nothing to merge. Jobs back up in the queue
+  behind the live one; that backlog is an accepted, observable open issue, not an MVP blocker (§6).
+- **`stage` is the durable checkpoint on the row** — it survives a recovery, so a mid-`author` crash
+  resumes at a stage boundary instead of re-running an expensive earlier stage. (Unlike investigation
+  `phase`, the stage boundary is a real orchestrator seam between LLM calls, so it is reliable to
+  record — §4.3.)
 - **No `reason` column — it's derivable.** Auto vs. explicit re-learn is exactly `client_request_id IS
   NULL` vs. set, so a separate `reason` enum would just be a denormalized duplicate. The GET endpoints
   derive the label from `client_request_id` (§2.6).
@@ -320,25 +342,29 @@ learning_attempts(attempt_id PK, tenant_id, learning_job_id FK, attempt_number,
 
 Frontend reads + a small write path (all tenant-scoped).
 
-**Writes are flat; lists nest.** Both `investigation` and `learning_job` have their own global ids and
-entirely flat canonical reads (`/investigations/:id`, `/learning-jobs/:id`), so creation is a flat
-top-level verb with the parent supplied as a **required body field** — the Stripe-style resource shape,
-and the same rule for both resources (no asymmetry: investigation-create is not nested under alert, so
-learning-job-create is not nested under investigation either). Parent-scoped **list** reads stay nested
-because a sub-collection genuinely belongs to its parent; that read/write split is standard convention,
-not the asymmetry §2 set out to remove.
+**Everything is flat — three top-level resource families** (`alerts`, `investigations`,
+`learning-jobs`/`lessons`). Each entity has a global id and a flat canonical read (`/alerts/:id`,
+`/investigations/:id`, `/learning-jobs/:id`). Creation is a flat top-level verb with the parent supplied
+as a **required body field** (Stripe-style): investigation-create takes `alert_id`, learning-job-create
+takes `investigation_id` — same rule for both, no asymmetry. Parent scoping on **list** reads is a
+query-param filter (`/investigations?alert_id=`, `/learning-jobs?investigation_id=`), not a nested
+sub-path: one resource, one collection URL. The only sub-paths are *actions on* and *sub-reads of* a
+single investigation (`/investigations/:id/cancel`, `/investigations/:id/artifacts/:key`), where the
+parent is the authorization scope, not a collection filter. Alert rows are upserted **out of band by the
+source adapter** (§1.5), so there is no ingest write in this surface.
 
 ```
-GET  /alerts, /alerts/:id                     alert history / review
-GET  /alerts/:id/investigations               execution history for one alert (sub-collection)
-GET  /alerts/:id/learning-jobs                all learning activity for an alert (via denormalized alert_id)
-GET  /lessons, /loop, /learning-jobs          learning reads + activity feed
-POST /investigations          { alert_id, client_request_id }          start/rerun for an alert_id
-GET  /investigations/:id                       poll job status + heartbeat (~30s); coarse DB state only (§4.5)
-GET  /investigations/:id/learning-jobs        all jobs for an investigation (auto + re-learns), newest first
+GET  /alerts                                  alert history / review (list + filter)
+GET  /alerts/:id                              one alert + investigation-history drill-down
+POST /investigations   { alert_id, client_request_id }       start/rerun for an alert_id
+GET  /investigations          ?alert_id=      execution list, optionally scoped to one alert
+GET  /investigations/:id                      poll job status + heartbeat (~30s); coarse DB state only (§4.5)
+POST /investigations/:id/cancel               request an aborted terminal stop (tenant-scoped audit event)
 GET  /investigations/:id/artifacts/:key       authorized, audited artifact read (§2.9)
-POST /learning-jobs           { investigation_id, client_request_id }  fire an explicit re-learn
-GET  /learning-jobs/:id                        detail: status, stage, timestamps, status_detail, resulting corpus version + PR link
+POST /learning-jobs    { investigation_id, client_request_id }   fire an explicit re-learn
+GET  /learning-jobs    ?alert_id= ?investigation_id=    learning reads + activity feed (newest first)
+GET  /learning-jobs/:id                       detail: status, stage, timestamps, status_detail, corpus version + PR link
+GET  /lessons                                 lesson-corpus read
 ```
 
 **A rerun is not a separate verb.** `POST /investigations` for an alert whose investigations have all
@@ -355,7 +381,7 @@ tenant-scoped audit event. The auto vs. explicit-re-learn label on read is deriv
 ### 2.7 Vendor alert normalization envelope
 
 Require a thin normalized envelope, keep the raw payload in blob. Required: `tenant_id`, `source_vendor`,
-`remote_alert_id`, raw-payload blob key, display title, display `created_at` (upstream first-seen),
+`remote_alert_id`, raw payload (stored inline as JSONB — §2.2), display title, display `created_at` (upstream first-seen),
 severity when available, source rule/signature when available. Optional adapter fields: `remote_url`,
 `description`, entity anchors, upstream `changed_at`, vendor case/incident labels. **Strict on the
 envelope, loose on the raw payload.** A source that can't supply a stable upstream id must mint one in
@@ -404,17 +430,17 @@ flowchart LR
 ```
 
 The two **workers** are the online investigation worker (per-alert, holds scoped SIEM creds) and the
-offline learning worker (batch, SIEM-free); they share the substrate but not privileges (§4.3). The
+offline learning worker (sequential, SIEM-free); they share the substrate but not privileges (§4.3). The
 endpoint surface is §2.6; the component-level wiring (reconciler, adapter, secret manager, SIEM) is
 drawn out where it matters in §4.
 
 **Two dependent lifecycles, not one.** The system is an online-serving plane (investigations) and an
-offline-batch plane (learning), joined by a single seam: an investigation's `completed` transition
+offline plane (learning), joined by a single seam: an investigation's `completed` transition
 (§4.3).
 
 - **Investigation** — production-facing serving execution: starts from an alert, holds SIEM/ticketing
   creds, gathers evidence, writes artifacts, terminates `completed | failed | aborted | unparseable`.
-- **Learning** — downstream batch execution: starts _only_ after `completed`, reads captured artifacts,
+- **Learning** — downstream sequential execution: starts _only_ after `completed`, reads captured artifacts,
   writes lesson-corpus changes through review. Its failure must never roll back or threaten the
   completed investigation.
 
@@ -441,26 +467,26 @@ sequenceDiagram
 
     FE->>API: POST /investigations with alert_id, client_request_id
     Note right of API: commit point 1 — initiation
-    API->>DB: tx — lock alert, insert investigation queued, insert queue row idempotent
+    API->>DB: tx — lock alert, insert investigation queued (live-collapse unique index, no separate queue row)
     API-->>FE: 202 with alert_id, investigation_id
 
     Note over WK,DB: DB-as-queue — the worker polls, the DB never pushes
-    WK->>DB: claim queued task SKIP LOCKED, set lease, open attempt
-    WK->>CT: spawn, label investigation_id and attempt_number, inject alert and scoped creds
-    WK->>DB: patch attempt runtime_handle, set job_status running
+    WK->>DB: claim queued investigation SKIP LOCKED, bump claim_epoch, set lease, job_status running
+    WK->>CT: spawn, label investigation_id and claim_epoch, inject alert, epoch, and scoped creds
+    WK->>DB: patch runtime_handle (fenced on claim_epoch)
 
     loop every ~30s until exit
-        CT->>DB: heartbeat last_heartbeat_at and cost_so_far, renew lease
+        CT->>DB: heartbeat last_heartbeat_at and cost_so_far, renew lease (fenced on claim_epoch)
         FE->>API: GET investigation detail
-        API->>DB: read job_status and active-attempt heartbeat
+        API->>DB: read job_status and heartbeat from the investigation row
         API-->>FE: coarse state — job_status, heartbeat age, cost
     end
 
     Note right of CT: commit point 2 — completion, blobs first then flip
     CT->>BLOB: upload artifact manifest
-    CT->>DB: tx — mark completed, update alert latest projection, insert learning_jobs outbox
-    Note over CT,DB: container exits, investigation_id never reused
-    Note over DB: stale lease with no labeled container is requeued by the reconciler, see §4.1.<br/>learning worker later drains the outbox, offline plane, see §4.3
+    CT->>DB: tx — mark completed (fenced on claim_epoch), update alert latest projection, insert learning_jobs outbox
+    Note over CT,DB: container exits; terminal investigation_id never reused
+    Note over DB: a non-terminal stale lease is recovered in place by the reconciler (claim_epoch bump), see §4.1.<br/>learning worker later drains the outbox, offline plane, see §4.3
 ```
 
 **Completion is the commit point.** A local dir is atomically "there"; blob + DB is a two-phase write.
@@ -473,8 +499,8 @@ optional side effect.
 
 **Learning write path.** The second half of the write story, across the seam: the `learning_jobs` outbox
 row inserted above is drained by the offline, SIEM-free learning worker, which authors lesson-corpus
-changes and pushes them to the **git server** through review (§4.3, §4.4). It is async and batched — it
-does not block or roll back the completed investigation.
+changes and pushes them to the **git server** through review (§4.3, §4.4). It is async and sequential per
+tenant — it does not block or roll back the completed investigation.
 
 ```mermaid
 sequenceDiagram
@@ -484,9 +510,9 @@ sequenceDiagram
     participant BLOB as Blob
     participant GIT as Git server / CI
 
-    Note over DB,LW: async, batched — fires after an investigation completes, separate SIEM-free worker
-    LW->>DB: drain queued learning_jobs SKIP LOCKED, claim a batch, open learning_attempt
-    LW->>DB: read investigation metadata for the batch
+    Note over DB,LW: async, sequential per tenant — fires after an investigation completes, separate SIEM-free worker
+    LW->>DB: claim one queued learning_job SKIP LOCKED (one live per tenant), bump claim_epoch
+    LW->>DB: read investigation metadata for the job
     LW->>BLOB: read captured artifacts
     Note over LW: actor, oracle, judge, author stages — stage cursor checkpoints each
     LW->>GIT: push branch and open PR with lesson-corpus changes
@@ -506,25 +532,32 @@ implements the same runner without touching APIs or schemas.
 
 ### 4.1 Durability & crash-safety
 
-**Two commit points, don't confuse them.** At _initiation_: investigation row first → open an
-`investigation_attempts` row → spawn the container labeled with `(investigation_id, attempt_number)`
-(the investigation row is the durable record of intent, must exist before any side-effect; infra
-linkage lives on the attempt, not the data row — §2.2). At _completion_: blobs first → flip the row. The
-investigation row exists throughout; what moves is `job_status`.
+**One row per investigation — state, infra, and result together.** All execution state lives on the
+`investigations` row: lifecycle (`job_status`), version pins, the infra/liveness of its current run
+(`runtime_kind`, `runtime_handle`, `claimed_by`, `lease_expires_at`, `last_heartbeat_at`,
+`cost_so_far`), a `claim_epoch` fencing counter, and the result. There is **no separate attempts table
+and no separate queue table** — the queue is the set of rows with `job_status='queued'`, claimed in
+place. A per-run history table graduates only if per-run forensics are needed (§6).
+
+**Two commit points, don't confuse them.** At _initiation_ the investigation row is written first — it
+is the durable record of intent and must exist before any side-effect (the container spawn). At
+_completion_, blobs are uploaded first, then the row is flipped to a terminal status. The row exists
+throughout; what moves is `job_status` and the infra columns.
 
 **Idempotency, enforced in the DAL _and_ by DB constraints** — not just API convention. Investigation
 idempotency is keyed by the **local `alert_id`**. Constraints: `alerts(tenant_id, source_vendor,
 remote_alert_id)` unique; a partial unique index allowing at most one live (`queued`/`running`)
-investigation per `(tenant_id, alert_id)`; queue table unique on `investigation_id`. The DAL method is a
-single `create_investigation_for_alert(alert)` transaction:
+investigation per `(tenant_id, alert_id)` — this index is **both** the enqueue-dedup and the
+live-collapse guarantee (no separate queue-row uniqueness needed); `client_request_id` unique per
+`(tenant_id, alert_id)` so a retried/double-clicked create call collapses onto the same investigation.
+The DAL method is a single `create_investigation_for_alert(alert)` transaction:
 
 1. load + lock the alert row (`SELECT ... FOR UPDATE`);
 2. if a live (`queued`/`running`) investigation already exists, return it — concurrent submits and
    double-clicks collapse onto the same row (the partial unique index makes this a hard guarantee, not
    just a check);
-3. otherwise insert the investigation row;
-4. insert the queue row keyed by `investigation_id` (`ON CONFLICT DO NOTHING`);
-5. return `{alert_id, investigation_id}`.
+3. otherwise insert the investigation row (`job_status='queued'`);
+4. return `{alert_id, investigation_id}`.
 
 The gate on starting _another_ investigation depends on what already terminated:
 
@@ -532,73 +565,127 @@ The gate on starting _another_ investigation depends on what already terminated:
 - **only `failed`/`aborted` priors** → a fresh investigation starts with no friction; nothing produced
   a result worth second-guessing.
 - **a `completed` investigation exists** → allowed, but the UI requires an explicit "start another
-  investigation?" confirm first — a UI affordance and a tenant-scoped audit event, not a server-side
-  approval ceremony.
+  investigation?" confirm first — a **rerun** (a new `investigation_id`, audited), a UI affordance, not
+  a server-side approval ceremony.
 
-A `client_request_id` (unique per `(tenant_id, alert_id)`) carried on the request dedupes retries and
-double-clicks so they don't fork.
+**Recovery is _rerun_ vs _resume_.** A *rerun* is a new investigation for the same alert (new
+`investigation_id`, product-level, above). A *resume/recovery* is the same investigation re-executed
+after a crash — same `investigation_id`, infra columns overwritten in place. The two never share a word.
 
-**Crash-safety from idempotency + a reconciler.** Pattern: database-as-queue + state machine. The
-classic failure ("spawned, died before recording the runtime handle → orphan") is handled by
-**labeling the container with `(investigation_id, attempt_number)`** rather than trusting a handle the
-row may never have captured — a periodic reconciler lists containers by label, matches them to attempt
-rows, and kills/adopts/retries mismatches. This is also why the attempt's `runtime_handle` need not be
-globally or temporally unique (§2.2): the label is the source of truth, not the substrate's id.
+**Claim and lease — short transactions, not long ones.** A worker claims a queued (or stale-lease)
+investigation with `SELECT … FOR UPDATE SKIP LOCKED`, bumps `claim_epoch`, sets
+`claimed_by` / `lease_expires_at`, flips to `running`, and commits. It must **not** hold a transaction
+open while the 5–15 min container runs. **Liveness is owned by the container's heartbeat**: the
+container holds scoped DB creds for its own row and renews the lease by writing
+`last_heartbeat_at` / `cost_so_far` (§4.5). A stale `last_heartbeat_at` past `lease_expires_at`, with no
+live labeled container, is recoverable while non-terminal.
 
-**Worker leases, not long transactions.** `SELECT … FOR UPDATE SKIP LOCKED` claims a queued task, sets
-`claimed_by` / `lease_expires_at`, commits. The worker must not hold a transaction while a 5–15 min
-container runs. **Liveness is owned by the container's heartbeat**: the container holds scoped DB creds
-for its own attempt row and renews the lease by heartbeating `last_heartbeat_at` / `cost_so_far` on the
-attempt (§4.5). A stale `last_heartbeat_at` with no matching labeled container is requeueable while
-non-terminal.
+**Recovery is in place, fenced by `claim_epoch`.** There is one row, so a recovery run **overwrites**
+the infra columns rather than appending — the dead run's infra details survive only in the audit/tool
+logs, not as structured rows (the accepted cost of one table). The hazard is a **zombie**: the
+reconciler declares a container dead on a stale lease and starts a recovery, but the "dead" container
+was only partitioned and is still alive. Defender is recommend-only, so this is externally harmless (see
+below), but two containers writing the same row would still race. `claim_epoch` is the fencing token
+that resolves it:
 
-> **Requeue is unconditionally safe here: defender is recommend-only.** There are no `act` verbs
+- each claim/recovery does `claim_epoch = claim_epoch + 1`, and the worker injects the new epoch into
+  the container;
+- the container is labeled `(investigation_id, claim_epoch)`;
+- **every** infra write (heartbeat) and the completion write is conditional on `claim_epoch = :my_epoch`.
+  A zombie from an older epoch touches 0 rows, learns it has been superseded, and exits instead of
+  corrupting the row.
+
+```sql
+-- claim or recover (initial claim and stale-lease recovery are one path)
+UPDATE investigations
+SET claimed_by = :worker, claim_epoch = claim_epoch + 1, job_status = 'running',
+    runtime_kind = :kind, lease_expires_at = now() + :ttl, last_heartbeat_at = now()
+WHERE investigation_id = :id
+  AND (job_status = 'queued'
+       OR (job_status = 'running' AND lease_expires_at < now()))   -- stale → reclaim in place
+RETURNING claim_epoch;                                             -- injected into the container
+
+-- heartbeat (fenced)
+UPDATE investigations SET last_heartbeat_at = now(), cost_so_far = :c, lease_expires_at = now() + :ttl
+WHERE investigation_id = :id AND claim_epoch = :my_epoch;          -- 0 rows ⇒ superseded ⇒ exit
+
+-- completion (commit point: blobs first, then this; fenced)
+UPDATE investigations SET job_status = 'completed', disposition = …, artifact_manifest = …
+WHERE investigation_id = :id AND claim_epoch = :my_epoch AND job_status = 'running';  -- 0 rows ⇒ zombie ⇒ discard + GC its blobs
+```
+
+**Reconciler.** A periodic reconciler lists containers by their `(investigation_id, claim_epoch)` label.
+A container whose label epoch is below the row's `claim_epoch` is a zombie → kill. A `running` row with a
+stale lease and no live container at the current epoch → run the claim/recover statement (which bumps the
+epoch and fences the old container out). The label is the source of truth, so `runtime_handle` need not
+be globally or temporally unique.
+
+> **Recovery is unconditionally safe here: defender is recommend-only.** There are no `act` verbs
 > (`close_ticket`, `block_ip`, …), so an investigation has no external side-effect to double-apply on
-> requeue. _If act-mode is ever graduated, requeue safety must be revisited — a partially-acted
+> recovery. _If act-mode is ever graduated, recovery safety must be revisited — a partially-acted
 > investigation is no longer freely re-runnable._
 
-After a container has run and reached a terminal state (`completed` / `failed` / `aborted`), that
-`investigation_id` is never reused; retry means a new investigation via `POST /investigations`. (A claim
-failure _before_ container spawn keeps the same investigation_id — release the lease and let another
-worker claim, opening a fresh attempt; `attempt_number` counts the runs.)
+**Cost and blob GC across a recovery.** `cost_so_far` is overwritten by the recovery run; the dead run's
+spend stays in the logs, not summed into the row (make the final `cost` additive at completion only if
+budget enforcement needs cumulative spend). `artifact_manifest` only ever holds the winning run's set,
+written at the fenced completion; the dead run's partial uploads are orphans the blob GC sweeps. After an
+investigation reaches a **terminal** state, its `investigation_id` is never reused — a fresh result means
+a rerun (new investigation); only a non-terminal stale lease is recovered in place.
 
-**Don't reach for a durable-execution engine (Temporal) yet.** A task table + status column +
-reconciler cron is right at this scale. Graduate when orchestration grows multi-step
+**Don't reach for a durable-execution engine (Temporal) yet.** A single task table + status column +
+`claim_epoch` + reconciler cron is right at this scale. Graduate when orchestration grows multi-step
 retries/timeouts/human-in-loop — which surfaces first in the learning loop (§4.3), not here (§6).
 
 ### 4.2 Queue storage
 
-**Keep the queue in the DB.** At this scale (dozens–hundreds of investigations, 5–15 min each),
-separating it (SQS/Kafka/Rabbit) is premature and _introduces_ the dual-write consistency problem.
-DB-as-queue gives **transactional enqueue** for free — the same transaction that writes the
-alert/investigation row enqueues the job. The mechanism is Postgres `SELECT … FOR UPDATE SKIP LOCKED`
-for short claim transactions, then lease/heartbeat renewal while the container runs. Separate only on a
-real throughput / fan-out / independent-scaling reason — not yet (§6).
+**Keep the queue in the DB — and it isn't even a separate table.** The queue is the set of
+`investigations` rows with `job_status='queued'`, claimed in place; there is no distinct queue table at
+this scale (dozens–hundreds of investigations, 5–15 min each). Separating it into a broker
+(SQS/Kafka/Rabbit) is premature and _introduces_ the dual-write consistency problem. DB-as-queue gives
+**transactional enqueue** for free — the same transaction that inserts the investigation row makes it
+claimable. The mechanism is Postgres `SELECT … FOR UPDATE SKIP LOCKED` over queued/stale-lease rows for
+short claim transactions, then lease/heartbeat renewal while the container runs (§4.1). This is a
+mainstream pattern with first-class Postgres support (`SKIP LOCKED`) and production libraries built on it
+(Solid Queue, Oban, River, graphile-worker). Split the queue into its own narrow table — or a broker —
+only on a real throughput / fan-out / independent-scaling reason, not yet (§6).
 
 ### 4.3 Investigation ↔ learning seam
 
-**Learning does not continue inside the investigation container.** The seam is an investigation's
-`completed` transition; learning runs in a **separate, ephemeral, batch, SIEM-free worker** — the
-standard online-serving (investigation) vs. offline-batch-training (learning) split.
+**Learning does not run in the investigation plane.** The seam is an investigation's `completed`
+transition; learning runs in a **separate, SIEM-free backend worker** — the standard online-serving
+(investigation) vs. offline-training (learning) split. Learning needs **no container**: its only
+privileged op is `git push` / `gh pr` over the corpus (verified — the author stages are the only
+corpus-mutating step; oracle/judge/actor write run-dir artifacts only: `author.py:217`,
+`lead_author.py:687-690` carry the git grants, while the judge writes to the learning run dir,
+`_loop_orchestrate.py:103-106`). A worker (or thread) on the backend with git + LLM creds suffices.
 
-**Why they must not share a container:**
+**Isolation is not the safety boundary here — human review is.** Learning reads captured artifacts that
+contain untrusted SIEM content, so the real risk is a poisoned artifact steering the author into a bad
+lesson. A sandbox doesn't fix that; salted-delimiter content tagging (§4.7) plus the mandatory **PR
+review gate** (§4.4) do. Learning's blast radius is "it proposes a bad lesson in a PR," caught before
+merge.
 
-1. **Privilege separation.** Investigation holds live SIEM creds + network; the whole learning plane is
+**Why learning is still a separate plane (not fused with the investigation):**
+
+1. **Privilege separation.** Investigation holds live SIEM creds + network; the learning plane is
    **SIEM-free** (even the actor writes its counterfactual from the completed investigation, not a live
-   query). Fusing them would run learning with creds it shouldn't hold and force the investigation image
-   to carry git/PR tooling.
-2. **Scope.** Learning is frequently cross-investigation (consolidation, held-out eval, dedup); a
-   per-investigation container only has its own context.
+   query) and instead holds git/PR creds the investigation should never carry.
+2. **Shared corpus state.** Learning reads/writes the shared per-tenant lesson corpus and ground-truth /
+   oracle sources; a single investigation has no business touching shared state. (Cross-investigation
+   consolidation/dedup is deferred functionality — §6 — but the corpus is shared regardless.)
 3. **Failure coupling.** Investigation is 5–15 min; learning is a longer, bursty LLM chain (actor →
    oracle → judge → author). A learning crash must not threaten an already-successful investigation.
-4. **Independent throttling.** Learning is expensive and not urgent → batch it; investigations are
-   urgent.
+4. **Independent throttling.** Learning is expensive and not urgent → run it sequentially, off the urgent
+   path; investigations are urgent.
 5. **Replayable seam.** `investigation.completed → learning job` lets you re-learn from a past
-   investigation without re-running defender (already supported via `learning/replay_actor.py`).
+   investigation without re-running defender. The actor stage already replays from a stored
+   `lead_sequence.yaml` (`learning/replay_actor.py`, used by the secondary-metric eval), proving the
+   seam is feasible; orchestrating the full re-learn chain (oracle → judge → author) off a completed
+   investigation is net-new.
 
-The learning plane is **tenant-scoped to start**: a job reads only its own tenant's artifacts, batches
-drain one tenant at a time, the corpus is per-tenant (§4.4). A single global cross-tenant corpus is a
-deferred decision gated on a redaction/isolation review (§6).
+The learning plane is **tenant-scoped to start**: a job reads only its own tenant's artifacts, jobs drain
+one tenant at a time **sequentially**, the corpus is per-tenant (§4.4). A single global cross-tenant
+corpus is a deferred decision gated on a redaction/isolation review (§6).
 
 **Learning worker tools:** blob read · corpus read+write · git/PR creds · LLM API · MITRE/oracle/
 ground-truth read · DB (investigation-metadata read, `learning_jobs` write, lesson-index write).
@@ -607,23 +694,36 @@ ground-truth read · DB (investigation-metadata read, `learning_jobs` write, les
 **Operational cutover.** The dev CLI may keep its "run investigation, then run learning" default; the
 platform worker invokes the harness in a no-learning mode (`run.py --no-learn` or equivalent), commits
 the investigation first, then creates the learning job. `investigation.completed` must never wait for,
-or be rolled back by, the learning loop. Host learning as **event-/cron-triggered ephemeral jobs that
-batch-drain completed investigations** (amortizes cold start), not an always-on service.
+or be rolled back by, the learning loop. Host learning as **event-/cron-triggered jobs that drain
+completed investigations one at a time per tenant**, not an always-on service.
 
-**Batch processing is a claim pattern, not a second entity.** A cron/event worker claims N queued rows
-(`… SKIP LOCKED LIMIT N`), optionally stamps a shared `learning_batch_id`, runs the cross-investigation
-loop (consolidation / dedup / authoring) once, marks each row `completed | skipped`. The corpus-version
-bump is recorded on the corpus, not per row. Per-stage checkpointing (the `stage` cursor) pays for
-itself — each stage is its own expensive non-deterministic LLM call, so a mid-`author` crash resumes at
-a stage boundary. **Do not** build a micro-stage DAG orchestrator — extend the investigation/job
-substrate (the existing on-disk `_pending/*.jsonl` queues move onto it), don't invent a second one.
+**Sequential processing, 1:1 — not batched.** A cron/event worker claims **one** queued job per tenant
+(`… SKIP LOCKED LIMIT 1`, gated by the one-live-job-per-tenant index — §2.5), runs the full
+actor → oracle → judge → author chain for that single investigation, marks it `completed | skipped`, then
+takes the next. No fan-in, no cross-investigation consolidation at MVP — that is deferred functionality
+(§6), and dropping it is exactly what makes corpus authoring conflict-free by construction (§4.4): one
+live job per tenant ⇒ never two authors ⇒ nothing to merge. Per-stage checkpointing (the `stage` cursor)
+still pays for itself — each stage is its own expensive non-deterministic LLM call, so a mid-`author`
+crash resumes at a stage boundary. **Do not** build a micro-stage DAG orchestrator — extend the
+investigation/job substrate (the existing on-disk `_pending/*.jsonl` queues move onto it), don't invent a
+second one.
 
 **MVP trigger policy:** every completed investigation creates one auto job and fires the loop. Failed /
 aborted / `unparseable` don't trigger. Keep policy a **replaceable module**, not `if`s scattered in
 completion handling — a `learning_policy` table/endpoint (sampling, only-on-disagreement,
 sparse-coverage priority, tenant overrides) is deferred (§6).
 
-### 4.4 Lessons corpus across concurrent containers
+> **Open issue — sequential-learning backlog.** Learning on _every_ completed investigation, processed
+> one-at-a-time per tenant, builds a backlog whenever investigation completion outpaces the sequential
+> learning rate — and since it is 1:1, one PR per investigation is also a _human-review_ backlog. This is
+> **not MVP-blocking**: learning is off the urgent path, the queue backpressure is safe (rows accumulate,
+> drain in idle periods), and the relief — a sampling `learning_policy`, or concurrent authors with
+> conflict handling — is purely additive (no schema/API change), so deferring costs nothing
+> architecturally. A never-draining backlog needs _sustained_ saturation, which is the §6 throughput
+> regime by definition. MVP should still **emit the backlog signal** (oldest-queued age + queue depth) so
+> the trigger is observable and learning never silently falls weeks behind (§6).
+
+### 4.4 Lessons corpus: concurrent readers, one sequential writer
 
 The key correction: **investigation containers READ lessons; they do not WRITE them.** The agent
 consumes lessons via retrieval during an investigation; the learning loop authors them separately,
@@ -637,17 +737,36 @@ investigation opens a PR." Split into two planes:
   published bundle at start and does not hot-swap mid-run. A critical lesson is handled by priority-
   publishing a new bundle for subsequent investigations; in-flight ones can be cancelled/rerun.
 - **Write/review plane (learning loop): branch + PR on the existing host.** Today the curator
-  (`author.py`) is local-git only (`add`/`commit`/`checkout`, no push); a sibling path
+  (`author.py`) commits locally only, never pushes (the curator subagent lands the structured commit;
+  `author.py` verifies it via a `git status` / `commit_sha` cross-check); a sibling path
   (`lead_author.py:901`) already has a gated, branch-safe `maybe_push` (`LEAD_AUTHOR_PUSH=1`, refuses
   `origin/main`/`master`), but **no `gh pr create` exists anywhere** in the loop. The platform reuses
   that branch-safe push machinery and adds only `gh pr create` on top of the structured commit the
   curator already lands — a thin addition. Merge triggers CI that builds **corpus vN+1** to blob.
   `lessons_corpus_version` is **minted by CI**, never hand-incremented.
 
-Conflicts/staleness mostly evaporate: the writer is serialized, and indices are **regenerated from the
-directory, never hand-merged** (the `MEMORY.md` / `board.html` pattern); some corpora fold/stale/delete
-superseded mutable facts, so don't rely on pure append-only semantics. An investigation pinned to vN
-keeps using vN even if vN+1 publishes mid-run — that's correct (reproducibility), not a bug.
+**Authoring concurrency — conflicts are prevented, not resolved.** The "one serialized writer" is
+concrete: the one-live-learning-job-per-tenant index (§2.5) means **at most one author touches a tenant's
+corpus at a time**, strictly sequentially (§4.3). Two authors never hold the same file, so there is
+nothing to git-merge — and we **never rely on git auto-merge**: lessons fold/stale/delete superseded
+facts, so a textual 3-way merge would be wrong and last-write-wins would silently drop a learning. Three
+structural choices keep even the sequential case clean:
+
+- **Per-tenant corpus** (above) — cross-tenant authoring never collides (separate paths).
+- **One lesson = one file** (the `MEMORY.md` file-per-fact pattern) — distinct lessons land in distinct
+  files.
+- **Generated indices are regenerated by CI on merge, never committed by the author** (`lessons.json`,
+  the `MEMORY.md`-style index, `board.html`) — the single largest conflict source simply cannot conflict.
+
+Across the human-review window the writer lease **spans author → PR → merge**: at most one open learning
+PR per tenant, each branched off the latest `main`. Queued jobs back up behind it (the backlog open
+issue, §4.3) — acceptable because learning is off the urgent path. With one open PR off latest `main`, no
+second divergent branch ever forms, so no merge conflict can. An investigation pinned to vN keeps using
+vN even if vN+1 publishes mid-run — that's correct (reproducibility), not a bug.
+
+Concurrent authors (to relieve the backlog) are a §6 graduation: they reintroduce the same-file case,
+handled by **rebase + replay-author** — re-run just the author stage against rebased `main` (cheap;
+replayable from artifacts — §4.3) — human-flagging anything that still can't reconcile.
 
 **No self-hosted git.** Authoring is low-frequency expensive LLM work; the curator already commits
 locally, so `push` + `gh pr` against GitHub is a thin extension. Self-host only for compliance isolation
@@ -660,15 +779,16 @@ per-completion" choice:
 
 | Layer                 | Granularity                    | Mechanism                                                                                                                           |
 | --------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **Progress metadata** | ~30s heartbeat                 | update the active attempt row (`last_heartbeat_at`, optional `cost_so_far`) + `job_status` on the investigation. Powers the polling view. |
+| **Progress metadata** | ~30s heartbeat                 | update the investigation row (`last_heartbeat_at`, `cost_so_far`, `job_status`), fenced on `claim_epoch`. HOT update — these columns aren't indexed, so no index churn. Powers the polling view. |
 | **DB metadata row**   | lifecycle checkpoints          | write on state transitions (`queued→running`, terminal). Per-tool writes here are pure churn.                                       |
 | **Trace artifact**    | local per tool, uploaded once  | `tool_trace.jsonl` stays the append-only local trace; upload to blob at completion. No per-event S3 PUT, no streaming sink for MVP. |
 | **Bulk artifacts**    | once, at completion            | build/project `runtime.html`, `lead_sequence.yaml`, etc.; PUT as the `→completed` commit (blobs first, then flip the row).          |
 
 **Polling-first live view.** Users don't need every token/tool event. The detail endpoint exposes
 coarse DB state only: `job_status`, `queued_at`, `started_at`, `finished_at`, `last_heartbeat_at`
-(from the active attempt), server-computed heartbeat age, elapsed, `cost_so_far` when available,
-optional token/tool counts, `status_detail`, and artifact availability. **No within-run `phase`** — it
+(on the investigation row), server-computed heartbeat age, elapsed, `cost_so_far` when available,
+optional token/tool counts (carried on the heartbeat, not the uploaded trace), `status_detail`, and
+artifact availability. **No within-run `phase`** — it
 is fragile to infer reliably, so the live view is heartbeat-based, not phase-based (§2.2). The artifact
 manifest appears only after completion (no `last_artifact_checkpoint` — artifacts are committed at
 completion, not continuously).
@@ -749,7 +869,7 @@ risk isn't worth carrying.
   Kubernetes Jobs / Fargate without touching APIs or schemas (§3).
 - **Reads scale off the DB index, not blob walks** — the whole point of §2.1 is to avoid the
   glob-the-prefix + N GETs-per-page pattern that fails at scale.
-- **Learning is batched and off the urgent path** — amortizes cold start and throttles expensive LLM
+- **Learning is sequential and off the urgent path** — throttles expensive LLM
   chains independently of investigations (§4.3).
 
 ---
@@ -766,11 +886,14 @@ pieces the platform reuses rather than rewrites:
   run directories for an alert/investigation index — that index is net-new.
 - `_loop_validate._parse_frontmatter` / `normalize_disposition` — post-hoc parse of defender's
   `{case_id, disposition, confidence}` frontmatter. Becomes the projector (lift to also write Postgres).
-- `author.py` — curator, local-git only (`add`/`commit`/`checkout`, no push).
+- `author.py` — curator; commits locally only, never pushes (the subagent lands the commit, `author.py`
+  cross-checks it via `git status` / `commit_sha`).
 - `lead_author.py:901` — gated, branch-safe `maybe_push` (`LEAD_AUTHOR_PUSH=1`, refuses
   `origin/main`/`master`). No `gh pr create` anywhere yet.
-- `learning/replay_actor.py` — already supports re-learning from a past investigation without re-running
-  defender (the replayable seam).
+- `learning/replay_actor.py` — replays **only the actor stage** from a stored `lead_sequence.yaml` (for
+  the secondary-metric eval; oracle/judge/author run at HEAD, not here). Proves the replay seam is
+  feasible without re-running defender; orchestrating a full re-learn off a completed investigation is
+  net-new.
 - On-disk `_pending/*.jsonl` queues — move onto the DB job substrate, don't invent a second one.
 
 ### 5.2 Phasing
@@ -810,6 +933,10 @@ new decision rather than re-opening the core API/schema.
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Token/tool-level live tail (SSE/WS streaming sink)                      | a product need requires live tailing (§4.5, §5.2)                                                                                                      |
 | Checkpoint-resume                                                       | p95 wall > 30 min, p95 cost ~10× today, preemption wastes >low-single-digit % of budget, or a customer needs long-running investigations (§4.5)        |
+| Per-run history table (`runs` / `learning_runs`)                        | per-run forensics across recovery runs are needed — today recovery overwrites infra in place (fenced by `claim_epoch`) and prior-run history lives only in logs (§4.1) |
+| Concurrent / sampled learning (relieve the sequential-learning backlog) | learning queue depth or oldest-queued age grows unbounded under sustained investigation throughput — relievers are the `learning_policy` sampling module and/or concurrent author PRs with rebase/replay conflict handling (§4.3, §4.4) |
+| Separate queue table (still in-DB)                                      | queue-only concerns (priority, delayed visibility) or churn-isolation from the wide row are needed — today the queue is `job_status='queued'` rows (§4.2) |
+| Blob spill for oversized raw alerts                                     | alerts routinely exceed ~a few MB inline as `raw_alert_json` JSONB (§2.2)                                                                              |
 | Durable-execution engine (Temporal)                                     | orchestration grows multi-step retries/timeouts/human-in-loop (§4.1)                                                                                   |
 | Separate queue broker (SQS/Kafka/Rabbit)                                | a real throughput / fan-out / independent-scaling reason (§4.2)                                                                                        |
 | Self-hosted git                                                         | compliance isolation or high-frequency programmatic commits (§4.4)                                                                                     |
@@ -819,3 +946,4 @@ new decision rather than re-opening the core API/schema.
 | `learning_policy` table/endpoint                                        | runtime rules (sampling, only-on-disagreement, sparse-coverage priority, tenant overrides) are needed (§4.3)                                           |
 | Analyst `alerts.review_status`                                          | the product needs `open`/`acknowledged`/`closed`/`suppressed` (§2.4)                                                                                   |
 | FUSE-style storage shim                                                 | live storage virtualization or multi-host mid-investigation mutation is required (§4.6)                                                                |
+| Artifact retention / GC policy for successful runs                      | run volume makes per-investigation artifact storage (esp. ~1.2 MB `runtime.html`) a cost concern (§2.1, §4.1)                                          |
