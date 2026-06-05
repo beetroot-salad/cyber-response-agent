@@ -76,7 +76,7 @@ For folds where one finding produces GOOD and another BAD on the same target fil
 After processing every finding:
 
 1. `git add defender/lessons/{each-touched-file}` — explicit paths only, never `git add .`.
-2. `git commit -m "{message}"` with this message shape:
+2. `git commit -m "{message}" -- defender/lessons/{each-touched-file}` — pass the same paths with a `--` pathspec so the commit is scoped to your edits only. A bare `git commit` is index-global and would sweep in any files another curator has left staged in the shared worktree. Use this message shape:
 
 ```
 defender: lesson batch {batch_id}
