@@ -7,20 +7,44 @@ runs *alongside* the production plugin (`soc-agent/`), shares some
 framings (invlang on-disk shape, the `++/+/-/--` assessment vocabulary)
 and some tools (the SIEM/host adapters), but has its own runtime loop
 and is not loaded as a Claude Code plugin. The point is to iterate fast
-on the **learning loop** under `defender/learning/`. Runtime reliability
-gates (hooks, validators, judge gates) are deliberately out of scope
-until the learning loop has proven itself end-to-end on real cases.
+on the **learning loop** under `defender/learning/`.
 
-If a question is "should we add a hook / validator / safety gate to the
-defender runtime?" — the answer right now is almost certainly **no**.
-That investment belongs in `soc-agent/`. The defender's job is to
-generate signal for the offline loop; gaps in its runtime discipline
-are *features* of the experiment, not bugs. The narrow exception is
-plumbing hooks that materialize harness contracts (e.g.
-`hooks/extract_lead_metadata.py`, which writes the
-`lead_description` sidecar from the gather dispatch block) — those
-are extraction shims, not safety gates, and they replace prompt
-instructions the model would otherwise have to remember.
+The learning loop has proven its value end-to-end on real cases, so the
+earlier "runtime reliability gates are out of scope" stance is **lifted**.
+A first wave of reliability hooks/validators has been ported from
+`soc-agent/` (the proving ground for these patterns):
+
+- **`hooks/invlang_validate.py`** — PreToolUse on `Write|Edit` of
+  `investigation.md`. Runs the structural validator over the lenient
+  parser's output and **blocks the write (exit 2)** on any violation:
+  structural parse failures, append-only violations, weak edge authority
+  on `++`/`--` resolutions, out-of-catalog
+  type/rel/anchor_kind/auth_kind, and unsatisfied `benign` disposition
+  gates (open `??` slots, unauthorized contracts). Rules live in
+  `skills/invlang/validate.py` and target the **current** invlang spec
+  (`skills/invlang/SKILL.md`), not soc-agent's. Pre-MVP, historical runs
+  written against earlier invlang variants are expected to fail — that's
+  intentional. A test (`test_skill_worked_examples_all_pass`) guards that
+  the runtime SKILL's own worked examples always validate clean, so the
+  SKILL can't teach invlang the hook blocks. Two further spec rules
+  (per-type class-slot grammar, sibling-fork uniqueness) are *not* yet
+  enforced because the spec's own examples currently contradict them —
+  see `tasks/defender-invlang-enforcement-ramp.md`.
+- **`hooks/tag_tool_results.py`** — PostToolUse injection-safety tagging:
+  wraps MCP output and annotates adapter-CLI / `alert.json` reads with a
+  per-run salted untrusted-data marker.
+- **`hooks/budget_enforcer.py`** — PostToolUse per-run tool-call /
+  subagent-spawn / wall-clock budget tracking (warning-only).
+
+The budget + tag hooks anchor on the `DEFENDER_RUN_DIR` env var that
+run.py exports (one `claude -p` per run, so no session→run map is needed).
+
+Still out of scope (port later if a case demands it): report-consistency
+judges, the phase state machine, class-slot grammar vocab, and
+sibling-fork topological uniqueness. Pure plumbing hooks that materialize
+harness contracts (e.g. `hooks/extract_lead_metadata.py`, which writes the
+`lead_description` sidecar from the gather dispatch block) remain
+extraction shims, not safety gates.
 
 **Design rationale lives in `defender/docs/`.** Before changing the
 loop shape, the actor/judge/oracle prompts, or the lessons mechanism,
@@ -37,13 +61,16 @@ defender/
   SKILL.md              # the runtime agent's entry point — ORIENT/PLAN/GATHER/ANALYZE/REPORT loop
   CLAUDE.md             # this file
   run.py                # canonical entrypoint: investigate one alert end-to-end (runtime + post-steps + learning loop)
-  run-settings.json     # claude --settings template (permissions + the three PreToolUse hooks)
-  hooks/                # three plumbing hooks (extraction shims + one discipline gate; not safety/validation gates)
+  run-settings.json     # claude --settings template (permissions + Pre/PostToolUse hooks)
+  hooks/                # plumbing shims + ported reliability gates
     extract_lead_metadata.py            # PreToolUse on Task|Agent: parses gather dispatch YAML, writes {position}.lead.json
     inject_system_skill_description.py  # PreToolUse on Task|Agent: appends the target system SKILL's frontmatter description: to the dispatch prompt
     block_main_loop_raw_access.py       # PreToolUse on Bash|Read|Grep|Glob: blocks the main loop from running system CLIs or reading gather_raw/ directly
+    invlang_validate.py                 # PreToolUse on Write|Edit: enforces the invlang schema on investigation.md (skills/invlang/validate.py)
+    tag_tool_results.py                 # PostToolUse: salted untrusted-data tagging of MCP / adapter-CLI / alert.json output
+    budget_enforcer.py                  # PostToolUse on *: per-run tool-call / spawn / wall-clock budget (warning-only)
   skills/
-    invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory)
+    invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)
     gather/             # gather subagent (Haiku) + per-system query templates
     wazuh/              # per-system reference: visibility surface + execution
     host-query/         # per-system reference: visibility surface + execution
