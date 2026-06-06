@@ -39,6 +39,7 @@ defender/scripts/tools/host_state_cli.py proc-tree ${container_id} --raw
 ## Common pitfalls
 
 - **`container-inspect` is not an implemented host_state_cli.py verb.** Use `docker --context soc-playground inspect` directly for name/image metadata; host_state_cli.py only supports `proc-tree`, `passwd`, `authorized-keys`, `fim-checksum`, `package-list`.
+- **`docker inspect` does not accept `--raw`**: when `raw: true` is passed as a dispatch param for a sweep invocation that routes through the docker inspect path (Query 1), the runner appends `--raw` to the docker inspect command, producing exit 125 (`unknown flag: --raw`). The `--raw` option is valid for `host_state_cli.py` subcommands only (Queries 2 and 3, where it is already hardcoded in the template body). Omit `raw` from dispatch params when the goal is container metadata retrieval via Query 1.
 - **Falco `container.name=<NA>` / `container.image.repository=null` are Falco-plugin sentinels, not host-state failures.** Falco's container plugin queries the Docker socket at alert-fire time; `<NA>` means that lookup failed (container may have exited or socket was transiently unavailable). The container ID is still a valid docker exec target — confirmed by successful `passwd` queries against the partial ID.
 - **Container ID is a partial hash.** Pass the 12-char prefix directly; docker resolves partials without a separate lookup.
 - **uid is an integer.** Do not confuse with username; /etc/passwd lookup by uid requires exact integer match.
