@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # Load loop.py directly — there is no package __init__ chain to anchor
 # `import defender.learning.loop`, and the loop is designed to run as a
