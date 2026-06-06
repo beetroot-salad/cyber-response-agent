@@ -8,7 +8,6 @@ stream). Reports per-condition mean overloaded events across the 3 runs.
 """
 import json
 import re
-import sys
 from pathlib import Path
 
 import yaml
@@ -22,6 +21,11 @@ def index_to_source(idx):
         return None
     idx = idx.replace("logs-", "").rstrip("-*.")
     return idx  # falco.alerts / system.auth / zeek.connection / zeek.ssh / elastic_agent / system.syslog
+
+def fam(s):
+    """Data-source family: first token after stripping `logs-` (so
+    'elastic_agent.internal' -> 'elastic_agent', 'cmdb.hosts' -> 'cmdb')."""
+    return s.replace("logs-", "").split(".")[0] if s else s
 
 # position -> set of allowed data sources (None entry = a state/lookup query, no event stream)
 pos_sources, pos_is_state_only = {}, {}
@@ -37,9 +41,11 @@ for e in ls["entries"]:
             continue  # state lookup — no event stream
         s = index_to_source(idx)
         if s:
-            srcs.add(s); has_event_q = True
+            srcs.add(s)
+            has_event_q = True
         elif "ip-to-host" in qid or "host-agent-by-ip" in qid or "enrollment" in qid:
-            srcs.add("elastic_agent"); has_event_q = True  # enrollment-ish lookups
+            srcs.add("elastic_agent")  # enrollment-ish lookups
+            has_event_q = True
     pos_sources[p] = srcs
     pos_is_state_only[p] = not has_event_q
 
@@ -96,10 +102,9 @@ def analyze(jsonl):
         for ev in evs:
             src = event_source(ev)
             allowed = pos_sources.get(p, set())
-            # match on data-source FAMILY (first token after stripping logs-): so
-            # 'elastic_agent.internal' matches allowed 'elastic_agent', but 'cmdb.*'
-            # (a lookup, not an event stream) matches nothing in an event lead.
-            fam = lambda s: s.replace("logs-", "").split(".")[0] if s else s
+            # match on data-source FAMILY (see fam()): 'elastic_agent.internal'
+            # matches allowed 'elastic_agent', but 'cmdb.*' (a lookup, not an event
+            # stream) matches nothing in an event lead.
             allowed_fams = {fam(a) for a in allowed}
             if not pos_is_state_only.get(p) and src != "unknown" and fam(src) not in allowed_fams:
                 cross_src += 1
@@ -110,15 +115,18 @@ def analyze(jsonl):
 print("position envelopes:", {p: (sorted(s) if not pos_is_state_only[p] else "STATE-ONLY") for p, s in pos_sources.items()})
 print()
 for cond in ("A", "B"):
-    runs = sorted(glob_ := [str(f) for f in OUT.glob(f"old{cond}_*.jsonl")])
+    runs = sorted(str(f) for f in OUT.glob(f"old{cond}_*.jsonl"))
     print(f"=== Condition {cond} ({'original goal+timestamps' if cond=='A' else 'sanitized'}) ===")
     ov_list, tot_list, cs_list, sf_list = [], [], [], []
     for r in runs:
         res, err = analyze(r)
         if err:
-            print(f"  {Path(r).name}: {err}"); continue
-        ov_list.append(res["overload"]); tot_list.append(res["total"])
-        cs_list = cs_list + [res["cross_src"]]; sf_list = sf_list + [res["state_fab"]]
+            print(f"  {Path(r).name}: {err}")
+            continue
+        ov_list.append(res["overload"])
+        tot_list.append(res["total"])
+        cs_list.append(res["cross_src"])
+        sf_list.append(res["state_fab"])
         print(f"  {Path(r).name}: {res['total']} events | cross-source-smuggle={res['cross_src']} state-fabrication={res['state_fab']}")
         for d in res["detail"]:
             print(d)

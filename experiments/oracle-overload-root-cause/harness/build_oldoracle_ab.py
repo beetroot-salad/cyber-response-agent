@@ -23,7 +23,8 @@ _ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
 _CLOCK = re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
 _CLOCK_HM = re.compile(r"(?<![\d:])\d{1,2}:\d{2}Z\b")
 def sanitize(s):
-    s = _ISO.sub("<alert-time>", s); s = _CLOCK.sub("<alert-time>", s)
+    s = _ISO.sub("<alert-time>", s)
+    s = _CLOCK.sub("<alert-time>", s)
     return _CLOCK_HM.sub("<alert-time>", s)
 
 # --- scrubbed exemplar (from _loop_exemplars._scrub_skeleton) --------------
