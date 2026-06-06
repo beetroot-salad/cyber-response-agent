@@ -26,9 +26,11 @@ the *why* — the RL / evolutionary-algorithms framing — read
    case. Can short-circuit with **SKIP** when no coherent story fits the
    menu — required when a causal step the story needs (e.g. initial access)
    has no covering technique to cite from it.
-4. **Telemetry oracle** (`oracle.md`) — synthesizes the per-lead events the
-   actor's story would have produced. It sits *between* actor and judge so
-   the judge isn't grading its own imagination.
+4. **Telemetry oracle** (two-stage) — `footprint.md` (an LLM enumerates the
+   events the actor's story would have produced, lead-agnostic) feeds
+   `_oracle_router.py` (deterministic containment routing places each event
+   under the leads it satisfies, emitting `projections` + `uncovered`). It sits
+   *between* actor and judge so the judge isn't grading its own imagination.
 5. **Judge** (`judge.md`) — classifies the outcome and emits findings.
    The adversarial outcome is one of: `caught` | `survived` | `undecidable`
    | `incoherent` | `skip-passthrough`. The benign direction (§Two

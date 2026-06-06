@@ -30,7 +30,6 @@ from _loop_config import (  # noqa: E402
     LoopError,
     LoopPaths,
 )
-from _loop_exemplars import assemble_exemplar_bundle, redact_exemplar  # noqa: E402
 from _loop_orchestrate import (  # noqa: E402
     build_oracle_doc,
     is_held_out,
@@ -54,7 +53,6 @@ from _loop_subagents import (  # noqa: E402
     invoke_footprint,
     invoke_judge,
     invoke_judge_benign,
-    invoke_oracle,
     is_skip_story,
     project_actor_input,
 )
@@ -73,10 +71,9 @@ __all__ = [
     "run_one", "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence",
     "validate_oracle_doc", "validate_judge_doc", "validate_judge_benign_doc",
-    "assemble_exemplar_bundle", "redact_exemplar",
     "append_findings", "append_actor_observations", "append_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
-    "invoke_actor", "invoke_actor_benign", "invoke_oracle", "invoke_footprint",
+    "invoke_actor", "invoke_actor_benign", "invoke_footprint",
     "build_oracle_doc",
     "invoke_judge", "invoke_judge_benign", "is_skip_story", "project_actor_input",
     # Underscore names are part of the test-facing surface (loop._outcome_keyword,

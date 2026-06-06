@@ -4,7 +4,7 @@
 
 **Implementation cache; code wins on conflict.** The loop described
 here exists under `defender/learning/` as orchestrator (`loop.py`) →
-actor (`actor.md`) → telemetry oracle (`oracle.md`) → judge
+actor (`actor.md`) → telemetry oracle (`footprint.md` → `_oracle_router.py`) → judge
 (`judge.md`) → author (`author.md`/`author.py`) with a per-lesson
 forward-check gate (`verify_forward.{md,py}`) → lessons corpus
 (`defender/lessons/*.md`). This doc is not the source of truth, but it

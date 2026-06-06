@@ -393,10 +393,10 @@ Outputs:
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
-  ORACLE_MODEL                         telemetry oracle (sonnet by design — Haiku
-                                       fabricated 1/3 projections in an N=3 test)
-  ORACLE_EFFORT                        oracle reasoning effort (default: low — mechanical
-                                       projection gains nothing from extended thinking)
+  FOOTPRINT_MODEL                      oracle stage-A footprint (sonnet by design —
+                                       generative; stage B is the deterministic router)
+  FOOTPRINT_EFFORT                     footprint reasoning effort (default: low — matching
+                                       is the router's job, not the LLM's)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: low — the prompt
                                        fully scaffolds the analysis, so high over-thinks)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge
