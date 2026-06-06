@@ -1,0 +1,19 @@
+events:
+  - "@timestamp": "<phase-5-alert-time>"
+    "falco":
+      "rule": "Launch Suspicious Network Tool in Container"
+      "priority": "Notice"
+      "output_fields":
+        "container.id": "ffbff1299702"
+        "container.image.repository": null
+        "container.name": "<NA>"
+        "evt.arg.flags": "EXE_LOWER_LAYER"
+        "evt.type": "execve"
+        "proc.cmdline": "nc -zv 172.18.0.24 <port>"
+        "proc.exepath": "/usr/bin/nc.openbsd"
+        "proc.name": "nc"
+        "proc.pname": "bash"
+        "proc.tty": 0
+        "user.loginuid": -1
+        "user.name": "<NA>"
+        "user.uid": "<container-uid>"
