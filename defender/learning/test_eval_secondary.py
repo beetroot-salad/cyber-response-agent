@@ -450,11 +450,78 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return {"projections": [], "uncovered": [], "unrouted_leads": []}
 
         @staticmethod
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
+
+        @staticmethod
         def invoke_judge(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+
+
+def test_run_head_oracle_and_judge_passes_lead_sequence_to_judge(tmp_path: Path):
+    """The judge call must include lead_sequence_path as the 3rd positional arg.
+
+    Regression for the arity break: invoke_judge gained a required
+    lead_sequence_path parameter; if the call site isn't updated it raises a
+    TypeError that escapes the SecondaryError handler and aborts the harness.
+    A real (non-variadic) signature on the double catches that.
+    """
+    head_run = tmp_path
+    (head_run / "alert.json").write_text("{}")
+    (head_run / "investigation.md").write_text("")
+    lead_seq = head_run / "lead_sequence.yaml"
+    lead_seq.write_text("entries: []\n")
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    (staging / "actor_story.md").write_text("not a SKIP\n")
+
+    recorded = {}
+
+    class FakeLoop:
+        class LoopError(Exception):
+            pass
+
+        @staticmethod
+        def is_skip_story(text):
+            return False
+
+        @staticmethod
+        def invoke_footprint(*_a, **_kw):
+            return "events: []\n"
+
+        @staticmethod
+        def build_oracle_doc(footprint_raw, lead_sequence):
+            return {"projections": [], "uncovered": [], "unrouted_leads": []}
+
+        @staticmethod
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
+
+        # Real signature — a wrong-arity call raises TypeError here.
+        @staticmethod
+        def invoke_judge(alert_path, investigation_path, lead_sequence_path,
+                         actor_story_path, projected_telemetry_path, learning_run_dir):
+            recorded["lead_sequence_path"] = lead_sequence_path
+            return "outcome: caught\ndefender_findings: []\n"
+
+        @staticmethod
+        def strip_yaml_fence(text):
+            return text
+
+        @staticmethod
+        def validate_judge_doc(doc):
+            return doc
+
+        @staticmethod
+        def _outcome_keyword(value):
+            return value
+
+    outcome = sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+    assert outcome == "caught"
+    assert recorded["lead_sequence_path"] == lead_seq
 
 
 def test_write_summary_appends_to_existing_index(tmp_path: Path):
