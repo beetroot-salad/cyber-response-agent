@@ -1,6 +1,10 @@
 ---
 id: elastic.ip-to-host-search
 status: established
+filter_keys:
+  index: logs-*
+  predicates:
+    - {event_attr: source_ip, op: eq, param: ip}
 ---
 
 ## Goal

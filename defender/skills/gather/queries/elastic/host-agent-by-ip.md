@@ -1,6 +1,10 @@
 ---
 id: elastic.host-agent-by-ip
 status: established
+filter_keys:
+  index: logs-*
+  predicates:
+    - {event_attr: host_ip, op: eq, param: ip}
 ---
 
 ## Goal

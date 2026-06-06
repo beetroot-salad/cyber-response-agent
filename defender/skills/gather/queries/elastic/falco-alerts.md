@@ -1,6 +1,9 @@
 ---
 id: elastic.falco-alerts
 status: established
+filter_keys:
+  index: logs-falco.alerts-*
+  window: {start: start, end: end}
 ---
 
 ## Goal

@@ -1,6 +1,11 @@
 ---
 id: elastic.falco-suspicious-network-rule
 status: established
+filter_keys:
+  index: logs-falco.alerts-*
+  window: {start: start, end: end}
+  predicates:
+    - {event_attr: rule, op: eq, param: rule_name}
 ---
 
 ## Goal

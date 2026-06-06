@@ -1,6 +1,11 @@
 ---
 id: elastic.falco-container-timeline
 status: established
+filter_keys:
+  index: logs-falco.alerts-*
+  window: {start: start, end: end}
+  predicates:
+    - {event_attr: container_id, op: eq, param: container_id}
 ---
 
 ## Goal

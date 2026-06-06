@@ -38,6 +38,9 @@ from _loop_config import (
     BENIGN_ACTOR_SETTINGS,
     BENIGN_JUDGE_EFFORT,
     BENIGN_JUDGE_MODEL,
+    FOOTPRINT_EFFORT,
+    FOOTPRINT_MODEL,
+    FOOTPRINT_PROMPT,
     JUDGE_BENIGN_PROMPT,
     JUDGE_EFFORT,
     JUDGE_MODEL,
@@ -53,7 +56,6 @@ from _loop_config import (
     SUBAGENT_TIMEOUT,
     _log,
 )
-from _loop_exemplars import assemble_exemplar_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +274,23 @@ def invoke_oracle(
     return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
 
 
+def invoke_footprint(alert_path: Path, actor_story_path: Path) -> str:
+    """Oracle stage A: enumerate the story's telemetry footprint, lead-agnostic.
+
+    No lead_sequence and no exemplars — the footprint is the events the activity
+    writes, with no view of the defender's queries, so there is nothing to
+    overload. Stage B (``_oracle_router.route``) places these events under the
+    leads whose structured filter they satisfy.
+    """
+    user = (
+        _section("alert", alert_path.read_text())
+        + _section("actor_story", actor_story_path.read_text())
+    )
+    return _run_claude(
+        FOOTPRINT_PROMPT, user, model=FOOTPRINT_MODEL, effort=FOOTPRINT_EFFORT
+    )
+
+
 def _invoke_judge(
     prompt_path: Path,
     model: str,
@@ -338,7 +357,7 @@ class Subagents(Protocol):
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str: ...
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str: ...
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str: ...
+    def footprint(self, run_dir: Path, actor_story_path: Path) -> str: ...
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
     def judge_benign(self, run_dir: Path, actor_story_path: Path,
@@ -360,12 +379,8 @@ class ClaudePrintSubagents:
             run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
         )
 
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
-        lead_sequence_path = run_dir / "lead_sequence.yaml"
-        bundle = assemble_exemplar_bundle(run_dir, lead_sequence_path.read_text())
-        return invoke_oracle(
-            run_dir / "alert.json", actor_story_path, lead_sequence_path, bundle
-        )
+    def footprint(self, run_dir: Path, actor_story_path: Path) -> str:
+        return invoke_footprint(run_dir / "alert.json", actor_story_path)
 
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:

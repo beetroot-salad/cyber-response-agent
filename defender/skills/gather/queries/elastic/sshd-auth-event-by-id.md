@@ -1,6 +1,10 @@
 ---
 id: elastic.sshd-auth-event-by-id
 status: established
+filter_keys:
+  index: logs-system.auth-*
+  predicates:
+    - {event_attr: event_id, op: eq, param: event_id}
 ---
 
 ## Goal

@@ -1,6 +1,10 @@
 ---
 id: elastic.zeek-outbound-by-source
 status: established
+filter_keys:
+  index: logs-zeek.connection-*
+  predicates:
+    - {event_attr: source_ip, op: eq, param: source_ip}
 ---
 
 ## Goal

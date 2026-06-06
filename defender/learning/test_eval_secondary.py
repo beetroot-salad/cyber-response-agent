@@ -386,10 +386,10 @@ def test_module_import_does_not_reexec():
 
 
 def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
-    """A subprocess.TimeoutExpired from invoke_oracle must surface as SecondaryError.
+    """A subprocess.TimeoutExpired from invoke_footprint must surface as SecondaryError.
 
     loop._run_claude wraps subprocess.run with a timeout, so a hung
-    oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
+    footprint child raises ``subprocess.TimeoutExpired`` (not the loop's
     LoopError). Earlier rev only caught LoopError; one timeout
     aborted the whole harness and prevented the summary from being
     written. This test pins the conversion.
@@ -414,14 +414,10 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
-            return ""
-
-        @staticmethod
-        def invoke_oracle(*_a, **_kw):
+        def invoke_footprint(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
-    with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
+    with pytest.raises(sec.SecondaryError, match="oracle footprint invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
 
 
@@ -435,7 +431,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
     staging.mkdir()
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
-    valid_oracle = "projections: []\n"
+    valid_footprint = "events: []\n"
 
     class FakeLoop:
         class LoopError(Exception):
@@ -446,20 +442,12 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
-            return ""
+        def invoke_footprint(*_a, **_kw):
+            return valid_footprint
 
         @staticmethod
-        def invoke_oracle(*_a, **_kw):
-            return valid_oracle
-
-        @staticmethod
-        def strip_yaml_fence(text):
-            return text
-
-        @staticmethod
-        def validate_oracle_doc(doc, positions):
-            return doc
+        def build_oracle_doc(footprint_raw, lead_sequence):
+            return {"projections": [], "uncovered": [], "unrouted_leads": []}
 
         @staticmethod
         def invoke_judge(*_a, **_kw):

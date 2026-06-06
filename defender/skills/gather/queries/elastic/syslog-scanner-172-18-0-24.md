@@ -1,6 +1,10 @@
 ---
 id: elastic.syslog-scanner-172-18-0-24
 status: established
+filter_keys:
+  index: logs-*
+  predicates:
+    - {op: substring, param: ip}
 ---
 
 ## Goal

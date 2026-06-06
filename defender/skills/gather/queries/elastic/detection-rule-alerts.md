@@ -1,5 +1,10 @@
 ---
 id: elastic.detection-rule-alerts
+filter_keys:
+  index: .internal.alerts-security.alerts-default-*
+  window: {start: start, end: end}
+  predicates:
+    - {event_attr: host, op: eq, param: host}
 ---
 
 ## Goal

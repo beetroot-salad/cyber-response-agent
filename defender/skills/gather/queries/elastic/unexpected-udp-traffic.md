@@ -1,6 +1,12 @@
 ---
 id: elastic.unexpected-udp-traffic
 status: established
+filter_keys:
+  index: logs-falco.alerts-*
+  window: {start: start, end: end}
+  predicates:
+    - {event_attr: container_id, op: eq, param: container_id}
+    - {event_attr: rule, op: eq, value: "Unexpected UDP Traffic"}
 ---
 
 ## Goal

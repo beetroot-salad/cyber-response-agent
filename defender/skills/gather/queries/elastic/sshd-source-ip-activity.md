@@ -1,6 +1,10 @@
 ---
 id: elastic.sshd-source-ip-activity
 status: established
+filter_keys:
+  index: logs-system.auth-*
+  predicates:
+    - {event_attr: source_ip, op: eq, param: ip}
 ---
 
 ## Goal

@@ -74,6 +74,10 @@ LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ACTOR_BENIGN_PROMPT = LEARNING_DIR / "actor_benign.md"
+# Oracle stage A (LLM footprint enumeration). Stage B is the deterministic
+# router in _oracle_router.py. oracle.md is the superseded single-call prompt,
+# kept for reference; the live path is footprint -> route.
+FOOTPRINT_PROMPT = LEARNING_DIR / "footprint.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
 JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
@@ -136,6 +140,12 @@ ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 # intermittently spends 5-6 min / ~25K tokens on extended thinking that does not
 # improve projection fidelity. Pin low; override via ORACLE_EFFORT.
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
+# Stage A (footprint enumeration) inherits the oracle's model/effort defaults —
+# generative work (sonnet) that the entangled per-lead pressure no longer
+# distorts, since matching moved to the deterministic router. Override via
+# FOOTPRINT_MODEL / FOOTPRINT_EFFORT.
+FOOTPRINT_MODEL = os.environ.get("FOOTPRINT_MODEL", "claude-sonnet-4-6")
+FOOTPRINT_EFFORT = os.environ.get("FOOTPRINT_EFFORT", "low")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already

@@ -1,6 +1,11 @@
 ---
 id: elastic.cross-tier-alerts-window
 status: established
+filter_keys:
+  index: .internal.alerts-security.alerts-default-*
+  window: {start: start, end: end}
+  predicates:
+    - {event_attr: rule, op: eq, param: rule_id}
 ---
 
 ## Goal

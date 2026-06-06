@@ -1,6 +1,8 @@
 ---
 id: elastic.postgresql-activity
 status: established
+filter_keys:
+  index: logs-postgresql-*
 ---
 
 ## Goal

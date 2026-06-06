@@ -1,6 +1,10 @@
 ---
 id: elastic.sudo-commands-svc-config-mgmt
 status: established
+filter_keys:
+  index: logs-system.auth-*
+  predicates:
+    - {event_attr: host, op: eq, param: host}
 ---
 
 ## Goal

@@ -470,36 +470,29 @@ def run_head_oracle_and_judge(
 
     lead_seq_path = head_run_dir / "lead_sequence.yaml"
     lead_seq_text = lead_seq_path.read_text()
-    exemplar_bundle = loop_mod.assemble_exemplar_bundle(head_run_dir, lead_seq_text)
 
-    # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
-    # on subprocess rc!=0 / timeout, which would otherwise escape the
-    # per-alert handler in run_secondary() and abort the harness
-    # mid-loop with no summary written.
+    # Two-stage oracle: stage A (LLM footprint) → stage B (deterministic router).
+    # invoke_footprint raises LoopError on subprocess rc!=0 / timeout, which
+    # would otherwise escape the per-alert handler in run_secondary() and abort
+    # the harness mid-loop with no summary written.
     try:
-        oracle_yaml = loop_mod.invoke_oracle(
-            head_run_dir / "alert.json",
-            actor_story_path,
-            lead_seq_path,
-            exemplar_bundle,
+        footprint_yaml = loop_mod.invoke_footprint(
+            head_run_dir / "alert.json", actor_story_path
         )
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
         # _run_claude wraps subprocess.run with a timeout that raises
-        # TimeoutExpired (not LoopError); catch both so a single oracle
+        # TimeoutExpired (not LoopError); catch both so a single footprint
         # hang doesn't abort the harness mid-loop.
-        raise SecondaryError(f"oracle invocation failed: {e}") from e
-    oracle_stripped = loop_mod.strip_yaml_fence(oracle_yaml)
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_seq_text) or {}).get("entries", [])
-    ]
+        raise SecondaryError(f"oracle footprint invocation failed: {e}") from e
     try:
-        oracle_doc = yaml.safe_load(oracle_stripped)
-        loop_mod.validate_oracle_doc(oracle_doc, expected_positions)
+        lead_sequence = yaml.safe_load(lead_seq_text) or {}
+        oracle_doc = loop_mod.build_oracle_doc(footprint_yaml, lead_sequence)
     except (yaml.YAMLError, loop_mod.LoopError) as e:
-        raise SecondaryError(f"oracle YAML invalid: {e}") from e
+        raise SecondaryError(f"oracle footprint/route invalid: {e}") from e
     projected_path = staging_dir / "projected_telemetry.yaml"
-    projected_path.write_text(oracle_stripped)
+    projected_path.write_text(
+        yaml.safe_dump(oracle_doc, sort_keys=False, default_flow_style=False)
+    )
 
     try:
         judge_yaml = loop_mod.invoke_judge(
