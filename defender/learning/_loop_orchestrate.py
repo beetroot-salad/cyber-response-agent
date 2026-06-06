@@ -33,6 +33,7 @@ from _loop_directions import BY_NAME, Direction, ObsTrigger
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from _loop_validate import normalize_disposition, strip_yaml_fence, validate_oracle_doc
+from _oracle_router import route
 
 
 # ---------------------------------------------------------------------------
@@ -69,26 +70,40 @@ def is_held_out(run_dir: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _write_validated_oracle(
-    oracle_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
+def build_oracle_doc(footprint_raw: str, lead_sequence: dict) -> dict:
+    """Oracle stage B as a pure function: parse the stage-A footprint, route it
+    against the lead sequence's structured filters, and validate.
+
+    The footprint LLM emits ``events:``; the deterministic router places each
+    event under the leads it satisfies and emits ``projections`` + ``uncovered``
+    + ``unrouted_leads``. Raises ``LoopError`` on a malformed footprint or an
+    invalid routed doc.
+    """
+    expected_positions = [e.get("position") for e in lead_sequence.get("entries", [])]
+    parsed = yaml.safe_load(strip_yaml_fence(footprint_raw))
+    footprint = (parsed or {}).get("events") if isinstance(parsed, dict) else None
+    if not isinstance(footprint, list):
+        raise LoopError("footprint YAML has no `events` list")
+    doc = route(footprint, lead_sequence)
+    validate_oracle_doc(doc, expected_positions)
+    return doc
+
+
+def _route_and_write_oracle(
+    footprint_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
 ) -> Path:
-    """Strip + validate the oracle YAML against the lead_sequence positions; write it."""
-    lead_sequence_text = (run_dir / "lead_sequence.yaml").read_text()
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
-    ]
-    stripped = strip_yaml_fence(oracle_raw)
+    """Run stage B and write the projected telemetry; dump the raw footprint on
+    any failure for debugging."""
+    lead_sequence = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
     raw_path = learning_run_dir / (Path(out_name).stem + ".raw.txt")
     try:
-        validate_oracle_doc(yaml.safe_load(stripped), expected_positions)
+        doc = build_oracle_doc(footprint_raw, lead_sequence)
     except (yaml.YAMLError, LoopError) as e:
-        raw_path.write_text(oracle_raw)
-        raise LoopError(f"oracle YAML invalid: {e}") from e
+        raw_path.write_text(footprint_raw)
+        raise LoopError(f"oracle footprint/route invalid: {e}") from e
+
     out_path = learning_run_dir / out_name
-    out_path.write_text(stripped)
-    if stripped != oracle_raw:
-        raw_path.write_text(oracle_raw)
+    out_path.write_text(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False))
     return out_path
 
 
@@ -148,9 +163,9 @@ def run_direction(
         return False
 
     _log(f"step=oracle ({spec.name})")
-    oracle_raw = agents.oracle(run_dir, actor_story_path)
-    telemetry_path = _write_validated_oracle(
-        oracle_raw, run_dir, learning_run_dir, spec.telemetry_name
+    footprint_raw = agents.footprint(run_dir, actor_story_path)
+    telemetry_path = _route_and_write_oracle(
+        footprint_raw, run_dir, learning_run_dir, spec.telemetry_name
     )
 
     judge_raw = spec.invoke_judge(

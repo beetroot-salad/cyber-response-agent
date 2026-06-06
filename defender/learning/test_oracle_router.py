@@ -1,63 +1,109 @@
-"""Unit tests for the deterministic oracle router (_oracle_router)."""
-from _oracle_router import parse_query, event_satisfies, route
+"""Unit tests for the deterministic oracle router (_oracle_router).
 
-WIN = "2026-06-04T14:00:00Z TO 2026-06-04T14:10:00Z"
+The router consumes the structured ``filters`` block recovered upstream
+(``scripts/lead_filters.py``, tested separately) — never a raw query string.
+"""
+from _oracle_router import event_satisfies, route
+
+WIN = {"start": "2026-06-04T14:00:00Z", "end": "2026-06-04T14:10:00Z"}
 
 
-def _ls(*query_lists):
-    """Build a lead_sequence dict: one position per arg (a list of (arg0,index))."""
+def _ls(*filter_lists):
+    """Build a lead_sequence dict: one position per arg (a list of filter dicts).
+
+    ``None`` in a list stands for an unrouted query (filters: null).
+    """
     entries = []
-    for i, qs in enumerate(query_lists):
+    for i, filters in enumerate(filter_lists):
         entries.append({"position": i, "queries": [
-            {"params": {"arg0": a, "index": idx}} for a, idx in qs]})
+            {"id": f"q{i}", "params": {}, "filters": f} for f in filters]})
     return {"entries": entries}
 
 
-# ---- parse ---------------------------------------------------------------
-
-def test_parse_field_eq_and_window():
-    sc = parse_query(
-        f'falco.output_fields.container.id: "ffbff1299702" AND @timestamp:[{WIN}]',
-        "logs-falco.alerts-*")
-    assert sc.eq["falco.output_fields.container.id"] == {"ffbff1299702"}
-    assert sc.ts_lo and sc.ts_hi
+def _falco_container(cid):
+    return {"index": "logs-falco.alerts-*", "window": WIN,
+            "predicates": [{"event_attr": "container_id", "op": "eq", "value": cid}]}
 
 
-def test_parse_or_within_field():
-    sc = parse_query(
-        'falco.output_fields.proc.name: "curl" OR falco.output_fields.proc.name: "nc"', "logs-falco.alerts-*")
-    assert sc.eq["falco.output_fields.proc.name"] == {"curl", "nc"}
+# ---- event_satisfies -----------------------------------------------------
+
+def test_eq_match_and_window():
+    f = _falco_container("ffbff1299702")
+    ev = {"container_id": "ffbff1299702", "data_source": "logs-falco.alerts",
+          "when": "2026-06-04T14:00:54Z"}
+    assert event_satisfies(ev, f) is True
 
 
-def test_parse_message_wildcard():
-    sc = parse_query('message: *"Accepted"* AND message: *"172.18.0.24"*', "logs-system.auth-*")
-    assert set(sc.substrings) == {"Accepted", "172.18.0.24"}
+def test_eq_excludes_other_value():
+    f = _falco_container("ffbff1299702")
+    ev = {"container_id": "<sidecar-container-id>", "data_source": "logs-falco.alerts",
+          "when": "2026-06-04T14:04:10Z"}
+    assert event_satisfies(ev, f) is False
+
+
+def test_eq_excludes_event_missing_the_field():
+    f = _falco_container("ffbff1299702")
+    ev = {"data_source": "logs-falco.alerts", "when": "2026-06-04T14:00:54Z"}
+    assert event_satisfies(ev, f) is False
+
+
+def test_window_excludes_out_of_range():
+    f = _falco_container("ffbff1299702")
+    late = {"container_id": "ffbff1299702", "data_source": "logs-falco.alerts",
+            "when": "2026-06-04T15:30:00Z"}
+    assert event_satisfies(late, f) is False
+
+
+def test_index_mismatch_excludes():
+    f = {"index": "logs-system.auth-*",
+         "predicates": [{"event_attr": "source_ip", "op": "eq", "value": "172.18.0.24"}]}
+    falco_ev = {"source_ip": "172.18.0.24", "data_source": "logs-falco.alerts",
+                "when": "2026-06-04T14:03:00Z"}
+    assert event_satisfies(falco_ev, f) is False
+
+
+def test_index_wildcard_matches_any():
+    f = {"index": "logs-*",
+         "predicates": [{"event_attr": "source_ip", "op": "eq", "value": "172.18.0.25"}]}
+    ev = {"source_ip": "172.18.0.25", "data_source": "logs-zeek.connection"}
+    assert event_satisfies(ev, f) is True
+
+
+def test_set_predicate_any_member():
+    f = {"index": "logs-falco.alerts-*",
+         "predicates": [{"event_attr": "process", "op": "set",
+                         "values": ["nc", "ncat", "socat"]}]}
+    assert event_satisfies({"process": "socat", "data_source": "logs-falco.alerts"}, f) is True
+    assert event_satisfies({"process": "python", "data_source": "logs-falco.alerts"}, f) is False
+
+
+def test_substring_scans_event_blob_when_no_attr():
+    f = {"index": "logs-system.auth-*",
+         "predicates": [{"op": "substring", "value": "172.18.0.24"}]}
+    ev = {"data_source": "logs-system.auth", "note": "Accepted publickey from 172.18.0.24"}
+    assert event_satisfies(ev, f) is True
+    assert event_satisfies({"data_source": "logs-system.auth", "note": "other"}, f) is False
+
+
+def test_multi_attr_predicate_matches_either():
+    f = {"index": "logs-*",
+         "predicates": [{"event_attr": ["host_ip", "source_ip"], "op": "eq",
+                         "value": "10.0.0.5"}]}
+    assert event_satisfies({"source_ip": "10.0.0.5", "data_source": "logs-zeek"}, f) is True
+    assert event_satisfies({"host_ip": "10.0.0.5", "data_source": "logs-zeek"}, f) is True
+
+
+def test_unknown_op_is_non_discriminating():
+    f = {"index": "logs-*", "predicates": [{"event_attr": "x", "op": "regex", "value": "y"}]}
+    assert event_satisfies({"data_source": "logs-zeek", "z": "1"}, f) is True
 
 
 # ---- the overload case (the whole point) ---------------------------------
 
-def test_sidecar_does_not_match_alert_container_lead():
-    alert_lead = parse_query(
-        'falco.output_fields.container.id: "ffbff1299702" AND @timestamp:[%s]' % WIN,
-        "logs-falco.alerts-*")
-    sidecar = {"container_id": "<sidecar-container-id>", "rule": "Launch Privileged Container",
-               "data_source": "logs-falco.alerts", "when": "2026-06-04T14:04:10Z"}
-    assert event_satisfies(sidecar, alert_lead) is False
-
-
-def test_alert_event_matches_its_container_lead():
-    lead = parse_query(
-        'falco.output_fields.container.id: "ffbff1299702" AND @timestamp:[%s]' % WIN,
-        "logs-falco.alerts-*")
-    ev = {"container_id": "ffbff1299702", "rule": "Launch Suspicious Network Tool in Container",
-          "data_source": "logs-falco.alerts", "when": "2026-06-04T14:00:54Z"}
-    assert event_satisfies(ev, lead) is True
-
-
 def test_route_sends_sidecar_to_uncovered_not_overloaded():
     ls = _ls(
-        [('falco.output_fields.container.id: "ffbff1299702" AND @timestamp:[%s]' % WIN, "logs-falco.alerts-*")],
-        [('ffbff1299702', "-")],  # host-state lookup, no index -> never covers
+        [_falco_container("ffbff1299702")],
+        [None],  # cmdb/host-state lookup, no contract -> unrouted, never covers
     )
     footprint = [
         {"attrs": {"container_id": "ffbff1299702", "rule": "Launch Suspicious Network Tool in Container",
@@ -72,34 +118,22 @@ def test_route_sends_sidecar_to_uncovered_not_overloaded():
     assert all(e.get("container_id") != "<sidecar-container-id>" for e in pos0)
 
 
-# ---- window / index discrimination ---------------------------------------
-
-def test_window_excludes_out_of_range_event():
-    lead = parse_query('falco.output_fields.container.id: "ffbff1299702" AND @timestamp:[%s]' % WIN,
-                       "logs-falco.alerts-*")
-    late = {"container_id": "ffbff1299702", "data_source": "logs-falco.alerts",
-            "when": "2026-06-04T15:30:00Z"}
-    assert event_satisfies(late, lead) is False
-
-
-def test_index_mismatch_excludes():
-    lead = parse_query('source.ip: "172.18.0.24"', "logs-system.auth-*")
-    falco_ev = {"source_ip": "172.18.0.24", "data_source": "logs-falco.alerts",
-                "when": "2026-06-04T14:03:00Z"}
-    assert event_satisfies(falco_ev, lead) is False
+def test_route_reports_unrouted_lead():
+    ls = _ls([None])
+    footprint = [{"attrs": {"container_id": "x", "data_source": "logs-falco.alerts"}}]
+    out = route(footprint, ls)
+    assert out["unrouted_leads"] == [{"position": 0, "queries": [{"id": "q0", "params": {}}]}]
+    # the position still projects (empty), and the event is uncovered-modulo-unrouted
+    assert out["projections"] == [{"position": 0, "events": []}]
+    assert len(out["uncovered"]) == 1
 
 
-def test_message_substring_match():
-    lead = parse_query('host.name: "dev-ws-1" AND message: *"Accepted"*', "logs-system.auth-*")
-    ev = {"host": "dev-ws-1", "process": "sshd", "note": "Accepted publickey for svc.monitoring",
-          "data_source": "logs-system.auth", "when": "2026-06-04T14:03:51Z"}
-    assert event_satisfies(ev, lead) is True
-    ev_other_host = dict(ev, host="jump-box-1")
-    assert event_satisfies(ev_other_host, lead) is False
-
-
-def test_unmapped_field_is_non_discriminating():
-    # a field we don't map must not cause a false exclusion
-    lead = parse_query('weird.unknown.field: "x" AND source.ip: "1.2.3.4"', "logs-zeek.connection-*")
-    ev = {"source_ip": "1.2.3.4", "data_source": "logs-zeek.connection", "when": "2026-06-04T14:03:00Z"}
-    assert event_satisfies(ev, lead) is True
+def test_route_event_covered_by_multiple_positions():
+    f = _falco_container("ffbff1299702")
+    ls = _ls([f], [f])  # two leads with the same filter both surface it
+    footprint = [{"attrs": {"container_id": "ffbff1299702", "data_source": "logs-falco.alerts",
+                            "when": "2026-06-04T14:00:54Z"}}]
+    out = route(footprint, ls)
+    assert len(out["projections"][0]["events"]) == 1
+    assert len(out["projections"][1]["events"]) == 1
+    assert out["uncovered"] == []

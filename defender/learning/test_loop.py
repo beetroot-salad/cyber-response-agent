@@ -40,14 +40,11 @@ append_actor_observations = loop.append_actor_observations
 def _ok_doc(positions=(0, 1)):
     return {
         "projections": [
-            {
-                "position": p,
-                "system": "wazuh",
-                "template": "auth-events",
-                "events": [{"data": {"srcip": "1.2.3.4"}}],
-            }
+            {"position": p, "events": [{"data_source": "logs-falco.alerts"}]}
             for p in positions
-        ]
+        ],
+        "uncovered": [],
+        "unrouted_leads": [],
     }
 
 
@@ -63,15 +60,20 @@ def test_validate_oracle_doc_accepts_empty_events_list():
     validate_oracle_doc(doc, expected_positions=[0, 1])
 
 
+def test_validate_oracle_doc_accepts_projections_only():
+    # uncovered / unrouted_leads are optional top-level keys
+    validate_oracle_doc({"projections": []}, expected_positions=[])
+
+
 def test_validate_oracle_doc_rejects_non_mapping():
-    with pytest.raises(LoopError, match="not parse to a mapping"):
+    with pytest.raises(LoopError, match="did not parse to a mapping"):
         validate_oracle_doc(["projections"], expected_positions=[0])
 
 
 def test_validate_oracle_doc_rejects_extra_top_level_keys():
     doc = _ok_doc(positions=(0,))
     doc["notes"] = "should not be here"
-    with pytest.raises(LoopError, match="exactly one top-level key"):
+    with pytest.raises(LoopError, match="unexpected top-level keys"):
         validate_oracle_doc(doc, expected_positions=[0])
 
 
@@ -89,7 +91,7 @@ def test_validate_oracle_doc_rejects_position_mismatch():
 
 def test_validate_oracle_doc_rejects_missing_projection_keys():
     doc = _ok_doc(positions=(0,))
-    del doc["projections"][0]["template"]
+    del doc["projections"][0]["events"]
     with pytest.raises(LoopError, match="missing keys"):
         validate_oracle_doc(doc, expected_positions=[0])
 
@@ -98,6 +100,13 @@ def test_validate_oracle_doc_rejects_unexpected_projection_keys():
     doc = _ok_doc(positions=(0,))
     doc["projections"][0]["coverage"] = "covered"
     with pytest.raises(LoopError, match="unexpected keys"):
+        validate_oracle_doc(doc, expected_positions=[0])
+
+
+def test_validate_oracle_doc_rejects_non_list_uncovered():
+    doc = _ok_doc(positions=(0,))
+    doc["uncovered"] = {"not": "a list"}
+    with pytest.raises(LoopError, match="`uncovered` is not a list"):
         validate_oracle_doc(doc, expected_positions=[0])
 
 

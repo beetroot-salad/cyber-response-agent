@@ -259,25 +259,40 @@ The current implementation uses three model-authored artifacts, not a single
 **Actor output** (`actor_story.md`) is plain markdown with exactly three
 numbered sections (`Attack story`, `Goal`, `Bypass`) or a single `SKIP:` line.
 
+**Oracle** is two-stage — generation and coverage-matching are decoupled so
+the matching can be deterministic:
+
+- **Stage A — footprint** (`footprint.md`, LLM). Sees only the alert + actor
+  story (no leads), and enumerates the events the activity writes into telemetry,
+  each with its *true native attributes* (`data_source`, `host`, `container_id`,
+  `source_ip`, `rule`, `when`, …). With no leads in view there is no per-lead
+  generation pressure, so nothing to overload.
+- **Stage B — router** (`_oracle_router.py`, deterministic). Places each
+  footprint event under the lead positions whose query it satisfies, by plain
+  containment over each query's structured `filters` block (`index`, `window`,
+  locator `predicates`). No query-language parsing: the filters are recovered
+  upstream (`scripts/lead_filters.py`) from the template that produced each query,
+  so routing is vendor-neutral.
+
 **Oracle output** (`projected_telemetry.yaml`) is a single YAML document:
 
 ```yaml
 projections:
   - position: 0
-    system: wazuh
-    template: auth-events
     events:
-      - {<event object matching the redacted exemplar shape>}
+      - {data_source: "logs-falco.alerts", container_id: "ffbff…", rule: "…", when: "…"}
   - position: 1
-    system: wazuh
-    template: recent-rule-fires
     events: []
+uncovered:                 # footprint events no lead's filter caught — the
+  - {data_source: "logs-system.syslog", note: "authorized_keys write"}   # mechanical coverage-gap signal
+unrouted_leads:            # positions with no structured filter (ad-hoc / un-promoted
+  - {position: 2, queries: [{id: elastic.some-coined-id, params: {…}}]}  # template); judge assesses from raw query
 ```
 
-The oracle sees alert, actor story, full lead sequence, and per-lead schema
-exemplars. `loop.py` redacts exemplars down to `### Raw Sample Events` JSON
-field/type skeletons, dropping counts, aggregations, and concrete values so
-the oracle cannot mirror the defender's actual results.
+Placement is by containment, so an out-of-envelope event (a sidecar's *different*
+container id) lands in `uncovered`, never overloaded into the nearest lead. The
+judge reads `uncovered` as a `lead-set` / `no-lead-exists` survival signal, modulo
+the `unrouted_leads` it must check by hand.
 
 **Judge output** (`judge_findings.yaml`) is a single YAML document:
 
