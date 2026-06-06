@@ -55,6 +55,7 @@ from _loop_subagents import (  # noqa: E402
     invoke_judge_benign,
     is_skip_story,
     project_actor_input,
+    telemetry_vocabulary,
 )
 from _loop_validate import (  # noqa: E402
     dump_oracle_doc,
@@ -76,7 +77,7 @@ __all__ = [
     "append_findings", "append_actor_observations", "append_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_footprint",
-    "build_oracle_doc",
+    "telemetry_vocabulary", "build_oracle_doc",
     "invoke_judge", "invoke_judge_benign", "is_skip_story", "project_actor_input",
     # Underscore names are part of the test-facing surface (loop._outcome_keyword,
     # loop._directions_for, loop._anchor_with_case_key); list them so they read as

@@ -476,8 +476,9 @@ def run_head_oracle_and_judge(
     # would otherwise escape the per-alert handler in run_secondary() and abort
     # the harness mid-loop with no summary written.
     try:
+        _vocab = loop_mod.telemetry_vocabulary(yaml.safe_load(lead_seq_text) or {})
         footprint_yaml = loop_mod.invoke_footprint(
-            head_run_dir / "alert.json", actor_story_path
+            head_run_dir / "alert.json", actor_story_path, _vocab
         )
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
         # _run_claude wraps subprocess.run with a timeout that raises

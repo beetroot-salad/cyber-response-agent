@@ -23,6 +23,8 @@ import uuid
 from pathlib import Path
 from typing import Protocol
 
+import yaml
+
 import mitre_corpus
 from _loop_persist import derive_alert_rule_key
 from _prologue import extract_case_entities
@@ -253,18 +255,87 @@ def invoke_actor_benign(
     return story
 
 
-def invoke_footprint(alert_path: Path, actor_story_path: Path) -> str:
-    """Oracle stage A: enumerate the story's telemetry footprint, lead-agnostic.
+def telemetry_vocabulary(lead_sequence: dict) -> str:
+    """Routable-vocabulary block for the footprint prompt, derived from the leads'
+    structured ``filters`` — the *canonical* layer the router matches on, not the
+    vendor-physical fields in raw sample docs.
 
-    No lead_sequence and no exemplars — the footprint is the events the activity
-    writes, with no view of the defender's queries, so there is nothing to
-    overload. Stage B (``_oracle_router.route``) places these events under the
-    leads whose structured filter they satisfy.
+    Two lists, both lifted straight from ``filters`` so they align with the router
+    by construction (no closed field-name list, no physical/logical guesswork):
+
+    - ``data_source`` tokens — distinct ``filters.index`` with the trailing
+      wildcard/separator stripped (``logs-falco.alerts-*`` -> ``logs-falco.alerts``),
+      i.e. the exact value ``event_satisfies`` compares ``data_source`` against.
+    - canonical event field names — distinct ``filters.predicates[].event_attr``,
+      the names the router reads off each event.
+
+    Returns ``""`` when no lead carries a structured filter (nothing to ground;
+    the footprint falls back to descriptive tokens and the run is degenerate
+    anyway).
+    """
+    tokens: list[str] = []
+    fields: list[str] = []
+    for entry in lead_sequence.get("entries") or []:
+        for q in entry.get("queries") or []:
+            f = q.get("filters")
+            if not isinstance(f, dict):
+                continue
+            idx = f.get("index")
+            if isinstance(idx, str) and idx:
+                core = idx.rstrip("*").rstrip("-.")   # mirror event_satisfies' core
+                if core:
+                    tokens.append(core)
+            for pred in f.get("predicates") or []:
+                attr = pred.get("event_attr") if isinstance(pred, dict) else None
+                for a in (attr if isinstance(attr, (list, tuple)) else [attr]):
+                    if isinstance(a, str) and a:
+                        fields.append(a)
+    tokens = list(dict.fromkeys(tokens))   # dedup, preserve first-seen order
+    fields = list(dict.fromkeys(fields))
+    if not tokens and not fields:
+        return ""
+    out: list[str] = []
+    if tokens:
+        out.append(
+            "Streams this deployment's telemetry lands in — emit `data_source` as one "
+            "of these exact tokens (one stream per event). For a stream not listed, use "
+            "a short descriptive token (it will read as uncovered, which is correct):"
+        )
+        out += [f"- {t}" for t in tokens]
+    if fields:
+        if out:
+            out.append("")
+        out.append(
+            "Canonical field names — when an event carries one of these entities, use "
+            "exactly this key (other native fields are still fine to add):"
+        )
+        out += [f"- {a}" for a in fields]
+    return "\n".join(out)
+
+
+def invoke_footprint(
+    alert_path: Path, actor_story_path: Path, vocabulary: str = ""
+) -> str:
+    """Oracle stage A: enumerate the story's telemetry footprint.
+
+    Sees the alert, the story, and the deployment's telemetry *vocabulary*
+    (data_source tokens + canonical field names from the leads' filters) — but
+    **not** the leads themselves: no queries, filters, windows, or coverage, so
+    there is still nothing to overload. The vocabulary grounds the tokens the
+    footprint emits so stage B (``_oracle_router.route``) can place each event by
+    containment instead of relying on the model to guess vendor index names.
     """
     user = (
         _section("alert", alert_path.read_text())
         + _section("actor_story", actor_story_path.read_text())
     )
+    if vocabulary:
+        user += _section(
+            "telemetry_vocabulary", vocabulary,
+            "the deployment's data_source tokens + canonical field names; emit events "
+            "using these so they land in the right stream. Vocabulary only — NOT the "
+            "defender's queries, filters, windows, or coverage.",
+        )
     return _run_claude(
         FOOTPRINT_PROMPT, user, model=FOOTPRINT_MODEL, effort=FOOTPRINT_EFFORT
     )
@@ -359,7 +430,9 @@ class ClaudePrintSubagents:
         )
 
     def footprint(self, run_dir: Path, actor_story_path: Path) -> str:
-        return invoke_footprint(run_dir / "alert.json", actor_story_path)
+        lead_sequence = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
+        vocab = telemetry_vocabulary(lead_sequence)
+        return invoke_footprint(run_dir / "alert.json", actor_story_path, vocab)
 
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
