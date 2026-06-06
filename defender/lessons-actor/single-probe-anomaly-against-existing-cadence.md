@@ -3,7 +3,7 @@ techniques: [T1040, T1046]
 alert_rule_ids: [rule-v2-falco-suspicious-network-tool]
 mutable: false
 recorded_at: e8e5c01b9664
-source_observation_ids: [20260530T133146Z-noise-alert-suspnet/1]
+source_observation_ids: [20260530T133146Z-noise-alert-suspnet/1, live-falco-nettool-e2e-1/1]
 relevance_criteria: bypass claims single-probe or low-count approach avoids volume-based anomaly detection for a network tool alert
 ---
 
