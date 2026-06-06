@@ -74,7 +74,9 @@ LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ACTOR_BENIGN_PROMPT = LEARNING_DIR / "actor_benign.md"
-ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
+# Oracle stage A (LLM footprint enumeration). Stage B is the deterministic
+# router in _oracle_router.py.
+FOOTPRINT_PROMPT = LEARNING_DIR / "footprint.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
 JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
 PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
@@ -119,12 +121,22 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
-ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
-# Telemetry projection is mechanical (stays sonnet for content fidelity per the
-# d2d72ab model decision), but at the inherited effort=high the oracle
-# intermittently spends 5-6 min / ~25K tokens on extended thinking that does not
-# improve projection fidelity. Pin low; override via ORACLE_EFFORT.
-ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
+# Story construction was never pinned, so the actor ran at the inherited global
+# `high` default. An effort A/B on a falco-nettool case (n=1/cell) found the
+# response bimodal: medium (~194s) ≈ high (~216s) in wall + thinking, while low
+# (~37s) sharply curtails reasoning. high was *dominated* by medium — medium was
+# both faster and better-grounded (it recovered the real jump-box IP + the
+# monitoring-probe fingerprint that high invented), so high buys nothing. Pinned
+# medium. low stays a 5x-cheaper fallback that still yields coherent (if blunter)
+# stories. Effort drives sophistication, not fact fidelity — that's corpus work.
+# Override via ACTOR_EFFORT.
+ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "medium")
+BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
+# Oracle stage A (footprint enumeration). Generative work — sonnet for content
+# fidelity (per the d2d72ab model decision); effort pinned low since matching is
+# now the deterministic router's job, not the LLM's. Override via FOOTPRINT_*.
+FOOTPRINT_MODEL = os.environ.get("FOOTPRINT_MODEL", "claude-sonnet-4-6")
+FOOTPRINT_EFFORT = os.environ.get("FOOTPRINT_EFFORT", "low")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already

@@ -128,18 +128,24 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ORACLE_PROJECTION_KEYS = {"position", "system", "template", "events"}
+_ORACLE_DOC_KEYS = {"projections", "uncovered", "unrouted_leads"}
+_ORACLE_PROJECTION_KEYS = {"position", "events"}
 
 
 def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
+    """Validate the two-stage oracle output (router emits this, not an LLM).
+
+    Shape: ``projections`` (one ``{position, events}`` per lead position, in
+    order), plus the mechanical coverage signals ``uncovered`` (footprint events
+    no routed lead caught) and ``unrouted_leads`` (positions with no structured
+    filter, for the judge to assess from the raw query).
+    """
     if not isinstance(doc, dict):
-        raise LoopError("oracle YAML did not parse to a mapping")
-    if set(doc.keys()) != {"projections"}:
-        raise LoopError(
-            f"oracle YAML must have exactly one top-level key `projections`; "
-            f"got {sorted(doc.keys())}"
-        )
-    projections = doc["projections"]
+        raise LoopError("oracle doc did not parse to a mapping")
+    extra = set(doc.keys()) - _ORACLE_DOC_KEYS
+    if extra:
+        raise LoopError(f"oracle doc has unexpected top-level keys: {sorted(extra)}")
+    projections = doc.get("projections")
     if not isinstance(projections, list):
         raise LoopError("oracle `projections` is not a list")
     if len(projections) != len(expected_positions):
@@ -149,7 +155,36 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
         )
     for i, p in enumerate(projections):
         _validate_oracle_projection(i, p, expected_positions[i])
+    for key in ("uncovered", "unrouted_leads"):
+        if key in doc and not isinstance(doc[key], list):
+            raise LoopError(f"oracle `{key}` is not a list")
     return doc
+
+
+class _NoAliasOracleDumper(yaml.SafeDumper):
+    """SafeDumper that never emits YAML anchors/aliases.
+
+    ``_oracle_router.route`` places the *same* footprint-event dict object under
+    every position whose filter matches it, so the default dumper would write the
+    event once as ``&id001`` and every later occurrence as a bare ``*id001``
+    alias. The judge is an LLM reading the raw YAML text — it cannot resolve an
+    alias, so it would silently lose the projected event for every lead after the
+    first match. Forcing inline emission keeps each projection self-contained.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def dump_oracle_doc(doc: dict) -> str:
+    """Serialize a routed oracle doc to YAML with every shared event inlined.
+
+    The judge reads this as text, so repeated events must be written out in full
+    under each lead, never as ``*alias`` back-references (see ``_NoAliasOracleDumper``).
+    """
+    return yaml.dump(
+        doc, Dumper=_NoAliasOracleDumper, sort_keys=False, default_flow_style=False
+    )
 
 
 def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:

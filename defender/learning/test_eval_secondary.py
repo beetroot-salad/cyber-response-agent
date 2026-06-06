@@ -386,10 +386,10 @@ def test_module_import_does_not_reexec():
 
 
 def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
-    """A subprocess.TimeoutExpired from invoke_oracle must surface as SecondaryError.
+    """A subprocess.TimeoutExpired from invoke_footprint must surface as SecondaryError.
 
     loop._run_claude wraps subprocess.run with a timeout, so a hung
-    oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
+    footprint child raises ``subprocess.TimeoutExpired`` (not the loop's
     LoopError). Earlier rev only caught LoopError; one timeout
     aborted the whole harness and prevented the summary from being
     written. This test pins the conversion.
@@ -414,14 +414,14 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
+        def telemetry_vocabulary(lead_sequence):
             return ""
 
         @staticmethod
-        def invoke_oracle(*_a, **_kw):
+        def invoke_footprint(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
-    with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
+    with pytest.raises(sec.SecondaryError, match="oracle footprint invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
 
 
@@ -435,7 +435,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
     staging.mkdir()
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
-    valid_oracle = "projections: []\n"
+    valid_footprint = "events: []\n"
 
     class FakeLoop:
         class LoopError(Exception):
@@ -446,20 +446,20 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
+        def telemetry_vocabulary(lead_sequence):
             return ""
 
         @staticmethod
-        def invoke_oracle(*_a, **_kw):
-            return valid_oracle
+        def invoke_footprint(*_a, **_kw):
+            return valid_footprint
 
         @staticmethod
-        def strip_yaml_fence(text):
-            return text
+        def build_oracle_doc(footprint_raw, lead_sequence):
+            return {"projections": [], "uncovered": [], "unrouted_leads": []}
 
         @staticmethod
-        def validate_oracle_doc(doc, positions):
-            return doc
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
 
         @staticmethod
         def invoke_judge(*_a, **_kw):
@@ -467,6 +467,73 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+
+
+def test_run_head_oracle_and_judge_passes_lead_sequence_to_judge(tmp_path: Path):
+    """The judge call must include lead_sequence_path as the 3rd positional arg.
+
+    Regression for the arity break: invoke_judge gained a required
+    lead_sequence_path parameter; if the call site isn't updated it raises a
+    TypeError that escapes the SecondaryError handler and aborts the harness.
+    A real (non-variadic) signature on the double catches that.
+    """
+    head_run = tmp_path
+    (head_run / "alert.json").write_text("{}")
+    (head_run / "investigation.md").write_text("")
+    lead_seq = head_run / "lead_sequence.yaml"
+    lead_seq.write_text("entries: []\n")
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    (staging / "actor_story.md").write_text("not a SKIP\n")
+
+    recorded = {}
+
+    class FakeLoop:
+        class LoopError(Exception):
+            pass
+
+        @staticmethod
+        def is_skip_story(text):
+            return False
+
+        @staticmethod
+        def telemetry_vocabulary(lead_sequence):
+            return ""
+
+        @staticmethod
+        def invoke_footprint(*_a, **_kw):
+            return "events: []\n"
+
+        @staticmethod
+        def build_oracle_doc(footprint_raw, lead_sequence):
+            return {"projections": [], "uncovered": [], "unrouted_leads": []}
+
+        @staticmethod
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
+
+        # Real signature — a wrong-arity call raises TypeError here.
+        @staticmethod
+        def invoke_judge(alert_path, investigation_path, lead_sequence_path,
+                         actor_story_path, projected_telemetry_path, learning_run_dir):
+            recorded["lead_sequence_path"] = lead_sequence_path
+            return "outcome: caught\ndefender_findings: []\n"
+
+        @staticmethod
+        def strip_yaml_fence(text):
+            return text
+
+        @staticmethod
+        def validate_judge_doc(doc):
+            return doc
+
+        @staticmethod
+        def _outcome_keyword(value):
+            return value
+
+    outcome = sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+    assert outcome == "caught"
+    assert recorded["lead_sequence_path"] == lead_seq
 
 
 def test_write_summary_appends_to_existing_index(tmp_path: Path):

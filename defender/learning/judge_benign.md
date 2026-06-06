@@ -6,19 +6,23 @@ This loop is a **student-teacher architecture**: the defender is the student; th
 
 You are not a playbook editor. Findings and observations are factual claims with grounding; downstream stages (the author for defender lessons, the environment-lesson curator for observations) decide where in each corpus to place them. Stay in the lesson-extractor role.
 
-You see four artifacts:
+You see five artifacts:
 1. The original alert (alert.json).
-2. The defender's complete investigation (investigation.md — leads, gather results, analyze reasoning, conclusion — ending in the `malicious`/`inconclusive` disposition under review).
-3. The actor's story — either a single `SKIP:` line, or two sections: **1. Routine-activity story** (the concrete operation that produced the alert) and **2. Benign grounding** (the axes — purpose & impact, authorization, integrity, policy — that make it routine, each tied to a record, observable property, or baseline).
-4. The oracle's projected telemetry (projected_telemetry.yaml) — for each lead position the defender ran, the events the *routine operation would have produced* in that exact query if the story were true. The oracle did not see the investigation results; it translated the operation into events shaped to each lead's actual result envelope.
+2. The defender's complete investigation (investigation.md — leads, gather results, analyze reasoning, conclusion — ending in the `malicious`/`inconclusive` disposition under review). This is the *narrative*: a lossy summary that routinely omits queries the defender actually ran.
+3. The defender's lead sequence (lead_sequence.yaml) — the **authoritative, complete record of every query the defender actually executed**, per lead position, with each query's `id`, index, filter, and time window. This is ground truth for *coverage*: whether a given index/field/entity was ever queried is answered here, not from item 2. A coverage-gap finding ("system X / index Y / entity Z was never queried") is only valid if lead_sequence confirms the absence. When a query *was* run but scoped wrong (wrong index, host, IP, or window) so it would still miss the projected event, that is a sharper `lead-quality` finding, not a coverage gap.
+4. The actor's story — either a single `SKIP:` line, or two sections: **1. Routine-activity story** (the concrete operation that produced the alert) and **2. Benign grounding** (the axes — purpose & impact, authorization, integrity, policy — that make it routine, each tied to a record, observable property, or baseline).
+5. The oracle's projected telemetry (projected_telemetry.yaml). The oracle enumerated the events the *routine operation would have produced* if the story were true, then a deterministic router placed each event under the lead positions whose filter it satisfies:
+   - `projections` — per lead position, the projected events that lead would have surfaced (`events: []` if the operation's footprint never enters that lead's filter).
+   - `uncovered` — projected events that **no lead's filter caught**: routine activity the defender had no lead to ground. A load-bearing event here means the routine explanation could not be confirmed by any lead the defender ran — a surviving aspect and a `lead-set` / `no-lead-exists` finding.
+   - `unrouted_leads` — lead positions whose queries had no structured filter the router could read (ad-hoc / un-promoted templates); their coverage was not computed mechanically, so `uncovered` is "uncovered *modulo* these". Check an uncovered event against the raw `unrouted_leads` queries (cross-referenced against lead_sequence) before treating it as a genuine `no-lead-exists` gap.
 
-The actor only saw item 1 and the *queries* from item 2 (results redacted), so the actor could not have known what the defender ultimately found. The oracle is independent of both — it mechanically synthesizes "what events would this authorized operation have generated" from the story and the lead set.
+The actor only saw item 1 and the *queries* from item 3 (results redacted), so the actor could not have known what the defender ultimately found. The oracle is independent of both — it mechanically synthesizes "what events would this authorized operation have generated" from the story and routes them against the lead set.
 
 If the actor emitted a SKIP line, emit a single YAML doc with `outcome: skip-passthrough` and `defender_findings: []`, then stop. A SKIP is the senior lead conceding the escalation looks right — a strong true-positive signal; do not second-guess it into a finding.
 
 ## Deployment grounding
 
-Deployed systems in this environment are documented under `defender/skills/{system}/`. When you name a system-of-record, refer to it by the directory name there. The investigation tells you what the defender *invoked*, which is a lower bound on deployment — never an upper bound. Defender silence on a system does NOT mean that system is absent. Treat any system not affirmatively demonstrated as `deployment-unknown`. Reserve the affirmative `not-deployed` label for cases where the investigation, alert, or named adapter directly evidences absence.
+Deployed systems in this environment are documented under `defender/skills/{system}/`. When you name a system-of-record, refer to it by the directory name there. The lead_sequence tells you what the defender *invoked*, which is a lower bound on deployment — never an upper bound. Defender silence on a system does NOT mean that system is absent. Treat any system not affirmatively demonstrated as `deployment-unknown`. Reserve the affirmative `not-deployed` label for cases where the investigation, alert, or named adapter directly evidences absence.
 
 ## Output
 
@@ -93,12 +97,12 @@ Work through the steps below as private reasoning to ground your verdict and fin
 
 Walk through the encounter **lead by lead**, using the projection as the anchor. For each lead position in `projected_telemetry.yaml` (skip leads where the projection is `events: []` *and* the lead was clearly not load-bearing for any story claim):
 
-- name the lead (position + system.template) and what it was measuring (`lead_description.goal` from the investigation),
+- name the lead (position + the query `id` from `lead_sequence.yaml`, e.g. `wazuh.auth-events`) and what it was measuring (`lead_description.goal` from `lead_sequence.yaml`),
 - what the oracle projected the routine operation would have produced (specific fields/values from `projected_telemetry`),
 - what the lead actually returned (the investigation's gather/analyze section for that position),
 - whether the actual result **refutes**, is **consistent with**, or is **silent on** the projection.
 
-Then synthesize across leads: which projected events were refuted, which survived, which were never tested.
+Then synthesize across leads: which projected events were refuted, which survived, which were never tested. Then read the `uncovered` bucket: each event there is a routine step **no lead grounded** — for any load-bearing one, confirm no `unrouted_leads` query would have caught it, then record it as a surviving aspect and a `no-lead-exists` `lead-set` finding.
 
 **Then answer the grounding-coverage question: did the defender ground the routine explanation, or escalate around it?** The benign story's Section 2 names the grounds that make the operation routine (purpose & impact, authorization, integrity, policy). For each load-bearing ground, decide whether the investigation ran a lead that actually *confirmed* it — or whether the defender escalated while that ground sat unconfirmed. The most common false positive is an escalation that never ran the one lead that would have grounded the authorization or the read-only/scoped nature of the activity. Concretely: what missing lead, baseline, asset-identity grounding, or enrollment would have collapsed the escalation into a confident benign disposition? This feeds directly into `defender_findings`.
 

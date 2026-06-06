@@ -30,8 +30,8 @@ from _loop_config import (  # noqa: E402
     LoopError,
     LoopPaths,
 )
-from _loop_exemplars import assemble_exemplar_bundle, redact_exemplar  # noqa: E402
 from _loop_orchestrate import (  # noqa: E402
+    build_oracle_doc,
     is_held_out,
     main,
     read_ground_truth,
@@ -50,13 +50,15 @@ from _loop_subagents import (  # noqa: E402
     Subagents,
     invoke_actor,
     invoke_actor_benign,
+    invoke_footprint,
     invoke_judge,
     invoke_judge_benign,
-    invoke_oracle,
     is_skip_story,
     project_actor_input,
+    telemetry_vocabulary,
 )
 from _loop_validate import (  # noqa: E402
+    dump_oracle_doc,
     normalize_disposition,
     strip_yaml_fence,
     validate_judge_benign_doc,
@@ -70,11 +72,12 @@ __all__ = [
     "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",
     "run_one", "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence",
-    "validate_oracle_doc", "validate_judge_doc", "validate_judge_benign_doc",
-    "assemble_exemplar_bundle", "redact_exemplar",
+    "validate_oracle_doc", "dump_oracle_doc",
+    "validate_judge_doc", "validate_judge_benign_doc",
     "append_findings", "append_actor_observations", "append_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
-    "invoke_actor", "invoke_actor_benign", "invoke_oracle",
+    "invoke_actor", "invoke_actor_benign", "invoke_footprint",
+    "telemetry_vocabulary", "build_oracle_doc",
     "invoke_judge", "invoke_judge_benign", "is_skip_story", "project_actor_input",
     # Underscore names are part of the test-facing surface (loop._outcome_keyword,
     # loop._directions_for, loop._anchor_with_case_key); list them so they read as

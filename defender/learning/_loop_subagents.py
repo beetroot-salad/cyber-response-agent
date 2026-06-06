@@ -23,18 +23,26 @@ import uuid
 from pathlib import Path
 from typing import Protocol
 
+import yaml
+
 import mitre_corpus
+from _loop_persist import derive_alert_rule_key
 from _prologue import extract_case_entities
 
 from _loop_config import (
     ACTOR_BENIGN_PROMPT,
+    ACTOR_EFFORT,
     ACTOR_MODEL,
     ACTOR_PROMPT,
     ACTOR_SETTINGS,
+    BENIGN_ACTOR_EFFORT,
     BENIGN_ACTOR_MODEL,
     BENIGN_ACTOR_SETTINGS,
     BENIGN_JUDGE_EFFORT,
     BENIGN_JUDGE_MODEL,
+    FOOTPRINT_EFFORT,
+    FOOTPRINT_MODEL,
+    FOOTPRINT_PROMPT,
     JUDGE_BENIGN_PROMPT,
     JUDGE_EFFORT,
     JUDGE_MODEL,
@@ -42,15 +50,11 @@ from _loop_config import (
     LESSONS_ACTOR_DIR,
     LESSONS_ENVIRONMENT_DIR,
     LoopError,
-    ORACLE_EFFORT,
-    ORACLE_MODEL,
-    ORACLE_PROMPT,
     PROJECT_SCRIPT,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
     _log,
 )
-from _loop_exemplars import assemble_exemplar_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +68,7 @@ def _run_claude(
     model: str,
     *,
     settings_path: Path | None = None,
-    add_dir: Path | None = None,
+    add_dir: Path | list[Path] | None = None,
     permission_mode: str | None = None,
     session_id: str | None = None,
     effort: str | None = None,
@@ -94,7 +98,8 @@ def _run_claude(
     if settings_path is not None:
         cmd += ["--settings", str(settings_path)]
     if add_dir is not None:
-        cmd += ["--add-dir", str(add_dir)]
+        for d in (add_dir if isinstance(add_dir, list) else [add_dir]):
+            cmd += ["--add-dir", str(d)]
     if permission_mode is not None:
         cmd += ["--permission-mode", permission_mode]
     if session_id is not None:
@@ -201,8 +206,11 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     (learning_run_dir / "actor_archetype.txt").write_text(archetype + "\n")
     (learning_run_dir / "actor_menu.txt").write_text(menu_text + "\n")
 
+    alert_rule_key = derive_alert_rule_key(json.loads(alert_path.read_text()))
     user = (
         _section("alert", alert_path.read_text())
+        + _section("alert_rule_id", alert_rule_key,
+                   "canonical rule key; pass verbatim to environment-fact retrieval")
         + _section("actor_input", actor_input_path.read_text(),
                    "lead sequence projected for the actor")
         + _section("actor_archetype", archetype)
@@ -210,8 +218,9 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     )
     session_id = str(uuid.uuid4())
     story = _run_claude(
-        ACTOR_PROMPT, user, model=ACTOR_MODEL,
-        settings_path=ACTOR_SETTINGS, add_dir=LESSONS_ACTOR_DIR,
+        ACTOR_PROMPT, user, model=ACTOR_MODEL, effort=ACTOR_EFFORT,
+        settings_path=ACTOR_SETTINGS,
+        add_dir=[LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR],
         permission_mode="acceptEdits", session_id=session_id,
     )
     _copy_transcript(session_id, learning_run_dir / "actor_trace.jsonl")
@@ -238,7 +247,7 @@ def invoke_actor_benign(
     )
     session_id = str(uuid.uuid4())
     story = _run_claude(
-        ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL,
+        ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL, effort=BENIGN_ACTOR_EFFORT,
         settings_path=BENIGN_ACTOR_SETTINGS, add_dir=LESSONS_ENVIRONMENT_DIR,
         permission_mode="acceptEdits", session_id=session_id,
     )
@@ -246,22 +255,90 @@ def invoke_actor_benign(
     return story
 
 
-def invoke_oracle(
-    alert_path: Path,
-    actor_story_path: Path,
-    lead_sequence_path: Path,
-    exemplar_bundle: str,
+def telemetry_vocabulary(lead_sequence: dict) -> str:
+    """Routable-vocabulary block for the footprint prompt, derived from the leads'
+    structured ``filters`` — the *canonical* layer the router matches on, not the
+    vendor-physical fields in raw sample docs.
+
+    Two lists, both lifted straight from ``filters`` so they align with the router
+    by construction (no closed field-name list, no physical/logical guesswork):
+
+    - ``data_source`` tokens — distinct ``filters.index`` with the trailing
+      wildcard/separator stripped (``logs-falco.alerts-*`` -> ``logs-falco.alerts``),
+      i.e. the exact value ``event_satisfies`` compares ``data_source`` against.
+    - canonical event field names — distinct ``filters.predicates[].event_attr``,
+      the names the router reads off each event.
+
+    Returns ``""`` when no lead carries a structured filter (nothing to ground;
+    the footprint falls back to descriptive tokens and the run is degenerate
+    anyway).
+    """
+    tokens: list[str] = []
+    fields: list[str] = []
+    for entry in lead_sequence.get("entries") or []:
+        for q in entry.get("queries") or []:
+            f = q.get("filters")
+            if not isinstance(f, dict):
+                continue
+            idx = f.get("index")
+            if isinstance(idx, str) and idx:
+                core = idx.rstrip("*").rstrip("-.")   # mirror event_satisfies' core
+                if core:
+                    tokens.append(core)
+            for pred in f.get("predicates") or []:
+                attr = pred.get("event_attr") if isinstance(pred, dict) else None
+                for a in (attr if isinstance(attr, (list, tuple)) else [attr]):
+                    if isinstance(a, str) and a:
+                        fields.append(a)
+    tokens = list(dict.fromkeys(tokens))   # dedup, preserve first-seen order
+    fields = list(dict.fromkeys(fields))
+    if not tokens and not fields:
+        return ""
+    out: list[str] = []
+    if tokens:
+        out.append(
+            "Streams this deployment's telemetry lands in — emit `data_source` as one "
+            "of these exact tokens (one stream per event). For a stream not listed, use "
+            "a short descriptive token (it will read as uncovered, which is correct):"
+        )
+        out += [f"- {t}" for t in tokens]
+    if fields:
+        if out:
+            out.append("")
+        out.append(
+            "Canonical field names — when an event carries one of these entities, use "
+            "exactly this key (other native fields are still fine to add):"
+        )
+        out += [f"- {a}" for a in fields]
+    return "\n".join(out)
+
+
+def invoke_footprint(
+    alert_path: Path, actor_story_path: Path, vocabulary: str = ""
 ) -> str:
+    """Oracle stage A: enumerate the story's telemetry footprint.
+
+    Sees the alert, the story, and the deployment's telemetry *vocabulary*
+    (data_source tokens + canonical field names from the leads' filters) — but
+    **not** the leads themselves: no queries, filters, windows, or coverage, so
+    there is still nothing to overload. The vocabulary grounds the tokens the
+    footprint emits so stage B (``_oracle_router.route``) can place each event by
+    containment instead of relying on the model to guess vendor index names.
+    """
     user = (
         _section("alert", alert_path.read_text())
         + _section("actor_story", actor_story_path.read_text())
-        + _section("lead_sequence", lead_sequence_path.read_text())
-        + _section(
-            "exemplars", exemplar_bundle,
-            "defender's actual gather_raw/{position}.json — schema reference, values scrubbed",
-        )
     )
-    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
+    if vocabulary:
+        user += _section(
+            "telemetry_vocabulary", vocabulary,
+            "the deployment's data_source tokens + canonical field names; emit events "
+            "using these so they land in the right stream. Vocabulary only — NOT the "
+            "defender's queries, filters, windows, or coverage.",
+        )
+    return _run_claude(
+        FOOTPRINT_PROMPT, user, model=FOOTPRINT_MODEL, effort=FOOTPRINT_EFFORT
+    )
 
 
 def _invoke_judge(
@@ -272,6 +349,7 @@ def _invoke_judge(
     label: str,
     alert_path: Path,
     investigation_path: Path,
+    lead_sequence_path: Path,
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
@@ -279,6 +357,12 @@ def _invoke_judge(
     user = (
         _section("alert", alert_path.read_text())
         + _section("investigation", investigation_path.read_text())
+        + _section(
+            "lead_sequence", lead_sequence_path.read_text(),
+            "the defender's actual executed queries per lead position — the "
+            "authoritative record of what was queried (index, filter, window). "
+            "investigation.md is the narrative; this is ground truth for coverage.",
+        )
         + _section("actor_story", actor_story_path.read_text())
         + _section("projected_telemetry", projected_telemetry_path.read_text())
     )
@@ -292,23 +376,24 @@ def _invoke_judge(
         _copy_transcript(session_id, learning_run_dir / trace_name)
 
 
-def invoke_judge(alert_path, investigation_path, actor_story_path,
+def invoke_judge(alert_path, investigation_path, lead_sequence_path, actor_story_path,
                  projected_telemetry_path, learning_run_dir) -> str:
     return _invoke_judge(
         JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-        alert_path, investigation_path, actor_story_path,
+        alert_path, investigation_path, lead_sequence_path, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
 
-def invoke_judge_benign(alert_path, investigation_path, actor_story_path,
-                        projected_telemetry_path, learning_run_dir) -> str:
+def invoke_judge_benign(alert_path, investigation_path, lead_sequence_path,
+                        actor_story_path, projected_telemetry_path,
+                        learning_run_dir) -> str:
     """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
     environment-observation stream alongside defender findings."""
     return _invoke_judge(
         JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
         "judge_benign_trace.jsonl", "judge-benign",
-        alert_path, investigation_path, actor_story_path,
+        alert_path, investigation_path, lead_sequence_path, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
@@ -322,7 +407,7 @@ class Subagents(Protocol):
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str: ...
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str: ...
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str: ...
+    def footprint(self, run_dir: Path, actor_story_path: Path) -> str: ...
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
     def judge_benign(self, run_dir: Path, actor_story_path: Path,
@@ -344,17 +429,16 @@ class ClaudePrintSubagents:
             run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
         )
 
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
-        lead_sequence_path = run_dir / "lead_sequence.yaml"
-        bundle = assemble_exemplar_bundle(run_dir, lead_sequence_path.read_text())
-        return invoke_oracle(
-            run_dir / "alert.json", actor_story_path, lead_sequence_path, bundle
-        )
+    def footprint(self, run_dir: Path, actor_story_path: Path) -> str:
+        lead_sequence = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
+        vocab = telemetry_vocabulary(lead_sequence)
+        return invoke_footprint(run_dir / "alert.json", actor_story_path, vocab)
 
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge(
             run_dir / "alert.json", run_dir / "investigation.md",
+            run_dir / "lead_sequence.yaml",
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )
 
@@ -362,5 +446,6 @@ class ClaudePrintSubagents:
                      projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge_benign(
             run_dir / "alert.json", run_dir / "investigation.md",
+            run_dir / "lead_sequence.yaml",
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )

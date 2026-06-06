@@ -32,7 +32,13 @@ from _loop_config import (
 from _loop_directions import BY_NAME, Direction, ObsTrigger
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
-from _loop_validate import normalize_disposition, strip_yaml_fence, validate_oracle_doc
+from _loop_validate import (
+    dump_oracle_doc,
+    normalize_disposition,
+    strip_yaml_fence,
+    validate_oracle_doc,
+)
+from _oracle_router import _event_attrs, route
 
 
 # ---------------------------------------------------------------------------
@@ -69,26 +75,74 @@ def is_held_out(run_dir: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _write_validated_oracle(
-    oracle_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
+def build_oracle_doc(footprint_raw: str, lead_sequence: dict) -> dict:
+    """Oracle stage B as a pure function: parse the stage-A footprint, route it
+    against the lead sequence's structured filters, and validate.
+
+    The footprint LLM emits ``events:``; the deterministic router places each
+    event under the leads it satisfies and emits ``projections`` + ``uncovered``
+    + ``unrouted_leads``. Raises ``LoopError`` on a malformed footprint or an
+    invalid routed doc.
+    """
+    expected_positions = [e.get("position") for e in lead_sequence.get("entries", [])]
+    parsed = yaml.safe_load(strip_yaml_fence(footprint_raw))
+    footprint = (parsed or {}).get("events") if isinstance(parsed, dict) else None
+    if not isinstance(footprint, list):
+        raise LoopError("footprint YAML has no `events` list")
+    # Validate event shape before routing: the router accesses event/attrs as
+    # mappings, so a stray scalar in the LLM-authored list would otherwise raise
+    # an AttributeError that escapes the caller's (yaml.YAMLError, LoopError)
+    # catch and aborts the run. Surface it as a clean LoopError instead.
+    for i, ev in enumerate(footprint):
+        attrs = _event_attrs(ev)
+        if not isinstance(attrs, dict):
+            raise LoopError(
+                f"footprint event {i} is not a mapping (got {type(ev).__name__})"
+            )
+    doc = route(footprint, lead_sequence)
+    validate_oracle_doc(doc, expected_positions)
+    return doc
+
+
+def _route_and_write_oracle(
+    footprint_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
 ) -> Path:
-    """Strip + validate the oracle YAML against the lead_sequence positions; write it."""
-    lead_sequence_text = (run_dir / "lead_sequence.yaml").read_text()
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
-    ]
-    stripped = strip_yaml_fence(oracle_raw)
+    """Run stage B and write the projected telemetry; dump the raw footprint on
+    any failure for debugging."""
+    lead_sequence = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
     raw_path = learning_run_dir / (Path(out_name).stem + ".raw.txt")
     try:
-        validate_oracle_doc(yaml.safe_load(stripped), expected_positions)
+        doc = build_oracle_doc(footprint_raw, lead_sequence)
     except (yaml.YAMLError, LoopError) as e:
-        raw_path.write_text(oracle_raw)
-        raise LoopError(f"oracle YAML invalid: {e}") from e
+        raw_path.write_text(footprint_raw)
+        raise LoopError(f"oracle footprint/route invalid: {e}") from e
+
+    # Always persist the stage-A footprint: the projected_telemetry.yaml on disk
+    # is the *routed transform* of it, so without the raw enumeration a wrong
+    # coverage verdict can't be traced back to whether stage A or the router
+    # produced it (the LLM call is not cheap to reproduce).
+    raw_path.write_text(footprint_raw)
+
+    # Degenerate-state signal: if leads exist but no query carried a structured
+    # filter the router could read (e.g. no template declares `filter_keys` for
+    # this deployment's catalog), every footprint event lands in `uncovered` and
+    # the mechanical coverage signal is vacuous. Warn so this isn't read as
+    # "every attack step is a proven gap" — the judge falls back to raw queries.
+    n_entries = len(lead_sequence.get("entries", []))
+    has_any_filter = any(
+        isinstance(q.get("filters"), dict)
+        for e in lead_sequence.get("entries", [])
+        for q in (e.get("queries") or [])
+    )
+    if n_entries and not has_any_filter:
+        _log(
+            f"WARNING: oracle router routed 0 of {n_entries} leads — no query "
+            "carried a structured filter (catalog has no filter_keys?); coverage "
+            "signal is degenerate, all footprint events are 'uncovered modulo unrouted'."
+        )
+
     out_path = learning_run_dir / out_name
-    out_path.write_text(stripped)
-    if stripped != oracle_raw:
-        raw_path.write_text(oracle_raw)
+    out_path.write_text(dump_oracle_doc(doc))
     return out_path
 
 
@@ -148,9 +202,9 @@ def run_direction(
         return False
 
     _log(f"step=oracle ({spec.name})")
-    oracle_raw = agents.oracle(run_dir, actor_story_path)
-    telemetry_path = _write_validated_oracle(
-        oracle_raw, run_dir, learning_run_dir, spec.telemetry_name
+    footprint_raw = agents.footprint(run_dir, actor_story_path)
+    telemetry_path = _route_and_write_oracle(
+        footprint_raw, run_dir, learning_run_dir, spec.telemetry_name
     )
 
     judge_raw = spec.invoke_judge(
@@ -366,7 +420,8 @@ Outputs:
   defender/learning/runs/<run_id>/
     actor_input.yaml               adversarial actor-facing projection (queries only)
     actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
-    projected_telemetry[_benign].yaml  oracle's per-lead synthesized events
+    projected_telemetry[_benign].yaml  routed oracle output: projections + uncovered + unrouted_leads
+    projected_telemetry[_benign].raw.txt  stage-A footprint (raw LLM enumeration, pre-routing)
     judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
     appended queueable defender findings (both directions, tagged `direction`);
@@ -378,10 +433,10 @@ Outputs:
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
-  ORACLE_MODEL                         telemetry oracle (sonnet by design — Haiku
-                                       fabricated 1/3 projections in an N=3 test)
-  ORACLE_EFFORT                        oracle reasoning effort (default: low — mechanical
-                                       projection gains nothing from extended thinking)
+  FOOTPRINT_MODEL                      oracle stage-A footprint (sonnet by design —
+                                       generative; stage B is the deterministic router)
+  FOOTPRINT_EFFORT                     footprint reasoning effort (default: low — matching
+                                       is the router's job, not the LLM's)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: low — the prompt
                                        fully scaffolds the analysis, so high over-thinks)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge
