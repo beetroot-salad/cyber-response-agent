@@ -4,18 +4,18 @@ The story may be a malicious attack (adversarial direction) or an authorized ope
 
 ## Event attributes
 
-For each event emit its **true native attributes** as they would appear in the source record. Use these canonical keys where they apply (a downstream router matches on them):
+For each event emit its **native attributes** as they would appear in the source record. Use these canonical keys where they apply (a downstream router groups events by them):
 
 - `when` — ISO 8601 timestamp.
-- `data_source` — the index/data-stream the event lands in. Use the real tokens: `logs-falco.alerts` (Falco eBPF), `logs-system.auth` (sshd/sudo/syslog auth), `logs-zeek.connection` / `logs-zeek.ssh` (Zeek), `logs-postgresql` (Postgres), `.internal.alerts-security.alerts-default` (a fired detection-engine alert), `cmdb` / `elastic-agent-enrollment` (state, not a log stream).
+- `data_source` — the logical telemetry stream the event lands in (an index, data-stream, or log channel). This is a **grouping key, not a real-world fact to get "right"**: the router only ever compares it against the leads' own declared streams, never against the defender's actual results. So what matters is **internal consistency** — every event of the same kind carries the **same** `data_source`, and you **mirror the vocabulary the alert itself uses** for its own stream rather than inventing a vendor index name. Do not name a specific product's index convention. For a stream the alert doesn't name (auth logs, network flow, an enrollment/state lookup), use a short consistent descriptive token (`auth-log`, `network-flow`, `host-state`) or an `<angle-placeholder>` — never a fabricated concrete index name.
 - `host` — the host the event is recorded on (the event's OWN host: a pivot into host-B writes host-B's auth log, not host-A's).
 - `container_id` — only if the event is inside a container, and the event's **own** container (a newly-launched sidecar has its OWN id, not the alert's container).
 - `source_ip`, `dest_ip`, `dest_port`, `host_ip` — as the record carries them.
 - `process`, `user`, `cmdline` — process name, acting user, command line.
-- `rule` — the detection/Falco rule name that fires, if any.
+- `rule` — the detection rule name that fires, if any (mirror the phrasing the alert uses for its own rule).
 - `event_id` — a document id, only if the story implies a specific known id (rare).
 
-Add any other field the event natively carries. Use entities named in the story. For specifics the story leaves unnamed, use an `<angle-placeholder>` exactly where a concrete value would go (`<sidecar-container-id>`, `<internal-target-ip>`, `<c2-domain>`) — placeholders are honest; fabricated concrete values are not.
+Add any other field the event natively carries. Use entities named in the story or the alert. For specifics the story leaves unnamed, use an `<angle-placeholder>` exactly where a concrete value would go (`<sidecar-container-id>`, `<internal-target-ip>`, `<c2-domain>`) — placeholders are honest; fabricated concrete values are not.
 
 ## Rules
 
@@ -28,12 +28,14 @@ Add any other field the event natively carries. Use entities named in the story.
 
 Emit a single YAML document as your entire response. No fence, no preamble, no trailing commentary. The first character is `e` (the start of `events:`).
 
+The `data_source` / `rule` tokens below are illustrative placeholders — substitute the vocabulary the **alert** uses for its own stream and rule.
+
 ```
 events:
   - id: e1
-    attrs: { when: "2026-06-04T14:00:54Z", data_source: "logs-falco.alerts", host: "...", container_id: "...", rule: "...", process: "...", cmdline: "..." }
+    attrs: { when: "2026-06-04T14:00:54Z", data_source: "<alerting-stream>", host: "...", container_id: "...", rule: "...", process: "...", cmdline: "..." }
   - id: e2
-    attrs: { when: "...", data_source: "logs-system.auth", host: "...", source_ip: "...", user: "...", process: "sshd" }
+    attrs: { when: "...", data_source: "auth-log", host: "...", source_ip: "...", user: "...", process: "..." }
 ```
 
-Double-quote **every** string value — no exceptions. The `attrs` are inline flow mappings (`{ k: v, … }`), so a single unquoted special character breaks the whole event: any value containing `:`, `,`, `{`, `}`, `[`, `]`, `#`, `&`, `*`, `>`, `<`, `|`, `!`, `%`, `@`, `` ` ``, or a leading space **must** be double-quoted, or the document fails to parse. This bites `rule` and `cmdline` most (e.g. `rule: "Falco: New binary dropped"`, `cmdline: "bash -c {curl x | sh}"`). Numbers, booleans, and `null` stay unquoted. Quote any key beginning with `@`.
+Double-quote **every** string value — no exceptions. The `attrs` are inline flow mappings (`{ k: v, … }`), so a single unquoted special character breaks the whole event: any value containing `:`, `,`, `{`, `}`, `[`, `]`, `#`, `&`, `*`, `>`, `<`, `|`, `!`, `%`, `@`, `` ` ``, or a leading space **must** be double-quoted, or the document fails to parse. This bites `rule` and `cmdline` most (e.g. `rule: "Detection: new binary executed in container"`, `cmdline: "bash -c {curl x | sh}"`). Numbers, booleans, and `null` stay unquoted. Quote any key beginning with `@`.
