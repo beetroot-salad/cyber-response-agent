@@ -414,6 +414,10 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
+        def telemetry_vocabulary(lead_sequence):
+            return ""
+
+        @staticmethod
         def invoke_footprint(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
@@ -440,6 +444,10 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         @staticmethod
         def is_skip_story(text):
             return False
+
+        @staticmethod
+        def telemetry_vocabulary(lead_sequence):
+            return ""
 
         @staticmethod
         def invoke_footprint(*_a, **_kw):
@@ -487,6 +495,10 @@ def test_run_head_oracle_and_judge_passes_lead_sequence_to_judge(tmp_path: Path)
         @staticmethod
         def is_skip_story(text):
             return False
+
+        @staticmethod
+        def telemetry_vocabulary(lead_sequence):
+            return ""
 
         @staticmethod
         def invoke_footprint(*_a, **_kw):

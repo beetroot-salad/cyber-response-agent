@@ -27,7 +27,42 @@ LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
 validate_oracle_doc = loop.validate_oracle_doc
 build_oracle_doc = loop.build_oracle_doc
+telemetry_vocabulary = loop.telemetry_vocabulary
 append_actor_observations = loop.append_actor_observations
+
+
+# ---------------------------------------------------------------------------
+# telemetry_vocabulary — routable tokens + canonical fields from lead filters
+# (router-aligned by construction; no vendor-physical sample fields)
+# ---------------------------------------------------------------------------
+
+
+def test_telemetry_vocabulary_derives_logical_tokens_and_fields():
+    ls = {"entries": [
+        {"position": 0, "queries": [{"id": "a", "filters": {
+            "index": "logs-falco.alerts-*",
+            "predicates": [{"event_attr": "container_id", "op": "eq", "value": "x"},
+                           {"event_attr": "process", "op": "set", "values": ["nc"]}],
+        }}]},
+        {"position": 1, "queries": [{"id": "b", "filters": {
+            "index": "logs-falco.alerts-*",                       # dup token -> once
+            "predicates": [{"event_attr": ["host_ip", "source_ip"], "op": "eq", "value": "y"}],
+        }}]},
+        {"position": 2, "queries": [{"id": "c", "filters": None}]},  # unrouted -> ignored
+    ]}
+    v = telemetry_vocabulary(ls)
+    # logical token (stripped of `-*`), deduped, NOT the physical `.ds-…`
+    assert v.count("- logs-falco.alerts") == 1
+    assert ".ds-" not in v and "logs-falco.alerts-*" not in v
+    # canonical field names, list-valued event_attr flattened
+    for f in ("container_id", "process", "host_ip", "source_ip"):
+        assert f"- {f}" in v
+
+
+def test_telemetry_vocabulary_empty_when_no_structured_filter():
+    ls = {"entries": [{"position": 0, "queries": [{"id": "a", "filters": None}]}]}
+    assert telemetry_vocabulary(ls) == ""
+    assert telemetry_vocabulary({}) == ""
 
 
 # ---------------------------------------------------------------------------
