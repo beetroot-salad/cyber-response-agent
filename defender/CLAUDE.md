@@ -20,7 +20,8 @@ defender/
   learning/            # offline learning loop — two directions off the disposition
                        #   loop.py             # run_one dispatch: benign disp → adversarial,
                        #                        #   malicious → benign (FP), inconclusive → both
-                       #   oracle.md           # shared telemetry projector (both directions)
+                       #   footprint.md        # oracle stage A: LLM enumerates the attack's telemetry footprint
+                       #   _oracle_router.py   # oracle stage B: deterministic containment routing -> projections/uncovered
                        #   --- adversarial (false-negative) direction ---
                        #   actor.md            # red-team actor (MITRE-sampled attack story)
                        #   judge.md            # caught|survived|… ; defender_findings + actor_observations

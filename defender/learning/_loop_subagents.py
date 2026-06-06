@@ -48,9 +48,6 @@ from _loop_config import (
     LESSONS_ACTOR_DIR,
     LESSONS_ENVIRONMENT_DIR,
     LoopError,
-    ORACLE_EFFORT,
-    ORACLE_MODEL,
-    ORACLE_PROMPT,
     PROJECT_SCRIPT,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
@@ -254,24 +251,6 @@ def invoke_actor_benign(
     )
     _copy_transcript(session_id, learning_run_dir / "actor_benign_trace.jsonl")
     return story
-
-
-def invoke_oracle(
-    alert_path: Path,
-    actor_story_path: Path,
-    lead_sequence_path: Path,
-    exemplar_bundle: str,
-) -> str:
-    user = (
-        _section("alert", alert_path.read_text())
-        + _section("actor_story", actor_story_path.read_text())
-        + _section("lead_sequence", lead_sequence_path.read_text())
-        + _section(
-            "exemplars", exemplar_bundle,
-            "defender's actual gather_raw/{position}.json — schema reference, values scrubbed",
-        )
-    )
-    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
 
 
 def invoke_footprint(alert_path: Path, actor_story_path: Path) -> str:
