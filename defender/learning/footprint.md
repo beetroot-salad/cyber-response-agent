@@ -36,4 +36,4 @@ events:
     attrs: { when: "...", data_source: "logs-system.auth", host: "...", source_ip: "...", user: "...", process: "sshd" }
 ```
 
-Double-quote every string value. Numbers, booleans, and `null` stay unquoted. Quote any key beginning with `@`.
+Double-quote **every** string value — no exceptions. The `attrs` are inline flow mappings (`{ k: v, … }`), so a single unquoted special character breaks the whole event: any value containing `:`, `,`, `{`, `}`, `[`, `]`, `#`, `&`, `*`, `>`, `<`, `|`, `!`, `%`, `@`, `` ` ``, or a leading space **must** be double-quoted, or the document fails to parse. This bites `rule` and `cmdline` most (e.g. `rule: "Falco: New binary dropped"`, `cmdline: "bash -c {curl x | sh}"`). Numbers, booleans, and `null` stay unquoted. Quote any key beginning with `@`.

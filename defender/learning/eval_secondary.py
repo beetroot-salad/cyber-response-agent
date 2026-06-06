@@ -498,6 +498,7 @@ def run_head_oracle_and_judge(
         judge_yaml = loop_mod.invoke_judge(
             head_run_dir / "alert.json",
             head_run_dir / "investigation.md",
+            lead_seq_path,
             actor_story_path,
             projected_path,
             staging_dir,

@@ -148,16 +148,34 @@ def test_recovery_is_whitespace_insensitive(catalog):
 
 def test_local_anchor_survives_divergent_earlier_clause(catalog):
     # The model rendered `evt.type` where the template has
-    # `falco.output_fields.evt.type`; the container_id predicate (a *later* local
-    # token) must still recover.
+    # `falco.output_fields.evt.type`. Every locator anchors on its own LOCAL
+    # clause, so both the container_id predicate and the @timestamp window
+    # recover despite the divergent middle clause.
     arg0 = ('falco.output_fields.container.id: "a36492b5172b" AND '
             'evt.type: "execve" AND @timestamp:[2026-06-02T21:14:26Z TO 2026-06-02T21:34:26Z]')
     f = lf.recover_filters("elastic.launch-tool", {"arg0": arg0})
     assert {"op": "eq", "event_attr": "container_id", "value": "a36492b5172b"} in f["predicates"]
+    assert f["window"] == {"start": "2026-06-02T21:14:26Z", "end": "2026-06-02T21:34:26Z"}
 
 
-def test_unrecoverable_param_predicate_is_dropped_not_errored(catalog):
-    # A query string that doesn't contain the templated field at all → the
-    # predicate is dropped (non-discriminating), recovery still returns a dict.
+def test_unrecoverable_declared_locator_unroutes_not_widens(catalog):
+    # A query string that doesn't contain the templated field/window at all → the
+    # declared locator can't be bound. Recovery returns None (router → unrouted)
+    # rather than a half-recovered filter that would over-claim coverage.
     f = lf.recover_filters("elastic.falco-timeline", {"arg0": "totally unrelated query text"})
-    assert f == {"index": "logs-falco.alerts-*"}
+    assert f is None
+
+
+def test_ambiguous_param_value_unroutes(catalog):
+    # Two distinct values for the same pinned field (e.g. an OR clause) is
+    # ambiguous — recovery abstains rather than silently binding the first.
+    arg0 = ('falco.output_fields.container.id: "AAA" OR '
+            'falco.output_fields.container.id: "BBB" AND '
+            '@timestamp:[2026-06-02T21:14:26Z TO 2026-06-02T21:34:26Z]')
+    assert lf.recover_filters("elastic.launch-tool", {"arg0": arg0}) is None
+
+
+def test_empty_quoted_value_unroutes(catalog):
+    # An empty quoted hole recovers to '' — not a real binding. A substring ''
+    # would match every event, so abstain (unroute) instead.
+    assert lf.recover_filters("elastic.syslog-scan", {"arg0": 'message: *""*'}) is None

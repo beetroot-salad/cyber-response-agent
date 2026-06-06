@@ -84,6 +84,16 @@ def build_oracle_doc(footprint_raw: str, lead_sequence: dict) -> dict:
     footprint = (parsed or {}).get("events") if isinstance(parsed, dict) else None
     if not isinstance(footprint, list):
         raise LoopError("footprint YAML has no `events` list")
+    # Validate event shape before routing: the router accesses event/attrs as
+    # mappings, so a stray scalar in the LLM-authored list would otherwise raise
+    # an AttributeError that escapes the caller's (yaml.YAMLError, LoopError)
+    # catch and aborts the run. Surface it as a clean LoopError instead.
+    for i, ev in enumerate(footprint):
+        attrs = ev.get("attrs", ev) if isinstance(ev, dict) else ev
+        if not isinstance(attrs, dict):
+            raise LoopError(
+                f"footprint event {i} is not a mapping (got {type(ev).__name__})"
+            )
     doc = route(footprint, lead_sequence)
     validate_oracle_doc(doc, expected_positions)
     return doc
@@ -101,6 +111,19 @@ def _route_and_write_oracle(
     except (yaml.YAMLError, LoopError) as e:
         raw_path.write_text(footprint_raw)
         raise LoopError(f"oracle footprint/route invalid: {e}") from e
+
+    # Degenerate-state signal: if leads exist but none carried a structured
+    # filter the router could read (e.g. no template declares `filter_keys` for
+    # this deployment's catalog), every footprint event lands in `uncovered` and
+    # the mechanical coverage signal is vacuous. Warn so this isn't read as
+    # "every attack step is a proven gap" — the judge falls back to raw queries.
+    n_entries = len(lead_sequence.get("entries", []))
+    if n_entries and len(doc.get("unrouted_leads", [])) == n_entries:
+        _log(
+            f"WARNING: oracle router routed 0 of {n_entries} leads — no query "
+            "carried a structured filter (catalog has no filter_keys?); coverage "
+            "signal is degenerate, all footprint events are 'uncovered modulo unrouted'."
+        )
 
     out_path = learning_run_dir / out_name
     out_path.write_text(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False))

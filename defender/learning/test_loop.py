@@ -27,7 +27,46 @@ _spec.loader.exec_module(loop)
 LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
 validate_oracle_doc = loop.validate_oracle_doc
+build_oracle_doc = loop.build_oracle_doc
 append_actor_observations = loop.append_actor_observations
+
+
+# ---------------------------------------------------------------------------
+# build_oracle_doc — footprint shape guard (malformed LLM output -> LoopError,
+# not an AttributeError that escapes the caller's catch and aborts the run)
+# ---------------------------------------------------------------------------
+
+
+_LS_ONE_FILTERED = {
+    "entries": [{
+        "position": 0,
+        "queries": [{"id": "x.q", "params": {}, "filters": {
+            "index": "logs-falco.alerts-*",
+            "predicates": [{"event_attr": "container_id", "op": "eq", "value": "abc"}],
+        }}],
+    }]
+}
+
+
+@pytest.mark.parametrize("footprint_yaml", [
+    "events:\n  - just a bare string\n",
+    "events:\n  - 5\n",
+    "events:\n  - null\n",
+    "events:\n  - attrs: not-a-mapping\n",
+])
+def test_build_oracle_doc_rejects_non_mapping_event(footprint_yaml):
+    with pytest.raises(LoopError, match="not a mapping"):
+        build_oracle_doc(footprint_yaml, _LS_ONE_FILTERED)
+
+
+def test_build_oracle_doc_routes_valid_footprint():
+    fp = ('events:\n'
+          '  - id: e1\n'
+          '    attrs: {container_id: "abc", data_source: "logs-falco.alerts"}\n')
+    doc = build_oracle_doc(fp, _LS_ONE_FILTERED)
+    assert doc["projections"][0]["events"] == [
+        {"container_id": "abc", "data_source": "logs-falco.alerts"}]
+    assert doc["uncovered"] == []
 
 
 # ---------------------------------------------------------------------------

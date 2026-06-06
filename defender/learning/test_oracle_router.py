@@ -98,6 +98,72 @@ def test_unknown_op_is_non_discriminating():
     assert event_satisfies({"data_source": "logs-zeek", "z": "1"}, f) is True
 
 
+# ---- timezone normalization (naive vs aware must not crash) ---------------
+
+def test_window_naive_event_aware_does_not_crash():
+    # window bounds naive (no Z), event `when` aware (Z) — must compare, not raise.
+    f = {"index": "logs-falco.alerts-*",
+         "window": {"start": "2026-06-04T14:00:00", "end": "2026-06-04T14:10:00"},
+         "predicates": []}
+    ev = {"data_source": "logs-falco.alerts", "when": "2026-06-04T14:05:00Z"}
+    assert event_satisfies(ev, f) is True
+
+
+def test_window_aware_event_naive_does_not_crash():
+    f = {"index": "logs-falco.alerts-*",
+         "window": {"start": "2026-06-04T14:00:00Z", "end": "2026-06-04T14:10:00Z"},
+         "predicates": []}
+    ev = {"data_source": "logs-falco.alerts", "when": "2026-06-04T14:05:00"}
+    assert event_satisfies(ev, f) is True
+    out = {"data_source": "logs-falco.alerts", "when": "2026-06-04T18:00:00"}
+    assert event_satisfies(out, f) is False
+
+
+def test_embedded_z_not_mangled():
+    # only a TRAILING Z is the zulu marker; an interior Z must not be rewritten.
+    f = {"index": "logs-*", "window": {"start": "2026-06-04T14:00:00Z",
+                                       "end": "2026-06-04T14:10:00Z"}, "predicates": []}
+    ev = {"data_source": "logs-zeek", "when": "2026-06-04T14:05:00Z"}
+    assert event_satisfies(ev, f) is True
+
+
+# ---- index boundary matching (no sibling-prefix false positives) ---------
+
+def test_index_no_data_source_excluded():
+    # an event naming no source can't be proven in the index -> not covered.
+    f = {"index": "logs-falco.alerts-*",
+         "predicates": [{"event_attr": "container_id", "op": "eq", "value": "abc"}]}
+    assert event_satisfies({"container_id": "abc"}, f) is False
+
+
+def test_index_sibling_prefix_excluded():
+    f = {"index": "logs-system.auth-*", "predicates": []}
+    # neither a coarser parent nor a different sibling dataset matches
+    assert event_satisfies({"data_source": "logs-system"}, f) is False
+    assert event_satisfies({"data_source": "logs-system.authpriv"}, f) is False
+    assert event_satisfies({"data_source": "logs-system.auth"}, f) is True
+    assert event_satisfies({"data_source": "logs-system.auth-default"}, f) is True
+
+
+def test_index_wildcard_respects_token_boundary():
+    f = {"index": "logs-*", "predicates": []}
+    assert event_satisfies({"data_source": "logs-system.auth"}, f) is True
+    assert event_satisfies({"data_source": "logstash-application"}, f) is False
+
+
+# ---- placeholders never positively match ---------------------------------
+
+def test_placeholder_substring_does_not_match():
+    f = {"index": "logs-*", "predicates": [{"event_attr": "host", "op": "substring", "value": "db"}]}
+    assert event_satisfies({"data_source": "logs-zeek", "host": "<db-host-placeholder>"}, f) is False
+
+
+def test_placeholder_skipped_in_no_attr_blob():
+    f = {"index": "logs-*", "predicates": [{"op": "substring", "value": "db"}]}
+    assert event_satisfies({"data_source": "logs-zeek", "host": "<db-host>"}, f) is False
+    assert event_satisfies({"data_source": "logs-zeek", "host": "db-prod-1"}, f) is True
+
+
 # ---- the overload case (the whole point) ---------------------------------
 
 def test_route_sends_sidecar_to_uncovered_not_overloaded():

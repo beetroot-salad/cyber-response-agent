@@ -24,29 +24,54 @@ modulo unrouted_leads").
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _parse_ts(value):
+    """Parse an ISO-8601 timestamp to a *tz-aware* datetime (assume UTC if naive).
+
+    Footprint events and recovered window bounds are independently authored, so
+    one side may carry a ``Z``/offset and the other may not. Normalizing both to
+    aware-UTC keeps ``lo <= ts <= hi`` from raising ``TypeError: can't compare
+    offset-naive and offset-aware datetimes``. Only a *trailing* ``Z`` is the
+    zulu marker — don't rewrite a ``Z`` embedded elsewhere in the string.
+    """
     if not value:
         return None
+    s = str(value).strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s)
     except (TypeError, ValueError):
         return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _is_placeholder(value) -> bool:
+    """True for an ``<angle-bracket>`` placeholder — an unspecified entity.
+
+    The footprint stage emits these where a concrete value is unknown
+    (footprint.md). They name nothing, so they must never positively satisfy a
+    locator predicate: an event whose pinned field is a placeholder is *not*
+    confirmed to be in any lead's envelope, so it belongs in ``uncovered``.
+    """
+    s = str(value).strip()
+    return len(s) >= 2 and s[0] == "<" and s[-1] == ">"
 
 
 def _event_values(event: dict, attr) -> set[str]:
     """String values an event carries for ``attr`` (a name or list of names).
 
     A list means "any of these" — e.g. a query that pins an IP that could land
-    in either ``source_ip`` or ``host_ip`` on the event side.
+    in either ``source_ip`` or ``host_ip`` on the event side. Placeholder values
+    are skipped (treated as absent — an unspecified entity matches nothing).
     """
     attrs = attr if isinstance(attr, (list, tuple)) else [attr]
     out: set[str] = set()
     for a in attrs:
         v = event.get(a)
-        if v is not None:
+        if v is not None and not _is_placeholder(v):
             out.add(str(v))
     return out
 
@@ -78,7 +103,9 @@ def _predicate_holds(event: dict, pred: dict) -> bool:
         if attr:
             blob = " ".join(_event_values(event, attr)).lower()
         else:
-            blob = " ".join(str(v) for v in event.values()).lower()
+            blob = " ".join(
+                str(v) for v in event.values() if not _is_placeholder(v)
+            ).lower()
         return any(lit.lower() in blob for lit in lits)
     return True  # unknown op -> non-discriminating, never a false exclusion
 
@@ -88,11 +115,22 @@ def event_satisfies(event: dict, filters: dict) -> bool:
     index = filters.get("index")
     if index:
         ds = str(event.get("data_source") or event.get("index") or "")
-        base = index.rstrip("*").rstrip("-.")
-        # Mutual-prefix so "logs-*" matches everything and a bare "logs" event
-        # isn't falsely excluded.
-        if ds and base and not (ds.startswith(base) or base.startswith(ds)):
-            return False
+        raw = index.rstrip("*")           # keep the trailing separator: "logs-"
+        core = raw.rstrip("-.")           # the dataset core: "logs", "logs-system.auth"
+        if core:
+            # An event that names no source can't be proven to sit in this index,
+            # so don't claim coverage for it (it falls through to `uncovered`).
+            # Otherwise: exact dataset match, or — for a separator-terminated
+            # wildcard pattern — a name that extends *past* that separator. This
+            # is a token boundary, so "logs-*" matches "logs-system.auth" but not
+            # "logstash-…", and "logs-system.auth-*" matches neither "logs-system"
+            # nor "logs-system.authpriv".
+            if ds == core:
+                pass
+            elif raw != core and ds.startswith(raw):
+                pass
+            else:
+                return False
     window = filters.get("window") or {}
     lo, hi = _parse_ts(window.get("start")), _parse_ts(window.get("end"))
     if lo and hi:

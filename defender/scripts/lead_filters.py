@@ -19,6 +19,7 @@ the router reports those leads as ``unrouted`` rather than guessing.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -55,7 +56,18 @@ def load_contract(query_id: str) -> tuple[dict, str] | None:
     ``None`` means "no declared locator contract" — either the template
     does not exist (ad-hoc / non-event-stream) or it carries no
     ``filter_keys`` frontmatter yet.
+
+    Cached: a run reuses a handful of templates across many queries, so this
+    re-read + YAML parse is memoized on ``(query_id, QUERIES_DIR)``. Including
+    ``QUERIES_DIR`` in the key keeps tests (which monkeypatch it to a tmp dir)
+    isolated. The returned ``filter_keys`` dict is shared — read-only by design;
+    callers build fresh predicate dicts and never mutate it.
     """
+    return _load_contract_cached(query_id, str(QUERIES_DIR))
+
+
+@lru_cache(maxsize=None)
+def _load_contract_cached(query_id: str, _queries_dir: str) -> tuple[dict, str] | None:
     path = _template_path(query_id)
     if path is None:
         return None
@@ -105,6 +117,14 @@ def _build_extractor(body: str, param: str) -> re.Pattern | None:
     if idx < 0:
         return None
     left_lit = _TOKEN_RE.split(body[:idx])[-1][-40:]
+    # Anchor on the *local* clause only: drop everything up to the last boolean
+    # join so a divergently-rendered EARLIER clause (e.g. the model wrote
+    # `evt.type` where the template has `output_fields.evt.type`) doesn't break
+    # alignment on this token. Splitting here, not on brackets/quotes, keeps the
+    # field's own `[`/`"` as part of the anchor.
+    local = re.split(r"\s+(?i:AND|OR)\s+", left_lit)[-1]
+    if local.strip():
+        left_lit = local
     right_lit = _TOKEN_RE.split(body[idx + len(token):])[0]
     if not left_lit.strip():
         return None  # no field anchor -> too ambiguous to recover safely
@@ -127,27 +147,38 @@ def _build_extractor(body: str, param: str) -> re.Pattern | None:
 def _recover_value(body: str, param: str, params: dict) -> str | None:
     """Bound value of ``${param}``: prefer a same-named executed-query param
     (window flags arrive as ``--start``/``--end``), else lift it from the
-    rendered query string via the template-derived extractor."""
+    rendered query string via the template-derived extractor.
+
+    Returns ``None`` when recovery is *unsafe*: no match, an empty capture, or
+    an **ambiguous** one (the extractor matches more than one distinct value
+    across the params, e.g. two IPs in an ``OR`` clause). Guessing one of them
+    would silently mis-target the predicate, so we abstain and let
+    ``recover_filters`` route the query as unrouted instead.
+    """
     direct = params.get(param)
-    if isinstance(direct, str) and direct:
+    if isinstance(direct, str) and direct.strip():
         return direct
     extractor = _build_extractor(body, param)
     if extractor is None:
         return None
+    found: set[str] = set()
     for value in params.values():
         if isinstance(value, str):
-            match = extractor.search(value)
-            if match:
-                return match.group(1).strip()
-    return None
+            for captured in extractor.findall(value):
+                cleaned = captured.strip()
+                if cleaned:
+                    found.add(cleaned)
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _build_predicate(pred: dict, body: str, params: dict) -> dict | None:
     """Turn a declared predicate into a value-bound one for the router.
 
     Constant predicates (``value`` / ``values`` in the declaration) pass
-    through. A ``param`` predicate recovers its value; if recovery fails it
-    is dropped (treated as non-discriminating — never a false exclusion).
+    through. A ``param`` predicate recovers its value; returns ``None`` if
+    recovery fails — the caller treats that as "this declared locator can't be
+    faithfully applied" and marks the whole query unrouted, rather than dropping
+    the predicate (which would widen the filter into false coverage).
     """
     out: dict = {"op": pred.get("op", "eq")}
     if "event_attr" in pred:
@@ -173,7 +204,13 @@ def recover_filters(query_id: str, params: dict) -> dict | None:
          "window": {"start": "...", "end": "..."},
          "predicates": [{"event_attr": "container_id", "op": "eq", "value": "ffbff…"}]}
 
-    ``None`` when the query has no declared contract (router → ``unrouted``).
+    ``None`` when the query has no declared contract (router → ``unrouted``),
+    **or** when the template declares a locator (a time ``window`` or a
+    ``param`` predicate) whose bound value can't be recovered. A
+    half-recovered filter is worse than none: dropping a declared predicate or
+    window widens the lead so the router over-claims coverage and hides a real
+    gap. So a declared-but-unbindable locator routes the query as unrouted (the
+    judge then assesses it from the raw query) rather than silently widening it.
     """
     contract = load_contract(query_id)
     if contract is None:
@@ -188,16 +225,18 @@ def recover_filters(query_id: str, params: dict) -> dict | None:
     if isinstance(window, dict):
         start = _recover_value(body, window.get("start", ""), params)
         end = _recover_value(body, window.get("end", ""), params)
-        if start and end:
-            out["window"] = {"start": start, "end": end}
+        if not (start and end):
+            return None  # declared window we couldn't bind -> don't route blind
+        out["window"] = {"start": start, "end": end}
 
     predicates = []
     for pred in filter_keys.get("predicates") or []:
         if not isinstance(pred, dict):
             continue
         built = _build_predicate(pred, body, params)
-        if built is not None:
-            predicates.append(built)
+        if built is None:
+            return None  # declared predicate we couldn't bind -> unroute, don't widen
+        predicates.append(built)
     if predicates:
         out["predicates"] = predicates
 
