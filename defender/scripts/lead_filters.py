@@ -19,12 +19,31 @@ the router reports those leads as ``unrouted`` rather than guessing.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
 
 QUERIES_DIR = Path(__file__).resolve().parent.parent / "skills" / "gather" / "queries"
+
+
+def _is_iso_ts(value: str) -> bool:
+    """True if ``value`` is an absolute ISO-8601 timestamp the router can compare.
+
+    Mirrors ``_oracle_router._parse_ts``'s trailing-``Z`` handling. A relative
+    bound (``now-24h``) or epoch-millis string is *not* absolute, so the router
+    could not range-check it; recover_filters abstains rather than emit a window
+    that would be silently dropped at routing time.
+    """
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        datetime.fromisoformat(s)
+        return True
+    except (TypeError, ValueError):
+        return False
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 _QUERY_BLOCK_RE = re.compile(
@@ -227,6 +246,11 @@ def recover_filters(query_id: str, params: dict) -> dict | None:
         end = _recover_value(body, window.get("end", ""), params)
         if not (start and end):
             return None  # declared window we couldn't bind -> don't route blind
+        if not (_is_iso_ts(start) and _is_iso_ts(end)):
+            # A non-absolute bound (relative time like `now-24h`, epoch millis)
+            # the router can't compare -> it would silently drop the window and
+            # over-claim coverage. Abstain: route as unrouted, don't route blind.
+            return None
         out["window"] = {"start": start, "end": end}
 
     predicates = []

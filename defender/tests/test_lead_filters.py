@@ -179,3 +179,12 @@ def test_empty_quoted_value_unroutes(catalog):
     # An empty quoted hole recovers to '' — not a real binding. A substring ''
     # would match every event, so abstain (unroute) instead.
     assert lf.recover_filters("elastic.syslog-scan", {"arg0": 'message: *""*'}) is None
+
+
+def test_relative_window_bound_unroutes(catalog):
+    # A recovered window whose bounds are non-absolute (relative `now-…`) can't be
+    # range-checked by the router, which would silently drop the window and
+    # over-claim coverage. Recovery abstains (unroute) rather than emit it.
+    arg0 = ('falco.output_fields.container.id: "abc" '
+            'AND @timestamp:[now-24h TO now]')
+    assert lf.recover_filters("elastic.falco-timeline", {"arg0": arg0}) is None

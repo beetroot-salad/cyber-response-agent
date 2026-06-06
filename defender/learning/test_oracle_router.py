@@ -203,3 +203,68 @@ def test_route_event_covered_by_multiple_positions():
     assert len(out["projections"][0]["events"]) == 1
     assert len(out["projections"][1]["events"]) == 1
     assert out["uncovered"] == []
+
+
+# ---- substring scans content only, never index/id metadata ---------------
+
+def test_substring_no_attr_ignores_index_token():
+    # value that is a token of the data_source must NOT self-match every event.
+    f = {"index": "logs-falco.alerts-*", "predicates": [{"op": "substring", "value": "falco"}]}
+    ev = {"data_source": "logs-falco.alerts", "rule": "unrelated", "process": "sshd"}
+    assert event_satisfies(ev, f) is False
+
+
+def test_substring_no_attr_still_matches_content():
+    f = {"index": "logs-*", "predicates": [{"op": "substring", "value": "172.18.0.24"}]}
+    ev = {"data_source": "logs-system.auth", "note": "Accepted publickey from 172.18.0.24"}
+    assert event_satisfies(ev, f) is True
+
+
+# ---- window fail-closed: an unparseable bound excludes, never passes ------
+
+def test_window_relative_bound_excludes_not_passes():
+    # `now-24h`/`now` can't be range-checked; the event must fall to uncovered,
+    # not be admitted as covered (the over-coverage regression).
+    f = {"index": "logs-falco.alerts-*",
+         "window": {"start": "now-24h", "end": "now"},
+         "predicates": [{"event_attr": "container_id", "op": "eq", "value": "abc"}]}
+    ev = {"container_id": "abc", "data_source": "logs-falco.alerts",
+          "when": "1999-01-01T00:00:00Z"}
+    assert event_satisfies(ev, f) is False
+
+
+def test_window_one_bound_unparseable_excludes():
+    f = {"index": "logs-*", "window": {"start": "2026-06-04T14:00:00Z", "end": "now"},
+         "predicates": []}
+    ev = {"data_source": "logs-zeek", "when": "2026-06-04T14:05:00Z"}
+    assert event_satisfies(ev, f) is False
+
+
+# ---- mixed [filtered, null] position surfaces the null query as unrouted --
+
+def test_route_mixed_position_reports_unrouted_query():
+    ls = {"entries": [{"position": 0, "queries": [
+        {"id": "q-filtered", "params": {}, "filters": _falco_container("AAA")},
+        {"id": "q-adhoc", "params": {}, "filters": None},
+    ]}]}
+    # event matches neither the eq filter (container BBB) — only the ad-hoc query
+    # could plausibly catch it, so it must land in uncovered AND the ad-hoc query
+    # must be surfaced for the judge to check.
+    footprint = [{"attrs": {"container_id": "BBB", "data_source": "logs-falco.alerts",
+                            "when": "2026-06-04T14:00:54Z"}}]
+    out = route(footprint, ls)
+    assert out["unrouted_leads"] == [
+        {"position": 0, "queries": [{"id": "q-adhoc", "params": {}}]}]
+    assert len(out["uncovered"]) == 1
+
+
+# ---- flat footprint event (no attrs wrapper) must not leak its synthetic id
+
+def test_route_flat_event_strips_id():
+    ls = _ls([_falco_container("abc")])
+    footprint = [{"id": "e1", "container_id": "abc", "data_source": "logs-falco.alerts",
+                  "when": "2026-06-04T14:00:54Z"}]
+    out = route(footprint, ls)
+    ev = out["projections"][0]["events"][0]
+    assert "id" not in ev
+    assert ev["container_id"] == "abc"

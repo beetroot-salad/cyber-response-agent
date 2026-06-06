@@ -488,11 +488,14 @@ def run_head_oracle_and_judge(
         lead_sequence = yaml.safe_load(lead_seq_text) or {}
         oracle_doc = loop_mod.build_oracle_doc(footprint_yaml, lead_sequence)
     except (yaml.YAMLError, loop_mod.LoopError) as e:
+        # Parity with _route_and_write_oracle: keep the raw stage-A footprint for
+        # debugging a route/parse failure.
+        (staging_dir / "projected_telemetry.raw.txt").write_text(footprint_yaml)
         raise SecondaryError(f"oracle footprint/route invalid: {e}") from e
     projected_path = staging_dir / "projected_telemetry.yaml"
-    projected_path.write_text(
-        yaml.safe_dump(oracle_doc, sort_keys=False, default_flow_style=False)
-    )
+    # dump_oracle_doc inlines shared event objects (no YAML aliases) so the judge,
+    # reading raw text, sees every projected event in full under each lead.
+    projected_path.write_text(loop_mod.dump_oracle_doc(oracle_doc))
 
     try:
         judge_yaml = loop_mod.invoke_judge(

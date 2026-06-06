@@ -450,6 +450,10 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return {"projections": [], "uncovered": [], "unrouted_leads": []}
 
         @staticmethod
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
+
+        @staticmethod
         def invoke_judge(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
@@ -491,6 +495,10 @@ def test_run_head_oracle_and_judge_passes_lead_sequence_to_judge(tmp_path: Path)
         @staticmethod
         def build_oracle_doc(footprint_raw, lead_sequence):
             return {"projections": [], "uncovered": [], "unrouted_leads": []}
+
+        @staticmethod
+        def dump_oracle_doc(doc):
+            return yaml.safe_dump(doc)
 
         # Real signature — a wrong-arity call raises TypeError here.
         @staticmethod

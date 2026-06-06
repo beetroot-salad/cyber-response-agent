@@ -48,6 +48,30 @@ def _parse_ts(value):
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
+# Routing/locator metadata an event carries for placement, not content. A
+# no-`event_attr` substring scan must exclude these or it matches on the index
+# name itself (e.g. a `substring: "falco"` self-matching every event whose
+# `data_source` is `logs-falco.alerts`) and on the synthetic footprint id.
+_NON_CONTENT_KEYS = {"data_source", "index", "id"}
+
+
+def _event_attrs(ev):
+    """The event's attribute mapping.
+
+    Footprint events are ``{id, attrs}`` (footprint.md), but the LLM sometimes
+    emits a flat event. Return the explicit ``attrs`` payload when the wrapper is
+    present (verbatim — the caller's shape check rejects a non-mapping), else the
+    event minus its synthetic ``id`` so that id never leaks into a projection as
+    if it were a native telemetry field. Non-dict events pass through unchanged
+    for the caller to reject.
+    """
+    if isinstance(ev, dict):
+        if "attrs" in ev:
+            return ev["attrs"]
+        return {k: v for k, v in ev.items() if k != "id"}
+    return ev
+
+
 def _is_placeholder(value) -> bool:
     """True for an ``<angle-bracket>`` placeholder — an unspecified entity.
 
@@ -103,8 +127,12 @@ def _predicate_holds(event: dict, pred: dict) -> bool:
         if attr:
             blob = " ".join(_event_values(event, attr)).lower()
         else:
+            # Scan content fields only — never the index/data_source token or the
+            # footprint id, which are placement metadata, not what the real
+            # free-text query searches.
             blob = " ".join(
-                str(v) for v in event.values() if not _is_placeholder(v)
+                str(v) for k, v in event.items()
+                if k not in _NON_CONTENT_KEYS and not _is_placeholder(v)
             ).lower()
         return any(lit.lower() in blob for lit in lits)
     return True  # unknown op -> non-discriminating, never a false exclusion
@@ -132,10 +160,17 @@ def event_satisfies(event: dict, filters: dict) -> bool:
             else:
                 return False
     window = filters.get("window") or {}
-    lo, hi = _parse_ts(window.get("start")), _parse_ts(window.get("end"))
-    if lo and hi:
+    start_raw, end_raw = window.get("start"), window.get("end")
+    if start_raw or end_raw:
+        # A declared window we can't fully evaluate must EXCLUDE the event (it
+        # falls through to `uncovered`), never silently pass. An unparseable
+        # bound (relative time like `now-24h`, epoch millis) previously skipped
+        # the check entirely and over-claimed coverage past the query's real
+        # time scope. recover_filters also abstains on such bounds upstream; this
+        # is the fail-closed backstop.
+        lo, hi = _parse_ts(start_raw), _parse_ts(end_raw)
         ts = _parse_ts(event.get("when"))
-        if ts is None or not (lo <= ts <= hi):
+        if lo is None or hi is None or ts is None or not (lo <= ts <= hi):
             return False
     for pred in filters.get("predicates") or []:
         if not _predicate_holds(event, pred):
@@ -147,12 +182,13 @@ def route(footprint: list[dict], lead_sequence: dict) -> dict:
     """Return ``{projections, uncovered, unrouted_leads}``.
 
     Each footprint event is placed under every position with a structured
-    filter it satisfies. A position whose queries carry **no** structured
-    filters is reported in ``unrouted_leads`` (and projects empty); events
-    matched by no *routed* position land in ``uncovered``.
+    filter it satisfies. Any query carrying **no** structured filter is reported
+    in ``unrouted_leads`` (even when a sibling query in the same position has a
+    filter); a position with no filtered query at all projects empty. Events
+    matched by no *routed* query land in ``uncovered``.
     """
     entries = lead_sequence.get("entries") or []
-    events = [ev.get("attrs", ev) if isinstance(ev, dict) else ev for ev in footprint]
+    events = [_event_attrs(ev) for ev in footprint]
 
     projections = []
     unrouted = []
@@ -161,13 +197,21 @@ def route(footprint: list[dict], lead_sequence: dict) -> dict:
         position = entry.get("position")
         queries = entry.get("queries") or []
         filter_blocks = [q["filters"] for q in queries if isinstance(q.get("filters"), dict)]
-        if not filter_blocks:
+        # Report unrouted queries at per-query granularity: a position that mixes
+        # a structured-filter query with a `filters: null` one still routes the
+        # former, but the null query must surface in `unrouted_leads` so the judge
+        # knows an event in `uncovered` might be caught by that raw query — gating
+        # on the whole position having zero filters would drop it silently.
+        unrouted_queries = [q for q in queries if not isinstance(q.get("filters"), dict)]
+        if unrouted_queries:
             unrouted.append({
                 "position": position,
                 "queries": [
-                    {"id": q.get("id"), "params": q.get("params", {})} for q in queries
+                    {"id": q.get("id"), "params": q.get("params", {})}
+                    for q in unrouted_queries
                 ],
             })
+        if not filter_blocks:
             projections.append({"position": position, "events": []})
             continue
         matched = []

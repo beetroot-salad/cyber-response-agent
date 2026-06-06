@@ -32,8 +32,13 @@ from _loop_config import (
 from _loop_directions import BY_NAME, Direction, ObsTrigger
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
-from _loop_validate import normalize_disposition, strip_yaml_fence, validate_oracle_doc
-from _oracle_router import route
+from _loop_validate import (
+    dump_oracle_doc,
+    normalize_disposition,
+    strip_yaml_fence,
+    validate_oracle_doc,
+)
+from _oracle_router import _event_attrs, route
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +94,7 @@ def build_oracle_doc(footprint_raw: str, lead_sequence: dict) -> dict:
     # an AttributeError that escapes the caller's (yaml.YAMLError, LoopError)
     # catch and aborts the run. Surface it as a clean LoopError instead.
     for i, ev in enumerate(footprint):
-        attrs = ev.get("attrs", ev) if isinstance(ev, dict) else ev
+        attrs = _event_attrs(ev)
         if not isinstance(attrs, dict):
             raise LoopError(
                 f"footprint event {i} is not a mapping (got {type(ev).__name__})"
@@ -112,13 +117,24 @@ def _route_and_write_oracle(
         raw_path.write_text(footprint_raw)
         raise LoopError(f"oracle footprint/route invalid: {e}") from e
 
-    # Degenerate-state signal: if leads exist but none carried a structured
+    # Always persist the stage-A footprint: the projected_telemetry.yaml on disk
+    # is the *routed transform* of it, so without the raw enumeration a wrong
+    # coverage verdict can't be traced back to whether stage A or the router
+    # produced it (the LLM call is not cheap to reproduce).
+    raw_path.write_text(footprint_raw)
+
+    # Degenerate-state signal: if leads exist but no query carried a structured
     # filter the router could read (e.g. no template declares `filter_keys` for
     # this deployment's catalog), every footprint event lands in `uncovered` and
     # the mechanical coverage signal is vacuous. Warn so this isn't read as
     # "every attack step is a proven gap" — the judge falls back to raw queries.
     n_entries = len(lead_sequence.get("entries", []))
-    if n_entries and len(doc.get("unrouted_leads", [])) == n_entries:
+    has_any_filter = any(
+        isinstance(q.get("filters"), dict)
+        for e in lead_sequence.get("entries", [])
+        for q in (e.get("queries") or [])
+    )
+    if n_entries and not has_any_filter:
         _log(
             f"WARNING: oracle router routed 0 of {n_entries} leads — no query "
             "carried a structured filter (catalog has no filter_keys?); coverage "
@@ -126,7 +142,7 @@ def _route_and_write_oracle(
         )
 
     out_path = learning_run_dir / out_name
-    out_path.write_text(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False))
+    out_path.write_text(dump_oracle_doc(doc))
     return out_path
 
 
@@ -404,7 +420,8 @@ Outputs:
   defender/learning/runs/<run_id>/
     actor_input.yaml               adversarial actor-facing projection (queries only)
     actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
-    projected_telemetry[_benign].yaml  oracle's per-lead synthesized events
+    projected_telemetry[_benign].yaml  routed oracle output: projections + uncovered + unrouted_leads
+    projected_telemetry[_benign].raw.txt  stage-A footprint (raw LLM enumeration, pre-routing)
     judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
     appended queueable defender findings (both directions, tagged `direction`);
