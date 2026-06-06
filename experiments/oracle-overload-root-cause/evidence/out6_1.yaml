@@ -1,0 +1,23 @@
+events:
+  - "@timestamp": "<alert-time>"
+    data_stream:
+      namespace: "default"
+      type: "logs"
+      dataset: "falco.alerts"
+    falco:
+      rule: "Launch Suspicious Network Tool in Container"
+      priority: "Notice"
+      output_fields:
+        "container.id": "ffbff1299702"
+        "container.name": "<NA>"
+        "container.image.repository": null
+        "evt.type": "execve"
+        "proc.name": "nc"
+        "proc.cmdline": "nc -zv 172.18.0.24 <port>"
+        "proc.exepath": "/usr/bin/nc.openbsd"
+        "proc.pname": "bash"
+        "proc.tty": 0
+        "user.uid": 1009
+        "user.name": "<NA>"
+        "user.loginuid": -1
+        "evt.time": "<alert-time-ns>"

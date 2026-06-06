@@ -1,0 +1,29 @@
+events:
+  - "@timestamp": "<initial-access>"
+    "source.ip": "172.18.0.24"
+    "source.port": 51666
+    "destination.ip": "172.18.0.14"
+    "destination.port": 22
+    "network.transport": "tcp"
+    "network.protocol": "ssh"
+    "event.category": "network_traffic"
+    "data_stream.dataset": "zeek.ssh"
+  - "@timestamp": "<initial-access>"
+    "host.name": "dev-ws-1"
+    "process.name": "sshd"
+    "message": "Accepted publickey for <attacker-account> from 172.18.0.24 port 51666 ssh2"
+    "source.ip": "172.18.0.24"
+    "source.port": 51666
+    "event.category": "authentication"
+    "event.action": "ssh_login"
+    "data_stream.dataset": "system.auth"
+  - "@timestamp": "2026-06-04T14:08:43Z"
+    "falco.rule": "Launch Suspicious Network Tool in Container"
+    "falco.output_fields.container.name": "ffbff1299702"
+    "falco.output_fields.container.id": "ffbff1299702"
+    "falco.output_fields.proc.name": "nc"
+    "falco.output_fields.proc.cmdline": "nc -zv 172.18.0.24 <port>"
+    "falco.output_fields.proc.parent": "bash"
+    "falco.output_fields.proc.tty": 0
+    "event.category": "process"
+    "data_stream.dataset": "falco.alerts"
