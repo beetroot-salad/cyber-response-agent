@@ -74,9 +74,9 @@ LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ACTOR_BENIGN_PROMPT = LEARNING_DIR / "actor_benign.md"
-# Oracle stage A (LLM footprint enumeration). Stage B is the deterministic
-# router in _oracle_router.py.
-FOOTPRINT_PROMPT = LEARNING_DIR / "footprint.md"
+# Per-lead generative telemetry oracle: one call per lead, fanned out concurrently
+# (see _loop_subagents.ClaudePrintSubagents.oracle / _loop_oracle).
+ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
 JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
 PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
@@ -132,11 +132,13 @@ BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 # Override via ACTOR_EFFORT.
 ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "medium")
 BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
-# Oracle stage A (footprint enumeration). Generative work — sonnet for content
-# fidelity (per the d2d72ab model decision); effort pinned low since matching is
-# now the deterministic router's job, not the LLM's. Override via FOOTPRINT_*.
-FOOTPRINT_MODEL = os.environ.get("FOOTPRINT_MODEL", "claude-sonnet-4-6")
-FOOTPRINT_EFFORT = os.environ.get("FOOTPRINT_EFFORT", "low")
+# Per-lead generative oracle. Generative work — sonnet for content fidelity (per the
+# d2d72ab model decision); effort pinned low since each call sees only its own lead and
+# projects a signed baseline-diff (no cross-lead matching to reason about). Override via
+# ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
+ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
+ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
+ORACLE_MAX_CONCURRENCY = int(os.environ.get("ORACLE_MAX_CONCURRENCY", "8"))
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already

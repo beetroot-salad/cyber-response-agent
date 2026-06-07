@@ -28,7 +28,6 @@ from pathlib import Path
 
 # Importable whether run as a script or loaded by path (replay_actor).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import lead_filters  # noqa: E402
 
 
 L_BLOCK_RE = re.compile(
@@ -238,15 +237,6 @@ def project(run_dir: Path) -> dict:
                 # whether to skip the entry or flag the run for review.
                 queries = [{"id": f"{system}.unknown", "params": {}}]
 
-        # Recover each query's structured locator filters from the template
-        # that produced it (vendor-neutral — no query-language parsing). The
-        # oracle router matches footprint events against these; a query with no
-        # declared contract recovers to None and the router reports it unrouted.
-        for q in queries:
-            q["filters"] = lead_filters.recover_filters(
-                q.get("id", ""), q.get("params") or {}
-            )
-
         sidecar = load_lead_sidecar(run_dir, position) or {}
         goal = sidecar.get("goal") or row.get("name") or row["id"]
         what_to_summarize = sidecar.get("what_to_summarize") or []
@@ -344,9 +334,6 @@ def dump_yaml(doc: dict) -> str:
                 out.append(f"        params: {{{params_inline}}}")
             else:
                 out.append("        params: {}")
-            # Structured locator filters (JSON is valid YAML flow); `null` when
-            # the query has no declared contract -> router treats it as unrouted.
-            out.append(f"        filters: {json.dumps(q.get('filters'))}")
         out.append(f"    result_ref: {entry['result_ref']}")
     return "\n".join(out) + "\n"
 

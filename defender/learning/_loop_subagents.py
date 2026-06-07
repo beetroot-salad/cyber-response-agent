@@ -20,13 +20,21 @@ import shutil
 import subprocess
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 
 import yaml
 
 import mitre_corpus
+from _loop_oracle import (
+    assemble_oracle_doc,
+    build_lead_user_prompt,
+    lead_sample_text,
+    parse_lead_events,
+)
 from _loop_persist import derive_alert_rule_key
+from _loop_validate import dump_oracle_doc
 from _prologue import extract_case_entities
 
 from _loop_config import (
@@ -40,9 +48,6 @@ from _loop_config import (
     BENIGN_ACTOR_SETTINGS,
     BENIGN_JUDGE_EFFORT,
     BENIGN_JUDGE_MODEL,
-    FOOTPRINT_EFFORT,
-    FOOTPRINT_MODEL,
-    FOOTPRINT_PROMPT,
     JUDGE_BENIGN_PROMPT,
     JUDGE_EFFORT,
     JUDGE_MODEL,
@@ -50,6 +55,10 @@ from _loop_config import (
     LESSONS_ACTOR_DIR,
     LESSONS_ENVIRONMENT_DIR,
     LoopError,
+    ORACLE_EFFORT,
+    ORACLE_MAX_CONCURRENCY,
+    ORACLE_MODEL,
+    ORACLE_PROMPT,
     PROJECT_SCRIPT,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
@@ -255,90 +264,40 @@ def invoke_actor_benign(
     return story
 
 
-def telemetry_vocabulary(lead_sequence: dict) -> str:
-    """Routable-vocabulary block for the footprint prompt, derived from the leads'
-    structured ``filters`` — the *canonical* layer the router matches on, not the
-    vendor-physical fields in raw sample docs.
-
-    Two lists, both lifted straight from ``filters`` so they align with the router
-    by construction (no closed field-name list, no physical/logical guesswork):
-
-    - ``data_source`` tokens — distinct ``filters.index`` with the trailing
-      wildcard/separator stripped (``logs-falco.alerts-*`` -> ``logs-falco.alerts``),
-      i.e. the exact value ``event_satisfies`` compares ``data_source`` against.
-    - canonical event field names — distinct ``filters.predicates[].event_attr``,
-      the names the router reads off each event.
-
-    Returns ``""`` when no lead carries a structured filter (nothing to ground;
-    the footprint falls back to descriptive tokens and the run is degenerate
-    anyway).
+def invoke_oracle_lead(entry: dict, story: str, sample_text: str) -> list:
+    """Project one lead. Sees only this lead — sanitized ``what_to_characterize`` +
+    queries + a scrubbed sample event — plus the story; no goal, no alert, no other lead.
+    Returns the lead's ``events`` list (mappings, a single baseline-diff marker, or empty).
     """
-    tokens: list[str] = []
-    fields: list[str] = []
-    for entry in lead_sequence.get("entries") or []:
-        for q in entry.get("queries") or []:
-            f = q.get("filters")
-            if not isinstance(f, dict):
-                continue
-            idx = f.get("index")
-            if isinstance(idx, str) and idx:
-                core = idx.rstrip("*").rstrip("-.")   # mirror event_satisfies' core
-                if core:
-                    tokens.append(core)
-            for pred in f.get("predicates") or []:
-                attr = pred.get("event_attr") if isinstance(pred, dict) else None
-                for a in (attr if isinstance(attr, (list, tuple)) else [attr]):
-                    if isinstance(a, str) and a:
-                        fields.append(a)
-    tokens = list(dict.fromkeys(tokens))   # dedup, preserve first-seen order
-    fields = list(dict.fromkeys(fields))
-    if not tokens and not fields:
-        return ""
-    out: list[str] = []
-    if tokens:
-        out.append(
-            "Streams this deployment's telemetry lands in — emit `data_source` as one "
-            "of these exact tokens (one stream per event). For a stream not listed, use "
-            "a short descriptive token (it will read as uncovered, which is correct):"
-        )
-        out += [f"- {t}" for t in tokens]
-    if fields:
-        if out:
-            out.append("")
-        out.append(
-            "Canonical field names — when an event carries one of these entities, use "
-            "exactly this key (other native fields are still fine to add):"
-        )
-        out += [f"- {a}" for a in fields]
-    return "\n".join(out)
+    user = build_lead_user_prompt(entry, story, sample_text)
+    raw = _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
+    return parse_lead_events(raw, entry.get("position"))
 
 
-def invoke_footprint(
-    alert_path: Path, actor_story_path: Path, vocabulary: str = ""
-) -> str:
-    """Oracle stage A: enumerate the story's telemetry footprint.
+def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
+    """Run the per-lead oracle over a run's lead sequence and assemble the doc.
 
-    Sees the alert, the story, and the deployment's telemetry *vocabulary*
-    (data_source tokens + canonical field names from the leads' filters) — but
-    **not** the leads themselves: no queries, filters, windows, or coverage, so
-    there is still nothing to overload. The vocabulary grounds the tokens the
-    footprint emits so stage B (``_oracle_router.route``) can place each event by
-    containment instead of relying on the model to guess vendor index names.
+    One ``claude -p`` per lead, fanned out concurrently (bounded by
+    ``ORACLE_MAX_CONCURRENCY``); results are reassembled in lead order into the
+    ``{projections: [{position, events}]}`` doc the validator + judge consume. Returns the
+    serialized YAML string, preserving the orchestration/validation seam the router used.
     """
-    user = (
-        _section("alert", alert_path.read_text())
-        + _section("actor_story", actor_story_path.read_text())
-    )
-    if vocabulary:
-        user += _section(
-            "telemetry_vocabulary", vocabulary,
-            "the deployment's data_source tokens + canonical field names; emit events "
-            "using these so they land in the right stream. Vocabulary only — NOT the "
-            "defender's queries, filters, windows, or coverage.",
+    story = actor_story_path.read_text()
+    doc = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
+    entries = doc.get("entries") or []
+    samples = [lead_sample_text(run_dir, e) for e in entries]
+    max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(entries) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        events_per_lead = list(
+            pool.map(
+                lambda args: invoke_oracle_lead(args[0], story, args[1]),
+                zip(entries, samples),
+            )
         )
-    return _run_claude(
-        FOOTPRINT_PROMPT, user, model=FOOTPRINT_MODEL, effort=FOOTPRINT_EFFORT
-    )
+    projections = [
+        (e.get("position"), events) for e, events in zip(entries, events_per_lead)
+    ]
+    return dump_oracle_doc(assemble_oracle_doc(projections))
 
 
 def _invoke_judge(
@@ -407,7 +366,7 @@ class Subagents(Protocol):
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str: ...
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str: ...
-    def footprint(self, run_dir: Path, actor_story_path: Path) -> str: ...
+    def oracle(self, run_dir: Path, actor_story_path: Path) -> str: ...
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
     def judge_benign(self, run_dir: Path, actor_story_path: Path,
@@ -429,10 +388,8 @@ class ClaudePrintSubagents:
             run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
         )
 
-    def footprint(self, run_dir: Path, actor_story_path: Path) -> str:
-        lead_sequence = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
-        vocab = telemetry_vocabulary(lead_sequence)
-        return invoke_footprint(run_dir / "alert.json", actor_story_path, vocab)
+    def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
+        return invoke_oracle(run_dir, actor_story_path)
 
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:

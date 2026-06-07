@@ -128,17 +128,18 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ORACLE_DOC_KEYS = {"projections", "uncovered", "unrouted_leads"}
+_ORACLE_DOC_KEYS = {"projections"}
 _ORACLE_PROJECTION_KEYS = {"position", "events"}
 
 
 def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
-    """Validate the two-stage oracle output (router emits this, not an LLM).
+    """Validate the assembled per-lead oracle output.
 
-    Shape: ``projections`` (one ``{position, events}`` per lead position, in
-    order), plus the mechanical coverage signals ``uncovered`` (footprint events
-    no routed lead caught) and ``unrouted_leads`` (positions with no structured
-    filter, for the judge to assess from the raw query).
+    Shape: a single ``projections`` key — one ``{position, events}`` per lead position,
+    in order. ``events`` is a list of event mappings, OR a single-item marker list (the
+    ``<standard environment noise>`` / ``<suppressed: …>`` baseline-diff strings), OR
+    empty. The validator stays structural; marker *wording* and the diff semantics are the
+    oracle prompt's and judge's concern, not this gate's.
     """
     if not isinstance(doc, dict):
         raise LoopError("oracle doc did not parse to a mapping")
@@ -155,21 +156,16 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
         )
     for i, p in enumerate(projections):
         _validate_oracle_projection(i, p, expected_positions[i])
-    for key in ("uncovered", "unrouted_leads"):
-        if key in doc and not isinstance(doc[key], list):
-            raise LoopError(f"oracle `{key}` is not a list")
     return doc
 
 
 class _NoAliasOracleDumper(yaml.SafeDumper):
     """SafeDumper that never emits YAML anchors/aliases.
 
-    ``_oracle_router.route`` places the *same* footprint-event dict object under
-    every position whose filter matches it, so the default dumper would write the
-    event once as ``&id001`` and every later occurrence as a bare ``*id001``
-    alias. The judge is an LLM reading the raw YAML text — it cannot resolve an
-    alias, so it would silently lose the projected event for every lead after the
-    first match. Forcing inline emission keeps each projection self-contained.
+    The judge is an LLM reading the raw YAML text — it cannot resolve a ``*alias``
+    back-reference, so two shape-identical projected events must each be written out in
+    full rather than the second collapsing to an alias of the first. Forcing inline
+    emission keeps every projection self-contained.
     """
 
     def ignore_aliases(self, data: Any) -> bool:
@@ -177,10 +173,10 @@ class _NoAliasOracleDumper(yaml.SafeDumper):
 
 
 def dump_oracle_doc(doc: dict) -> str:
-    """Serialize a routed oracle doc to YAML with every shared event inlined.
+    """Serialize the assembled oracle doc to YAML, every event inlined (no aliases).
 
-    The judge reads this as text, so repeated events must be written out in full
-    under each lead, never as ``*alias`` back-references (see ``_NoAliasOracleDumper``).
+    The judge reads this as text, so repeated events are written out in full under each
+    lead, never as ``*alias`` back-references (see ``_NoAliasOracleDumper``).
     """
     return yaml.dump(
         doc, Dumper=_NoAliasOracleDumper, sort_keys=False, default_flow_style=False
@@ -204,10 +200,13 @@ def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     events = p["events"]
     if not isinstance(events, list):
         raise LoopError(f"projection[{i}].events is not a list")
+    # An event is either a mapping (a projected event) or a string (a baseline-diff
+    # marker: <standard environment noise> / <suppressed: …>). Nothing else.
     for j, ev in enumerate(events):
-        if not isinstance(ev, dict):
+        if not isinstance(ev, (dict, str)):
             raise LoopError(
-                f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
+                f"projection[{i}].events[{j}] is not a mapping or marker string "
+                f"(got {type(ev).__name__})"
             )
 
 

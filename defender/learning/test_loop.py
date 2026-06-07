@@ -26,101 +26,120 @@ _spec.loader.exec_module(loop)
 LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
 validate_oracle_doc = loop.validate_oracle_doc
-build_oracle_doc = loop.build_oracle_doc
-telemetry_vocabulary = loop.telemetry_vocabulary
+dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
-
-# ---------------------------------------------------------------------------
-# telemetry_vocabulary — routable tokens + canonical fields from lead filters
-# (router-aligned by construction; no vendor-physical sample fields)
-# ---------------------------------------------------------------------------
-
-
-def test_telemetry_vocabulary_derives_logical_tokens_and_fields():
-    ls = {"entries": [
-        {"position": 0, "queries": [{"id": "a", "filters": {
-            "index": "logs-falco.alerts-*",
-            "predicates": [{"event_attr": "container_id", "op": "eq", "value": "x"},
-                           {"event_attr": "process", "op": "set", "values": ["nc"]}],
-        }}]},
-        {"position": 1, "queries": [{"id": "b", "filters": {
-            "index": "logs-falco.alerts-*",                       # dup token -> once
-            "predicates": [{"event_attr": ["host_ip", "source_ip"], "op": "eq", "value": "y"}],
-        }}]},
-        {"position": 2, "queries": [{"id": "c", "filters": None}]},  # unrouted -> ignored
-    ]}
-    v = telemetry_vocabulary(ls)
-    # logical token (stripped of `-*`), deduped, NOT the physical `.ds-…`
-    assert v.count("- logs-falco.alerts") == 1
-    assert ".ds-" not in v and "logs-falco.alerts-*" not in v
-    # canonical field names, list-valued event_attr flattened
-    for f in ("container_id", "process", "host_ip", "source_ip"):
-        assert f"- {f}" in v
-
-
-def test_telemetry_vocabulary_empty_when_no_structured_filter():
-    ls = {"entries": [{"position": 0, "queries": [{"id": "a", "filters": None}]}]}
-    assert telemetry_vocabulary(ls) == ""
-    assert telemetry_vocabulary({}) == ""
+import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# build_oracle_doc — footprint shape guard (malformed LLM output -> LoopError,
-# not an AttributeError that escapes the caller's catch and aborts the run)
+# sanitize_wtc — relativize copyable absolute clock times
 # ---------------------------------------------------------------------------
 
 
-_LS_ONE_FILTERED = {
-    "entries": [{
+def test_sanitize_wtc_relativizes_iso_and_clock_times():
+    assert oracle_mod.sanitize_wtc(
+        "the login at 2026-06-02T17:08:19Z from host x"
+    ) == "the login at <alert-time> from host x"
+    assert oracle_mod.sanitize_wtc("a connection at 17:08:19Z") == (
+        "a connection at <alert-time>"
+    )
+    assert oracle_mod.sanitize_wtc("the event at 14:08Z") == "the event at <alert-time>"
+
+
+def test_sanitize_wtc_leaves_relative_spans_untouched():
+    for item in ("within +/-5 minutes of the alert", "a few minutes later", "no times here"):
+        assert oracle_mod.sanitize_wtc(item) == item
+
+
+# ---------------------------------------------------------------------------
+# redact_exemplar — value-scrubbed shape skeleton (no defender values leak)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_exemplar_scrubs_values_keeps_shape():
+    payload = (
+        "### Raw Sample Events (first 3)\n\n"
+        "```json\n"
+        '[{"host": "db-07", "port": 22, "ok": true, "nested": {"user": "alice"}}]\n'
+        "```\n"
+    )
+    out = oracle_mod.redact_exemplar(payload)
+    assert "db-07" not in out and "alice" not in out
+    assert '"<host>"' in out and '"<user>"' in out
+    assert '"port": 0' in out and '"ok": false' in out
+
+
+def test_redact_exemplar_no_sample_block_is_placeholder():
+    assert oracle_mod.redact_exemplar("## Query Results\n(no raw block)\n").startswith("(")
+
+
+# ---------------------------------------------------------------------------
+# parse_lead_events / assemble_oracle_doc — per-lead reply -> projections doc
+# ---------------------------------------------------------------------------
+
+
+def test_parse_lead_events_accepts_events_mappings_markers_and_empty():
+    assert oracle_mod.parse_lead_events('events:\n  - {a: "b"}\n', 0) == [{"a": "b"}]
+    assert oracle_mod.parse_lead_events("events: []\n", 1) == []
+    assert oracle_mod.parse_lead_events(
+        'events:\n  - "<standard environment noise>"\n', 2
+    ) == ["<standard environment noise>"]
+    assert oracle_mod.parse_lead_events(
+        'events:\n  - "<suppressed: stopped auditd>"\n', 3
+    ) == ["<suppressed: stopped auditd>"]
+
+
+def test_parse_lead_events_rescues_unquoted_suppression_marker():
+    # An unquoted `- <suppressed: reason>` parses as a 1-key mapping (colon-space);
+    # the parser rejoins it to the intended marker string.
+    assert oracle_mod.parse_lead_events(
+        "events:\n  - <suppressed: stopped auditd before the probe>\n", 0
+    ) == ["<suppressed: stopped auditd before the probe>"]
+
+
+def test_parse_lead_events_strips_fence():
+    assert oracle_mod.parse_lead_events("```yaml\nevents: []\n```\n", 0) == []
+
+
+def test_parse_lead_events_rejects_missing_events_list():
+    with pytest.raises(LoopError, match="no `events` list"):
+        oracle_mod.parse_lead_events("projections: []\n", 0)
+
+
+def test_assemble_oracle_doc_preserves_position_order():
+    doc = oracle_mod.assemble_oracle_doc([(0, [{"a": 1}]), (1, []), (2, ["<x>"])])
+    assert [p["position"] for p in doc["projections"]] == [0, 1, 2]
+    assert doc["projections"][2]["events"] == ["<x>"]
+
+
+def test_assembled_doc_round_trips_through_validate_and_dump():
+    doc = oracle_mod.assemble_oracle_doc(
+        [(0, [{"host": "h"}]), (1, ["<standard environment noise>"])]
+    )
+    validate_oracle_doc(doc, expected_positions=[0, 1])
+    text = dump_oracle_doc(doc)
+    assert "projections:" in text and "<standard environment noise>" in text
+
+
+# ---------------------------------------------------------------------------
+# build_lead_user_prompt — no goal, sanitized characterization
+# ---------------------------------------------------------------------------
+
+
+def test_build_lead_user_prompt_drops_goal_and_sanitizes_wtc():
+    entry = {
         "position": 0,
-        "queries": [{"id": "x.q", "params": {}, "filters": {
-            "index": "logs-falco.alerts-*",
-            "predicates": [{"event_attr": "container_id", "op": "eq", "value": "abc"}],
-        }}],
-    }]
-}
-
-
-@pytest.mark.parametrize("footprint_yaml", [
-    "events:\n  - just a bare string\n",
-    "events:\n  - 5\n",
-    "events:\n  - null\n",
-    "events:\n  - attrs: not-a-mapping\n",
-])
-def test_build_oracle_doc_rejects_non_mapping_event(footprint_yaml):
-    with pytest.raises(LoopError, match="not a mapping"):
-        build_oracle_doc(footprint_yaml, _LS_ONE_FILTERED)
-
-
-def test_build_oracle_doc_routes_valid_footprint():
-    fp = ('events:\n'
-          '  - id: e1\n'
-          '    attrs: {container_id: "abc", data_source: "logs-falco.alerts"}\n')
-    doc = build_oracle_doc(fp, _LS_ONE_FILTERED)
-    assert doc["projections"][0]["events"] == [
-        {"container_id": "abc", "data_source": "logs-falco.alerts"}]
-    assert doc["uncovered"] == []
-
-
-def test_dump_oracle_doc_inlines_shared_events_no_aliases():
-    # An event matched by two positions is the SAME object in both projections;
-    # the default dumper emits it as `&id001` / `*id001`, which the LLM judge
-    # can't resolve. dump_oracle_doc must write it out in full under each lead.
-    f = {"index": "logs-falco.alerts-*",
-         "predicates": [{"event_attr": "container_id", "op": "eq", "value": "abc"}]}
-    ls = {"entries": [
-        {"position": 0, "queries": [{"id": "a", "params": {}, "filters": f}]},
-        {"position": 1, "queries": [{"id": "b", "params": {}, "filters": f}]},
-    ]}
-    fp = ('events:\n  - attrs: {container_id: "abc", data_source: "logs-falco.alerts",'
-          ' rule: "Suspicious tool"}\n')
-    doc = build_oracle_doc(fp, ls)
-    text = loop.dump_oracle_doc(doc)
-    assert "&id" not in text and "*id" not in text
-    # the event renders in full under BOTH positions
-    assert text.count("container_id: abc") == 2
-    assert text.count("rule: Suspicious tool") == 2
+        "lead_description": {
+            "goal": "SECRET defender intent that must not leak",
+            "what_to_summarize": ["the login at 2026-06-02T17:08:19Z"],
+        },
+        "queries": [{"id": "wazuh.auth-events", "params": {"host": "h"}}],
+    }
+    prompt = oracle_mod.build_lead_user_prompt(entry, "the story", "SAMPLE")
+    assert "SECRET defender intent" not in prompt          # goal omitted
+    assert "<alert-time>" in prompt and "17:08:19Z" not in prompt  # wtc sanitized
+    assert "wazuh.auth-events" in prompt and "the story" in prompt and "SAMPLE" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +153,6 @@ def _ok_doc(positions=(0, 1)):
             {"position": p, "events": [{"data_source": "logs-falco.alerts"}]}
             for p in positions
         ],
-        "uncovered": [],
-        "unrouted_leads": [],
     }
 
 
@@ -151,8 +168,14 @@ def test_validate_oracle_doc_accepts_empty_events_list():
     validate_oracle_doc(doc, expected_positions=[0, 1])
 
 
+def test_validate_oracle_doc_accepts_marker_strings():
+    doc = _ok_doc()
+    doc["projections"][0]["events"] = ["<standard environment noise>"]
+    doc["projections"][1]["events"] = ["<suppressed: cleared the auth log>"]
+    validate_oracle_doc(doc, expected_positions=[0, 1])
+
+
 def test_validate_oracle_doc_accepts_projections_only():
-    # uncovered / unrouted_leads are optional top-level keys
     validate_oracle_doc({"projections": []}, expected_positions=[])
 
 
@@ -162,8 +185,9 @@ def test_validate_oracle_doc_rejects_non_mapping():
 
 
 def test_validate_oracle_doc_rejects_extra_top_level_keys():
+    # uncovered / unrouted_leads are gone — any non-`projections` key is rejected.
     doc = _ok_doc(positions=(0,))
-    doc["notes"] = "should not be here"
+    doc["uncovered"] = []
     with pytest.raises(LoopError, match="unexpected top-level keys"):
         validate_oracle_doc(doc, expected_positions=[0])
 
@@ -194,17 +218,11 @@ def test_validate_oracle_doc_rejects_unexpected_projection_keys():
         validate_oracle_doc(doc, expected_positions=[0])
 
 
-def test_validate_oracle_doc_rejects_non_list_uncovered():
+def test_validate_oracle_doc_rejects_non_mapping_non_marker_event():
+    # An event is a mapping or a marker string; an int (or any other scalar) is neither.
     doc = _ok_doc(positions=(0,))
-    doc["uncovered"] = {"not": "a list"}
-    with pytest.raises(LoopError, match="`uncovered` is not a list"):
-        validate_oracle_doc(doc, expected_positions=[0])
-
-
-def test_validate_oracle_doc_rejects_non_mapping_event():
-    doc = _ok_doc(positions=(0,))
-    doc["projections"][0]["events"] = ["a string event"]
-    with pytest.raises(LoopError, match=r"events\[0\] is not a mapping"):
+    doc["projections"][0]["events"] = [5]
+    with pytest.raises(LoopError, match=r"events\[0\] is not a mapping or marker string"):
         validate_oracle_doc(doc, expected_positions=[0])
 
 

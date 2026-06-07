@@ -22,10 +22,10 @@ class FakeSubagents:
     """
 
     def __init__(self, *, story="story body\n", story_benign="story body\n",
-                 footprint="events: []\n", judge="", judge_benign=""):
+                 oracle="projections: []\n", judge="", judge_benign=""):
         self._story = story
         self._story_benign = story_benign
-        self._footprint = footprint
+        self._oracle = oracle
         self._judge = judge
         self._judge_benign = judge_benign
         self.calls: dict[str, int] = {}
@@ -41,9 +41,9 @@ class FakeSubagents:
         self._bump("actor_benign")
         return self._story_benign
 
-    def footprint(self, run_dir, actor_story_path):
-        self._bump("footprint")
-        return self._footprint
+    def oracle(self, run_dir, actor_story_path):
+        self._bump("oracle")
+        return self._oracle
 
     def judge(self, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir):
         self._bump("judge")
