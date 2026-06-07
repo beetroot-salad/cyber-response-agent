@@ -280,7 +280,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     One ``claude -p`` per lead, fanned out concurrently (bounded by
     ``ORACLE_MAX_CONCURRENCY``); results are reassembled in lead order into the
     ``{projections: [{position, events}]}`` doc the validator + judge consume. Returns the
-    serialized YAML string, preserving the orchestration/validation seam the router used.
+    serialized YAML string.
     """
     story = actor_story_path.read_text()
     doc = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
