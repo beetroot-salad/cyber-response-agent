@@ -45,13 +45,36 @@ alternative decomposition #249 validated — chosen for its per-lead semantic ri
 - **Deleted:** `_oracle_router.py`, `scripts/lead_filters.py` (+ the projector's `filters`
   recovery) and their tests.
 
+## Review hardening (post-`/code-review`)
+
+Fixes folded in after an extra-high-effort review of the diff:
+
+- **`lead_sample_text` glob over-match** — `{position}*.json` matched `10.json`/`11.json`
+  for `position=1` on ≥10-lead runs (feeding another lead's shape skeleton). Tightened to
+  `{position}.json` + `{position}[a-z].json`, mirroring the projector's suffix guard.
+- **Judge prompt pointer removed** — `judge.md`/`judge_benign.md` told the judge to read
+  `system.template` "from `lead_sequence`", a doc the judge is never handed (and the
+  projection no longer carries those keys). Reworded to name the lead by position + the
+  name/system it *does* see in `investigation.md`.
+- **Suppression-marker parse** — an unquoted `<suppressed: REASON>` whose REASON held a
+  second `: ` raised a YAML `ScannerError` that aborted the whole oracle direction. Replaced
+  the post-hoc `_normalize_marker` mapping-rescue (which also corrupted legit single-field
+  placeholder events) with a pre-parse quoting pass that survives any number of colons.
+- **Validator marker strictness** — now rejects unrecognized/empty event strings and a
+  marker mixed with mappings or duplicated (the "marker is the sole item" contract was
+  prose-only). Raw reply is embedded in the parse `LoopError` for debuggability.
+- **Sanitizer fixes** — `_CLOCK` now requires a `Z` (durations / local-time windows no
+  longer clobbered); a scalar `what_to_summarize` is no longer iterated char-by-char;
+  non-dict `lead_description` / `None` query params no longer crash; `dump_oracle_doc`
+  keeps non-ASCII values literal (`allow_unicode=True`); oracle fan-out fails fast and
+  cancels queued leads; non-integer `ORACLE_MAX_CONCURRENCY` fails with a clear message.
+
 ## Verification
 
-- `learning/` suite: 92 passed. `tests/ -m "not llm"`: 267 passed, 7 skipped.
-  (Combined `tests/ learning/` collection shows pre-existing sys.path-pollution errors not
-  present per-dir; the one `tests/` failure is the live-`claude` `@pytest.mark.llm` gather
-  test.) New unit tests cover sanitizer, scrub, per-lead parse (incl. unquoted-marker
-  rescue), assembly, and validator marker acceptance.
-- **Open / next session:** a live replay run through `learning/loop.py` to eyeball a real
-  `projected_telemetry.yaml` (per-lead events / `[]` / noise / `<suppressed>` on a
-  T1562-sampled story), and confirm the judge's detection-by-absence reading end-to-end.
+- `learning/` suite (with the +12 review-hardening regression tests): see latest run.
+- New unit tests cover the glob-overmatch guard, multi-colon suppression-marker parse,
+  placeholder-event preservation, validator marker strictness, sanitizer Z-requirement,
+  scalar/malformed `what_to_summarize`, empty-sample fallthrough, and unicode dump.
+- Validated end-to-end on this v2 worktree: a live `learning/loop.py` replay producing a
+  real `projected_telemetry.yaml` (per-lead events / `[]` / noise / `<suppressed>`) and the
+  judge's detection-by-absence reading.

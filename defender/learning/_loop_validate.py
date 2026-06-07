@@ -177,10 +177,22 @@ def dump_oracle_doc(doc: dict) -> str:
 
     The judge reads this as text, so repeated events are written out in full under each
     lead, never as ``*alias`` back-references (see ``_NoAliasOracleDumper``).
+    ``allow_unicode=True`` keeps non-ASCII event values (e.g. a username ``Bjørn``) literal
+    rather than ``\\xNN``-escaped, so the LLM judge compares the same text the defender's
+    actuals carry. Mirrors the dumper in ``_loop_oracle.build_lead_user_prompt``.
     """
     return yaml.dump(
-        doc, Dumper=_NoAliasOracleDumper, sort_keys=False, default_flow_style=False
+        doc, Dumper=_NoAliasOracleDumper, sort_keys=False,
+        default_flow_style=False, allow_unicode=True,
     )
+
+
+_BASELINE_NOISE_MARKER = "<standard environment noise>"
+
+
+def _is_baseline_diff_marker(s: str) -> bool:
+    """True for the two baseline-diff marker strings the oracle may emit as an event item."""
+    return s == _BASELINE_NOISE_MARKER or (s.startswith("<suppressed:") and s.endswith(">"))
 
 
 def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
@@ -200,14 +212,30 @@ def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     events = p["events"]
     if not isinstance(events, list):
         raise LoopError(f"projection[{i}].events is not a list")
-    # An event is either a mapping (a projected event) or a string (a baseline-diff
-    # marker: <standard environment noise> / <suppressed: …>). Nothing else.
+    # An event is either a mapping (a projected event) or a baseline-diff marker string
+    # (<standard environment noise> / <suppressed: …>). A marker is a whole-lead verdict, so
+    # it must be the SOLE item — never mixed with event mappings, never duplicated.
+    has_marker = False
     for j, ev in enumerate(events):
-        if not isinstance(ev, (dict, str)):
-            raise LoopError(
-                f"projection[{i}].events[{j}] is not a mapping or marker string "
-                f"(got {type(ev).__name__})"
-            )
+        if isinstance(ev, dict):
+            continue
+        if isinstance(ev, str):
+            if not _is_baseline_diff_marker(ev):
+                raise LoopError(
+                    f"projection[{i}].events[{j}] is a string but not a recognized "
+                    f"baseline-diff marker (got {ev!r})"
+                )
+            has_marker = True
+            continue
+        raise LoopError(
+            f"projection[{i}].events[{j}] is not a mapping or marker string "
+            f"(got {type(ev).__name__})"
+        )
+    if has_marker and len(events) != 1:
+        raise LoopError(
+            f"projection[{i}].events mixes a baseline-diff marker with other items; "
+            f"a marker must be the only event in the list"
+        )
 
 
 # ---------------------------------------------------------------------------

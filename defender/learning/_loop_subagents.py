@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Protocol
 
@@ -287,13 +287,21 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     entries = doc.get("entries") or []
     samples = [lead_sample_text(run_dir, e) for e in entries]
     max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(entries) or 1))
+    events_per_lead: list = [None] * len(entries)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        events_per_lead = list(
-            pool.map(
-                lambda args: invoke_oracle_lead(args[0], story, args[1]),
-                zip(entries, samples),
-            )
-        )
+        fut_to_idx = {
+            pool.submit(invoke_oracle_lead, e, story, s): i
+            for i, (e, s) in enumerate(zip(entries, samples))
+        }
+        try:
+            # Surface the first failing lead as soon as it completes (rather than after
+            # every sibling finishes) and cancel any leads still queued behind the cap.
+            for fut in as_completed(fut_to_idx):
+                events_per_lead[fut_to_idx[fut]] = fut.result()
+        except Exception:
+            for f in fut_to_idx:
+                f.cancel()
+            raise
     projections = [
         (e.get("position"), events) for e, events in zip(entries, events_per_lead)
     ]
