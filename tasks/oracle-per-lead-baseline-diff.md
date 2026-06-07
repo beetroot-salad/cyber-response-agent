@@ -41,9 +41,34 @@ the all-leads `oracle.md`).
 - **Removed** `_loop_exemplars.py` (its scrub logic moved into `_loop_oracle`; the old
   all-leads exemplar bundle is no longer assembled).
 
+## Review hardening (post-`/code-review`)
+
+Fixes folded in after an extra-high-effort review of the diff:
+
+- **`lead_sample_text` glob over-match** — `{position}*.json` matched `10.json`/`11.json`
+  for `position=1` on ≥10-lead runs (feeding another lead's shape skeleton). Tightened to
+  `{position}.json` + `{position}[a-z].json`, mirroring the projector's suffix guard.
+- **Judge prompt pointer removed** — `judge.md`/`judge_benign.md` told the judge to read
+  `system.template` "from `lead_sequence`", a doc the judge is never handed (and the
+  projection no longer carries those keys). Reworded to name the lead by position + the
+  name/system it *does* see in `investigation.md`.
+- **Suppression-marker parse** — an unquoted `<suppressed: REASON>` whose REASON held a
+  second `: ` raised a YAML `ScannerError` that aborted the whole oracle direction. Replaced
+  the post-hoc `_normalize_marker` mapping-rescue (which also corrupted legit single-field
+  placeholder events) with a pre-parse quoting pass that survives any number of colons.
+- **Validator marker strictness** — now rejects unrecognized/empty event strings and a
+  marker mixed with mappings or duplicated (the "marker is the sole item" contract was
+  prose-only). Raw reply is embedded in the parse `LoopError` for debuggability.
+- **Sanitizer fixes** — `_CLOCK` now requires a `Z` (durations / local-time windows no
+  longer clobbered); a scalar `what_to_summarize` is no longer iterated char-by-char;
+  non-dict `lead_description` / `None` query params no longer crash; `dump_oracle_doc`
+  keeps non-ASCII values literal (`allow_unicode=True`); oracle fan-out fails fast and
+  cancels queued leads; non-integer `ORACLE_MAX_CONCURRENCY` fails with a clear message.
+
 ## Verification
 
-- `learning/` 91 passed; `tests/ -m "not llm"` 282 passed.
+- `learning/` 103 passed (was 91; +12 regression tests for the fixes above);
+  `tests/ -m "not llm"` 282 passed.
 - Validated end-to-end on the v2 worktree: two live loop runs (actor→oracle→judge→persist)
   clean across both directions; all four oracle modes confirmed on live claude incl.
   `<suppressed>` detection-by-absence.

@@ -86,7 +86,7 @@ Work through the steps below as private reasoning to ground your verdict and fin
 
 Walk through the encounter **lead by lead**, using the projection as the anchor. For each lead position in `projected_telemetry.yaml` (skip leads where the projection is `events: []` *and* the lead was clearly not load-bearing for any story claim):
 
-- name the lead (position + system.template, read from lead_sequence) and what it was measuring (`lead_description.goal` from the investigation),
+- name the lead (its position, plus the lead's name/system from the investigation) and what it was measuring (`lead_description.goal` from the investigation),
 - what the oracle projected the attack would have produced (specific fields/values from `projected_telemetry`),
 - what the lead actually returned (the investigation's gather/analyze section for that position),
 - whether the actual result **refutes**, is **consistent with**, or is **silent on** the projection.

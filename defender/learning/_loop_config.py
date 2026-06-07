@@ -125,7 +125,13 @@ ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 # projects a signed baseline-diff (no cross-lead matching to reason about). Override via
 # ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
-ORACLE_MAX_CONCURRENCY = int(os.environ.get("ORACLE_MAX_CONCURRENCY", "8"))
+_oracle_concurrency_raw = os.environ.get("ORACLE_MAX_CONCURRENCY", "8")
+try:
+    ORACLE_MAX_CONCURRENCY = int(_oracle_concurrency_raw)
+except ValueError:
+    raise ValueError(
+        f"ORACLE_MAX_CONCURRENCY must be an integer; got {_oracle_concurrency_raw!r}"
+    ) from None
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already

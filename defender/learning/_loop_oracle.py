@@ -32,20 +32,23 @@ from _loop_validate import strip_yaml_fence
 # ---------------------------------------------------------------------------
 
 _ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
-_CLOCK = re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")   # HH:MM:SS(.ms)(Z)
+_CLOCK = re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z\b")    # HH:MM:SS(.ms)Z (UTC only)
 _CLOCK_HM = re.compile(r"(?<![\d:])\d{1,2}:\d{2}Z\b")          # bare HH:MMZ
 
 
 def sanitize_wtc(item: str) -> str:
-    """Replace every absolute clock time in a characterization item with ``<alert-time>``.
+    """Replace every absolute UTC clock time in a characterization item with ``<alert-time>``.
 
     A concrete clock time embedded in ``what_to_summarize`` (e.g. "the login at
     17:08:19Z") is copyable: the oracle lifts it into an event timestamp even when the
     story never stated it, fabricating a wrong-time event. Relativizing it to the
     oracle's own ``<alert-time>`` anchor removes the copyable value while keeping the
-    salience. Relative spans ("within +/-5 minutes", "a few minutes later") carry no
-    absolute value and survive untouched. Query *windows* are NOT sanitized here — they
-    are the legitimate envelope the oracle filters on.
+    salience. Only ISO8601 timestamps and ``Z``-suffixed clock times are relativized —
+    a bare ``HH:MM:SS`` without the ``Z`` UTC marker is ambiguous (a duration like
+    ``1:30:00``, or the time half of a space-separated local datetime) and is left
+    untouched, as are relative spans ("within +/-5 minutes", "a few minutes later").
+    Query *windows* are NOT sanitized here — they are the legitimate envelope the
+    oracle filters on.
     """
     item = _ISO.sub("<alert-time>", item)
     item = _CLOCK.sub("<alert-time>", item)
@@ -103,6 +106,9 @@ def redact_exemplar(text: str) -> str:
         sample = json.loads(json_m.group(1))
     except json.JSONDecodeError:
         return f"{header_line}\n(could not parse schema sample as JSON; skeleton unavailable)"
+    if not sample:  # empty list/object/null — no shape to show; let the caller try siblings
+        # Leading "(" signals lead_sample_text to skip this payload and glob a sibling.
+        return "(schema sample block is empty; skeleton unavailable for this lead)"
 
     skeleton = _scrub_skeleton(sample)
     return (
@@ -114,11 +120,15 @@ def redact_exemplar(text: str) -> str:
 def lead_sample_text(run_dir: Path, entry: dict) -> str:
     """One scrubbed sample-event skeleton for a lead.
 
-    Tries the entry's ``result_ref`` first, then falls back to globbing the lead's
-    multi-query payloads (``gather_raw/{position}{a..z}.json``) — a single dispatch can
-    fan into several files and ``result_ref`` may point at a position that was never
-    written as a bare ``{position}.json``. Returns the first payload that yields a real
-    JSON skeleton; a placeholder string if none do.
+    Tries the entry's ``result_ref`` first, then falls back to the lead's multi-query
+    payloads (``gather_raw/{position}{a..z}.json``) — a single dispatch can fan into
+    several files and ``result_ref`` may point at a position that was never written as a
+    bare ``{position}.json``. The fallback matches only the bare ``{position}.json`` and a
+    single lowercase-alpha suffix (``{position}[a-z].json``); it must NOT use a bare
+    ``{position}*`` glob, which would over-match higher positions (``1*`` catches
+    ``10.json``, ``11.json``) and feed another lead's shape skeleton into this lead.
+    Returns the first payload that yields a real JSON skeleton; a placeholder string if
+    none do.
     """
     position = entry.get("position")
     gather_dir = run_dir / "gather_raw"
@@ -128,8 +138,8 @@ def lead_sample_text(run_dir: Path, entry: dict) -> str:
         candidates.append(run_dir / result_ref)
     if position is not None:
         candidates += sorted(
-            p for p in gather_dir.glob(f"{position}*.json")
-            if not p.name.endswith((".observations.json", ".lead.json"))
+            set(gather_dir.glob(f"{position}.json"))
+            | set(gather_dir.glob(f"{position}[a-z].json"))
         )
     seen: set[Path] = set()
     for path in candidates:
@@ -151,7 +161,7 @@ def _query_lines(entry: dict) -> str:
     lines = []
     for q in entry.get("queries") or []:
         lines.append(f"  - id: {q.get('id')}")
-        lines.append(f"    params: {json.dumps(q.get('params', {}))}")
+        lines.append(f"    params: {json.dumps(q.get('params') or {})}")
     return "\n".join(lines) if lines else "  (none)"
 
 
@@ -161,8 +171,13 @@ def build_lead_user_prompt(entry: dict, story: str, sample_text: str) -> str:
     fabrication-to-fill); ``what_to_characterize`` is the sanitized ``what_to_summarize``.
     """
     position = entry.get("position")
-    raw_wtc = (entry.get("lead_description") or {}).get("what_to_summarize") or []
-    san_wtc = [sanitize_wtc(x) for x in raw_wtc]
+    ld = entry.get("lead_description")
+    raw_wtc = ld.get("what_to_summarize") if isinstance(ld, dict) else None
+    if isinstance(raw_wtc, str):           # a scalar slipped through — one item, not N chars
+        raw_wtc = [raw_wtc]
+    elif not isinstance(raw_wtc, list):
+        raw_wtc = []
+    san_wtc = [sanitize_wtc(x) for x in raw_wtc if isinstance(x, str)]
     wtc_block = (
         yaml.safe_dump(san_wtc, default_flow_style=False, allow_unicode=True).rstrip()
         if san_wtc else "  (none)"
@@ -187,20 +202,21 @@ def build_lead_user_prompt(entry: dict, story: str, sample_text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_marker(ev):
-    """Rescue an unquoted ``<suppressed: reason>`` marker that YAML parsed as a mapping.
+_UNQUOTED_SUPPRESSED_RE = re.compile(r'^(\s*-\s*)(<suppressed:.*>)\s*$', re.MULTILINE)
 
-    The colon-space in ``- <suppressed: stopped auditd>`` makes ``yaml.safe_load`` read the
-    item as a one-key mapping ``{"<suppressed": "stopped auditd>"}`` rather than a string.
-    The oracle is told to quote markers, but quoting discipline is imperfect; when an item is
-    a one-key mapping whose key opens with ``<`` and whose value closes with ``>``, rejoin it
-    to the intended ``"<...>"`` marker string so the judge reads a clean marker.
+
+def _quote_unquoted_markers(text: str) -> str:
+    """Double-quote an unquoted ``- <suppressed: …>`` list item before YAML parsing.
+
+    The ``<suppressed: REASON>`` marker contains a colon, so an unquoted list item is read
+    by YAML as a broken one-key mapping — and, when REASON carries a *second* ``: ``, raises
+    a ScannerError outright (no mapping to rescue post-hoc). Wrapping the whole marker in
+    double quotes makes it a clean string regardless of how many colons REASON holds. The
+    ``<standard environment noise>`` marker has no colon and parses fine unquoted, so it is
+    left alone. An already-quoted item (``- "<suppressed: …>"``) has a ``"`` right after the
+    dash, not a ``<``, so the anchored pattern does not match and it is not double-quoted.
     """
-    if isinstance(ev, dict) and len(ev) == 1:
-        (k, v), = ev.items()
-        if isinstance(k, str) and k.startswith("<") and isinstance(v, str) and v.endswith(">"):
-            return f"{k}: {v}"
-    return ev
+    return _UNQUOTED_SUPPRESSED_RE.sub(r'\1"\2"', text)
 
 
 def parse_lead_events(raw: str, position) -> list:
@@ -208,20 +224,26 @@ def parse_lead_events(raw: str, position) -> list:
 
     The reply is a single YAML doc whose only key is ``events`` (a list of event mappings,
     or a single-item marker list, or ``[]``). Tolerates a stray fence/envelope via
-    ``strip_yaml_fence`` and an unquoted suppression marker via ``_normalize_marker``. Raises
-    ``LoopError`` on anything that is not an ``events`` list — item-level shape (mapping vs
-    marker string) is the validator's job downstream.
+    ``strip_yaml_fence`` and an unquoted suppression marker via ``_quote_unquoted_markers``.
+    Raises ``LoopError`` (with the raw reply embedded for debuggability — a per-lead failure
+    otherwise leaves nothing on disk) on anything that is not an ``events`` list; item-level
+    shape (mapping vs marker string) is the validator's job downstream.
     """
+    cleaned = _quote_unquoted_markers(strip_yaml_fence(raw))
     try:
-        doc = yaml.safe_load(strip_yaml_fence(raw))
+        doc = yaml.safe_load(cleaned)
     except yaml.YAMLError as e:
-        raise LoopError(f"oracle lead {position}: reply is not valid YAML: {e}") from e
+        raise LoopError(
+            f"oracle lead {position}: reply is not valid YAML: {e}\n"
+            f"--- raw reply ---\n{raw[:2000]}"
+        ) from e
     events = doc.get("events") if isinstance(doc, dict) else None
     if not isinstance(events, list):
         raise LoopError(
-            f"oracle lead {position}: reply has no `events` list (got {type(events).__name__})"
+            f"oracle lead {position}: reply has no `events` list "
+            f"(got {type(events).__name__})\n--- raw reply ---\n{raw[:2000]}"
         )
-    return [_normalize_marker(ev) for ev in events]
+    return events
 
 
 def assemble_oracle_doc(projections: list[tuple]) -> dict:
