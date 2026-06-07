@@ -29,6 +29,7 @@ import fnmatch
 from typing import Any
 from collections.abc import Iterable
 
+from . import _walkers
 from .corpus import Companion
 
 
@@ -50,12 +51,9 @@ def _hypothesis_name(h: dict[str, Any]) -> str:
 
 
 def _all_hypotheses(c: Companion) -> Iterable[dict[str, Any]]:
-    """Hypothesize-block hypotheses plus any new_hypotheses spawned in leads."""
-    yield from c.hypotheses
-    for lead in c.leads:
-        for h in lead.get("new_hypotheses", []) or []:
-            if isinstance(h, dict):
-                yield h
+    """Hypothesize-block hypotheses plus any new_hypotheses spawned in leads
+    (deduped by id; shared with the write-time validator via `_walkers`)."""
+    return _walkers.all_hypotheses(c.body).values()
 
 
 def _lead_outcome_empty(lead: dict[str, Any]) -> bool:
@@ -362,16 +360,9 @@ def _build_lead_effect_rows(
 # ---------------------------------------------------------------------------
 
 def _compute_final_weights(c: Companion) -> dict[str, Any]:
-    """Initial hypothesis weight, overlaid by the last resolution shift."""
-    final: dict[str, Any] = {
-        h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h
-    }
-    for lead in c.leads:
-        for r in lead.get("resolutions", []) or []:
-            h_id = r.get("hypothesis")
-            if h_id:
-                final[h_id] = r.get("after")
-    return final
+    """Initial hypothesis weight, overlaid by the last resolution shift
+    (shared with the write-time validator via `_walkers`)."""
+    return _walkers.final_weights(c.body)
 
 
 def _hypothesis_matches_shape(

@@ -182,7 +182,25 @@ confidence             high
 """,
     )
     errors = validate_companion(text, None)
-    assert any("open `??` class slot" in e for e in errors), errors
+    assert any("unresolved class ('??/??/??')" in e for e in errors), errors
+
+
+def test_benign_blocked_by_unresolved_candidate_set():
+    # `{a, b}` is the narrowed-but-not-concrete middle state — still open,
+    # so benign must block on it just like a bare `??`.
+    text = fence(
+        """
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|{bastion/internal/known-corp, ip-only/internet/novel}|bastion-01|os=linux
+""",
+        """
+:T conclude
+disposition            benign
+confidence             high
+""",
+    )
+    errors = validate_companion(text, None)
+    assert any("unresolved class" in e and "v-001" in e for e in errors), errors
 
 
 def test_open_slot_resolved_by_attr_update_passes_gate():
@@ -204,6 +222,29 @@ confidence             high
     )
     errors = validate_companion(text, None)
     assert not any("open `??`" in e for e in errors), errors
+
+
+def test_open_slot_refined_by_later_redeclaration_passes_gate():
+    # A lead observation that re-declares a `??` vertex with a concrete class
+    # refines the open baseline (append-only: the original row stays).
+    text = fence(
+        """
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|??/??/??|bastion-01|os=linux
+""",
+        L_FINDINGS,
+        """
+:V l-001.observations.vertices [id|type|class|ident|attrs?]
+v-001|compute|bastion/internal/known-corp|bastion-01|os=linux
+""",
+        """
+:T conclude
+disposition            benign
+confidence             high
+""",
+    )
+    errors = validate_companion(text, None)
+    assert not any("unresolved class" in e for e in errors), errors
 
 
 def test_benign_blocked_by_unauthorized_contract():
@@ -322,6 +363,154 @@ confidence             high
     assert not any("benign blocked" in e for e in errors), errors
 
 
+def test_crlf_line_endings_do_not_bypass_validation():
+    # A CRLF file must not defeat the fence regex into an empty-companion
+    # no-op pass — line endings are normalized before parsing.
+    bad = fence(
+        """
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|widget|??/??/??|host-1|os=linux
+""",
+        """
+:T conclude
+disposition            benign
+confidence             high
+""",
+    )
+    lf_errors = validate_companion(bad, None)
+    crlf_errors = validate_companion(bad.replace("\n", "\r\n"), None)
+    assert any("not a known vertex type" in e for e in lf_errors), lf_errors
+    # Same violations surface under CRLF — not a silent pass.
+    assert any("not a known vertex type" in e for e in crlf_errors), crlf_errors
+    assert any("unresolved class" in e for e in crlf_errors), crlf_errors
+
+
+def test_yaml_fence_is_rejected():
+    # The on-disk surface is ```invlang; a ```yaml fence must not yield an
+    # empty companion that silently passes every rule.
+    text = "```yaml\ndisposition: benign\n```\n"
+    errors = validate_companion(text, None)
+    assert any("non-invlang surface" in e for e in errors), errors
+
+
+def test_append_only_rejects_in_fence_record_mutation():
+    # Rewriting a committed vertex's class in place (same fence count) is an
+    # append-only violation even though no block was dropped.
+    current = fence(
+        """
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|bastion/internal/known-corp|bastion-01|os=linux
+"""
+    )
+    mutated = fence(
+        """
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|workstation/internet/anonymous|bastion-01|os=linux
+"""
+    )
+    errors = validate_companion(mutated, current)
+    assert any("mutated in place" in e and "v-001" in e for e in errors), errors
+
+
+def test_benign_blocked_by_unauthorized_contract_without_surviving_table():
+    # The bypass: a live hypothesis carrying an `unauthorized` contract must
+    # block benign even when it is omitted from `:T conclude.surviving`
+    # (survival is computed from final weights, not the self-declared table).
+    text = fence(
+        V_PROLOGUE,
+        E_PROLOGUE_SIEM,
+        """
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active
+""",
+        """
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"svc permitted"|escalate|escalate
+""",
+        L_FINDINGS,
+        """
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-001|e-001|ac1|unauthorized|iam-policy|"absent from CMDB"
+""",
+        """
+:T conclude
+disposition            benign
+confidence             high
+""",
+        # NB: no :T conclude.surviving table at all.
+    )
+    errors = validate_companion(text, None)
+    assert any("'unauthorized'" in e and "not 'authorized'" in e for e in errors), errors
+
+
+def test_authorized_row_does_not_mask_unauthorized_for_same_contract():
+    # Conflicting append-only rows for one contract: a later `authorized`
+    # row must not mask an earlier `unauthorized`.
+    text = fence(
+        V_PROLOGUE,
+        E_PROLOGUE_SIEM,
+        """
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active
+""",
+        """
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"svc permitted"|escalate|escalate
+""",
+        L_FINDINGS,
+        """
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-001|e-001|ac1|unauthorized|iam-policy|"absent from CMDB"
+l-001|e-001|ac1|authorized|iam-policy|"later flip"
+""",
+        """
+:T conclude
+disposition            benign
+confidence             high
+""",
+        """
+:T conclude.surviving [hyp_id|final_weight]
+h-001|++
+""",
+    )
+    errors = validate_companion(text, None)
+    assert any("'unauthorized'" in e and "not 'authorized'" in e for e in errors), errors
+
+
+def test_attr_update_bare_key_is_rejected():
+    # `:R attr_updates` keys must be `class` or `attrs.<name>`; a bare key is
+    # silently dropped by the resolver, so reject it at write time.
+    text = fence(
+        V_PROLOGUE,
+        L_FINDINGS,
+        """
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-001|provenance|apt:nginx
+""",
+    )
+    errors = validate_companion(text, None)
+    assert any("is not a valid refinement key" in e for e in errors), errors
+
+
+def test_skill_example_a_accumulates_clean():
+    """Validate the flagship Example A as the hook actually sees it: the
+    section's ```invlang fences applied in order to one investigation.md,
+    re-checking append-only at each step. Per-fence isolation (the
+    all-examples test) can't catch cross-fence or append-only drift."""
+    import re
+    skill = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text()
+    m = re.search(r"### Example A.*?(?=\n### )", skill, re.DOTALL)
+    assert m, "Example A section not found"
+    fences = re.findall(r"```invlang\n(.*?)\n```", m.group(0), re.DOTALL)
+    assert len(fences) >= 3, f"expected Example A to build up several fences, got {len(fences)}"
+    acc = ""
+    for i, body in enumerate(fences):
+        nxt = (acc + "\n" if acc else "") + "```invlang\n" + body + "\n```\n"
+        errs = validate_companion(nxt, acc or None)
+        assert not errs, f"Example A fence#{i} (accumulated) failed: {errs}"
+        acc = nxt
+
+
 # --- Hook-level ------------------------------------------------------------
 
 
@@ -392,3 +581,40 @@ def test_hook_edit_append_only(monkeypatch, tmp_path):
         },
     })
     assert rc == 2
+
+
+def test_hook_fails_closed_on_internal_error(monkeypatch, tmp_path, capsys):
+    # A validator crash must BLOCK (exit 2), not silently pass the write
+    # (exit ≠ 2 is non-blocking in the harness).
+    mod = _load_hook()
+    monkeypatch.setattr(mod, "validate_companion", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    inv = tmp_path / "investigation.md"
+    rc = _run_hook(mod, monkeypatch, {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(inv), "content": fence(V_PROLOGUE)},
+    })
+    assert rc == 2
+    assert "failing closed" in capsys.readouterr().err
+
+
+def test_hook_scopes_to_run_dir(monkeypatch, tmp_path):
+    # With DEFENDER_RUN_DIR set, only investigation.md inside it is validated;
+    # a same-named file elsewhere is left alone (neither validated nor blocked).
+    mod = _load_hook()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(run_dir))
+
+    outside = tmp_path / "elsewhere" / "investigation.md"
+    rc_outside = _run_hook(mod, monkeypatch, {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(outside), "content": BAD_WRITE},
+    })
+    assert rc_outside == 0  # not the run companion → not blocked
+
+    inside = run_dir / "investigation.md"
+    rc_inside = _run_hook(mod, monkeypatch, {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(inside), "content": BAD_WRITE},
+    })
+    assert rc_inside == 2  # the run companion → schema-enforced

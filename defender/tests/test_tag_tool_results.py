@@ -76,6 +76,32 @@ def test_alert_json_read_is_annotated(monkeypatch, tmp_path, capsys):
     assert "[UNTRUSTED-abc12345]" in out["hookSpecificOutput"]["additionalContext"]
 
 
+def test_gather_subagent_dispatch_is_annotated(monkeypatch, tmp_path, capsys):
+    # The gather Task return is the primary untrusted channel into the main
+    # loop; its dispatch points at the gather skill.
+    mod = _load()
+    _write_meta(tmp_path, "5a17ed00")
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    out = _run(mod, {
+        "tool_name": "Task",
+        "tool_input": {"prompt": "Read defender/skills/gather/SKILL.md and follow it.\n..."},
+    }, capsys)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "[UNTRUSTED-5a17ed00]" in ctx
+    assert "gather-subagent" in ctx
+
+
+def test_non_gather_task_is_not_annotated(monkeypatch, tmp_path, capsys):
+    mod = _load()
+    _write_meta(tmp_path, "5a17ed00")
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    out = _run(mod, {
+        "tool_name": "Task",
+        "tool_input": {"prompt": "Summarize the report draft."},
+    }, capsys)
+    assert out is None
+
+
 def test_other_read_is_not_annotated(monkeypatch, tmp_path, capsys):
     mod = _load()
     _write_meta(tmp_path, "abc12345")

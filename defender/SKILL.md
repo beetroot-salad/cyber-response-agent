@@ -491,7 +491,7 @@ v-003|process|dpkg|dpkg[pid=4471]|signing=apt;parent=unattended-upgrades
 e-002|modified|v-003|v-002|2026-05-05T02:13:48Z|siem-event:siem|via=unattended-upgrades;checksum_after_matches_upstream=true;fleet_peers=11/12
 
 :R attr_updates [resolved_by|target|key|value]
-l-001|v-002|provenance|apt:nginx_1.24.0-2ubuntu7.5_amd64.deb
+l-001|v-002|attrs.provenance|apt:nginx_1.24.0-2ubuntu7.5_amd64.deb
 
 :T resolutions
 h-001  null → ++    [l-001 p1,p2 severe ⟂ e-002 :: apt/dpkg write at 02:13:48Z, checksum matches upstream]

@@ -17,22 +17,33 @@ A first wave of reliability hooks/validators has been ported from
 - **`hooks/invlang_validate.py`** — PreToolUse on `Write|Edit` of
   `investigation.md`. Runs the structural validator over the lenient
   parser's output and **blocks the write (exit 2)** on any violation:
-  structural parse failures, append-only violations, weak edge authority
-  on `++`/`--` resolutions, out-of-catalog
-  type/rel/anchor_kind/auth_kind, and unsatisfied `benign` disposition
-  gates (open `??` slots, unauthorized contracts). Rules live in
-  `skills/invlang/validate.py` and target the **current** invlang spec
-  (`skills/invlang/SKILL.md`), not soc-agent's. Pre-MVP, historical runs
-  written against earlier invlang variants are expected to fail — that's
-  intentional. A test (`test_skill_worked_examples_all_pass`) guards that
-  the runtime SKILL's own worked examples always validate clean, so the
-  SKILL can't teach invlang the hook blocks. Two further spec rules
-  (per-type class-slot grammar, sibling-fork uniqueness) are *not* yet
-  enforced because the spec's own examples currently contradict them —
-  see `tasks/defender-invlang-enforcement-ramp.md`.
+  non-invlang surface (line endings are normalized first; a `​```yaml`
+  fence is rejected), structural parse failures, append-only violations
+  (block-count drop **or** in-place mutation/removal of a committed
+  vertex/edge), weak edge authority on `++`/`--` resolutions,
+  out-of-catalog type/rel/anchor_kind/auth_kind or `:R attr_updates`
+  key, and unsatisfied `benign` disposition gates (open `??`/`{a,b}`
+  slots, or an unauthorized contract on a *live* — final weight ≠ `--` —
+  hypothesis, computed from the resolution record rather than the
+  omittable `:T conclude.surviving` table). The hook **fails closed**
+  (exit 2) on an internal validator error and scopes to the run's own
+  `investigation.md` via `DEFENDER_RUN_DIR`. Rules live in
+  `skills/invlang/validate.py` (companion walkers shared with the corpus
+  queries via `skills/invlang/_walkers.py`) and target the **current**
+  invlang spec (`skills/invlang/SKILL.md`), not soc-agent's. Pre-MVP,
+  historical runs written against earlier invlang variants are expected
+  to fail — that's intentional. Tests (`test_skill_worked_examples_all_pass`
+  per-fence + `test_skill_example_a_accumulates_clean` whole-document)
+  guard that the runtime SKILL's own worked examples always validate
+  clean, so the SKILL can't teach invlang the hook blocks. Two further
+  spec rules (per-type class-slot grammar, sibling-fork uniqueness) are
+  *not* yet enforced because the spec's own examples currently contradict
+  them — see `tasks/defender-invlang-enforcement-ramp.md`.
 - **`hooks/tag_tool_results.py`** — PostToolUse injection-safety tagging:
-  wraps MCP output and annotates adapter-CLI / `alert.json` reads with a
-  per-run salted untrusted-data marker.
+  wraps MCP output and annotates the gather subagent's `Task` return (the
+  primary untrusted channel into the main loop) plus adapter-CLI /
+  `alert.json` reads with a per-run salted untrusted-data marker. Shares
+  the run-dir/salt lookup with the budget hook via `hooks/_run_dir.py`.
 - **`hooks/budget_enforcer.py`** — PostToolUse per-run tool-call /
   subagent-spawn / wall-clock budget tracking (warning-only).
 

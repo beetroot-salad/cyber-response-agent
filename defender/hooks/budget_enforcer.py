@@ -24,10 +24,16 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+# Sibling-import the shared run-dir helper. Inserting our own dir covers
+# the importlib-loaded test path; running as a script adds it automatically.
+_HOOK_DIR = Path(__file__).resolve().parent
+if str(_HOOK_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOK_DIR))
+from _run_dir import resolve_run_dir  # noqa: E402
 
 # Caps are intentionally inline + single-default: the defender has no
 # per-signature permissions.yaml to overlay, so there is nothing to
@@ -49,14 +55,6 @@ def make_budget_state(run_id: str) -> dict:
     }
 
 
-def resolve_run_dir() -> Path | None:
-    raw = os.environ.get("DEFENDER_RUN_DIR")
-    if not raw:
-        return None
-    run_dir = Path(raw)
-    return run_dir if run_dir.is_dir() else None
-
-
 def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
     """Atomic read-modify-write of budget.json under an exclusive lock."""
     budget_path = run_dir / "budget.json"
@@ -68,6 +66,9 @@ def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
             budget = json.loads(raw) if raw else make_budget_state(run_id)
         except json.JSONDecodeError:
             budget = make_budget_state(run_id)
+        # Backfill started_at if an older/partial budget.json lacks it, so the
+        # wall-clock check never silently drops out for the rest of the run.
+        budget.setdefault("started_at", datetime.now(UTC).isoformat())
         budget["tool_calls"] = budget.get("tool_calls", 0) + 1
         if tool_name in ("Task", "Agent"):
             budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1

@@ -28,6 +28,7 @@ Exit codes:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -40,38 +41,62 @@ if str(REPO_ROOT) not in sys.path:
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 
 
-def resolve_proposed_text(hook_data: dict) -> str | None:
+def _is_target_investigation(file_path: str) -> bool:
+    """True only for the run's canonical ``investigation.md``.
+
+    Basename must match, and — when ``DEFENDER_RUN_DIR`` is set (the
+    production anchor) — the path must resolve inside it, so a stray
+    ``investigation.md`` elsewhere on disk is neither validated nor
+    blocked. With no run anchor (tests) the basename alone scopes.
+    """
+    if not isinstance(file_path, str) or Path(file_path).name != "investigation.md":
+        return False
+    run_raw = os.environ.get("DEFENDER_RUN_DIR")
+    if not run_raw:
+        return True
+    try:
+        run_dir = Path(run_raw).resolve()
+        target = Path(file_path).resolve()
+    except OSError:
+        return True
+    return target.parent == run_dir or run_dir in target.parents
+
+
+def _read_current(file_path: str) -> str | None:
+    p = Path(file_path)
+    if not p.exists():
+        return None
+    try:
+        return p.read_text()
+    except OSError:
+        return None
+
+
+def resolve_proposed_text(hook_data: dict, current_text: str | None) -> str | None:
     """Return the proposed investigation.md text, or None if unrelated.
 
     For Write: the full ``content``.
-    For Edit:  the current file with ``old_string → new_string`` applied
-               (honoring ``replace_all``).
+    For Edit:  ``current_text`` with ``old_string → new_string`` applied
+               (honoring ``replace_all``). ``current_text`` is read once by
+               the caller and threaded through, so the file isn't re-read.
     """
     tool_name = hook_data.get("tool_name", "")
     tool_input = hook_data.get("tool_input") or {}
-    file_path = tool_input.get("file_path", "")
-    if not isinstance(file_path, str) or Path(file_path).name != "investigation.md":
-        return None
 
     if tool_name == "Write":
         content = tool_input.get("content", "")
         return content if isinstance(content, str) else ""
 
     if tool_name == "Edit":
-        inv_path = Path(file_path)
-        if not inv_path.exists():
-            return None
-        try:
-            current = inv_path.read_text()
-        except OSError:
+        if current_text is None:
             return None
         old = tool_input.get("old_string", "")
         new = tool_input.get("new_string", "")
         if not isinstance(old, str) or not isinstance(new, str):
             return None
         if tool_input.get("replace_all"):
-            return current.replace(old, new)
-        return current.replace(old, new, 1)
+            return current_text.replace(old, new)
+        return current_text.replace(old, new, 1)
 
     return None
 
@@ -85,20 +110,28 @@ def main() -> int:
     if hook_data.get("tool_name") not in ("Write", "Edit"):
         return 0
 
-    proposed = resolve_proposed_text(hook_data)
+    file_path = (hook_data.get("tool_input") or {}).get("file_path", "")
+    if not _is_target_investigation(file_path):
+        return 0
+
+    current_text = _read_current(file_path)
+    proposed = resolve_proposed_text(hook_data, current_text)
     if proposed is None:
         return 0
 
-    file_path = (hook_data.get("tool_input") or {}).get("file_path", "")
-    inv_path = Path(file_path)
-    current_text: str | None = None
-    if inv_path.exists():
-        try:
-            current_text = inv_path.read_text()
-        except OSError:
-            current_text = None
+    try:
+        errors = validate_companion(proposed, current_text)
+    except Exception as exc:  # noqa: BLE001 — a blocking gate must fail CLOSED
+        # An internal validator error must not silently let the write through
+        # (exit ≠ 2 is non-blocking). Block and surface the failure instead.
+        print("invlang validation errored — failing closed:", file=sys.stderr)
+        print(f"  - {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(
+            "Next action: simplify the ```invlang block(s) and retry, or escalate.",
+            file=sys.stderr,
+        )
+        return 2
 
-    errors = validate_companion(proposed, current_text)
     if not errors:
         return 0
 

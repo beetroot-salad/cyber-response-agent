@@ -81,7 +81,7 @@
         ]
       },
       {
-        "matcher": "Bash|Read|mcp__.*",
+        "matcher": "Task|Agent|Bash|Read|mcp__.*",
         "hooks": [
           {
             "type": "command",
