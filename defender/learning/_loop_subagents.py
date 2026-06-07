@@ -33,14 +33,17 @@ from _loop_oracle import (
     lead_sample_text,
     parse_lead_events,
 )
+from _loop_persist import derive_alert_rule_key
 from _loop_validate import dump_oracle_doc
 from _prologue import extract_case_entities
 
 from _loop_config import (
     ACTOR_BENIGN_PROMPT,
+    ACTOR_EFFORT,
     ACTOR_MODEL,
     ACTOR_PROMPT,
     ACTOR_SETTINGS,
+    BENIGN_ACTOR_EFFORT,
     BENIGN_ACTOR_MODEL,
     BENIGN_ACTOR_SETTINGS,
     BENIGN_JUDGE_EFFORT,
@@ -74,7 +77,7 @@ def _run_claude(
     model: str,
     *,
     settings_path: Path | None = None,
-    add_dir: Path | None = None,
+    add_dir: Path | list[Path] | None = None,
     permission_mode: str | None = None,
     session_id: str | None = None,
     effort: str | None = None,
@@ -104,7 +107,8 @@ def _run_claude(
     if settings_path is not None:
         cmd += ["--settings", str(settings_path)]
     if add_dir is not None:
-        cmd += ["--add-dir", str(add_dir)]
+        for d in (add_dir if isinstance(add_dir, list) else [add_dir]):
+            cmd += ["--add-dir", str(d)]
     if permission_mode is not None:
         cmd += ["--permission-mode", permission_mode]
     if session_id is not None:
@@ -211,8 +215,11 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     (learning_run_dir / "actor_archetype.txt").write_text(archetype + "\n")
     (learning_run_dir / "actor_menu.txt").write_text(menu_text + "\n")
 
+    alert_rule_key = derive_alert_rule_key(json.loads(alert_path.read_text()))
     user = (
         _section("alert", alert_path.read_text())
+        + _section("alert_rule_id", alert_rule_key,
+                   "canonical rule key; pass verbatim to environment-fact retrieval")
         + _section("actor_input", actor_input_path.read_text(),
                    "lead sequence projected for the actor")
         + _section("actor_archetype", archetype)
@@ -220,8 +227,9 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     )
     session_id = str(uuid.uuid4())
     story = _run_claude(
-        ACTOR_PROMPT, user, model=ACTOR_MODEL,
-        settings_path=ACTOR_SETTINGS, add_dir=LESSONS_ACTOR_DIR,
+        ACTOR_PROMPT, user, model=ACTOR_MODEL, effort=ACTOR_EFFORT,
+        settings_path=ACTOR_SETTINGS,
+        add_dir=[LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR],
         permission_mode="acceptEdits", session_id=session_id,
     )
     _copy_transcript(session_id, learning_run_dir / "actor_trace.jsonl")
@@ -248,7 +256,7 @@ def invoke_actor_benign(
     )
     session_id = str(uuid.uuid4())
     story = _run_claude(
-        ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL,
+        ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL, effort=BENIGN_ACTOR_EFFORT,
         settings_path=BENIGN_ACTOR_SETTINGS, add_dir=LESSONS_ENVIRONMENT_DIR,
         permission_mode="acceptEdits", session_id=session_id,
     )
@@ -308,6 +316,7 @@ def _invoke_judge(
     label: str,
     alert_path: Path,
     investigation_path: Path,
+    lead_sequence_path: Path,
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
@@ -315,6 +324,12 @@ def _invoke_judge(
     user = (
         _section("alert", alert_path.read_text())
         + _section("investigation", investigation_path.read_text())
+        + _section(
+            "lead_sequence", lead_sequence_path.read_text(),
+            "the defender's actual executed queries per lead position — the "
+            "authoritative record of what was queried (index, filter, window). "
+            "investigation.md is the narrative; this is ground truth for coverage.",
+        )
         + _section("actor_story", actor_story_path.read_text())
         + _section("projected_telemetry", projected_telemetry_path.read_text())
     )
@@ -328,23 +343,24 @@ def _invoke_judge(
         _copy_transcript(session_id, learning_run_dir / trace_name)
 
 
-def invoke_judge(alert_path, investigation_path, actor_story_path,
+def invoke_judge(alert_path, investigation_path, lead_sequence_path, actor_story_path,
                  projected_telemetry_path, learning_run_dir) -> str:
     return _invoke_judge(
         JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-        alert_path, investigation_path, actor_story_path,
+        alert_path, investigation_path, lead_sequence_path, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
 
-def invoke_judge_benign(alert_path, investigation_path, actor_story_path,
-                        projected_telemetry_path, learning_run_dir) -> str:
+def invoke_judge_benign(alert_path, investigation_path, lead_sequence_path,
+                        actor_story_path, projected_telemetry_path,
+                        learning_run_dir) -> str:
     """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
     environment-observation stream alongside defender findings."""
     return _invoke_judge(
         JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
         "judge_benign_trace.jsonl", "judge-benign",
-        alert_path, investigation_path, actor_story_path,
+        alert_path, investigation_path, lead_sequence_path, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
@@ -387,6 +403,7 @@ class ClaudePrintSubagents:
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge(
             run_dir / "alert.json", run_dir / "investigation.md",
+            run_dir / "lead_sequence.yaml",
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )
 
@@ -394,5 +411,6 @@ class ClaudePrintSubagents:
                      projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge_benign(
             run_dir / "alert.json", run_dir / "investigation.md",
+            run_dir / "lead_sequence.yaml",
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )

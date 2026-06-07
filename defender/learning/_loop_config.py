@@ -119,6 +119,17 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
+# Story construction was never pinned, so the actor ran at the inherited global
+# `high` default. An effort A/B on a falco-nettool case (n=1/cell) found the
+# response bimodal: medium (~194s) ≈ high (~216s) in wall + thinking, while low
+# (~37s) sharply curtails reasoning. high was *dominated* by medium — medium was
+# both faster and better-grounded (it recovered the real jump-box IP + the
+# monitoring-probe fingerprint that high invented), so high buys nothing. Pinned
+# medium. low stays a 5x-cheaper fallback that still yields coherent (if blunter)
+# stories. Effort drives sophistication, not fact fidelity — that's corpus work.
+# Override via ACTOR_EFFORT.
+ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "medium")
+BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 # Per-lead generative oracle. Generative work — sonnet for content fidelity (per the
 # d2d72ab model decision); effort pinned low since each call sees only its own lead and
