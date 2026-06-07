@@ -120,11 +120,12 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
-# Telemetry projection is mechanical (stays sonnet for content fidelity per the
-# d2d72ab model decision), but at the inherited effort=high the oracle
-# intermittently spends 5-6 min / ~25K tokens on extended thinking that does not
-# improve projection fidelity. Pin low; override via ORACLE_EFFORT.
+# Per-lead generative oracle. Generative work — sonnet for content fidelity (per the
+# d2d72ab model decision); effort pinned low since each call sees only its own lead and
+# projects a signed baseline-diff (no cross-lead matching to reason about). Override via
+# ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
+ORACLE_MAX_CONCURRENCY = int(os.environ.get("ORACLE_MAX_CONCURRENCY", "8"))
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already

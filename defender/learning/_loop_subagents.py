@@ -20,10 +20,20 @@ import shutil
 import subprocess
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 
+import yaml
+
 import mitre_corpus
+from _loop_oracle import (
+    assemble_oracle_doc,
+    build_lead_user_prompt,
+    lead_sample_text,
+    parse_lead_events,
+)
+from _loop_validate import dump_oracle_doc
 from _prologue import extract_case_entities
 
 from _loop_config import (
@@ -43,6 +53,7 @@ from _loop_config import (
     LESSONS_ENVIRONMENT_DIR,
     LoopError,
     ORACLE_EFFORT,
+    ORACLE_MAX_CONCURRENCY,
     ORACLE_MODEL,
     ORACLE_PROMPT,
     PROJECT_SCRIPT,
@@ -50,7 +61,6 @@ from _loop_config import (
     SUBAGENT_TIMEOUT,
     _log,
 )
-from _loop_exemplars import assemble_exemplar_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -246,22 +256,40 @@ def invoke_actor_benign(
     return story
 
 
-def invoke_oracle(
-    alert_path: Path,
-    actor_story_path: Path,
-    lead_sequence_path: Path,
-    exemplar_bundle: str,
-) -> str:
-    user = (
-        _section("alert", alert_path.read_text())
-        + _section("actor_story", actor_story_path.read_text())
-        + _section("lead_sequence", lead_sequence_path.read_text())
-        + _section(
-            "exemplars", exemplar_bundle,
-            "defender's actual gather_raw/{position}.json — schema reference, values scrubbed",
+def invoke_oracle_lead(entry: dict, story: str, sample_text: str) -> list:
+    """Project one lead. Sees only this lead — sanitized ``what_to_characterize`` +
+    queries + a scrubbed sample event — plus the story; no goal, no alert, no other lead.
+    Returns the lead's ``events`` list (mappings, a single baseline-diff marker, or empty).
+    """
+    user = build_lead_user_prompt(entry, story, sample_text)
+    raw = _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
+    return parse_lead_events(raw, entry.get("position"))
+
+
+def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
+    """Run the per-lead oracle over a run's lead sequence and assemble the doc.
+
+    One ``claude -p`` per lead, fanned out concurrently (bounded by
+    ``ORACLE_MAX_CONCURRENCY``); results are reassembled in lead order into the
+    ``{projections: [{position, events}]}`` doc the validator + judge consume. Returns the
+    serialized YAML string.
+    """
+    story = actor_story_path.read_text()
+    doc = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
+    entries = doc.get("entries") or []
+    samples = [lead_sample_text(run_dir, e) for e in entries]
+    max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(entries) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        events_per_lead = list(
+            pool.map(
+                lambda args: invoke_oracle_lead(args[0], story, args[1]),
+                zip(entries, samples),
+            )
         )
-    )
-    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
+    projections = [
+        (e.get("position"), events) for e, events in zip(entries, events_per_lead)
+    ]
+    return dump_oracle_doc(assemble_oracle_doc(projections))
 
 
 def _invoke_judge(
@@ -345,11 +373,7 @@ class ClaudePrintSubagents:
         )
 
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
-        lead_sequence_path = run_dir / "lead_sequence.yaml"
-        bundle = assemble_exemplar_bundle(run_dir, lead_sequence_path.read_text())
-        return invoke_oracle(
-            run_dir / "alert.json", actor_story_path, lead_sequence_path, bundle
-        )
+        return invoke_oracle(run_dir, actor_story_path)
 
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:

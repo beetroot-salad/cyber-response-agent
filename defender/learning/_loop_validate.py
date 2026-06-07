@@ -128,10 +128,18 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ORACLE_PROJECTION_KEYS = {"position", "system", "template", "events"}
+_ORACLE_PROJECTION_KEYS = {"position", "events"}
 
 
 def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
+    """Validate the assembled per-lead oracle output.
+
+    Shape: a single ``projections`` key — one ``{position, events}`` per lead position, in
+    order. ``events`` is a list of event mappings, OR a single-item marker list (the
+    ``<standard environment noise>`` / ``<suppressed: …>`` baseline-diff strings), OR empty.
+    The validator stays structural; marker wording and diff semantics are the oracle
+    prompt's and judge's concern, not this gate's.
+    """
     if not isinstance(doc, dict):
         raise LoopError("oracle YAML did not parse to a mapping")
     if set(doc.keys()) != {"projections"}:
@@ -152,6 +160,25 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
     return doc
 
 
+class _NoAliasOracleDumper(yaml.SafeDumper):
+    """SafeDumper that never emits YAML anchors/aliases.
+
+    The judge is an LLM reading the raw YAML text — it cannot resolve a ``*alias``
+    back-reference, so two shape-identical projected events must each be written out in
+    full rather than the second collapsing to an alias of the first.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def dump_oracle_doc(doc: dict) -> str:
+    """Serialize the assembled oracle doc to YAML, every event inlined (no aliases)."""
+    return yaml.dump(
+        doc, Dumper=_NoAliasOracleDumper, sort_keys=False, default_flow_style=False
+    )
+
+
 def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     if not isinstance(p, dict):
         raise LoopError(f"projection[{i}] is not a mapping")
@@ -169,10 +196,13 @@ def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     events = p["events"]
     if not isinstance(events, list):
         raise LoopError(f"projection[{i}].events is not a list")
+    # An event is either a mapping (a projected event) or a string (a baseline-diff
+    # marker: <standard environment noise> / <suppressed: …>). Nothing else.
     for j, ev in enumerate(events):
-        if not isinstance(ev, dict):
+        if not isinstance(ev, (dict, str)):
             raise LoopError(
-                f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
+                f"projection[{i}].events[{j}] is not a mapping or marker string "
+                f"(got {type(ev).__name__})"
             )
 
 
