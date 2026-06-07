@@ -470,19 +470,14 @@ def run_head_oracle_and_judge(
 
     lead_seq_path = head_run_dir / "lead_sequence.yaml"
     lead_seq_text = lead_seq_path.read_text()
-    exemplar_bundle = loop_mod.assemble_exemplar_bundle(head_run_dir, lead_seq_text)
 
     # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
     # on subprocess rc!=0 / timeout, which would otherwise escape the
     # per-alert handler in run_secondary() and abort the harness
-    # mid-loop with no summary written.
+    # mid-loop with no summary written. invoke_oracle now fans one claude -p
+    # per lead and reassembles; a per-lead hang surfaces the same way.
     try:
-        oracle_yaml = loop_mod.invoke_oracle(
-            head_run_dir / "alert.json",
-            actor_story_path,
-            lead_seq_path,
-            exemplar_bundle,
-        )
+        oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path)
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
         # _run_claude wraps subprocess.run with a timeout that raises
         # TimeoutExpired (not LoopError); catch both so a single oracle
@@ -505,6 +500,7 @@ def run_head_oracle_and_judge(
         judge_yaml = loop_mod.invoke_judge(
             head_run_dir / "alert.json",
             head_run_dir / "investigation.md",
+            lead_seq_path,
             actor_story_path,
             projected_path,
             staging_dir,

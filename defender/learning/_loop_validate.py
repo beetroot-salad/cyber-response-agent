@@ -128,10 +128,18 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ORACLE_PROJECTION_KEYS = {"position", "system", "template", "events"}
+_ORACLE_PROJECTION_KEYS = {"position", "events"}
 
 
 def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
+    """Validate the assembled per-lead oracle output.
+
+    Shape: a single ``projections`` key — one ``{position, events}`` per lead position, in
+    order. ``events`` is a list of event mappings, OR a single-item marker list (the
+    ``<standard environment noise>`` / ``<suppressed: …>`` baseline-diff strings), OR empty.
+    The validator stays structural; marker wording and diff semantics are the oracle
+    prompt's and judge's concern, not this gate's.
+    """
     if not isinstance(doc, dict):
         raise LoopError("oracle YAML did not parse to a mapping")
     if set(doc.keys()) != {"projections"}:
@@ -152,6 +160,39 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
     return doc
 
 
+class _NoAliasOracleDumper(yaml.SafeDumper):
+    """SafeDumper that never emits YAML anchors/aliases.
+
+    The judge is an LLM reading the raw YAML text — it cannot resolve a ``*alias``
+    back-reference, so two shape-identical projected events must each be written out in
+    full rather than the second collapsing to an alias of the first.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def dump_oracle_doc(doc: dict) -> str:
+    """Serialize the assembled oracle doc to YAML, every event inlined (no aliases).
+
+    ``allow_unicode=True`` keeps non-ASCII event values (e.g. a username ``Bjørn``) literal
+    rather than ``\\xNN``-escaped, so the LLM judge compares the same text the defender's
+    actuals carry. Mirrors the dumper in ``_loop_oracle.build_lead_user_prompt``.
+    """
+    return yaml.dump(
+        doc, Dumper=_NoAliasOracleDumper, sort_keys=False,
+        default_flow_style=False, allow_unicode=True,
+    )
+
+
+_BASELINE_NOISE_MARKER = "<standard environment noise>"
+
+
+def _is_baseline_diff_marker(s: str) -> bool:
+    """True for the two baseline-diff marker strings the oracle may emit as an event item."""
+    return s == _BASELINE_NOISE_MARKER or (s.startswith("<suppressed:") and s.endswith(">"))
+
+
 def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     if not isinstance(p, dict):
         raise LoopError(f"projection[{i}] is not a mapping")
@@ -169,11 +210,30 @@ def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     events = p["events"]
     if not isinstance(events, list):
         raise LoopError(f"projection[{i}].events is not a list")
+    # An event is either a mapping (a projected event) or a baseline-diff marker string
+    # (<standard environment noise> / <suppressed: …>). A marker is a whole-lead verdict, so
+    # it must be the SOLE item — never mixed with event mappings, never duplicated.
+    has_marker = False
     for j, ev in enumerate(events):
-        if not isinstance(ev, dict):
-            raise LoopError(
-                f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
-            )
+        if isinstance(ev, dict):
+            continue
+        if isinstance(ev, str):
+            if not _is_baseline_diff_marker(ev):
+                raise LoopError(
+                    f"projection[{i}].events[{j}] is a string but not a recognized "
+                    f"baseline-diff marker (got {ev!r})"
+                )
+            has_marker = True
+            continue
+        raise LoopError(
+            f"projection[{i}].events[{j}] is not a mapping or marker string "
+            f"(got {type(ev).__name__})"
+        )
+    if has_marker and len(events) != 1:
+        raise LoopError(
+            f"projection[{i}].events mixes a baseline-diff marker with other items; "
+            f"a marker must be the only event in the list"
+        )
 
 
 # ---------------------------------------------------------------------------

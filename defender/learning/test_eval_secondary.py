@@ -414,10 +414,6 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
-            return ""
-
-        @staticmethod
         def invoke_oracle(*_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
@@ -444,10 +440,6 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         @staticmethod
         def is_skip_story(text):
             return False
-
-        @staticmethod
-        def assemble_exemplar_bundle(run_dir, _lead_text):
-            return ""
 
         @staticmethod
         def invoke_oracle(*_a, **_kw):

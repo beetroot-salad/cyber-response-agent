@@ -1,6 +1,6 @@
 """Unit tests for the telemetry-oracle additions to loop.py.
 
-Focus: the new ``validate_oracle_doc`` and ``assemble_exemplar_bundle``
+Focus: the new ``validate_oracle_doc``
 helpers. The existing actor / judge / persistence paths are exercised
 end-to-end via the smoke-run script; this file pins the bits we can
 test cheaply without spawning ``claude -p``.
@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # Load loop.py directly — there is no package __init__ chain to anchor
 # `import defender.learning.loop`, and the loop is designed to run as a
@@ -26,10 +25,205 @@ _spec.loader.exec_module(loop)
 
 LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
-assemble_exemplar_bundle = loop.assemble_exemplar_bundle
-redact_exemplar = loop.redact_exemplar
 validate_oracle_doc = loop.validate_oracle_doc
+dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
+
+import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# sanitize_wtc — relativize copyable absolute clock times
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_wtc_relativizes_iso_and_clock_times():
+    assert oracle_mod.sanitize_wtc(
+        "the login at 2026-06-02T17:08:19Z from host x"
+    ) == "the login at <alert-time> from host x"
+    assert oracle_mod.sanitize_wtc("a connection at 17:08:19Z") == (
+        "a connection at <alert-time>"
+    )
+    assert oracle_mod.sanitize_wtc("the event at 14:08Z") == "the event at <alert-time>"
+
+
+def test_sanitize_wtc_leaves_relative_spans_untouched():
+    for item in ("within +/-5 minutes of the alert", "a few minutes later", "no times here"):
+        assert oracle_mod.sanitize_wtc(item) == item
+
+
+def test_sanitize_wtc_leaves_non_utc_clock_times_untouched():
+    # Bare HH:MM:SS without a Z is ambiguous (a duration, or a local-time window half)
+    # and must NOT be relativized — only ISO/Z-suffixed absolute times are.
+    for item in (
+        "session lasted 1:30:00",
+        "window 2026-06-07 16:00:00 to 2026-06-07 18:00:00",
+        "top 12:34:56 talkers",
+    ):
+        assert oracle_mod.sanitize_wtc(item) == item
+
+
+# ---------------------------------------------------------------------------
+# redact_exemplar — value-scrubbed shape skeleton (no defender values leak)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_exemplar_scrubs_values_keeps_shape():
+    payload = (
+        "### Raw Sample Events (first 3)\n\n"
+        "```json\n"
+        '[{"host": "db-07", "port": 22, "ok": true, "nested": {"user": "alice"}}]\n'
+        "```\n"
+    )
+    out = oracle_mod.redact_exemplar(payload)
+    assert "db-07" not in out and "alice" not in out
+    assert '"<host>"' in out and '"<user>"' in out
+    assert '"port": 0' in out and '"ok": false' in out
+
+
+def test_redact_exemplar_no_sample_block_is_placeholder():
+    assert oracle_mod.redact_exemplar("## Query Results\n(no raw block)\n").startswith("(")
+
+
+def test_redact_exemplar_empty_sample_block_is_placeholder():
+    # A Raw Sample header over an empty `[]` block has no shape to show; redact returns a
+    # leading-"(" placeholder so lead_sample_text falls through to sibling payloads.
+    out = oracle_mod.redact_exemplar("### Raw Sample Events\n\n```json\n[]\n```\n")
+    assert out.startswith("(")
+    assert "is empty" in out
+
+
+def test_lead_sample_text_does_not_overmatch_higher_positions(tmp_path: Path):
+    # Position 1's fallback glob must not pick up 10.json / 11.json. Lead 1 has no bare
+    # 1.json and an empty 1a.json; only 10.json carries a real skeleton — it must NOT win.
+    gather = tmp_path / "gather_raw"
+    gather.mkdir()
+    real = (
+        "### Raw Sample Events\n\n```json\n"
+        '[{"host": "wrong-lead-10"}]\n```\n'
+    )
+    (gather / "10.json").write_text(real)
+    (gather / "1a.json").write_text("### Raw Sample Events\n\n```json\n[]\n```\n")
+    out = oracle_mod.lead_sample_text(tmp_path, {"position": 1})
+    assert "wrong-lead-10" not in out
+    assert out.startswith("(")  # no real skeleton for position 1 -> placeholder
+
+
+# ---------------------------------------------------------------------------
+# parse_lead_events / assemble_oracle_doc — per-lead reply -> projections doc
+# ---------------------------------------------------------------------------
+
+
+def test_parse_lead_events_accepts_events_mappings_markers_and_empty():
+    assert oracle_mod.parse_lead_events('events:\n  - {a: "b"}\n', 0) == [{"a": "b"}]
+    assert oracle_mod.parse_lead_events("events: []\n", 1) == []
+    assert oracle_mod.parse_lead_events(
+        'events:\n  - "<standard environment noise>"\n', 2
+    ) == ["<standard environment noise>"]
+    assert oracle_mod.parse_lead_events(
+        'events:\n  - "<suppressed: stopped auditd>"\n', 3
+    ) == ["<suppressed: stopped auditd>"]
+
+
+def test_parse_lead_events_rescues_unquoted_suppression_marker():
+    # An unquoted `- <suppressed: reason>` is quoted by the pre-parse pass before
+    # yaml.safe_load reads it, so it lands as a clean marker string.
+    assert oracle_mod.parse_lead_events(
+        "events:\n  - <suppressed: stopped auditd before the probe>\n", 0
+    ) == ["<suppressed: stopped auditd before the probe>"]
+
+
+def test_parse_lead_events_rescues_unquoted_marker_with_multiple_colons():
+    # A reason carrying a second `: ` used to raise a ScannerError that aborted the whole
+    # oracle direction; the pre-parse quoting handles any number of colons.
+    assert oracle_mod.parse_lead_events(
+        "events:\n  - <suppressed: ran cmd: systemctl stop auditd>\n", 0
+    ) == ["<suppressed: ran cmd: systemctl stop auditd>"]
+    assert oracle_mod.parse_lead_events(
+        "events:\n  - <suppressed: cleared log: /var/log/auth>\n", 0
+    ) == ["<suppressed: cleared log: /var/log/auth>"]
+
+
+def test_parse_lead_events_keeps_single_field_placeholder_event():
+    # A real one-field event whose key+value are angle-bracket placeholders must survive
+    # as a mapping — the old _normalize_marker heuristic corrupted it into a marker string.
+    assert oracle_mod.parse_lead_events(
+        'events:\n  - {"<c2-domain>": "<resolved-ip>"}\n', 0
+    ) == [{"<c2-domain>": "<resolved-ip>"}]
+
+
+def test_parse_lead_events_embeds_raw_reply_on_failure():
+    with pytest.raises(LoopError, match="UNPARSEABLE-MARKER"):
+        oracle_mod.parse_lead_events("events:\n  not-a-list: UNPARSEABLE-MARKER\n", 0)
+
+
+def test_parse_lead_events_strips_fence():
+    assert oracle_mod.parse_lead_events("```yaml\nevents: []\n```\n", 0) == []
+
+
+def test_parse_lead_events_rejects_missing_events_list():
+    with pytest.raises(LoopError, match="no `events` list"):
+        oracle_mod.parse_lead_events("projections: []\n", 0)
+
+
+def test_assemble_oracle_doc_preserves_position_order():
+    doc = oracle_mod.assemble_oracle_doc([(0, [{"a": 1}]), (1, []), (2, ["<x>"])])
+    assert [p["position"] for p in doc["projections"]] == [0, 1, 2]
+    assert doc["projections"][2]["events"] == ["<x>"]
+
+
+def test_assembled_doc_round_trips_through_validate_and_dump():
+    doc = oracle_mod.assemble_oracle_doc(
+        [(0, [{"host": "h"}]), (1, ["<standard environment noise>"])]
+    )
+    validate_oracle_doc(doc, expected_positions=[0, 1])
+    text = dump_oracle_doc(doc)
+    assert "projections:" in text and "<standard environment noise>" in text
+
+
+# ---------------------------------------------------------------------------
+# build_lead_user_prompt — no goal, sanitized characterization
+# ---------------------------------------------------------------------------
+
+
+def test_build_lead_user_prompt_drops_goal_and_sanitizes_wtc():
+    entry = {
+        "position": 0,
+        "lead_description": {
+            "goal": "SECRET defender intent that must not leak",
+            "what_to_summarize": ["the login at 2026-06-02T17:08:19Z"],
+        },
+        "queries": [{"id": "wazuh.auth-events", "params": {"host": "h"}}],
+    }
+    prompt = oracle_mod.build_lead_user_prompt(entry, "the story", "SAMPLE")
+    assert "SECRET defender intent" not in prompt          # goal omitted
+    assert "<alert-time>" in prompt and "17:08:19Z" not in prompt  # wtc sanitized
+    assert "wazuh.auth-events" in prompt and "the story" in prompt and "SAMPLE" in prompt
+
+
+def test_build_lead_user_prompt_handles_scalar_and_malformed_wtc():
+    # A scalar what_to_summarize must not be iterated char-by-char, and a non-dict
+    # lead_description / None params must not crash.
+    scalar = oracle_mod.build_lead_user_prompt(
+        {"position": 0, "lead_description": {"what_to_summarize": "auth events by host"},
+         "queries": [{"id": "wazuh.x", "params": None}]},
+        "story", "SAMPLE",
+    )
+    assert "auth events by host" in scalar
+    assert "\n- a\n- u\n- t" not in scalar           # not split into characters
+    assert "params: {}" in scalar                     # None params rendered as {}
+    # non-dict lead_description / non-list wtc items: no crash, no garbage
+    oracle_mod.build_lead_user_prompt(
+        {"position": 1, "lead_description": "oops", "queries": []}, "story", "S")
+    oracle_mod.build_lead_user_prompt(
+        {"position": 2, "lead_description": {"what_to_summarize": [42, {"x": 1}]},
+         "queries": []}, "story", "S")
+
+
+def test_dump_oracle_doc_preserves_unicode():
+    doc = oracle_mod.assemble_oracle_doc([(0, [{"user": "Bjørn"}])])
+    text = dump_oracle_doc(doc)
+    assert "Bjørn" in text and "\\xF8" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -40,14 +234,9 @@ append_actor_observations = loop.append_actor_observations
 def _ok_doc(positions=(0, 1)):
     return {
         "projections": [
-            {
-                "position": p,
-                "system": "wazuh",
-                "template": "auth-events",
-                "events": [{"data": {"srcip": "1.2.3.4"}}],
-            }
+            {"position": p, "events": [{"data_source": "logs-falco.alerts"}]}
             for p in positions
-        ]
+        ],
     }
 
 
@@ -63,14 +252,56 @@ def test_validate_oracle_doc_accepts_empty_events_list():
     validate_oracle_doc(doc, expected_positions=[0, 1])
 
 
+def test_validate_oracle_doc_accepts_marker_strings():
+    doc = _ok_doc()
+    doc["projections"][0]["events"] = ["<standard environment noise>"]
+    doc["projections"][1]["events"] = ["<suppressed: cleared the auth log>"]
+    validate_oracle_doc(doc, expected_positions=[0, 1])
+
+
+def test_validate_oracle_doc_accepts_projections_only():
+    validate_oracle_doc({"projections": []}, expected_positions=[])
+
+
+def test_validate_oracle_doc_rejects_unrecognized_marker_string():
+    doc = _ok_doc(positions=(0,))
+    doc["projections"][0]["events"] = ["this lead is silent"]
+    with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
+        validate_oracle_doc(doc, expected_positions=[0])
+
+
+def test_validate_oracle_doc_rejects_empty_string_event():
+    doc = _ok_doc(positions=(0,))
+    doc["projections"][0]["events"] = [""]
+    with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
+        validate_oracle_doc(doc, expected_positions=[0])
+
+
+def test_validate_oracle_doc_rejects_marker_mixed_with_event_mapping():
+    doc = _ok_doc(positions=(0,))
+    doc["projections"][0]["events"] = [{"host": "h"}, "<suppressed: cleared log>"]
+    with pytest.raises(LoopError, match="must be the only event"):
+        validate_oracle_doc(doc, expected_positions=[0])
+
+
+def test_validate_oracle_doc_rejects_duplicate_markers():
+    doc = _ok_doc(positions=(0,))
+    doc["projections"][0]["events"] = [
+        "<standard environment noise>", "<standard environment noise>"
+    ]
+    with pytest.raises(LoopError, match="must be the only event"):
+        validate_oracle_doc(doc, expected_positions=[0])
+
+
 def test_validate_oracle_doc_rejects_non_mapping():
-    with pytest.raises(LoopError, match="not parse to a mapping"):
+    with pytest.raises(LoopError, match="did not parse to a mapping"):
         validate_oracle_doc(["projections"], expected_positions=[0])
 
 
 def test_validate_oracle_doc_rejects_extra_top_level_keys():
+    # any non-`projections` top-level key is rejected.
     doc = _ok_doc(positions=(0,))
-    doc["notes"] = "should not be here"
+    doc["uncovered"] = []
     with pytest.raises(LoopError, match="exactly one top-level key"):
         validate_oracle_doc(doc, expected_positions=[0])
 
@@ -89,7 +320,7 @@ def test_validate_oracle_doc_rejects_position_mismatch():
 
 def test_validate_oracle_doc_rejects_missing_projection_keys():
     doc = _ok_doc(positions=(0,))
-    del doc["projections"][0]["template"]
+    del doc["projections"][0]["events"]
     with pytest.raises(LoopError, match="missing keys"):
         validate_oracle_doc(doc, expected_positions=[0])
 
@@ -101,10 +332,11 @@ def test_validate_oracle_doc_rejects_unexpected_projection_keys():
         validate_oracle_doc(doc, expected_positions=[0])
 
 
-def test_validate_oracle_doc_rejects_non_mapping_event():
+def test_validate_oracle_doc_rejects_non_mapping_non_marker_event():
+    # An event is a mapping or a marker string; an int (or any other scalar) is neither.
     doc = _ok_doc(positions=(0,))
-    doc["projections"][0]["events"] = ["a string event"]
-    with pytest.raises(LoopError, match=r"events\[0\] is not a mapping"):
+    doc["projections"][0]["events"] = [5]
+    with pytest.raises(LoopError, match=r"events\[0\] is not a mapping or marker string"):
         validate_oracle_doc(doc, expected_positions=[0])
 
 
@@ -113,129 +345,6 @@ def test_validate_oracle_doc_rejects_events_not_list():
     doc["projections"][0]["events"] = {"event": "a"}
     with pytest.raises(LoopError, match="events is not a list"):
         validate_oracle_doc(doc, expected_positions=[0])
-
-
-# ---------------------------------------------------------------------------
-# assemble_exemplar_bundle
-# ---------------------------------------------------------------------------
-
-
-def _gather_raw_fixture(tag: str) -> str:
-    """Mirrors the wazuh-CLI gather_raw layout: counts/aggregations on top,
-    then a `### Raw Sample Events` block carrying the per-event schema."""
-    return (
-        "## Query Results\n"
-        "### Summary\n"
-        f"- **Matching events:** 999  # ACTUAL-RESULT-{tag}\n"
-        "### Aggregations\n"
-        f"  total_events: 999  # ACTUAL-RESULT-{tag}\n"
-        "### Raw Sample Events (first 3, full _source)\n"
-        "```json\n"
-        f'[{{"data": {{"srcip": "1.2.3.4", "tag": "{tag}"}}}}]\n'
-        "```\n"
-    )
-
-
-def test_assemble_exemplar_bundle_concatenates_per_position(tmp_path: Path):
-    (tmp_path / "gather_raw").mkdir()
-    (tmp_path / "gather_raw" / "0.json").write_text(_gather_raw_fixture("0"))
-    (tmp_path / "gather_raw" / "1.json").write_text(_gather_raw_fixture("1"))
-    lead_seq = yaml.safe_dump(
-        {
-            "case_id": "x",
-            "alert_ref": "alert.json",
-            "entries": [
-                {
-                    "position": 0,
-                    "queries": [{"id": "wazuh.auth-events", "params": {}}],
-                    "result_ref": "gather_raw/0.json",
-                },
-                {
-                    "position": 1,
-                    "queries": [{"id": "wazuh.dns-history", "params": {}}],
-                    "result_ref": "gather_raw/1.json",
-                },
-            ],
-        }
-    )
-    out = assemble_exemplar_bundle(tmp_path, lead_seq)
-    assert '<exemplar position="0" query="wazuh.auth-events"' in out
-    assert '<exemplar position="1" query="wazuh.dns-history"' in out
-    assert "</exemplar>" in out
-    # Per-event schema kept as a type/field skeleton — field names survive.
-    assert "Raw Sample Events" in out
-    assert "values scrubbed" in out
-    assert '"srcip": "<srcip>"' in out
-    # Concrete values from the source JSON do not survive.
-    assert '"1.2.3.4"' not in out
-    assert '"tag": "0"' not in out
-    assert '"tag": "1"' not in out
-    # Counts / aggregations (which leak the actual lead result) are dropped.
-    assert "ACTUAL-RESULT" not in out
-    assert "Matching events" not in out
-    assert "Aggregations" not in out
-
-
-def test_assemble_exemplar_bundle_marks_missing_files(tmp_path: Path):
-    (tmp_path / "gather_raw").mkdir()
-    # Position 0 file missing on purpose.
-    lead_seq = yaml.safe_dump(
-        {
-            "case_id": "x",
-            "alert_ref": "alert.json",
-            "entries": [
-                {
-                    "position": 0,
-                    "queries": [{"id": "wazuh.auth-events", "params": {}}],
-                    "result_ref": "gather_raw/0.json",
-                },
-            ],
-        }
-    )
-    out = assemble_exemplar_bundle(tmp_path, lead_seq)
-    assert "no exemplars on disk" in out
-
-
-def test_assemble_exemplar_bundle_rejects_malformed_lead_sequence(tmp_path: Path):
-    with pytest.raises(LoopError, match="`entries` list"):
-        assemble_exemplar_bundle(tmp_path, "not_a_mapping: true\n")
-
-
-# ---------------------------------------------------------------------------
-# redact_exemplar
-# ---------------------------------------------------------------------------
-
-
-def test_redact_exemplar_returns_type_field_skeleton():
-    text = _gather_raw_fixture("0")
-    out = redact_exemplar(text)
-    assert out.startswith("### Raw Sample Events")
-    assert "values scrubbed" in out
-    # Field names + nesting preserved.
-    assert '"srcip"' in out
-    assert '"data"' in out
-    # Field-name placeholders replace concrete strings.
-    assert '"<srcip>"' in out
-    assert '"<tag>"' in out
-    # Concrete values from the source JSON are gone.
-    assert '"1.2.3.4"' not in out
-    assert '"0"' not in out  # the "tag" was "0"; must not survive
-    # Sections outside Raw Sample Events stay dropped.
-    assert "Matching events" not in out
-    assert "Aggregations" not in out
-    assert "ACTUAL-RESULT" not in out
-
-
-def test_redact_exemplar_returns_placeholder_when_no_raw_sample_block():
-    text = (
-        "## Query Results\n"
-        "### Summary\n"
-        "- **Matching events:** 0\n"
-    )
-    out = redact_exemplar(text)
-    assert "no schema sample available" in out
-    # Crucially, the upstream summary text is not echoed back.
-    assert "Matching events" not in out
 
 
 # ---------------------------------------------------------------------------
