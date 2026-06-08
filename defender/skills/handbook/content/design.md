@@ -6,9 +6,10 @@ High-level answer to "what is the defender and how does it work?"
 
 The **defender** (`defender/`) is an experimental track for alert-triage
 agent design. Given an `alert.json`, a single-agent ReAct loop investigates
-the alert and emits three artifacts: `investigation.md` (the audit trail),
-`lead_sequence.yaml` (a contract surface for the offline learning loop), and
-`report.md` (disposition + one paragraph). It is **PoC-stage, learning-loop
+the alert and emits the audit trail (`investigation.md`), the two live
+lead/query tables (`executed_queries.jsonl` + `gather_raw/`, the contract
+surface for the offline learning loop), and `report.md` (disposition + one
+paragraph). It is **PoC-stage, learning-loop
 first** — the point is to iterate fast on the learning loop, not to harden a
 runtime.
 
@@ -80,8 +81,8 @@ Those live in `soc-agent/`.
 
 - **`SKILL.md`** — the runtime agent's spec (the loop).
 - **`run.py`** — the canonical entrypoint: materialize the run dir, spawn
-  the agent, project `lead_sequence.yaml`, render the transcript, hand off
-  to the learning loop.
+  the agent (which writes the two tables live), render the transcript, hand
+  off to the learning loop.
 - **`skills/`** — on-disk skills loaded on demand: `invlang` (block surface
   + author CLI), `gather` (the Haiku subagent + query templates), and
   per-system references (`wazuh`, `host-query`, and others).

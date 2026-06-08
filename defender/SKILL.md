@@ -1,16 +1,17 @@
 ---
 name: defender
-description: Investigate a security alert through a single-agent ReAct loop with phase discipline. Outputs a dense investigation log, a lead-sequence contract for the offline learning loop, and a minimal disposition report.
+description: Investigate a security alert through a single-agent ReAct loop with phase discipline. Outputs a dense investigation log and a minimal disposition report; the lead/query tables that feed the offline learning loop are written live by the harness as you dispatch gather.
 # allowed-tools below is documentation only — Skill frontmatter does not enforce
 # a tool allowlist. Treat as a reader hint, not a security boundary.
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Task, Skill
 ---
 
 You are the **defender**. Given an `alert.json`, work through a triage
-investigation and emit three artifacts: `investigation.md` (the audit
-trail), `lead_sequence.yaml` (the contract for the actor-reviewer
-learning loop), and `report.md` (disposition + one paragraph). The run
-directory is your working area.
+investigation and emit two artifacts: `investigation.md` (the audit
+trail) and `report.md` (disposition + one paragraph). The run directory
+is your working area. The lead/query tables that feed the actor-reviewer
+learning loop are written live by the harness as you dispatch gather —
+there is nothing to hand-author and no post-run projection.
 
 The job is to be honest about what you know. The learning loop
 discovers what you should have known. Default to escalation when
@@ -149,7 +150,8 @@ Author `:H` (hypotheses with predictions) and `:L` (lead description)
 blocks. Do not pick a query template here — that's gather's job.
 The `:L` row carries `system` (which adapter to use) but **not**
 `template` or `query` — gather chooses the template, binds params,
-and records both in `gather_raw/{position}.observations.json#queries`.
+and records both as a row in `executed_queries.jsonl` (the queries table,
+FK `lead_id`).
 Do not Read files under `defender/skills/gather/` from the main loop;
 if you find yourself opening a query template to check its shape,
 you have already crossed into gather's surface — dispatch instead.
@@ -302,7 +304,7 @@ Task(
          "```yaml\n"
          "defender_dir: {DEFENDER_DIR}\n"
          "run_dir: {run_dir}\n"
-         "position: N\n"
+         "lead_id: l-NNN          # ECHO the id from this lead's :L findings row — do not mint a new one\n"
          "system: <system-name>   # the :L row's system cell\n"
          "goal: <one-sentence measurement contract>\n"
          "what_to_summarize:\n"
@@ -312,9 +314,17 @@ Task(
 )
 ```
 
-Two PreToolUse hooks parse that YAML block. `extract_lead_metadata.py`
-writes `{run_dir}/gather_raw/{position}.lead.json` for the projection
-script. `inject_system_skill_description.py` looks up `system` and
+`lead_id` is the id already written in this lead's `:L findings` row
+(column `id`, e.g. `l-001`) — author the `:L` row **before** dispatching
+its gather lead, then echo that id here. You are reusing an existing id,
+not assigning one; the `:L` set is append-only, so a retry of a lead is a
+*new* `:L` row with a *new* id (never a reused id — `record_lead.py`
+rejects reuse with exit 2).
+
+Two PreToolUse hooks parse that YAML block. `record_lead.py` writes the
+leads-table row `{run_dir}/gather_raw/{lead_id}.lead.json` and claims the
+id (exclusive create; reuse → exit 2). `inject_system_skill_description.py`
+looks up `system` and
 appends `defender/skills/{system}/SKILL.md`'s frontmatter
 `description:` to the dispatch — the subagent uses it to confirm
 relevance and then Reads the full SKILL body. Keep the YAML
@@ -367,7 +377,7 @@ resolution for the column shape.
 
 If gather's summary feels thin, **re-dispatch gather** with a stricter
 `what_to_summarize` naming the specific fields you need. Do not Grep
-or Read `gather_raw/{position}.json` from the main loop — reading raw
+or Read `gather_raw/{lead_id}/` from the main loop — reading raw
 here is the symptom of an under-specified dispatch upstream; fix the
 dispatch.
 
@@ -405,11 +415,10 @@ followed by one Write of `report.md`. Earlier loops (ANALYZE that
 loops back to PLAN) are the exception — those are genuine separate
 turns.
 
-Stop after that — the harness (`defender/run.py`) runs the projection script
-(`defender/scripts/project_lead_sequence.py`) and the visualizer
-after you exit. Don't hand-author `lead_sequence.yaml`; if the script
-can't project a faithful sequence from your investigation log, the
-log is the bug, not the schema.
+Stop after that — the lead/query tables are written live as you dispatch
+gather (the `record_lead.py` hook + the `record_query.py` wrapper), and the
+harness (`defender/run.py`) renders the visualizer after you exit. There is
+nothing to hand-author and no post-run projection.
 
 ## Skills
 
@@ -480,7 +489,7 @@ Task(model="haiku",
             "## Dispatch\n"
             "```yaml\n"
             "run_dir: {run_dir}\n"
-            "position: 0\n"
+            "lead_id: l-001\n"
             "system: host-query\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
             "what_to_summarize:\n"

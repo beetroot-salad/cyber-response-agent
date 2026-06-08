@@ -60,7 +60,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--defender-dir", required=True, help="Absolute path to the defender repo root")
     p.add_argument("--system", required=True, help="System whose query produced the sentinel (e.g. elastic)")
-    p.add_argument("--payload", required=True, help="Path to the raw payload file (gather_raw/{position}.json)")
+    p.add_argument("--payload", required=True, help="Path to the raw payload file (gather_raw/{lead_id}/{seq}.json)")
     p.add_argument("--question", required=True, help="Natural-language question for the debug subagent")
     p.add_argument("--model", default=DEFAULT_MODEL, help=f"claude --model (default: {DEFAULT_MODEL})")
     args = p.parse_args()

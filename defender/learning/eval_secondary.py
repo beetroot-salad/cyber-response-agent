@@ -15,7 +15,7 @@ Pipeline per eligible alert:
 
   1. Current defender (HEAD) investigates the alert via
      ``defender/run.py --no-learn`` — produces ``report.md`` +
-     ``lead_sequence.yaml``.
+     the two lead/query tables (``executed_queries.jsonl`` + ``gather_raw/``).
   2. Filter eligibility: ground-truth must be benign or
      inconclusive. Malicious held-out is primary-only.
   3. Filter executed: HEAD defender must not have escalated
@@ -23,9 +23,9 @@ Pipeline per eligible alert:
      the catch-rate denominator and are reported as
      ``not_executed``.
   4. Frozen actor (gen-{N-K} worktree) writes a story via
-     ``defender/learning/replay_actor.py``, reading the HEAD
-     defender's ``lead_sequence.yaml``. Model is pinned from the
-     gen-{N-K} commit's ``Actor-Model:`` trailer.
+     ``defender/learning/replay_actor.py``, projecting the HEAD
+     defender's tables through ``lead_repository.actor_view``. Model is
+     pinned from the gen-{N-K} commit's ``Actor-Model:`` trailer.
   5. Current oracle + judge (HEAD) grade the story against the
      defender's lead sequence.
 
@@ -408,6 +408,7 @@ def run_frozen_actor(
     worktree: Path,
     pin: GenerationPin,
     case_id: str,
+    loop_mod,
     *,
     runner: subprocess._RunFn = subprocess.run,
 ) -> Path:
@@ -420,9 +421,10 @@ def run_frozen_actor(
     """
     staging_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(head_run_dir / "alert.json", staging_dir / "alert.json")
-    shutil.copy2(
-        head_run_dir / "lead_sequence.yaml", staging_dir / "lead_sequence.yaml"
-    )
+    # Stage the two tables (the actor replays off them via lead_repository),
+    # through the single shared staging helper so this and the persist stage
+    # share one definition of the on-disk table set.
+    loop_mod.lead_repository.stage_tables(head_run_dir, staging_dir)
     venv_python = worktree / "defender" / ".venv" / "bin" / "python3"
     # Walk-up the parent worktrees in case the pinned tree shares the
     # repo's venv with the main checkout (saves a `uv venv` per worktree).
@@ -468,24 +470,23 @@ def run_head_oracle_and_judge(
     if loop_mod.is_skip_story(actor_story):
         return SKIP_OUTCOME
 
-    lead_seq_path = head_run_dir / "lead_sequence.yaml"
-    lead_seq_text = lead_seq_path.read_text()
-
-    # Per-lead oracle: one claude -p per lead, fanned out + reassembled. invoke_oracle
-    # raises LoopError on subprocess rc!=0 / timeout, which would otherwise escape the
-    # per-alert handler in run_secondary() and abort the harness mid-loop with no summary.
+    # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
+    # on subprocess rc!=0 / timeout, which would otherwise escape the
+    # per-alert handler in run_secondary() and abort the harness
+    # mid-loop with no summary written. invoke_oracle now fans one claude -p
+    # per lead and reassembles; a per-lead hang surfaces the same way.
     try:
         oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path)
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
         # _run_claude wraps subprocess.run with a timeout that raises TimeoutExpired
         # (not LoopError); catch both so a single per-lead hang doesn't abort the harness.
         raise SecondaryError(f"oracle invocation failed: {e}") from e
-    expected_positions = [
-        e.get("position") for e in (yaml.safe_load(lead_seq_text) or {}).get("entries", [])
+    expected_lead_ids = [
+        jl.lead_id for jl in loop_mod.lead_repository.joined(head_run_dir)
     ]
     stripped = loop_mod.strip_yaml_fence(oracle_yaml)
     try:
-        loop_mod.validate_oracle_doc(yaml.safe_load(stripped), expected_positions)
+        loop_mod.validate_oracle_doc(yaml.safe_load(stripped), expected_lead_ids)
     except (yaml.YAMLError, loop_mod.LoopError) as e:
         # Keep the raw assembled doc for debugging a parse/validation failure.
         (staging_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml)
@@ -497,7 +498,7 @@ def run_head_oracle_and_judge(
         judge_yaml = loop_mod.invoke_judge(
             head_run_dir / "alert.json",
             head_run_dir / "investigation.md",
-            lead_seq_path,
+            loop_mod.lead_repository.render_joined_yaml(head_run_dir),
             actor_story_path,
             projected_path,
             staging_dir,
@@ -740,7 +741,7 @@ def run_secondary(
                 continue
 
             staging = runs_base / f"{run_id}-replay"
-            run_frozen_actor(head_run_dir, staging, worktree, pin, case_id)
+            run_frozen_actor(head_run_dir, staging, worktree, pin, case_id, loop_mod)
             result.replay_run_dir = str(staging)
             outcome = run_head_oracle_and_judge(head_run_dir, staging, loop_mod)
             result.judge_outcome = outcome

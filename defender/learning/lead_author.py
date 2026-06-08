@@ -24,7 +24,8 @@ Lifecycle, per tick:
   4. Capture ``base_sha`` + ``baseline_status``. Refuse to author if the
      catalog itself is already dirty (uncommitted file under
      ``defender/skills/gather/queries/``).
-  5. Extract ``ExecutedLead`` records from ``<run_dir>/lead_sequence.yaml``.
+  5. Extract ``ExecutedLead`` records by joining the leads + queries
+     tables via ``lead_repository.joined(<run_dir>)``.
   6. Build per-lead handoff blocks (top-k neighbors via
      ``lead_neighbors.top_k_neighbors``).
   7. Spawn ``claude -p`` with a narrow allowlist. Stdout/stderr → log.
@@ -53,20 +54,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 try:
     from defender.learning import (
         _author_shared,
         lead_classifier,
         lead_neighbors,
         lead_render,
+        lead_repository,
     )
 except ImportError:  # pragma: no cover — direct-script execution fallback
     import _author_shared  # type: ignore[no-redef]
     import lead_classifier  # type: ignore[no-redef]
     import lead_neighbors  # type: ignore[no-redef]
     import lead_render  # type: ignore[no-redef]
+    import lead_repository  # type: ignore[no-redef]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -169,16 +170,17 @@ def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
 
 @dataclass(frozen=True)
 class ExecutedLead:
-    position: int
-    query_index: int
-    is_multi_query: bool          # parent entry had >1 query
-    entry_index: int              # index into the raw entries list
+    lead_id: str                  # the :L row id (FK), e.g. "l-001"
+    query_index: int              # positional index within this lead's queries
+    is_multi_query: bool          # parent lead had >1 query
+    entry_index: int              # index into the joined-leads list
     query_id: str
     params: dict[str, Any]
     goal_text: str
     what_to_summarize: tuple[str, ...]
-    result_ref: Path              # this invocation's payload file
-    sidecar_path: Path            # this invocation's .observations.json
+    raw_ref: Path | None          # this query's payload, by-ref
+    payload_status: str           # from the queries table (record_query)
+    payload_digest: str
 
 
 _VALID_PAYLOAD_STATUSES = frozenset(
@@ -186,84 +188,51 @@ _VALID_PAYLOAD_STATUSES = frozenset(
 )
 
 
-def _result_ref_for(run_dir: Path, position: int, query_index: int, is_multi: bool) -> Path:
-    """Canonical payload path for one invocation.
-
-    Single-query lead → ``gather_raw/{position}.json``.
-    Multi-query lead  → ``gather_raw/{position}{a..z}.json`` by index.
-    """
-    raw_dir = run_dir / "gather_raw"
-    if is_multi:
-        suffix = chr(ord("a") + query_index)
-        return raw_dir / f"{position}{suffix}.json"
-    return raw_dir / f"{position}.json"
-
-
-def _sidecar_for(result_ref: Path) -> Path:
-    """``foo.json`` → ``foo.observations.json`` (same dir, same stem)."""
-    return result_ref.with_name(result_ref.stem + ".observations.json")
-
-
-def _load_entries(run_dir: Path) -> list[dict]:
-    seq_path = run_dir / "lead_sequence.yaml"
-    if not seq_path.is_file():
-        raise FileNotFoundError(seq_path)
-    doc = yaml.safe_load(seq_path.read_text())
-    if not isinstance(doc, dict):
-        raise ValueError(f"{seq_path}: top-level mapping required")
-    entries = doc.get("entries") or []
-    if not isinstance(entries, list):
-        raise ValueError(f"{seq_path}: entries must be a list")
-    return entries
-
-
 def extract(run_dir: Path) -> list[ExecutedLead]:
-    """Read ``lead_sequence.yaml`` and emit one ExecutedLead per query.
+    """Join the two tables via ``lead_repository`` and emit one ExecutedLead
+    per executed query.
 
-    Invocations whose canonical payload file is missing are dropped
-    silently (the dispatch never landed or the projection is stale).
-    Observation sidecars are *not* checked here — that happens in
-    ``build_handoff``, where a missing sidecar is a hard error.
+    Queries whose payload file is missing are dropped silently (the dispatch
+    never landed). The payload status comes from the queries-table row
+    (``record_query`` writes it deterministically); an out-of-vocabulary
+    status is a loud failure — the loop refuses to author against it.
     """
-    entries = _load_entries(run_dir)
+    return extract_from_joined(lead_repository.joined(run_dir))
+
+
+def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
+    """``extract`` over an already-joined leads list (no disk I/O).
+
+    Lets a caller that already holds ``lead_repository.joined(run_dir)`` reuse
+    it instead of re-reading both tables. ``joined_leads`` is a list of
+    ``lead_repository.JoinedLead``.
+    """
     out: list[ExecutedLead] = []
-    for entry_idx, raw_entry in enumerate(entries):
-        if not isinstance(raw_entry, dict):
-            continue
-        position = raw_entry.get("position")
-        if not isinstance(position, int):
-            continue
-        lead_desc = raw_entry.get("lead_description") or {}
-        goal = lead_desc.get("goal") or ""
-        wtc_raw = lead_desc.get("what_to_summarize") or []
-        wtc = tuple(str(x) for x in wtc_raw if isinstance(x, (str, int)))
-
-        queries = raw_entry.get("queries") or []
-        if not isinstance(queries, list) or not queries:
-            continue
-        is_multi = len(queries) > 1
-
-        for q_idx, q in enumerate(queries):
-            if not isinstance(q, dict):
+    for entry_idx, jl in enumerate(joined_leads):
+        goal = jl.goal or ""
+        wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
+        is_multi = len(jl.queries) > 1
+        for q_idx, q in enumerate(jl.queries):
+            if q.raw_ref is None or not q.raw_ref.is_file():
                 continue
-            result_ref = _result_ref_for(run_dir, position, q_idx, is_multi)
-            if not result_ref.is_file():
-                continue
-            query_id = q.get("id") or ""
-            params_raw = q.get("params") or {}
-            params = dict(params_raw) if isinstance(params_raw, dict) else {}
+            if q.payload_status not in _VALID_PAYLOAD_STATUSES:
+                raise LeadAuthorError(
+                    f"{jl.lead_id} seq {q.seq}: payload_status must be one of "
+                    f"{sorted(_VALID_PAYLOAD_STATUSES)}, got {q.payload_status!r}"
+                )
             out.append(
                 ExecutedLead(
-                    position=position,
+                    lead_id=jl.lead_id,
                     query_index=q_idx,
                     is_multi_query=is_multi,
                     entry_index=entry_idx,
-                    query_id=query_id,
-                    params=params,
+                    query_id=q.query_id,
+                    params=dict(q.params),
                     goal_text=goal,
                     what_to_summarize=wtc,
-                    result_ref=result_ref,
-                    sidecar_path=_sidecar_for(result_ref),
+                    raw_ref=q.raw_ref,
+                    payload_status=q.payload_status,
+                    payload_digest=str(q.payload_digest)[:200],
                 )
             )
     return out
@@ -490,37 +459,8 @@ def _stage_pending_drafts() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _read_sidecar(sidecar_path: Path) -> dict[str, str]:
-    """Read ``gather_raw/{position}.observations.json`` for one invocation.
-
-    Missing or malformed sidecars are a gather-prompt regression — the
-    loop refuses to author against a run that lacks the loud-failure
-    signal, rather than silently masking it.
-    """
-    if not sidecar_path.is_file():
-        raise LeadAuthorError(
-            f"missing observation sidecar: {sidecar_path} "
-            "(gather must write a sidecar per dispatch — see "
-            "defender/skills/gather/SKILL.md §Return)"
-        )
-    try:
-        data = json.loads(sidecar_path.read_text())
-    except json.JSONDecodeError as e:
-        raise LeadAuthorError(f"{sidecar_path}: invalid JSON ({e})") from e
-    if not isinstance(data, dict):
-        raise LeadAuthorError(f"{sidecar_path}: top-level mapping required")
-    status = data.get("payload_status")
-    if status not in _VALID_PAYLOAD_STATUSES:
-        raise LeadAuthorError(
-            f"{sidecar_path}: payload_status must be one of "
-            f"{sorted(_VALID_PAYLOAD_STATUSES)}, got {status!r}"
-        )
-    digest = str(data.get("payload_digest") or "")
-    return {"payload_status": status, "payload_digest": digest[:200]}
-
-
 def build_handoff(
-    run_dir: Path, executed: list[ExecutedLead]
+    run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
 
@@ -538,7 +478,16 @@ def build_handoff(
     catalog = lead_neighbors.load_catalog()
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
-    entries = _load_entries(run_dir)
+    # Reconstruct dict-shaped entries from the join surface for the
+    # (dict-based) composite classifier — one entry per joined lead, in the
+    # same order as the entry_index ExecutedLead carries. Reuse the caller's
+    # already-joined list when given, rather than re-reading both tables.
+    if joined_leads is None:
+        joined_leads = lead_repository.joined(run_dir)
+    entries = [
+        {"queries": [{"id": q.query_id, "params": dict(q.params)} for q in jl.queries]}
+        for jl in joined_leads
+    ]
     template_path_by_id = {
         tid: str(tpl.path.relative_to(REPO_ROOT))
         for tid, tpl in by_id.items()
@@ -552,8 +501,8 @@ def build_handoff(
         tpl = by_id.get(lead.query_id)
         if tpl is None:
             _log(
-                f"WARN unresolved query_id={lead.query_id!r} at position "
-                f"{lead.position} (runtime contract violation; dropping invocation)"
+                f"WARN unresolved query_id={lead.query_id!r} at lead "
+                f"{lead.lead_id} (runtime contract violation; dropping invocation)"
             )
             continue
         if tpl.path not in grouped:
@@ -571,7 +520,6 @@ def build_handoff(
         invocations: list[dict] = []
         for lead in invocations_raw:
             entry = entries[lead.entry_index] if lead.entry_index < len(entries) else {}
-            sidecar = _read_sidecar(lead.sidecar_path)
             query = (entry.get("queries") or [])[lead.query_index] \
                 if isinstance(entry.get("queries"), list) else {}
             composite_kind = lead_classifier.infer_composite_kind(
@@ -587,15 +535,17 @@ def build_handoff(
                 rendered_query = ""
             invocations.append(
                 {
-                    "position": lead.position,
+                    "lead_id": lead.lead_id,
                     "query_index": lead.query_index,
                     "goal_text": lead.goal_text,
                     "what_to_summarize": list(lead.what_to_summarize),
                     "params": dict(lead.params),
                     "rendered_query": rendered_query,
-                    "payload_status": sidecar["payload_status"],
-                    "payload_digest": sidecar["payload_digest"],
-                    "result_refs": [str(lead.result_ref.relative_to(run_dir))],
+                    "payload_status": lead.payload_status,
+                    "payload_digest": lead.payload_digest,
+                    "result_refs": (
+                        [str(lead.raw_ref.relative_to(run_dir))] if lead.raw_ref else []
+                    ),
                     "composite_kind": composite_kind,
                     "co_dispatched_with": co_dispatched,
                 }
@@ -990,19 +940,26 @@ def _run_locked(run_dir: Path) -> int:
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
 
+    # Join the two tables ONCE for this tick and reuse it everywhere (draft
+    # synthesis, handoff extraction, the composite classifier's entry view) —
+    # the run dir is immutable by now, so re-joining would be pure repeated I/O.
+    try:
+        joined_leads = lead_repository.joined(run_dir)
+        executed = extract_from_joined(joined_leads)
+    except (FileNotFoundError, ValueError) as e:
+        _log(f"FATAL: cannot extract leads: {e}")
+        return 2
+
     # Mint drafts for executed-but-uncatalogued verbs BEFORE capturing the
     # git baseline, so the new {system}/_draft/ files are expected queue
     # content (the dirty-protected preflight ignores _draft/) and the
     # post-flight verifies against a baseline that already includes them.
-    try:
-        synth = synthesize_drafts(extract(run_dir))
-        if synth:
-            _log(
-                f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
-                + ", ".join(p.name for p in synth)
-            )
-    except (FileNotFoundError, ValueError) as e:
-        _log(f"draft synthesis skipped (extract failed: {e})")
+    synth = synthesize_drafts(executed)
+    if synth:
+        _log(
+            f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
+            + ", ".join(p.name for p in synth)
+        )
 
     # Stage all pending drafts (synthesized + gather-authored + system-skill
     # deposits) so the curator can `git mv` (promote/lift) and `git rm -f`
@@ -1022,7 +979,9 @@ def _run_locked(run_dir: Path) -> int:
         _log(f"FATAL preflight: protected paths dirty before authoring: {dirty_protected}")
         return 2
 
-    handoffs, pending_drafts, rc = _prepare_handoffs(run_dir, base_sha)
+    handoffs, pending_drafts, rc = _prepare_handoffs(
+        run_dir, base_sha, executed, joined_leads
+    )
     if rc is not None:
         return rc
     _log(
@@ -1065,6 +1024,7 @@ def _run_locked(run_dir: Path) -> int:
 
 def _prepare_handoffs(
     run_dir: Path, base_sha: str,
+    executed: list | None = None, joined_leads: list | None = None,
 ) -> tuple[list, list, int | None]:
     """Extract leads + build executed-template + system-draft handoffs.
 
@@ -1072,7 +1032,8 @@ def _prepare_handoffs(
     ``None`` when work remains; an ``int`` rc when the caller should
     return immediately. Both lists may be empty independently:
 
-    - Executed handoffs come from ``lead_sequence.yaml`` + ``gather_raw/``.
+    - Executed handoffs come from the two tables (``executed_queries.jsonl``
+      + ``gather_raw/``) joined via ``lead_repository``.
     - Pending drafts come from ``discover_system_drafts()`` and are gated
       on ``_lift_threshold()`` — below threshold, the list is forced
       empty so the lift portion is silently skipped this tick.
@@ -1093,11 +1054,12 @@ def _prepare_handoffs(
     else:
         pending_drafts = build_system_draft_handoffs(pending_drafts_raw)
 
-    try:
-        executed = extract(run_dir)
-    except (FileNotFoundError, ValueError) as e:
-        _log(f"FATAL: cannot extract leads: {e}")
-        return [], [], 2
+    if executed is None:
+        try:
+            executed = extract(run_dir)
+        except (FileNotFoundError, ValueError) as e:
+            _log(f"FATAL: cannot extract leads: {e}")
+            return [], [], 2
 
     if not executed:
         if not pending_drafts:
@@ -1110,7 +1072,7 @@ def _prepare_handoffs(
         return [], pending_drafts, None
 
     try:
-        handoffs = build_handoff(run_dir, executed)
+        handoffs = build_handoff(run_dir, executed, joined_leads)
     except LeadAuthorError as e:
         _log(f"FATAL: cannot build handoffs: {e}")
         return [], [], 2
@@ -1142,8 +1104,9 @@ Preconditions
     defender/learning/_pending_leads/.lock).
   * No defender-side author tick may be running (shared repo lock at
     defender/learning/_author.lock).
-  * ``<run_dir>/lead_sequence.yaml`` and ``<run_dir>/gather_raw/`` must
-    exist (produced by defender/scripts/project_lead_sequence.py).
+  * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
+    (the two tables) must exist — written live during the run by
+    record_query.py + record_lead.py.
 
 State files written under ``<run_dir>/lead_author/``
   done           sentinel on successful completion; makes the run a no-op.
@@ -1170,7 +1133,7 @@ def main(argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("run_dir", type=Path,
-                   help="defender run dir containing lead_sequence.yaml + gather_raw/")
+                   help="defender run dir containing executed_queries.jsonl + gather_raw/")
     args = p.parse_args(argv)
     return run(args.run_dir)
 

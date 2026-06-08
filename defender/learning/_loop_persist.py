@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 import yaml
 
+import lead_repository
 from _loop_config import DEFAULT_PATHS, LoopError, LoopPaths
 from _loop_validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -108,7 +109,11 @@ def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-PERSIST_COPY_FILES = ("alert.json", "report.md", "investigation.md", "lead_sequence.yaml")
+# Hard-required flat inputs. The two lead/query tables
+# (executed_queries.jsonl + the gather_raw/ directory) are copied separately
+# and are best-effort — a query-less run has neither, which is a monitor case,
+# not a persist failure.
+PERSIST_COPY_FILES = ("alert.json", "report.md", "investigation.md")
 
 # Both directions write the same disposition-level shared artifacts (copied inputs
 # + source_refs.yaml). When the legs run concurrently these truncating writes target
@@ -125,6 +130,10 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             if not src.is_file():
                 raise LoopError(f"missing source artifact for persist: {src}")
             shutil.copy2(src, learning_run_dir / name)
+        # The two live tables (queries JSONL + the gather_raw/ tree). Staged
+        # via the single lead_repository helper so this and the secondary-eval
+        # staging step share one definition of the on-disk table set.
+        lead_repository.stage_tables(run_dir, learning_run_dir)
 
 
 def _write_source_refs(
@@ -136,7 +145,8 @@ def _write_source_refs(
             "alert": str(run_dir / "alert.json"),
             "report": str(run_dir / "report.md"),
             "investigation": str(run_dir / "investigation.md"),
-            "lead_sequence": str(run_dir / "lead_sequence.yaml"),
+            "executed_queries": str(run_dir / "executed_queries.jsonl"),
+            "gather_raw": str(run_dir / "gather_raw"),
         },
         "normalized_disposition": disposition,
         "alert_rule_key": alert_rule_key,

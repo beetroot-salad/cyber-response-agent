@@ -305,11 +305,11 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     """Stable --case-id keeps actor seed constant across attempt-suffixed staging dirs.
 
     Loads ``replay_actor.py`` directly, stubs out the heavy bits
-    (lead-sequence parsing it does itself, loop.invoke_actor /
-    project_actor / dump_actor_yaml), and asserts that the seed
-    captured during the invoke_actor call corresponds to the
-    ``--case-id`` value rather than ``staging.name``. This is the
-    invariant that protects catch rate from per-attempt noise.
+    (loop.invoke_actor and the lead_repository actor_view it projects
+    from), and asserts that the seed captured during the invoke_actor
+    call corresponds to the ``--case-id`` value rather than
+    ``staging.name``. This is the invariant that protects catch rate
+    from per-attempt noise.
     """
     replay = _load("replay_actor_t", _HERE / "replay_actor.py")
 
@@ -334,27 +334,22 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
 
     fake_loop = FakeLoop()
 
-    class FakePLS:
+    class FakeLR:
         @staticmethod
-        def project_actor(doc):
-            return doc
-
-        @staticmethod
-        def dump_actor_yaml(doc):
-            return "case_id: " + doc["case_id"] + "\n"
+        def actor_view(staging):
+            return {"case_id": "ignored", "alert_ref": "alert.json", "leads": []}
 
     def fake_load_sibling(name, path):
         if name.endswith("subagents_replay"):
             return fake_loop
-        return FakePLS()
+        if name.endswith("lead_repository_replay"):
+            return FakeLR()
+        raise AssertionError(f"unexpected sibling load: {name}")
 
-    import yaml as _yaml
     staging = tmp_path / "stage-with-attempt-aaaaaaaa"
     staging.mkdir()
     (staging / "alert.json").write_text("{}")
-    (staging / "lead_sequence.yaml").write_text(
-        _yaml.safe_dump({"case_id": "ignored", "entries": []})
-    )
+    (staging / "gather_raw").mkdir()  # the leads table (required replay input)
 
     import unittest.mock as mock
     with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling):
@@ -389,7 +384,7 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
     """A subprocess.TimeoutExpired from invoke_oracle must surface as SecondaryError.
 
     loop._run_claude wraps subprocess.run with a timeout, so a hung
-    per-lead oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
+    oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
     LoopError). Earlier rev only caught LoopError; one timeout
     aborted the whole harness and prevented the summary from being
     written. This test pins the conversion.
@@ -426,14 +421,26 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
     head_run = tmp_path
     (head_run / "alert.json").write_text("{}")
     (head_run / "investigation.md").write_text("")
-    (head_run / "lead_sequence.yaml").write_text("entries: []\n")
     staging = tmp_path / "stage"
     staging.mkdir()
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
+    valid_oracle = "projections: []\n"
+
+    class _FakeLR:
+        @staticmethod
+        def joined(run_dir):
+            return []
+
+        @staticmethod
+        def render_joined_yaml(run_dir):
+            return "leads: []\n"
+
     class FakeLoop:
         class LoopError(Exception):
             pass
+
+        lead_repository = _FakeLR
 
         @staticmethod
         def is_skip_story(text):
@@ -441,14 +448,14 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
 
         @staticmethod
         def invoke_oracle(*_a, **_kw):
-            return "projections: []\n"
+            return valid_oracle
 
         @staticmethod
         def strip_yaml_fence(text):
             return text
 
         @staticmethod
-        def validate_oracle_doc(doc, expected_positions):
+        def validate_oracle_doc(doc, lead_ids):
             return doc
 
         @staticmethod
@@ -457,65 +464,6 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
-
-
-def test_run_head_oracle_and_judge_passes_lead_sequence_to_judge(tmp_path: Path):
-    """The judge call must include lead_sequence_path as the 3rd positional arg.
-
-    Regression for the arity break: invoke_judge gained a required
-    lead_sequence_path parameter; if the call site isn't updated it raises a
-    TypeError that escapes the SecondaryError handler and aborts the harness.
-    A real (non-variadic) signature on the double catches that.
-    """
-    head_run = tmp_path
-    (head_run / "alert.json").write_text("{}")
-    (head_run / "investigation.md").write_text("")
-    lead_seq = head_run / "lead_sequence.yaml"
-    lead_seq.write_text("entries: []\n")
-    staging = tmp_path / "stage"
-    staging.mkdir()
-    (staging / "actor_story.md").write_text("not a SKIP\n")
-
-    recorded = {}
-
-    class FakeLoop:
-        class LoopError(Exception):
-            pass
-
-        @staticmethod
-        def is_skip_story(text):
-            return False
-
-        @staticmethod
-        def invoke_oracle(*_a, **_kw):
-            return "projections: []\n"
-
-        @staticmethod
-        def validate_oracle_doc(doc, expected_positions):
-            return doc
-
-        # Real signature — a wrong-arity call raises TypeError here.
-        @staticmethod
-        def invoke_judge(alert_path, investigation_path, lead_sequence_path,
-                         actor_story_path, projected_telemetry_path, learning_run_dir):
-            recorded["lead_sequence_path"] = lead_sequence_path
-            return "outcome: caught\ndefender_findings: []\n"
-
-        @staticmethod
-        def strip_yaml_fence(text):
-            return text
-
-        @staticmethod
-        def validate_judge_doc(doc):
-            return doc
-
-        @staticmethod
-        def _outcome_keyword(value):
-            return value
-
-    outcome = sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
-    assert outcome == "caught"
-    assert recorded["lead_sequence_path"] == lead_seq
 
 
 def test_write_summary_appends_to_existing_index(tmp_path: Path):

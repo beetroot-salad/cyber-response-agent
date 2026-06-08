@@ -200,8 +200,8 @@ payload rather than packing into `attrs?`.
 l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|90d
 
 # PLAN names the lead by measurement and the `system` it targets; gather
-# chooses the template and binds params, and writes both into
-# `gather_raw/{position}.observations.json#queries`. Do not include
+# chooses the template and binds params, and writes both as a row in
+# `executed_queries.jsonl` (the queries table, FK `lead_id`). Do not include
 # `template` or `query` columns at PLAN time — they are gather's record,
 # not the defender's.
 ```

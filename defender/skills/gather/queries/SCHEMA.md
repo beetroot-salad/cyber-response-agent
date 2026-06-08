@@ -76,18 +76,16 @@ self-contained.
 ## Multi-query dispatches and `gather_raw/` naming
 
 Gather runs each query through
-`gather_exec.py --run-dir R --lead {position} --system {system} --query-id {id}`
+`record_query.py --run-dir R --lead {lead_id} --system {system} --query-id {id}`
 (see `defender/skills/gather/SKILL.md` §3). The wrapper persists raw output
-to `{run_dir}/gather_raw/{lead}/{seq}.json` and appends a record to
-`executed_queries.jsonl`; gather neither redirects stdout nor names files.
-The `lead_sequence` projection renders the wrapper's per-lead records into the
-canonical artifacts consumers read — single-query at `gather_raw/{position}.json`,
-multi-query suffixed `{position}{a..z}.json`:
+by-ref to `{run_dir}/gather_raw/{lead_id}/{seq}.json` and appends one row to
+`executed_queries.jsonl` (the queries table, FK `lead_id`); gather neither
+redirects stdout nor names files. `seq` disambiguates N-queries-per-lead — there
+is no flat `{position}.json` / `{position}{a..z}.json` projection:
 
-- `gather_raw/0.json` — single-query dispatch at position 0
-- `gather_raw/0a.json`, `gather_raw/0b.json`, `gather_raw/0c.json` — three
-  queries at position 0
-- `gather_raw/1.json` — single-query dispatch at position 1
+- `gather_raw/l-001/0.json` — first query for lead `l-001`
+- `gather_raw/l-001/1.json`, `gather_raw/l-001/2.json` — further queries for `l-001`
+- `gather_raw/l-002/0.json` — first query for lead `l-002`
 
 ## What is *not* a template
 

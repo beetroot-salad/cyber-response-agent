@@ -20,7 +20,7 @@ subagent.
 ### Why scope to the main session
 
 The gather subagent legitimately does both — it runs the adapter CLI
-(through gather_exec.py) and reads `gather_raw/` (§3.5/§4). A session-wide
+(through record_query.py) and reads `gather_raw/` (§3.5/§4). A session-wide
 permission-deny rule can't tell the two apart and would break gather, so
 the scoping lives here.
 
@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RAW_MARKER = "gather_raw"
 # An adapter CLI invocation: a path under scripts/tools/ ending in _cli.py.
 # Matches both `defender/scripts/tools/elastic_cli.py` and the absolute form.
-# `gather_exec.py` / `data_source_debug.py` are NOT `_cli.py` and are not
+# `record_query.py` / `data_source_debug.py` are NOT `_cli.py` and are not
 # matched; the invlang CLI (`-m defender.skills.invlang.cli`) has no
 # `scripts/tools/` path and no `_cli.py`, so it stays allowed.
 ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
@@ -113,13 +113,13 @@ def main() -> int:
         print(RAW_DENY_REASON, file=sys.stderr)
         return 2
 
-    # Adapter-CLI clamp. Exempt commands wrapped in gather_exec.py: that
+    # Adapter-CLI clamp. Exempt commands wrapped in record_query.py: that
     # wrapper is gather's path (and audits the query), so this stays robust
     # even if a gather subagent ever runs at REPO_ROOT — it can't break
     # gather's own queries, only the main loop's direct, unwrapped calls.
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
-        if ADAPTER_CLI_RE.search(cmd) and "gather_exec.py" not in cmd:
+        if ADAPTER_CLI_RE.search(cmd) and "record_query.py" not in cmd:
             print(ADAPTER_DENY_REASON, file=sys.stderr)
             return 2
 

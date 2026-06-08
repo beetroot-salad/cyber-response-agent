@@ -199,35 +199,21 @@ The defender does not pick from a slugged lead catalog; gather picks (or
 authors) a query template per dispatch, and the template id is what makes
 a lead addressable across cases.
 
-The source run materializes that ordered contract as:
+The source run materializes that ordered contract as **two live tables**
+(no post-run projection), joined by `defender/learning/lead_repository.py`:
 
-```yaml
-case_id: <run id>
-alert_ref: alert.json
-entries:
-  - position: 0
-    lead_description:
-      goal: <defender's measurement contract>
-      what_to_summarize:
-        - <dimension the gather result must characterize>
-    queries:
-      - id: <system-prefixed kebab, e.g. wazuh.auth-events>
-        params: {<param>: <bound value>}
-    result_ref: <gather_raw/{position}.json>
-```
+- **leads** — `gather_raw/{lead_id}.lead.json` (`{goal, what_to_summarize}`),
+  written by the `record_lead.py` PreToolUse hook from the gather dispatch
+  block, keyed on the `:L` invlang row id (`l-001`).
+- **queries** — `executed_queries.jsonl`, one row per executed query
+  (`{lead_id, seq, system, query_id, params, payload_status, payload_digest,
+  payload_path, …}`), written by the `record_query.py` capture wrapper;
+  raw payloads land by-ref at `gather_raw/{lead_id}/{seq}.json`.
 
-`defender/scripts/project_lead_sequence.py` is the canonical projector. It
-parses `:L findings` rows from `investigation.md`, requires `system` and
-`template` cells, derives `queries[].id` as `{system}.{template}` (or
-`ad-hoc`), parses bound params from the `query` and `window` cells, and writes
-`lead_sequence.yaml` back into the source run dir. If a
-`gather_raw/{position}.lead.json` sidecar exists, its `goal` and
-`what_to_summarize` fill `lead_description`; otherwise the projector falls
-back to the `:L` row name and an empty dimension list.
-
-The schema allows multiple `queries[]` entries per lead position, but the
-current projector emits one query per parsed `:L` row. Templates authored
-during a run are written back to the per-system catalog
+Consumers call `lead_repository.joined(run_dir)` / `actor_view(run_dir)`;
+the cross-case join key is `(query_id, params)`. `seq` disambiguates
+N-queries-per-lead (no flat `{position}.json` / `{a..z}` scheme). Templates
+authored during a run are written back to the per-system catalog
 (`defender/skills/gather/queries/{system}/`), so the catalog grows organically
 with usage; early near-duplicates are accepted and normalized downstream when
 patterns stabilize.
