@@ -197,8 +197,18 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
     (``record_query`` writes it deterministically); an out-of-vocabulary
     status is a loud failure — the loop refuses to author against it.
     """
+    return extract_from_joined(lead_repository.joined(run_dir))
+
+
+def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
+    """``extract`` over an already-joined leads list (no disk I/O).
+
+    Lets a caller that already holds ``lead_repository.joined(run_dir)`` reuse
+    it instead of re-reading both tables. ``joined_leads`` is a list of
+    ``lead_repository.JoinedLead``.
+    """
     out: list[ExecutedLead] = []
-    for entry_idx, jl in enumerate(lead_repository.joined(run_dir)):
+    for entry_idx, jl in enumerate(joined_leads):
         goal = jl.goal or ""
         wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
         is_multi = len(jl.queries) > 1
@@ -450,7 +460,7 @@ def _stage_pending_drafts() -> list[str]:
 
 
 def build_handoff(
-    run_dir: Path, executed: list[ExecutedLead]
+    run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
 
@@ -470,10 +480,13 @@ def build_handoff(
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
     # Reconstruct dict-shaped entries from the join surface for the
     # (dict-based) composite classifier — one entry per joined lead, in the
-    # same order as the entry_index ExecutedLead carries.
+    # same order as the entry_index ExecutedLead carries. Reuse the caller's
+    # already-joined list when given, rather than re-reading both tables.
+    if joined_leads is None:
+        joined_leads = lead_repository.joined(run_dir)
     entries = [
         {"queries": [{"id": q.query_id, "params": dict(q.params)} for q in jl.queries]}
-        for jl in lead_repository.joined(run_dir)
+        for jl in joined_leads
     ]
     template_path_by_id = {
         tid: str(tpl.path.relative_to(REPO_ROOT))
@@ -927,19 +940,26 @@ def _run_locked(run_dir: Path) -> int:
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
 
+    # Join the two tables ONCE for this tick and reuse it everywhere (draft
+    # synthesis, handoff extraction, the composite classifier's entry view) —
+    # the run dir is immutable by now, so re-joining would be pure repeated I/O.
+    try:
+        joined_leads = lead_repository.joined(run_dir)
+        executed = extract_from_joined(joined_leads)
+    except (FileNotFoundError, ValueError) as e:
+        _log(f"FATAL: cannot extract leads: {e}")
+        return 2
+
     # Mint drafts for executed-but-uncatalogued verbs BEFORE capturing the
     # git baseline, so the new {system}/_draft/ files are expected queue
     # content (the dirty-protected preflight ignores _draft/) and the
     # post-flight verifies against a baseline that already includes them.
-    try:
-        synth = synthesize_drafts(extract(run_dir))
-        if synth:
-            _log(
-                f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
-                + ", ".join(p.name for p in synth)
-            )
-    except (FileNotFoundError, ValueError) as e:
-        _log(f"draft synthesis skipped (extract failed: {e})")
+    synth = synthesize_drafts(executed)
+    if synth:
+        _log(
+            f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
+            + ", ".join(p.name for p in synth)
+        )
 
     # Stage all pending drafts (synthesized + gather-authored + system-skill
     # deposits) so the curator can `git mv` (promote/lift) and `git rm -f`
@@ -959,7 +979,9 @@ def _run_locked(run_dir: Path) -> int:
         _log(f"FATAL preflight: protected paths dirty before authoring: {dirty_protected}")
         return 2
 
-    handoffs, pending_drafts, rc = _prepare_handoffs(run_dir, base_sha)
+    handoffs, pending_drafts, rc = _prepare_handoffs(
+        run_dir, base_sha, executed, joined_leads
+    )
     if rc is not None:
         return rc
     _log(
@@ -1002,6 +1024,7 @@ def _run_locked(run_dir: Path) -> int:
 
 def _prepare_handoffs(
     run_dir: Path, base_sha: str,
+    executed: list | None = None, joined_leads: list | None = None,
 ) -> tuple[list, list, int | None]:
     """Extract leads + build executed-template + system-draft handoffs.
 
@@ -1031,11 +1054,12 @@ def _prepare_handoffs(
     else:
         pending_drafts = build_system_draft_handoffs(pending_drafts_raw)
 
-    try:
-        executed = extract(run_dir)
-    except (FileNotFoundError, ValueError) as e:
-        _log(f"FATAL: cannot extract leads: {e}")
-        return [], [], 2
+    if executed is None:
+        try:
+            executed = extract(run_dir)
+        except (FileNotFoundError, ValueError) as e:
+            _log(f"FATAL: cannot extract leads: {e}")
+            return [], [], 2
 
     if not executed:
         if not pending_drafts:
@@ -1048,7 +1072,7 @@ def _prepare_handoffs(
         return [], pending_drafts, None
 
     try:
-        handoffs = build_handoff(run_dir, executed)
+        handoffs = build_handoff(run_dir, executed, joined_leads)
     except LeadAuthorError as e:
         _log(f"FATAL: cannot build handoffs: {e}")
         return [], [], 2

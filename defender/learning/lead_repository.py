@@ -32,6 +32,7 @@ boundary, not field-by-field stripping.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,20 @@ import yaml
 GATHER_DIR = "gather_raw"
 QUERIES_LOG = "executed_queries.jsonl"
 _LEAD_SUFFIX = ".lead.json"
+
+
+def _as_int(value, default: int = 0) -> int:
+    """Coerce a JSONL field to int, defaulting on null / non-numeric.
+
+    The readers must never raise on a malformed artifact (a hand-edited or
+    partially-written row can carry a null or non-numeric ``seq`` /
+    ``exit_code``), so an uncoercible value degrades to ``default`` rather
+    than taking down ``load_queries`` and every consumer that joins on it.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass(frozen=True)
@@ -144,18 +159,25 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
         if not lead_id:
             continue
         payload_path = rec.get("payload_path")
-        raw_ref = run_dir / payload_path if payload_path else None
+        # By contract payloads are recorded run-dir-relative; an absolute path
+        # would silently escape the run dir under `/` (run_dir / "/abs" == /abs),
+        # so treat it as malformed and carry no ref rather than a path outside
+        # the run dir.
+        if payload_path and not Path(payload_path).is_absolute():
+            raw_ref = run_dir / payload_path
+        else:
+            raw_ref = None
         params = rec.get("params")
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
-                seq=int(rec.get("seq", 0)),
+                seq=_as_int(rec.get("seq", 0)),
                 system=str(rec.get("system", "")),
                 verb=str(rec.get("verb", "")),
                 query_id=str(rec.get("query_id", "")),
                 params=params if isinstance(params, dict) else {},
                 raw_command=str(rec.get("raw_command", "")),
-                exit_code=int(rec.get("exit_code", 0)),
+                exit_code=_as_int(rec.get("exit_code", 0)),
                 payload_status=str(rec.get("payload_status", "")),
                 payload_digest=str(rec.get("payload_digest", "")),
                 raw_ref=raw_ref,
@@ -179,24 +201,24 @@ def joined(run_dir: Path) -> list[JoinedLead]:
     - a query whose `lead_id` has no sidecar → a synthetic `orphan` lead
       (`goal=None`, `orphan=True`) so consumers can surface it.
 
-    Order: leads that ran, by first execution (`min seq`); then query-less
-    leads in `lead_id` sort order; then orphans last. Deterministic display
-    order without coupling lead identity to document order.
+    Order: leads that ran, by first execution (first appearance in the
+    queries log, which is in execution order); then query-less leads in
+    `lead_id` sort order; then orphans last. `seq` resets to 0 per lead, so
+    it cannot order leads against each other — the global row index does, and
+    this matches `actor_view`'s grouping order.
     """
     leads = load_leads(run_dir)
     queries = load_queries(run_dir)
 
     buckets: dict[str, list[QueryRow]] = {lid: [] for lid in leads}
-    for q in queries:
+    first_seen: dict[str, int] = {}
+    for idx, q in enumerate(queries):
         buckets.setdefault(q.lead_id, []).append(q)
-
-    def _min_seq(lid: str) -> int:
-        rows = buckets.get(lid)
-        return min((r.seq for r in rows), default=-1) if rows else -1
+        first_seen.setdefault(q.lead_id, idx)
 
     ran = sorted(
         (lid for lid in buckets if buckets[lid]),
-        key=lambda lid: (_min_seq(lid), lid),
+        key=lambda lid: first_seen.get(lid, len(queries)),
     )
     queryless = sorted(lid for lid in leads if not buckets.get(lid))
     orphans = sorted(lid for lid in buckets if buckets[lid] and lid not in leads)
@@ -255,6 +277,32 @@ def actor_view(run_dir: Path) -> dict:
             {"lead_id": lid, "queries": qs} for lid, qs in grouped.items()
         ],
     }
+
+
+# --------------------------------------------------------------------------
+# Table staging (copy the two tables between run dirs)
+# --------------------------------------------------------------------------
+
+
+def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
+    """Copy the two live tables from one run dir into another.
+
+    The queries table (`executed_queries.jsonl`, a flat file) plus the leads
+    table + by-ref payloads (the `gather_raw/` tree). Both are best-effort: a
+    query-less run has neither, which is a monitor case, not an error. This is
+    the single definition of "what files constitute the tables on disk",
+    shared by the learning-loop persist stage and the secondary-eval staging
+    step so the two can't drift.
+    """
+    src_run_dir = Path(src_run_dir)
+    dst_dir = Path(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    ledger = src_run_dir / QUERIES_LOG
+    if ledger.is_file():
+        shutil.copy2(ledger, dst_dir / ledger.name)
+    gather_src = src_run_dir / GATHER_DIR
+    if gather_src.is_dir():
+        shutil.copytree(gather_src, dst_dir / GATHER_DIR, dirs_exist_ok=True)
 
 
 # --------------------------------------------------------------------------

@@ -44,6 +44,7 @@ if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import secrets
@@ -196,6 +197,44 @@ def visualize(run_dir: Path) -> None:
         sys.stderr.write(f"[run.py] copied {path}\n")
 
 
+def cross_check_tables(run_dir: Path) -> None:
+    """Loud structural-integrity check on the two live tables.
+
+    Restores the signal the deleted projection-failure halt used to provide:
+    cross-check the leads/queries tables against the `:L` row ids in
+    investigation.md. Orphan query rows or a lead the narration forgot are a
+    WARN — a structurally degraded run that would otherwise flow silently into
+    the oracle/judge; leads with no queries are an informational MONITOR note.
+    Never raises — a diagnostic must not abort the post-steps.
+    """
+    if not (run_dir / "investigation.md").is_file():
+        return
+    learning = str(DEFENDER_DIR / "learning")
+    sys.path.insert(0, learning)
+    try:
+        import lead_repository  # type: ignore[import-not-found]
+
+        xcheck = lead_repository.narration_crosscheck_from_run(run_dir)
+    except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
+        print(f"[run.py] narration cross-check skipped: {e!r}", file=sys.stderr)
+        return
+    finally:
+        with contextlib.suppress(ValueError):
+            sys.path.remove(learning)
+    if not xcheck["ok"]:
+        print(
+            "[run.py] WARN narration cross-check FAILED — the live tables "
+            "disagree with investigation.md's :L rows:",
+            file=sys.stderr,
+        )
+        if xcheck["missing_from_narration"]:
+            print(f"[run.py]   table lead_ids with no :L row: {xcheck['missing_from_narration']}", file=sys.stderr)
+        if xcheck["queries_without_lead"]:
+            print(f"[run.py]   query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}", file=sys.stderr)
+    if xcheck["leads_without_queries"]:
+        print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
+
+
 def run_learning_loop(run_dir: Path) -> int:
     sys.path.insert(0, str(DEFENDER_DIR / "learning"))
     try:
@@ -233,6 +272,9 @@ def main(argv: list[str]) -> int:
 
     if not (run_dir / "executed_queries.jsonl").is_file():
         print("[run.py] note: no executed_queries.jsonl (the run ran no queries)", file=sys.stderr)
+
+    # Loud structural-integrity signal (replaces the deleted projection halt).
+    cross_check_tables(run_dir)
 
     learn_rc = 0
     if ns.no_learn:

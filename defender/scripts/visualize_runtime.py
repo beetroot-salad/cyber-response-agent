@@ -254,7 +254,11 @@ def _render_gather_call(i: int, call: dict, gather_dir: Path, cost: float = 0.0)
     return block("subcall gather", title, inner, anchor=f"gather-{i}")
 
 
-_LEAD_ID_RE = re.compile(r"^lead_id:\s*(l-[A-Za-z0-9]+)", re.MULTILINE)
+# Pull the lead_id out of the (model-authored) dispatch YAML. Tolerate leading
+# indentation: the dispatch block is free-form text, so the `lead_id:` key may
+# be indented even though the canonical renderer emits it flush-left. The id
+# body mirrors hooks/record_lead.py's LEAD_ID_RE — keep in sync.
+_LEAD_ID_RE = re.compile(r"^[ \t]*lead_id:\s*(l-[A-Za-z0-9]+)", re.MULTILINE)
 
 
 def _render_gather_raw_payloads(lead_id: str | None, gather_dir: Path) -> str:

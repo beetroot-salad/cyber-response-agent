@@ -408,6 +408,7 @@ def run_frozen_actor(
     worktree: Path,
     pin: GenerationPin,
     case_id: str,
+    loop_mod,
     *,
     runner: subprocess._RunFn = subprocess.run,
 ) -> Path:
@@ -420,14 +421,10 @@ def run_frozen_actor(
     """
     staging_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(head_run_dir / "alert.json", staging_dir / "alert.json")
-    # Stage the two tables (the actor replays off them via lead_repository).
-    # executed_queries.jsonl is a flat file; gather_raw/ is a directory.
-    ledger = head_run_dir / "executed_queries.jsonl"
-    if ledger.is_file():
-        shutil.copy2(ledger, staging_dir / ledger.name)
-    gather_src = head_run_dir / "gather_raw"
-    if gather_src.is_dir():
-        shutil.copytree(gather_src, staging_dir / "gather_raw", dirs_exist_ok=True)
+    # Stage the two tables (the actor replays off them via lead_repository),
+    # through the single shared staging helper so this and the persist stage
+    # share one definition of the on-disk table set.
+    loop_mod.lead_repository.stage_tables(head_run_dir, staging_dir)
     venv_python = worktree / "defender" / ".venv" / "bin" / "python3"
     # Walk-up the parent worktrees in case the pinned tree shares the
     # repo's venv with the main checkout (saves a `uv venv` per worktree).
@@ -744,7 +741,7 @@ def run_secondary(
                 continue
 
             staging = runs_base / f"{run_id}-replay"
-            run_frozen_actor(head_run_dir, staging, worktree, pin, case_id)
+            run_frozen_actor(head_run_dir, staging, worktree, pin, case_id, loop_mod)
             result.replay_run_dir = str(staging)
             outcome = run_head_oracle_and_judge(head_run_dir, staging, loop_mod)
             result.judge_outcome = outcome

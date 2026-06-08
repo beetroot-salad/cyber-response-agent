@@ -37,10 +37,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+# A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
+# and a gather_raw/ path segment. Grammar mirrors hooks/record_lead.py and the
+# invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
+LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 # Size safety: a query that over-returns (server-side filter didn't bind,
 # broad window, high-cardinality index) would otherwise dump its whole
@@ -163,10 +169,34 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     return "\n".join(lines) + "\n"
 
 
-def _next_seq(lead_dir: Path) -> int:
-    if not lead_dir.is_dir():
+def _next_seq(run_dir: Path, lead: str) -> int:
+    """Next per-lead seq = number of rows already recorded for this lead in the
+    queries table.
+
+    Counting rows (not payload files on disk) keeps seq monotonic even when a
+    payload write failed: that query still appends a row with ``payload_path:
+    null``, so the next query won't reuse the seq and collide on
+    ``(lead_id, seq)``.
+    """
+    log = run_dir / "executed_queries.jsonl"
+    if not log.is_file():
         return 0
-    return sum(1 for p in lead_dir.glob("*.json"))
+    try:
+        text = log.read_text()
+    except OSError:
+        return 0
+    n = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(rec, dict) and rec.get("lead_id") == lead:
+            n += 1
+    return n
 
 
 def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -196,13 +226,22 @@ def main(argv: list[str]) -> int:
 
     run_dir = Path(ns.run_dir)
     lead = ns.lead
+    # Validate the FK before it becomes a path segment: an unvalidated --lead
+    # (traversal / absolute) would escape gather_raw/ and break the join.
+    # Mirrors hooks/record_lead.py's claim-side guard.
+    if not LEAD_ID_RE.match(lead):
+        print(
+            f"record_query.py: invalid --lead {lead!r} (expected an `l-` row id)",
+            file=sys.stderr,
+        )
+        return 2
     query_id = ns.query_id
     verb = query_id.split(".", 1)[1] if "." in query_id else query_id
 
     proc = subprocess.run(inner, capture_output=True, text=True)
 
     lead_dir = run_dir / "gather_raw" / lead
-    seq = _next_seq(lead_dir)
+    seq = _next_seq(run_dir, lead)
     payload_path = lead_dir / f"{seq}.json"
     payload_rel = None
     try:

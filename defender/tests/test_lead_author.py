@@ -724,7 +724,7 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
         "neighbors": [], "invocations": [],
     }]
     monkeypatch.setattr(lead_author, "extract", lambda rd: fake_executed)
-    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex: fake_handoff)
+    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex, jl=None: fake_handoff)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     monkeypatch.setattr(
         lead_author, "discover_system_drafts",
@@ -746,7 +746,7 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
         "neighbors": [], "invocations": [],
     }]
     monkeypatch.setattr(lead_author, "extract", lambda rd: [object()])
-    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex: fake_handoff)
+    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex, jl=None: fake_handoff)
     # Seed two real draft files so build_system_draft_handoffs can compute
     # repo-relative paths.
     skills = tmp_path / "defender" / "skills"

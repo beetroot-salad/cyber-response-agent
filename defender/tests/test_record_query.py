@@ -217,3 +217,49 @@ def test_main_passes_small_payload_through_verbatim(tmp_path, capsys, monkeypatc
     out = capsys.readouterr().out
     assert "pass-through truncated" not in out
     assert '{"hits":[{"i":1}]}' in out
+
+
+# --- --lead validation (mirrors record_lead's claim-side guard) ---
+
+def test_main_rejects_invalid_lead_id(tmp_path, capsys):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
+    for bad in ("../../etc", "/etc", "l 1", "x-001", ""):
+        rc = ge.main(["--run-dir", str(run_dir), "--lead", bad,
+                      "--system", "stub-cmdb", "--query-id", "stub-cmdb.x", "--",
+                      sys.executable, str(cli), "x", "a"])
+        assert rc == 2, f"expected reject for {bad!r}"
+    # No table or payload escaped the run dir.
+    assert not (run_dir / "executed_queries.jsonl").exists()
+
+
+# --- seq stays monotonic even when a payload write fails (no (lead,seq) reuse) ---
+
+def test_main_seq_monotonic_after_failed_payload_write(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
+
+    real_write = Path.write_text
+    calls = {"n": 0}
+
+    def flaky_write(self, data, *a, **k):
+        # Fail only the FIRST payload write (a .json under gather_raw/), so its
+        # row is still appended with payload_path: null and no 0.json exists.
+        if self.suffix == ".json" and "gather_raw" in str(self) and calls["n"] == 0:
+            calls["n"] = 1
+            raise OSError("disk full")
+        return real_write(self, data, *a, **k)
+
+    monkeypatch.setattr(Path, "write_text", flaky_write)
+    ge.main(["--run-dir", str(run_dir), "--lead", "l-001", "--system", "s",
+             "--query-id", "s.a", "--", sys.executable, str(cli), "a"])
+    ge.main(["--run-dir", str(run_dir), "--lead", "l-001", "--system", "s",
+             "--query-id", "s.b", "--", sys.executable, str(cli), "b"])
+    monkeypatch.undo()
+
+    rows = [json.loads(ln) for ln in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
+    assert [r["seq"] for r in rows] == [0, 1]          # no reuse
+    assert rows[0]["payload_path"] is None             # first write failed
+    assert rows[1]["payload_path"] == "gather_raw/l-001/1.json"

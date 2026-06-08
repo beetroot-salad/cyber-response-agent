@@ -33,6 +33,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import os
@@ -43,8 +44,9 @@ from pathlib import Path
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 
-# A lead_id is the `:L` row id: `l-` + alphanumerics (mirrors the invlang
-# parser's lead-id grammar). Used verbatim as a path segment and FK.
+# A lead_id is the `:L` row id: `l-` + alphanumerics. Grammar mirrors the
+# invlang parser's lead-id grammar and scripts/tools/record_query.py's --lead
+# guard — keep in sync. Used verbatim as a path segment and FK.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 # Capture the first ```yaml ... ``` (or ```yml) fenced block in the prompt.
@@ -151,6 +153,14 @@ def claim_lead(dispatch: dict) -> int:
         with os.fdopen(fd, "w") as fh:
             fh.write(payload)
     except OSError:
+        # Don't leave a 0-byte sidecar: load_leads would skip it (degrading the
+        # lead to an orphan) AND it would become a false reuse token that
+        # rejects a legitimate same-id retry with EEXIST. Best-effort: close a
+        # leaked fd (if fdopen never took ownership) and remove the empty file.
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(sidecar_path)
         return 0
     return 0
 

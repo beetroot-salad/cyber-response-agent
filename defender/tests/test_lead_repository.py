@@ -290,3 +290,77 @@ def test_narration_crosscheck_from_run_parses_l_ids(tmp_path):
     report = lr.narration_crosscheck_from_run(run)
     assert report["missing_from_narration"] == []
     assert report["ok"] is True
+
+
+# --------------------------------------------------------------------------
+# Malformed-row tolerance (readers never raise) + absolute-path guard
+# --------------------------------------------------------------------------
+
+
+def _raw_row(run: Path, rec: dict) -> None:
+    run.mkdir(parents=True, exist_ok=True)
+    with (run / "executed_queries.jsonl").open("a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def test_load_queries_tolerates_null_and_non_numeric_seq_exit_code(tmp_path):
+    run = tmp_path / "run"
+    _raw_row(run, {"lead_id": "l-001", "seq": None, "exit_code": None, "query_id": "s.v"})
+    _raw_row(run, {"lead_id": "l-002", "seq": "0a", "exit_code": "x", "query_id": "s.v"})
+    rows = lr.load_queries(run)  # must not raise
+    assert [r.lead_id for r in rows] == ["l-001", "l-002"]
+    assert [r.seq for r in rows] == [0, 0]
+    assert [r.exit_code for r in rows] == [0, 0]
+
+
+def test_actor_view_tolerates_malformed_seq(tmp_path):
+    run = tmp_path / "run"
+    _raw_row(run, {"lead_id": "l-001", "seq": None, "query_id": "s.v", "params": {}})
+    view = lr.actor_view(run)  # the integrity boundary must not raise either
+    assert view["leads"][0]["lead_id"] == "l-001"
+
+
+def test_load_queries_raw_ref_none_on_absolute_payload_path(tmp_path):
+    run = tmp_path / "run"
+    _raw_row(run, {"lead_id": "l-001", "seq": 0, "query_id": "s.v",
+                   "payload_path": "/etc/passwd"})
+    rows = lr.load_queries(run)
+    assert rows[0].raw_ref is None  # absolute path must not escape the run dir
+
+
+def test_joined_orders_ran_by_execution_not_alphabetical(tmp_path):
+    """seq resets per-lead, so ran order must follow execution (first-seen in
+    the queries log), not lead_id sort — matching actor_view."""
+    run = tmp_path / "run"
+    _lead(run, "l-005", "first", [])
+    _lead(run, "l-001", "second", [])
+    _query(run, "l-005", 0)   # executed first
+    _query(run, "l-001", 0)   # executed second
+    joined_order = [j.lead_id for j in lr.joined(run)]
+    actor_order = [l["lead_id"] for l in lr.actor_view(run)["leads"]]
+    assert joined_order == ["l-005", "l-001"]
+    assert joined_order == actor_order
+
+
+# --------------------------------------------------------------------------
+# stage_tables
+# --------------------------------------------------------------------------
+
+
+def test_stage_tables_copies_both_tables(tmp_path):
+    src = tmp_path / "src"
+    _lead(src, "l-001", "g", [])
+    _query(src, "l-001", 0)
+    dst = tmp_path / "dst"
+    lr.stage_tables(src, dst)
+    assert (dst / "executed_queries.jsonl").is_file()
+    assert (dst / "gather_raw" / "l-001.lead.json").is_file()
+    assert (dst / "gather_raw" / "l-001" / "0.json").is_file()
+
+
+def test_stage_tables_queryless_run_is_noop(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    dst = tmp_path / "dst"
+    lr.stage_tables(src, dst)  # no tables → no error
+    assert not (dst / "executed_queries.jsonl").exists()

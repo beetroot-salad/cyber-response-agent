@@ -202,3 +202,33 @@ class _StringIn:
 
     def read(self) -> str:
         return self._s
+
+
+def test_failed_payload_write_removes_empty_sidecar_and_allows_retry(
+    tmp_path, hook, monkeypatch
+):
+    """A write failure after the O_EXCL create must not leave a 0-byte sidecar:
+    it would degrade the lead to an orphan AND falsely reject a same-id retry."""
+    import os
+
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    dispatch = {"run_dir": str(run_dir), "lead_id": "l-001",
+                "goal": "g", "what_to_summarize": ["d"]}
+
+    real_fdopen = os.fdopen
+
+    def boom(fd, *a, **k):
+        os.close(fd)  # release the fd the way the real fdopen would on success
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "fdopen", boom)
+    assert hook.claim_lead(dispatch) == 0           # fails open, never blocks
+    monkeypatch.setattr(os, "fdopen", real_fdopen)
+
+    sidecar = run_dir / "gather_raw" / "l-001.lead.json"
+    assert not sidecar.exists()                     # no 0-byte orphan left behind
+
+    # A genuine retry of the same id now succeeds (not falsely rejected).
+    assert hook.claim_lead(dispatch) == 0
+    assert json.loads(sidecar.read_text())["goal"] == "g"

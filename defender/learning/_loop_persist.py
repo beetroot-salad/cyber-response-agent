@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 import yaml
 
+import lead_repository
 from _loop_config import DEFAULT_PATHS, LoopError, LoopPaths
 from _loop_validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -129,18 +130,10 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             if not src.is_file():
                 raise LoopError(f"missing source artifact for persist: {src}")
             shutil.copy2(src, learning_run_dir / name)
-        # The queries table (a flat JSONL) + the gather_raw/ directory (leads
-        # sidecars + by-ref payloads). copy2 can't copy a directory, so the
-        # gather_raw tree is copytree'd; dirs_exist_ok lets the second leg
-        # re-copy into the shared learning_run_dir without erroring.
-        ledger = run_dir / "executed_queries.jsonl"
-        if ledger.is_file():
-            shutil.copy2(ledger, learning_run_dir / ledger.name)
-        gather_src = run_dir / "gather_raw"
-        if gather_src.is_dir():
-            shutil.copytree(
-                gather_src, learning_run_dir / "gather_raw", dirs_exist_ok=True
-            )
+        # The two live tables (queries JSONL + the gather_raw/ tree). Staged
+        # via the single lead_repository helper so this and the secondary-eval
+        # staging step share one definition of the on-disk table set.
+        lead_repository.stage_tables(run_dir, learning_run_dir)
 
 
 def _write_source_refs(
