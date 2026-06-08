@@ -13,7 +13,7 @@ marker, or empty. This module owns the deterministic glue around those calls:
   (leaking the defender's real result would contaminate the projected-vs-actual compare).
 - ``build_lead_user_prompt`` — assemble one lead's user message (no ``goal``).
 - ``parse_lead_events`` / ``assemble_oracle_doc`` — turn the per-lead ``events:`` replies
-  into the ``{projections: [{position, events}]}`` doc the validator + judge consume.
+  into the ``{projections: [{lead_id, events}]}`` doc the validator + judge consume.
 """
 from __future__ import annotations
 
@@ -117,36 +117,19 @@ def redact_exemplar(text: str) -> str:
     )
 
 
-def lead_sample_text(run_dir: Path, entry: dict) -> str:
+def lead_sample_text(lead) -> str:
     """One scrubbed sample-event skeleton for a lead.
 
-    Tries the entry's ``result_ref`` first, then falls back to the lead's multi-query
-    payloads (``gather_raw/{position}{a..z}.json``) — a single dispatch can fan into
-    several files and ``result_ref`` may point at a position that was never written as a
-    bare ``{position}.json``. The fallback matches only the bare ``{position}.json`` and a
-    single lowercase-alpha suffix (``{position}[a-z].json``); it must NOT use a bare
-    ``{position}*`` glob, which would over-match higher positions (``1*`` catches
-    ``10.json``, ``11.json``) and feed another lead's shape skeleton into this lead.
-    Returns the first payload that yields a real JSON skeleton; a placeholder string if
-    none do.
+    Reads the lead's by-ref payloads (``gather_raw/{lead_id}/{seq}.json``,
+    exposed as ``raw_ref`` on each query row) in seq order and returns the
+    first that yields a real JSON skeleton; a placeholder string if none do.
+    The FK subdir scopes a lead's payloads, so there is no cross-lead
+    over-match to defend against — each query's payload is addressed directly.
     """
-    position = entry.get("position")
-    gather_dir = run_dir / "gather_raw"
-    candidates: list[Path] = []
-    result_ref = entry.get("result_ref")
-    if result_ref:
-        candidates.append(run_dir / result_ref)
-    if position is not None:
-        candidates += sorted(
-            set(gather_dir.glob(f"{position}.json"))
-            | set(gather_dir.glob(f"{position}[a-z].json"))
-        )
-    seen: set[Path] = set()
-    for path in candidates:
-        if path in seen or not path.is_file():
+    for q in lead.queries:
+        if q.raw_ref is None or not q.raw_ref.is_file():
             continue
-        seen.add(path)
-        body = redact_exemplar(path.read_text())
+        body = redact_exemplar(q.raw_ref.read_text())
         if not body.startswith("("):  # a real skeleton, not a "(no … available)" note
             return body
     return "(no schema sample available for this lead)"
@@ -157,22 +140,22 @@ def lead_sample_text(run_dir: Path, entry: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _query_lines(entry: dict) -> str:
+def _query_lines(lead) -> str:
     lines = []
-    for q in entry.get("queries") or []:
-        lines.append(f"  - id: {q.get('id')}")
-        lines.append(f"    params: {json.dumps(q.get('params') or {})}")
+    for q in lead.queries:
+        lines.append(f"  - id: {q.query_id}")
+        lines.append(f"    params: {json.dumps(q.params or {})}")
     return "\n".join(lines) if lines else "  (none)"
 
 
-def build_lead_user_prompt(entry: dict, story: str, sample_text: str) -> str:
+def build_lead_user_prompt(lead, story: str, sample_text: str) -> str:
     """Assemble one lead's user message: story + sanitized characterization + queries +
     scrubbed sample. The defender's prose ``goal`` is deliberately omitted (it drove
     fabrication-to-fill); ``what_to_characterize`` is the sanitized ``what_to_summarize``.
+
+    ``lead`` is a ``lead_repository.JoinedLead``.
     """
-    position = entry.get("position")
-    ld = entry.get("lead_description")
-    raw_wtc = ld.get("what_to_summarize") if isinstance(ld, dict) else None
+    raw_wtc = lead.what_to_summarize
     if isinstance(raw_wtc, str):           # a scalar slipped through — one item, not N chars
         raw_wtc = [raw_wtc]
     elif not isinstance(raw_wtc, list):
@@ -185,11 +168,11 @@ def build_lead_user_prompt(entry: dict, story: str, sample_text: str) -> str:
     return (
         "## The actor's story\n\n"
         f"{story.rstrip()}\n\n"
-        f"## This lead (position {position}) — no goal given\n\n"
+        f"## This lead ({lead.lead_id}) — no goal given\n\n"
         "what_to_characterize:\n"
         f"{wtc_block}\n\n"
         "queries:\n"
-        f"{_query_lines(entry)}\n\n"
+        f"{_query_lines(lead)}\n\n"
         "## Sample event one of these queries returned (shape reference; values scrubbed)\n\n"
         f"{sample_text}\n\n"
         "Emit the events the story's activity would produce that surface through this "
@@ -219,7 +202,7 @@ def _quote_unquoted_markers(text: str) -> str:
     return _UNQUOTED_SUPPRESSED_RE.sub(r'\1"\2"', text)
 
 
-def parse_lead_events(raw: str, position) -> list:
+def parse_lead_events(raw: str, lead_id) -> list:
     """Parse one per-lead oracle reply into its ``events`` list.
 
     The reply is a single YAML doc whose only key is ``events`` (a list of event mappings,
@@ -234,27 +217,26 @@ def parse_lead_events(raw: str, position) -> list:
         doc = yaml.safe_load(cleaned)
     except yaml.YAMLError as e:
         raise LoopError(
-            f"oracle lead {position}: reply is not valid YAML: {e}\n"
+            f"oracle lead {lead_id}: reply is not valid YAML: {e}\n"
             f"--- raw reply ---\n{raw[:2000]}"
         ) from e
     events = doc.get("events") if isinstance(doc, dict) else None
     if not isinstance(events, list):
         raise LoopError(
-            f"oracle lead {position}: reply has no `events` list "
+            f"oracle lead {lead_id}: reply has no `events` list "
             f"(got {type(events).__name__})\n--- raw reply ---\n{raw[:2000]}"
         )
     return events
 
 
 def assemble_oracle_doc(projections: list[tuple]) -> dict:
-    """Build the ``{projections: [{position, events}]}`` doc from per-lead results.
+    """Build the ``{projections: [{lead_id, events}]}`` doc from per-lead results.
 
-    ``projections`` is a list of ``(position, events)`` tuples in lead order. Output shape
-    matches what the router used to emit (minus ``uncovered``/``unrouted_leads``), so the
-    validator + judge are unchanged.
+    ``projections`` is a list of ``(lead_id, events)`` tuples in lead order — the
+    ``lead_id`` is the ``:L`` row id (FK), replacing the former dispatch position.
     """
     return {
         "projections": [
-            {"position": position, "events": events} for position, events in projections
+            {"lead_id": lead_id, "events": events} for lead_id, events in projections
         ]
     }

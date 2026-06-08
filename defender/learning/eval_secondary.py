@@ -15,7 +15,7 @@ Pipeline per eligible alert:
 
   1. Current defender (HEAD) investigates the alert via
      ``defender/run.py --no-learn`` — produces ``report.md`` +
-     ``lead_sequence.yaml``.
+     the two lead/query tables (``executed_queries.jsonl`` + ``gather_raw/``).
   2. Filter eligibility: ground-truth must be benign or
      inconclusive. Malicious held-out is primary-only.
   3. Filter executed: HEAD defender must not have escalated
@@ -23,9 +23,9 @@ Pipeline per eligible alert:
      the catch-rate denominator and are reported as
      ``not_executed``.
   4. Frozen actor (gen-{N-K} worktree) writes a story via
-     ``defender/learning/replay_actor.py``, reading the HEAD
-     defender's ``lead_sequence.yaml``. Model is pinned from the
-     gen-{N-K} commit's ``Actor-Model:`` trailer.
+     ``defender/learning/replay_actor.py``, projecting the HEAD
+     defender's tables through ``lead_repository.actor_view``. Model is
+     pinned from the gen-{N-K} commit's ``Actor-Model:`` trailer.
   5. Current oracle + judge (HEAD) grade the story against the
      defender's lead sequence.
 
@@ -420,9 +420,14 @@ def run_frozen_actor(
     """
     staging_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(head_run_dir / "alert.json", staging_dir / "alert.json")
-    shutil.copy2(
-        head_run_dir / "lead_sequence.yaml", staging_dir / "lead_sequence.yaml"
-    )
+    # Stage the two tables (the actor replays off them via lead_repository).
+    # executed_queries.jsonl is a flat file; gather_raw/ is a directory.
+    ledger = head_run_dir / "executed_queries.jsonl"
+    if ledger.is_file():
+        shutil.copy2(ledger, staging_dir / ledger.name)
+    gather_src = head_run_dir / "gather_raw"
+    if gather_src.is_dir():
+        shutil.copytree(gather_src, staging_dir / "gather_raw", dirs_exist_ok=True)
     venv_python = worktree / "defender" / ".venv" / "bin" / "python3"
     # Walk-up the parent worktrees in case the pinned tree shares the
     # repo's venv with the main checkout (saves a `uv venv` per worktree).
@@ -468,9 +473,6 @@ def run_head_oracle_and_judge(
     if loop_mod.is_skip_story(actor_story):
         return SKIP_OUTCOME
 
-    lead_seq_path = head_run_dir / "lead_sequence.yaml"
-    lead_seq_text = lead_seq_path.read_text()
-
     # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
     # on subprocess rc!=0 / timeout, which would otherwise escape the
     # per-alert handler in run_secondary() and abort the harness
@@ -484,13 +486,12 @@ def run_head_oracle_and_judge(
         # hang doesn't abort the harness mid-loop.
         raise SecondaryError(f"oracle invocation failed: {e}") from e
     oracle_stripped = loop_mod.strip_yaml_fence(oracle_yaml)
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_seq_text) or {}).get("entries", [])
+    expected_lead_ids = [
+        jl.lead_id for jl in loop_mod.lead_repository.joined(head_run_dir)
     ]
     try:
         oracle_doc = yaml.safe_load(oracle_stripped)
-        loop_mod.validate_oracle_doc(oracle_doc, expected_positions)
+        loop_mod.validate_oracle_doc(oracle_doc, expected_lead_ids)
     except (yaml.YAMLError, loop_mod.LoopError) as e:
         raise SecondaryError(f"oracle YAML invalid: {e}") from e
     projected_path = staging_dir / "projected_telemetry.yaml"
@@ -500,7 +501,7 @@ def run_head_oracle_and_judge(
         judge_yaml = loop_mod.invoke_judge(
             head_run_dir / "alert.json",
             head_run_dir / "investigation.md",
-            lead_seq_path,
+            loop_mod.lead_repository.render_joined_yaml(head_run_dir),
             actor_story_path,
             projected_path,
             staging_dir,

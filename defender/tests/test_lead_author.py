@@ -14,44 +14,58 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 import lead_author  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — write the two live tables (leads sidecar + queries ledger)
 # ---------------------------------------------------------------------------
 
 
-def _write_lead_sequence(run_dir: Path, entries: list[dict]) -> None:
-    (run_dir / "lead_sequence.yaml").write_text(
-        yaml.safe_dump({"case_id": "test", "alert_ref": "alert.json", "entries": entries})
+def _write_lead_meta(run_dir: Path, lead_id: str, goal: str, wts=()) -> None:
+    raw = run_dir / "gather_raw"
+    raw.mkdir(exist_ok=True)
+    (raw / f"{lead_id}.lead.json").write_text(
+        json.dumps({"goal": goal, "what_to_summarize": list(wts)})
     )
 
 
-def _write_invocation(
+def _write_query(
     run_dir: Path,
-    position: int,
+    lead_id: str,
+    seq: int,
+    query_id: str,
+    params: dict | None = None,
     *,
-    query_index: int = 0,
-    is_multi: bool = False,
-    payload: str = "{}",
+    payload: str | None = "{}",
     payload_status: str = "ok",
     payload_digest: str = "ok digest",
-) -> Path:
-    """Write the canonical payload + observation sidecar for one invocation."""
+) -> None:
+    """Append one queries-table row + (optionally) its by-ref payload."""
     raw = run_dir / "gather_raw"
     raw.mkdir(exist_ok=True)
-    suffix = chr(ord("a") + query_index) if is_multi else ""
-    payload_path = raw / f"{position}{suffix}.json"
-    payload_path.write_text(payload)
-    sidecar = raw / f"{position}{suffix}.observations.json"
-    sidecar.write_text(json.dumps({
+    rel = None
+    if payload is not None:
+        ld = raw / lead_id
+        ld.mkdir(exist_ok=True)
+        (ld / f"{seq}.json").write_text(payload)
+        rel = f"gather_raw/{lead_id}/{seq}.json"
+    row = {
+        "lead_id": lead_id,
+        "seq": seq,
+        "system": query_id.split(".", 1)[0] if "." in query_id else query_id,
+        "verb": query_id.split(".", 1)[-1],
+        "query_id": query_id,
+        "params": params or {},
+        "raw_command": "cli",
+        "payload_path": rel,
+        "exit_code": 0 if payload_status != "error" else 1,
         "payload_status": payload_status,
         "payload_digest": payload_digest,
-    }))
-    return payload_path
+    }
+    with (run_dir / "executed_queries.jsonl").open("a") as fh:
+        fh.write(json.dumps(row) + "\n")
 
 
 @pytest.fixture
@@ -68,80 +82,66 @@ def run_dir(tmp_path: Path) -> Path:
 
 
 def test_extract_single_query_per_entry(run_dir: Path):
-    _write_invocation(run_dir, 0)
-    _write_lead_sequence(run_dir, [
-        {
-            "position": 0,
-            "lead_description": {"goal": "list auth events",
-                                 "what_to_summarize": ["src_ip", "user"]},
-            "queries": [
-                {"id": "wazuh.auth-events", "params": {"host": "h1", "window": "1h"}}
-            ],
-        }
-    ])
+    _write_lead_meta(run_dir, "l-001", "list auth events", ["src_ip", "user"])
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", {"host": "h1", "window": "1h"})
     leads = lead_author.extract(run_dir)
     assert len(leads) == 1
     lead = leads[0]
-    assert lead.position == 0
+    assert lead.lead_id == "l-001"
     assert lead.query_index == 0
     assert lead.is_multi_query is False
     assert lead.query_id == "wazuh.auth-events"
     assert lead.params == {"host": "h1", "window": "1h"}
     assert lead.goal_text == "list auth events"
     assert lead.what_to_summarize == ("src_ip", "user")
-    assert lead.result_ref.name == "0.json"
-    assert lead.sidecar_path.name == "0.observations.json"
+    assert lead.raw_ref == run_dir / "gather_raw" / "l-001" / "0.json"
+    assert lead.payload_status == "ok"
 
 
 def test_extract_multi_query_fans_out(run_dir: Path):
-    _write_invocation(run_dir, 0, query_index=0, is_multi=True)
-    _write_invocation(run_dir, 0, query_index=1, is_multi=True)
-    _write_lead_sequence(run_dir, [
-        {
-            "position": 0,
-            "lead_description": {"goal": "fan out"},
-            "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "wazuh.sudo-commands", "params": {}},
-            ],
-        }
-    ])
+    _write_lead_meta(run_dir, "l-001", "fan out")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
+    _write_query(run_dir, "l-001", 1, "wazuh.sudo-commands")
     leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     assert leads[0].query_index == 0
     assert leads[0].is_multi_query is True
-    assert leads[0].result_ref.name == "0a.json"
+    assert leads[0].raw_ref.name == "0.json"
     assert leads[1].query_index == 1
     assert leads[1].query_id == "wazuh.sudo-commands"
-    assert leads[1].result_ref.name == "0b.json"
+    assert leads[1].raw_ref.name == "1.json"
 
 
-def test_extract_skips_entry_with_no_payload(run_dir: Path):
-    # No payload written — entry must be silently skipped.
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
-    ])
+def test_extract_skips_query_with_no_payload(run_dir: Path):
+    # Query row present but payload write failed (payload_path null) — skipped.
+    _write_lead_meta(run_dir, "l-001", "x")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload=None)
     assert lead_author.extract(run_dir) == []
 
 
-def test_extract_multi_query_skips_missing_invocation(run_dir: Path):
+def test_extract_multi_query_skips_missing_payload(run_dir: Path):
     # Multi-query with only first payload present — second skipped.
-    _write_invocation(run_dir, 0, query_index=0, is_multi=True)
-    # No 0b.json written.
-    _write_lead_sequence(run_dir, [
-        {
-            "position": 0,
-            "lead_description": {"goal": "partial fan-out"},
-            "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "wazuh.sudo-commands", "params": {}},
-            ],
-        }
-    ])
+    _write_lead_meta(run_dir, "l-001", "partial fan-out")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
+    _write_query(run_dir, "l-001", 1, "wazuh.sudo-commands", payload=None)
     leads = lead_author.extract(run_dir)
     assert len(leads) == 1
     assert leads[0].query_id == "wazuh.auth-events"
+
+
+def test_extract_missing_payload_status_raises(run_dir: Path):
+    """An empty payload_status (no row status) is a loud failure."""
+    _write_lead_meta(run_dir, "l-001", "x")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload_status="")
+    with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
+        lead_author.extract(run_dir)
+
+
+def test_extract_invalid_payload_status_raises(run_dir: Path):
+    _write_lead_meta(run_dir, "l-001", "x")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload_status="weird")
+    with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
+        lead_author.extract(run_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -150,17 +150,12 @@ def test_extract_multi_query_skips_missing_invocation(run_dir: Path):
 
 
 def test_build_handoff_groups_by_template(run_dir: Path):
-    """Same template invoked 3× → one handoff with 3 invocations."""
+    """Same template invoked across 3 leads → one handoff with 3 invocations."""
     for i in range(3):
-        _write_invocation(run_dir, i, payload_digest=f"call-{i}")
-    _write_lead_sequence(run_dir, [
-        {
-            "position": i,
-            "lead_description": {"goal": f"call {i}"},
-            "queries": [{"id": "wazuh.auth-events", "params": {"host": f"h{i}"}}],
-        }
-        for i in range(3)
-    ])
+        lid = f"l-00{i + 1}"
+        _write_lead_meta(run_dir, lid, f"call {i}")
+        _write_query(run_dir, lid, 0, "wazuh.auth-events", {"host": f"h{i}"},
+                     payload_digest=f"call-{i}")
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert len(handoffs) == 1
@@ -176,23 +171,21 @@ def test_build_handoff_groups_by_template(run_dir: Path):
     json.dumps(h)
 
 
-def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
-    _write_invocation(
-        run_dir, 0,
+def test_build_handoff_includes_rendered_query_and_status(run_dir: Path):
+    _write_lead_meta(run_dir, "l-001", "x")
+    _write_query(
+        run_dir, "l-001", 0, "wazuh.auth-events",
+        {"host": "bastion-01", "window": "1h"},
         payload_status="suspect_empty",
         payload_digest="0 events; data.srcip is IP-typed",
     )
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events",
-                      "params": {"host": "bastion-01", "window": "1h"}}]}
-    ])
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert len(handoffs) == 1
     inv = handoffs[0]["invocations"][0]
     assert inv["payload_status"] == "suspect_empty"
     assert "data.srcip" in inv["payload_digest"]
+    assert inv["result_refs"] == ["gather_raw/l-001/0.json"]
     # rendered_query should contain the substituted params from the
     # ## Query body — wazuh.auth-events references ${window}; unbound
     # placeholders like ${host_clause} pass through verbatim so the
@@ -202,48 +195,12 @@ def test_build_handoff_includes_rendered_query_and_sidecar(run_dir: Path):
     assert "${host_clause}" in inv["rendered_query"]
 
 
-def test_build_handoff_missing_sidecar_raises(run_dir: Path):
-    """Missing observation sidecar is a gather-regression — fail loud."""
-    raw = run_dir / "gather_raw"
-    raw.mkdir(exist_ok=True)
-    (raw / "0.json").write_text("{}")
-    # No 0.observations.json written.
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
-    ])
-    leads = lead_author.extract(run_dir)
-    with pytest.raises(lead_author.LeadAuthorError, match="observation sidecar"):
-        lead_author.build_handoff(run_dir, leads)
-
-
-def test_build_handoff_invalid_payload_status_raises(run_dir: Path):
-    raw = run_dir / "gather_raw"
-    raw.mkdir(exist_ok=True)
-    (raw / "0.json").write_text("{}")
-    (raw / "0.observations.json").write_text(json.dumps({
-        "payload_status": "weird",
-        "payload_digest": "x",
-    }))
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "x"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]}
-    ])
-    leads = lead_author.extract(run_dir)
-    with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
-        lead_author.build_handoff(run_dir, leads)
-
-
 def test_build_handoff_drops_unresolved_query_id(run_dir: Path):
     """Unresolved query_id ⇒ skip with a corpus-health warning, don't crash."""
-    _write_invocation(run_dir, 0)
-    _write_invocation(run_dir, 1)
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "novel"},
-         "queries": [{"id": "wazuh.does-not-exist", "params": {}}]},
-        {"position": 1, "lead_description": {"goal": "real one"},
-         "queries": [{"id": "wazuh.auth-events", "params": {}}]},
-    ])
+    _write_lead_meta(run_dir, "l-001", "novel")
+    _write_query(run_dir, "l-001", 0, "wazuh.does-not-exist")
+    _write_lead_meta(run_dir, "l-002", "real one")
+    _write_query(run_dir, "l-002", 0, "wazuh.auth-events")
     leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     handoffs = lead_author.build_handoff(run_dir, leads)
@@ -253,11 +210,8 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path):
 
 
 def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
-    _write_invocation(run_dir, 0)
-    _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "ad-hoc"},
-         "queries": [{"id": "", "params": {}}]}
-    ])
+    _write_lead_meta(run_dir, "l-001", "ad-hoc")
+    _write_query(run_dir, "l-001", 0, "")
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert handoffs == []
@@ -265,18 +219,9 @@ def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
 
 def test_build_handoff_co_dispatched_with_for_join(run_dir: Path):
     """Cross-system join: each invocation lists its sibling template path."""
-    _write_invocation(run_dir, 0, query_index=0, is_multi=True)
-    _write_invocation(run_dir, 0, query_index=1, is_multi=True)
-    _write_lead_sequence(run_dir, [
-        {
-            "position": 0,
-            "lead_description": {"goal": "cross-system"},
-            "queries": [
-                {"id": "wazuh.auth-events", "params": {}},
-                {"id": "host-query.process-list", "params": {"pattern": "x"}},
-            ],
-        }
-    ])
+    _write_lead_meta(run_dir, "l-001", "cross-system")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
+    _write_query(run_dir, "l-001", 1, "host-query.process-list", {"pattern": "x"})
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     # Two handoffs (one per template).
@@ -828,8 +773,7 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(
     run_dir: Path, monkeypatch, tmp_path
 ):
     """No executed leads + drafts at threshold → proceed with drafts only."""
-    # Lead sequence with no entries — extract() returns [].
-    _write_lead_sequence(run_dir, [])
+    # No tables written — extract() returns [].
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     drafts = [skills / "elastic" / "_draft" / f"d{i}.md" for i in range(2)]
@@ -847,7 +791,6 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(
 
 def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, monkeypatch):
     """No executed leads AND no pending drafts → early exit 0, no work."""
-    _write_lead_sequence(run_dir, [])
     monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: [])
     handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
     assert rc == 0

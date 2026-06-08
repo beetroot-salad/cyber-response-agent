@@ -562,7 +562,8 @@ def extract_main_subagents(events: list[dict]) -> list[dict]:
     that fired three parallel ``Task`` calls yields three entries. Each
     entry: ``{id, name, input, result, is_error}``. The order matches
     dispatch order — same order the runtime view's § Gather panel
-    renders, and the same indexing used by ``gather_raw/{N}.json``.
+    renders, which pairs each call with its lead's ``gather_raw/{lead_id}/``
+    payloads.
     """
     from visualize_primitives import flatten_tool_result_content
 

@@ -305,11 +305,11 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     """Stable --case-id keeps actor seed constant across attempt-suffixed staging dirs.
 
     Loads ``replay_actor.py`` directly, stubs out the heavy bits
-    (lead-sequence parsing it does itself, loop.invoke_actor /
-    project_actor / dump_actor_yaml), and asserts that the seed
-    captured during the invoke_actor call corresponds to the
-    ``--case-id`` value rather than ``staging.name``. This is the
-    invariant that protects catch rate from per-attempt noise.
+    (loop.invoke_actor and the lead_repository actor_view it projects
+    from), and asserts that the seed captured during the invoke_actor
+    call corresponds to the ``--case-id`` value rather than
+    ``staging.name``. This is the invariant that protects catch rate
+    from per-attempt noise.
     """
     replay = _load("replay_actor_t", _HERE / "replay_actor.py")
 
@@ -334,27 +334,22 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
 
     fake_loop = FakeLoop()
 
-    class FakePLS:
+    class FakeLR:
         @staticmethod
-        def project_actor(doc):
-            return doc
-
-        @staticmethod
-        def dump_actor_yaml(doc):
-            return "case_id: " + doc["case_id"] + "\n"
+        def actor_view(staging):
+            return {"case_id": "ignored", "alert_ref": "alert.json", "leads": []}
 
     def fake_load_sibling(name, path):
         if name.endswith("subagents_replay"):
             return fake_loop
-        return FakePLS()
+        if name.endswith("lead_repository_replay"):
+            return FakeLR()
+        raise AssertionError(f"unexpected sibling load: {name}")
 
-    import yaml as _yaml
     staging = tmp_path / "stage-with-attempt-aaaaaaaa"
     staging.mkdir()
     (staging / "alert.json").write_text("{}")
-    (staging / "lead_sequence.yaml").write_text(
-        _yaml.safe_dump({"case_id": "ignored", "entries": []})
-    )
+    (staging / "gather_raw").mkdir()  # the leads table (required replay input)
 
     import unittest.mock as mock
     with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling):
@@ -426,16 +421,26 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
     head_run = tmp_path
     (head_run / "alert.json").write_text("{}")
     (head_run / "investigation.md").write_text("")
-    (head_run / "lead_sequence.yaml").write_text("entries: []\n")
     staging = tmp_path / "stage"
     staging.mkdir()
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
     valid_oracle = "projections: []\n"
 
+    class _FakeLR:
+        @staticmethod
+        def joined(run_dir):
+            return []
+
+        @staticmethod
+        def render_joined_yaml(run_dir):
+            return "leads: []\n"
+
     class FakeLoop:
         class LoopError(Exception):
             pass
+
+        lead_repository = _FakeLR
 
         @staticmethod
         def is_skip_story(text):
@@ -450,7 +455,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return text
 
         @staticmethod
-        def validate_oracle_doc(doc, positions):
+        def validate_oracle_doc(doc, lead_ids):
             return doc
 
         @staticmethod

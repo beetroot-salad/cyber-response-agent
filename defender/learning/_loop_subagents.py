@@ -18,14 +18,12 @@ import json
 import random
 import shutil
 import subprocess
-import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Protocol
 
-import yaml
-
+import lead_repository
 import mitre_corpus
 from _loop_oracle import (
     assemble_oracle_doc,
@@ -59,7 +57,6 @@ from _loop_config import (
     ORACLE_MAX_CONCURRENCY,
     ORACLE_MODEL,
     ORACLE_PROMPT,
-    PROJECT_SCRIPT,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
     _log,
@@ -196,18 +193,6 @@ def is_skip_story(actor_story: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def project_actor_input(run_dir: Path, actor_out: Path) -> None:
-    cmd = [sys.executable, str(PROJECT_SCRIPT), str(run_dir), "--actor-out", str(actor_out)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise LoopError(
-            f"project_lead_sequence.py failed (rc={proc.returncode}):\n"
-            f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
-        )
-    if not actor_out.is_file():
-        raise LoopError(f"actor projection did not produce {actor_out}")
-
-
 def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Path) -> str:
     rng = random.Random(_actor_seed(learning_run_dir.name))
     archetype = rng.choice(["internal", "external"])
@@ -264,34 +249,35 @@ def invoke_actor_benign(
     return story
 
 
-def invoke_oracle_lead(entry: dict, story: str, sample_text: str) -> list:
+def invoke_oracle_lead(lead, story: str, sample_text: str) -> list:
     """Project one lead. Sees only this lead — sanitized ``what_to_characterize`` +
     queries + a scrubbed sample event — plus the story; no goal, no alert, no other lead.
     Returns the lead's ``events`` list (mappings, a single baseline-diff marker, or empty).
+
+    ``lead`` is a ``lead_repository.JoinedLead``.
     """
-    user = build_lead_user_prompt(entry, story, sample_text)
+    user = build_lead_user_prompt(lead, story, sample_text)
     raw = _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
-    return parse_lead_events(raw, entry.get("position"))
+    return parse_lead_events(raw, lead.lead_id)
 
 
 def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
-    """Run the per-lead oracle over a run's lead sequence and assemble the doc.
+    """Run the per-lead oracle over a run's leads and assemble the doc.
 
     One ``claude -p`` per lead, fanned out concurrently (bounded by
     ``ORACLE_MAX_CONCURRENCY``); results are reassembled in lead order into the
-    ``{projections: [{position, events}]}`` doc the validator + judge consume. Returns the
-    serialized YAML string.
+    ``{projections: [{lead_id, events}]}`` doc the validator + judge consume. Reads the
+    leads from the joined two-table surface. Returns the serialized YAML string.
     """
     story = actor_story_path.read_text()
-    doc = yaml.safe_load((run_dir / "lead_sequence.yaml").read_text()) or {}
-    entries = doc.get("entries") or []
-    samples = [lead_sample_text(run_dir, e) for e in entries]
-    max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(entries) or 1))
-    events_per_lead: list = [None] * len(entries)
+    leads = lead_repository.joined(run_dir)
+    samples = [lead_sample_text(jl) for jl in leads]
+    max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(leads) or 1))
+    events_per_lead: list = [None] * len(leads)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         fut_to_idx = {
-            pool.submit(invoke_oracle_lead, e, story, s): i
-            for i, (e, s) in enumerate(zip(entries, samples))
+            pool.submit(invoke_oracle_lead, jl, story, s): i
+            for i, (jl, s) in enumerate(zip(leads, samples))
         }
         try:
             # Surface the first failing lead as soon as it completes (rather than after
@@ -303,7 +289,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
                 f.cancel()
             raise
     projections = [
-        (e.get("position"), events) for e, events in zip(entries, events_per_lead)
+        (jl.lead_id, events) for jl, events in zip(leads, events_per_lead)
     ]
     return dump_oracle_doc(assemble_oracle_doc(projections))
 
@@ -316,7 +302,7 @@ def _invoke_judge(
     label: str,
     alert_path: Path,
     investigation_path: Path,
-    lead_sequence_path: Path,
+    lead_view_text: str,
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
@@ -325,10 +311,11 @@ def _invoke_judge(
         _section("alert", alert_path.read_text())
         + _section("investigation", investigation_path.read_text())
         + _section(
-            "lead_sequence", lead_sequence_path.read_text(),
-            "the defender's actual executed queries per lead position — the "
-            "authoritative record of what was queried (index, filter, window). "
-            "investigation.md is the narrative; this is ground truth for coverage.",
+            "lead_sequence", lead_view_text,
+            "the defender's actual executed queries per lead (the joined "
+            "leads+queries view) — the authoritative record of what was queried "
+            "(id, params, status). investigation.md is the narrative; this is "
+            "ground truth for coverage.",
         )
         + _section("actor_story", actor_story_path.read_text())
         + _section("projected_telemetry", projected_telemetry_path.read_text())
@@ -343,16 +330,16 @@ def _invoke_judge(
         _copy_transcript(session_id, learning_run_dir / trace_name)
 
 
-def invoke_judge(alert_path, investigation_path, lead_sequence_path, actor_story_path,
+def invoke_judge(alert_path, investigation_path, lead_view_text, actor_story_path,
                  projected_telemetry_path, learning_run_dir) -> str:
     return _invoke_judge(
         JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-        alert_path, investigation_path, lead_sequence_path, actor_story_path,
+        alert_path, investigation_path, lead_view_text, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
 
-def invoke_judge_benign(alert_path, investigation_path, lead_sequence_path,
+def invoke_judge_benign(alert_path, investigation_path, lead_view_text,
                         actor_story_path, projected_telemetry_path,
                         learning_run_dir) -> str:
     """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
@@ -360,7 +347,7 @@ def invoke_judge_benign(alert_path, investigation_path, lead_sequence_path,
     return _invoke_judge(
         JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
         "judge_benign_trace.jsonl", "judge-benign",
-        alert_path, investigation_path, lead_sequence_path, actor_story_path,
+        alert_path, investigation_path, lead_view_text, actor_story_path,
         projected_telemetry_path, learning_run_dir,
     )
 
@@ -385,8 +372,10 @@ class ClaudePrintSubagents:
     """Default adapter — assembles each step's inputs and shells out to ``claude -p``."""
 
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
+        # The actor-facing view is queries-only (no goal / what_to_summarize) —
+        # written as a real side-artifact for transcripts/visualizers.
         actor_input_path = learning_run_dir / "actor_input.yaml"
-        project_actor_input(run_dir, actor_input_path)
+        actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir))
         return invoke_actor(run_dir / "alert.json", actor_input_path, learning_run_dir)
 
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
@@ -403,7 +392,7 @@ class ClaudePrintSubagents:
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge(
             run_dir / "alert.json", run_dir / "investigation.md",
-            run_dir / "lead_sequence.yaml",
+            lead_repository.render_joined_yaml(run_dir),
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )
 
@@ -411,6 +400,6 @@ class ClaudePrintSubagents:
                      projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge_benign(
             run_dir / "alert.json", run_dir / "investigation.md",
-            run_dir / "lead_sequence.yaml",
+            lead_repository.render_joined_yaml(run_dir),
             actor_story_path, projected_telemetry_path, learning_run_dir,
         )

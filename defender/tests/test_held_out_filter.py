@@ -95,7 +95,11 @@ def test_read_ground_truth_rejects_malformed_yaml(run_dir: Path) -> None:
 
 
 def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Path:
-    """A run dir with the four inputs persist_run copies, plus optional held-out mark."""
+    """A run dir with the inputs persist_run copies, plus optional held-out mark.
+
+    The lead/query tables (gather_raw/ + executed_queries.jsonl) are the
+    learning-loop inputs; persist copies them when present.
+    """
     run_dir = tmp_path / "case"
     run_dir.mkdir()
     (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
@@ -103,7 +107,10 @@ def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Pa
         f"---\ncase_id: case\ndisposition: {disposition}\nconfidence: high\n---\nbody\n"
     )
     (run_dir / "investigation.md").write_text("stub\n")
-    (run_dir / "lead_sequence.yaml").write_text("entries: []\n")
+    # Empty lead/query tables — a no-query run (joined() -> []), which the
+    # stubbed oracle's empty projections match.
+    (run_dir / "gather_raw").mkdir()
+    (run_dir / "executed_queries.jsonl").write_text("")
     if held_out:
         (run_dir / "ground_truth.yaml").write_text(
             "held_out: true\ndisposition: benign\nrationale: x\n"

@@ -18,7 +18,7 @@ v1 rules — keep it cheap; ambiguous cases collapse to ``atomic``.
 5. Otherwise → ``atomic``.
 
 ``drill_down`` is left as a follow-up; it requires inter-query
-dependency tracking the current ``lead_sequence.yaml`` shape does
+dependency tracking the current joined leads/queries shape does
 not capture.
 """
 from __future__ import annotations
@@ -82,7 +82,7 @@ def infer_composite_kind(
     ----------
     lead_entry : the ``entries[]`` element this query came from.
     query : the specific ``queries[]`` element being classified.
-    run_entries : all of ``lead_sequence.yaml``'s entries, for
+    run_entries : all of the run's leads (one dict per joined lead), for
         cross-entry rules (baseline_shift).
     """
     queries = lead_entry.get("queries") or []

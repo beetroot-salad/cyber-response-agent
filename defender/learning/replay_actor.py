@@ -8,23 +8,26 @@ lessons-actor / model-pin state of that older generation. The full
 ``loop.run_one`` runs oracle + judge + persist + queue, which the
 harness explicitly does *not* want from the frozen worktree (those
 stages must run at HEAD). This script exposes just the actor stage:
-project the HEAD-produced ``lead_sequence.yaml`` to an actor-facing
-view, invoke the actor, write ``actor_story.md``.
+project the HEAD-produced two tables (executed_queries.jsonl +
+gather_raw/) to an actor-facing view via ``lead_repository``, invoke
+the actor, write ``actor_story.md``.
 
 This script is the **replay compatibility boundary**. Generations
-whose worktree does not ship ``replay_actor.py`` are reported by the
-secondary harness as ``replay-incompatible``; the metric becomes
-meaningful starting at the first generation that includes it.
+whose worktree does not ship ``replay_actor.py`` (or ``lead_repository.py``)
+are reported by the secondary harness as ``replay-incompatible``;
+pre-migration archives carrying ``lead_sequence.yaml`` (not the tables)
+are likewise incompatible. The metric is meaningful starting at the
+first generation that ships both.
 
 Usage:
   python3 defender/learning/replay_actor.py <staging_dir>
 
 Required inputs in ``<staging_dir>``:
   - alert.json
-  - lead_sequence.yaml   (HEAD-produced; schema must parse here)
+  - gather_raw/          (the leads table; queries table optional)
 
 Outputs in ``<staging_dir>``:
-  - actor_input.yaml     (actor-facing projection of lead_sequence)
+  - actor_input.yaml     (actor-facing, queries-only projection)
   - actor_archetype.txt
   - actor_menu.txt
   - actor_story.md
@@ -55,7 +58,7 @@ def _load_sibling(modname: str, path: Path):
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("staging_dir", help="dir containing alert.json + lead_sequence.yaml")
+    p.add_argument("staging_dir", help="dir containing alert.json + gather_raw/")
     p.add_argument("--case-id", default=None,
                    help="stable case id for actor seed/menu/archetype "
                         "(defaults to staging_dir.name). The harness should "
@@ -65,33 +68,20 @@ def main(argv: list[str]) -> int:
 
     staging = Path(ns.staging_dir).resolve()
     alert = staging / "alert.json"
-    lead_seq = staging / "lead_sequence.yaml"
     if not alert.is_file():
         print(f"missing {alert}", file=sys.stderr)
         return 2
-    if not lead_seq.is_file():
-        print(f"missing {lead_seq}", file=sys.stderr)
+    if not (staging / "gather_raw").is_dir() and not (staging / "executed_queries.jsonl").is_file():
+        print(f"missing the lead/query tables under {staging} "
+              "(gather_raw/ + executed_queries.jsonl)", file=sys.stderr)
         return 2
 
     here = Path(__file__).resolve().parent
-    repo_root = here.parents[1]
-    # Load the actor stage + projector from *this worktree* so all sibling refs
+    # Load the actor stage + read surface from *this worktree* so all sibling refs
     # (actor.md, mitre_corpus.py, lessons-actor/) resolve to the pinned generation,
     # not HEAD. The actor lives in _loop_subagents.py (loop.py is a thin facade).
     sub = _load_sibling("_defender_learning_subagents_replay", here / "_loop_subagents.py")
-    pls = _load_sibling(
-        "_defender_scripts_project_lead_sequence_replay",
-        repo_root / "defender" / "scripts" / "project_lead_sequence.py",
-    )
-
-    try:
-        full_doc = yaml.safe_load(lead_seq.read_text())
-    except yaml.YAMLError as e:
-        print(f"lead_sequence.yaml parse failed: {e}", file=sys.stderr)
-        return 2
-    if not isinstance(full_doc, dict) or "entries" not in full_doc:
-        print("lead_sequence.yaml missing top-level entries list", file=sys.stderr)
-        return 2
+    lr = _load_sibling("_defender_learning_lead_repository_replay", here / "lead_repository.py")
 
     # Re-stamp case_id to the caller-supplied stable id so the actor's
     # seed/menu/archetype is keyed on (generation, alert) — independent
@@ -99,12 +89,12 @@ def main(argv: list[str]) -> int:
     # filesystem dirs don't collide across reruns. Without this split,
     # retry identity would perturb catch rate.
     case_id = ns.case_id or staging.name
-    full_doc = dict(full_doc)
-    full_doc["case_id"] = case_id
-    full_doc.setdefault("alert_ref", "alert.json")
+    view = lr.actor_view(staging)
+    view["case_id"] = case_id
+    view.setdefault("alert_ref", "alert.json")
 
     actor_input = staging / "actor_input.yaml"
-    actor_input.write_text(pls.dump_actor_yaml(pls.project_actor(full_doc)))
+    actor_input.write_text(yaml.safe_dump(view, sort_keys=False))
 
     # invoke_actor seeds menu/archetype from learning_run_dir.name —
     # but in replay we want the seed keyed on the stable case_id

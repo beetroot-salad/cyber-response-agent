@@ -13,14 +13,14 @@ Options:
 Pipeline:
     1. Materialize {run_dir}/ with alert.json and an empty gather_raw/.
     2. Spawn `claude -p` against defender/SKILL.md with the prepared
-       run_settings.json (permissions + the lead-metadata extraction
-       hook). stream-json events go to {run_dir}/tool_trace.jsonl.
-    3. Project lead_sequence.yaml from the run.
-    4. Render transcript.html.
-    5. Unless --no-learn, hand the run to defender.learning.loop.run_one
+       run_settings.json (permissions + the record_lead hook). The two
+       lead/query tables are written live during the run by record_lead.py
+       + record_query.py. stream-json events go to {run_dir}/tool_trace.jsonl.
+    3. Render transcript.html.
+    4. Unless --no-learn, hand the run to defender.learning.loop.run_one
        (in-process import, not subprocess).
 
-Steps 3–5 used to live in run.sh + the SKILL prompt; consolidating
+Steps 3–4 used to live in run.sh + the SKILL prompt; consolidating
 them here means the agent stops carrying the projection responsibility
 and broken runs (where the agent forgot or crashed) still produce
 whatever artifacts the agent did manage to write.
@@ -54,7 +54,6 @@ import tempfile
 DEFENDER_DIR = _DEFENDER_DIR
 REPO_ROOT = DEFENDER_DIR.parent
 SETTINGS_TEMPLATE = DEFENDER_DIR / "run-settings.json"
-PROJECT_SCRIPT = DEFENDER_DIR / "scripts" / "project_lead_sequence.py"
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize_run.py"
 
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
@@ -134,8 +133,8 @@ def build_prompt(run_id: str, run_dir: Path) -> str:
         "under the repo. Work through ORIENT → PLAN → GATHER →\n"
         "ANALYZE → REPORT, dispatching gather subagents per\n"
         "defender/SKILL.md §GATHER. Stop when investigation.md and\n"
-        "report.md both exist; lead_sequence.yaml and transcript.html are\n"
-        "rendered by the harness after you exit.\n"
+        "report.md both exist; the lead/query tables are written live as you\n"
+        "dispatch gather, and transcript.html is rendered after you exit.\n"
     )
 
 
@@ -168,18 +167,6 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
     with trace.open("w") as out:
         proc = subprocess.run(args, input=prompt, text=True, stdout=out, env=env, cwd=str(REPO_ROOT))
     return proc.returncode
-
-
-def project_lead_sequence(run_dir: Path) -> bool:
-    proc = subprocess.run(
-        [sys.executable, str(PROJECT_SCRIPT), str(run_dir)],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        sys.stderr.write(f"[run.py] project_lead_sequence failed: {proc.stderr}")
-        return False
-    sys.stderr.write(proc.stdout)
-    return True
 
 
 def visualize(run_dir: Path) -> None:
@@ -236,21 +223,16 @@ def main(argv: list[str]) -> int:
     if rc != 0:
         print(f"[run.py] claude exited rc={rc}; continuing post-steps on whatever artifacts exist", file=sys.stderr)
 
-    projected = project_lead_sequence(run_dir)
-
+    # The two lead/query tables are written live during the run (record_lead.py
+    # + record_query.py), so there is no post-run projection step. A run that
+    # produced no queries (no executed_queries.jsonl) is a monitor case, not a
+    # harness break — the learning loop reads whatever the join surface yields.
     print("[run.py] artifacts:", file=sys.stderr)
     for entry in sorted(run_dir.iterdir()):
         sys.stderr.write(f"  {entry.name}\n")
 
-    if not projected:
-        # Projection failure is a harness-level break (no lead_sequence.yaml,
-        # the documented learning-loop input). Surface it on every path —
-        # the non-zero exit lets CI / loops detect a broken run regardless
-        # of whether --no-learn was requested. Render the transcript first
-        # so the broken run still has a reviewable artifact.
-        visualize(run_dir)
-        print("[run.py] lead_sequence.yaml missing; halting after post-steps", file=sys.stderr)
-        return rc or 1
+    if not (run_dir / "executed_queries.jsonl").is_file():
+        print("[run.py] note: no executed_queries.jsonl (the run ran no queries)", file=sys.stderr)
 
     learn_rc = 0
     if ns.no_learn:

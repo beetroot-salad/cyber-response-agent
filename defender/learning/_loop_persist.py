@@ -108,7 +108,11 @@ def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-PERSIST_COPY_FILES = ("alert.json", "report.md", "investigation.md", "lead_sequence.yaml")
+# Hard-required flat inputs. The two lead/query tables
+# (executed_queries.jsonl + the gather_raw/ directory) are copied separately
+# and are best-effort — a query-less run has neither, which is a monitor case,
+# not a persist failure.
+PERSIST_COPY_FILES = ("alert.json", "report.md", "investigation.md")
 
 # Both directions write the same disposition-level shared artifacts (copied inputs
 # + source_refs.yaml). When the legs run concurrently these truncating writes target
@@ -125,6 +129,18 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             if not src.is_file():
                 raise LoopError(f"missing source artifact for persist: {src}")
             shutil.copy2(src, learning_run_dir / name)
+        # The queries table (a flat JSONL) + the gather_raw/ directory (leads
+        # sidecars + by-ref payloads). copy2 can't copy a directory, so the
+        # gather_raw tree is copytree'd; dirs_exist_ok lets the second leg
+        # re-copy into the shared learning_run_dir without erroring.
+        ledger = run_dir / "executed_queries.jsonl"
+        if ledger.is_file():
+            shutil.copy2(ledger, learning_run_dir / ledger.name)
+        gather_src = run_dir / "gather_raw"
+        if gather_src.is_dir():
+            shutil.copytree(
+                gather_src, learning_run_dir / "gather_raw", dirs_exist_ok=True
+            )
 
 
 def _write_source_refs(
@@ -136,7 +152,8 @@ def _write_source_refs(
             "alert": str(run_dir / "alert.json"),
             "report": str(run_dir / "report.md"),
             "investigation": str(run_dir / "investigation.md"),
-            "lead_sequence": str(run_dir / "lead_sequence.yaml"),
+            "executed_queries": str(run_dir / "executed_queries.jsonl"),
+            "gather_raw": str(run_dir / "gather_raw"),
         },
         "normalized_disposition": disposition,
         "alert_rule_key": alert_rule_key,

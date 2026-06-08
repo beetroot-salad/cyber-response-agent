@@ -77,7 +77,6 @@ ACTOR_BENIGN_PROMPT = LEARNING_DIR / "actor_benign.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
 JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
-PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
 BENIGN_ACTOR_SETTINGS = LEARNING_DIR / "benign-actor-settings.json"

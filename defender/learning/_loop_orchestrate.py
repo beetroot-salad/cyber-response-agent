@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 import yaml
 
+import lead_repository
 from _loop_config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
@@ -72,16 +73,12 @@ def is_held_out(run_dir: Path) -> bool:
 def _write_validated_oracle(
     oracle_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
 ) -> Path:
-    """Strip + validate the oracle YAML against the lead_sequence positions; write it."""
-    lead_sequence_text = (run_dir / "lead_sequence.yaml").read_text()
-    expected_positions = [
-        e.get("position")
-        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
-    ]
+    """Strip + validate the oracle YAML against the run's lead ids; write it."""
+    expected_lead_ids = [jl.lead_id for jl in lead_repository.joined(run_dir)]
     stripped = strip_yaml_fence(oracle_raw)
     raw_path = learning_run_dir / (Path(out_name).stem + ".raw.txt")
     try:
-        validate_oracle_doc(yaml.safe_load(stripped), expected_positions)
+        validate_oracle_doc(yaml.safe_load(stripped), expected_lead_ids)
     except (yaml.YAMLError, LoopError) as e:
         raw_path.write_text(oracle_raw)
         raise LoopError(f"oracle YAML invalid: {e}") from e
@@ -356,11 +353,13 @@ Direction dispatch (by the defender's normalized disposition):
 A disposition that maps to no direction is skipped.
 
 Inputs (must exist in <run_dir>):
-  alert.json            verbatim alert input
-  report.md             YAML frontmatter with disposition ∈ {benign, inconclusive, malicious}
-  investigation.md      defender's invlang audit log
-  lead_sequence.yaml    projected lead set (emitted by defender/scripts/project_lead_sequence.py)
-  gather_raw/{N}.json   raw query payloads referenced by lead_sequence
+  alert.json                 verbatim alert input
+  report.md                  YAML frontmatter with disposition ∈ {benign, inconclusive, malicious}
+  investigation.md           defender's invlang audit log
+  executed_queries.jsonl     the queries table (FK lead_id) — written live by record_query.py
+  gather_raw/{lead_id}.lead.json   the leads table — written live by record_lead.py
+  gather_raw/{lead_id}/{seq}.json  raw query payloads (by-ref)
+  (joined via defender/learning/lead_repository.py)
 
 Outputs:
   defender/learning/runs/<run_id>/
