@@ -402,11 +402,10 @@ followed by one Write of `report.md`. Earlier loops (ANALYZE that
 loops back to PLAN) are the exception — those are genuine separate
 turns.
 
-Stop after that — the harness (`defender/run.py`) runs the projection script
-(`defender/scripts/project_lead_sequence.py`) and the visualizer
-after you exit. Don't hand-author `lead_sequence.yaml`; if the script
-can't project a faithful sequence from your investigation log, the
-log is the bug, not the schema.
+Stop after that — the lead/query tables are written live as you dispatch
+gather (the `record_lead.py` hook + the `record_query.py` wrapper), and the
+harness (`defender/run.py`) renders the visualizer after you exit. There is
+nothing to hand-author and no post-run projection.
 
 ## Skills
 

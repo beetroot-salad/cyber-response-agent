@@ -75,17 +75,16 @@ This is the load-bearing rule of the runtime loop:
   `DEFENDER_DIR` from the workspace map.
 
 See `defender/skills/gather/SKILL.md` for the subagent's own contract and
-`content/run-artifacts.md` for the payload + observations sidecar shapes.
+`content/run-artifacts.md` for the two-table + by-ref payload shapes.
 
 ## Hooks
 
 The defender has **three plumbing hooks** (registered in
-`run-settings.json`), all PreToolUse. They are extraction shims and a
-discipline gate — **not** safety/validation gates (`content/design.md`):
+`run-settings.json`), all PreToolUse:
 
 | Hook | Matcher | Purpose |
 |---|---|---|
-| `extract_lead_metadata.py` | `Task\|Agent` | Parses the gather dispatch YAML and writes `gather_raw/{position}.lead.json` (goal + dimensions) for the projection script — replaces a prompt instruction the model would otherwise carry |
+| `record_lead.py` | `Task\|Agent` | Parses the gather dispatch YAML and writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id fails the create and the hook exits 2 (an integrity gate, not just a shim) |
 | `inject_system_skill_description.py` | `Task\|Agent` | Looks up the dispatch's `system` and appends that per-system SKILL's frontmatter `description:` to the subagent prompt, so gather confirms relevance then reads the full SKILL |
 | `block_main_loop_raw_access.py` | `Bash\|Read\|Grep\|Glob` | Enforces the gather-dispatch discipline above — blocks the main loop from running the system CLIs directly or reading `gather_raw` to re-derive fields |
 

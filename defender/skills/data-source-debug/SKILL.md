@@ -19,7 +19,7 @@ The wrapper passes:
 
 - `defender_dir` — absolute path to the defender repo root
 - `system` — the data source whose query produced the sentinel
-- `payload_path` — the raw payload file (`{run_dir}/gather_raw/{position}.json`)
+- `payload_path` — the raw payload file (`{run_dir}/gather_raw/{lead_id}/{seq}.json`)
 - `question` — a one-paragraph natural-language question from gather:
   which field carries which sentinel, in what context, what would
   resolve it. Read it carefully; the field name(s) and sentinel
