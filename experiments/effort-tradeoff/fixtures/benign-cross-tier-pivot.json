@@ -1,0 +1,187 @@
+{
+  "alert_id": "5182f51498a077d8240dbf7ee3d02ef2099d0117d06c04b7da9c9251d8f885f2",
+  "alert_timestamp": "2026-06-07T18:00:36.518Z",
+  "rule": {
+    "id": "v2-cross-tier-ssh-pivot",
+    "name": "v2 cross-tier SSH pivot",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 73,
+    "tags": [
+      "v2",
+      "auth",
+      "lateral-movement",
+      "correlation"
+    ],
+    "description": "Successful sshd login on a workstation host (dev-ws-*, office-ws-*) followed within 15 minutes by an sshd authentication event (Accepted or Failed) on a prod-tier host (web-*, db-*, jump-box-*). Cross-tier lateral movement detector; alerts on the staging-then-pivot pattern in playground-v2/attacks/catalog.yaml cross-tier-ssh-probe.",
+    "language": "eql",
+    "query": "sequence with maxspan=15m\n  [any where (host.name like \"dev-ws-*\" or host.name like \"office-ws-*\") and process.name == \"sshd\" and event.outcome == \"success\"]\n  [any where (host.name like \"web-*\" or host.name like \"db-*\" or host.name like \"jump-box-*\") and process.name == \"sshd\" and event.outcome in (\"success\", \"failure\")]",
+    "index": [
+      "logs-system.auth-*"
+    ]
+  },
+  "reason": "authentication, session event with process sshd, source 172.18.0.11:37862, by sre.alice on web-1 created high alert v2 cross-tier SSH pivot.",
+  "host": {
+    "hostname": "web-1",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "jammy",
+      "name": "Ubuntu",
+      "type": "linux",
+      "family": "debian",
+      "version": "22.04.5 LTS (Jammy Jellyfish)",
+      "platform": "ubuntu"
+    },
+    "containerized": false,
+    "ip": [
+      "172.18.0.4"
+    ],
+    "name": "web-1",
+    "mac": [
+      "52-7D-E9-E8-38-7A"
+    ],
+    "architecture": "x86_64"
+  },
+  "process": {
+    "name": "sshd"
+  },
+  "event": {
+    "agent_id_status": "verified",
+    "ingested": "2026-06-07T17:58:42Z",
+    "timezone": "+00:00",
+    "action": "ssh_login",
+    "type": [
+      "info"
+    ],
+    "category": [
+      "authentication",
+      "session"
+    ],
+    "dataset": "system.auth",
+    "outcome": "success",
+    "module": "system"
+  },
+  "ancestor_events": [
+    {
+      "agent": {
+        "name": "web-1",
+        "id": "ea339669-cc30-44df-ab7f-53ab2431b2ff",
+        "ephemeral_id": "1eda45d5-76be-415d-8b73-dc32e367f364",
+        "type": "filebeat",
+        "version": "9.3.3"
+      },
+      "process": {
+        "name": "sshd"
+      },
+      "log": {
+        "file": {
+          "path": "/var/log/auth.log"
+        },
+        "offset": 6019161,
+        "syslog": {
+          "hostname": "web-1",
+          "appname": "sshd",
+          "procid": "937436"
+        }
+      },
+      "elastic_agent": {
+        "id": "ea339669-cc30-44df-ab7f-53ab2431b2ff",
+        "version": "9.3.3",
+        "snapshot": false
+      },
+      "source": {
+        "address": "172.18.0.11",
+        "port": 37862,
+        "ip": "172.18.0.11"
+      },
+      "message": "Accepted password for sre.alice from 172.18.0.11 port 37862 ssh2",
+      "tags": [
+        "system-auth"
+      ],
+      "cloud": {
+        "availability_zone": "nbg1-dc3",
+        "instance": {
+          "name": "soc-playground",
+          "id": "132559370"
+        },
+        "provider": "hetzner",
+        "service": {
+          "name": "Cloud"
+        },
+        "region": "eu-central"
+      },
+      "input": {
+        "type": "log"
+      },
+      "@timestamp": "2026-06-07T17:58:33.000Z",
+      "system": {
+        "auth": {
+          "ssh": {
+            "method": "password",
+            "event": "Accepted"
+          }
+        }
+      },
+      "ecs": {
+        "version": "8.11.0"
+      },
+      "related": {
+        "hosts": [
+          "web-1"
+        ],
+        "ip": [
+          "172.18.0.11"
+        ],
+        "user": [
+          "sre.alice"
+        ]
+      },
+      "data_stream": {
+        "namespace": "default",
+        "type": "logs",
+        "dataset": "system.auth"
+      },
+      "host": {
+        "hostname": "web-1",
+        "os": {
+          "kernel": "6.8.0-71-generic",
+          "codename": "jammy",
+          "name": "Ubuntu",
+          "type": "linux",
+          "family": "debian",
+          "version": "22.04.5 LTS (Jammy Jellyfish)",
+          "platform": "ubuntu"
+        },
+        "containerized": false,
+        "ip": [
+          "172.18.0.4"
+        ],
+        "name": "web-1",
+        "mac": [
+          "52-7D-E9-E8-38-7A"
+        ],
+        "architecture": "x86_64"
+      },
+      "event": {
+        "agent_id_status": "verified",
+        "ingested": "2026-06-07T17:58:42Z",
+        "timezone": "+00:00",
+        "kind": "event",
+        "action": "ssh_login",
+        "type": [
+          "info"
+        ],
+        "category": [
+          "authentication",
+          "session"
+        ],
+        "dataset": "system.auth",
+        "outcome": "success"
+      },
+      "user": {
+        "name": "sre.alice"
+      }
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}
