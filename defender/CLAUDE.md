@@ -7,12 +7,17 @@ defender/
   SKILL.md             # runtime agent entry point (ORIENT/PLAN/GATHER/ANALYZE/REPORT)
   CLAUDE.md            # this file
   run.py               # entrypoint: investigate one alert end-to-end
-  run-settings.json    # claude --settings template (permissions + extract_lead_metadata hook)
+  run-settings.json    # claude --settings template (permissions + Pre/PostToolUse hooks)
   pyproject.toml       # defender venv deps (uv-managed at defender/.venv)
   uv.lock
-  hooks/               # PreToolUse hooks (extract_lead_metadata, ...)
+  hooks/               # plumbing shims + ported reliability gates (from main #246):
+                       #   invlang_validate.py  # PreToolUse Write|Edit: blocks invalid investigation.md writes
+                       #   tag_tool_results.py  # PostToolUse: salted untrusted-data tagging (gather Task / MCP / alert.json)
+                       #   budget_enforcer.py   # PostToolUse: per-run tool/spawn/wall-clock budget (warning-only)
+                       #   _run_dir.py          # shared DEFENDER_RUN_DIR + meta.json salt lookup
+                       #   extract_lead_metadata.py, inject_system_skill_description.py, block_main_loop_raw_access.py
   skills/
-    invlang/           # invlang block surface (schema + author-side CLI)
+    invlang/           # invlang block surface (schema + author-side CLI + validate.py rule engine + _walkers.py)
     gather/            # gather subagent + per-system query templates (v2 systems pending)
     advisory/          # advisory skill
   scripts/             # project_lead_sequence, run_stats, visualize_*, lint_*

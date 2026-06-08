@@ -68,6 +68,35 @@
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_main_loop_raw_access.py"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/invlang_validate.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/budget_enforcer.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent|Bash|Read|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/tag_tool_results.py"
+          }
+        ]
       }
     ]
   }
