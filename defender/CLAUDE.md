@@ -87,6 +87,7 @@ defender/
     host-query/         # per-system reference: visibility surface + execution
   scripts/
     project_lead_sequence.py   # canonical projector: investigation.md → lead_sequence.yaml
+    workspace_map.py           # on-disk orientation injected into run.py:build_prompt (message 0)
     run_stats.py
     visualize_run.py           # post-run transcript renderer
   learning/             # offline learning loop — see §Learning loop below
