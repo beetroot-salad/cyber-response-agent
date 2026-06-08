@@ -183,26 +183,29 @@ def test_allows_main_running_invlang_cli(monkeypatch):
     assert rc == 0
 
 
-def test_allows_main_running_gather_exec(monkeypatch):
-    """gather_exec.py is not an adapter *_cli.py; not matched (and the main
+def test_allows_main_running_record_query(monkeypatch):
+    """record_query.py is not an adapter *_cli.py; not matched (and the main
     loop never runs it anyway)."""
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/tools/gather_exec.py --help"},
+        "tool_input": {"command": "python3 defender/scripts/tools/record_query.py --help"},
         "cwd": MAIN_CWD,
     })
     assert rc == 0
 
 
-def test_gather_exec_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
-    """Robustness net: a gather_exec-wrapped adapter call is gather's path
-    (and is audited); never blocked, even if a subagent ran at REPO_ROOT."""
+def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
+    """Robustness net: a record_query-wrapped adapter call is gather's path
+    (and is audited); never blocked, even if a subagent ran at REPO_ROOT.
+
+    Pins the exemption literal: the clamp checks `"record_query.py" not in cmd`,
+    so the rename from gather_exec.py must keep this command exempt."""
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
         "tool_input": {"command": (
-            "python3 defender/scripts/tools/gather_exec.py --run-dir /r --lead 0 "
+            "python3 defender/scripts/tools/record_query.py --run-dir /r --lead l-001 "
             "--system elastic --query-id elastic.q -- "
             "python3 defender/scripts/tools/elastic_cli.py query 'x' --raw"
         )},

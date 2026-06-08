@@ -4,18 +4,18 @@
 The gather subagent invokes this instead of redirecting a system-CLI's
 stdout itself:
 
-    gather_exec.py --run-dir {R} --lead {L} \
+    record_query.py --run-dir {R} --lead {L} \
         --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
         python3 .../cmdb_cli.py host-lookup web-1 --raw
 
 It runs the inner command, captures stdout to a canonical per-lead path,
-and appends an executed-query record to ``{R}/executed_queries.jsonl``.
-The inner command's stdout/stderr/exit code pass straight through, so the
-subagent still sees the result for its reasoning, and the wrapper reports
-the raw payload path it wrote on stderr.
+and appends an executed-query record (the queries table) to
+``{R}/executed_queries.jsonl``. The inner command's stdout/stderr/exit
+code pass straight through, so the subagent still sees the result for its
+reasoning, and the wrapper reports the raw payload path it wrote on stderr.
 
 It retires the two brittle model-authored steps it replaces: the redirect
-to a model-chosen ``gather_raw/{position}.json`` (Bug #1: filename drift →
+to a model-chosen ``gather_raw/{lead_id}.json`` (Bug #1: filename drift →
 silent drop) and the post-hoc, free-floating ``queries[]`` sidecar id
 (Bug #2: mislabel → catalog miss). Both `--system` and `--query-id` come
 from the dispatch contract — `system` is the harness-injected lead system,
@@ -25,9 +25,9 @@ command and its captured payload, rather than reconstructed from a fragile
 per-CLI argv grammar — so the wrapper stays portable across whatever system
 CLIs are onboarded, with no hardcoded system/verb roster.
 
-The per-lead group id ``L`` comes from the dispatch (the integer lead
-position; see ``hooks/extract_lead_metadata.py``); it is the address
-namespace for this lead's payloads and the co-dispatch group key.
+The per-lead group id ``L`` comes from the dispatch (the ``:L`` invlang row
+id, e.g. ``l-001``; see ``hooks/record_lead.py``); it is the address
+namespace for this lead's payloads and the queries-table FK (``lead_id``).
 
 Exit code: the inner command's exit code (or 2 on wrapper usage error).
 """
@@ -143,14 +143,14 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     records = _find_records(stdout)
     lines: list[str] = []
     if records is not None:
-        lines.append(f"[gather_exec] {len(records)} records, {size} bytes — pass-through truncated")
+        lines.append(f"[record_query] {len(records)} records, {size} bytes — pass-through truncated")
         for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
             sample = json.dumps(rec, default=str)
             if len(sample) > _SAMPLE_MAX_CHARS:
                 sample = sample[:_SAMPLE_MAX_CHARS] + "…"
             lines.append(f"sample[{idx}]: {sample}")
     else:
-        lines.append(f"[gather_exec] {size} bytes — pass-through truncated")
+        lines.append(f"[record_query] {size} bytes — pass-through truncated")
         lines.append(stdout[:_SAMPLE_MAX_CHARS * PASSTHROUGH_SAMPLE_COUNT] + "…")
     if payload_rel:
         abs_payload = run_dir / payload_rel
@@ -178,7 +178,7 @@ def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
 
 def main(argv: list[str]) -> int:
     wrapper_argv, inner = _split_argv(argv)
-    parser = argparse.ArgumentParser(prog="gather_exec.py")
+    parser = argparse.ArgumentParser(prog="record_query.py")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--lead", required=True)
     # Both come from the dispatch contract: --system is the harness-injected
@@ -191,7 +191,7 @@ def main(argv: list[str]) -> int:
     except SystemExit:
         return 2
     if not inner:
-        print("gather_exec.py: nothing after `--` to execute", file=sys.stderr)
+        print("record_query.py: nothing after `--` to execute", file=sys.stderr)
         return 2
 
     run_dir = Path(ns.run_dir)
@@ -210,10 +210,10 @@ def main(argv: list[str]) -> int:
         payload_path.write_text(proc.stdout)
         payload_rel = str(payload_path.relative_to(run_dir))
     except OSError as e:
-        print(f"gather_exec.py: could not write payload: {e}", file=sys.stderr)
+        print(f"record_query.py: could not write payload: {e}", file=sys.stderr)
 
     record = {
-        "lead": lead,
+        "lead_id": lead,
         "seq": seq,
         "system": ns.system,
         "verb": verb,
@@ -230,7 +230,7 @@ def main(argv: list[str]) -> int:
         with log.open("a") as fh:  # append is atomic for one short line
             fh.write(json.dumps(record) + "\n")
     except OSError as e:
-        print(f"gather_exec.py: could not append record: {e}", file=sys.stderr)
+        print(f"record_query.py: could not append record: {e}", file=sys.stderr)
 
     # Pass the result through for the subagent's reasoning, but cap the
     # in-context view: an oversized payload is replaced by count + samples +
@@ -243,7 +243,7 @@ def main(argv: list[str]) -> int:
         sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if payload_rel:
-        print(f"[gather_exec] raw payload: {payload_rel}", file=sys.stderr)
+        print(f"[record_query] raw payload: {payload_rel}", file=sys.stderr)
     return proc.returncode
 
 

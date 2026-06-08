@@ -14,7 +14,7 @@ architecture rather than copied verbatim:
   the main loop; that summary is the primary untrusted channel into the
   main loop (the main loop is blocked from the adapter CLIs / gather_raw
   directly), so its return is marked untrusted-derived.
-- ``Bash``         — annotate only adapter-CLI / gather_exec invocations
+- ``Bash``         — annotate only adapter-CLI / record_query invocations
   (the commands that return raw data-source payloads). Plain main-loop
   utilities (``ls``/``jq``/``cat`` over the agent's own artifacts) are
   trusted and left alone.
@@ -48,7 +48,7 @@ from _run_dir import read_meta_salt  # noqa: E402
 # Commands that return raw data-source payloads (mirrors the markers the
 # block_main_loop_raw_access hook keys on).
 ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
-GATHER_EXEC_MARKER = "gather_exec.py"
+GATHER_EXEC_MARKER = "record_query.py"
 # A gather-subagent dispatch — the Task/Agent prompt points the subagent at
 # the gather skill, whose return summarizes raw data-source output.
 GATHER_DISPATCH_MARKER = "skills/gather"

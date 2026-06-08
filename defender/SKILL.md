@@ -138,7 +138,8 @@ Author `:H` (hypotheses with predictions) and `:L` (lead description)
 blocks. Do not pick a query template here — that's gather's job.
 The `:L` row carries `system` (which adapter to use) but **not**
 `template` or `query` — gather chooses the template, binds params,
-and records both in `gather_raw/{position}.observations.json#queries`.
+and records both as a row in `executed_queries.jsonl` (the queries table,
+FK `lead_id`).
 Do not Read files under `defender/skills/gather/` from the main loop;
 if you find yourself opening a query template to check its shape,
 you have already crossed into gather's surface — dispatch instead.
@@ -291,7 +292,7 @@ Task(
          "```yaml\n"
          "defender_dir: {DEFENDER_DIR}\n"
          "run_dir: {run_dir}\n"
-         "position: N\n"
+         "lead_id: l-NNN          # ECHO the id from this lead's :L findings row — do not mint a new one\n"
          "system: <system-name>   # the :L row's system cell\n"
          "goal: <one-sentence measurement contract>\n"
          "what_to_summarize:\n"
@@ -301,9 +302,17 @@ Task(
 )
 ```
 
-Two PreToolUse hooks parse that YAML block. `extract_lead_metadata.py`
-writes `{run_dir}/gather_raw/{position}.lead.json` for the projection
-script. `inject_system_skill_description.py` looks up `system` and
+`lead_id` is the id already written in this lead's `:L findings` row
+(column `id`, e.g. `l-001`) — author the `:L` row **before** dispatching
+its gather lead, then echo that id here. You are reusing an existing id,
+not assigning one; the `:L` set is append-only, so a retry of a lead is a
+*new* `:L` row with a *new* id (never a reused id — `record_lead.py`
+rejects reuse with exit 2).
+
+Two PreToolUse hooks parse that YAML block. `record_lead.py` writes the
+leads-table row `{run_dir}/gather_raw/{lead_id}.lead.json` and claims the
+id (exclusive create; reuse → exit 2). `inject_system_skill_description.py`
+looks up `system` and
 appends `defender/skills/{system}/SKILL.md`'s frontmatter
 `description:` to the dispatch — the subagent uses it to confirm
 relevance and then Reads the full SKILL body. Keep the YAML
@@ -354,8 +363,9 @@ right trigger to loop back to PLAN with a follow-up lead, not to fetch
 inline. See `defender/skills/invlang/SKILL.md` §Authz contract
 resolution for the column shape.
 
-If gather's summary feels thin, Grep `gather_raw/{position}.json`
-for the specific signal first; Read it whole only if Grep doesn't
+If gather's summary feels thin, Grep `gather_raw/{lead_id}/` (the lead's
+payloads, one `{seq}.json` per query) for the specific signal first;
+Read a file whole only if Grep doesn't
 narrow it down.
 
 ### REPORT
@@ -467,7 +477,7 @@ Task(model="haiku",
             "## Dispatch\n"
             "```yaml\n"
             "run_dir: {run_dir}\n"
-            "position: 0\n"
+            "lead_id: l-001\n"
             "system: host-query\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
             "what_to_summarize:\n"

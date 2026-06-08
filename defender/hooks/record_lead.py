@@ -1,38 +1,51 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: persist gather lead metadata sidecar.
+"""PreToolUse hook: write the leads table + claim the lead_id.
 
 Fires on Task tool calls whose prompt dispatches the defender gather
 subagent (identified by the literal `defender/skills/gather/SKILL.md`
 in the prompt). Parses the dispatch's YAML block — `run_dir`,
-`position`, `goal`, `what_to_summarize` — and writes
-`{run_dir}/gather_raw/{position}.lead.json`.
+`lead_id`, `goal`, `what_to_summarize` — and writes the leads-table row
+`{run_dir}/gather_raw/{lead_id}.lead.json` = `{goal, what_to_summarize}`.
 
-This replaces the heredoc instruction that gather/SKILL.md used to
-ask the model to run itself. The sidecar is the contract that
-project_lead_sequence.py reads to populate `lead_description` in
-`lead_sequence.yaml`; if it's missing the projection silently
-degrades to the `:L findings.name` cell. Doing it here makes the
-sidecar a structural side-effect of dispatching gather, not a
-prompt instruction the model can forget.
+`lead_id` is the `:L` invlang row id the defender echoes from the
+already-authored `:L findings` row (e.g. `l-001`) — not a new id minted
+here. It is the FK the queries table (`record_query.py`) and the read
+surface (`learning/lead_repository.py`) join on.
 
-The hook is silent on parse failure — the run still completes,
-projection just falls back to its degraded path. Hard-failing here
-would block gather dispatches over a metadata-extraction issue,
-which is the wrong tradeoff for an experimental loop.
+The write is an atomic exclusive create (`O_CREAT|O_EXCL`): one syscall
+that both persists the row and detects a reused id. Parallel leads
+dispatch as concurrent Task calls (SKILL.md), firing this hook
+concurrently — distinct ids claim distinct paths and all succeed; a
+genuine reuse (same id twice in a batch, or across turns) fails the
+exclusive create and the hook **exits 2**, blocking the Task so gather
+never runs and no orphan query row is written. The remediation fed back
+to the agent is to append a fresh `:L` findings row and echo its id (a
+retry is a new lead, never a reused id — append-only invlang).
+
+The hook stays silent (exit 0) on parse failure / missing fields /
+malformed lead_id — never blocking a dispatch over an extraction issue;
+only a real reuse collision blocks.
 
 Exit codes:
-    0 — always.
+    0 — claimed, or benign skip (not a gather dispatch / parse failure).
+    2 — lead_id reuse collision; reason on stderr is fed back to the agent.
 """
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
+
+# A lead_id is the `:L` row id: `l-` + alphanumerics (mirrors the invlang
+# parser's lead-id grammar). Used verbatim as a path segment and FK.
+LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 # Capture the first ```yaml ... ``` (or ```yml) fenced block in the prompt.
 FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
@@ -88,38 +101,58 @@ def _parse_block(text: str) -> dict | None:
     return out or None
 
 
-def write_sidecar(dispatch: dict) -> None:
+def claim_lead(dispatch: dict) -> int:
+    """Write the leads-table row exclusively, claiming the lead_id.
+
+    Returns 0 on a claim or a benign skip (missing fields / malformed
+    lead_id / plumbing error — never block a dispatch over these), and 2
+    on a reuse collision (the id's sidecar already exists).
+    """
     run_dir = dispatch.get("run_dir")
-    position = dispatch.get("position")
+    lead_id = dispatch.get("lead_id")
     goal = dispatch.get("goal")
     wtc = dispatch.get("what_to_summarize") or []
 
-    if not run_dir or position is None or not goal:
-        return
+    if not run_dir or not lead_id or not goal:
+        return 0
     if not isinstance(wtc, list):
-        return
-
-    # Position may be int or string ("0", "0a"); the projection groups
-    # files back under the int prefix, but the sidecar keys on the
-    # leading integer either way.
-    pos_str = str(position)
-    pos_int_match = re.match(r"^(\d+)", pos_str)
-    if not pos_int_match:
-        return
-    pos_int = pos_int_match.group(1)
+        return 0
+    if not LEAD_ID_RE.match(str(lead_id)):
+        return 0
 
     sidecar_dir = Path(run_dir) / "gather_raw"
     try:
         sidecar_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
-        return
+        return 0
 
-    sidecar_path = sidecar_dir / f"{pos_int}.lead.json"
-    payload = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
+    sidecar_path = sidecar_dir / f"{lead_id}.lead.json"
+    payload = json.dumps(
+        {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}, indent=2
+    ) + "\n"
+
+    # Atomic exclusive create: one syscall persists the row AND detects a
+    # reused id. Only EEXIST is a hard error (exit 2); any other OSError
+    # fails open (exit 0) — losing the sidecar is acceptable, blocking a
+    # dispatch over plumbing is not.
     try:
-        sidecar_path.write_text(json.dumps(payload, indent=2) + "\n")
+        fd = os.open(sidecar_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            print(
+                f"lead_id {lead_id!r} already dispatched; append a new :L "
+                f"findings row and echo its id (a retry is a new lead, never "
+                f"a reused id).",
+                file=sys.stderr,
+            )
+            return 2
+        return 0
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(payload)
     except OSError:
-        return
+        return 0
+    return 0
 
 
 def main() -> int:
@@ -140,8 +173,7 @@ def main() -> int:
     if dispatch is None:
         return 0
 
-    write_sidecar(dispatch)
-    return 0
+    return claim_lead(dispatch)
 
 
 if __name__ == "__main__":

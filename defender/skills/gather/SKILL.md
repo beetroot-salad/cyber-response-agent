@@ -5,7 +5,7 @@ description: Gather subagent body. Takes a defender's lead description, binds an
 
 You are the defender's gather subagent. The defender invoked you with a
 **lead description** (goal + what to summarize), the **run dir**, and
-the **position** of this dispatch in the run's lead sequence. Your job
+the **lead_id** (`l-NNN`, the `:L` row id) of this dispatch. Your job
 is to translate the lead into one or more concrete queries against a
 system of record, run them via the system CLI, and return a summary the
 defender can reason from.
@@ -20,8 +20,9 @@ these keys:
   always anchor `Read` and `Bash` calls to `{defender_dir}/...` rather
   than to relative paths.
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
-- `position` — integer; pass it to `gather_exec.py` as `--lead` (it is
-  the per-lead group id that scopes the wrapper's output)
+- `lead_id` — the `:L` row id (`l-NNN`); pass it to `record_query.py` as
+  `--lead` (it is the per-lead group id that scopes the wrapper's output
+  and the FK in the queries table)
 - `system` — name of the system of record (matches the `:L` row's `system` cell and a subdirectory under `defender/skills/`). The harness injects this system's SKILL `description:` into your prompt; if `system` is missing, the injection silently no-ops and you must discover the right env SKILL yourself.
 - `goal` — one-sentence measurement contract
 - `what_to_summarize` — list of dimensions your summary must address
@@ -99,13 +100,13 @@ system's SKILL.md documents it — the CLI's filename, subcommands, and
 flags all come from there (don't assume it's `{system}_cli.py`):
 
 ```bash
-python3 {defender_dir}/scripts/tools/gather_exec.py \
-    --run-dir {run_dir} --lead {position} \
+python3 {defender_dir}/scripts/tools/record_query.py \
+    --run-dir {run_dir} --lead {lead_id} \
     --system {system} --query-id {system}.{template-id} -- \
     python3 {defender_dir}/scripts/tools/<system-cli> <verb> <args> --raw
 ```
 
-Pass three values: your `position` as `--lead`, the lead's `system` as
+Pass three values: your `lead_id` as `--lead`, the lead's `system` as
 `--system`, and the **measurement id** as `--query-id` — either an
 established template's `id:` (`{system}.{template-id}`) or the
 `{system}.{kebab-name}` you coined in §2 for a no-template query.
@@ -123,7 +124,7 @@ or report the partial result with `payload_status: partial`.
 **Large payloads: filter the file, never hand-count.** When a query
 over-returns (server-side filter didn't bind, broad window,
 high-cardinality index), the capture wrapper caps what it passes back:
-above its byte ceiling you get a `[gather_exec] N records … pass-through
+above its byte ceiling you get a `[record_query] N records … pass-through
 truncated` line, a few `sample[i]` records, and the on-disk payload
 path — not the full dump. **That truncated view is not a countable
 sample.** Do not eyeball it or estimate from the samples. Filter the
@@ -185,7 +186,7 @@ python3 {defender_dir}/scripts/tools/data_source_debug.py \
 ```
 
 `{raw-payload-path}` is the path the capture wrapper reported on stderr
-for the query you just ran (`[gather_exec] raw payload: gather_raw/…`).
+for the query you just ran (`[record_query] raw payload: gather_raw/…`).
 
 The wrapper spawns a fresh top-level `claude -p` with the
 data-source-debug SKILL loaded and returns three sections on
@@ -262,13 +263,13 @@ leads); one round of smell-check, then report.
 
 ### 5. The executed-query record (wrapper-owned)
 
-You do **not** author an observation sidecar. `gather_exec.py` appends
-one record per query to `{run_dir}/executed_queries.jsonl` — the
-`query_id`, `params`, raw command, payload path, and a coarse structural
-`payload_status` (`ok`/`empty`/`error`). The lead-sequence projection
-renders these into the canonical
-`gather_raw/{position}[a..z].{json,observations.json}` the offline
-lead-author reads. Nothing for you to write here.
+You do **not** author an observation sidecar. `record_query.py` appends
+one row per query to `{run_dir}/executed_queries.jsonl` (the queries
+table, FK `lead_id`) — the `query_id`, `params`, raw command, payload
+path, and a coarse structural `payload_status` (`ok`/`empty`/`error`) —
+and writes the raw payload by-ref to `gather_raw/{lead_id}/{seq}.json`.
+The offline lead-author reads these two tables directly (via
+`learning/lead_repository.py`). Nothing for you to write here.
 
 ### 6. Return
 
@@ -337,8 +338,8 @@ How to search without a template:
 4. Name the final measurement and run it under that id:
 
 ```bash
-python3 {defender_dir}/scripts/tools/gather_exec.py \
-    --run-dir {run_dir} --lead {position} \
+python3 {defender_dir}/scripts/tools/record_query.py \
+    --run-dir {run_dir} --lead {lead_id} \
     --system {system} --query-id {system}.failed-auth-by-srcip -- \
     python3 {defender_dir}/scripts/tools/<system-cli> <query invocation> --raw
 ```
