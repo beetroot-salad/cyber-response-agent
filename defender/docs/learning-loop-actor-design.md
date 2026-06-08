@@ -110,7 +110,7 @@ entry exposes:
 - `lead_name` — the defender's name for the dispatch
 - `queries[].id` and `queries[].params` — the raw query, verbatim
 
-Synthesized fields (`goal`, `what_to_characterize`) are **not**
+Synthesized fields (`goal`, `what_to_summarize`) are **not**
 projected. The raw query is the source of truth and avoids the
 projection layer leaking results through summary phrasing.
 `result_ref` is omitted entirely.

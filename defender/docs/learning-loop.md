@@ -208,7 +208,7 @@ entries:
   - position: 0
     lead_description:
       goal: <defender's measurement contract>
-      what_to_characterize:
+      what_to_summarize:
         - <dimension the gather result must characterize>
     queries:
       - id: <system-prefixed kebab, e.g. wazuh.auth-events>
@@ -222,7 +222,7 @@ parses `:L findings` rows from `investigation.md`, requires `system` and
 `ad-hoc`), parses bound params from the `query` and `window` cells, and writes
 `lead_sequence.yaml` back into the source run dir. If a
 `gather_raw/{position}.lead.json` sidecar exists, its `goal` and
-`what_to_characterize` fill `lead_description`; otherwise the projector falls
+`what_to_summarize` fill `lead_description`; otherwise the projector falls
 back to the `:L` row name and an empty dimension list.
 
 The schema allows multiple `queries[]` entries per lead position, but the

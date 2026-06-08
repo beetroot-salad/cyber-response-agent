@@ -96,10 +96,12 @@ If you cite a fact that's load-bearing or surprising, name the source file.
   points to. Don't fill gaps from memory.
 - **Match weight to weight. Don't pad.** A one-line question gets a
   one-line answer. Err shorter; the user can always ask for more.
-- **Stay read-only.** `allowed-tools` restricts this skill to `Read`,
-  `Glob`, `Grep`. The handbook never edits run dirs, lessons, skills, or
-  the loop. If a question drifts into "now change it," hand off to the
-  right file (see the precedence table) and stop.
+- **Stay read-only.** The `allowed-tools: Read, Glob, Grep` frontmatter
+  declares this skill's read-only posture — it's a reader hint, not an
+  enforced sandbox (`defender/SKILL.md` notes skill `allowed-tools` isn't
+  enforced). Honor it anyway: the handbook never edits run dirs, lessons,
+  skills, or the loop. If a question drifts into "now change it," hand off
+  to the right file (see the precedence table) and stop.
 - **Flag stale docs.** The defender moves fast and the code wins. If
   content contradicts the current tree — a path that's gone, a hook that
   changed — say so. A stale handbook is worse than no handbook.
