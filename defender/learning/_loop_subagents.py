@@ -265,7 +265,7 @@ def invoke_actor_benign(
 
 
 def invoke_oracle_lead(entry: dict, story: str, sample_text: str) -> list:
-    """Project one lead. Sees only this lead — sanitized ``what_to_characterize`` +
+    """Project one lead. Sees only this lead — sanitized ``what_to_summarize`` +
     queries + a scrubbed sample event — plus the story; no goal, no alert, no other lead.
     Returns the lead's ``events`` list (mappings, a single baseline-diff marker, or empty).
     """
