@@ -122,6 +122,15 @@ def build_settings_file() -> Path:
 
 
 def build_prompt(run_id: str, run_dir: Path) -> str:
+    # Inline workspace orientation so the agent doesn't burn turns on
+    # ls/find/grep across skills and tools. Failure here is non-fatal —
+    # the prompt still works without the map; we just lose the
+    # discovery-thrash savings.
+    ws_proc = subprocess.run(
+        [sys.executable, str(DEFENDER_DIR / "scripts" / "workspace_map.py"), str(run_dir)],
+        capture_output=True, text=True,
+    )
+    ws_map = ws_proc.stdout if ws_proc.returncode == 0 else f"<workspace map unavailable: {ws_proc.stderr.strip()}>\n"
     return (
         "Read defender/SKILL.md and follow it end-to-end.\n\n"
         "## Run context\n"
@@ -135,7 +144,8 @@ def build_prompt(run_id: str, run_dir: Path) -> str:
         "ANALYZE → REPORT, dispatching gather subagents per\n"
         "defender/SKILL.md §GATHER. Stop when investigation.md and\n"
         "report.md both exist; lead_sequence.yaml and transcript.html are\n"
-        "rendered by the harness after you exit.\n"
+        "rendered by the harness after you exit.\n\n"
+        f"{ws_map}"
     )
 
 
