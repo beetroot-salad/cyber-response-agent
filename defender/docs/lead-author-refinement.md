@@ -143,7 +143,7 @@ Key changes:
       "position": 0,
       "query_index": 0,
       "goal_text": "Characterize SSH activity from 10.42.7.183 against bastion-01.",
-      "what_to_characterize": [
+      "what_to_summarize": [
         "source IP diversity",
         "auth methods (publickey vs password)",
         "success/failure ratio"
@@ -160,7 +160,7 @@ Key changes:
       "position": 4,
       "query_index": 0,
       "goal_text": "Lateral-spread check: same srcip across other hosts.",
-      "what_to_characterize": ["host diversity for this srcip"],
+      "what_to_summarize": ["host diversity for this srcip"],
       "params": {"srcip": "bastion-01", "window": "1h"},
       "rendered_query": "python3 defender/scripts/tools/wazuh_cli.py query --query 'rule.groups:(authentication_success OR authentication_failed) AND data.srcip:bastion-01' --window 1h --run-dir <run_dir>",
       "payload_status": "suspect_empty",

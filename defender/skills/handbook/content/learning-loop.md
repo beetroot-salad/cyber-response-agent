@@ -95,17 +95,12 @@ Each leg emits two kinds of output on **separate** queue → author → corpus
 pipelines — don't assume one shared `lessons/`:
 
 - **Defender findings** (the judge findings about the *investigation*, steps
-  5–7 above) → `_pending/findings.jsonl`, which **both** directions append to
-  (tagged `direction`) → `author.py` at `LEARNING_AUTHOR_THRESHOLD` (default
-  **5**) → `defender/lessons/`. This is the corpus the runtime agent reads at
-  PLAN.
+  5–7 above) feed `defender/lessons/` — the corpus the runtime agent reads at
+  PLAN. **Both** directions append here (tagged `direction`).
 - **Direction-specific observations** (about the actor / environment, not the
-  defender's moves) → a per-direction queue + curator: the adversarial leg
-  feeds `_pending/actor_observations.jsonl` → `author_actor.py`
-  (`LEARNING_AUTHOR_ACTOR_THRESHOLD`) → `defender/lessons-actor/`; the benign
-  leg feeds `_pending/environment_observations.jsonl` →
-  `author_actor_benign.py` (`LEARNING_AUTHOR_ENV_THRESHOLD`) →
-  `defender/lessons-environment/`.
+  defender's moves) feed direction-specific corpora — `defender/lessons-actor/`
+  (adversarial) and `defender/lessons-environment/` (benign) — each via its
+  own queue, curator, and threshold.
 
 So "both directions feed the same corpus" holds only for defender findings;
 the actor/environment corpora are direction-specific. The canonical
