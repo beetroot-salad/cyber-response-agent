@@ -12,7 +12,8 @@ Ground truth: malicious fixture must NOT be benign (no false negative);
 benign fixture must be benign (no over-escalation).
 """
 from __future__ import annotations
-import json, re, sys
+import json
+import re
 from pathlib import Path
 
 EXP = Path("/workspace/experiments/effort-tradeoff")

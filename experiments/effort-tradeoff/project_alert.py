@@ -12,7 +12,9 @@ Usage:
 elastic_cli.py alerts --raw, picking one hit).
 """
 from __future__ import annotations
-import json, subprocess, sys
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 DEFENDER = Path("/workspace/defender-v2-tree/defender")
@@ -44,7 +46,9 @@ def fetch_event(doc_id: str, index: str) -> dict | None:
 
 
 def project(s: dict) -> dict:
-    rule_get = lambda k, d=None: s.get(f"kibana.alert.rule.{k}", d)
+    def rule_get(k, d=None):
+        return s.get(f"kibana.alert.rule.{k}", d)
+
     params = rule_get("parameters", {}) or {}
     ancestors = s.get("kibana.alert.ancestors", []) or []
     resolved = []
