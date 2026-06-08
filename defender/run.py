@@ -45,6 +45,8 @@ if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
 
 import argparse
 import datetime as _dt
+import json
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -81,6 +83,13 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"run dir already exists: {run_dir}")
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(alert, run_dir / "alert.json")
+    # Per-run salt consumed by the tag_tool_results hook to wrap untrusted
+    # data-source output in unguessable delimiters. Stable across the run,
+    # regenerated per run.
+    (run_dir / "meta.json").write_text(
+        json.dumps({"run_id": run_dir.name, "salt": secrets.token_hex(8)}, indent=2)
+        + "\n"
+    )
     # Propagate a sibling ground_truth.yaml into the run dir so the learning
     # loop's persist stage can recognise held-out cases and suppress
     # queue appends. Fixture layout: {fixture-dir}/{alert.json,ground_truth.yaml}.
@@ -153,6 +162,9 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
     print(f"[run.py] run_dir={run_dir} model={model}" + (f" effort={effort}" if effort else ""), file=sys.stderr)
     env = dict(os.environ)
     env["DEFENDER_DIR"] = str(DEFENDER_DIR)
+    # Single run-dir anchor for the budget + tag hooks (one claude -p per
+    # run, so no session→run map is needed). Inherited by hook subshells.
+    env["DEFENDER_RUN_DIR"] = str(run_dir)
     with trace.open("w") as out:
         proc = subprocess.run(args, input=prompt, text=True, stdout=out, env=env, cwd=str(REPO_ROOT))
     return proc.returncode
