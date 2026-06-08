@@ -7,16 +7,16 @@ surface.
 ## CLI
 
 ```bash
-defender/scripts/tools/identity_cli.py health-check
-defender/scripts/tools/identity_cli.py can-access <user> <host> [--raw]
-defender/scripts/tools/identity_cli.py get-user <user> [--raw]
-defender/scripts/tools/identity_cli.py list-authorized-hosts <user> [--raw]
-defender/scripts/tools/identity_cli.py list-users [--role X] [--enabled true|false] [--limit N] [--raw]
-defender/scripts/tools/identity_cli.py list-roles [--raw]
+defender-identity health-check
+defender-identity can-access <user> <host> [--raw]
+defender-identity get-user <user> [--raw]
+defender-identity list-authorized-hosts <user> [--raw]
+defender-identity list-users [--role X] [--enabled true|false] [--limit N] [--raw]
+defender-identity list-roles [--raw]
 ```
 
 **Do not Read `identity_cli.py` source to discover flags.** This file
-plus `identity_cli.py {subcommand} --help` is the authoritative
+plus `defender-identity {subcommand} --help` is the authoritative
 surface. If a flag you need isn't here or in `--help`, treat it as
 unsupported and escalate.
 
@@ -32,8 +32,10 @@ host on the compose network — every host has Docker DNS for the stub.
 No SSH tunnel needed; the same docker context already used by
 elastic_cli for rule installs is reused here.
 
-If `health-check` exits 2, check `docker --context soc-playground ps`
-for the bastion + the `identity` container.
+If a call exits 2 (connectivity / docker / upstream), the data source
+is unreachable: **stop and escalate immediately** with the error — do
+not probe with `docker`/`netstat`/`ss` or hunt for config. That's a
+data-source outage, not a query problem (see gather SKILL §debug leads).
 
 ## Config
 

@@ -98,16 +98,16 @@ the defender, the author skill, and the actor-reviewer judge.
 ### CLI
 
 ```bash
-defender/scripts/tools/host_state_cli.py health-check
-defender/scripts/tools/host_state_cli.py proc-tree <host> [--raw]
-defender/scripts/tools/host_state_cli.py passwd <host> [--raw]
-defender/scripts/tools/host_state_cli.py authorized-keys <host> [--user U] [--raw]
-defender/scripts/tools/host_state_cli.py fim-checksum <host> <path> [--raw]
-defender/scripts/tools/host_state_cli.py package-list <host> [--limit N] [--raw]
+defender-host-state health-check
+defender-host-state proc-tree <host> [--raw]
+defender-host-state passwd <host> [--raw]
+defender-host-state authorized-keys <host> [--user U] [--raw]
+defender-host-state fim-checksum <host> <path> [--raw]
+defender-host-state package-list <host> [--limit N] [--raw]
 ```
 
 **Do not Read `host_state_cli.py` source to discover flags.** This
-SKILL plus `host_state_cli.py {subcommand} --help` is the
+SKILL plus `defender-host-state {subcommand} --help` is the
 authoritative surface.
 
 `--raw` emits a JSON envelope with `host`, `captured_at`, and the

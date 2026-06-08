@@ -121,10 +121,10 @@ from closed catalogs. When you need a value and don't already know
 it, Bash the `enum` subcommand — don't memorize the catalog:
 
 ```bash
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum                # slot names
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum types          # vertex types
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum relations      # edge rels
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum compute.role   # one slot's values
+defender-invlang enum                # slot names
+defender-invlang enum types          # vertex types
+defender-invlang enum relations      # edge rels
+defender-invlang enum compute.role   # one slot's values
 ```
 
 The skill at `defender/skills/invlang/SKILL.md` documents the grammar
@@ -221,7 +221,7 @@ for this signature — trust the response.
 Call (arg order is **corpus_root first, then `advisory`**):
 
 ```bash
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
+defender-invlang advisory \
     --signature <signature_id> \
     --class lead_discrimination \
     --frontier '?hypothesis-one' \
@@ -258,14 +258,14 @@ Two verbs cover this:
 
 ```bash
 # Cross-signature, topology-scoped: names for this kind of fork, anywhere.
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-shape \
+defender-invlang hypothesis-shape \
     --parent-type identity \
     --parent-class 'service-account/*' \
     --rel modified \
     --attached-to-type configuration
 
 # Signature-scoped: names this rule has historically used.
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-vocabulary \
+defender-invlang hypothesis-vocabulary \
     --signature <signature_id>
 ```
 
@@ -428,11 +428,14 @@ Loaded on demand:
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
-- `defender/skills/{system}/SKILL.md` — per-system reference: what
-  data the system holds, what its CLI looks like, sample queries.
+- `defender/skills/{system}/SKILL.md` — per-system **visibility**
+  reference: what data the system holds and what it can/can't answer.
   Enumerate `defender/skills/*/SKILL.md` at ORIENT to discover what's
   reachable in this environment, then load the ones whose `description:`
-  frontmatter looks relevant to the alert.
+  frontmatter looks relevant to the alert. The CLI/query surface and
+  any connectivity detail live in the gather subagent's surface (e.g.
+  `skills/elastic/execution.md`), not here — you route to systems, you
+  do not query them.
 
 ## Worked examples
 

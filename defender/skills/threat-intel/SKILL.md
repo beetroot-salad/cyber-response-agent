@@ -78,13 +78,13 @@ the defender, the author skill, and the actor-reviewer judge.
 ### CLI
 
 ```bash
-defender/scripts/tools/threat_intel_cli.py health-check
-defender/scripts/tools/threat_intel_cli.py lookup <value> [--raw]
-defender/scripts/tools/threat_intel_cli.py list-indicators [--verdict X] [--type X] [--tag X] [--limit N] [--raw]
+defender-threat-intel health-check
+defender-threat-intel lookup <value> [--raw]
+defender-threat-intel list-indicators [--verdict X] [--type X] [--tag X] [--limit N] [--raw]
 ```
 
 **Do not Read `threat_intel_cli.py` source to discover flags.** This
-SKILL plus `threat_intel_cli.py {subcommand} --help` is the
+SKILL plus `defender-threat-intel {subcommand} --help` is the
 authoritative surface.
 
 `lookup` text output includes an explicit note when `verdict` is

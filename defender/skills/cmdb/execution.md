@@ -7,14 +7,14 @@ surface.
 ## CLI
 
 ```bash
-defender/scripts/tools/cmdb_cli.py health-check
-defender/scripts/tools/cmdb_cli.py get-host <name> [--raw]
-defender/scripts/tools/cmdb_cli.py list-hosts [--role X] [--criticality X] [--owner X] [--limit N] [--raw]
-defender/scripts/tools/cmdb_cli.py list-roles [--raw]
+defender-cmdb health-check
+defender-cmdb get-host <name> [--raw]
+defender-cmdb list-hosts [--role X] [--criticality X] [--owner X] [--limit N] [--raw]
+defender-cmdb list-roles [--raw]
 ```
 
 **Do not Read `cmdb_cli.py` source to discover flags.** This file plus
-`cmdb_cli.py {subcommand} --help` is the authoritative surface.
+`defender-cmdb {subcommand} --help` is the authoritative surface.
 
 `--raw` emits the upstream JSON response unchanged, suitable for
 `gather_raw/{position}.json`. Default output is short formatted text

@@ -10,12 +10,14 @@ rules in `playground-v2/detection-rules/`. All v2 query routing — Falco,
 system auth, syslog, security alerts — goes through one adapter
 (`elastic_cli.py`) against this one cluster.
 
-The file is split by audience. The **Visibility surface** section is
-read by the defender (gather routing, judge), the author (template
-scaffolding), and the actor-reviewer judge — it describes what the v2
-ES instance can answer, regardless of how queries are dispatched. The
-**Execution** section is read only by code paths that actually
-dispatch queries.
+This file is the **Visibility surface** — read by the defender (gather
+routing, judge), the author (template scaffolding), and the
+actor-reviewer judge. It describes what the v2 ES instance can answer,
+regardless of how queries are dispatched. The **Execution** surface
+(CLI, query syntax, index scoping, connectivity) lives in the adjacent
+`execution.md`, read only by the gather subagent when it dispatches a
+query — not by the orchestrator, which routes here and never queries a
+data source directly.
 
 ## Visibility surface
 
@@ -132,83 +134,5 @@ Things this Elasticsearch deployment **cannot** answer:
 
 ## Execution
 
-### CLI
-
-```bash
-defender/scripts/tools/elastic_cli.py health-check
-defender/scripts/tools/elastic_cli.py query '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
-defender/scripts/tools/elastic_cli.py alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
-```
-
-**Do not Read `elastic_cli.py` source to discover flags.** This
-SKILL plus `elastic_cli.py {subcommand} --help` is the authoritative
-surface. The source is ~500 lines and reading it shows up as the
-single largest source of wasted Read calls across runs. If a flag
-you need isn't here or in `--help`, treat it as unsupported and
-escalate — don't infer one from the source.
-
-Output is formatted markdown (summary + 5 sample lines + first 3 raw
-_source docs) by default; `--raw` emits a JSON envelope
-`{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`
-suitable for `gather_raw/{position}.json`.
-
-### Connectivity
-
-The v2 ES cluster only exposes `127.0.0.1:9200` on the Hetzner VPS;
-the adapter expects an SSH tunnel from the devcontainer:
-
-```bash
-ssh -fN -L 9200:localhost:9200 -L 5601:localhost:5601 soc-playground
-```
-
-If the tunnel is down, `health-check` exits 2 with a connect error.
-`config.env` lists `ELASTICSEARCH_URL=https://localhost:9200`; override
-via env vars (`ELASTICSEARCH_URL=...`) when running against a different
-deployment.
-
-### Credentials
-
-The CLI handles credentials itself — agents do **not** need to source
-`.env` or export anything. Resolution order:
-
-1. `V2_ELASTIC_PASSWORD` environment variable (highest priority).
-2. `V2_ELASTIC_PASSWORD=...` line in `playground-v2/.env` (auto-read).
-
-`V2_ELASTIC_USERNAME` defaults to `elastic` when unset.
-
-If the CLI exits with a credentials error, the password is genuinely
-missing from both — restore `playground-v2/.env` or export the var;
-do not chain shell substitutions to work around it.
-
-### Query syntax
-
-`query_string` syntax (lucene). KQL covers the same vocabulary for the
-common case; the adapter passes the string through unmodified. Common
-forms used by v2 gather templates:
-
-- Field exact: `process.name: "sshd"`, `falco.rule: "Adding ssh keys to authorized_keys"`
-- Substring on `message`: `message: *"Failed password"*`
-- Disjunction: `host.name: ("web-1" OR "web-2")`
-- Boolean: `data_stream.dataset: "system.auth" AND process.name: "sudo"`
-- Squid by user: `user.name: "sre.alice" AND data_stream.dataset: "squid.access"`
-- Zeek by destination: `destination.ip: "172.18.0.20" AND data_stream.dataset: "zeek.connection"`
-- Postgres auth failures: `data_stream.dataset: "postgresql.log" AND message: *"authentication failed"*`
-- Nginx 5xx on a host: `host.name: "web-1" AND data_stream.dataset: "nginx.access" AND http.response.status_code: [500 TO 599]`
-- Keycloak LOGIN events: `loggerName: "org.keycloak.events" AND message: *'type="LOGIN"'*` (note the quoted-substring shape — events are key=value text inside `message`)
-- Unbound query for a domain: `data_stream.dataset: "unbound.queries" AND message: *"example.com"*`
-
-### Index-pattern selection
-
-`--index` overrides the per-subcommand default. Common scopes:
-
-- `--index 'logs-system.auth-*'` — sshd / sudo / PAM only
-- `--index 'logs-falco.alerts-*'` — Falco rule-fires only
-- `--index 'logs-system.syslog-*'` — general syslog only
-- `--index 'logs-zeek.connection-*'` — Zeek flow records only (the `connection` dataset is what other vendors call `conn.log`)
-- `--index 'logs-zeek.*'` — every Zeek dataset (conn/dns/http/ssl/files/ssh)
-- `--index 'logs-squid.access-*'` — Squid proxy attribution only
-- `--index 'logs-postgresql.log-*'` — Postgres queries / auth / lifecycle only
-- `--index 'logs-nginx.access-*'` — nginx requests only (separate from `nginx.error`)
-- `--index 'logs-keycloak.events-*'` — Keycloak Quarkus log + events stream (scope further with `loggerName:`)
-- `--index 'logs-unbound.queries-*'` — Unbound resolver query/reply lines
-- `--index '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` subcommand's default)
+CLI invocation, query syntax, index scoping, connectivity, and exit
+codes live in `execution.md` — read by gather only.

@@ -87,14 +87,14 @@ the defender, the author skill, and the actor-reviewer judge.
 ### CLI
 
 ```bash
-defender/scripts/tools/change_mgmt_cli.py health-check
-defender/scripts/tools/change_mgmt_cli.py active-changes --host <h> --at <iso> [--raw]
-defender/scripts/tools/change_mgmt_cli.py get-change <cr_id> [--raw]
-defender/scripts/tools/change_mgmt_cli.py list-changes [--status X] [--host h] [--active-at iso] [--limit N] [--raw]
+defender-change-mgmt health-check
+defender-change-mgmt active-changes --host <h> --at <iso> [--raw]
+defender-change-mgmt get-change <cr_id> [--raw]
+defender-change-mgmt list-changes [--status X] [--host h] [--active-at iso] [--limit N] [--raw]
 ```
 
 **Do not Read `change_mgmt_cli.py` source to discover flags.** This
-SKILL plus `change_mgmt_cli.py {subcommand} --help` is the
+SKILL plus `defender-change-mgmt {subcommand} --help` is the
 authoritative surface.
 
 **`--at` and `--active-at` must be UTC ISO 8601** (e.g.

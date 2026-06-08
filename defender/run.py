@@ -175,6 +175,13 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
     # Single run-dir anchor for the budget + tag hooks (one claude -p per
     # run, so no session→run map is needed). Inherited by hook subshells.
     env["DEFENDER_RUN_DIR"] = str(run_dir)
+    # Put the invocation shims (defender/bin/defender-*) first on PATH so the
+    # agent and its subagents call `defender-invlang` / `defender-elastic` /
+    # … by a single stable token — matched by one allowlist rule regardless of
+    # cwd, venv path, or compound wrapping. DEFENDER_RUNS_BASE is the invlang
+    # corpus root the shim injects (run_dir.parent == the runs base).
+    env["PATH"] = f"{DEFENDER_DIR / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
     with trace.open("w") as out:
         proc = subprocess.run(args, input=prompt, text=True, stdout=out, env=env, cwd=str(REPO_ROOT))
     return proc.returncode

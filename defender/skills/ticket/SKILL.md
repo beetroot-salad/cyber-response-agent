@@ -87,13 +87,13 @@ the defender, the author skill, and the actor-reviewer judge.
 ### CLI
 
 ```bash
-defender/scripts/tools/ticket_cli.py health-check
-defender/scripts/tools/ticket_cli.py list-tickets [--status X] [--label X] [--q X] [--limit N] [--raw]
-defender/scripts/tools/ticket_cli.py get-ticket <key> [--raw]
+defender-ticket health-check
+defender-ticket list-tickets [--status X] [--label X] [--q X] [--limit N] [--raw]
+defender-ticket get-ticket <key> [--raw]
 ```
 
 **Do not Read `ticket_cli.py` source to discover flags.** This SKILL
-plus `ticket_cli.py {subcommand} --help` is the authoritative
+plus `defender-ticket {subcommand} --help` is the authoritative
 surface.
 
 `--raw` emits the upstream JSON response unchanged.

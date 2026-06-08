@@ -1,21 +1,31 @@
 # `defender/skills/{system}/SKILL.md` — shape and boundary
 
-Per-system SKILL.md files under `defender/skills/{system}/` are split
-into two sections by audience:
+Per-system knowledge under `defender/skills/{system}/` is split into
+two surfaces by audience, across two files:
 
-- **Visibility surface** — read by the defender (gather routing,
-  judge), the author skill (template scaffolding), and the
-  actor-reviewer judge. Describes what the system *can* and *cannot*
-  answer in this deployment, and how to read its output. Independent
-  of how queries are dispatched.
-- **Execution** — read only by code paths that dispatch queries
-  (defender/gather, template authors). Adapter CLI shape, flag
-  conventions, dispatch-time adapter quirks.
+- **Visibility surface** — `SKILL.md`. Read by the orchestrating
+  defender (gather routing, judge), the author skill (template
+  scaffolding), and the actor-reviewer judge. Describes what the system
+  *can* and *cannot* answer in this deployment, and how to read its
+  output. Independent of how queries are dispatched.
+- **Execution** — `execution.md`, a sibling file read **only** by the
+  gather subagent when it dispatches a query. Adapter CLI shape, flag
+  conventions, connectivity, exit codes, dispatch-time adapter quirks.
+  `SKILL.md` keeps a one-line `## Execution` pointer to it.
 
-Keeping both sections in one file per system keeps per-system knowledge
-in one place; keeping them as named sections (not separate files) keeps
-the audience boundary explicit without inviting drift between two
-parallel trees.
+The two files exist so the orchestrator — which loads `SKILL.md` to
+**route** to a system but never queries it — physically cannot ingest
+the execution surface. That boundary is load-bearing for data sources
+with credentials or connectivity detail (e.g. elastic): a one-file
+"named sections" layout leaked the adapter's credential/tunnel
+variables into the orchestrator's context, where it groped for them
+instead of dispatching gather (issue #261). Splitting the file removes
+the trigger structurally rather than with a "don't read this" note.
+
+(Some stub systems still carry their Execution section inline in
+`SKILL.md`; they hold no secrets, so the leak doesn't apply. New
+systems and any system with real credentials use the `execution.md`
+split.)
 
 ## Visibility surface — four fields
 

@@ -54,6 +54,15 @@ RAW_MARKER = "gather_raw"
 # matched; the invlang CLI (`-m defender.skills.invlang.cli`) has no
 # `scripts/tools/` path and no `_cli.py`, so it stays allowed.
 ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
+# The `defender/bin/defender-*` invocation shims hide the `scripts/tools/*_cli.py`
+# path behind a bare token, so the path regex above no longer sees a main-loop
+# adapter call. Match the adapter shims by name too — every `defender-*` shim
+# EXCEPT the three non-adapter ones (invlang = corpus query, record-query =
+# gather's capture wrapper, data-source-debug = gather's helper), which the main
+# loop is allowed to run. Keep this exempt set in sync with defender/bin/.
+ADAPTER_SHIM_RE = re.compile(
+    r"\bdefender-(?!invlang\b)(?!record-query\b)(?!data-source-debug\b)[a-z][a-z-]*\b"
+)
 
 RAW_DENY_REASON = (
     "Blocked: the main loop must not read gather_raw/. Gather's returned "
@@ -119,7 +128,9 @@ def main() -> int:
     # gather's own queries, only the main loop's direct, unwrapped calls.
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
-        if ADAPTER_CLI_RE.search(cmd) and "record_query.py" not in cmd:
+        is_adapter = ADAPTER_CLI_RE.search(cmd) or ADAPTER_SHIM_RE.search(cmd)
+        wrapped = "record_query.py" in cmd or "defender-record-query" in cmd
+        if is_adapter and not wrapped:
             print(ADAPTER_DENY_REASON, file=sys.stderr)
             return 2
 

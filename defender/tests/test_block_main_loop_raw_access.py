@@ -212,3 +212,66 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
         "cwd": MAIN_CWD,
     })
     assert rc == 0
+
+
+# --- adapter clamp via the `defender-*` invocation shims -------------------
+# The bin/ shims hide the scripts/tools/*_cli.py path behind a bare token, so
+# the clamp must recognise the adapter shim names too.
+
+def test_denies_main_running_adapter_shim(monkeypatch, capsys):
+    mod = _load(monkeypatch)
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": "defender-elastic query 'x' --raw"},
+        "cwd": MAIN_CWD,
+    })
+    assert rc == 2
+    assert "must not run data-source CLIs" in capsys.readouterr().err
+
+
+def test_denies_main_adapter_shim_inside_bash_c(monkeypatch):
+    """The shim name is visible in the `bash -c` payload string, so the clamp
+    still fires on the wrapped form."""
+    mod = _load(monkeypatch)
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": "bash -c 'defender-host-state proc-tree web-1 --raw'"},
+        "cwd": MAIN_CWD,
+    })
+    assert rc == 2
+
+
+def test_allows_main_running_invlang_shim(monkeypatch):
+    """defender-invlang is corpus query, not an adapter — stays allowed."""
+    mod = _load(monkeypatch)
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": "defender-invlang enum types"},
+        "cwd": MAIN_CWD,
+    })
+    assert rc == 0
+
+
+def test_allows_main_record_query_shim_wrapping_adapter_shim(monkeypatch):
+    """defender-record-query is gather's audited wrapper; the wrapped
+    defender-<adapter> stays exempt."""
+    mod = _load(monkeypatch)
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": (
+            "defender-record-query --run-dir /r --lead l-001 --system elastic "
+            "--query-id elastic.q -- defender-elastic query 'x' --raw"
+        )},
+        "cwd": MAIN_CWD,
+    })
+    assert rc == 0
+
+
+def test_allows_subagent_running_adapter_shim(monkeypatch):
+    mod = _load(monkeypatch)
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": "defender-elastic query 'x' --raw"},
+        "cwd": SUBAGENT_CWD,
+    })
+    assert rc == 0

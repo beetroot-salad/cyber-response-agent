@@ -21,10 +21,7 @@
       "Edit(/workspace/.claude/worktrees/*/defender/skills/gather/queries/*/_draft/**)",
       "Write(/workspace/.claude/worktrees/*/defender/skills/*/_draft/**)",
       "Edit(/workspace/.claude/worktrees/*/defender/skills/*/_draft/**)",
-      "Bash(python3 defender/scripts/tools/*.py *)",
-      "Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/*.py *)",
-      "Bash(python3 /workspace/.claude/worktrees/*/defender/scripts/tools/*.py *)",
-      "Bash(python3 -m defender.skills.invlang.cli *)",
+      "Bash(defender-* *)",
       "Bash(jq *)",
       "Bash(ls *)",
       "Bash(cat *)",
@@ -63,6 +60,10 @@
       {
         "matcher": "Bash|Read|Grep|Glob",
         "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/approve_shim_invocations.py"
+          },
           {
             "type": "command",
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_main_loop_raw_access.py"
