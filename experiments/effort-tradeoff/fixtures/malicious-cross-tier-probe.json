@@ -1,0 +1,174 @@
+{
+  "alert_id": "4e507c5e83326d2f851484b66e077aab368b8cc2f6833cc57f376204fb2c927f",
+  "alert_timestamp": "2026-06-08T06:40:59.428Z",
+  "rule": {
+    "id": "v2-sshd-success-after-failures",
+    "name": "v2 sshd success after failures",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 65,
+    "tags": [
+      "v2",
+      "auth",
+      "ssh",
+      "correlation",
+      "brute-force-success"
+    ],
+    "description": "Successful sshd login on a host preceded by three or more failed password attempts on the same host within 10 minutes. The EQL sequence keys by host.name; same-user join would be more precise but the system.auth integration does not extract user.name from the sshd 'Failed password for X' message reliably across PAM and openssh log lines.",
+    "language": "eql",
+    "query": "sequence by host.name with maxspan=10m\n  [any where process.name == \"sshd\" and event.outcome == \"failure\"] with runs=3\n  [any where process.name == \"sshd\" and event.outcome == \"success\"]",
+    "index": [
+      "logs-system.auth-*"
+    ]
+  },
+  "reason": "authentication event with process sshd, source 172.18.0.21:53856, by  dev.dana on db-1 created high alert v2 sshd success after failures.",
+  "host": {
+    "hostname": "db-1",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "jammy",
+      "name": "Ubuntu",
+      "family": "debian",
+      "type": "linux",
+      "version": "22.04.5 LTS (Jammy Jellyfish)",
+      "platform": "ubuntu"
+    },
+    "containerized": false,
+    "ip": [
+      "172.18.0.2"
+    ],
+    "name": "db-1",
+    "mac": [
+      "EE-0C-31-AB-A9-7C"
+    ],
+    "architecture": "x86_64"
+  },
+  "process": {
+    "name": "sshd"
+  },
+  "event": {
+    "agent_id_status": "verified",
+    "ingested": "2026-06-08T06:36:30Z",
+    "timezone": "+00:00",
+    "action": "ssh_login",
+    "type": [
+      "info"
+    ],
+    "category": [
+      "authentication"
+    ],
+    "dataset": "system.auth",
+    "outcome": "failure",
+    "module": "system"
+  },
+  "ancestor_events": [
+    {
+      "agent": {
+        "name": "db-1",
+        "id": "2b2a12b8-d2e5-4878-adc3-7675981f4c51",
+        "type": "filebeat",
+        "ephemeral_id": "28326852-405e-4afd-81c9-f0f2724c8b51",
+        "version": "9.3.3"
+      },
+      "process": {
+        "name": "sshd"
+      },
+      "log": {
+        "file": {
+          "path": "/var/log/auth.log"
+        },
+        "offset": 3859438,
+        "syslog": {
+          "hostname": "db-1",
+          "appname": "sshd",
+          "procid": "1455083"
+        }
+      },
+      "elastic_agent": {
+        "id": "2b2a12b8-d2e5-4878-adc3-7675981f4c51",
+        "version": "9.3.3",
+        "snapshot": false
+      },
+      "source": {
+        "address": "172.18.0.21",
+        "port": 53856,
+        "ip": "172.18.0.21"
+      },
+      "message": "Failed password for invalid user dev.dana from 172.18.0.21 port 53856 ssh2",
+      "tags": [
+        "system-auth"
+      ],
+      "input": {
+        "type": "log"
+      },
+      "@timestamp": "2026-06-08T06:36:25.000Z",
+      "system": {
+        "auth": {
+          "ssh": {
+            "method": "password",
+            "event": "Failed"
+          }
+        }
+      },
+      "ecs": {
+        "version": "8.11.0"
+      },
+      "related": {
+        "hosts": [
+          "db-1"
+        ],
+        "ip": [
+          "172.18.0.21"
+        ],
+        "user": [
+          " dev.dana"
+        ]
+      },
+      "data_stream": {
+        "namespace": "default",
+        "type": "logs",
+        "dataset": "system.auth"
+      },
+      "host": {
+        "hostname": "db-1",
+        "os": {
+          "kernel": "6.8.0-71-generic",
+          "codename": "jammy",
+          "name": "Ubuntu",
+          "family": "debian",
+          "type": "linux",
+          "version": "22.04.5 LTS (Jammy Jellyfish)",
+          "platform": "ubuntu"
+        },
+        "containerized": false,
+        "ip": [
+          "172.18.0.2"
+        ],
+        "name": "db-1",
+        "mac": [
+          "EE-0C-31-AB-A9-7C"
+        ],
+        "architecture": "x86_64"
+      },
+      "event": {
+        "agent_id_status": "verified",
+        "ingested": "2026-06-08T06:36:30Z",
+        "timezone": "+00:00",
+        "kind": "event",
+        "action": "ssh_login",
+        "type": [
+          "info"
+        ],
+        "category": [
+          "authentication"
+        ],
+        "dataset": "system.auth",
+        "outcome": "failure"
+      },
+      "user": {
+        "name": " dev.dana"
+      }
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}

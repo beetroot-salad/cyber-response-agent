@@ -88,6 +88,7 @@ defender/
     host-query/         # per-system reference: visibility surface + execution
   scripts/
     tools/record_query.py      # gather capture wrapper: executes a query, writes the queries table (executed_queries.jsonl + by-ref payload)
+    workspace_map.py           # on-disk orientation injected into run.py:build_prompt (message 0)
     run_stats.py
     visualize_run.py           # post-run transcript renderer
   learning/             # offline learning loop — see §Learning loop below

@@ -2,7 +2,7 @@
 
 The oracle runs once per lead (``_loop_subagents.ClaudePrintSubagents.oracle`` fans
 the calls out concurrently). Each call sees only its own lead — sanitized
-``what_to_characterize`` + queries + one scrubbed sample event — and emits the lead's
+``what_to_summarize`` + queries + one scrubbed sample event — and emits the lead's
 predicted result as a signed diff over the baseline (``<standard environment noise>``):
 distinguishable events, an additive-noise marker, a subtractive ``<suppressed: …>``
 marker, or empty. This module owns the deterministic glue around those calls:
@@ -28,7 +28,7 @@ from _loop_validate import strip_yaml_fence
 
 
 # ---------------------------------------------------------------------------
-# what_to_characterize timestamp sanitizer
+# what_to_summarize timestamp sanitizer
 # ---------------------------------------------------------------------------
 
 _ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
@@ -37,7 +37,7 @@ _CLOCK_HM = re.compile(r"(?<![\d:])\d{1,2}:\d{2}Z\b")          # bare HH:MMZ
 
 
 def sanitize_wtc(item: str) -> str:
-    """Replace every absolute UTC clock time in a characterization item with ``<alert-time>``.
+    """Replace every absolute UTC clock time in a ``what_to_summarize`` item with ``<alert-time>``.
 
     A concrete clock time embedded in ``what_to_summarize`` (e.g. "the login at
     17:08:19Z") is copyable: the oracle lifts it into an event timestamp even when the
@@ -149,9 +149,10 @@ def _query_lines(lead) -> str:
 
 
 def build_lead_user_prompt(lead, story: str, sample_text: str) -> str:
-    """Assemble one lead's user message: story + sanitized characterization + queries +
-    scrubbed sample. The defender's prose ``goal`` is deliberately omitted (it drove
-    fabrication-to-fill); ``what_to_characterize`` is the sanitized ``what_to_summarize``.
+    """Assemble one lead's user message: story + sanitized ``what_to_summarize`` +
+    queries + scrubbed sample. The defender's prose ``goal`` is deliberately omitted
+    (it drove fabrication-to-fill); the oracle sees ``what_to_summarize`` with absolute
+    UTC timestamps relativized (see ``sanitize_wtc``).
 
     ``lead`` is a ``lead_repository.JoinedLead``.
     """
@@ -169,7 +170,7 @@ def build_lead_user_prompt(lead, story: str, sample_text: str) -> str:
         "## The actor's story\n\n"
         f"{story.rstrip()}\n\n"
         f"## This lead ({lead.lead_id}) — no goal given\n\n"
-        "what_to_characterize:\n"
+        "what_to_summarize:\n"
         f"{wtc_block}\n\n"
         "queries:\n"
         f"{_query_lines(lead)}\n\n"
