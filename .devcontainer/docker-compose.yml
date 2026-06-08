@@ -10,7 +10,7 @@ services:
         # Team-baseline pins. Override per-machine by setting these in
         # .devcontainer/.env (gitignored) — no tracked diff required.
         HCLOUD_VERSION: ${HCLOUD_VERSION:-1.62.2}
-        CODEX_VERSION: ${CODEX_VERSION:-0.128.0}
+        CODEX_VERSION: ${CODEX_VERSION:-0.137.0}
     container_name: response-devcontainer
     env_file:
       - ../.env
@@ -27,6 +27,12 @@ services:
       - ../:${HOST_WORKSPACE}
     networks:
       - response-network
+    # PID 1 must reap orphaned children. Without an init, `sleep infinity`
+    # becomes PID 1 and never reaps — every detached process (run.py
+    # launchers, backgrounded ssh/git/gh) leaks as a permanent zombie, and
+    # kill -0 / wait-on-pid liveness checks see zombies as still-alive.
+    # `init: true` injects tini as PID 1 to reap them.
+    init: true
     command: ["sleep", "infinity"]
 
   # Target Endpoint (generates realistic workload activity)
