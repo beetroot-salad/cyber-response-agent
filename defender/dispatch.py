@@ -1,7 +1,7 @@
 """Canonical renderer for the gather subagent dispatch prompt.
 
 The defender (LLM) constructs this prompt as free-form text in production;
-the hooks `extract_lead_metadata.py` and `inject_system_skill_description.py`
+the hooks `record_lead.py` and `inject_system_skill_description.py`
 then parse and augment it. This module is the Python source of truth for the
 same shape — used by the invocation test harness so tests and runtime can't
 drift.
@@ -9,8 +9,8 @@ drift.
 The post-hook prompt has three pieces, in order:
     1. A `Read defender/skills/gather/SKILL.md` instruction (so gather loads
        its body from disk; the dispatch doesn't inline it).
-    2. A fenced ```yaml block whose keys match what `extract_lead_metadata.py`
-       parses: `defender_dir`, `run_dir`, `position`, `system`, `goal`,
+    2. A fenced ```yaml block whose keys match what `record_lead.py`
+       parses: `defender_dir`, `run_dir`, `lead_id`, `system`, `goal`,
        `what_to_summarize`.
     3. A `## System {name} (auto-injected ...)` block — what
        `inject_system_skill_description.py` appends at PreToolUse time. The
@@ -41,7 +41,7 @@ def render_dispatch_yaml(
     *,
     defender_dir: Path | str,
     run_dir: Path | str,
-    position: int | str,
+    lead_id: str,
     system: str,
     goal: str,
     what_to_summarize: Sequence[str],
@@ -50,7 +50,7 @@ def render_dispatch_yaml(
     lines = [
         f"defender_dir: {defender_dir}",
         f"run_dir: {run_dir}",
-        f"position: {position}",
+        f"lead_id: {lead_id}",
         f"system: {system}",
         f"goal: {goal}",
         "what_to_summarize:",
@@ -64,7 +64,7 @@ def render_gather_dispatch(
     *,
     defender_dir: Path | str,
     run_dir: Path | str,
-    position: int | str,
+    lead_id: str,
     system: str,
     goal: str,
     what_to_summarize: Sequence[str],
@@ -79,7 +79,7 @@ def render_gather_dispatch(
     yaml_body = render_dispatch_yaml(
         defender_dir=defender_dir,
         run_dir=run_dir,
-        position=position,
+        lead_id=lead_id,
         system=system,
         goal=goal,
         what_to_summarize=what_to_summarize,

@@ -172,7 +172,7 @@ defender/learning/
   run.py                  # orchestrator
   actor.md                # actor prompt (sibling to defender/skills/, defender/agents/)
   judge.md                # judge prompt (locked once visibility A/B settles)
-  project_lead_sequence.py  # projector
+  lead_repository.py      # the two-table read/join surface
 ```
 
 Co-locating with the orchestrator (rather than under
@@ -309,10 +309,10 @@ discriminator-first prompt missed (synth-01-ssh's l-001 query-scope
 vs stated-goal mismatch). Run dir `/tmp/ab-exp3/`.
 
 **Reframe accepted.** Actor prompt at `defender/learning/actor.md`
-(three sections, projected lead_sequence input). Judge prompt at
+(three sections, actor-view input). Judge prompt at
 `defender/learning/judge.md` (encounter-first, bidirectional, lessons
-not edits). Projector at `defender/learning/project_lead_sequence.py`.
-Ready for the orchestrator stage.
+not edits). Two-table read/join surface at
+`defender/learning/lead_repository.py`. Ready for the orchestrator stage.
 
 ### N=3 variance check (4 fixtures × 3 trials, $2.35)
 

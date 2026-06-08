@@ -30,6 +30,21 @@ dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
 import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
+import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
+
+
+def _qr(query_id, params=None, *, seq=0, raw_ref=None, lead_id="l-001"):
+    return lr.QueryRow(
+        lead_id=lead_id, seq=seq, system="", verb="", query_id=query_id,
+        params=params or {}, raw_command="", exit_code=0,
+        payload_status="ok", payload_digest="", raw_ref=raw_ref,
+    )
+
+
+def _jl(lead_id="l-001", goal=None, wts=(), queries=()):
+    return lr.JoinedLead(
+        lead_id=lead_id, goal=goal, what_to_summarize=wts, queries=list(queries),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -93,20 +108,22 @@ def test_redact_exemplar_empty_sample_block_is_placeholder():
     assert "is empty" in out
 
 
-def test_lead_sample_text_does_not_overmatch_higher_positions(tmp_path: Path):
-    # Position 1's fallback glob must not pick up 10.json / 11.json. Lead 1 has no bare
-    # 1.json and an empty 1a.json; only 10.json carries a real skeleton — it must NOT win.
+def test_lead_sample_text_reads_only_its_lead_subdir(tmp_path: Path):
+    # Each lead's payloads live under gather_raw/{lead_id}/{seq}.json — the FK
+    # subdir scopes them, so reading l-001 can never pick up l-010's payload
+    # (the over-match the old flat {position}*.json glob risked is gone).
     gather = tmp_path / "gather_raw"
-    gather.mkdir()
-    real = (
-        "### Raw Sample Events\n\n```json\n"
-        '[{"host": "wrong-lead-10"}]\n```\n'
+    (gather / "l-010").mkdir(parents=True)
+    (gather / "l-010" / "0.json").write_text(
+        '### Raw Sample Events\n\n```json\n[{"host": "wrong-lead"}]\n```\n'
     )
-    (gather / "10.json").write_text(real)
-    (gather / "1a.json").write_text("### Raw Sample Events\n\n```json\n[]\n```\n")
-    out = oracle_mod.lead_sample_text(tmp_path, {"position": 1})
-    assert "wrong-lead-10" not in out
-    assert out.startswith("(")  # no real skeleton for position 1 -> placeholder
+    (gather / "l-001").mkdir(parents=True)
+    empty = gather / "l-001" / "0.json"
+    empty.write_text("### Raw Sample Events\n\n```json\n[]\n```\n")
+    lead = _jl("l-001", queries=[_qr("wazuh.x", seq=0, raw_ref=empty)])
+    out = oracle_mod.lead_sample_text(lead)
+    assert "wrong-lead" not in out
+    assert out.startswith("(")  # l-001's only payload is empty -> placeholder
 
 
 # ---------------------------------------------------------------------------
@@ -166,17 +183,19 @@ def test_parse_lead_events_rejects_missing_events_list():
         oracle_mod.parse_lead_events("projections: []\n", 0)
 
 
-def test_assemble_oracle_doc_preserves_position_order():
-    doc = oracle_mod.assemble_oracle_doc([(0, [{"a": 1}]), (1, []), (2, ["<x>"])])
-    assert [p["position"] for p in doc["projections"]] == [0, 1, 2]
+def test_assemble_oracle_doc_preserves_lead_order():
+    doc = oracle_mod.assemble_oracle_doc(
+        [("l-001", [{"a": 1}]), ("l-002", []), ("l-003", ["<x>"])]
+    )
+    assert [p["lead_id"] for p in doc["projections"]] == ["l-001", "l-002", "l-003"]
     assert doc["projections"][2]["events"] == ["<x>"]
 
 
 def test_assembled_doc_round_trips_through_validate_and_dump():
     doc = oracle_mod.assemble_oracle_doc(
-        [(0, [{"host": "h"}]), (1, ["<standard environment noise>"])]
+        [("l-001", [{"host": "h"}]), ("l-002", ["<standard environment noise>"])]
     )
-    validate_oracle_doc(doc, expected_positions=[0, 1])
+    validate_oracle_doc(doc, ["l-001", "l-002"])
     text = dump_oracle_doc(doc)
     assert "projections:" in text and "<standard environment noise>" in text
 
@@ -187,41 +206,34 @@ def test_assembled_doc_round_trips_through_validate_and_dump():
 
 
 def test_build_lead_user_prompt_drops_goal_and_sanitizes_wtc():
-    entry = {
-        "position": 0,
-        "lead_description": {
-            "goal": "SECRET defender intent that must not leak",
-            "what_to_summarize": ["the login at 2026-06-02T17:08:19Z"],
-        },
-        "queries": [{"id": "wazuh.auth-events", "params": {"host": "h"}}],
-    }
-    prompt = oracle_mod.build_lead_user_prompt(entry, "the story", "SAMPLE")
+    lead = _jl(
+        "l-001",
+        goal="SECRET defender intent that must not leak",
+        wts=["the login at 2026-06-02T17:08:19Z"],
+        queries=[_qr("wazuh.auth-events", {"host": "h"})],
+    )
+    prompt = oracle_mod.build_lead_user_prompt(lead, "the story", "SAMPLE")
     assert "SECRET defender intent" not in prompt          # goal omitted
     assert "<alert-time>" in prompt and "17:08:19Z" not in prompt  # wtc sanitized
     assert "wazuh.auth-events" in prompt and "the story" in prompt and "SAMPLE" in prompt
 
 
 def test_build_lead_user_prompt_handles_scalar_and_malformed_wtc():
-    # A scalar what_to_summarize must not be iterated char-by-char, and a non-dict
-    # lead_description / None params must not crash.
+    # A scalar what_to_summarize must not be iterated char-by-char, and None
+    # params must not crash.
     scalar = oracle_mod.build_lead_user_prompt(
-        {"position": 0, "lead_description": {"what_to_summarize": "auth events by host"},
-         "queries": [{"id": "wazuh.x", "params": None}]},
+        _jl("l-001", wts="auth events by host", queries=[_qr("wazuh.x", None)]),
         "story", "SAMPLE",
     )
     assert "auth events by host" in scalar
     assert "\n- a\n- u\n- t" not in scalar           # not split into characters
     assert "params: {}" in scalar                     # None params rendered as {}
-    # non-dict lead_description / non-list wtc items: no crash, no garbage
-    oracle_mod.build_lead_user_prompt(
-        {"position": 1, "lead_description": "oops", "queries": []}, "story", "S")
-    oracle_mod.build_lead_user_prompt(
-        {"position": 2, "lead_description": {"what_to_summarize": [42, {"x": 1}]},
-         "queries": []}, "story", "S")
+    # non-list wtc items (non-strings filtered out): no crash, no garbage
+    oracle_mod.build_lead_user_prompt(_jl("l-002", wts=[42, {"x": 1}]), "story", "S")
 
 
 def test_dump_oracle_doc_preserves_unicode():
-    doc = oracle_mod.assemble_oracle_doc([(0, [{"user": "Bjørn"}])])
+    doc = oracle_mod.assemble_oracle_doc([("l-001", [{"user": "Bjørn"}])])
     text = dump_oracle_doc(doc)
     assert "Bjørn" in text and "\\xF8" not in text
 
@@ -231,120 +243,120 @@ def test_dump_oracle_doc_preserves_unicode():
 # ---------------------------------------------------------------------------
 
 
-def _ok_doc(positions=(0, 1)):
+def _ok_doc(lead_ids=("l-001", "l-002")):
     return {
         "projections": [
-            {"position": p, "events": [{"data_source": "logs-falco.alerts"}]}
-            for p in positions
+            {"lead_id": lid, "events": [{"data_source": "logs-falco.alerts"}]}
+            for lid in lead_ids
         ],
     }
 
 
 def test_validate_oracle_doc_accepts_well_formed():
     doc = _ok_doc()
-    out = validate_oracle_doc(doc, expected_positions=[0, 1])
+    out = validate_oracle_doc(doc, ["l-001", "l-002"])
     assert out is doc
 
 
 def test_validate_oracle_doc_accepts_empty_events_list():
     doc = _ok_doc()
     doc["projections"][1]["events"] = []
-    validate_oracle_doc(doc, expected_positions=[0, 1])
+    validate_oracle_doc(doc, ["l-001", "l-002"])
 
 
 def test_validate_oracle_doc_accepts_marker_strings():
     doc = _ok_doc()
     doc["projections"][0]["events"] = ["<standard environment noise>"]
     doc["projections"][1]["events"] = ["<suppressed: cleared the auth log>"]
-    validate_oracle_doc(doc, expected_positions=[0, 1])
+    validate_oracle_doc(doc, ["l-001", "l-002"])
 
 
 def test_validate_oracle_doc_accepts_projections_only():
-    validate_oracle_doc({"projections": []}, expected_positions=[])
+    validate_oracle_doc({"projections": []}, [])
 
 
 def test_validate_oracle_doc_rejects_unrecognized_marker_string():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = ["this lead is silent"]
     with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_empty_string_event():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = [""]
     with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_marker_mixed_with_event_mapping():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = [{"host": "h"}, "<suppressed: cleared log>"]
     with pytest.raises(LoopError, match="must be the only event"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_duplicate_markers():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = [
         "<standard environment noise>", "<standard environment noise>"
     ]
     with pytest.raises(LoopError, match="must be the only event"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_non_mapping():
     with pytest.raises(LoopError, match="did not parse to a mapping"):
-        validate_oracle_doc(["projections"], expected_positions=[0])
+        validate_oracle_doc(["projections"], ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_extra_top_level_keys():
     # any non-`projections` top-level key is rejected.
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["uncovered"] = []
     with pytest.raises(LoopError, match="exactly one top-level key"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_count_mismatch():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     with pytest.raises(LoopError, match="projections count"):
-        validate_oracle_doc(doc, expected_positions=[0, 1])
+        validate_oracle_doc(doc, ["l-001", "l-002"])
 
 
-def test_validate_oracle_doc_rejects_position_mismatch():
-    doc = _ok_doc(positions=(0, 2))
-    with pytest.raises(LoopError, match=r"projection\[1\]\.position"):
-        validate_oracle_doc(doc, expected_positions=[0, 1])
+def test_validate_oracle_doc_rejects_lead_id_mismatch():
+    doc = _ok_doc(lead_ids=("l-001", "l-003"))
+    with pytest.raises(LoopError, match=r"projection\[1\]\.lead_id"):
+        validate_oracle_doc(doc, ["l-001", "l-002"])
 
 
 def test_validate_oracle_doc_rejects_missing_projection_keys():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     del doc["projections"][0]["events"]
     with pytest.raises(LoopError, match="missing keys"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_unexpected_projection_keys():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["coverage"] = "covered"
     with pytest.raises(LoopError, match="unexpected keys"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_non_mapping_non_marker_event():
     # An event is a mapping or a marker string; an int (or any other scalar) is neither.
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = [5]
     with pytest.raises(LoopError, match=r"events\[0\] is not a mapping or marker string"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 def test_validate_oracle_doc_rejects_events_not_list():
-    doc = _ok_doc(positions=(0,))
+    doc = _ok_doc(lead_ids=("l-001",))
     doc["projections"][0]["events"] = {"event": "a"}
     with pytest.raises(LoopError, match="events is not a list"):
-        validate_oracle_doc(doc, expected_positions=[0])
+        validate_oracle_doc(doc, ["l-001"])
 
 
 # ---------------------------------------------------------------------------

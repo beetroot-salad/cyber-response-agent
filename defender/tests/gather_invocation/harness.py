@@ -175,7 +175,7 @@ def run_fixture(
     prompt = render_gather_dispatch(
         defender_dir=sandbox,
         run_dir=run_dir,
-        position=params.get("position", 0),
+        lead_id=params.get("lead_id", "l-001"),
         system=system,
         goal=params["goal"],
         what_to_summarize=params["what_to_summarize"],

@@ -15,9 +15,10 @@ import lead_neighbors
 
 def _lead(query_id: str, params: dict | None = None) -> "lead_author.ExecutedLead":
     return lead_author.ExecutedLead(
-        position=0, query_index=0, is_multi_query=False, entry_index=0,
+        lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
         query_id=query_id, params=params or {}, goal_text="probe the thing",
-        what_to_summarize=(), result_ref=Path("x.json"), sidecar_path=Path("x.observations.json"),
+        what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
+        payload_status="ok", payload_digest="2 bytes, 1 line(s)",
     )
 
 

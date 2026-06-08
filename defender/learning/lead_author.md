@@ -26,7 +26,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
     ],
     "invocations": [
       {
-        "position": 0,
+        "lead_id": "l-001",
         "query_index": 0,
         "goal_text": "...",
         "what_to_summarize": ["..."],
@@ -34,7 +34,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
         "rendered_query": "<the literal query body, params substituted>",
         "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
         "payload_digest": "847 events; 12 distinct dstuser; ...",
-        "result_refs": ["gather_raw/0.json"],
+        "result_refs": ["gather_raw/l-001/0.json"],
         "composite_kind": "atomic",         // atomic|sweep|join|baseline_shift|drill_down
         "co_dispatched_with": []            // sibling template paths in same lead
       }

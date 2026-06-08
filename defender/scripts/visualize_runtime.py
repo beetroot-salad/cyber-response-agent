@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -248,21 +249,33 @@ def _render_gather_call(i: int, call: dict, gather_dir: Path, cost: float = 0.0)
         )
     else:
         inner += '<div class="empty">(no result captured)</div>'
-    inner += _render_gather_raw_payloads(i, gather_dir)
+    m = _LEAD_ID_RE.search(prompt)
+    inner += _render_gather_raw_payloads(m.group(1) if m else None, gather_dir)
     return block("subcall gather", title, inner, anchor=f"gather-{i}")
 
 
-def _render_gather_raw_payloads(i: int, gather_dir: Path) -> str:
-    if not gather_dir.is_dir():
+# Pull the lead_id out of the (model-authored) dispatch YAML. Tolerate leading
+# indentation: the dispatch block is free-form text, so the `lead_id:` key may
+# be indented even though the canonical renderer emits it flush-left. The id
+# body mirrors hooks/record_lead.py's LEAD_ID_RE — keep in sync.
+_LEAD_ID_RE = re.compile(r"^[ \t]*lead_id:\s*(l-[A-Za-z0-9]+)", re.MULTILINE)
+
+
+def _render_gather_raw_payloads(lead_id: str | None, gather_dir: Path) -> str:
+    """Render the by-ref payloads for one dispatched lead.
+
+    Payloads live under ``gather_raw/{lead_id}/{seq}.json`` — the FK subdir
+    scopes a lead's outputs, so we list that lead's directory directly (no
+    prefix-matching against a flat namespace).
+    """
+    if not lead_id:
+        return ""
+    lead_dir = gather_dir / lead_id
+    if not lead_dir.is_dir():
         return ""
     out = ""
-    for entry in sorted(gather_dir.iterdir()):
+    for entry in sorted(lead_dir.iterdir()):
         if not entry.is_file() or entry.suffix not in (".json", ".txt"):
-            continue
-        stem = entry.stem
-        # match leading position prefix (e.g. "0.json", "0-1.json", "0a.json")
-        if not (stem == str(i) or stem.startswith(
-                (f"{i}-", f"{i}.", f"{i}a", f"{i}b"))):
             continue
         try:
             raw = entry.read_text()
@@ -270,7 +283,7 @@ def _render_gather_raw_payloads(i: int, gather_dir: Path) -> str:
                 raw = json.dumps(json.loads(raw), indent=2)
         except (OSError, json.JSONDecodeError):
             raw = "<unreadable>"
-        out += block("gather-raw", f"gather_raw/{entry.name}", pre_text(raw))
+        out += block("gather-raw", f"gather_raw/{lead_id}/{entry.name}", pre_text(raw))
     return out
 
 
@@ -281,9 +294,9 @@ def _render_gather_raw_payloads(i: int, gather_dir: Path) -> str:
 
 def render_runtime_lead_sequence(run_dir: Path) -> str:
     raw = ""
-    p = run_dir / "lead_sequence.yaml"
+    p = run_dir / "executed_queries.jsonl"
     if p.is_file():
-        raw = block("artifact", "lead_sequence.yaml (raw)", pre_text(p.read_text()))
+        raw = block("artifact", "executed_queries.jsonl (queries table)", pre_text(p.read_text()))
     return f"""
 <section id="sec-lead-sequence" class="stage stage-defender">
   <h2>§ Lead sequence</h2>

@@ -128,13 +128,13 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ORACLE_PROJECTION_KEYS = {"position", "events"}
+_ORACLE_PROJECTION_KEYS = {"lead_id", "events"}
 
 
-def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
+def validate_oracle_doc(doc: Any, expected_lead_ids: list[str]) -> dict[str, Any]:
     """Validate the assembled per-lead oracle output.
 
-    Shape: a single ``projections`` key — one ``{position, events}`` per lead position, in
+    Shape: a single ``projections`` key — one ``{lead_id, events}`` per lead, in
     order. ``events`` is a list of event mappings, OR a single-item marker list (the
     ``<standard environment noise>`` / ``<suppressed: …>`` baseline-diff strings), OR empty.
     The validator stays structural; marker wording and diff semantics are the oracle
@@ -150,13 +150,13 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
     projections = doc["projections"]
     if not isinstance(projections, list):
         raise LoopError("oracle `projections` is not a list")
-    if len(projections) != len(expected_positions):
+    if len(projections) != len(expected_lead_ids):
         raise LoopError(
             f"oracle projections count {len(projections)} != "
-            f"lead_sequence positions count {len(expected_positions)}"
+            f"lead count {len(expected_lead_ids)}"
         )
     for i, p in enumerate(projections):
-        _validate_oracle_projection(i, p, expected_positions[i])
+        _validate_oracle_projection(i, p, expected_lead_ids[i])
     return doc
 
 
@@ -193,7 +193,7 @@ def _is_baseline_diff_marker(s: str) -> bool:
     return s == _BASELINE_NOISE_MARKER or (s.startswith("<suppressed:") and s.endswith(">"))
 
 
-def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
+def _validate_oracle_projection(i: int, p: Any, expected_lead_id: str) -> None:
     if not isinstance(p, dict):
         raise LoopError(f"projection[{i}] is not a mapping")
     missing = _ORACLE_PROJECTION_KEYS - set(p.keys())
@@ -202,10 +202,10 @@ def _validate_oracle_projection(i: int, p: Any, expected_position: int) -> None:
     extra = set(p.keys()) - _ORACLE_PROJECTION_KEYS
     if extra:
         raise LoopError(f"projection[{i}] has unexpected keys: {sorted(extra)}")
-    if p["position"] != expected_position:
+    if p["lead_id"] != expected_lead_id:
         raise LoopError(
-            f"projection[{i}].position={p['position']!r} != "
-            f"expected {expected_position!r}"
+            f"projection[{i}].lead_id={p['lead_id']!r} != "
+            f"expected {expected_lead_id!r}"
         )
     events = p["events"]
     if not isinstance(events, list):

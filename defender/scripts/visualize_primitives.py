@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import sys
 from pathlib import Path
 
 try:
@@ -22,6 +23,12 @@ except ImportError:  # pragma: no cover — yaml is in defender deps
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# The two-table read/join surface lives in defender/learning/; add it to the
+# path so the visualizers render from `joined()` rather than the retired
+# lead_sequence.yaml projection.
+sys.path.insert(0, str(REPO_ROOT / "defender" / "learning"))
+import lead_repository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -268,43 +275,29 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
 
 
 def render_lead_sequence_compact(run_dir: Path) -> str:
-    """Compact lead list — position, goal one-liner, queries[].id + params.
+    """Compact lead list — lead_id, goal one-liner, queries[].id + params.
 
-    This is the judge's view of "what did the defender measure?". Raw
-    payloads stay collapsed under § Runtime.
+    This is the judge's view of "what did the defender measure?", rendered
+    from the joined two-table surface. Raw payloads stay collapsed under
+    § Runtime.
     """
-    p = run_dir / "lead_sequence.yaml"
-    data = load_yaml(p)
-    if not isinstance(data, dict):
-        return '<div class="empty">no lead_sequence.yaml</div>'
-    entries = data.get("entries") or []
-    if not entries:
-        return '<div class="empty">lead_sequence has no entries</div>'
+    leads = lead_repository.joined(run_dir)
+    if not leads:
+        return '<div class="empty">no leads recorded</div>'
     rows: list[str] = []
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        pos = e.get("position", "?")
-        ld = e.get("lead_description") or {}
-        goal = ld.get("goal", "") if isinstance(ld, dict) else ""
-        queries = e.get("queries") or []
-        q_html = ""
-        if isinstance(queries, list):
-            q_rows: list[str] = []
-            for q in queries:
-                if not isinstance(q, dict):
-                    continue
-                qid = q.get("id", "?")
-                params = q.get("params") or {}
-                params_str = json.dumps(params, ensure_ascii=False) if params else ""
-                q_rows.append(
-                    f'<div class="lead-query"><span class="qid">{esc(qid)}</span> '
-                    f'<span class="qparams">{esc(params_str)}</span></div>'
-                )
-            q_html = "".join(q_rows)
+    for jl in leads:
+        goal = jl.goal or ""
+        q_rows: list[str] = []
+        for q in jl.queries:
+            params_str = json.dumps(q.params, ensure_ascii=False) if q.params else ""
+            q_rows.append(
+                f'<div class="lead-query"><span class="qid">{esc(q.query_id or "?")}</span> '
+                f'<span class="qparams">{esc(params_str)}</span></div>'
+            )
+        q_html = "".join(q_rows)
         rows.append(
             f'<div class="lead-row">'
-            f'<div class="lead-head"><span class="lead-pos">#{esc(str(pos))}</span></div>'
+            f'<div class="lead-head"><span class="lead-pos">{esc(jl.lead_id)}</span></div>'
             f'<div class="lead-body">'
             f'<div class="lead-goal">{esc(goal)}</div>'
             f'{q_html}'

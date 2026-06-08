@@ -36,7 +36,7 @@ def test_build_settings_file_substitutes_placeholders(run_mod):
         # the venv python and the absolute hook script path.
         cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         assert sys.executable in cmd
-        assert "extract_lead_metadata.py" in cmd
+        assert "record_lead.py" in cmd
         # Matcher must cover both Task and Agent — Claude Code dispatches
         # subagents under either name and the regex needs alternation.
         matcher = data["hooks"]["PreToolUse"][0]["matcher"]

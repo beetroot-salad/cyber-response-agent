@@ -4,18 +4,18 @@
 The gather subagent invokes this instead of redirecting a system-CLI's
 stdout itself:
 
-    gather_exec.py --run-dir {R} --lead {L} \
+    record_query.py --run-dir {R} --lead {L} \
         --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
         python3 .../cmdb_cli.py host-lookup web-1 --raw
 
 It runs the inner command, captures stdout to a canonical per-lead path,
-and appends an executed-query record to ``{R}/executed_queries.jsonl``.
-The inner command's stdout/stderr/exit code pass straight through, so the
-subagent still sees the result for its reasoning, and the wrapper reports
-the raw payload path it wrote on stderr.
+and appends an executed-query record (the queries table) to
+``{R}/executed_queries.jsonl``. The inner command's stdout/stderr/exit
+code pass straight through, so the subagent still sees the result for its
+reasoning, and the wrapper reports the raw payload path it wrote on stderr.
 
 It retires the two brittle model-authored steps it replaces: the redirect
-to a model-chosen ``gather_raw/{position}.json`` (Bug #1: filename drift →
+to a model-chosen ``gather_raw/{lead_id}.json`` (Bug #1: filename drift →
 silent drop) and the post-hoc, free-floating ``queries[]`` sidecar id
 (Bug #2: mislabel → catalog miss). Both `--system` and `--query-id` come
 from the dispatch contract — `system` is the harness-injected lead system,
@@ -25,9 +25,9 @@ command and its captured payload, rather than reconstructed from a fragile
 per-CLI argv grammar — so the wrapper stays portable across whatever system
 CLIs are onboarded, with no hardcoded system/verb roster.
 
-The per-lead group id ``L`` comes from the dispatch (the integer lead
-position; see ``hooks/extract_lead_metadata.py``); it is the address
-namespace for this lead's payloads and the co-dispatch group key.
+The per-lead group id ``L`` comes from the dispatch (the ``:L`` invlang row
+id, e.g. ``l-001``; see ``hooks/record_lead.py``); it is the address
+namespace for this lead's payloads and the queries-table FK (``lead_id``).
 
 Exit code: the inner command's exit code (or 2 on wrapper usage error).
 """
@@ -37,10 +37,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+# A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
+# and a gather_raw/ path segment. Grammar mirrors hooks/record_lead.py and the
+# invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
+LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 # Size safety: a query that over-returns (server-side filter didn't bind,
 # broad window, high-cardinality index) would otherwise dump its whole
@@ -143,14 +149,14 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     records = _find_records(stdout)
     lines: list[str] = []
     if records is not None:
-        lines.append(f"[gather_exec] {len(records)} records, {size} bytes — pass-through truncated")
+        lines.append(f"[record_query] {len(records)} records, {size} bytes — pass-through truncated")
         for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
             sample = json.dumps(rec, default=str)
             if len(sample) > _SAMPLE_MAX_CHARS:
                 sample = sample[:_SAMPLE_MAX_CHARS] + "…"
             lines.append(f"sample[{idx}]: {sample}")
     else:
-        lines.append(f"[gather_exec] {size} bytes — pass-through truncated")
+        lines.append(f"[record_query] {size} bytes — pass-through truncated")
         lines.append(stdout[:_SAMPLE_MAX_CHARS * PASSTHROUGH_SAMPLE_COUNT] + "…")
     if payload_rel:
         abs_payload = run_dir / payload_rel
@@ -163,10 +169,34 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     return "\n".join(lines) + "\n"
 
 
-def _next_seq(lead_dir: Path) -> int:
-    if not lead_dir.is_dir():
+def _next_seq(run_dir: Path, lead: str) -> int:
+    """Next per-lead seq = number of rows already recorded for this lead in the
+    queries table.
+
+    Counting rows (not payload files on disk) keeps seq monotonic even when a
+    payload write failed: that query still appends a row with ``payload_path:
+    null``, so the next query won't reuse the seq and collide on
+    ``(lead_id, seq)``.
+    """
+    log = run_dir / "executed_queries.jsonl"
+    if not log.is_file():
         return 0
-    return sum(1 for p in lead_dir.glob("*.json"))
+    try:
+        text = log.read_text()
+    except OSError:
+        return 0
+    n = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(rec, dict) and rec.get("lead_id") == lead:
+            n += 1
+    return n
 
 
 def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -178,7 +208,7 @@ def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
 
 def main(argv: list[str]) -> int:
     wrapper_argv, inner = _split_argv(argv)
-    parser = argparse.ArgumentParser(prog="gather_exec.py")
+    parser = argparse.ArgumentParser(prog="record_query.py")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--lead", required=True)
     # Both come from the dispatch contract: --system is the harness-injected
@@ -191,18 +221,27 @@ def main(argv: list[str]) -> int:
     except SystemExit:
         return 2
     if not inner:
-        print("gather_exec.py: nothing after `--` to execute", file=sys.stderr)
+        print("record_query.py: nothing after `--` to execute", file=sys.stderr)
         return 2
 
     run_dir = Path(ns.run_dir)
     lead = ns.lead
+    # Validate the FK before it becomes a path segment: an unvalidated --lead
+    # (traversal / absolute) would escape gather_raw/ and break the join.
+    # Mirrors hooks/record_lead.py's claim-side guard.
+    if not LEAD_ID_RE.match(lead):
+        print(
+            f"record_query.py: invalid --lead {lead!r} (expected an `l-` row id)",
+            file=sys.stderr,
+        )
+        return 2
     query_id = ns.query_id
     verb = query_id.split(".", 1)[1] if "." in query_id else query_id
 
     proc = subprocess.run(inner, capture_output=True, text=True)
 
     lead_dir = run_dir / "gather_raw" / lead
-    seq = _next_seq(lead_dir)
+    seq = _next_seq(run_dir, lead)
     payload_path = lead_dir / f"{seq}.json"
     payload_rel = None
     try:
@@ -210,10 +249,10 @@ def main(argv: list[str]) -> int:
         payload_path.write_text(proc.stdout)
         payload_rel = str(payload_path.relative_to(run_dir))
     except OSError as e:
-        print(f"gather_exec.py: could not write payload: {e}", file=sys.stderr)
+        print(f"record_query.py: could not write payload: {e}", file=sys.stderr)
 
     record = {
-        "lead": lead,
+        "lead_id": lead,
         "seq": seq,
         "system": ns.system,
         "verb": verb,
@@ -230,7 +269,7 @@ def main(argv: list[str]) -> int:
         with log.open("a") as fh:  # append is atomic for one short line
             fh.write(json.dumps(record) + "\n")
     except OSError as e:
-        print(f"gather_exec.py: could not append record: {e}", file=sys.stderr)
+        print(f"record_query.py: could not append record: {e}", file=sys.stderr)
 
     # Pass the result through for the subagent's reasoning, but cap the
     # in-context view: an oversized payload is replaced by count + samples +
@@ -243,7 +282,7 @@ def main(argv: list[str]) -> int:
         sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if payload_rel:
-        print(f"[gather_exec] raw payload: {payload_rel}", file=sys.stderr)
+        print(f"[record_query] raw payload: {payload_rel}", file=sys.stderr)
     return proc.returncode
 
 

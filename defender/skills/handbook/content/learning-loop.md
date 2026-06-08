@@ -16,8 +16,8 @@ the *why* — the RL / evolutionary-algorithms framing — read
 1. **Normalize** — read and validate the disposition from `report.md`
    frontmatter (`benign | inconclusive | malicious`); it selects which
    direction(s) run (see §Two directions).
-2. **Project** — turn `lead_sequence.yaml` into an actor-facing view of what
-   the investigation looked at.
+2. **Project** — turn the queries table into an actor-facing view (via
+   `lead_repository.actor_view`) of what the investigation looked at.
 3. **Actor** (`actor.md`, gray-box adversarial) — given the alert + lead set
    + an `actor_archetype` (`internal` / `external`) + a `mitre_menu` (a
    12-technique subset sampled from `mitre_corpus.py`), writes a candidate

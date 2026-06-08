@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from visualize_primitives import (
+from visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
     REPO_ROOT,
     block,
     esc,
+    lead_repository,
     load_yaml,
     pre_text,
     render_lead_sequence_compact,
@@ -67,12 +68,7 @@ def render_judge_finding(idx: int, f: dict, anchor_prefix: str = "finding") -> s
 
 
 def _lead_count(run_dir: Path) -> int:
-    data = load_yaml(run_dir / "lead_sequence.yaml")
-    if isinstance(data, dict):
-        e = data.get("entries") or []
-        if isinstance(e, list):
-            return len(e)
-    return 0
+    return len(lead_repository.joined(run_dir))
 
 
 def render_judge_defender_summary(run_dir: Path) -> str:
@@ -320,7 +316,7 @@ def render_judge_raw_bundle(run_id: str) -> str:
     if not learn_dir.is_dir():
         return ""
     panels: list[str] = []
-    for fname in ("actor_input.yaml", "source_refs.yaml", "lead_sequence.yaml", "alert.json"):
+    for fname in ("actor_input.yaml", "source_refs.yaml", "executed_queries.jsonl", "alert.json"):
         p = learn_dir / fname
         if p.is_file():
             panels.append(block("artifact", fname, pre_text(p.read_text())))
