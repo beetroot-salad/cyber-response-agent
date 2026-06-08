@@ -1,0 +1,6 @@
+{"run_id": "xt-mal-high", "effort": "high", "fixture": "mal", "harness_start": "2026-06-08T06:48:24.581693119Z", "harness_end": "2026-06-08T07:06:43.032140120Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-mal-high"}
+{"run_id": "xt-ben-high", "effort": "high", "fixture": "ben", "harness_start": "2026-06-08T07:06:43.066215846Z", "harness_end": "2026-06-08T07:27:14.109010874Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-ben-high"}
+{"run_id": "xt-mal-medium", "effort": "medium", "fixture": "mal", "harness_start": "2026-06-08T07:27:14.190138414Z", "harness_end": "2026-06-08T07:46:44.748199689Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-mal-medium"}
+{"run_id": "xt-ben-medium", "effort": "medium", "fixture": "ben", "harness_start": "2026-06-08T07:46:44.818832913Z", "harness_end": "2026-06-08T08:04:15.260272623Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-ben-medium"}
+{"run_id": "xt-mal-low", "effort": "low", "fixture": "mal", "harness_start": "2026-06-08T08:04:15.311076719Z", "harness_end": "2026-06-08T08:16:07.986478530Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-mal-low"}
+{"run_id": "xt-ben-low", "effort": "low", "fixture": "ben", "harness_start": "2026-06-08T08:16:08.046888590Z", "harness_end": "2026-06-08T08:32:35.893210058Z", "rc": 0, "run_dir": "/tmp/defender-runs-v2/xt-ben-low"}
