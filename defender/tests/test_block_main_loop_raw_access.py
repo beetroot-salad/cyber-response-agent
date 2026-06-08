@@ -275,3 +275,36 @@ def test_allows_subagent_running_adapter_shim(monkeypatch):
         "cwd": SUBAGENT_CWD,
     })
     assert rc == 0
+
+
+# --- gather payload tools may name gather_raw paths even at REPO_ROOT --------
+# data-source-debug receives a gather_raw payload path as input (reading it IS
+# its job); the RAW_MARKER clamp must not deny it just because "gather_raw"
+# appears in the command.
+
+def test_allows_data_source_debug_with_gather_raw_payload_in_main(monkeypatch):
+    mod = _load(monkeypatch)
+    for cmd in (
+        "defender-data-source-debug --defender-dir /d --system elastic "
+        "--payload /tmp/defender-runs-v2/r/gather_raw/l-004/0.json --question 'why empty'",
+        "python3 defender/scripts/tools/data_source_debug.py "
+        "--payload /tmp/r/gather_raw/l-004/0.json",
+    ):
+        rc = _run(mod, monkeypatch, {
+            "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": MAIN_CWD,
+        })
+        assert rc == 0, cmd
+
+
+def test_still_denies_main_loop_reading_gather_raw_directly(monkeypatch):
+    """The exemption must not loosen the real clamp: a bare cat/cp/Read of a
+    gather_raw payload from the main loop stays blocked."""
+    mod = _load(monkeypatch)
+    for cmd in (
+        "cat /tmp/r/gather_raw/l-004/0.json",
+        "cp /tmp/r/gather_raw/l-004/0.json /tmp/x.json",
+    ):
+        rc = _run(mod, monkeypatch, {
+            "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": MAIN_CWD,
+        })
+        assert rc == 2, cmd

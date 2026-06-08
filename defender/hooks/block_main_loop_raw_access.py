@@ -60,8 +60,17 @@ ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
 # EXCEPT the three non-adapter ones (invlang = corpus query, record-query =
 # gather's capture wrapper, data-source-debug = gather's helper), which the main
 # loop is allowed to run. Keep this exempt set in sync with defender/bin/.
+# The data-source ADAPTER shims (the `*_cli.py` wrappers) — the main loop must
+# not run these directly. Enumerated explicitly (NOT `defender-[a-z-]*`) because
+# an open pattern also matches `defender-runs` in the runs-base path
+# `/tmp/defender-runs-v2/...` and `defender-dir` in `--defender-dir`, both of
+# which appear in legitimate gather commands. Keep in sync with defender/bin/:
+# the non-adapter shims (invlang, record-query, data-source-debug) are excluded.
+# `(?<![-\w/])` anchors the match to command position, not a flag/path substring.
+_ADAPTER_SHIMS = ("elastic", "cmdb", "identity", "host-state",
+                  "threat-intel", "change-mgmt", "ticket")
 ADAPTER_SHIM_RE = re.compile(
-    r"\bdefender-(?!invlang\b)(?!record-query\b)(?!data-source-debug\b)[a-z][a-z-]*\b"
+    r"(?<![-\w/])defender-(?:" + "|".join(_ADAPTER_SHIMS) + r")\b"
 )
 
 RAW_DENY_REASON = (
@@ -119,8 +128,22 @@ def main() -> int:
     tool_input = hook_data.get("tool_input") or {}
 
     if RAW_MARKER in _read_target(tool_name, tool_input):
-        print(RAW_DENY_REASON, file=sys.stderr)
-        return 2
+        # Exempt gather's own payload tools. data-source-debug RECEIVES a
+        # gather_raw payload path as input (reading it is its whole job) and
+        # record_query WRITES there; both legitimately name gather_raw paths on
+        # the command line. The clamp targets the main loop spot-checking raw
+        # payloads (Read/Grep/Glob, or bash cat/jq/cp on the file), not these
+        # tools — without this, a `defender-data-source-debug --payload
+        # .../gather_raw/...` call is wrongly denied (surfacing as a confusing
+        # "hook error") whenever the cwd discriminator flags the subagent as the
+        # main session. Mirrors the record_query exemption on the adapter clamp.
+        cmd = str(tool_input.get("command", "")) if tool_name == "Bash" else ""
+        gather_payload_tool = any(t in cmd for t in (
+            "data_source_debug", "defender-data-source-debug",
+            "record_query", "defender-record-query"))
+        if not gather_payload_tool:
+            print(RAW_DENY_REASON, file=sys.stderr)
+            return 2
 
     # Adapter-CLI clamp. Exempt commands wrapped in record_query.py: that
     # wrapper is gather's path (and audits the query), so this stays robust
