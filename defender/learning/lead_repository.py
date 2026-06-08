@@ -32,6 +32,7 @@ boundary, not field-by-field stripping.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,11 @@ import yaml
 GATHER_DIR = "gather_raw"
 QUERIES_LOG = "executed_queries.jsonl"
 _LEAD_SUFFIX = ".lead.json"
+# A `:L` row id: `l-` + alphanumerics. Used to filter the parsed companion's
+# findings down to actual lead rows — the parser also surfaces `:R` resolution
+# rows whose "id" is a comma-joined lead *reference* (e.g. `l-001,l-002`), which
+# is not a lead id and must not be treated as one.
+_LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 
 def _as_int(value, default: int = 0) -> int:
@@ -396,7 +402,20 @@ def narration_crosscheck_from_run(run_dir: Path) -> dict:
 
     text = (run_dir / "investigation.md").read_text()
     companion, _ = parse_dense_companion(text)
-    l_ids = {
-        f["id"] for f in companion.get("findings", []) if isinstance(f, dict) and f.get("id")
+    return narration_crosscheck(run_dir, _lead_ids_from_companion(companion))
+
+
+def _lead_ids_from_companion(companion: dict) -> set[str]:
+    """The `:L` row ids from a parsed companion, filtered to the lead-id grammar.
+
+    The parser also surfaces `:R` resolution rows under `findings`, whose "id"
+    is a comma-joined lead *reference* (e.g. `l-001,l-002,l-003`) — not a lead
+    id. Filtering on the grammar keeps those out of the `:L` id set so the
+    cross-check doesn't report a phantom lead.
+    """
+    return {
+        f["id"]
+        for f in companion.get("findings", [])
+        if isinstance(f, dict) and isinstance(f.get("id"), str)
+        and _LEAD_ID_RE.match(f["id"])
     }
-    return narration_crosscheck(run_dir, l_ids)

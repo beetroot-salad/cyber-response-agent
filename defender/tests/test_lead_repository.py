@@ -364,3 +364,18 @@ def test_stage_tables_queryless_run_is_noop(tmp_path):
     dst = tmp_path / "dst"
     lr.stage_tables(src, dst)  # no tables → no error
     assert not (dst / "executed_queries.jsonl").exists()
+
+
+def test_lead_ids_from_companion_filters_resolution_references():
+    """A `:R` resolution row's comma-joined lead reference is surfaced under
+    `findings` by the parser but must NOT be treated as a `:L` lead id."""
+    companion = {
+        "findings": [
+            {"id": "l-001"},
+            {"id": "l-002"},
+            {"id": "l-001,l-002,l-003,l-004"},  # resolution lead-reference list
+            {"id": None},
+            {"no_id": True},
+        ]
+    }
+    assert lr._lead_ids_from_companion(companion) == {"l-001", "l-002"}
