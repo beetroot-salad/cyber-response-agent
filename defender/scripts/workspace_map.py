@@ -3,14 +3,14 @@
 
 Run from `defender/run.py` (build_prompt) so the agent's message 0
 already carries: run-dir contents, adapter CLI roster, system skills,
-gather query templates, and which env vars are populated. The whole
-point is to absorb the discovery thrash (ls/find/grep across skills,
-tools, env files) observed in trace runs — every call below replaces
-one or more interactive tool turns.
+and gather query templates. The whole point is to absorb the discovery
+thrash (ls/find/grep across skills and tools) observed in trace runs —
+every call below replaces one or more interactive tool turns.
 
 Stays under ~60 short lines of output. Lists paths and presence, not
-file bodies — bodies are the SKILL's job. Never prints secrets;
-env-var presence is a tick or a cross.
+file bodies — bodies are the SKILL's job. Credentials are not surfaced
+here: each adapter CLI sources them itself at call time (gather
+subagent), so the orchestrator never needs them.
 
 Usage:
     python3 defender/scripts/workspace_map.py <run_dir>
@@ -18,15 +18,11 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
-
-# Env vars adapters actually consume. Presence-only — never printed.
-WATCHED_ENV = ("V2_ELASTIC_PASSWORD", "V2_ELASTIC_USERNAME", "ELASTICSEARCH_URL")
 
 
 def _rel(p: Path) -> str:
@@ -124,18 +120,6 @@ def workspace_map(run_dir: Path) -> str:
     else:
         lines.append("- (no queries dir)")
     lines.append("")
-
-    # Env-var status — presence only, no values.
-    lines.append("## Environment variables")
-    for name in WATCHED_ENV:
-        status = "set" if os.environ.get(name) else "MISSING"
-        lines.append(f"- {name}: {status}")
-    lines.append("")
-    lines.append(
-        "If a required adapter env var is MISSING, the canonical source "
-        "is `playground-v2/.env`. Source it once; do not re-grep per "
-        "subagent dispatch."
-    )
 
     return "\n".join(lines) + "\n"
 
