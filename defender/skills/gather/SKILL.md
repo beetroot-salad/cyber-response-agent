@@ -276,9 +276,16 @@ The offline lead-author reads these two tables directly (via
 
 ### 6. Return
 
-Report a `## Summary` — the measurement read the defender reasons
-from. The executed queries and raw payload paths are already on disk
-via the wrapper (§5); don't restate them.
+Report a `## Summary` — the measurement the defender reasons from,
+expressed as observations: values, counts, timing, entity bindings.
+**Never write a `gather_raw/...` path — or any raw-payload file path —
+into your return.** The wrapper already persisted the payloads (§5);
+the defender addresses them by `(lead_id, seq)` through the queries
+table, never by path, and is blocked from reading the raw tree at all.
+A path in your summary leaks that tree into the main loop's context and
+defeats the boundary. The path the wrapper printed on stderr is yours
+to `jq`/filter against (§3.5) — it stays in your context, not the
+return.
 
 ```
 ## Summary
@@ -399,7 +406,8 @@ The defender decides what the differential means; you report it.
   point of letting the wrapper persist it to `gather_raw/`.
 - One required section (`## Summary`); one optional trailer
   (`## Proposed` for a §3.5 deposit). The executed queries + raw paths
-  are wrapper-recorded (§5), not restated. You do not author query
+  are wrapper-recorded (§5), never restated — no `gather_raw/...` path
+  belongs in the return. You do not author query
   templates — naming the measurement in `--query-id` is the whole
   contribution; the offline lead-author drafts and curates. Nothing
   else — ANALYZE is the defender's phase, not yours.
