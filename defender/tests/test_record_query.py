@@ -1,11 +1,12 @@
 """Tests for the gather capture wrapper (defender/scripts/tools/record_query.py).
 
-Pins the deterministic-capture contract: system + query_id come verbatim from
-the dispatch (`--system`/`--query-id`, so the wrapper stays portable across any
-system CLI roster — no hardcoded system/verb tables), params are parsed
-generically from argv, per-lead canonical addressing fixes the filename-drift
-silent drop, and the inner command passes straight through. `--lead` is the
-`:L` row id (`l-NNN`), used as the per-lead group dir and the `lead_id` FK.
+Pins the deterministic-capture contract: query_id comes verbatim from the
+dispatch (`--query-id`, the agent's catalog binding) and `system` is taken from
+`--system` or derived generically from the inner adapter command (no hardcoded
+system/verb tables), params are parsed generically from argv, per-lead canonical
+addressing fixes the filename-drift silent drop, and the inner command passes
+straight through. `--lead` is the `:L` row id (`l-NNN`), used as the per-lead
+group dir and the `lead_id` FK. `--run-dir` defaults to `$DEFENDER_RUN_DIR`.
 """
 from __future__ import annotations
 
@@ -142,15 +143,92 @@ def test_main_adhoc_query_id(tmp_path):
     assert row["params"] == {"query": "rule.id:5503", "raw": True}
 
 
-def test_main_requires_system_and_query_id(tmp_path):
+def test_main_requires_query_id(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
-    # Missing --system/--query-id → usage error (exit 2), nothing executed.
+    # --query-id is still required (the agent's catalog binding); missing it is a
+    # usage error (exit 2), nothing executed — even though --system would derive.
     rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001", "--",
                   sys.executable, str(cli), "host-lookup", "web-1"])
     assert rc == 2
     assert not (run_dir / "executed_queries.jsonl").exists()
+
+
+# --- derive_system: generic, no per-system table ---
+
+def test_derive_system_from_defender_shim():
+    assert ge.derive_system(["defender-elastic", "query", "x"]) == "elastic"
+    assert ge.derive_system(["defender-change-mgmt", "list-changes"]) == "change-mgmt"
+    assert ge.derive_system(["defender-host-state", "container-inspect", "c1"]) == "host-state"
+
+
+def test_derive_system_from_cli_path():
+    assert ge.derive_system(["python3", "/x/cmdb_cli.py", "host-lookup", "web-1"]) == "cmdb"
+
+
+def test_derive_system_skips_non_adapter_and_unknown():
+    # record-query/data-source-debug/invlang are not lead systems.
+    assert ge.derive_system(["defender-data-source-debug", "--payload", "p"]) is None
+    assert ge.derive_system(["echo", "hi"]) is None
+
+
+def test_main_derives_system_from_inner_when_flag_omitted(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", '{"name":"web-1"}')
+    # No --system: derived from the cmdb_cli.py path token.
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
+                  "--query-id", "cmdb.host-lookup", "--",
+                  sys.executable, str(cli), "host-lookup", "web-1"])
+    assert rc == 0
+    row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
+    assert row["system"] == "cmdb"
+
+
+def test_main_explicit_system_overrides_derivation(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
+    ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
+             "--system", "stub-cmdb", "--query-id", "stub-cmdb.host-lookup", "--",
+             sys.executable, str(cli), "host-lookup", "web-1"])
+    row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
+    assert row["system"] == "stub-cmdb"
+
+
+def test_main_errors_when_system_underivable_and_flag_omitted(tmp_path, capsys):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "probe.py", "{}")  # no _cli.py / defender- token
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
+                  "--query-id", "ad-hoc", "--", sys.executable, str(cli), "x"])
+    assert rc == 2
+    assert "could not be derived" in capsys.readouterr().err
+    assert not (run_dir / "executed_queries.jsonl").exists()
+
+
+# --- --run-dir defaults from $DEFENDER_RUN_DIR ---
+
+def test_main_defaults_run_dir_from_env(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(run_dir))
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
+    # No --run-dir: defaults to $DEFENDER_RUN_DIR.
+    rc = ge.main(["--lead", "l-001", "--query-id", "cmdb.host-lookup", "--",
+                  sys.executable, str(cli), "host-lookup", "web-1"])
+    assert rc == 0
+    assert (run_dir / "executed_queries.jsonl").is_file()
+
+
+def test_main_errors_when_no_run_dir(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("DEFENDER_RUN_DIR", raising=False)
+    cli = _fake_cli(tmp_path, "cmdb_cli.py", "{}")
+    rc = ge.main(["--lead", "l-001", "--query-id", "cmdb.host-lookup", "--",
+                  sys.executable, str(cli), "host-lookup", "web-1"])
+    assert rc == 2
+    assert "DEFENDER_RUN_DIR is unset" in capsys.readouterr().err
 
 
 def test_main_propagates_nonzero_exit_and_error_status(tmp_path):
