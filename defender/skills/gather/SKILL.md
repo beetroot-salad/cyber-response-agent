@@ -104,19 +104,20 @@ the system SKILL:
 
 ```bash
 defender-record-query \
-    --run-dir {run_dir} --lead {lead_id} \
-    --system {system} --query-id {system}.{template-id} -- \
+    --lead {lead_id} --query-id {system}.{template-id} -- \
     defender-{system} <verb> <args> --raw
 ```
 
-Pass three values: your `lead_id` as `--lead`, the lead's `system` as
-`--system`, and the **measurement id** as `--query-id` — either an
-established template's `id:` (`{system}.{template-id}`) or the
-`{system}.{kebab-name}` you coined in §2 for a no-template query.
-Recording the id you actually ran — rather than having the wrapper guess
-it from the CLI argv — is what keeps cross-case joins keyed correctly.
-Run one wrapper invocation per query; the wrapper handles per-lead
-sequencing.
+Pass just two values: your `lead_id` as `--lead`, and the **measurement
+id** as `--query-id` — either an established template's `id:`
+(`{system}.{template-id}`) or the `{system}.{kebab-name}` you coined in §2
+for a no-template query. Recording the id you actually ran — rather than
+having the wrapper guess it from the CLI argv — is what keeps cross-case
+joins keyed correctly. The wrapper defaults `--run-dir` from the run
+environment and derives `--system` from the `defender-{system}` token of
+the inner command, so you don't echo them; pass `--system` explicitly only
+if the inner command has no `defender-<system>` shim. Run one wrapper
+invocation per query; the wrapper handles per-lead sequencing.
 
 **Watch for limit-capped breakdowns.** When a count or distribution
 matters, verify the indexer's `total` is ≤ the `--limit` you passed
@@ -350,8 +351,7 @@ How to search without a template:
 
 ```bash
 defender-record-query \
-    --run-dir {run_dir} --lead {lead_id} \
-    --system {system} --query-id {system}.failed-auth-by-srcip -- \
+    --lead {lead_id} --query-id {system}.failed-auth-by-srcip -- \
     defender-{system} <query invocation> --raw
 ```
 

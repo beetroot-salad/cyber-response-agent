@@ -45,32 +45,37 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
+
+# Sibling-import the shared command-decomposition + shim-taxonomy helpers so the
+# adapter/non-adapter split is defined once (hooks/_cmd_segments.py) and a newly
+# onboarded adapter auto-gates here too. Mirrors approve_shim_invocations.py /
+# block_unwrapped_adapter_calls.py.
+_HOOK_DIR = Path(__file__).resolve().parent
+if str(_HOOK_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOK_DIR))
+from _cmd_segments import ADAPTER_CLI_RE, adapter_shims  # noqa: E402
 
 RAW_MARKER = "gather_raw"
-# An adapter CLI invocation: a path under scripts/tools/ ending in _cli.py.
-# Matches both `defender/scripts/tools/elastic_cli.py` and the absolute form.
-# `record_query.py` / `data_source_debug.py` are NOT `_cli.py` and are not
-# matched; the invlang CLI (`-m defender.skills.invlang.cli`) has no
-# `scripts/tools/` path and no `_cli.py`, so it stays allowed.
-ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
-# The `defender/bin/defender-*` invocation shims hide the `scripts/tools/*_cli.py`
-# path behind a bare token, so the path regex above no longer sees a main-loop
-# adapter call. Match the adapter shims by name too — every `defender-*` shim
-# EXCEPT the three non-adapter ones (invlang = corpus query, record-query =
-# gather's capture wrapper, data-source-debug = gather's helper), which the main
-# loop is allowed to run. Keep this exempt set in sync with defender/bin/.
-# The data-source ADAPTER shims (the `*_cli.py` wrappers) — the main loop must
-# not run these directly. Enumerated explicitly (NOT `defender-[a-z-]*`) because
-# an open pattern also matches `defender-runs` in the runs-base path
-# `/tmp/defender-runs-v2/...` and `defender-dir` in `--defender-dir`, both of
-# which appear in legitimate gather commands. Keep in sync with defender/bin/:
-# the non-adapter shims (invlang, record-query, data-source-debug) are excluded.
-# `(?<![-\w/])` anchors the match to command position, not a flag/path substring.
-_ADAPTER_SHIMS = ("elastic", "cmdb", "identity", "host-state",
-                  "threat-intel", "change-mgmt", "ticket")
-ADAPTER_SHIM_RE = re.compile(
-    r"(?<![-\w/])defender-(?:" + "|".join(_ADAPTER_SHIMS) + r")\b"
-)
+# `ADAPTER_CLI_RE` (a `scripts/tools/<name>_cli.py` path) is imported from the
+# shared taxonomy. `record_query.py` / `data_source_debug.py` are NOT `_cli.py`,
+# and the invlang CLI has no `scripts/tools/` path, so both stay allowed.
+
+
+def _adapter_shim_re() -> re.Pattern | None:
+    """Regex matching a `defender-<system>` ADAPTER shim in command position.
+
+    Built per-call from the shared `adapter_shims()` (every `defender-*` shim in
+    defender/bin minus the non-adapter ones: invlang, record-query,
+    data-source-debug), so onboarding an adapter needs no edit here. The
+    `(?<![-\\w/])` anchor keeps it from false-matching `defender-runs` in a
+    runs-base path or `--defender-dir`, and names are enumerated (NOT an open
+    `defender-[a-z-]*`) for the same reason. Returns None if no adapters are
+    discoverable (fail open — never block on an empty roster)."""
+    names = sorted(s[len("defender-"):] for s in adapter_shims())
+    if not names:
+        return None
+    return re.compile(r"(?<![-\w/])defender-(?:" + "|".join(map(re.escape, names)) + r")\b")
 
 RAW_DENY_REASON = (
     "Blocked: the main loop must not read gather_raw/. Gather's returned "
@@ -152,7 +157,8 @@ def main() -> int:
     # gather's own queries, only the main loop's direct, unwrapped calls.
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
-        is_adapter = ADAPTER_CLI_RE.search(cmd) or ADAPTER_SHIM_RE.search(cmd)
+        shim_re = _adapter_shim_re()
+        is_adapter = bool(ADAPTER_CLI_RE.search(cmd)) or bool(shim_re and shim_re.search(cmd))
         wrapped = "record_query.py" in cmd or "defender-record-query" in cmd
         if is_adapter and not wrapped:
             print(ADAPTER_DENY_REASON, file=sys.stderr)

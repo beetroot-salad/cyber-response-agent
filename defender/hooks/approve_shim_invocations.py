@@ -20,7 +20,7 @@ assignment prefix (the credential-groping vector), or a `$(...)`/backtick
 substitution falls through untouched (exit 0, no decision) to the normal
 permission flow.
 
-Clamp-aware: in the main session (cwd == REPO_ROOT) the data-source adapter
+Clamp-aware: in the main session (no `agent_id`) the data-source adapter
 shims (`defender-elastic`, `defender-cmdb`, …) are NOT in the safe set, so
 this hook never approves a main-loop adapter call — that stays the job of
 `block_main_loop_raw_access.py`. Approving here only ever *adds* permission
@@ -34,25 +34,27 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import sys
 from pathlib import Path
 
-# Hook lives at <repo>/defender/hooks/this_file.py → parents[2] is the repo
-# root, matching run.py's REPO_ROOT and block_main_loop_raw_access.py.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# Sibling-import the shared command-decomposition + shim-taxonomy helpers.
+# Inserting our own dir covers the importlib-loaded test path; running as a
+# script adds it. Mirrors tag_tool_results.py's _run_dir import.
+_HOOK_DIR = Path(__file__).resolve().parent
+if str(_HOOK_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOK_DIR))
+from _cmd_segments import (  # noqa: E402
+    NON_ADAPTER_SHIMS,
+    all_defender_shims as _all_defender_shims,
+    split_segments as _split_segments,
+    unwrap as _unwrap,
+)
 
 # Read-only utilities safe to approve in any composition. Deliberately small:
 # viewers/filters over already-materialized files, plus navigation. No `env`,
 # `printenv`, `export`, `source`, `find`, `python3`, `netstat`, `docker`.
 READONLY_TOOLS = frozenset(
     {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "sort", "uniq", "true"}
-)
-
-# Non-adapter shims the main loop is allowed to run (corpus query + gather's
-# own wrappers). Keep in sync with block_main_loop_raw_access.ADAPTER_SHIM_RE.
-NON_ADAPTER_SHIMS = frozenset(
-    {"defender-invlang", "defender-record-query", "defender-data-source-debug"}
 )
 
 # Tokens that make a command unsafe to approve regardless of leading word:
@@ -63,69 +65,12 @@ NON_ADAPTER_SHIMS = frozenset(
 _UNSAFE_TOKEN_RE = re.compile(r"(\$\(|`|>|<|\bexport\b|^[A-Za-z_][A-Za-z0-9_]*=)")
 
 
-def _split_segments(script: str) -> list[str]:
-    """Split on shell operators (`&&`, `||`, `|`, `;`) that are OUTSIDE quotes.
-    A naive regex split would cut a `|` inside a jq filter (`jq '.a | .b'`)."""
-    segs: list[str] = []
-    buf: list[str] = []
-    quote: str | None = None
-    i, n = 0, len(script)
-    while i < n:
-        c = script[i]
-        if quote is not None:
-            buf.append(c)
-            if c == quote:
-                quote = None
-            i += 1
-        elif c in ("'", '"'):
-            quote = c
-            buf.append(c)
-            i += 1
-        elif script.startswith("&&", i) or script.startswith("||", i):
-            segs.append("".join(buf))
-            buf = []
-            i += 2
-        elif c in "|;":
-            segs.append("".join(buf))
-            buf = []
-            i += 1
-        else:
-            buf.append(c)
-            i += 1
-    segs.append("".join(buf))
-    return segs
-
-
 def _is_main_session(hook_data: dict) -> bool:
     """Main loop = no `agent_id`; a Task subagent's PreToolUse payload carries it
     (and `agent_type`). cwd is NOT usable — v2 runs the orchestrator and every
     gather subagent in-process at the same cwd. Matches
     block_main_loop_raw_access._is_main_session."""
     return not hook_data.get("agent_id")
-
-
-def _unwrap(cmd: str) -> str | None:
-    """Strip a leading `timeout <n>` and a single `bash -c`/`sh -c`, returning
-    the inner script. Returns the command unchanged if there is nothing to
-    unwrap, or None if the `-c` payload can't be cleanly extracted."""
-    try:
-        tokens = shlex.split(cmd)
-    except ValueError:
-        return None
-    if not tokens:
-        return None
-    # Drop a leading `timeout <n>` / `timeout -k <n> <n>` prefix.
-    i = 0
-    if tokens[i] == "timeout":
-        i += 1
-        while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].replace(".", "").isdigit()):
-            i += 1
-    if i < len(tokens) and tokens[i] in ("bash", "sh") and "-c" in tokens[i:]:
-        c_idx = tokens.index("-c", i)
-        if c_idx + 1 < len(tokens):
-            return tokens[c_idx + 1]  # the quoted script payload
-        return None
-    return cmd
 
 
 def _all_segments_safe(script: str, safe_leading: frozenset) -> bool:
@@ -181,16 +126,6 @@ def main() -> int:
         }
     }))
     return 0
-
-
-def _all_defender_shims() -> set:
-    """All `defender-*` shim names from defender/bin/ (cheap dir read). Falls
-    back to the known set if the dir is unreadable."""
-    bin_dir = REPO_ROOT / "defender" / "bin"
-    try:
-        return {p.name for p in bin_dir.iterdir() if p.name.startswith("defender-")}
-    except OSError:
-        return set(NON_ADAPTER_SHIMS)
 
 
 if __name__ == "__main__":

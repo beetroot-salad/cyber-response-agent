@@ -1,29 +1,46 @@
 #!/usr/bin/env python3
 """Gather capture wrapper — deterministic record of an executed query.
 
-The gather subagent invokes this instead of redirecting a system-CLI's
-stdout itself:
+The gather subagent invokes this (via the ``defender-record-query`` shim)
+instead of redirecting a system-CLI's stdout itself. Only two flags carry
+information the wrapper can't recover on its own:
 
-    record_query.py --run-dir {R} --lead {L} \
-        --system stub-cmdb --query-id stub-cmdb.host-lookup -- \
-        python3 .../cmdb_cli.py host-lookup web-1 --raw
+    defender-record-query --lead {L} --query-id cmdb.host-lookup -- \
+        defender-cmdb host-lookup web-1 --raw
+
+Both the wrapper and the inner command are invoked through their stable
+``defender-*`` shims (``defender/bin/``), not a path/module form — see
+``defender/bin/README.md`` and ``defender/skills/gather/SKILL.md`` §3.
+
+The other two flags default themselves, so the subagent doesn't echo
+boilerplate:
+
+  * ``--run-dir`` defaults to ``$DEFENDER_RUN_DIR`` (exported by run.py;
+    one ``claude -p`` per run). Pass it explicitly only outside a run.
+  * ``--system`` is derived from the inner adapter invocation — the
+    ``defender-<system>`` shim token (or a ``<system>_cli.py`` path).
+    Pass it explicitly to override an undetectable case.
+
+``--lead`` stays explicit: the subagent already holds its ``:L`` row id
+from the dispatch, and there is no portable in-process channel to recover
+it here. ``--query-id`` stays explicit: it is the agent's semantic binding
+of this query to a catalog template (``{system}.{template}``, or
+``ad-hoc``), not a mechanical function of the argv.
 
 It runs the inner command, captures stdout to a canonical per-lead path,
 and appends an executed-query record (the queries table) to
-``{R}/executed_queries.jsonl``. The inner command's stdout/stderr/exit
+``{run_dir}/executed_queries.jsonl``. The inner command's stdout/stderr/exit
 code pass straight through, so the subagent still sees the result for its
 reasoning, and the wrapper reports the raw payload path it wrote on stderr.
 
 It retires the two brittle model-authored steps it replaces: the redirect
 to a model-chosen ``gather_raw/{lead_id}.json`` (Bug #1: filename drift →
 silent drop) and the post-hoc, free-floating ``queries[]`` sidecar id
-(Bug #2: mislabel → catalog miss). Both `--system` and `--query-id` come
-from the dispatch contract — `system` is the harness-injected lead system,
-`query_id` is the catalog template id the subagent bound (`{system}.{verb}`,
-or ``ad-hoc``). They are recorded *at execution time*, bound to the actual
-command and its captured payload, rather than reconstructed from a fragile
-per-CLI argv grammar — so the wrapper stays portable across whatever system
-CLIs are onboarded, with no hardcoded system/verb roster.
+(Bug #2: mislabel → catalog miss). ``system``/``query_id`` are recorded
+*at execution time*, bound to the actual command and its captured payload,
+rather than reconstructed from a fragile per-CLI argv grammar — so the
+wrapper stays portable across whatever system CLIs are onboarded, with no
+hardcoded system/verb roster.
 
 The per-lead group id ``L`` comes from the dispatch (the ``:L`` invlang row
 id, e.g. ``l-001``; see ``hooks/record_lead.py``); it is the address
@@ -47,6 +64,15 @@ from pathlib import Path
 # and a gather_raw/ path segment. Grammar mirrors hooks/record_lead.py and the
 # invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
+
+# An adapter `<system>_cli.py` path token → its `<system>`. `\w+` (not
+# `[A-Za-z0-9]+`) so a multi-word filename captures fully — `host_state_cli.py`
+# → `host_state` (normalized to `host-state` below), matching the `\w+_cli` form
+# in block_main_loop_raw_access.ADAPTER_CLI_RE / hooks/_cmd_segments.ADAPTER_CLI_RE.
+_CLI_RE = re.compile(r"(?:^|/)(\w+)_cli\.py$")
+# Non-adapter `defender-*` shims — never a lead system. Mirrors
+# hooks/_cmd_segments.NON_ADAPTER_SHIMS.
+_NON_ADAPTER = frozenset({"record-query", "data-source-debug", "invlang"})
 
 # Size safety: a query that over-returns (server-side filter didn't bind,
 # broad window, high-cardinality index) would otherwise dump its whole
@@ -104,6 +130,40 @@ def parse_params(inner: list[str]) -> dict:
             pos += 1
             i += 1
     return params
+
+
+def derive_system(inner: list[str]) -> str | None:
+    """Infer the lead ``system`` from the inner adapter invocation, generically.
+
+    The inner command (everything after ``--``) is the adapter call: a
+    ``defender-<system>`` shim or a ``<system>_cli.py`` path. Returns the first
+    system name found, or None when none is detectable (the caller then requires
+    an explicit ``--system``). Pure — no IO, no per-system table; a newly
+    onboarded adapter is covered with no edit here."""
+    for tok in inner:
+        # Adapter shim form `defender-<system>`. Require a bare shim token: skip
+        # path/flag values that merely start with `defender-` (a
+        # `/tmp/defender-runs/…` arg, a `--defender-dir` value), which would
+        # otherwise yield a garbage system. Mirrors the command-position anchor
+        # block_main_loop_raw_access's adapter-shim regex uses for the same reason.
+        if tok.startswith("defender-") and "/" not in tok and "=" not in tok:
+            name = tok[len("defender-"):]
+            if name and name not in _NON_ADAPTER:
+                return name
+        # Raw `<system>_cli.py` path form. The filename uses `_` where the
+        # canonical system name (and the `defender-<system>` shim) uses `-`
+        # (host_state_cli.py → host-state), so normalize to agree with the
+        # shim-derived spelling and the queries-table join key. Skip `VAR=…`
+        # assignment values (never an executable path) so a stray
+        # `FOO=/x/elastic_cli.py` doesn't pre-empt the real adapter token.
+        if "=" in tok:
+            continue
+        m = _CLI_RE.search(tok)
+        if m:
+            name = m.group(1).replace("_", "-")
+            if name not in _NON_ADAPTER:
+                return name
+    return None
 
 
 def payload_status(exit_code: int, stdout: str) -> str:
@@ -211,12 +271,12 @@ def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
 def main(argv: list[str]) -> int:
     wrapper_argv, inner = _split_argv(argv)
     parser = argparse.ArgumentParser(prog="record_query.py")
-    parser.add_argument("--run-dir", required=True)
+    # --run-dir defaults to $DEFENDER_RUN_DIR; --system is derived from the inner
+    # adapter command. Only --lead (the subagent's :L row id) and --query-id (the
+    # agent's catalog binding) carry information the wrapper can't recover.
+    parser.add_argument("--run-dir")
     parser.add_argument("--lead", required=True)
-    # Both come from the dispatch contract: --system is the harness-injected
-    # lead system; --query-id is the catalog template id the subagent bound
-    # ({system}.{verb}, or `ad-hoc`). The wrapper records them verbatim.
-    parser.add_argument("--system", required=True)
+    parser.add_argument("--system")
     parser.add_argument("--query-id", required=True)
     try:
         ns = parser.parse_args(wrapper_argv)
@@ -226,7 +286,25 @@ def main(argv: list[str]) -> int:
         print("record_query.py: nothing after `--` to execute", file=sys.stderr)
         return 2
 
-    run_dir = Path(ns.run_dir)
+    run_dir_arg = ns.run_dir or os.environ.get("DEFENDER_RUN_DIR")
+    if not run_dir_arg:
+        print(
+            "record_query.py: --run-dir not given and DEFENDER_RUN_DIR is unset",
+            file=sys.stderr,
+        )
+        return 2
+    run_dir = Path(run_dir_arg)
+
+    system = ns.system or derive_system(inner)
+    if not system:
+        print(
+            "record_query.py: --system not given and could not be derived from "
+            "the inner command (expected a defender-<system> shim or "
+            "<system>_cli.py path)",
+            file=sys.stderr,
+        )
+        return 2
+
     lead = ns.lead
     # Validate the FK before it becomes a path segment: an unvalidated --lead
     # (traversal / absolute) would escape gather_raw/ and break the join.
@@ -256,7 +334,7 @@ def main(argv: list[str]) -> int:
     record = {
         "lead_id": lead,
         "seq": seq,
-        "system": ns.system,
+        "system": system,
         "verb": verb,
         "query_id": query_id,
         "params": parse_params(inner),
