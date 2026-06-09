@@ -124,40 +124,15 @@ def _benign_outcome_keyword(outcome_value: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Oracle projection schema
+# Oracle doc serialization
 # ---------------------------------------------------------------------------
-
-
-_ORACLE_PROJECTION_KEYS = {"lead_id", "events"}
-
-
-def validate_oracle_doc(doc: Any, expected_lead_ids: list[str]) -> dict[str, Any]:
-    """Validate the assembled per-lead oracle output.
-
-    Shape: a single ``projections`` key — one ``{lead_id, events}`` per lead, in
-    order. ``events`` is a list of event mappings, OR a single-item marker list (the
-    ``<standard environment noise>`` / ``<suppressed: …>`` baseline-diff strings), OR empty.
-    The validator stays structural; marker wording and diff semantics are the oracle
-    prompt's and judge's concern, not this gate's.
-    """
-    if not isinstance(doc, dict):
-        raise LoopError("oracle doc did not parse to a mapping")
-    if set(doc.keys()) != {"projections"}:
-        raise LoopError(
-            f"oracle YAML must have exactly one top-level key `projections`; "
-            f"got {sorted(doc.keys())}"
-        )
-    projections = doc.get("projections")
-    if not isinstance(projections, list):
-        raise LoopError("oracle `projections` is not a list")
-    if len(projections) != len(expected_lead_ids):
-        raise LoopError(
-            f"oracle projections count {len(projections)} != "
-            f"lead count {len(expected_lead_ids)}"
-        )
-    for i, p in enumerate(projections):
-        _validate_oracle_projection(i, p, expected_lead_ids[i])
-    return doc
+#
+# The oracle doc is assembled by our own code (``_loop_oracle.assemble_oracle_doc``:
+# one ``{lead_id, events}`` per lead, lead_ids taken from the join), so its structure
+# is guaranteed by construction — there is nothing model-controlled to validate at the
+# doc level. The only model-authored content is each lead's ``events`` list, which
+# ``parse_lead_events`` already guarantees is a list; its items are read solely by the
+# LLM judge as text, so no structural gate is imposed on them here.
 
 
 class _NoAliasOracleDumper(yaml.SafeDumper):
@@ -186,57 +161,6 @@ def dump_oracle_doc(doc: dict) -> str:
         doc, Dumper=_NoAliasOracleDumper, sort_keys=False,
         default_flow_style=False, allow_unicode=True,
     )
-
-
-_BASELINE_NOISE_MARKER = "<standard environment noise>"
-
-
-def _is_baseline_diff_marker(s: str) -> bool:
-    """True for the two baseline-diff marker strings the oracle may emit as an event item."""
-    return s == _BASELINE_NOISE_MARKER or (s.startswith("<suppressed:") and s.endswith(">"))
-
-
-def _validate_oracle_projection(i: int, p: Any, expected_lead_id: str) -> None:
-    if not isinstance(p, dict):
-        raise LoopError(f"projection[{i}] is not a mapping")
-    missing = _ORACLE_PROJECTION_KEYS - set(p.keys())
-    if missing:
-        raise LoopError(f"projection[{i}] missing keys: {sorted(missing)}")
-    extra = set(p.keys()) - _ORACLE_PROJECTION_KEYS
-    if extra:
-        raise LoopError(f"projection[{i}] has unexpected keys: {sorted(extra)}")
-    if p["lead_id"] != expected_lead_id:
-        raise LoopError(
-            f"projection[{i}].lead_id={p['lead_id']!r} != "
-            f"expected {expected_lead_id!r}"
-        )
-    events = p["events"]
-    if not isinstance(events, list):
-        raise LoopError(f"projection[{i}].events is not a list")
-    # An event is either a mapping (a projected event) or a baseline-diff marker string
-    # (<standard environment noise> / <suppressed: …>). A marker is a whole-lead verdict, so
-    # it must be the SOLE item — never mixed with event mappings, never duplicated.
-    has_marker = False
-    for j, ev in enumerate(events):
-        if isinstance(ev, dict):
-            continue
-        if isinstance(ev, str):
-            if not _is_baseline_diff_marker(ev):
-                raise LoopError(
-                    f"projection[{i}].events[{j}] is a string but not a recognized "
-                    f"baseline-diff marker (got {ev!r})"
-                )
-            has_marker = True
-            continue
-        raise LoopError(
-            f"projection[{i}].events[{j}] is not a mapping or marker string "
-            f"(got {type(ev).__name__})"
-        )
-    if has_marker and len(events) != 1:
-        raise LoopError(
-            f"projection[{i}].events mixes a baseline-diff marker with other items; "
-            f"a marker must be the only event in the list"
-        )
 
 
 # ---------------------------------------------------------------------------

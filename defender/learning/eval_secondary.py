@@ -481,18 +481,11 @@ def run_head_oracle_and_judge(
         # _run_claude wraps subprocess.run with a timeout that raises TimeoutExpired
         # (not LoopError); catch both so a single per-lead hang doesn't abort the harness.
         raise SecondaryError(f"oracle invocation failed: {e}") from e
-    expected_lead_ids = [
-        jl.lead_id for jl in loop_mod.lead_repository.joined(head_run_dir)
-    ]
-    stripped = loop_mod.strip_yaml_fence(oracle_yaml)
-    try:
-        loop_mod.validate_oracle_doc(yaml.safe_load(stripped), expected_lead_ids)
-    except (yaml.YAMLError, loop_mod.LoopError) as e:
-        # Keep the raw assembled doc for debugging a parse/validation failure.
-        (staging_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml)
-        raise SecondaryError(f"oracle output invalid: {e}") from e
+    # The oracle doc is assembled by our own code (one projection per lead, lead_ids
+    # from the join); the only model-authored content is each lead's events list, read
+    # by the LLM judge as text. No structural validation gate — just strip + write.
     projected_path = staging_dir / "projected_telemetry.yaml"
-    projected_path.write_text(stripped)
+    projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
         judge_yaml = loop_mod.invoke_judge(
