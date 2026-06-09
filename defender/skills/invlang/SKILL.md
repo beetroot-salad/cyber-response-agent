@@ -275,11 +275,6 @@ matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
 ```
 
-`:T conclude` is flat key/value lines only — there are no `conclude.*`
-sub-tables. Final hypothesis weights live in `:T resolutions`;
-benign-disposition gating is computed from the resolution record, not a
-restated table here.
-
 ## Discovery hypotheses
 
 `:H` proposes a new parent vertex plus an edge anchoring it to an
