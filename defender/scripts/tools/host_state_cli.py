@@ -9,6 +9,7 @@ tables in particular).
 
 Usage:
     host_state_cli.py health-check                       # docker context check
+    host_state_cli.py container-inspect <container_id>   # name + image (docker inspect)
     host_state_cli.py proc-tree web-1
     host_state_cli.py passwd web-1
     host_state_cli.py authorized-keys web-1 [--user dev.dana]
@@ -99,6 +100,42 @@ def cmd_health_check(args, _config):
     print(f"hosts present ({len(present)}/{len(KNOWN_HOSTS)}): {', '.join(present) or '—'}")
     if missing:
         print(f"hosts missing: {', '.join(missing)}")
+
+
+def cmd_container_inspect(args, _config):
+    """Container name + image by container id — daemon-level `docker inspect`.
+
+    Unlike the other verbs this takes a container id, not a known host name
+    (Falco alerts carry the runtime container id), so it neither runs
+    _check_host nor routes through docker exec. Docker resolves partial-hash
+    ids without a separate lookup.
+    """
+    fmt = "{{json .Name}}\t{{json .Config.Image}}"
+    rc, out, err = transport.docker_inspect_raw(args.container_id, fmt=fmt)
+    if rc != 0:
+        s = err.strip()
+        if "No such object" in s or "No such container" in s:
+            sys.exit(
+                f"error: no container matching {args.container_id!r} on "
+                f"context {transport.DOCKER_CONTEXT!r}: {s}"
+            )
+        sys.exit(f"error: docker inspect failed (rc={rc}): {s}")
+    parts = out.strip().split("\t")
+    # `.Name` comes back with a leading slash (docker's canonical form).
+    name = json.loads(parts[0]).lstrip("/") if parts and parts[0] else ""
+    image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
+    if args.raw:
+        print(json.dumps({
+            "container_id": args.container_id,
+            "captured_at": _utcnow_z(),
+            "name": name,
+            "image": image,
+        }))
+        return
+    print(f"container_id: {args.container_id}")
+    print(f"captured_at: {_utcnow_z()}")
+    print(f"name: {name}")
+    print(f"image: {image}")
 
 
 def cmd_proc_tree(args, _config):
@@ -246,6 +283,13 @@ def build_parser():
 
     sub.add_parser("health-check", help="Verify docker context + list known hosts.")
 
+    ci = sub.add_parser(
+        "container-inspect",
+        help="Container name + image by container id (docker inspect).",
+    )
+    ci.add_argument("container_id")
+    ci.add_argument("--raw", action="store_true")
+
     pt = sub.add_parser("proc-tree", help="Process forest (ps -eo ... --forest).")
     pt.add_argument("host")
     pt.add_argument("--raw", action="store_true")
@@ -285,6 +329,8 @@ def main():
 
     if args.subcommand == "health-check":
         cmd_health_check(args, config)
+    elif args.subcommand == "container-inspect":
+        cmd_container_inspect(args, config)
     elif args.subcommand == "proc-tree":
         cmd_proc_tree(args, config)
     elif args.subcommand == "passwd":
