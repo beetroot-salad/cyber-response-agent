@@ -69,15 +69,13 @@ def workspace_map(run_dir: Path) -> str:
     lines.append(f"## Run dir — `{run_dir}`")
     if run_dir.is_dir():
         for child in sorted(run_dir.iterdir()):
+            # gather_raw/ holds the raw query payloads + leads table — a
+            # subagent-only artifact. The orchestrator reasons from gather's
+            # returned summary, never the raw tree, so keep it off the map.
+            if child.name == "gather_raw":
+                continue
             kind = "dir/" if child.is_dir() else ""
             lines.append(f"- {child.name}{(' ' + kind) if kind else ''}")
-        gr = run_dir / "gather_raw"
-        if gr.is_dir():
-            kids = sorted(gr.iterdir())
-            if kids:
-                lines.append(f"  gather_raw/ contents: {', '.join(k.name for k in kids)}")
-            else:
-                lines.append("  gather_raw/ is empty")
     else:
         lines.append("- (not yet materialized)")
     lines.append("")

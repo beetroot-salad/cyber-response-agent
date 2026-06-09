@@ -58,26 +58,16 @@ uncertain.
    prediction of what gather will see under the competing explanations.
    Compare actual observations to that prediction; ungrounded post-hoc
    analysis is the failure mode.
-5. **Save context — delegate the raw payload, then trust the return.**
-   Every data-source query goes through the gather subagent. Gather
-   returns a summary that names the queries it ran and enumerates the
-   fields you asked for in `what_to_summarize`. **Treat that return
-   as the authoritative record.** Do not Read or Grep
-   `gather_raw/*.json` from the main loop to spot-check or re-derive
-   fields. If the summary is missing something you need, re-dispatch
-   gather with a stricter `what_to_summarize` rather than diving into
-   the raw payload yourself; pulling raw into the main context
-   defeats the subagent isolation that made the dispatch cheap in
-   the first place.
-
-   **The only way to query a data source is a `Task`→gather dispatch.**
-   Do not run the system CLIs (`scripts/tools/*_cli.py`) yourself from
-   the main loop, and do not redirect their output to a file you then
-   Read — querying-then-reading-your-own-dump is the same violation as
-   reading `gather_raw`, just renamed, and it leaves the query out of
-   the audit trail. Both moves are blocked by a hook; if you hit that
-   block, the fix is always to dispatch gather, never to find another
-   path to the bytes.
+5. **Save context — delegate the query, then reason from the return.**
+   Every data-source query goes through a `Task`→gather dispatch; that
+   dispatch is the only way to reach a system of record. Gather returns
+   a summary that names the queries it ran and enumerates the fields you
+   asked for in `what_to_summarize`. **That return is the authoritative
+   record — reason from it.** If it is missing something you need,
+   re-dispatch gather with a stricter `what_to_summarize` naming the
+   specific fields; that keeps the measurement in the audit trail and
+   the heavy payload out of your context, which is what made the
+   dispatch cheap in the first place.
 6. **Discover knowledge on demand.** Domain knowledge lives as on-disk
    skills. Load them via `Skill` when the next move needs them.
 7. **Don't pre-judge what unowned tools can or can't accept.** Per-system
@@ -344,8 +334,9 @@ guardrails over routing more dispatches to the heavier model.
 Gather picks a query template from
 `defender/skills/gather/queries/{system}/`, or authors a new one and
 writes it back. Gather returns: summary of observations + the
-`queries[]` it ran (id + bound params) + path to the raw payload it
-wrote under `gather_raw/`.
+`queries[]` it ran (id + bound params). Those `queries[]` — addressed
+by `(lead_id, seq)` in the queries table — are the authoritative record
+you reason from.
 
 When PLAN issued multiple leads in one turn, dispatch them as parallel
 `Task` calls — **all `Task` tool uses in the same assistant message**.
@@ -376,10 +367,8 @@ inline. See `defender/skills/invlang/SKILL.md` §Authz contract
 resolution for the column shape.
 
 If gather's summary feels thin, **re-dispatch gather** with a stricter
-`what_to_summarize` naming the specific fields you need. Do not Grep
-or Read `gather_raw/{lead_id}/` from the main loop — reading raw
-here is the symptom of an under-specified dispatch upstream; fix the
-dispatch.
+`what_to_summarize` naming the specific fields you need — a thin summary
+is the symptom of an under-specified dispatch upstream; fix the dispatch.
 
 ### REPORT
 
@@ -506,7 +495,7 @@ Gather authored a new template (`host-query.apt-history-around` —
 catalog was empty for this system) and returned: an `unattended-upgrades`
 event at 02:13:48Z (13s before the FIM fire), package signature verified,
 checksum_after matches the upstream Packages.gz SHA, fleet 11/12 received
-the same upgrade in the same window. Raw payload at `gather_raw/0.json`.
+the same upgrade in the same window.
 
 ```invlang
 :V l-001.observations.vertices [id|type|class|ident|attrs?]
