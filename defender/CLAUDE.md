@@ -2,17 +2,18 @@
 
 **Status: experimental. PoC stage, learning-loop first.**
 
-`defender/` is an exploratory track for alert-triage agent design. It
-runs *alongside* the production plugin (`soc-agent/`), shares some
-framings (invlang on-disk shape, the `++/+/-/--` assessment vocabulary)
-and some tools (the SIEM/host adapters), but has its own runtime loop
-and is not loaded as a Claude Code plugin. The point is to iterate fast
-on the **learning loop** under `defender/learning/`.
+`defender/` is the alert-triage agent. It has its own runtime loop
+(driven by `run.py`, not loaded as a Claude Code plugin) plus an offline
+**learning loop** under `defender/learning/`, which is where most
+iteration happens. It runs against the v2 environment (the
+`playground-v2/` elastic/identity/cmdb stack); per-system knowledge lives
+under `defender/skills/`. Investigations record their reasoning in the
+invlang on-disk format (`++/+/-/--` assessment vocabulary; see
+`skills/invlang/`).
 
 The learning loop has proven its value end-to-end on real cases, so the
 earlier "runtime reliability gates are out of scope" stance is **lifted**.
-A first wave of reliability hooks/validators has been ported from
-`soc-agent/` (the proving ground for these patterns):
+A wave of reliability hooks/validators guards the runtime loop:
 
 - **`hooks/invlang_validate.py`** — PreToolUse on `Write|Edit` of
   `investigation.md`. Runs the structural validator over the lenient
@@ -30,7 +31,7 @@ A first wave of reliability hooks/validators has been ported from
   `investigation.md` via `DEFENDER_RUN_DIR`. Rules live in
   `skills/invlang/validate.py` (companion walkers shared with the corpus
   queries via `skills/invlang/_walkers.py`) and target the **current**
-  invlang spec (`skills/invlang/SKILL.md`), not soc-agent's. Pre-MVP,
+  invlang spec (`skills/invlang/SKILL.md`). Pre-MVP,
   historical runs written against earlier invlang variants are expected
   to fail — that's intentional. Tests (`test_skill_worked_examples_all_pass`
   per-fence + `test_skill_example_a_accumulates_clean` whole-document)
@@ -84,8 +85,10 @@ defender/
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)
     gather/             # gather subagent (Haiku) + per-system query templates
-    wazuh/              # per-system reference: visibility surface + execution
-    host-query/         # per-system reference: visibility surface + execution
+    handbook/           # on-demand reference docs
+    advisory/  data-source-debug/   # cross-system runtime skills
+    # per-system references (v2 environment) — visibility surface + execution:
+    elastic/  identity/  cmdb/  ticket/  change-mgmt/  threat-intel/  host-state/
   scripts/
     tools/record_query.py      # gather capture wrapper: executes a query, writes the queries table (executed_queries.jsonl + by-ref payload)
     workspace_map.py           # on-disk orientation injected into run.py:build_prompt (message 0)
@@ -284,8 +287,7 @@ breaking changes through the PoC phase.
 
 ## Out of scope here
 
-soc-agent concerns: archetype catalogs, precedent snapshots,
-permissions.yaml, hook scripts, budget enforcement, the
-`/investigate` plugin command, environment knowledge under
-`soc-agent/knowledge/environment/`. If you need those, you're in the
-wrong tree — open `soc-agent/` instead.
+The dev/eval environment itself — the `playground-v2/` stack (elastic,
+identity, cmdb, ticket, change-mgmt, threat-intel services), its
+detection rules, and host baselines. Defender consumes that environment
+through `defender/skills/`; it does not provision it.

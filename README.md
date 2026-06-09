@@ -120,8 +120,24 @@ Nicer reading experience.
 The runtime agent has no unit tests — it's evaluated by running real alerts and reviewing the run dir. `defender/tests/` covers learning-loop invariants (lesson schema, author pre/post-flight, atomic writes, forward-check):
 
 ```bash
-cd defender && .venv/bin/python -m pytest tests/ -q
+cd defender && .venv/bin/python -m pytest tests/ -q -m "not llm and not live"
 ```
+
+The `llm`/`live` markers gate tests that spawn a real `claude -p` or need live
+infrastructure; CI runs `-m "not llm and not live"`.
+
+## Repository Conventions
+
+- **Experiments** — keepworthy findings live in `experiments/{name}/` (writeup +
+  load-bearing artifacts). Throwaway probes go in a git worktree under
+  `.claude/worktrees/{branch}/`, never new top-level scratch dirs; promote to
+  `experiments/` only with a writeup, otherwise discard.
+- **Tasks** — open work is one markdown file per task under `tasks/` (frontmatter:
+  `title`, `status` of backlog/todo/doing/done/deferred, `groups`). Run
+  `python3 tasks/build.py` to regenerate `board.html`.
+- **Per-area guidance** — `defender/CLAUDE.md` (agent runtime contracts + a
+  "where to make changes" map), `playground-v2/CLAUDE.md` (the dev/eval stack),
+  `infra/CLAUDE.md`. There is no repo-root CLAUDE.md.
 
 ## Where To Start Reading
 
