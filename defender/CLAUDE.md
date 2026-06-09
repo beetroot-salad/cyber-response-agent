@@ -47,7 +47,9 @@ A wave of reliability hooks/validators guards the runtime loop:
   is captured into the queries table instead of escaping the audit trail.
   The main loop is out of scope here — `block_main_loop_raw_access.py`
   denies adapter calls there outright. The adapter-vs-non-adapter split
-  is shared with `approve_shim_invocations.py` via `hooks/_cmd_segments.py`.
+  is shared across all three gate hooks (`approve_shim_invocations.py`,
+  `block_main_loop_raw_access.py`, and this one) via `hooks/_cmd_segments.py`,
+  so onboarding an adapter gates it everywhere with no per-hook edit.
   This makes the queries table a real integrity gate, matching
   `record_lead.py`'s `O_EXCL` claim on the leads table.
 - **`hooks/tag_tool_results.py`** — PostToolUse injection-safety tagging:
@@ -91,7 +93,7 @@ defender/
     block_main_loop_raw_access.py       # PreToolUse on Bash|Read|Grep|Glob: blocks the main loop from running system CLIs or reading gather_raw/ directly
     block_unwrapped_adapter_calls.py    # PreToolUse on Bash: in the gather subagent, denies adapter calls not wrapped in defender-record-query (forces queries-table capture)
     approve_shim_invocations.py         # PreToolUse on Bash|Read|Grep|Glob: auto-approves safe defender-* shim + read-only compounds the static allowlist can't express
-    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy (used by the two gate hooks above)
+    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy (used by all three gate hooks above)
     invlang_validate.py                 # PreToolUse on Write|Edit: enforces the invlang schema on investigation.md (skills/invlang/validate.py)
     tag_tool_results.py                 # PostToolUse: salted untrusted-data tagging of MCP / adapter-CLI / alert.json output
     budget_enforcer.py                  # PostToolUse on *: per-run tool-call / spawn / wall-clock budget (warning-only)

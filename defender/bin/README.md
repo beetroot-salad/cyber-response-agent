@@ -34,9 +34,10 @@ in `run-settings.json`). `run.py` puts this dir first on `PATH` and exports
   The non-adapter shims (`defender-invlang`, `defender-record-query`,
   `defender-data-source-debug`) stay allowed in the main loop. The adapter vs.
   non-adapter split is defined once in `hooks/_cmd_segments.py`
-  (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`), shared by
-  both gate hooks; `block_main_loop_raw_access.py` keeps a parallel regex list —
-  keep them in sync with this dir.
+  (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`) and is read by
+  all three gate hooks (`approve_shim_invocations.py`,
+  `block_unwrapped_adapter_calls.py`, `block_main_loop_raw_access.py`), so a new
+  adapter dropped in this dir auto-gates everywhere with no per-hook edit.
 
 To add a tool: drop a shim here following the same pattern; no allowlist edit
 is needed (the `defender-*` glob covers it).

@@ -29,7 +29,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Non-adapter shims: corpus query + gather's own wrappers. Everything else
 # under defender/bin/ that starts with `defender-` is a data-source adapter.
-# Keep in sync with defender/bin/ and block_main_loop_raw_access._ADAPTER_SHIMS.
+# This is the single source of truth for the split — all three gate hooks
+# (approve_shim_invocations, block_unwrapped_adapter_calls,
+# block_main_loop_raw_access) derive their adapter set from here.
 NON_ADAPTER_SHIMS = frozenset(
     {"defender-invlang", "defender-record-query", "defender-data-source-debug"}
 )
@@ -78,6 +80,12 @@ def unwrap(cmd: str) -> str | None:
         if c_idx + 1 < len(tokens):
             return tokens[c_idx + 1]  # the quoted script payload
         return None
+    if i > 0:
+        # A `timeout <n>` prefix was stripped but no `bash -c` followed — return
+        # the remainder so callers see the real command at the head, not
+        # `timeout`. (Re-quote only this stripped case; leave a plain command's
+        # original text untouched to avoid spurious quoting differences.)
+        return shlex.join(tokens[i:])
     return cmd
 
 

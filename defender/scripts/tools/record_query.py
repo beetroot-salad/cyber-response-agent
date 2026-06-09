@@ -65,9 +65,11 @@ from pathlib import Path
 # invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
-# An adapter `<system>_cli.py` path token → its `<system>`. Mirrors
-# block_main_loop_raw_access.ADAPTER_CLI_RE / hooks/_cmd_segments.ADAPTER_CLI_RE.
-_CLI_RE = re.compile(r"(?:^|/)([A-Za-z0-9]+)_cli\.py$")
+# An adapter `<system>_cli.py` path token → its `<system>`. `\w+` (not
+# `[A-Za-z0-9]+`) so a multi-word filename captures fully — `host_state_cli.py`
+# → `host_state` (normalized to `host-state` below), matching the `\w+_cli` form
+# in block_main_loop_raw_access.ADAPTER_CLI_RE / hooks/_cmd_segments.ADAPTER_CLI_RE.
+_CLI_RE = re.compile(r"(?:^|/)(\w+)_cli\.py$")
 # Non-adapter `defender-*` shims — never a lead system. Mirrors
 # hooks/_cmd_segments.NON_ADAPTER_SHIMS.
 _NON_ADAPTER = frozenset({"record-query", "data-source-debug", "invlang"})
@@ -139,13 +141,28 @@ def derive_system(inner: list[str]) -> str | None:
     an explicit ``--system``). Pure — no IO, no per-system table; a newly
     onboarded adapter is covered with no edit here."""
     for tok in inner:
-        if tok.startswith("defender-"):
+        # Adapter shim form `defender-<system>`. Require a bare shim token: skip
+        # path/flag values that merely start with `defender-` (a
+        # `/tmp/defender-runs/…` arg, a `--defender-dir` value), which would
+        # otherwise yield a garbage system. Mirrors the command-position anchor
+        # block_main_loop_raw_access's adapter-shim regex uses for the same reason.
+        if tok.startswith("defender-") and "/" not in tok and "=" not in tok:
             name = tok[len("defender-"):]
             if name and name not in _NON_ADAPTER:
                 return name
+        # Raw `<system>_cli.py` path form. The filename uses `_` where the
+        # canonical system name (and the `defender-<system>` shim) uses `-`
+        # (host_state_cli.py → host-state), so normalize to agree with the
+        # shim-derived spelling and the queries-table join key. Skip `VAR=…`
+        # assignment values (never an executable path) so a stray
+        # `FOO=/x/elastic_cli.py` doesn't pre-empt the real adapter token.
+        if "=" in tok:
+            continue
         m = _CLI_RE.search(tok)
         if m:
-            return m.group(1)
+            name = m.group(1).replace("_", "-")
+            if name not in _NON_ADAPTER:
+                return name
     return None
 
 

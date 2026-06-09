@@ -52,6 +52,11 @@ def _run(mod, monkeypatch, command: str, *, subagent: bool) -> int:
 
 
 WRAPPED = (
+    "defender-record-query --lead l-1 --query-id elastic.q "
+    "-- defender-elastic query foo --raw"
+)
+# The verbose explicit-flag form is still accepted and must still be allowed.
+WRAPPED_EXPLICIT = (
     "defender-record-query --run-dir /r --lead l-1 --system elastic "
     "--query-id elastic.q -- defender-elastic query foo --raw"
 )
@@ -77,6 +82,7 @@ def test_denies_unwrapped_adapter_in_subagent(monkeypatch, capsys, command):
 
 @pytest.mark.parametrize("command", [
     WRAPPED,
+    WRAPPED_EXPLICIT,
     f"{WRAPPED} | jq .",
     "tail -1 /r/executed_queries.jsonl | jq .",
     "cat /r/gather_raw/l-1/0.json | jq '.hits | length'",
@@ -84,6 +90,43 @@ def test_denies_unwrapped_adapter_in_subagent(monkeypatch, capsys, command):
     "defender-invlang enum types",
 ])
 def test_allows_wrapped_and_nonadapter_in_subagent(monkeypatch, capsys, command):
+    mod = _load(monkeypatch)
+    assert _run(mod, monkeypatch, command, subagent=True) == 0
+    assert capsys.readouterr().err == ""
+
+
+# --- the wrapper marker must be at the HEAD, not anywhere in the segment ----
+# A bare adapter call whose ARGUMENTS merely mention the wrapper token (e.g. an
+# elastic query for the literal string `defender-record-query`) is still bare.
+
+@pytest.mark.parametrize("command", [
+    "defender-elastic query --query 'process:defender-record-query' --raw",
+    "defender-elastic query --note record_query.py",
+    "defender-cmdb host-lookup web-1 -- record_query.py",
+])
+def test_denies_bare_adapter_when_args_mention_wrapper(monkeypatch, capsys, command):
+    mod = _load(monkeypatch)
+    assert _run(mod, monkeypatch, command, subagent=True) == 2
+    assert "capture wrapper" in capsys.readouterr().err
+
+
+# --- a `timeout <n>` prefix (no bash -c) must not hide the adapter head ------
+
+def test_denies_timeout_prefixed_bare_adapter(monkeypatch, capsys):
+    mod = _load(monkeypatch)
+    assert _run(mod, monkeypatch, "timeout 30 defender-elastic query foo", subagent=True) == 2
+    assert "capture wrapper" in capsys.readouterr().err
+
+
+# --- reading an adapter's SOURCE file is not running the adapter -------------
+# The cli path appears only as an argument to cat/grep/wc, not in exec position.
+
+@pytest.mark.parametrize("command", [
+    "cat defender/scripts/tools/elastic_cli.py",
+    "grep total defender/scripts/tools/elastic_cli.py",
+    "wc -l defender/scripts/tools/cmdb_cli.py | cat",
+])
+def test_allows_reading_adapter_source(monkeypatch, capsys, command):
     mod = _load(monkeypatch)
     assert _run(mod, monkeypatch, command, subagent=True) == 0
     assert capsys.readouterr().err == ""

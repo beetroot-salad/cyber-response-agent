@@ -243,6 +243,25 @@ def test_denies_main_running_adapter_shim(monkeypatch, capsys):
     assert "must not run data-source CLIs" in capsys.readouterr().err
 
 
+def test_newly_onboarded_adapter_auto_gates_in_main_loop(monkeypatch, capsys):
+    """A new adapter dropped in bin/ auto-gates here too — the shim roster is
+    sourced from the shared _cmd_segments taxonomy, not a hardcoded list. This
+    pins the PR's 'single source of truth' claim for the main-loop clamp."""
+    mod = _load(monkeypatch)  # exec inserts the hooks dir on sys.path
+    import _cmd_segments  # type: ignore[import-not-found]
+    monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
+        "defender-record-query", "defender-invlang", "defender-data-source-debug",
+        "defender-elastic", "defender-foo",  # 'foo' is the freshly onboarded adapter
+    })
+    rc = _run(mod, monkeypatch, {
+        "tool_name": "Bash",
+        "tool_input": {"command": "defender-foo lookup web-1 --raw"},
+        "cwd": MAIN_CWD,
+    })
+    assert rc == 2
+    assert "must not run data-source CLIs" in capsys.readouterr().err
+
+
 def test_denies_main_adapter_shim_inside_bash_c(monkeypatch):
     """The shim name is visible in the `bash -c` payload string, so the clamp
     still fires on the wrapped form."""

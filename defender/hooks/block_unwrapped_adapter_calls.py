@@ -41,6 +41,7 @@ Exit codes:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -57,17 +58,23 @@ from _cmd_segments import (  # noqa: E402
     unwrap,
 )
 
-# A segment that carries one of these is the capture wrapper itself, so an
-# adapter token inside it is wrapped (appears after `--`), not a bare call.
-_WRAPPER_MARKERS = ("defender-record-query", "record_query.py")
+# The capture wrapper, recognized in *command position* (segment head), so a
+# bare adapter whose arguments merely mention the wrapper token — e.g. an
+# elastic query for the literal string `defender-record-query` — is still a bare
+# call, not a wrapped one. Matched at the head, never as a free substring.
+_WRAPPER_SHIM = "defender-record-query"
+_WRAPPER_SCRIPT_RE = re.compile(r"(?:^|/)record_query\.py$")
+_INTERP_RE = re.compile(r"(?:^|/)python[0-9.]*$")
 
 DENY_REASON = (
     "Blocked: route this data-source query through the capture wrapper so it "
     "lands in the queries table (executed_queries.jsonl) with its raw payload. "
     "A bare adapter call escapes the audit trail. Re-run it as:\n"
-    "  defender-record-query --run-dir $DEFENDER_RUN_DIR --lead <l-NNN> "
-    "--system <system> --query-id <{system}.{template}|ad-hoc> -- <adapter call>\n"
-    "Use --query-id ad-hoc for a one-off probe with no catalog candidacy."
+    "  defender-record-query --lead <l-NNN> "
+    "--query-id <{system}.{template}|ad-hoc> -- <adapter call>\n"
+    "(--run-dir defaults from $DEFENDER_RUN_DIR and --system is derived from the "
+    "adapter; pass either only to override.) Use --query-id ad-hoc for a one-off "
+    "probe with no catalog candidacy."
 )
 
 
@@ -78,19 +85,50 @@ def _is_subagent(hook_data: dict) -> bool:
     return bool(hook_data.get("agent_id"))
 
 
+def _is_wrapper_segment(parts: list[str]) -> bool:
+    """True if the capture wrapper is the command being RUN at the segment head
+    (`defender-record-query …`, or an interpreter running `…/record_query.py`),
+    so the adapter token after `--` is wrapped. A wrapper token merely appearing
+    in an argument does NOT count."""
+    if not parts:
+        return False
+    head = parts[0]
+    if head == _WRAPPER_SHIM or _WRAPPER_SCRIPT_RE.search(head):
+        return True
+    if _INTERP_RE.search(head):
+        return any(_WRAPPER_SCRIPT_RE.search(p) for p in parts[1:])
+    return False
+
+
+def _is_adapter_segment(parts: list[str], adapters: set) -> bool:
+    """True if the segment EXECUTES a data-source adapter: its head is an adapter
+    shim, the head is itself an adapter `*_cli.py` path, or an interpreter at the
+    head runs one. A `*_cli.py` path appearing only as an argument (e.g.
+    `cat …/elastic_cli.py`) is a read, not an execution, and is not flagged."""
+    if not parts:
+        return False
+    head = parts[0]
+    if head in adapters:
+        return True
+    if ADAPTER_CLI_RE.search(head):
+        return True
+    if _INTERP_RE.search(head):
+        return any(ADAPTER_CLI_RE.search(p) for p in parts[1:])
+    return False
+
+
 def _has_unwrapped_adapter(cmd: str) -> bool:
     inner = unwrap(cmd)
     if inner is None:
         return False
     adapters = adapter_shims()
     for raw in split_segments(inner):
-        seg = raw.strip()
-        if not seg:
+        parts = raw.split()
+        if not parts:
             continue
-        if any(m in seg for m in _WRAPPER_MARKERS):
-            continue  # this segment is the capture wrapper — adapter is wrapped
-        head = seg.split(None, 1)[0]
-        if head in adapters or ADAPTER_CLI_RE.search(seg):
+        if _is_wrapper_segment(parts):
+            continue  # the capture wrapper — the adapter after `--` is wrapped
+        if _is_adapter_segment(parts, adapters):
             return True
     return False
 

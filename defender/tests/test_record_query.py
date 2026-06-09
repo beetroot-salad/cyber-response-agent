@@ -167,6 +167,22 @@ def test_derive_system_from_cli_path():
     assert ge.derive_system(["python3", "/x/cmdb_cli.py", "host-lookup", "web-1"]) == "cmdb"
 
 
+def test_derive_system_multiword_cli_path_normalizes_underscore():
+    # A multi-word adapter file uses `_`, but the canonical system name and the
+    # `defender-<system>` shim use `-`; the path form must agree with the shim
+    # form so the queries-table join key is stable across both.
+    assert ge.derive_system(["python3", "/x/host_state_cli.py", "inspect", "c1"]) == "host-state"
+    assert ge.derive_system(["/x/change_mgmt_cli.py", "list"]) == "change-mgmt"
+    assert ge.derive_system(["python3", "/x/threat_intel_cli.py", "lookup"]) == "threat-intel"
+
+
+def test_derive_system_ignores_stray_tokens_before_shim():
+    # A path/flag value that merely starts with `defender-` or ends in `_cli.py`
+    # must not pre-empt the real adapter shim that follows it.
+    assert ge.derive_system(["--out", "defender-runs/x", "defender-cmdb", "q"]) == "cmdb"
+    assert ge.derive_system(["FOO=/x/elastic_cli.py", "defender-cmdb", "q"]) == "cmdb"
+
+
 def test_derive_system_skips_non_adapter_and_unknown():
     # record-query/data-source-debug/invlang are not lead systems.
     assert ge.derive_system(["defender-data-source-debug", "--payload", "p"]) is None
@@ -184,6 +200,19 @@ def test_main_derives_system_from_inner_when_flag_omitted(tmp_path):
     assert rc == 0
     row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
     assert row["system"] == "cmdb"
+
+
+def test_main_derives_multiword_system_from_cli_path(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "host_state_cli.py", "{}")
+    # No --system: derived (and normalized `_`→`-`) from the host_state_cli.py path.
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
+                  "--query-id", "host-state.inspect", "--",
+                  sys.executable, str(cli), "inspect", "c1"])
+    assert rc == 0
+    row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
+    assert row["system"] == "host-state"
 
 
 def test_main_explicit_system_overrides_derivation(tmp_path):
