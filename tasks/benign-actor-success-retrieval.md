@@ -32,6 +32,13 @@ lessons that beat the judge rise to the top of the corpus.
    (held-out runs carry `ground_truth.yaml`) or a defender FP-finding that
    survived author curation, treated as provisional otherwise.
 
+**Design.** See `defender/docs/lessons-success-scoring.md`
+(2026-05-30 draft) — problem, principles, the safety-pessimistic
+contextual-bandit solution (actor self-rating for credit assignment;
+gated/loss-averse update for safety; pessimism-for-pruning +
+Thompson-selection for the curriculum), the malicious-actor mirror +
+shared helpers, trade-offs, and sequencing.
+
 **Status / scope.** The environment-lessons schema currently ships
 *without* `confidence` / `wins` fields (lessons are advice, agent-judged;
 a confidence tier adds no clear signal). This task owns introducing the

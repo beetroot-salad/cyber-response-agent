@@ -39,21 +39,50 @@ A grading unit is one of:
 - an `ac*` authorization contract
 - an `lp*` Shape E branch reading
 
-Each unit has a fixed shape: a claim, an optional comparison (selector + dimension), a subject/target on the proposed edge or vertex, a hypothesis it lives under, and after this loop, a status (`pending` / `settled` / `indeterminate`). Settled units carry a grade + grading-loop + lead.
+Each unit has a fixed source shape: a claim, an optional comparison (selector + dimension), a subject/target on the proposed edge or vertex, the hypothesis or lead branch it lives under, and after this loop, a status (`pending` / `settled` / `indeterminate`). Settled units carry a grade + grading-loop + lead.
+
+Each unit also has a fixed **output family**. The output family is what prevents the authoring surface from mixing unrelated verdict types:
+
+| output_family | unit kinds | allowed verdicts | handler projection |
+|---|---|---|---|
+| `hypothesis_grade` | `p*`, `ap*`, `r*` | `++`, `+`, `-`, `--`, `indeterminate` | current `:T resolutions` / `resolutions_by_lead` shape, keyed to the owning hypothesis and matched predicate id |
+| `authorization_verdict` | `ac*` | `authorized`, `unauthorized`, `indeterminate` | current `:R authz` / `legitimacy_by_lead` shape, keyed to `h-*.ac*` |
+| `consultation_result` | anchor consultations that do not close an `ac*` | `confirmed`, `refuted`, `partial`, `no-data` | current `:R consultations` / `trust_anchor_by_lead` shape |
+| `impact_verdict` | impact predictions, if surfaced later | `within`, `exceeds`, `indeterminate` | current `:R impact` / `impact_by_lead` shape |
+| `branch_reading` | `lp*` Shape E branch readings | `matched`, `not_matched`, `indeterminate` | branch/routing metadata for the next PREDICT step; only emitted once Shape E readings are persisted into the gather entry |
+
+`indeterminate` on a `hypothesis_grade` unit is a model-authored no-grade result: it does **not** project to a `:T resolutions` row because current invlang weights have no indeterminate state. The handler records the rationale as an anomaly/data-wish/no-change note and leaves the predicate pending for the next loop.
 
 ### Prediction-anchored frontier
 
 Replace `<current_gather>` and the prediction half of `<analysis_frontier>` with one `<grading_units>` dense block:
 
 ```
-:G grading_units [unit_id|hypothesis|kind|claim|baseline_ref|observation_ref|status]
-g1|h-001|p1|"<claim>"|baselines/h-001.p1.md|observations/h-001.p1.md|pending
-g2|h-001|ac1|"<predicate>"|-|observations/h-001.ac1.md|pending
-g3|h-002|r1|"<refutation>"|baselines/h-002.r1.md|observations/h-002.r1.md|pending
-g4|h-001|p1|<settled-claim>|-|-|settled                          # carried; skip
+:G grading_units [unit_id|owner|predicate_id|unit_kind|output_family|claim|baseline_ref|observation_ref|status]
+g1|h-001|p1|prediction|hypothesis_grade|"<claim>"|baselines/h-001.p1.md|observations/h-001.p1.md|pending
+g2|h-001|ac1|authorization_contract|authorization_verdict|"<predicate>"|-|observations/h-001.ac1.md|pending
+g3|h-002|r1|refutation|hypothesis_grade|"<refutation>"|baselines/h-002.r1.md|observations/h-002.r1.md|pending
+g4|h-001|p1|prediction|hypothesis_grade|<settled-claim>|-|-|settled          # carried; skip
 ```
 
-Inline cost in the prompt drops to one row per grading unit. The model does not see gather output inline — it Reads each unit's observation file when it grades that unit. Freshness comes from the Read landing right before the grade.
+Inline cost in the prompt drops to one row per grading unit. The model does not see gather output inline — it Reads each unit's observation file when it grades that unit. Freshness comes from the Read landing right before the grade. The row is a routing/index surface only; the handler keeps the full `unit_id -> canonical source object` mapping in Python so output rows can be projected back into the existing ANALYZE envelope without guessing.
+
+### Handler join source of truth
+
+`_grading_units.py` builds units from the **full parsed current PREDICT companion state** plus the current loop's GATHER payload, not from the already-compact `<analysis_frontier>` prompt block.
+
+That distinction is load-bearing. `format_analyze_frontier_block()` is a model-facing summary and is allowed to omit detail for cache cost. The join is not allowed to lose detail. It must read the canonical hypothesis objects from the parsed companion (`predictions`, `attribute_predictions`, `refutation_shape`, `authorization_contract`, `attached_to_vertex`, `proposed_edge`, story links, and any target/attribute fields), then join those objects to `ctx.outputs[Phase.GATHER]` and raw detail paths. Only after the join succeeds does the handler emit the compact `<grading_units>` rows and per-unit files.
+
+Practical flow:
+
+```
+investigation.md current PREDICT fence + ctx.outputs[Phase.GATHER] + raw_details paths
+  -> _grading_units.py full-state join
+  -> unit index (handler-only) + observations/*.md + baselines/*.md
+  -> compact :G grading_units rows in the prompt
+  -> model :G unit_resolutions rows
+  -> handler projection into AnalyzeEnvelope / invlang findings
+```
 
 ### Per-unit files (handler-emitted)
 
@@ -98,7 +127,8 @@ comparison.dimension: inter-event-gap-distribution
 - loop 1: + (lead: authentication-history) — <one-line carry>
 
 ## Grade this unit
-weight: ++ | + | - | -- | indeterminate
+output_family: hypothesis_grade
+verdict: ++ | + | - | -- | indeterminate
 citing: [<evidence-edge ids>]
 rationale: <one sentence>
 ```
@@ -106,17 +136,17 @@ rationale: <one sentence>
 Authoring surface = the bottom block per unit. ANALYZE's stdout becomes a sequence of `:G` resolution rows (one per ungraded unit) plus the routing trailer:
 
 ```
-:G resolutions [unit_id|weight|citing|rationale]
-g1|++|"e-001"|"foreground inter-event gap distribution within historical-self baseline"
-g2|authorized|"e-002"|"anchor confirms registered principal initiated"
-g3|--|"e-001"|"refutation observable absent"
+:G unit_resolutions [unit_id|output_family|verdict|citing|rationale]
+g1|hypothesis_grade|++|"e-001"|"foreground inter-event gap distribution within historical-self baseline"
+g2|authorization_verdict|authorized|"e-002"|"anchor confirms registered principal initiated"
+g3|hypothesis_grade|--|"e-001"|"refutation observable present"
 ```
 
-The handler composes the prose `## ANALYZE (loop N)` section from those rows + the unit files; the model never authors prose, it grades.
+The parser validates that every `unit_id` exists, `output_family` matches the handler-owned unit index, and `verdict` belongs to that family's allowed set. The handler then projects the typed unit result into the current `AnalyzeEnvelope` buckets (`resolutions_by_lead`, `legitimacy_by_lead`, `trust_anchor_by_lead`, `impact_by_lead`) and composes the prose `## ANALYZE (loop N)` section from those rows + the unit files. The model never authors prose; it grades typed units.
 
 ### Settled resolutions as a structural field
 
-`frontier.settled_resolutions[]` carries `{hypothesis_id, predicate_id, grade, grading_loop, lead}`. Corresponding `:G` rows are pre-stamped `status=settled`; the model skips them. The "do not relitigate prior grades" discipline becomes a field, not a prose rule.
+`frontier.settled_resolutions[]` carries `{unit_id, owner, predicate_id, output_family, verdict, grading_loop, lead}` for terminal unit outcomes. For `hypothesis_grade`, only decisive `++` / `--` outcomes are settled; partial `+` / `-` outcomes remain pending and are exposed through `prior_grades/` so the model can re-grade them against new evidence. Corresponding `:G` rows are pre-stamped `status=settled`; the model skips them. The "do not relitigate prior grades" discipline becomes a field, not a prose rule.
 
 ### Trimmed `<available_context>`
 
@@ -146,13 +176,13 @@ This is also the empirical answer to "how does ANALYZE think" — read sequences
 ### Stage 1 — handler-side join + per-unit file emission
 
 1. **`scripts/handlers/analyze.py`** — extend `_assemble_prompt` to emit `<grading_units>` and write per-unit files under `runs/<run>/grading/loop-<N>/`. Keep the existing `<current_gather>` / `<analysis_frontier>` blocks for now so ANALYZE keeps working through the cutover.
-2. **`scripts/handlers/_grading_units.py`** (new) — module owning the prediction↔observation join. One function per kind (`p*`, `ap*`, `r*`, `ac*`, `lp*`); each takes the active hypothesis frontier + the loop's gather output and returns `(unit_row, observation_md, baseline_md_or_none, raw_payload_slice_or_none)`.
-3. **Tests** — `tests/test_grading_units_join.py` against fixtures: deviation-kind prediction with baseline, contract with anchor consult, Shape E `lp*` with selector, settled-grade carry. Each fixture verifies the file path layout and the slice contents.
+2. **`scripts/handlers/_grading_units.py`** (new) — module owning the prediction↔observation join. It parses the full current PREDICT companion state from `investigation.md` and joins it to the loop's gather output; it does not consume the compact `<analysis_frontier>` block as input. One function per unit kind (`p*`, `ap*`, `r*`, `ac*`, `lp*`) returns a `GradingUnit` object containing the compact row fields, `output_family`, allowed verdicts, canonical source object, observation markdown, optional baseline markdown, and optional raw-payload slice.
+3. **Tests** — `tests/test_grading_units_join.py` against fixtures: deviation-kind prediction with baseline, attribute prediction target/attribute carry, contract with anchor consult, Shape E `lp*` with selector, settled-grade carry. Each fixture verifies the file path layout, output family, allowed verdict set, handler projection target, and slice contents.
 4. **Investigation manifest** — extend `format_run_manifest` (or fork it for analyze) so the manifest surfaces `grading_units: runs/<run>/grading/loop-<N>/` once the directory exists.
 
 ### Stage 2 — settled-resolution structural tagging
 
-5. **`scripts/handlers/investigation_views.py`** — extend `format_analyze_frontier_block` to compute `settled_resolutions[]` from the accumulated companion (walk hypothesize/findings, project last `++/--/+/-` per `(hypothesis_id, predicate_id)`).
+5. **`scripts/handlers/investigation_views.py`** — extend `format_analyze_frontier_block` to compute `settled_resolutions[]` from the accumulated companion (walk hypothesize/findings, project last decisive `++/--` per `(hypothesis_id, predicate_id)` for `hypothesis_grade`, and terminal contract verdicts per `(hypothesis_id, ac_id)` for `authorization_verdict`). Partial `+/-` grades are prior context, not settled rows.
 6. **Per-unit emission** — settled units get `status=settled` and no observation file (or a `prior_grades/h-{id}.md` summary file referenced from the unit row). Model skips them.
 7. **Independent of stage 1** — can land in either order.
 
@@ -164,9 +194,9 @@ This is also the empirical answer to "how does ANALYZE think" — read sequences
 
 ### Stage 4 — authoring surface migration
 
-11. **`agents/analyze.md`** — rewrite the output contract: stdout is `:G resolutions` rows + routing trailer. Drop the prose `## ANALYZE (loop N)` envelope from the model's job; the handler composes it from `:G` rows + per-unit files.
-12. **`scripts/handlers/_output_parser.py`** — accept the `:G resolutions` shape; emit a remediation note when the model emits prose envelopes (one cutover loop, then reject).
-13. **`scripts/handlers/_analyze_dense.py`** — handler-side composition of the persisted `## ANALYZE (loop N)` markdown section from `:G` rows + grading-unit observations.
+11. **`agents/analyze.md`** — rewrite the output contract: stdout is `:G unit_resolutions` rows + routing trailer. The prompt must teach the family-specific verdict sets; `authorized` is only legal for `authorization_verdict`, and `++`/`--` are only legal for `hypothesis_grade`. Drop the prose `## ANALYZE (loop N)` envelope from the model's job; the handler composes it from `:G` rows + per-unit files.
+12. **`scripts/handlers/_output_parser.py`** — accept the typed `:G unit_resolutions` shape, validate `(unit_id, output_family, verdict)` against the handler-owned unit index, and project rows into the existing `AnalyzeEnvelope` buckets. Emit a remediation note when the model emits prose envelopes or mismatched verdict families (one cutover loop, then reject).
+13. **`scripts/handlers/_analyze_dense.py`** — handler-side composition of the persisted `## ANALYZE (loop N)` markdown section from typed `:G` rows + grading-unit observations.
 14. **Trim manifest** — at this stage drop the listed PREDICT-shaped pointers; previous stages were strictly additive.
 15. **Drop `<current_gather>`** — once `<grading_units>` carries the load-bearing slice, the inline structured-gather block is redundant. Keep the gather output on disk under `runs/<run>/`; it still feeds the join.
 
@@ -180,7 +210,7 @@ This is also the empirical answer to "how does ANALYZE think" — read sequences
 Three measurable shifts:
 
 1. **Prediction-observation join is deterministic.** Pick a fixture where today's ANALYZE prose narrates "comparing p1's claim against the gather of `authentication-history` we see X." After stage 1, the unit file `observations/h-001.p1.md` contains the slice X verbatim, with no model effort spent on locating it. Measurable by: presence of the slice in the unit file, and absence of "the relevant lead is …" prose in the model's output.
-2. **Settled grades are not relitigated.** Pick a fixture with a multi-loop run where loop 1 graded `p1` `++`. After stage 2, loop 2's `:G grading_units` row for that predicate is `status=settled` and the model emits no resolution for it. Measurable by: zero `:G resolutions` rows naming a settled unit_id.
+2. **Settled grades are not relitigated.** Pick a fixture with a multi-loop run where loop 1 graded `p1` `++`. After stage 2, loop 2's `:G grading_units` row for that predicate is `status=settled` and the model emits no resolution for it. Measurable by: zero `:G unit_resolutions` rows naming a settled unit_id.
 3. **Manifest trim does not cause regressions.** After stage 3 + 4, the trimmed manifest is in production for ≥20 runs with no degradation in grading quality (judge metric, or eyeballed against the pre-trim runs on the same fixtures). Measurable by: judge-A/B parity on a held-out set, plus no Read attempts to removed paths in `analyze_reads.jsonl`.
 
 Without all three, the redesign can show "the new shape is producible" but not "the new context investigates better."
