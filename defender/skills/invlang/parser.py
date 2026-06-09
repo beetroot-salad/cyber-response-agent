@@ -138,8 +138,9 @@ def _row_cells(block: Block, row: str, expected: int) -> list[str]:
     """
     cells = _split_cells(row)
     if len(cells) > expected:
+        header = f" for [{'|'.join(block.columns)}]" if block.columns else ""
         raise RowError(
-            f"row has {len(cells)} cells but {expected} expected "
+            f"row has {len(cells)} cells but {expected} expected{header} "
             f"(check for unescaped `|` inside an attrs/value cell)"
         )
     if len(cells) < expected:
@@ -720,15 +721,6 @@ def _project_rows(
     return out
 
 
-_CONCLUDE_SUB_TABLES = {
-    "surviving": "surviving_hypotheses",
-    "deferred_authz": "deferred_authorizations",
-    "deferred_impact": "deferred_impact_predictions",
-    "deferred_preds": "deferred_predictions",
-    "ceiling_test": "ceiling_test",
-}
-
-
 def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:
     termination: dict[str, Any] = {}
     for row in rows:
@@ -749,61 +741,6 @@ def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None
             conclude[key] = value
     if termination:
         conclude["termination"] = termination
-
-
-def _project_conclude_sub(
-    block: Block, conclude: dict[str, Any], warnings: list[ParseWarning]
-) -> None:
-    sub = block.name[len("conclude."):]
-    dict_key = _CONCLUDE_SUB_TABLES.get(sub)
-    if not dict_key or not block.rows:
-        return
-    if len(block.rows) == 1 and block.rows[0].strip().lower() == "none":
-        if dict_key != "ceiling_test":
-            conclude[dict_key] = []
-        return
-    if dict_key == "ceiling_test":
-        _project_conclude_ceiling_test(block, conclude, dict_key, warnings)
-        return
-    conclude[dict_key] = _project_conclude_bucket(block, dict_key, warnings)
-
-
-def _project_conclude_ceiling_test(
-    block: Block, conclude: dict[str, Any], dict_key: str,
-    warnings: list[ParseWarning],
-) -> None:
-    cols = block.columns or []
-    try:
-        cells = _row_cells(block, block.rows[0], len(cols))
-    except RowError as e:
-        warnings.append(ParseWarning(
-            block=f":{block.tag} {block.name}", row_index=0,
-            row=block.rows[0], reason=str(e),
-        ))
-        return
-    conclude[dict_key] = dict(zip(cols, cells, strict=False))
-
-
-def _project_conclude_bucket(
-    block: Block, dict_key: str, warnings: list[ParseWarning],
-) -> list[Any]:
-    cols = block.columns or []
-    bucket: list[Any] = []
-    for idx, row in enumerate(block.rows):
-        try:
-            cells = _row_cells(block, row, len(cols))
-        except RowError as e:
-            warnings.append(ParseWarning(
-                block=f":{block.tag} {block.name}", row_index=idx,
-                row=row, reason=str(e),
-            ))
-            continue
-        if dict_key == "surviving_hypotheses":
-            if cells and cells[0]:
-                bucket.append(cells[0])
-        else:
-            bucket.append(dict(zip(cols, cells, strict=False)))
-    return bucket
 
 
 # ---------------------------------------------------------------------------
@@ -947,7 +884,12 @@ def _project_t_block(
         _project_conclude_scalars(out.setdefault("conclude", {}), block.rows)
         return True, current_lead
     if name.startswith("conclude."):
-        _project_conclude_sub(block, out.setdefault("conclude", {}), warnings)
+        # `conclude.*` sub-tables (surviving / ceiling_test / deferred_*) have
+        # no machine consumer in defender — the closure rules that read them in
+        # soc-agent (#13/#26/#31/#34) were never ported, and benign-gating is
+        # computed from the resolution record. Accept-and-ignore: a stray
+        # sub-block is tolerated rather than rejected, so the agent never
+        # format-fights an undocumented surface against the validator.
         return True, current_lead
     if name == "resolutions":
         return True, _project_resolutions_block(block, lead_bucket, warnings, current_lead)

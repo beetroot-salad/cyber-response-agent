@@ -273,9 +273,6 @@ impact_verdict         none
 confidence             high
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
-
-:T conclude.surviving [hyp_id|final_weight]
-h-001|++
 ```
 
 ## Discovery hypotheses

@@ -337,7 +337,7 @@ def test_joined_orders_ran_by_execution_not_alphabetical(tmp_path):
     _query(run, "l-005", 0)   # executed first
     _query(run, "l-001", 0)   # executed second
     joined_order = [j.lead_id for j in lr.joined(run)]
-    actor_order = [l["lead_id"] for l in lr.actor_view(run)["leads"]]
+    actor_order = [lead["lead_id"] for lead in lr.actor_view(run)["leads"]]
     assert joined_order == ["l-005", "l-001"]
     assert joined_order == actor_order
 

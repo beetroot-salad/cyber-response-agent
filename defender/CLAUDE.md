@@ -24,8 +24,8 @@ A first wave of reliability hooks/validators has been ported from
   out-of-catalog type/rel/anchor_kind/auth_kind or `:R attr_updates`
   key, and unsatisfied `benign` disposition gates (open `??`/`{a,b}`
   slots, or an unauthorized contract on a *live* — final weight ≠ `--` —
-  hypothesis, computed from the resolution record rather than the
-  omittable `:T conclude.surviving` table). The hook **fails closed**
+  hypothesis, computed from the resolution record (`:T conclude` carries
+  no sub-tables). The hook **fails closed**
   (exit 2) on an internal validator error and scopes to the run's own
   `investigation.md` via `DEFENDER_RUN_DIR`. Rules live in
   `skills/invlang/validate.py` (companion walkers shared with the corpus
