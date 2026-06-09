@@ -40,6 +40,16 @@ A wave of reliability hooks/validators guards the runtime loop:
   spec rules (per-type class-slot grammar, sibling-fork uniqueness) are
   *not* yet enforced because the spec's own examples currently contradict
   them — see `tasks/defender-invlang-enforcement-ramp.md`.
+- **`hooks/block_unwrapped_adapter_calls.py`** — PreToolUse on `Bash`,
+  scoped to the gather subagent (`agent_id` present). Denies (exit 2) a
+  data-source adapter call (`defender-elastic …`, or a raw `*_cli.py`
+  path) unless it is wrapped in `defender-record-query`, so every query
+  is captured into the queries table instead of escaping the audit trail.
+  The main loop is out of scope here — `block_main_loop_raw_access.py`
+  denies adapter calls there outright. The adapter-vs-non-adapter split
+  is shared with `approve_shim_invocations.py` via `hooks/_cmd_segments.py`.
+  This makes the queries table a real integrity gate, matching
+  `record_lead.py`'s `O_EXCL` claim on the leads table.
 - **`hooks/tag_tool_results.py`** — PostToolUse injection-safety tagging:
   wraps MCP output and annotates the gather subagent's `Task` return (the
   primary untrusted channel into the main loop) plus adapter-CLI /
@@ -79,6 +89,9 @@ defender/
     record_lead.py                      # PreToolUse on Task|Agent: parses gather dispatch YAML, writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse → exit 2)
     inject_system_skill_description.py  # PreToolUse on Task|Agent: appends the target system SKILL's frontmatter description: to the dispatch prompt
     block_main_loop_raw_access.py       # PreToolUse on Bash|Read|Grep|Glob: blocks the main loop from running system CLIs or reading gather_raw/ directly
+    block_unwrapped_adapter_calls.py    # PreToolUse on Bash: in the gather subagent, denies adapter calls not wrapped in defender-record-query (forces queries-table capture)
+    approve_shim_invocations.py         # PreToolUse on Bash|Read|Grep|Glob: auto-approves safe defender-* shim + read-only compounds the static allowlist can't express
+    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy (used by the two gate hooks above)
     invlang_validate.py                 # PreToolUse on Write|Edit: enforces the invlang schema on investigation.md (skills/invlang/validate.py)
     tag_tool_results.py                 # PostToolUse: salted untrusted-data tagging of MCP / adapter-CLI / alert.json output
     budget_enforcer.py                  # PostToolUse on *: per-run tool-call / spawn / wall-clock budget (warning-only)

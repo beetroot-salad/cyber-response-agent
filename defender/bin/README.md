@@ -28,11 +28,15 @@ in `run-settings.json`). `run.py` puts this dir first on `PATH` and exports
 - The data-source **adapter** shims (`defender-elastic`, `defender-cmdb`,
   `defender-identity`, `defender-host-state`, `defender-threat-intel`,
   `defender-change-mgmt`, `defender-ticket`) are clamped out of the main loop
-  by `hooks/block_main_loop_raw_access.py` — only the gather subagent (via
-  `defender-record-query`) runs them. The non-adapter shims (`defender-invlang`,
-  `defender-record-query`, `defender-data-source-debug`) stay allowed in the
-  main loop. Keep that exempt set in sync with `block_main_loop_raw_access.py`
-  and `hooks/approve_shim_invocations.py`.
+  by `hooks/block_main_loop_raw_access.py`, and inside the gather subagent they
+  must be **wrapped** in `defender-record-query` — `hooks/block_unwrapped_adapter_calls.py`
+  denies a bare adapter call there so every query lands in the queries table.
+  The non-adapter shims (`defender-invlang`, `defender-record-query`,
+  `defender-data-source-debug`) stay allowed in the main loop. The adapter vs.
+  non-adapter split is defined once in `hooks/_cmd_segments.py`
+  (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`), shared by
+  both gate hooks; `block_main_loop_raw_access.py` keeps a parallel regex list —
+  keep them in sync with this dir.
 
 To add a tool: drop a shim here following the same pattern; no allowlist edit
 is needed (the `defender-*` glob covers it).

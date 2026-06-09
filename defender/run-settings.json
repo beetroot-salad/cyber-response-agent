@@ -67,6 +67,10 @@
           {
             "type": "command",
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_main_loop_raw_access.py"
+          },
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_unwrapped_adapter_calls.py"
           }
         ]
       },
