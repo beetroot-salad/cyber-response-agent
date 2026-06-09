@@ -46,10 +46,24 @@ def test_no_credential_signal(tmp_path: Path):
 
 def test_run_dir_contents_listed(tmp_path: Path):
     (tmp_path / "alert.json").write_text("{}")
-    (tmp_path / "gather_raw").mkdir()
     out = wm.workspace_map(tmp_path)
     assert "alert.json" in out
-    assert "gather_raw/ is empty" in out
+
+
+def test_gather_raw_suppressed(tmp_path: Path):
+    """#264 cleanse: `gather_raw/` is a subagent-only artifact (raw query
+    payloads + the leads table). The orchestrator reasons from gather's
+    returned summary, never the raw tree, so the map must not name it — not
+    the dir entry, not its contents — even when it exists and is populated."""
+    (tmp_path / "alert.json").write_text("{}")
+    gr = tmp_path / "gather_raw"
+    gr.mkdir()
+    (gr / "l-001.lead.json").write_text("{}")
+    # Mask the run-dir path first: a tmp dir named after this test would
+    # otherwise inject "gather_raw" through the `## Run dir — <path>` header.
+    out = wm.workspace_map(tmp_path).replace(str(tmp_path), "RUNDIR")
+    assert "alert.json" in out
+    assert "gather_raw" not in out
 
 
 def test_output_ends_with_newline(tmp_path: Path):
