@@ -16,6 +16,9 @@ import pytest
 
 
 HOOK_PATH = Path(__file__).resolve().parents[1] / "hooks" / "approve_shim_invocations.py"
+# Main vs subagent is told apart by `agent_id`, not cwd. These constants are
+# sentinels for the _decide helper: SUBAGENT_CWD marks the call as a subagent
+# (adds agent_id to the payload); cwd itself is ignored by the hook.
 MAIN_CWD = "/workspace/defender-v2-tree"
 SUBAGENT_CWD = "/tmp/cc-worktree-abc123"
 
@@ -25,7 +28,6 @@ def _load(monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "REPO_ROOT", Path(MAIN_CWD))
     # Deterministic shim roster (don't depend on the real bin/ dir contents).
     monkeypatch.setattr(mod, "_all_defender_shims", lambda: {
         "defender-invlang", "defender-record-query", "defender-data-source-debug",
@@ -47,6 +49,9 @@ def _decide(mod, monkeypatch, capsys, command: str, cwd: str | None) -> str:
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
     if cwd is not None:
         payload["cwd"] = cwd
+    if cwd == SUBAGENT_CWD:  # sentinel → mark as a Task subagent (agent_id present)
+        payload["agent_id"] = "sub-abc123"
+        payload["agent_type"] = "general-purpose"
     monkeypatch.setattr(sys, "stdin", _StringIn(json.dumps(payload)))
     rc = mod.main()
     assert rc == 0

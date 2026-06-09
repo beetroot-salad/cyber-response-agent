@@ -92,13 +92,12 @@ def _split_segments(script: str) -> list[str]:
     return segs
 
 
-def _is_main_session(cwd: str | None) -> bool:
-    if not cwd:
-        return False
-    try:
-        return Path(cwd).resolve() == REPO_ROOT
-    except (OSError, ValueError):
-        return False
+def _is_main_session(hook_data: dict) -> bool:
+    """Main loop = no `agent_id`; a Task subagent's PreToolUse payload carries it
+    (and `agent_type`). cwd is NOT usable — v2 runs the orchestrator and every
+    gather subagent in-process at the same cwd. Matches
+    block_main_loop_raw_access._is_main_session."""
+    return not hook_data.get("agent_id")
 
 
 def _unwrap(cmd: str) -> str | None:
@@ -153,7 +152,7 @@ def main() -> int:
     # would deny — a `gather_raw` reference or an adapter call. Declining to
     # approve (passthrough) keeps the two hooks from ever contradicting,
     # independent of hook-precedence semantics.
-    main_session = _is_main_session(hook_data.get("cwd"))
+    main_session = _is_main_session(hook_data)
     if main_session and "gather_raw" in cmd:
         return 0
 

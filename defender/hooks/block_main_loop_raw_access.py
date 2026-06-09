@@ -24,12 +24,16 @@ The gather subagent legitimately does both — it runs the adapter CLI
 permission-deny rule can't tell the two apart and would break gather, so
 the scoping lives here.
 
-The discriminator is `cwd`: run.py spawns the main loop with
-`cwd=REPO_ROOT`, while gather subagents land in a Claude-Code-managed
-worktree whose cwd is *not* under REPO_ROOT (the same fact run.py relies
-on when it passes `--add-dir REPO_ROOT`). We deny only when cwd resolves
-to REPO_ROOT; anything else fails **open** (allow) — losing enforcement
-is acceptable, breaking gather is not.
+The discriminator is `agent_id`: Claude Code includes it (and `agent_type`)
+in the PreToolUse payload ONLY when the hook fires inside a Task subagent;
+the top-level loop has neither. cwd does NOT work — run.py spawns the
+orchestrator and every gather subagent in-process at the same cwd
+(REPO_ROOT), so a `cwd == REPO_ROOT` test flags gather subagents as the
+main loop and wrongly denies their legitimate gather_raw reads. We deny
+only when `agent_id` is absent (main loop); any subagent fails **open**
+(allow) — losing enforcement is acceptable, breaking gather is not. This
+clamp is a backstop: the primary defense is keeping gather_raw paths out
+of the orchestrator's context so it never reaches for them (see issue #264).
 
 Exit codes:
     0 — allow.
@@ -41,11 +45,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-from pathlib import Path
-
-# Hook lives at <repo>/defender/hooks/this_file.py → parents[2] is the repo
-# root, matching run.py's REPO_ROOT (DEFENDER_DIR.parent).
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 RAW_MARKER = "gather_raw"
 # An adapter CLI invocation: a path under scripts/tools/ ending in _cli.py.
@@ -102,15 +101,17 @@ def _read_target(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
-def _is_main_session(cwd: str | None) -> bool:
-    """True only when cwd resolves to REPO_ROOT. Missing/odd cwd → False
-    (fail open: never block a gather subagent)."""
-    if not cwd:
-        return False
-    try:
-        return Path(cwd).resolve() == REPO_ROOT
-    except (OSError, ValueError):
-        return False
+def _is_main_session(hook_data: dict) -> bool:
+    """True for the top-level agent loop, False for a Task subagent.
+
+    The discriminator is `agent_id`: the PreToolUse payload carries it (plus
+    `agent_type`) ONLY when the hook fires inside a subagent call; the main loop
+    has neither (per the hooks reference, confirmed empirically). cwd is NOT
+    usable — run.py spawns the orchestrator and every gather subagent in-process
+    at the same cwd (REPO_ROOT), so a `cwd == REPO_ROOT` test flags gather
+    subagents as the main loop and wrongly blocks their legitimate gather_raw
+    reads. Absence of `agent_id` → main loop → apply the clamps."""
+    return not hook_data.get("agent_id")
 
 
 def main() -> int:
@@ -122,7 +123,7 @@ def main() -> int:
     tool_name = hook_data.get("tool_name")
     if tool_name not in ("Bash", "Read", "Grep", "Glob"):
         return 0
-    if not _is_main_session(hook_data.get("cwd")):
+    if not _is_main_session(hook_data):
         return 0
 
     tool_input = hook_data.get("tool_input") or {}
