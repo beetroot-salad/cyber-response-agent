@@ -43,8 +43,8 @@ Rules (all blocking):
                      vertex and (b) every authz contract on a *live*
                      (not ``--``-refuted) hypothesis resolved
                      ``authorized``. Survival is computed from the
-                     resolution record, not the omittable
-                     ``:T conclude.surviving`` table.
+                     resolution record (``:T conclude`` carries no
+                     sub-tables).
 
 Deferred (tracked as follow-ups, intentionally NOT enforced here):
 per-type class-slot grammar vocab (the slot enums behind ``compute`` etc.)
@@ -391,9 +391,9 @@ def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
                 )
 
     # (b) every authz contract on a LIVE hypothesis resolved authorized.
-    # Survival is computed from final weights (not the omittable
-    # `:T conclude.surviving` table), so an unauthorized contract can't slip
-    # through by leaving its hypothesis off that list.
+    # Survival is computed from final weights (`:T conclude` carries no
+    # sub-tables), so an unauthorized contract can't slip through by being
+    # omitted from a restated survivors list.
     live = set(_walkers.live_hypothesis_ids(companion))
     hyps = _walkers.all_hypotheses(companion)
 

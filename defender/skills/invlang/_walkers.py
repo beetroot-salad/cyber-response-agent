@@ -104,8 +104,8 @@ def final_weights(companion: dict[str, Any]) -> dict[str, Any]:
 
 def live_hypothesis_ids(companion: dict[str, Any]) -> list[str]:
     """Hypothesis ids that survived: final weight is not ``--`` (strongly
-    refuted). Computed from the resolution record, not from the agent's
-    self-declared ``:T conclude.surviving`` table (which is omittable)."""
+    refuted). Computed from the resolution record; ``:T conclude`` carries
+    no sub-tables to restate this."""
     return [
         hid
         for hid, w in final_weights(companion).items()

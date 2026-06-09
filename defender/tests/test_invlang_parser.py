@@ -113,6 +113,27 @@ def test_conformant_parse_produces_no_warnings():
     assert body["conclude"]["disposition"] == "malicious"
 
 
+def test_conclude_subtable_is_accepted_and_ignored():
+    # `:T conclude.*` sub-tables have no machine consumer in defender; a stray
+    # one (here a malformed ceiling_test) must neither warn nor project,
+    # rather than trigger format-fighting against the validator.
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+confidence             high
+
+:T conclude.ceiling_test [kind|subject]
+out-of-band-human-contact|owner|extra-cell
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert body["conclude"]["disposition"] == "benign"
+    # No sub-table key leaks into the projected conclude dict.
+    assert set(body["conclude"]) == {"disposition", "confidence"}
+
+
 # ---------------------------------------------------------------------------
 # Parent-attrs sub-block (rare but supported)
 # ---------------------------------------------------------------------------
@@ -244,6 +265,9 @@ def test_unquoted_pipe_in_attrs_drops_row_and_keeps_rest():
     bad = next(w for w in warnings if w.block == ":V prologue.vertices")
     assert bad.row_index == 1
     assert "6 cells but 5 expected" in bad.reason
+    # The expected header is echoed so the mismatch is self-correcting
+    # without a spec lookup.
+    assert "for [id|type|class|ident|attrs]" in bad.reason
     # The hypothesis and the conclude still land — file remains useful.
     assert body["hypothesize"]["hypotheses"][0]["id"] == "h-001"
     assert body["conclude"]["disposition"] == "malicious"
