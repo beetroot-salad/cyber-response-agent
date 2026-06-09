@@ -21,6 +21,7 @@ the defender, the author skill, and the actor-reviewer judge.
 
 | Subcommand | Measurement |
 |---|---|
+| `container-inspect <container_id>` | Container name + image by id (daemon `docker inspect`) — takes a container id, not a host name |
 | `proc-tree <host>` | Process forest (`ps -eo pid,ppid,user,stat,etime,cmd --forest`) |
 | `passwd <host>` | `/etc/passwd` entries — UNIX-level account presence on this host |
 | `authorized-keys <host> [--user U]` | `~U/.ssh/authorized_keys` (user defaults to root) |
@@ -99,6 +100,7 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ```bash
 defender-host-state health-check
+defender-host-state container-inspect <container_id> [--raw]
 defender-host-state proc-tree <host> [--raw]
 defender-host-state passwd <host> [--raw]
 defender-host-state authorized-keys <host> [--user U] [--raw]

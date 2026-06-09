@@ -229,3 +229,34 @@ def docker_exec_raw(
             f"(bastion: {bastion}, argv: {shlex.join(argv)})"
         )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def docker_inspect_raw(
+    target: str,
+    *,
+    fmt: str | None = None,
+    timeout_sec: int = 10,
+) -> tuple[int, str, str]:
+    """Run `docker --context soc-playground inspect [--format <fmt>] <target>`.
+
+    Daemon-level container/image inspection — distinct from docker_exec_raw,
+    which runs a command *inside* a container. Exposed for host_state_cli.py's
+    container-inspect verb (Falco alerts carry a runtime container id, not a
+    host name). Returns (rc, stdout, stderr).
+    """
+    cmd = ["docker", "--context", DOCKER_CONTEXT, "inspect"]
+    if fmt is not None:
+        cmd += ["--format", fmt]
+    cmd.append(target)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
+        )
+    except FileNotFoundError:
+        sys.exit("error: docker CLI not found on PATH")
+    except subprocess.TimeoutExpired:
+        sys.exit(
+            f"error: docker inspect timed out after {timeout_sec + 5}s "
+            f"(target: {target})"
+        )
+    return proc.returncode, proc.stdout, proc.stderr
