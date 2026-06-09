@@ -19,7 +19,6 @@ from typing import Any, Callable
 
 import yaml
 
-import lead_repository
 from _loop_config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
@@ -36,7 +35,6 @@ from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from _loop_validate import (
     normalize_disposition,
     strip_yaml_fence,
-    validate_oracle_doc,
 )
 
 
@@ -70,26 +68,28 @@ def is_held_out(run_dir: Path) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Per-step validation (writes a *.raw.txt companion on failure / mutation)
+# Per-step output handling (oracle: strip + write; judge: strip + validate;
+# a *.raw.txt companion is written on mutation, or on a judge validation failure)
 # ---------------------------------------------------------------------------
 
 
-def _write_validated_oracle(
-    oracle_raw: str, run_dir: Path, learning_run_dir: Path, out_name: str
+def _write_oracle_telemetry(
+    oracle_raw: str, learning_run_dir: Path, out_name: str
 ) -> Path:
-    """Strip + validate the oracle YAML against the run's lead ids; write it."""
-    expected_lead_ids = [jl.lead_id for jl in lead_repository.joined(run_dir)]
+    """Strip the oracle YAML envelope and write it for the judge to read.
+
+    There is no validation gate: the doc is assembled by our own code (one projection
+    per lead, lead_ids from the join) and the only model-authored content — each lead's
+    ``events`` list — is read solely by the LLM judge as text. ``strip_yaml_fence`` is a
+    no-op on our own serialized output, kept only to normalize a fenced reply from an
+    alternative ``Subagents`` adapter; the ``.raw.txt`` companion records the original if
+    stripping ever changes anything.
+    """
     stripped = strip_yaml_fence(oracle_raw)
-    raw_path = learning_run_dir / (Path(out_name).stem + ".raw.txt")
-    try:
-        validate_oracle_doc(yaml.safe_load(stripped), expected_lead_ids)
-    except (yaml.YAMLError, LoopError) as e:
-        raw_path.write_text(oracle_raw)
-        raise LoopError(f"oracle YAML invalid: {e}") from e
     out_path = learning_run_dir / out_name
     out_path.write_text(stripped)
     if stripped != oracle_raw:
-        raw_path.write_text(oracle_raw)
+        (learning_run_dir / (Path(out_name).stem + ".raw.txt")).write_text(oracle_raw)
     return out_path
 
 
@@ -150,8 +150,8 @@ def run_direction(
 
     _log(f"step=oracle ({spec.name})")
     oracle_raw = agents.oracle(run_dir, actor_story_path)
-    telemetry_path = _write_validated_oracle(
-        oracle_raw, run_dir, learning_run_dir, spec.telemetry_name
+    telemetry_path = _write_oracle_telemetry(
+        oracle_raw, learning_run_dir, spec.telemetry_name
     )
 
     judge_raw = spec.invoke_judge(
@@ -370,7 +370,7 @@ Outputs:
     actor_input.yaml               adversarial actor-facing projection (queries only)
     actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
     projected_telemetry[_benign].yaml  per-lead oracle output: projections (one per lead)
-    projected_telemetry[_benign].raw.txt  assembled oracle doc, pre-strip (only on mutation/failure)
+    projected_telemetry[_benign].raw.txt  assembled oracle doc, pre-strip (only on mutation)
     judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
     appended queueable defender findings (both directions, tagged `direction`);

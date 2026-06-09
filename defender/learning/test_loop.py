@@ -1,9 +1,9 @@
 """Unit tests for the telemetry-oracle additions to loop.py.
 
-Focus: the new ``validate_oracle_doc``
-helpers. The existing actor / judge / persistence paths are exercised
-end-to-end via the smoke-run script; this file pins the bits we can
-test cheaply without spawning ``claude -p``.
+Focus: the per-lead oracle parse/assemble/dump helpers and the judge schema.
+The existing actor / judge / persistence paths are exercised end-to-end via the
+smoke-run script; this file pins the bits we can test cheaply without spawning
+``claude -p``.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ _spec.loader.exec_module(loop)
 
 LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
-validate_oracle_doc = loop.validate_oracle_doc
 dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
@@ -191,11 +190,10 @@ def test_assemble_oracle_doc_preserves_lead_order():
     assert doc["projections"][2]["events"] == ["<x>"]
 
 
-def test_assembled_doc_round_trips_through_validate_and_dump():
+def test_assembled_doc_dumps_with_markers_inline():
     doc = oracle_mod.assemble_oracle_doc(
         [("l-001", [{"host": "h"}]), ("l-002", ["<standard environment noise>"])]
     )
-    validate_oracle_doc(doc, ["l-001", "l-002"])
     text = dump_oracle_doc(doc)
     assert "projections:" in text and "<standard environment noise>" in text
 
@@ -236,127 +234,6 @@ def test_dump_oracle_doc_preserves_unicode():
     doc = oracle_mod.assemble_oracle_doc([("l-001", [{"user": "Bjørn"}])])
     text = dump_oracle_doc(doc)
     assert "Bjørn" in text and "\\xF8" not in text
-
-
-# ---------------------------------------------------------------------------
-# validate_oracle_doc
-# ---------------------------------------------------------------------------
-
-
-def _ok_doc(lead_ids=("l-001", "l-002")):
-    return {
-        "projections": [
-            {"lead_id": lid, "events": [{"data_source": "logs-falco.alerts"}]}
-            for lid in lead_ids
-        ],
-    }
-
-
-def test_validate_oracle_doc_accepts_well_formed():
-    doc = _ok_doc()
-    out = validate_oracle_doc(doc, ["l-001", "l-002"])
-    assert out is doc
-
-
-def test_validate_oracle_doc_accepts_empty_events_list():
-    doc = _ok_doc()
-    doc["projections"][1]["events"] = []
-    validate_oracle_doc(doc, ["l-001", "l-002"])
-
-
-def test_validate_oracle_doc_accepts_marker_strings():
-    doc = _ok_doc()
-    doc["projections"][0]["events"] = ["<standard environment noise>"]
-    doc["projections"][1]["events"] = ["<suppressed: cleared the auth log>"]
-    validate_oracle_doc(doc, ["l-001", "l-002"])
-
-
-def test_validate_oracle_doc_accepts_projections_only():
-    validate_oracle_doc({"projections": []}, [])
-
-
-def test_validate_oracle_doc_rejects_unrecognized_marker_string():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = ["this lead is silent"]
-    with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_empty_string_event():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = [""]
-    with pytest.raises(LoopError, match="not a recognized baseline-diff marker"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_marker_mixed_with_event_mapping():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = [{"host": "h"}, "<suppressed: cleared log>"]
-    with pytest.raises(LoopError, match="must be the only event"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_duplicate_markers():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = [
-        "<standard environment noise>", "<standard environment noise>"
-    ]
-    with pytest.raises(LoopError, match="must be the only event"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_non_mapping():
-    with pytest.raises(LoopError, match="did not parse to a mapping"):
-        validate_oracle_doc(["projections"], ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_extra_top_level_keys():
-    # any non-`projections` top-level key is rejected.
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["uncovered"] = []
-    with pytest.raises(LoopError, match="exactly one top-level key"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_count_mismatch():
-    doc = _ok_doc(lead_ids=("l-001",))
-    with pytest.raises(LoopError, match="projections count"):
-        validate_oracle_doc(doc, ["l-001", "l-002"])
-
-
-def test_validate_oracle_doc_rejects_lead_id_mismatch():
-    doc = _ok_doc(lead_ids=("l-001", "l-003"))
-    with pytest.raises(LoopError, match=r"projection\[1\]\.lead_id"):
-        validate_oracle_doc(doc, ["l-001", "l-002"])
-
-
-def test_validate_oracle_doc_rejects_missing_projection_keys():
-    doc = _ok_doc(lead_ids=("l-001",))
-    del doc["projections"][0]["events"]
-    with pytest.raises(LoopError, match="missing keys"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_unexpected_projection_keys():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["coverage"] = "covered"
-    with pytest.raises(LoopError, match="unexpected keys"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_non_mapping_non_marker_event():
-    # An event is a mapping or a marker string; an int (or any other scalar) is neither.
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = [5]
-    with pytest.raises(LoopError, match=r"events\[0\] is not a mapping or marker string"):
-        validate_oracle_doc(doc, ["l-001"])
-
-
-def test_validate_oracle_doc_rejects_events_not_list():
-    doc = _ok_doc(lead_ids=("l-001",))
-    doc["projections"][0]["events"] = {"event": "a"}
-    with pytest.raises(LoopError, match="events is not a list"):
-        validate_oracle_doc(doc, ["l-001"])
 
 
 # ---------------------------------------------------------------------------

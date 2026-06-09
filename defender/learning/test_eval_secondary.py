@@ -429,10 +429,6 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
 
     class _FakeLR:
         @staticmethod
-        def joined(run_dir):
-            return []
-
-        @staticmethod
         def render_joined_yaml(run_dir):
             return "leads: []\n"
 
@@ -453,10 +449,6 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         @staticmethod
         def strip_yaml_fence(text):
             return text
-
-        @staticmethod
-        def validate_oracle_doc(doc, lead_ids):
-            return doc
 
         @staticmethod
         def invoke_judge(*_a, **_kw):

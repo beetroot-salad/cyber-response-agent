@@ -63,7 +63,6 @@ from _loop_validate import (  # noqa: E402
     strip_yaml_fence,
     validate_judge_benign_doc,
     validate_judge_doc,
-    validate_oracle_doc,
     _outcome_keyword,
 )
 from _prologue import extract_case_entities  # noqa: E402
@@ -72,7 +71,7 @@ __all__ = [
     "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",
     "run_one", "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence",
-    "validate_oracle_doc", "dump_oracle_doc",
+    "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",
     "append_findings", "append_actor_observations", "append_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
