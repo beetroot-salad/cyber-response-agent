@@ -39,8 +39,9 @@ _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
 # Compare unresolved paths — the venv python is typically a symlink to the
 # system interpreter, so .resolve() would collapse both sides and skip the
-# re-exec even when site-packages differ.
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+# re-exec even when site-packages differ. Gated on __main__: importing run.py
+# (e.g. test_run_settings) must never os.execv the importing process away.
+if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import argparse

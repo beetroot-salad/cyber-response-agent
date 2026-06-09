@@ -31,7 +31,8 @@ from pathlib import Path
 # python the caller invoked us with (the actor's Bash tool uses the
 # system ``python3`` on PATH; the defender's venv carries pyyaml).
 _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+# Gated on __main__ so importing this module as a library never os.execv's away.
+if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import argparse

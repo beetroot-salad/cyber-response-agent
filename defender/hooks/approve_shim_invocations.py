@@ -82,9 +82,13 @@ def _split_segments(script: str) -> list[str]:
             buf.append(c)
             i += 1
         elif script.startswith("&&", i) or script.startswith("||", i):
-            segs.append("".join(buf)); buf = []; i += 2
+            segs.append("".join(buf))
+            buf = []
+            i += 2
         elif c in "|;":
-            segs.append("".join(buf)); buf = []; i += 1
+            segs.append("".join(buf))
+            buf = []
+            i += 1
         else:
             buf.append(c)
             i += 1

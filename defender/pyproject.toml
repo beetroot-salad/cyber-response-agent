@@ -1,7 +1,7 @@
 [project]
 name = "defender"
 version = "0.0.0"
-description = "Experimental defender / learning-loop track. Runs alongside soc-agent."
+description = "Defender / learning-loop agent (v2 environment)."
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
@@ -10,7 +10,45 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff",
+    "vulture",
+    "radon",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "llm: spawns a real claude -p subprocess (skip in CI with -m 'not llm')",
+    "live: requires live external infrastructure (skip in CI with -m 'not live')",
 ]
 
 [tool.uv]
 package = false
+
+[tool.ruff.lint]
+# Hard gate (CI-blocking) is `select = ["E","F"]` minus E402/E501, run with
+# explicit flags. The extra rule sets below are layered in via extend-select and
+# reported in CI as a non-blocking code-smell signal. Hard gate locally:
+#   ruff check . --select E,F --ignore E402,E501
+# Full smell sweep:  ruff check .
+select = ["E", "F"]
+extend-select = [
+    "B",             # flake8-bugbear: real bug patterns (mutable defaults, etc.)
+    "SIM",           # flake8-simplify: redundant logic
+    "C901",          # mccabe complexity
+    "PLR0912",       # too-many-branches
+    "PLR0913",       # too-many-arguments
+    "PLR0915",       # too-many-statements
+    "PT",            # flake8-pytest-style
+    "UP",            # pyupgrade
+]
+# E402: tests/scripts intentionally do sys.path.insert(...) before imports.
+# E501: line length is enforced by formatter, not lint.
+ignore = ["E402", "E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 15
+max-args = 8
+max-statements = 60

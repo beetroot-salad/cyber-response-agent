@@ -16,12 +16,14 @@ import os
 import sys
 from pathlib import Path
 
-# Re-exec into defender/.venv if launched against a different interpreter. Compare
-# unresolved paths — the venv python is typically a symlink to the system interpreter,
-# so .resolve() would collapse both sides and skip the re-exec even when site-packages
-# differ.
+# Re-exec into defender/.venv if launched *as a script* against a different
+# interpreter. Gated on __main__: importing loop.py (the test suite, and run.py —
+# which has already re-exec'd via its own shim) must never os.execv the importing
+# process away. Compare unresolved paths — the venv python is typically a symlink to
+# the system interpreter, so .resolve() would collapse both sides and skip the
+# re-exec even when site-packages differ.
 _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 # Public surface re-exported for run.py, replay_actor.py, and the test suites.

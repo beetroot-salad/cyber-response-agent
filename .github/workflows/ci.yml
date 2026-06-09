@@ -19,11 +19,16 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
-      - name: Create venv and install dependencies
-        run: uv venv && uv pip install -e "soc-agent[dev]"
+      # defender/pyproject.toml is package = false — `uv sync` installs the
+      # dependencies (incl. the dev extra) into defender/.venv without trying to
+      # build defender itself as an installable package.
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev
 
       - name: Run unit tests
-        run: uv run pytest soc-agent/tests/ -v -m "not llm"
+        working-directory: defender
+        run: uv run pytest tests/ -v -m "not llm and not live"
 
   lint:
     runs-on: ubuntu-latest
@@ -36,16 +41,15 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
-      - name: Create venv and install dependencies
-        run: uv venv && uv pip install -e "soc-agent[dev]"
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev
 
       # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
-      # clean; extra rule sets are reported in the code-smells job, not here.
+      # clean repo-wide; extra rule sets are reported in the code-smells job.
+      # `--select` on the CLI overrides per-file config, so the gate is uniform.
       - name: Ruff (hard gate — E + F)
-        run: uv run ruff check . --select E,F --ignore E402,E501
-
-      - name: Mock-usage ratchet
-        run: uv run python soc-agent/scripts/lint_mock_usage.py
+        run: defender/.venv/bin/ruff check . --select E,F --ignore E402,E501
 
   code-smells:
     runs-on: ubuntu-latest
@@ -58,8 +62,9 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
-      - name: Create venv and install dev deps
-        run: uv venv && uv pip install -e "soc-agent[dev]"
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev
 
       - name: Set up Node (for jscpd)
         uses: actions/setup-node@v4
@@ -70,35 +75,26 @@ jobs:
         run: npm install -g jscpd
 
       # Code-smell signals are reported, not enforced — surface trends in the
-      # job log without blocking PRs. Tighten thresholds incrementally.
-      # `--config` forces both trees onto soc-agent's extended ruleset;
-      # without it, defender/ would fall back to ruff defaults (no
-      # bugbear/simplify/complexity/etc.) because defender/pyproject.toml
-      # has no [tool.ruff] section.
+      # job log without blocking PRs. defender/ carries its own [tool.ruff]
+      # config (extend-select bugbear/simplify/complexity/pyupgrade/pytest-style),
+      # so no --config is needed.
       - name: Ruff (extended — bugbear, simplify, complexity, pyupgrade, pytest-style)
-        run: uv run ruff check . --config soc-agent/pyproject.toml --statistics || true
-
-      # `--config-file` is required: mypy is run from the repo root,
-      # but the project's [tool.mypy] config lives in soc-agent/.
-      # Without this, mypy falls back to defaults, sees no `files=...`,
-      # and errors with "Missing target" (silently swallowed by `|| true`).
-      - name: Mypy (type-check, soft-launch)
-        run: uv run mypy --config-file soc-agent/pyproject.toml || true
+        run: defender/.venv/bin/ruff check defender --statistics || true
 
       - name: Vulture (dead code)
-        run: uv run vulture soc-agent defender --min-confidence 80 --exclude 'soc-agent/.venv,soc-agent/tests,defender/.venv,defender/tests' --ignore-names 'key_field,key_value' || true
+        run: defender/.venv/bin/vulture defender --min-confidence 80 --exclude 'defender/.venv,defender/tests' --ignore-names 'key_field,key_value' || true
 
       - name: Radon — cyclomatic complexity (B and worse)
-        run: uv run radon cc soc-agent defender -a -nb || true
+        run: defender/.venv/bin/radon cc defender -a -nb || true
 
       - name: Radon — maintainability index (B and worse)
-        run: uv run radon mi soc-agent defender -nb || true
+        run: defender/.venv/bin/radon mi defender -nb || true
 
       - name: Radon — raw size metrics
-        run: uv run radon raw soc-agent defender -s || true
+        run: defender/.venv/bin/radon raw defender -s || true
 
       - name: jscpd (copy-paste detection)
-        run: jscpd soc-agent defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**" || true
+        run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**" || true
 
       # Defender hygiene + discipline lints (soft — reported, not enforced).
       # Each script is independently inspectable under defender/scripts/lint_*.py;
