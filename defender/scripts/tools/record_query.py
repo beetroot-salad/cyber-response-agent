@@ -65,7 +65,8 @@ def parse_params(inner: list[str]) -> dict:
     """Extract bound params from an inner CLI argv, generically.
 
     Pure — no IO, no per-system tables. Locates the CLI script (first
-    token ending in ``.py``), drops the leading subcommand token (the
+    token ending in ``.py`` or a ``defender-`` invocation shim), drops the
+    leading subcommand token (the
     verb, already captured in ``query_id``), then folds the remainder:
     ``--flag value`` / ``-f value`` pairs become named entries, bare
     ``--flag`` (followed by another flag or end-of-args) become ``True``,
@@ -77,7 +78,8 @@ def parse_params(inner: list[str]) -> dict:
     verbatim command is preserved separately as ``raw_command``.
     """
     script_idx = next(
-        (i for i, t in enumerate(inner) if t.endswith(".py")), None
+        (i for i, t in enumerate(inner)
+         if t.endswith(".py") or t.startswith("defender-")), None
     )
     rest = inner[script_idx + 1 :] if script_idx is not None else list(inner)
     # Drop the leading subcommand token (the verb); it is already in query_id.

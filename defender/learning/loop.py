@@ -31,7 +31,6 @@ from _loop_config import (  # noqa: E402
     LoopError,
     LoopPaths,
 )
-from _loop_oracle import redact_exemplar  # noqa: E402
 from _loop_orchestrate import (  # noqa: E402
     is_held_out,
     main,
@@ -73,7 +72,6 @@ __all__ = [
     "normalize_disposition", "strip_yaml_fence",
     "validate_oracle_doc", "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",
-    "redact_exemplar",
     "append_findings", "append_actor_observations", "append_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_oracle",

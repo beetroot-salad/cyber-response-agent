@@ -478,21 +478,21 @@ def run_head_oracle_and_judge(
     try:
         oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path)
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
-        # _run_claude wraps subprocess.run with a timeout that raises
-        # TimeoutExpired (not LoopError); catch both so a single oracle
-        # hang doesn't abort the harness mid-loop.
+        # _run_claude wraps subprocess.run with a timeout that raises TimeoutExpired
+        # (not LoopError); catch both so a single per-lead hang doesn't abort the harness.
         raise SecondaryError(f"oracle invocation failed: {e}") from e
-    oracle_stripped = loop_mod.strip_yaml_fence(oracle_yaml)
     expected_lead_ids = [
         jl.lead_id for jl in loop_mod.lead_repository.joined(head_run_dir)
     ]
+    stripped = loop_mod.strip_yaml_fence(oracle_yaml)
     try:
-        oracle_doc = yaml.safe_load(oracle_stripped)
-        loop_mod.validate_oracle_doc(oracle_doc, expected_lead_ids)
+        loop_mod.validate_oracle_doc(yaml.safe_load(stripped), expected_lead_ids)
     except (yaml.YAMLError, loop_mod.LoopError) as e:
-        raise SecondaryError(f"oracle YAML invalid: {e}") from e
+        # Keep the raw assembled doc for debugging a parse/validation failure.
+        (staging_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml)
+        raise SecondaryError(f"oracle output invalid: {e}") from e
     projected_path = staging_dir / "projected_telemetry.yaml"
-    projected_path.write_text(oracle_stripped)
+    projected_path.write_text(stripped)
 
     try:
         judge_yaml = loop_mod.invoke_judge(

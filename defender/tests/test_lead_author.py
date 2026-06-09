@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import lead_author  # type: ignore[import-not-found]
+import lead_neighbors  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,33 @@ def run_dir(tmp_path: Path) -> Path:
     rd.mkdir()
     (rd / "gather_raw").mkdir()
     return rd
+
+
+@pytest.fixture
+def catalog(tmp_path: Path, monkeypatch) -> Path:
+    """Self-contained query catalog so build_handoff resolves ids without
+    depending on the live, environment-specific on-disk catalog (v2 ships an
+    elastic/host-state/cmdb catalog; main ships wazuh). Points both
+    CATALOG_ROOT and REPO_ROOT at the temp tree (build_handoff renders
+    template paths relative to REPO_ROOT)."""
+    cat = tmp_path / "queries"
+    (cat / "elastic").mkdir(parents=True)
+    (cat / "host-state").mkdir(parents=True)
+    (cat / "elastic" / "auth-events.md").write_text(
+        "---\nid: elastic.auth-events\nstatus: established\n---\n\n"
+        "## Goal\nAuthentication events for a host over a window.\n\n"
+        "## Query\n\n```\nelastic_cli.py query --window ${window} ${host_clause}\n```\n"
+    )
+    (cat / "host-state" / "process-list.md").write_text(
+        "---\nid: host-state.process-list\nstatus: established\n---\n\n"
+        "## Goal\nRunning processes matching a pattern.\n\n"
+        "## Query\n\n```\nhost_state_cli.py process-list ${pattern}\n```\n"
+    )
+    monkeypatch.setattr(lead_neighbors, "CATALOG_ROOT", cat)
+    monkeypatch.setattr(lead_author.lead_neighbors, "CATALOG_ROOT", cat)
+    monkeypatch.setattr(lead_author, "CATALOG_DIR", cat)
+    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
+    return cat
 
 
 # ---------------------------------------------------------------------------
@@ -149,20 +177,20 @@ def test_extract_invalid_payload_status_raises(run_dir: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_build_handoff_groups_by_template(run_dir: Path):
+def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
     """Same template invoked across 3 leads → one handoff with 3 invocations."""
     for i in range(3):
         lid = f"l-00{i + 1}"
         _write_lead_meta(run_dir, lid, f"call {i}")
-        _write_query(run_dir, lid, 0, "wazuh.auth-events", {"host": f"h{i}"},
+        _write_query(run_dir, lid, 0, "elastic.auth-events", {"host": f"h{i}"},
                      payload_digest=f"call-{i}")
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert len(handoffs) == 1
     h = handoffs[0]
-    assert h["query_id"] == "wazuh.auth-events"
+    assert h["query_id"] == "elastic.auth-events"
     assert h["status"] == "established"
-    assert h["executed_template_path"].endswith("wazuh/auth-events.md")
+    assert h["executed_template_path"].endswith("elastic/auth-events.md")
     assert len(h["invocations"]) == 3
     assert [inv["payload_digest"] for inv in h["invocations"]] == [
         "call-0", "call-1", "call-2",
@@ -171,10 +199,10 @@ def test_build_handoff_groups_by_template(run_dir: Path):
     json.dumps(h)
 
 
-def test_build_handoff_includes_rendered_query_and_status(run_dir: Path):
+def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog: Path):
     _write_lead_meta(run_dir, "l-001", "x")
     _write_query(
-        run_dir, "l-001", 0, "wazuh.auth-events",
+        run_dir, "l-001", 0, "elastic.auth-events",
         {"host": "bastion-01", "window": "1h"},
         payload_status="suspect_empty",
         payload_digest="0 events; data.srcip is IP-typed",
@@ -187,7 +215,7 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path):
     assert "data.srcip" in inv["payload_digest"]
     assert inv["result_refs"] == ["gather_raw/l-001/0.json"]
     # rendered_query should contain the substituted params from the
-    # ## Query body — wazuh.auth-events references ${window}; unbound
+    # ## Query body — elastic.auth-events references ${window}; unbound
     # placeholders like ${host_clause} pass through verbatim so the
     # leak is visible.
     assert inv["rendered_query"]  # non-empty
@@ -195,18 +223,18 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path):
     assert "${host_clause}" in inv["rendered_query"]
 
 
-def test_build_handoff_drops_unresolved_query_id(run_dir: Path):
+def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     """Unresolved query_id ⇒ skip with a corpus-health warning, don't crash."""
     _write_lead_meta(run_dir, "l-001", "novel")
-    _write_query(run_dir, "l-001", 0, "wazuh.does-not-exist")
+    _write_query(run_dir, "l-001", 0, "elastic.does-not-exist")
     _write_lead_meta(run_dir, "l-002", "real one")
-    _write_query(run_dir, "l-002", 0, "wazuh.auth-events")
+    _write_query(run_dir, "l-002", 0, "elastic.auth-events")
     leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     handoffs = lead_author.build_handoff(run_dir, leads)
     # Only the resolved lead survives.
     assert len(handoffs) == 1
-    assert handoffs[0]["query_id"] == "wazuh.auth-events"
+    assert handoffs[0]["query_id"] == "elastic.auth-events"
 
 
 def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
@@ -217,19 +245,19 @@ def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     assert handoffs == []
 
 
-def test_build_handoff_co_dispatched_with_for_join(run_dir: Path):
+def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path):
     """Cross-system join: each invocation lists its sibling template path."""
     _write_lead_meta(run_dir, "l-001", "cross-system")
-    _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
-    _write_query(run_dir, "l-001", 1, "host-query.process-list", {"pattern": "x"})
+    _write_query(run_dir, "l-001", 0, "elastic.auth-events")
+    _write_query(run_dir, "l-001", 1, "host-state.process-list", {"pattern": "x"})
     leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     # Two handoffs (one per template).
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
-    auth_inv = by_id["wazuh.auth-events"]["invocations"][0]
+    auth_inv = by_id["elastic.auth-events"]["invocations"][0]
     assert auth_inv["composite_kind"] == "join"
-    assert any("host-query/process-list.md" in p for p in auth_inv["co_dispatched_with"])
+    assert any("host-state/process-list.md" in p for p in auth_inv["co_dispatched_with"])
 
 
 # ---------------------------------------------------------------------------

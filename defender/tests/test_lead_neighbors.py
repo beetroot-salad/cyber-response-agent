@@ -119,6 +119,18 @@ def idf(catalog):
     return ln.build_idf(ln._all_query_variants(catalog))
 
 
+# The regression fixture below and test_cli_firewall pin scorer behavior over
+# a populated wazuh catalog. defender-v2-env stripped that catalog in the
+# v1-strip and its v2 replacements aren't authored yet, so the pinned ids don't
+# resolve. Skip until the v2 gather catalog is populated, then regenerate the
+# fixture against real v2 templates (don't hand-invent rankings).
+_V2_CATALOG_PENDING = pytest.mark.skip(
+    reason="regression baseline pinned against the v1 wazuh catalog (stripped on "
+    "defender-v2-env); regenerate against v2 templates once the catalog is populated"
+)
+
+
+@_V2_CATALOG_PENDING
 @pytest.mark.parametrize("case", REGRESSION_FIXTURE,
                          ids=[c["case_id"] for c in REGRESSION_FIXTURE])
 def test_top3_pinned(catalog, idf, case):
@@ -132,6 +144,7 @@ def test_top3_pinned(catalog, idf, case):
     )
 
 
+@_V2_CATALOG_PENDING
 def test_cli_firewall(catalog):
     """A wazuh template's neighbors must all be wazuh (CLI firewall)."""
     neighbors = ln.top_k_neighbors("wazuh.auth-events", catalog, k=10)

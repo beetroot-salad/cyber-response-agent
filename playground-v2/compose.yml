@@ -262,7 +262,7 @@ services:
     command: >
       sh -c '
         set -eu;
-        ROLES="web db jump-box dev-ws office-ws canary";
+        ROLES="web db jump-box dev-ws office-ws canary config-mgmt ci-host scanner-host";
         for role in $$ROLES; do
           policy_id="host-$${role}-policy";
           echo "-> creating policy $${policy_id}";
@@ -440,6 +440,14 @@ services:
       # writes LOGIN/LOGOUT/etc. lines to stdout. Root stays INFO — we only want
       # the events stream, not all of Keycloak's internals.
       - KC_LOG_LEVEL=INFO,org.keycloak.events:debug
+      # Also write to a file in JSON format so the host-side elastic-agent can
+      # tail it into logs-keycloak.events via Custom Logs + decode_json_fields.
+      # File lands inside the existing keycloak_data named volume — on the VPS
+      # at /var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log
+      # — the host agent reads it from there. No extra volume needed.
+      - KC_LOG=console,file
+      - KC_LOG_FILE=/opt/keycloak/data/keycloak.log
+      - KC_LOG_FILE_OUTPUT=json
     command: ["start-dev", "--import-realm"]
     volumes:
       - keycloak_data:/opt/keycloak/data
@@ -469,6 +477,11 @@ services:
     container_name: unbound
     restart: unless-stopped
     mem_limit: 128m
+    volumes:
+      # /var/log/unbound is created in the image with unbound:unbound ownership;
+      # the named volume preserves those perms on first init. Host-side
+      # elastic-agent reads /var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log.
+      - unbound_logs:/var/log/unbound
     healthcheck:
       # pgrep is in the alpine base; confirms the daemon is up. (No netcat in minimal
       # alpine for a proper `dig`-style probe; pgrep is enough for a playground.)
@@ -484,13 +497,14 @@ services:
     container_name: squid
     restart: unless-stopped
     mem_limit: 256m
-    # /var/log/squid is a VOLUME in the ubuntu/squid image, which creates anonymous
-    # volumes that persist across `compose up --build` — i.e., image changes to this
-    # dir won't propagate. Force tmpfs so it resets to the image's state (proxy:proxy)
-    # every restart. Logs ship via the entrypoint's `tail -F → stdout` anyway, so
-    # persistence isn't needed.
+    # /var/log/squid is a VOLUME in the ubuntu/squid image. We use a **named** volume
+    # (not anonymous) so the host-side elastic-agent can tail /var/lib/docker/volumes/
+    # soc-playground_squid_logs/_data/access.log into Elastic — symmetric to zeek_logs.
+    # Image-time volume init handles perms (proxy:proxy / uid=13) automatically.
+    # /var/spool/squid stays tmpfs — cache dir, no value in persisting it.
+    volumes:
+      - squid_logs:/var/log/squid
     tmpfs:
-      - /var/log/squid:uid=13,gid=13,mode=0755
       - /var/spool/squid:uid=13,gid=13,mode=0755
     healthcheck:
       # Squid's PID file is at /run/squid.pid in the ubuntu/squid image; presence
@@ -794,6 +808,80 @@ services:
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_canary_1:/var/lib/elastic-agent
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Noise-generator hosts. Sources of rule-fire-shaped benign activity:
+  # config-mgmt-1 pushes config + rotates keys across the fleet, ci-1 deploys
+  # to the web tier, scanner-1 runs authorized vuln scans. All three reuse
+  # the `plain` host image — they need sshd + elastic-agent + the baseline
+  # scheduler but no role-specific service (nginx/postgres) on board.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  config-mgmt-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: config-mgmt-1
+    hostname: config-mgmt-1
+    environment:
+      HOST_NAME: config-mgmt-1
+      HOST_ROLE: config-mgmt
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_config_mgmt_1:/var/lib/elastic-agent
+
+  ci-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:22.04
+    container_name: ci-1
+    hostname: ci-1
+    environment:
+      HOST_NAME: ci-1
+      HOST_ROLE: ci-host
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_ci_1:/var/lib/elastic-agent
+
+  scanner-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: scanner-1
+    hostname: scanner-1
+    environment:
+      HOST_NAME: scanner-1
+      HOST_ROLE: scanner-host
+      BASELINE_SEED: ${V2_BASELINE_SEED}
+      BASELINE_ENABLED: ${V2_BASELINE_ENABLED:-true}
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_scanner_1:/var/lib/elastic-agent
+
   # Batch 9 stubs: CMDB, threat intel, change management, ticketing.
   # All auth-less FastAPI servers on 8080 internal. Exposed on loopback
   # 127.0.0.1:8001-8004 on the VPS for debugging; in-cluster access via
@@ -889,6 +977,14 @@ volumes:
     driver: local
   zeek_logs:
     driver: local
+  # Squid access log — tailed by the host-side elastic-agent's squid Custom Logs
+  # integration into Elastic. Symmetric to zeek_logs in shape.
+  squid_logs:
+    driver: local
+  # Unbound query/reply log — tailed by the host-side elastic-agent's unbound
+  # Custom Logs integration. Same pattern as squid_logs.
+  unbound_logs:
+    driver: local
   # Per-role Fleet enrollment tokens — written by fleet-host-policies init,
   # mounted read-only into each host at /fleet-tokens/<role>.token.
   fleet_tokens:
@@ -912,4 +1008,10 @@ volumes:
   agent_state_office_ws_2:
     driver: local
   agent_state_canary_1:
+    driver: local
+  agent_state_config_mgmt_1:
+    driver: local
+  agent_state_ci_1:
+    driver: local
+  agent_state_scanner_1:
     driver: local

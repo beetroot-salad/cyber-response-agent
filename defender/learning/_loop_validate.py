@@ -141,13 +141,13 @@ def validate_oracle_doc(doc: Any, expected_lead_ids: list[str]) -> dict[str, Any
     prompt's and judge's concern, not this gate's.
     """
     if not isinstance(doc, dict):
-        raise LoopError("oracle YAML did not parse to a mapping")
+        raise LoopError("oracle doc did not parse to a mapping")
     if set(doc.keys()) != {"projections"}:
         raise LoopError(
             f"oracle YAML must have exactly one top-level key `projections`; "
             f"got {sorted(doc.keys())}"
         )
-    projections = doc["projections"]
+    projections = doc.get("projections")
     if not isinstance(projections, list):
         raise LoopError("oracle `projections` is not a list")
     if len(projections) != len(expected_lead_ids):
@@ -165,7 +165,8 @@ class _NoAliasOracleDumper(yaml.SafeDumper):
 
     The judge is an LLM reading the raw YAML text — it cannot resolve a ``*alias``
     back-reference, so two shape-identical projected events must each be written out in
-    full rather than the second collapsing to an alias of the first.
+    full rather than the second collapsing to an alias of the first. Forcing inline
+    emission keeps every projection self-contained.
     """
 
     def ignore_aliases(self, data: Any) -> bool:
@@ -175,6 +176,8 @@ class _NoAliasOracleDumper(yaml.SafeDumper):
 def dump_oracle_doc(doc: dict) -> str:
     """Serialize the assembled oracle doc to YAML, every event inlined (no aliases).
 
+    The judge reads this as text, so repeated events are written out in full under each
+    lead, never as ``*alias`` back-references (see ``_NoAliasOracleDumper``).
     ``allow_unicode=True`` keeps non-ASCII event values (e.g. a username ``Bjørn``) literal
     rather than ``\\xNN``-escaped, so the LLM judge compares the same text the defender's
     actuals carry. Mirrors the dumper in ``_loop_oracle.build_lead_user_prompt``.

@@ -11,11 +11,17 @@
       "Edit(/tmp/defender-runs/**)",
       "Write(/workspace/defender/skills/gather/queries/*/_draft/**)",
       "Edit(/workspace/defender/skills/gather/queries/*/_draft/**)",
-      "Bash(python3 defender/scripts/tools/wazuh_cli.py *)",
-      "Bash(python3 defender/scripts/tools/host_query.py *)",
-      "Bash(python3 defender/scripts/tools/cmdb_cli.py *)",
-      "Bash(python3 defender/scripts/tools/stub_iam_cli.py *)",
-      "Bash(python3 -m defender.skills.invlang.cli *)",
+      "Write(/workspace/defender/skills/*/_draft/**)",
+      "Edit(/workspace/defender/skills/*/_draft/**)",
+      "Write(/workspace/defender-v2-tree/defender/skills/gather/queries/*/_draft/**)",
+      "Edit(/workspace/defender-v2-tree/defender/skills/gather/queries/*/_draft/**)",
+      "Write(/workspace/defender-v2-tree/defender/skills/*/_draft/**)",
+      "Edit(/workspace/defender-v2-tree/defender/skills/*/_draft/**)",
+      "Write(/workspace/.claude/worktrees/*/defender/skills/gather/queries/*/_draft/**)",
+      "Edit(/workspace/.claude/worktrees/*/defender/skills/gather/queries/*/_draft/**)",
+      "Write(/workspace/.claude/worktrees/*/defender/skills/*/_draft/**)",
+      "Edit(/workspace/.claude/worktrees/*/defender/skills/*/_draft/**)",
+      "Bash(defender-* *)",
       "Bash(jq *)",
       "Bash(ls *)",
       "Bash(cat *)",
@@ -54,6 +60,10 @@
       {
         "matcher": "Bash|Read|Grep|Glob",
         "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/approve_shim_invocations.py"
+          },
           {
             "type": "command",
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/block_main_loop_raw_access.py"

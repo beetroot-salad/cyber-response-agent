@@ -48,6 +48,25 @@ roles:
     hosts: [office-ws-2]              # time-limited, office-only
     shell: /bin/bash
     sudo: false
+  config-mgmt:
+    # Hosts the config-mgmt server itself runs from. No realm-role-wide
+    # binding — svc.config-mgmt is a per-host user where it lands accounts
+    # (config-mgmt-1 source + every managed target).
+    hosts: []
+    shell: /usr/sbin/nologin
+    sudo: false
+  ci-host:
+    # CI/CD orchestration host. svc.deploy lands here + on web targets.
+    hosts: []
+    shell: /usr/sbin/nologin
+    sudo: false
+  scanner-host:
+    # Authorized vuln-scan dispatcher. svc.security needs a shell here
+    # to run nmap; targets do not need svc.security accounts (TCP probes
+    # do not authenticate).
+    hosts: []
+    shell: /usr/sbin/nologin
+    sudo: false
 
 hosts:
   - name: web-1
@@ -62,6 +81,10 @@ hosts:
       # Per-host service accounts layered on top of role-wide assignment.
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
       - {username: svc.reports, shell: /usr/sbin/nologin, sudo: false}
+      # Config-mgmt + CI/CD inbound targets — both need a real shell + sudo
+      # to do their jobs (package installs, service restarts, key rotation).
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
+      - {username: svc.deploy, shell: /bin/bash, sudo: true}
 
   - name: web-2
     role: web
@@ -74,6 +97,8 @@ hosts:
     users:
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
       - {username: svc.reports, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
+      - {username: svc.deploy, shell: /bin/bash, sudo: true}
 
   - name: db-1
     role: db
@@ -86,6 +111,7 @@ hosts:
     users:
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
       - {username: svc.backups, shell: /bin/bash, sudo: false}  # needs a shell for pg_dump cron
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
 
   - name: jump-box-1
     role: jump-box
@@ -97,6 +123,7 @@ hosts:
     trust_edges_out: [web-1, web-2, db-1, dev-ws-1]  # the bastion — hops anywhere
     users:
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
 
   - name: dev-ws-1
     role: dev-ws
@@ -108,6 +135,7 @@ hosts:
     trust_edges_out: [jump-box-1]
     users:
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
 
   - name: office-ws-1
     role: office-ws
@@ -120,6 +148,7 @@ hosts:
     users:
       - {username: dev.dana, shell: /bin/bash, sudo: true}  # primary user has admin on own laptop
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
 
   - name: office-ws-2
     role: office-ws
@@ -132,6 +161,7 @@ hosts:
     users:
       - {username: dev.ethan, shell: /bin/bash, sudo: true}
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
 
   - name: canary-1
     role: canary
@@ -143,3 +173,46 @@ hosts:
     trust_edges_out: []               # deliberately isolated
     users:
       - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: true}
+
+  - name: config-mgmt-1
+    role: config-mgmt
+    criticality: prod                 # config-mgmt server is itself prod-critical
+    owner: team.sre
+    change_window: "sun 04:00-05:00 UTC"
+    os: {distro: ubuntu, version: "24.04"}
+    service: null
+    # Fleet-wide push target list — every host the agent baseline expects
+    # svc.config-mgmt to reach. Stays in lock-step with the per-host
+    # svc.config-mgmt entries above.
+    trust_edges_out: [web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1]
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      # Source-side account so the scheduler can dispatch `runuser -u svc.config-mgmt`.
+      - {username: svc.config-mgmt, shell: /bin/bash, sudo: false}
+
+  - name: ci-1
+    role: ci-host
+    criticality: prod                 # CI orchestrator is prod tooling
+    owner: team.platform
+    change_window: "sun 04:00-05:00 UTC"
+    os: {distro: ubuntu, version: "22.04"}
+    service: null
+    trust_edges_out: [web-1, web-2]   # deploys land only on the web tier
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.deploy, shell: /bin/bash, sudo: false}
+
+  - name: scanner-1
+    role: scanner-host
+    criticality: prod                 # authorized security scanner
+    owner: team.security
+    change_window: "sun 04:00-05:00 UTC"
+    os: {distro: ubuntu, version: "24.04"}
+    service: null
+    # nmap probes do not authenticate — trust_edges_out is "reachable by
+    # TCP" not "has an account on". Listed for parity with other hosts.
+    trust_edges_out: [web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1]
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.security, shell: /bin/bash, sudo: true}  # nmap raw-socket scans need root

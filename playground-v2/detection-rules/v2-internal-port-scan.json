@@ -1,0 +1,28 @@
+{
+  "rule_id": "v2-internal-port-scan",
+  "name": "v2 internal port-scan burst",
+  "description": "Twenty or more Falco suspicious-network-tool fires from a single container within 10 minutes — a sweep-shaped burst rather than the occasional one-off probe the suspicious-network-tool rule already covers. Authorized vuln scans from scanner-1 produce this pattern; reconnaissance from a compromised host also produces it. Triage answers whether the source is in CMDB as a scanner role and whether the burst correlates with a scheduled scan window.",
+  "type": "threshold",
+  "language": "kuery",
+  "index": [
+    "logs-falco.alerts-*"
+  ],
+  "query": "falco.rule: \"Launch Suspicious Network Tool in Container\"",
+  "threshold": {
+    "field": [
+      "falco.output_fields.container.name"
+    ],
+    "value": 20
+  },
+  "from": "now-15m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": [
+    "v2",
+    "falco",
+    "container",
+    "reconnaissance"
+  ],
+  "enabled": true
+}

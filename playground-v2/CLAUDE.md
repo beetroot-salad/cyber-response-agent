@@ -78,7 +78,8 @@ Identity tier — OIDC/SAML IdP with scripted user/role seeding (see v2 §Identi
   # Account console (as a seed user): http://localhost:8080/realms/soc-playground/account → e.g., sre.alice / changeme
   ```
 - **Config files shipped via a build-context image** (`keycloak/Dockerfile`). The init container is `FROM python:3.12-alpine` + `COPY realm.yaml seed.py`, so the build context tar-streams those files to the remote daemon at `compose build` time — no pre-stage on the VPS needed. Note: the obvious alternative — Docker Compose `configs:` with `file: ./keycloak/realm.yaml` — does **not** work against a remote context. `file:` resolves the path on the daemon side, and `/workspace/` doesn't exist on the VPS. (`configs.*.content:` with inline YAML would also work but buries a 5KB seed inside compose.yml.)
-- **Events enabled**: realm config sets `eventsEnabled: true` with the `jboss-logging` listener. The listener writes at DEBUG level, so stdout is silent unless the log level is raised — we set `KC_LOG_LEVEL=INFO,org.keycloak.events:debug` so only the events stream is verbose (root stays INFO). Sample line: `type="LOGIN", realmName="soc-playground", clientId="soc-playground-app", username="sre.alice", ipAddress="127.0.0.1", grant_type="password", ...`. Events are also stored in the realm DB and viewable in Kibana → (later) or Keycloak UI → Events.
+- **Events enabled**: realm config sets `eventsEnabled: true` with the `jboss-logging` listener. The listener writes at DEBUG level, so stdout is silent unless the log level is raised — we set `KC_LOG_LEVEL=INFO,org.keycloak.events:debug` so only the events stream is verbose (root stays INFO). Sample line: `type="LOGIN", realmName="soc-playground", clientId="soc-playground-app", username="sre.alice", ipAddress="127.0.0.1", grant_type="password", ...`. Events are also stored in the realm DB and viewable in Kibana → Discover (see below) or Keycloak UI → Events.
+- **File logging in JSON** for ES ingestion: `KC_LOG=console,file` + `KC_LOG_FILE=/opt/keycloak/data/keycloak.log` + `KC_LOG_FILE_OUTPUT=json` writes a parallel JSON-per-line stream into the existing `keycloak_data` named volume. The host-side elastic-agent (on `vps-host-policy`) tails it into `logs-keycloak.events-default` via Custom Logs + `decode_json_fields`. No extra volume needed — `keycloak_data` is already the keycloak-writable mount. Lands on the VPS at `/var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log`.
 - **Named volumes**: `soc-playground_keycloak_data` (H2 DB + server state), `soc-playground_keycloak_import` (generated realm.json — rewritten on every `compose up`).
 
 #### Re-seed users/roles
@@ -107,11 +108,12 @@ The committed YAML is source-of-truth; if #2 is used for substantive changes, fo
 
 Recursive DNS resolver + playground-internal zone. Built from `playground-v2/unbound/Dockerfile` (`FROM alpine:3.20` + `apk add unbound`).
 
-- Config: `playground-v2/unbound/unbound.conf` — `log-queries`/`log-replies` on, writes to stdout (no file, no syslog).
+- Config: `playground-v2/unbound/unbound.conf` — `log-queries`/`log-replies` on, writes to `/var/log/unbound/unbound.log` (named volume `unbound_logs`).
 - Forwards `.` to `1.1.1.1` + `9.9.9.9` over plain Do53 (TLS upstream is a hardening follow-up).
 - Local zone: `soc-playground.local.` (empty — batch 7 populates A records per role host).
 - In-network access only (`http://unbound:53` from other containers). No host port.
-- Log shape: `172.18.0.8 github.com. A IN` (query); `172.18.0.8 github.com. A IN NOERROR 0.006902 0 55` (reply — adds rcode, RTT, flags, size).
+- Log shape: `<ts> unbound[1:0] info: 172.18.0.8 github.com. A IN` (query); `<ts> unbound[1:0] info: 172.18.0.8 github.com. A IN NOERROR 0.006902 0 55` (reply — adds rcode, RTT, flags, size).
+- **Ingested into Elastic** via Custom Logs on `vps-host-policy`, reading the named volume's path `/var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log` on the VPS. Lands in `logs-unbound.queries-default` as plain-text `message` (no parser — substring queries against `message` work fine).
 
 ### squid (ubuntu/squid:latest, 6.13)
 
@@ -122,6 +124,7 @@ Forward HTTP(S) proxy with basic-auth user attribution.
 - Sample line: `1776879941.428 102 172.18.0.8 sre.alice TCP_TUNNEL/200 5336 CONNECT example.com:443 HIER_DIRECT/172.66.147.243 -`.
 - Listens on `3128/tcp` (docker network, no host port). `forwarded_for delete` + `via off` keep internal identity out of upstream requests.
 - The user list in the Dockerfile must stay in sync with `keycloak/realm.yaml`. Cross-file invariant maintained by humans; no validator.
+- **`/var/log/squid` is a named volume `squid_logs`** — the image's `tail -F → stdout` still forwards to container stdout, but the file form is what the host-side elastic-agent ingests into `logs-squid.access-default` via a Custom Logs integration (dissect parser for the `soc` format). One-time attach via Fleet API — see "Shipping Squid access logs to Elastic" below.
 
 ### zeek (zeek/zeek:lts, 8.0.x)
 
@@ -132,7 +135,7 @@ Passive monitor producing JSON conn/dns/http/ssl/files logs to the `zeek_logs` n
 - Uses the `Zeek_AF_Packet` plugin (built-in): `zeek -C -i af_packet::<iface>`. `-C` ignores TCP checksums (Hetzner NICs do checksum offloading → libpcap would see bogus checksums → Zeek would drop most packets).
 - JSON logs via `@load policy/tuning/json-logs.zeek` in `local.zeek`. Fields line up with Elastic's Zeek integration ECS mappings.
 - Cross-source correlation already works: Zeek's `http.log` captures `"username":"sre.alice"` from Squid's CONNECT basic-auth headers, and `dns.log` shows the two-hop resolver flow (container → unbound, unbound → 1.1.1.1).
-- Log ingestion into Elastic is deferred to a later batch (existing host-based elastic-agent integration or a container Filebeat).
+- **Ingested into Elastic** via the official Zeek integration on `vps-host-policy`, reading `/var/lib/docker/volumes/soc-playground_zeek_logs/_data/{conn,dns,http,ssl,files,ssh}.log`. Lands in `logs-zeek.{connection,dns,http,ssl,files,ssh}-default` with full ECS field promotion. One-time attach via Fleet API — see "Shipping Zeek + Squid logs to Elastic" below.
 
 ### Adding a new proxy-attributable user
 
@@ -316,6 +319,198 @@ curl -fsS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' -H 'Content-Type: a
 Without the `decode_json_fields` processor, the Falco JSON line is ingested as a literal `message` string and fields like `container.name`, `rule`, `priority` aren't queryable. With it, they're nested under `falco.*` (e.g. `falco.output_fields.container.name`, `falco.rule`).
 
 **Verify.** In Kibana → Discover, filter `data_stream.dataset: falco.alerts`. Events should show up within a few seconds of an activity trigger. Quick trigger: `docker --context soc-playground exec canary-1 bash -c 'touch /tmp/.falco-test && ls /etc/shadow || true'` — Falco's "Read sensitive file untrusted" or similar rule fires.
+
+### Shipping Keycloak + Unbound logs to Elastic — manual attach (one-time)
+
+Both ride the host-side elastic-agent on `vps-host-policy`. Keycloak writes JSON-per-line into the `keycloak_data` named volume; Unbound writes plain text into a dedicated `unbound_logs` named volume. The Custom Logs integrations read those files at `/var/lib/docker/volumes/soc-playground_{keycloak_data,unbound_logs}/_data/`.
+
+```bash
+# Keycloak (JSON file, parsed with decode_json_fields).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "vps-host-policy",
+    "package": {"name": "log", "version": "2.4.4"},
+    "name": "keycloak-logs", "namespace": "default",
+    "inputs": {
+      "logs-logfile": {
+        "enabled": true,
+        "streams": {
+          "log.logs": {
+            "enabled": true,
+            "vars": {
+              "paths": ["/var/lib/docker/volumes/soc-playground_keycloak_data/_data/keycloak.log"],
+              "data_stream.dataset": "keycloak.events",
+              "processors": "- decode_json_fields:\n    fields: [message]\n    target: \"\"\n    overwrite_keys: true\n    add_error_key: true\n"
+            }
+          }
+        }
+      }
+    }
+  }'
+
+# Unbound (plain text, no processors).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "vps-host-policy",
+    "package": {"name": "log", "version": "2.4.4"},
+    "name": "unbound-logs", "namespace": "default",
+    "inputs": {
+      "logs-logfile": {
+        "enabled": true,
+        "streams": {
+          "log.logs": {
+            "enabled": true,
+            "vars": {
+              "paths": ["/var/lib/docker/volumes/soc-playground_unbound_logs/_data/unbound.log"],
+              "data_stream.dataset": "unbound.queries"
+            }
+          }
+        }
+      }
+    }
+  }'
+```
+
+The Keycloak processor uses `target: ""` (empty string) so decoded top-level JSON keys (`timestamp`, `loggerName`, `level`, `message`) land at the root rather than nested under a prefix. The events stream's structured detail (`type=`, `username=`, …) stays embedded as a substring inside `message` — filter `loggerName: "org.keycloak.events"` to scope, and substring-match `*'username="sre.alice"'*` etc. to extract.
+
+**Verify.**
+
+```bash
+docker --context soc-playground exec web-1 \
+  curl -s -o /dev/null 'http://keycloak:8080/realms/soc-playground/protocol/openid-connect/token' \
+  -d 'grant_type=password&client_id=admin-cli&username=sre.alice&password=changeme'
+docker --context soc-playground exec web-1 nslookup example.com unbound >/dev/null
+# Wait ~30s for the agent check-in cycle.
+curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" \
+  'https://localhost:9200/_cat/indices/logs-{keycloak,unbound}.*?h=index,docs.count'
+```
+
+### Shipping Postgres + Nginx logs to Elastic — manual attach (one-time)
+
+Each role host runs its own embedded `elastic-agent` enrolled into a role policy (`host-db-policy`, `host-web-policy`), so attaching the official integrations to those policies gets the agents reading the in-container log paths directly. No file bind-mounts needed — the agent is *inside* the container. Default `paths` in both packages already match the in-container layout (`/var/log/postgresql/postgresql-*-*.log*` matches Ubuntu's `postgresql-14-main.log`; `/var/log/nginx/{access,error}.log*` is the nginx default). Metrics inputs are left disabled — they require credentials we don't surface to the agents.
+
+```bash
+# Install packages (idempotent on re-runs).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/epm/packages/postgresql/1.32.1' -d '{"force": false}'
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/epm/packages/nginx/3.1.0' -d '{"force": false}'
+
+# Postgres → host-db-policy (one agent: db-1).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "host-db-policy",
+    "package": {"name": "postgresql", "version": "1.32.1"},
+    "name": "postgresql-logs", "namespace": "default",
+    "inputs": {"postgresql-logfile": {"enabled": true, "streams": {"postgresql.log": {"enabled": true}}}}
+  }'
+
+# Nginx access + error → host-web-policy (two agents: web-1, web-2).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "host-web-policy",
+    "package": {"name": "nginx", "version": "3.1.0"},
+    "name": "nginx-logs", "namespace": "default",
+    "inputs": {"nginx-logfile": {"enabled": true, "streams": {"nginx.access": {"enabled": true}, "nginx.error": {"enabled": true}}}}
+  }'
+```
+
+**Verify.**
+
+```bash
+docker --context soc-playground exec web-1 curl -s http://localhost/ -o /dev/null
+docker --context soc-playground exec db-1  bash -c 'PGPASSWORD=wrong psql -h db-1 -U appuser -d app -c "SELECT 1" 2>&1 | head -1'
+# Wait ~30s for the agent check-in cycle.
+curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" \
+  'https://localhost:9200/_cat/indices/logs-{postgresql,nginx}.*?h=index,docs.count'
+```
+
+### Shipping Zeek + Squid logs to Elastic — manual attach (one-time)
+
+Both ride the same `vps-host-policy` host-side elastic-agent as Falco, reading docker named volumes on the VPS filesystem (`/var/lib/docker/volumes/soc-playground_{zeek,squid}_logs/_data/`). The agent runs as root, so volume perms are not a concern. Attach via Fleet API, run from the devcontainer with Kibana tunneled on 5601:
+
+**Zeek (official integration, full ECS mapping).**
+
+```bash
+# 1. Install the package (idempotent — re-install on version bumps).
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/epm/packages/zeek/5.0.1' -d '{"force": false}'
+
+# 2. Attach as a package policy on vps-host-policy.
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d '{
+    "policy_id": "vps-host-policy",
+    "package": {"name": "zeek", "version": "5.0.1"},
+    "name": "zeek-logs", "namespace": "default",
+    "inputs": {
+      "zeek-logfile": {
+        "enabled": true,
+        "vars": {"base_paths": ["/var/lib/docker/volumes/soc-playground_zeek_logs/_data"]},
+        "streams": {
+          "zeek.connection": {"enabled": true, "vars": {"filenames": ["conn.log"]}},
+          "zeek.dns":        {"enabled": true, "vars": {"filenames": ["dns.log"]}},
+          "zeek.http":       {"enabled": true, "vars": {"filenames": ["http.log"]}},
+          "zeek.ssl":        {"enabled": true, "vars": {"filenames": ["ssl.log"]}},
+          "zeek.files":      {"enabled": true, "vars": {"filenames": ["files.log"]}},
+          "zeek.ssh":        {"enabled": true, "vars": {"filenames": ["ssh.log"]}}
+        }
+      }
+    }
+  }'
+```
+
+The `base_paths` var is **input-level** (not package-level); the API returns `Variable :base_paths not found` if placed wrong. Each enabled stream's `filenames` is concatenated against `base_paths` by the integration's Filebeat config. The package also enables `zeek.tunnel` and `zeek.weird` by default — fine, more visibility is better.
+
+**Squid (Custom Logs + dissect on the `soc` format).**
+
+```bash
+LOG_VER=$(curl -fsSu "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  http://localhost:5601/api/fleet/epm/packages/log | jq -r '.item.version')
+
+curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  -H 'Content-Type: application/json' -H 'elastic-api-version: 2023-10-31' \
+  -X POST 'http://localhost:5601/api/fleet/package_policies' -d "{
+    \"policy_id\": \"vps-host-policy\",
+    \"package\": {\"name\": \"log\", \"version\": \"${LOG_VER}\"},
+    \"name\": \"squid-logs\", \"namespace\": \"default\",
+    \"inputs\": {
+      \"logs-logfile\": {
+        \"enabled\": true,
+        \"streams\": {
+          \"log.logs\": {
+            \"enabled\": true,
+            \"vars\": {
+              \"paths\": [\"/var/lib/docker/volumes/soc-playground_squid_logs/_data/access.log\"],
+              \"data_stream.dataset\": \"squid.access\",
+              \"processors\": \"- dissect:\\n    tokenizer: \\\"%{squid.timestamp->} %{squid.elapsed_ms->} %{source.ip->} %{user.name->} %{squid.result_status->} %{http.response.bytes->} %{http.request.method->} %{url.original->} %{squid.hierarchy_peer->} %{http.response.mime_type}\\\"\\n    field: \\\"message\\\"\\n    target_prefix: \\\"\\\"\\n- convert:\\n    fields:\\n      - {from: squid.elapsed_ms, to: squid.elapsed_ms, type: long}\\n      - {from: http.response.bytes, to: http.response.bytes, type: long}\\n    ignore_missing: true\\n    fail_on_error: false\\n\"
+            }
+          }
+        }
+      }
+    }
+  }"
+```
+
+The `->` modifier on each dissect key (e.g. `%{source.ip->}`) tells the parser to skip over runs of the delimiter — required because squid's `%6tr` right-justifies elapsed-ms with variable padding. `target_prefix: ""` strips the default `dissect.` prefix so the dotted keys land at their ECS positions (`source.ip`, `user.name`, `http.request.method`, `url.original`) instead of nested under `dissect.*`.
+
+**Verify.** From the devcontainer, with Kibana tunneled on 5601:
+
+```bash
+docker --context soc-playground exec web-1 \
+  curl -s -x http://sre.alice:changeme@squid:3128 https://example.com -o /dev/null
+# Wait ~30s for the agent check-in cycle, then:
+curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" "https://localhost:9200/_cat/indices/logs-{zeek,squid}.*?h=index,docs.count"
+```
+
+`logs-squid.access-default` should show the new row; `logs-zeek.{connection,ssl,http}-default` should be growing continuously (zeek captures all bridge traffic, not just the test request).
 
 **auditd — deferred.** Per-container auditd in docker is fraught: the kernel audit socket is a single-listener resource, so only one container's auditd can actually attach to it at a time, and user-namespace interaction is still a moving target on modern kernels. Running auditd on the VPS host itself (plus Falco for syscall coverage + rsyslog for auth/sudo/cron) covers the same ground without fighting the kernel. If per-container auditd becomes necessary later, the cleanest route is an audit-dispatcher daemon on the VPS host that demuxes by PID → container; that's a separate design problem from batch 7.
 

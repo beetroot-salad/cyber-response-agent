@@ -165,6 +165,7 @@ def run_fixture(
                 f"Glob({sb}/**)",
                 f"Grep({sb}/**)",
                 f"Bash(python3 {sb}/scripts/tools/*.py *)",
+                "Bash(defender-* *)",
                 "Bash(ls *)",
                 "Bash(cat *)",
                 "Bash(jq *)",
@@ -185,6 +186,12 @@ def run_fixture(
     env = dict(os.environ)
     env["STUB_ELASTIC_PAYLOAD"] = str(fixture_dir / "elastic_payload.json")
     env["STUB_DSD_TRACE"] = str(trace_path)
+    # Make the `defender-*` invocation shims resolve against the sandbox stubs:
+    # the real shims (on PATH) read DEFENDER_DIR at runtime and fall back to
+    # system python3 when the sandbox has no venv. Mirrors run.py's spawn env.
+    env["PATH"] = f"{DEFENDER_ROOT / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env["DEFENDER_DIR"] = str(sandbox)
+    env["DEFENDER_RUNS_BASE"] = str(sandbox / "runs")
     # Optional per-fixture verdict override.
     verdict = fixture_dir / "dsd_verdict.txt"
     if verdict.exists():

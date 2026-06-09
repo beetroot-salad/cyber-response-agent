@@ -18,7 +18,7 @@ A fenced YAML dispatch block on stdin:
 
 ```yaml
 run_dir: {run_dir}
-signature_id: wazuh-rule-NNNN
+signature_id: <signature-id from the alert, e.g. v2-sshd-failed-auth-burst>
 frontier:
   - "?hypothesis-one"
   - "?hypothesis-two"
@@ -34,10 +34,10 @@ goal: <one-sentence: what the caller wants past cases to tell them>
    `{run_dir}/investigation.md` for lines starting with `?:H` to
    extract live hypothesis names. If still empty, proceed with empty
    frontier — the CLI will fall back to top-K recurring leads.
-3. **Call the CLI** (arg order is corpus_root first, then `advisory`):
+3. **Call the CLI** (the `defender-invlang` shim injects the corpus root):
 
    ```bash
-   python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
+   defender-invlang advisory \
        --signature <signature_id> \
        --class lead_discrimination \
        --frontier '?hypothesis-one' \

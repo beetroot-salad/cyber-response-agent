@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Auto-stable invocation shim for the invlang corpus/schema CLI. Injects the
+# corpus root (DEFENDER_RUNS_BASE) so the agent calls `defender-invlang enum
+# types` with no path/run-dir argument. Runs from REPO_ROOT because
+# skills/invlang/cli.py uses package-relative imports (`from .advisory ...`).
+cd "${DEFENDER_DIR:?DEFENDER_DIR is not set}/.." || exit 1
+PY="${DEFENDER_DIR}/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+exec "$PY" -m defender.skills.invlang.cli "${DEFENDER_RUNS_BASE:?DEFENDER_RUNS_BASE is not set}" "$@"

@@ -14,6 +14,7 @@ RUN apk add --no-cache apache2-utils && \
              dev.dana dev.ethan dev.fatima dev.gabe dev.hira \
              dba.ivy \
              svc.backups svc.reports svc.monitoring \
+             svc.config-mgmt svc.deploy svc.security \
              ctr.kai; do \
       htpasswd -bB /tmp/passwd "$u" changeme; \
     done

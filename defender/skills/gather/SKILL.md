@@ -44,9 +44,11 @@ description tells you **what this system is for** and **when it's the
 right target** — use it to confirm your lead actually wants this
 system. If the lead does target this system, Read the full
 `{defender_dir}/skills/{system}/SKILL.md` before running anything; the
-body carries the CLI conventions, field vocabularies, and load-bearing
-rules (e.g. "use `--help`, don't read source") that the description
-does not.
+body carries the field vocabularies and load-bearing rules that the
+description does not. If the system has an adjacent
+`{defender_dir}/skills/{system}/execution.md` (e.g. elastic), Read it
+too — that's where its CLI surface, query syntax, and connectivity
+notes live ("use `--help`, don't read source").
 
 ### 2. Find a template, or name the measurement
 
@@ -96,14 +98,15 @@ wrapper persists the raw payload and records the executed query
 **not** redirect output or hand-name files:
 
 Everything after `--` is the system CLI invocation exactly as that
-system's SKILL.md documents it — the CLI's filename, subcommands, and
-flags all come from there (don't assume it's `{system}_cli.py`):
+system's SKILL.md documents it — the invocation token is that system's
+`defender-<system>` shim, and the subcommands and flags all come from
+the system SKILL:
 
 ```bash
-python3 {defender_dir}/scripts/tools/record_query.py \
+defender-record-query \
     --run-dir {run_dir} --lead {lead_id} \
     --system {system} --query-id {system}.{template-id} -- \
-    python3 {defender_dir}/scripts/tools/<system-cli> <verb> <args> --raw
+    defender-{system} <verb> <args> --raw
 ```
 
 Pass three values: your `lead_id` as `--lead`, the lead's `system` as
@@ -178,7 +181,7 @@ continue to §4 with the resolved data.
 **Step 2 — cache miss: invoke the data-source-debug wrapper.**
 
 ```bash
-python3 {defender_dir}/scripts/tools/data_source_debug.py \
+defender-data-source-debug \
     --defender-dir {defender_dir} \
     --system {system} \
     --payload {run_dir}/{raw-payload-path} \
@@ -328,8 +331,9 @@ draft and decides whether to keep it.
 
 How to search without a template:
 
-1. Read `{defender_dir}/skills/{system}/SKILL.md` for the CLI's query
-   surface and field vocabulary.
+1. Read `{defender_dir}/skills/{system}/SKILL.md` (and
+   `{system}/execution.md` if present) for the CLI's query surface and
+   field vocabulary.
 2. Compose the narrowest query that answers the lead, run it through
    the wrapper, and read the result.
 3. If it's empty/wrong-shaped, iterate (widen the window, drop a
@@ -338,10 +342,10 @@ How to search without a template:
 4. Name the final measurement and run it under that id:
 
 ```bash
-python3 {defender_dir}/scripts/tools/record_query.py \
+defender-record-query \
     --run-dir {run_dir} --lead {lead_id} \
     --system {system} --query-id {system}.failed-auth-by-srcip -- \
-    python3 {defender_dir}/scripts/tools/<system-cli> <query invocation> --raw
+    defender-{system} <query invocation> --raw
 ```
 
 Reserve the literal `--query-id ad-hoc` for the genuinely unnameable —
@@ -351,19 +355,35 @@ trail but are not catalog candidates.
 
 ### Debug leads
 
-When a prior dispatch returned empty and the defender suspects
-misconfiguration rather than no-events, the defender will dispatch a
-**debug lead** explicitly. The protocol:
+First branch on the adapter's exit code (the `payload_status` the
+wrapper records) — it already tells you which kind of problem you have:
 
-1. Confirm the index/host the query targets actually exists (system
-   health check).
-2. Broaden the time window by 10× and re-run.
-3. Drop the most specific filter clause and re-run.
-4. Drop the next-most-specific clause; iterate until either rows
+- **`error` (exit 2 — connectivity / auth / config):** the data source
+  is **unreachable**, not mis-queried. Stop and **escalate
+  immediately** with the adapter's error. Do **not** probe the
+  connection — no `netstat`/`ss`/`docker`/`/dev/tcp`, no hunting for
+  `.env` or credentials, no re-running to "confirm". The adapter owns
+  connectivity and auth; a `2` is a data-source outage for the human to
+  resolve.
+- **`empty` (exit 0, 0 hits):** the source answered; it just had
+  nothing matching. This is the only case the debug protocol below
+  applies to.
+
+When a dispatch returned **empty** and the defender suspects a
+mis-bound query rather than genuine no-events, the defender dispatches a
+**debug lead**. The protocol (query-level only — never a host/network
+probe):
+
+1. Broaden the time window by 10× and re-run.
+2. Drop the most specific filter clause and re-run.
+3. Drop the next-most-specific clause; iterate until either rows
    appear or all filters are stripped.
-5. Report the differential: "rows appear when `data.srcip` filter is
+4. Report the differential: "rows appear when `data.srcip` filter is
    dropped — likely IP normalization / NAT issue" or "no rows at any
-   widening — index empty or misrouted."
+   widening — index empty or misrouted." For a stubborn empty whose
+   cause isn't a filter (suspected mis-routed index, wrong field
+   vocabulary), escalate to the data-source-debug subagent (§3.5),
+   which now covers connected-but-empty payloads as well as sentinels.
 
 The defender decides what the differential means; you report it.
 

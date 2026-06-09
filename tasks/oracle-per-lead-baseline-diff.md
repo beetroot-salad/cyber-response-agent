@@ -1,45 +1,49 @@
 ---
-title: Per-lead generative oracle + baseline-diff (detection-by-absence)
+title: Per-lead generative oracle + baseline-diff (retire footprint→router)
 status: done
 groups: defender, learning-loop
 ---
 
 ## Why
 
-PR #249 (`experiments/oracle-overload-root-cause/`) showed the single-call telemetry
-oracle's projection overload (out-of-envelope events smuggled into the nearest lead) is
-eliminated by **decomposition** — one generative call per lead — plus two input fixes:
-dropping the prose `goal` (drove fabrication-to-fill) and a deterministic
-`what_to_summarize` timestamp sanitizer. Ported here from the v2 worktree
-(`defender-v2-env`), adapted to main's single-call-oracle baseline (main never carried
-the footprint→router two-stage path, so there is nothing to delete here — this replaces
-the all-leads `oracle.md`).
+PR #249 (`experiments/oracle-overload-root-cause/`) re-examined PR #247's oracle
+overload fix and concluded **decomposition** — running the oracle per-lead so each
+isolated instance can't smuggle out-of-envelope events into the nearest lead — is the
+load-bearing mechanism, with two complementary input fixes: dropping the prose `goal`
+(drove fabrication-to-fill) and a deterministic `what_to_summarize` timestamp sanitizer.
+
+v2 had adopted #247's two-stage **footprint → deterministic router** path. This change
+**discards the router** and replaces it with a **per-lead generative oracle** — the
+alternative decomposition #249 validated — chosen for its per-lead semantic richness.
 
 ## What landed
 
-- **`learning/oracle.md`** — rewritten: one `claude -p` per lead, fed only that lead's
-  sanitized `what_to_characterize` + queries + a scrubbed sample event; no goal, no other
-  leads, no alert. Output is a **signed diff over the baseline** ("standard environment
-  noise"), the frame the runtime already reasons in (`SKILL.md` deviation-from-baseline):
+- **`learning/oracle.md`** (new; `footprint.md` deleted) — one `claude -p` per lead, fed
+  only that lead's sanitized `what_to_characterize` + queries + a scrubbed sample event;
+  no goal, no other leads, no alert. Output is a **signed diff over the baseline**
+  ("standard environment noise"), mirroring the defender runtime's own
+  deviation-from-baseline / absence-as-signal frame (`SKILL.md`):
   - `+` distinguishable → event mappings
   - `+` indistinguishable → `"<standard environment noise>"` (blend)
-  - `−` baseline → `"<suppressed: REASON>"` (story disables this lead's stream →
+  - `−` baseline → `"<suppressed: REASON>"` (the story disables this lead's stream →
     predicted dark; **detection-by-absence**, exercises MITRE T1562.001 / T1070.002)
   - `0` → `events: []`
-- **`learning/_loop_oracle.py`** (new, shared with v2) — `sanitize_wtc`, scrubbed-sample
-  helper (was `_loop_exemplars.redact_exemplar`), per-lead prompt builder (drops goal),
-  reply parser (rescues an unquoted `<suppressed: …>` marker YAML mis-parses as a
-  mapping), `{projections:[{position,events}]}` assembly.
-- **`_loop_subagents.py`** — single-call `invoke_oracle` → per-lead, fanned out
-  concurrently (`ORACLE_MAX_CONCURRENCY`), reassembled in lead order.
-- **`_loop_validate.py`** — projection shape `{position, events}` (dropped the redundant
-  `system`/`template` — the judge reads those from `lead_sequence`); events may be a
-  mapping OR a marker string; added the no-alias `dump_oracle_doc`.
-- **`judge.md` + `judge_benign.md`** — oracle source rewritten for the per-lead
-  baseline-diff output; negative-claim rule extended to read `<suppressed: …>` (stream
-  alive ⇒ caught; dark ⇒ detection-by-absence finding).
-- **Removed** `_loop_exemplars.py` (its scrub logic moved into `_loop_oracle`; the old
-  all-leads exemplar bundle is no longer assembled).
+- **`learning/_loop_oracle.py`** (new) — `sanitize_wtc`, scrubbed-sample helper (ported
+  from `main:_loop_exemplars.py`), per-lead prompt builder (drops goal), reply parser
+  (rescues an unquoted `<suppressed: …>` marker that YAML mis-parses as a mapping), and
+  `{projections:[{position,events}]}` assembly.
+- **`learning/_loop_subagents.py`** — `footprint`→`oracle`; per-lead calls fanned out
+  concurrently (`ThreadPoolExecutor`, `ORACLE_MAX_CONCURRENCY`); assembled in lead order.
+- **`learning/_loop_orchestrate.py`** — router glue removed; `_write_validated_oracle`
+  strips+validates the assembled doc.
+- **`learning/_loop_validate.py`** — `projections`-only doc; events may be mapping OR
+  marker string; `uncovered`/`unrouted_leads` dropped.
+- **`learning/judge.md` + `judge_benign.md`** — source #5 rewritten for per-lead
+  generative output; negative-claim rule extended to read `<suppressed: …>` (stream alive
+  ⇒ caught; dark ⇒ consistent + detection-by-absence finding); `uncovered`/`unrouted`
+  references removed.
+- **Deleted:** `_oracle_router.py`, `scripts/lead_filters.py` (+ the projector's `filters`
+  recovery) and their tests.
 
 ## Review hardening (post-`/code-review`)
 
@@ -67,12 +71,10 @@ Fixes folded in after an extra-high-effort review of the diff:
 
 ## Verification
 
-- `learning/` 103 passed (was 91; +12 regression tests for the fixes above);
-  `tests/ -m "not llm"` 282 passed.
-- Validated end-to-end on the v2 worktree: two live loop runs (actor→oracle→judge→persist)
-  clean across both directions; all four oracle modes confirmed on live claude incl.
-  `<suppressed>` detection-by-absence.
-- **Follow-up:** both live runs produced all-empty projections (one confirmed correct by
-  the judge — a cross-container attack). The per-lead oracle is deliberately conservative
-  (no alert → won't bridge a story's friendly entity name to a lead's pinned id); worth a
-  check that it isn't over-abstaining on genuine event leads.
+- `learning/` suite (with the +12 review-hardening regression tests): see latest run.
+- New unit tests cover the glob-overmatch guard, multi-colon suppression-marker parse,
+  placeholder-event preservation, validator marker strictness, sanitizer Z-requirement,
+  scalar/malformed `what_to_summarize`, empty-sample fallthrough, and unicode dump.
+- Validated end-to-end on this v2 worktree: a live `learning/loop.py` replay producing a
+  real `projected_telemetry.yaml` (per-lead events / `[]` / noise / `<suppressed>`) and the
+  judge's detection-by-absence reading.

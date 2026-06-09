@@ -33,7 +33,11 @@ from _loop_config import (
 from _loop_directions import BY_NAME, Direction, ObsTrigger
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
-from _loop_validate import normalize_disposition, strip_yaml_fence, validate_oracle_doc
+from _loop_validate import (
+    normalize_disposition,
+    strip_yaml_fence,
+    validate_oracle_doc,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +369,8 @@ Outputs:
   defender/learning/runs/<run_id>/
     actor_input.yaml               adversarial actor-facing projection (queries only)
     actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
-    projected_telemetry[_benign].yaml  oracle's per-lead synthesized events
+    projected_telemetry[_benign].yaml  per-lead oracle output: projections (one per lead)
+    projected_telemetry[_benign].raw.txt  assembled oracle doc, pre-strip (only on mutation/failure)
     judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
     appended queueable defender findings (both directions, tagged `direction`);
@@ -377,10 +382,10 @@ Outputs:
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
-  ORACLE_MODEL                         telemetry oracle (sonnet by design — Haiku
-                                       fabricated 1/3 projections in an N=3 test)
-  ORACLE_EFFORT                        oracle reasoning effort (default: low — mechanical
-                                       projection gains nothing from extended thinking)
+  ORACLE_MODEL                         per-lead telemetry oracle (sonnet by design — generative)
+  ORACLE_EFFORT                        oracle reasoning effort (default: low — each call sees
+                                       only its own lead; no cross-lead matching to reason about)
+  ORACLE_MAX_CONCURRENCY               max concurrent per-lead oracle calls (default: 8)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: low — the prompt
                                        fully scaffolds the analysis, so high over-thinks)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge

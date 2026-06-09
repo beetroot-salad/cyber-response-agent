@@ -41,15 +41,15 @@ authz `anchor_kind`, edge `auth_kind`, per-type `class` and
 them up when you need a value:
 
 ```bash
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum                  # list slot names
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum types            # vertex type names
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum relations        # edge rel names
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum compute.role     # compute role slot
-python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum anchor-kinds     # authz anchor_kind
+defender-invlang enum                  # list slot names
+defender-invlang enum types            # vertex type names
+defender-invlang enum relations        # edge rel names
+defender-invlang enum compute.role     # compute role slot
+defender-invlang enum anchor-kinds     # authz anchor_kind
 ```
 
-(`corpus_root` is positional and required by the parser, but `enum`
-does not read the corpus — any path works.) Pick from these catalogs.
+(The `defender-invlang` shim injects the corpus root, so you never pass a
+path; `enum` doesn't read the corpus anyway.) Pick from these catalogs.
 If your case genuinely doesn't fit, use `unclassified-{type}` in
 `class` (type known, sub-kind unknown) or `ambiguous-{a}-or-{b}`
 (genuinely indistinguishable).
