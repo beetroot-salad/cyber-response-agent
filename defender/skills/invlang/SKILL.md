@@ -273,10 +273,12 @@ impact_verdict         none
 confidence             high
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
-
-:T conclude.surviving [hyp_id|final_weight]
-h-001|++
 ```
+
+`:T conclude` is flat key/value lines only — there are no `conclude.*`
+sub-tables. Final hypothesis weights live in `:T resolutions`;
+benign-disposition gating is computed from the resolution record, not a
+restated table here.
 
 ## Discovery hypotheses
 
