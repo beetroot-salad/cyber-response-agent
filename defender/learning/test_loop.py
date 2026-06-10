@@ -719,3 +719,83 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
+
+
+def test_author_drain_quarantines_poison_run_dir(tmp_path: Path):
+    """A lead-author that raises on one (present) run dir must NOT wedge the
+    serial drain: the marker is quarantined to failed/ (so it can't re-poison
+    every tick) and the threshold curators still fire."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-poison"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    triggered: list[str] = []
+
+    def boom(_rd: Path) -> None:
+        raise RuntimeError("lead-author blew up")
+
+    orch.author_drain(
+        paths,
+        run_lead_author=boom,
+        trigger_author=lambda pending_file, env, module, label: triggered.append(module),
+    )
+    assert not (paths.author_queue_dir / "case-poison.json").exists()
+    failed = paths.author_queue_dir / "failed" / "case-poison.json"
+    assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
+    # the poison run dir didn't starve the accumulated findings/observation queues
+    assert triggered == ["author", "author_actor", "author_actor_benign"]
+
+
+# ---------------------------------------------------------------------------
+# Out-of-repo state_dir (DEFENDER_LEARNING_STATE_DIR) — the concurrent-run config
+# the seam exists for. Until now NO test exercised state_dir != None.
+# ---------------------------------------------------------------------------
+
+
+def test_source_run_dir_absolute_when_state_dir_out_of_repo(tmp_path: Path):
+    """_source_run_dir must not crash when the run lives out-of-repo (it used to
+    raise ValueError on relative_to) and must return an absolute path that the
+    consumer contract (``repo_root / src``) resolves back to the real run dir."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = tmp_path / "state"  # out-of-repo, like /tmp/defender-state
+    paths = LoopPaths(repo_root=repo, state_dir=state)
+    assert paths.runs_dir == state / "runs"
+
+    learning_run_dir = paths.runs_dir / "case-x"
+    src = persist._source_run_dir(learning_run_dir, paths.repo_root)
+    assert src == str(learning_run_dir) + "/"  # absolute, no crash
+    assert paths.repo_root / src.rstrip("/") == learning_run_dir  # pathlib: abs RHS wins
+
+
+def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
+    """The headline concurrent path: append_findings must not crash with the run
+    bundle out-of-repo, and the queue + its row land under state_dir, not the repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = tmp_path / "state"
+    paths = LoopPaths(repo_root=repo, state_dir=state)
+    learning_run_dir = paths.runs_dir / "case-y"
+    learning_run_dir.mkdir(parents=True)
+
+    judge_doc = {
+        "outcome": "survived",
+        "defender_findings": [
+            {
+                "type": "lead-set",
+                "subject_anchor": "host-a",
+                "subject_topic": "missed lateral move",
+                "finding": "narrative",
+                "citations": [{"source": "investigation", "quote": "..."}],
+            }
+        ],
+    }
+    n = persist.append_findings(
+        judge_doc, "case-y", "rule-1", learning_run_dir,
+        direction="adversarial", paths=paths,
+    )
+    assert n == 1
+    rows = _read_jsonl(paths.pending_file)
+    assert rows[0]["source_run_dir"] == str(learning_run_dir) + "/"
+    assert paths.pending_file.is_relative_to(state)
+    assert not paths.pending_file.is_relative_to(repo)

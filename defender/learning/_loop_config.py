@@ -105,16 +105,17 @@ def _env_state_dir() -> Path | None:
     """Out-of-repo learning-state dir from ``DEFENDER_LEARNING_STATE_DIR``.
 
     Returns None when unset (state stays in-repo). When set, the dir is
-    resolved + created so producer (run/learn) and consumer (author) processes
-    resolve one identical location — no silent fallback that would split-brain
-    the queue across concurrent runs.
+    *resolved* so producer (run/learn) and consumer (author) processes agree on
+    one identical location — no silent fallback that would split-brain the queue
+    across concurrent runs. It is **not** created here: importing this module
+    must have no filesystem side effect, and a typo'd/unwritable path should fail
+    at first use (where each writer mkdirs the specific subdir it needs), not
+    crash the import of the whole learning subsystem.
     """
     raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
     if not raw:
         return None
-    p = Path(raw).resolve()
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return Path(raw).resolve()
 
 
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())

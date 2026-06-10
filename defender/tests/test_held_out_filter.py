@@ -157,6 +157,22 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path) -> None:
     assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 
 
+def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path) -> None:
+    """A failed direction leg must still enqueue the run for the serial
+    author-drainer — lead-author (catalog refinement) is leg-independent — and
+    then fail loud. Enqueue happens before the re-raise, so the run isn't
+    stranded with no author-work marker."""
+    run_dir = _complete_run_dir(tmp_path, "benign", held_out=False)
+    # Malformed judge YAML → the adversarial leg raises LoopError.
+    agents = FakeSubagents(judge="outcome: [unterminated\n")
+    paths = loop.LoopPaths(repo_root=tmp_path)
+
+    with pytest.raises(loop.LoopError):
+        loop.run_one(run_dir, paths=paths, agents=agents)
+    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    assert marker.exists(), "a failed leg must still enqueue the run for authoring"
+
+
 def test_directions_for_dispatch() -> None:
     assert loop._directions_for("benign") == ["adversarial"]
     assert loop._directions_for("malicious") == ["benign"]

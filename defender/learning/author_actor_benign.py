@@ -44,7 +44,6 @@ module enforces the transaction envelope.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import fcntl
 import json
 import os
@@ -63,6 +62,7 @@ try:
     import _author_runner as _runner  # type: ignore[import-not-found]
     import _author_shared as _shared  # type: ignore[import-not-found]
     from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
+    from _loop_persist import rotate_queue_locked  # type: ignore[import-not-found]
 finally:
     sys.path.pop(0)
 
@@ -188,7 +188,11 @@ def existing_observation_ids() -> set[str]:
 
 
 def is_held_out_source(source_run_dir: str) -> bool:
-    """True if ``{source_run_dir}/ground_truth.yaml`` declares held-out."""
+    """True if ``{source_run_dir}/ground_truth.yaml`` declares held-out.
+
+    ``source_run_dir`` is repo-relative in-repo, absolute out-of-repo (under
+    DEFENDER_LEARNING_STATE_DIR); ``REPO_ROOT / src`` resolves both (pathlib lets
+    an absolute right-hand side win)."""
     if not source_run_dir:
         return False
     path = REPO_ROOT / source_run_dir.rstrip("/") / GROUND_TRUTH_FILE
@@ -436,37 +440,30 @@ def verify_agent_state(
 # ---------------------------------------------------------------------------
 
 
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-
-
 def rotate_queue(
     *,
     held: list[dict],
     consumed: list[dict],
     commit_sha: str | None,
 ) -> None:
-    """Atomic rewrite of the queue + append to consumed.
+    """Held-only rewrite of the queue + append to consumed (the shared
+    ``rotate_queue_locked`` with ``merge_concurrent=False``).
 
-    No re-read-merge here (unlike ``author.rotate_queue``): ``run_batch`` holds the
-    queue lock (``acquire_queue_lock`` on ``LOCK_FILE``) across read→rotate, and the
-    producer's append blocks on that same lock, so no observation can arrive
-    mid-batch — a held-only rewrite cannot lose data."""
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = PENDING_FILE.with_suffix(".jsonl.tmp")
-    with tmp.open("w") as fh:
-        for entry in held:
-            fh.write(json.dumps(entry) + "\n")
-    os.replace(tmp, PENDING_FILE)
-    if consumed:
-        now = _now_iso()
-        with CONSUMED_FILE.open("a") as fh:
-            for entry in consumed:
-                rec = dict(entry)
-                rec.setdefault("consumed_at", now)
-                if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                    rec["consumed_commit"] = commit_sha
-                fh.write(json.dumps(rec) + "\n")
+    No re-read-merge (unlike ``author.rotate_queue``): ``run_batch`` holds the
+    queue lock (``acquire_queue_lock`` on ``LOCK_FILE``) across read→rotate, and
+    the producer's append blocks on that same lock, so no observation can arrive
+    mid-batch — a held-only rewrite cannot lose data, and re-taking ``LOCK_FILE``
+    here would self-deadlock (hence ``merge_concurrent=False``)."""
+    rotate_queue_locked(
+        pending_file=PENDING_FILE,
+        consumed_file=CONSUMED_FILE,
+        lock_file=LOCK_FILE,
+        id_key="observation_id",
+        held=held,
+        consumed=consumed,
+        commit_sha=commit_sha,
+        merge_concurrent=False,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -90,6 +90,44 @@ def _read_jsonl_rows(path: Path) -> list[dict]:
     return rows
 
 
+def _rewrite_queue(
+    pending_file: Path,
+    consumed_file: Path,
+    id_key: str,
+    held: list[dict],
+    consumed: list[dict],
+    commit_sha: str | None,
+    *,
+    merge: bool,
+) -> None:
+    """Atomically rewrite ``pending_file`` to the survivors and append consumed.
+
+    ``merge=True`` re-reads the current file and keeps any row the author never
+    processed (mutated ``held`` rows + untouched new arrivals); ``merge=False``
+    writes ``held`` verbatim. The caller owns whatever lock the producer uses.
+    """
+    if merge:
+        processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
+        current = _read_jsonl_rows(pending_file)
+        survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
+    else:
+        survivors = list(held)
+    tmp = pending_file.with_suffix(pending_file.suffix + ".tmp")
+    with tmp.open("w") as fh:
+        for entry in survivors:
+            fh.write(json.dumps(entry) + "\n")
+    os.replace(tmp, pending_file)
+    if consumed:
+        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+        with consumed_file.open("a") as fh:
+            for entry in consumed:
+                rec = dict(entry)
+                rec.setdefault("consumed_at", now)
+                if rec.get("consumed_category") == "consumed_committed" and commit_sha:
+                    rec["consumed_commit"] = commit_sha
+                fh.write(json.dumps(rec) + "\n")
+
+
 def rotate_queue_locked(
     *,
     pending_file: Path,
@@ -99,36 +137,36 @@ def rotate_queue_locked(
     held: list[dict],
     consumed: list[dict],
     commit_sha: str | None,
+    merge_concurrent: bool = True,
 ) -> None:
-    """Drain a JSONL queue under its flock, **preserving concurrent appends**.
+    """Drain a JSONL queue: rewrite survivors atomically + append consumed rows.
 
-    An author reads its batch minutes before draining; meanwhile concurrent
-    learn processes may append new rows. Re-reading the queue under the same
-    lock the producers use (``lock_file``) lets us keep any row whose ``id_key``
-    the author never processed. The rewrite keeps the (possibly mutated) ``held``
-    rows + those untouched new arrivals, and drops ``consumed`` rows (which are
-    appended to ``consumed_file`` with ``consumed_at`` / ``consumed_commit``).
+    ``merge_concurrent`` selects how the caller relates to the producer's
+    ``lock_file``:
+
+    * ``True`` (the findings path) — the caller held the queue lock only
+      *briefly* to read its batch, so a producer may have appended new rows in
+      the minutes since. Take ``lock_file`` here, re-read, and preserve any row
+      whose ``id_key`` the author never processed.
+    * ``False`` (the observation paths) — the caller already holds ``lock_file``
+      across the whole read→rotate batch, so no row can arrive mid-batch and a
+      held-only rewrite cannot lose data. Re-taking ``lock_file`` here would
+      self-deadlock (flock denies a second fd held by the same process), so we
+      must not — the caller's lock already serializes the rewrite.
+
+    Consumed rows append to ``consumed_file`` with ``consumed_at`` /
+    ``consumed_commit``.
     """
-    processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
     pending_file.parent.mkdir(parents=True, exist_ok=True)
-    with _flock(lock_file):
-        current = _read_jsonl_rows(pending_file)
-        new_arrivals = [r for r in current if r.get(id_key) not in processed]
-        survivors = list(held) + new_arrivals
-        tmp = pending_file.with_suffix(pending_file.suffix + ".tmp")
-        with tmp.open("w") as fh:
-            for entry in survivors:
-                fh.write(json.dumps(entry) + "\n")
-        os.replace(tmp, pending_file)
-        if consumed:
-            now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-            with consumed_file.open("a") as fh:
-                for entry in consumed:
-                    rec = dict(entry)
-                    rec.setdefault("consumed_at", now)
-                    if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                        rec["consumed_commit"] = commit_sha
-                    fh.write(json.dumps(rec) + "\n")
+    if merge_concurrent:
+        with _flock(lock_file):
+            _rewrite_queue(
+                pending_file, consumed_file, id_key, held, consumed, commit_sha, merge=True
+            )
+    else:
+        _rewrite_queue(
+            pending_file, consumed_file, id_key, held, consumed, commit_sha, merge=False
+        )
 
 
 def _slugify(s: str) -> str:
@@ -159,8 +197,19 @@ def derive_alert_rule_key(alert: dict) -> str:
 
 
 def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
-    """Repo-relative path with trailing slash — shared by both `_pending/` queues."""
-    return str(learning_run_dir.relative_to(repo_root)) + "/"
+    """Path to the run bundle, as consumers resolve it (``repo_root / src``).
+
+    Repo-relative when the run lives in-repo (the default); absolute when it
+    lives out-of-repo under ``DEFENDER_LEARNING_STATE_DIR`` (no repo-relative
+    form exists). Both resolve correctly via ``repo_root / src`` — pathlib lets
+    an absolute right-hand side win — so the consumers (the authors' held-out
+    double-check, the forward-checkers) need no special-casing. Trailing slash
+    preserved for the existing string contract.
+    """
+    try:
+        return str(learning_run_dir.relative_to(repo_root)) + "/"
+    except ValueError:
+        return str(learning_run_dir) + "/"
 
 
 # ---------------------------------------------------------------------------

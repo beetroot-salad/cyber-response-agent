@@ -341,13 +341,18 @@ def run_one(
             except Exception as e:  # re-raised after all legs settle (fail loud)
                 errors.append((name, e))
 
+    # Hand the run to the serial author-drainer regardless of leg outcome —
+    # lead-author refines the query catalog (independent of the legs) and any
+    # findings a surviving leg already appended still need draining. Commits
+    # happen there, never here. Enqueue *before* failing loud so a single failed
+    # leg doesn't strand the run with no author-work marker.
+    _enqueue_for_authoring(run_dir, paths)
+
     if errors:
         for name, e in errors:
             _log(f"{name} leg failed: {e!r}")
         raise errors[0][1]
 
-    # Hand the run to the serial author-drainer; commits happen there, never here.
-    _enqueue_for_authoring(run_dir, paths)
     if not directions:
         _log(f"disposition={disposition} — no learning direction; findings queue untouched")
     return 0
@@ -358,17 +363,18 @@ def run_one(
 # ---------------------------------------------------------------------------
 
 
-def _mark_artifact_missing(spec: dict, marker: Path, paths: LoopPaths) -> None:
-    """Surface a vanished run dir (``/tmp`` cleared between learn and author)
-    instead of silently dropping it — move the marker to author-queue/failed/."""
+def _quarantine_marker(spec: dict, marker: Path, paths: LoopPaths, reason: str) -> None:
+    """Move a marker we can't process to author-queue/failed/ — surfaced for a
+    human, not silently dropped, and (crucially) not left to re-poison the queue
+    on every subsequent drain tick."""
     failed_dir = paths.author_queue_dir / "failed"
     failed_dir.mkdir(parents=True, exist_ok=True)
     rec = dict(spec)
-    rec["failed"] = "artifact-missing"
+    rec["failed"] = reason
     (failed_dir / marker.name).write_text(json.dumps(rec) + "\n")
     with contextlib.suppress(OSError):
         marker.unlink()
-    _log(f"author_drain: run_dir missing for {spec.get('run_id')} — marked artifact-missing")
+    _log(f"author_drain: quarantined {spec.get('run_id')} — {reason}")
 
 
 def _author_drain_locked(
@@ -387,9 +393,15 @@ def _author_drain_locked(
             continue
         run_dir = Path(spec.get("run_dir", ""))
         if not run_dir.is_dir():
-            _mark_artifact_missing(spec, marker, paths)
+            _quarantine_marker(spec, marker, paths, "artifact-missing")
             continue
-        run_lead_author(run_dir)
+        try:
+            run_lead_author(run_dir)
+        except Exception as e:  # noqa: BLE001 — one poison run dir must not wedge
+            # the whole serial drain (and re-crash every tick on the same
+            # marker): quarantine it and move on to the remaining work.
+            _quarantine_marker(spec, marker, paths, f"lead-author-error: {e!r}")
+            continue
         with contextlib.suppress(OSError):
             marker.unlink()
 

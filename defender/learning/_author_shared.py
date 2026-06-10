@@ -61,7 +61,9 @@ def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
     """
     if timeout_seconds is None:
         timeout_seconds = REPO_LOCK_WAIT_SECONDS
-    LEARNING_DIR.mkdir(parents=True, exist_ok=True)
+    # mkdir the lock's own parent — the out-of-repo state_dir when
+    # DEFENDER_LEARNING_STATE_DIR is set, not LEARNING_DIR.
+    REPO_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     fh = REPO_LOCK_FILE.open("a+")
     deadline = time.monotonic() + max(1, timeout_seconds)
     while True:

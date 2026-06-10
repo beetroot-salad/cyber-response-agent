@@ -59,7 +59,11 @@ try:
     import _author_runner as _runner  # type: ignore[import-not-found]
     import _author_shared as _shared  # type: ignore[import-not-found]
     from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
-    from _loop_persist import rotate_queue_locked  # type: ignore[import-not-found]
+    from _loop_persist import (  # type: ignore[import-not-found]
+        _flock,
+        _read_jsonl_rows,
+        rotate_queue_locked,
+    )
 finally:
     sys.path.pop(0)
 
@@ -132,15 +136,19 @@ def assert_clean_lessons_dir() -> None:
 
 
 def read_batch() -> list[dict]:
+    """Snapshot the findings queue under the producer's lock.
+
+    Unlike the observation authors, this author's instance lock (``.lock``) and
+    the shared repo lock are NOT the lock ``append_findings`` writes under
+    (``.findings.lock``), so a concurrent live run can be mid-append while we
+    read. Take ``FINDINGS_LOCK_FILE`` briefly (released before the minutes-long
+    agent call) so we never read a torn multi-line append, and parse tolerantly
+    so a blank/torn line left by a crashed prior append is skipped, not raised
+    (the row stays queued and is picked up next tick)."""
     if not PENDING_FILE.is_file():
         return []
-    out = []
-    for line in PENDING_FILE.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        out.append(json.loads(s))
-    return out
+    with _flock(FINDINGS_LOCK_FILE):
+        return _read_jsonl_rows(PENDING_FILE)
 
 
 def disposition_for(run_id: str) -> str | None:
