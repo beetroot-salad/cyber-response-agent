@@ -415,13 +415,6 @@ def _by_id(findings: list[dict]) -> dict[str, dict]:
     return {f["finding_id"]: f for f in findings}
 
 
-def _without_consumed_category(rec: dict) -> dict:
-    """A queue row stripped of the ``consumed_*`` stamp — for re-holding a
-    committed row in the pending queue (hold_committed) so it reads clean on the
-    next batch."""
-    return {k: v for k, v in rec.items() if k != "consumed_category"}
-
-
 def _result_finding_id(bucket: str, entry: Any) -> str:
     if bucket == "committed":
         if not isinstance(entry, str) or not entry:
@@ -541,10 +534,9 @@ def _run_batch_inner(*, hold_committed: bool = False) -> int:
     # rotating it to consumed.jsonl. `consumed_idempotent` (already in origin/main)
     # and `consumed_skip` (no lesson anchor → would re-author forever if held) ALWAYS
     # rotate out. See author_branch.py / platform-design §4.4.
-    held_committed = (
-        [_without_consumed_category(c) for c in committed] if hold_committed else []
+    held_committed, rotated_committed = _shared.partition_committed(
+        committed, hold_committed=hold_committed
     )
-    rotated_committed = [] if hold_committed else committed
     try:
         rotate_queue(
             held=held + held_forward_bad + held_committed,

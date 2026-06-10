@@ -509,12 +509,6 @@ def _by_id(rows: list[dict]) -> dict[str, dict]:
     return {r["observation_id"]: r for r in rows}
 
 
-def _without_consumed_category(rec: dict) -> dict:
-    """A queue row stripped of the ``consumed_*`` stamp — for re-holding a
-    committed observation in the pending queue (hold_committed)."""
-    return {k: v for k, v in rec.items() if k != "consumed_category"}
-
-
 def run_batch(*, hold_committed: bool = False) -> int:
     """Drain an actor-observation batch into the actor-lessons corpus.
 
@@ -574,10 +568,9 @@ def _run_batch_inner(*, hold_committed: bool = False) -> int:
     # hold_committed: keep `committed` in the queue (stripped of the consumed
     # stamp) instead of rotating it out, since the commit is on an unmerged PR
     # branch. consumed_pre + consumed_skip always rotate out. See author.py.
-    held_committed = (
-        [_without_consumed_category(c) for c in committed] if hold_committed else []
+    held_committed, rotated_committed = _shared.partition_committed(
+        committed, hold_committed=hold_committed
     )
-    rotated_committed = [] if hold_committed else committed
     try:
         rotate_queue(
             held=held + held_committed,
