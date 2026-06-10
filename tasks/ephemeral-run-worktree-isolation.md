@@ -86,11 +86,18 @@ the revert path + lesson→outcome traceability surface existing; until then def
       new no-commit/marker contract; `conftest` rebind. Affected suites green
       per-directory (58 / 16 / 111).
 
-**Phase 2 — deferred:**
-- [ ] Author worktree off freshly-fetched `origin/main` per batch + `gh pr create`
-      (extend `lead_author.maybe_push`) + auto-merge wiring.
-- [ ] Off-process LEARN worker (SIEM-free) draining run-dir artifacts; promote the
-      in-`run.py` learn call to a standalone stage.
+**Phase 2:**
+- [ ] Author **in-place branch** off freshly-fetched `origin/main` per batch +
+      `gh pr create` + auto-merge wiring (decided: in-place branch, not a worktree —
+      no `REPO_ROOT` injection).
+- [x] Off-process LEARN worker (SIEM-free) draining run-dir artifacts; promoted the
+      in-`run.py` learn call to a standalone stage. `run.py` now drops a
+      `learn-queue/<run-id>.json` marker (instead of in-process `run_one`); a
+      concurrent-safe `learn_drain()` + `loop.py --learn-drain` claims each marker by
+      atomic rename into `learn-queue/inflight/` (no one-at-a-time lock — learning is
+      concurrent), runs `run_one`, and re-renders the transcript so the judge page
+      lands (render+mirror centralized into `visualize_run.render_and_mirror`). Tests
+      in `test_loop.py` (+6).
 - [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
       lesson commit (needs claude + the v2 stack).
 

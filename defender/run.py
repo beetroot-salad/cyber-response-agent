@@ -189,6 +189,11 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
 
 
 def visualize(run_dir: Path) -> None:
+    # visualize_run.py renders the judge + runtime pages AND mirrors them into
+    # defender/run-visualizations/<run_id>/ (so reviews aren't gated on /tmp
+    # surviving). The off-process learn worker re-renders the same way after the
+    # judge artifacts exist, so this pre-learn pass carries only the runtime view
+    # until then.
     proc = subprocess.run(
         [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
         capture_output=True, text=True,
@@ -196,23 +201,6 @@ def visualize(run_dir: Path) -> None:
     sys.stderr.write(proc.stdout)
     if proc.returncode != 0:
         sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
-        return
-    # Mirror the rendered pages into defender/run-visualizations/<run_id>/
-    # so reviews aren't gated on /tmp/defender-runs/ surviving. We mirror
-    # into a per-run subdir (not flat files) because the judge/runtime
-    # pages cross-link via relative hrefs.
-    dest_dir = DEFENDER_DIR / "run-visualizations" / run_dir.name
-    copied: list[str] = []
-    for fname in ("transcript.html", "runtime.html"):
-        src = run_dir / fname
-        if not src.is_file():
-            continue
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / fname
-        shutil.copyfile(src, dest)
-        copied.append(str(dest.relative_to(REPO_ROOT)))
-    for path in copied:
-        sys.stderr.write(f"[run.py] copied {path}\n")
 
 
 def cross_check_tables(run_dir: Path) -> None:
@@ -253,17 +241,17 @@ def cross_check_tables(run_dir: Path) -> None:
         print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
 
 
-def run_learning_loop(run_dir: Path) -> int:
+def enqueue_learning(run_dir: Path) -> None:
+    """Hand the finished run to the off-process LEARN worker by dropping a
+    learn-queue marker. run.py holds SIEM creds; learning is SIEM-free and runs
+    in a separate process (loop.py --learn-drain), so the investigation's exit
+    no longer waits on — or is rolled back by — the learning chain."""
     sys.path.insert(0, str(DEFENDER_DIR / "learning"))
     try:
         import loop as _loop  # type: ignore[import-not-found]
     finally:
         sys.path.pop(0)
-    try:
-        return _loop.run_one(run_dir)
-    except _loop.LoopError as e:
-        print(f"[run.py] learning loop FATAL: {e}", file=sys.stderr)
-        return 2
+    _loop.enqueue_for_learning(run_dir)
 
 
 def main(argv: list[str]) -> int:
@@ -294,17 +282,17 @@ def main(argv: list[str]) -> int:
     # Loud structural-integrity signal (replaces the deleted projection halt).
     cross_check_tables(run_dir)
 
-    learn_rc = 0
     if ns.no_learn:
-        print("[run.py] --no-learn set; skipping learning loop", file=sys.stderr)
+        print("[run.py] --no-learn set; not enqueuing for learning", file=sys.stderr)
     else:
-        print("[run.py] handing off to learning loop", file=sys.stderr)
-        learn_rc = run_learning_loop(run_dir)
+        enqueue_learning(run_dir)
+        print("[run.py] enqueued for off-process learning (loop.py --learn-drain)", file=sys.stderr)
 
-    # Render after the learning loop so transcript.html includes the
-    # actor/oracle/judge artifacts and any lesson-corpus commits.
+    # Render now (runtime view only — the judge page is empty until the learn
+    # worker re-renders post-actor/oracle/judge). Learning is off-process, so a
+    # learn failure surfaces via the worker/quarantine path, not run.py's exit.
     visualize(run_dir)
-    return rc or learn_rc
+    return rc
 
 
 if __name__ == "__main__":

@@ -747,6 +747,118 @@ def test_author_drain_quarantines_poison_run_dir(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Off-process LEARN worker — learn-queue marker + learn_drain
+# ---------------------------------------------------------------------------
+
+
+def test_enqueue_for_learning_writes_marker(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-a"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+    spec = json.loads((paths.learn_queue_dir / "case-a.json").read_text())
+    assert spec == {"run_id": "case-a", "run_dir": str(run_dir.resolve())}
+
+
+def test_learn_drain_runs_run_one_renders_and_clears_marker(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-b"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+    learned: list[Path] = []
+    rendered: list[Path] = []
+    rc = orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: rendered.append(rd),
+    )
+    assert rc == 0
+    assert learned == [run_dir.resolve()]
+    assert rendered == [run_dir.resolve()]  # re-render only after run_one succeeds
+    assert not (paths.learn_queue_dir / "case-b.json").exists()
+    assert not (paths.learn_queue_dir / "inflight" / "case-b.json").exists()
+
+
+def test_learn_drain_marks_artifact_missing(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    gone = tmp_path / "tmprun" / "case-gone"  # never created
+    orch.enqueue_for_learning(gone, paths)
+    learned: list[Path] = []
+    orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: None,
+    )
+    assert learned == []  # run_one NOT called on a vanished artifact
+    assert not (paths.learn_queue_dir / "case-gone.json").exists()
+    failed = paths.learn_queue_dir / "failed" / "case-gone.json"
+    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
+
+
+def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
+    """A run_one that raises on one (present) run dir must not wedge the worker:
+    the marker is quarantined to learn-queue/failed/ and no render fires."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-poison"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+
+    def boom(_rd: Path) -> int:
+        raise RuntimeError("run_one blew up")
+
+    rendered: list[Path] = []
+    orch.learn_drain(paths, run_one_fn=boom, render=lambda rd: rendered.append(rd))
+    assert rendered == []
+    failed = paths.learn_queue_dir / "failed" / "case-poison.json"
+    assert json.loads(failed.read_text())["failed"].startswith("run-one-error")
+
+
+def test_learn_drain_skips_already_claimed_marker(tmp_path: Path):
+    """The rename-claim is the cross-worker safety: a marker already moved into
+    inflight/ (claimed by another worker) is not re-globbed, so run_one never
+    runs twice on the same run dir."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-claimed"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+    inflight = paths.learn_queue_dir / "inflight"
+    inflight.mkdir(parents=True)
+    (paths.learn_queue_dir / "case-claimed.json").rename(inflight / "case-claimed.json")
+    learned: list[Path] = []
+    orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: None,
+    )
+    assert learned == []
+
+
+def test_learn_drain_each_queued_marker_processed_once(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    runs = []
+    for name in ("case-1", "case-2", "case-3"):
+        rd = tmp_path / "tmprun" / name
+        rd.mkdir(parents=True)
+        orch.enqueue_for_learning(rd, paths)
+        runs.append(rd.resolve())
+    learned: list[Path] = []
+    orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: None,
+    )
+    assert sorted(learned) == sorted(runs)
+    # a second drain finds an empty queue
+    learned2: list[Path] = []
+    orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned2.append(rd) or 0,
+        render=lambda rd: None,
+    )
+    assert learned2 == []
+
+
+# ---------------------------------------------------------------------------
 # Out-of-repo state_dir (DEFENDER_LEARNING_STATE_DIR) — the concurrent-run config
 # the seam exists for. Until now NO test exercised state_dir != None.
 # ---------------------------------------------------------------------------
