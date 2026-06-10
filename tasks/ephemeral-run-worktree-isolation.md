@@ -102,8 +102,10 @@ the revert path + lesson→outcome traceability surface existing; until then def
       (`LEARNING_MERGE_MODE`, default `human_review`; `auto_on_green` path is PR C).
       Tests: `test_loop.py` author_branch (8) + author_drain lease/no-work/dirty/
       no-commit (4), `test_author_atomic.py` hold-committed cycle (2).
-- [ ] Auto-merge wiring (`gh pr merge --auto` on the green bar) — folded into PR C
-      (`auto_on_green`), since the gate that decides the merge lives in the green bar.
+- [x] Auto-merge wiring (`gh pr merge --auto` on the green bar) — `author_drain`'s
+      `auto_on_green` path calls `green_bar.evaluate` (injectable) and, on pass,
+      `branch.merge_pr` (`gh pr merge --auto --squash`). `human_review` never consults
+      the bar. Fails closed (left for review) on any not-green/merge-declined.
 - [x] Off-process LEARN worker (SIEM-free) draining run-dir artifacts; promoted the
       in-`run.py` learn call to a standalone stage. `run.py` now drops a
       `learn-queue/<run-id>.json` marker (instead of in-process `run_one`); a
@@ -123,12 +125,26 @@ the revert path + lesson→outcome traceability surface existing; until then def
 - [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
       lesson commit (needs claude + the v2 stack).
 
-**Phase 3 — deferred:**
-- [ ] `merge_mode` knob; wire the green bar (forward-check author-time +
-      `eval_held_out.py` / `eval_secondary.py` at PR time). Default `human_review`
-      until the revert + traceability surface exist.
-- [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping
-      the default to `auto_on_green`).
+**Phase 3:**
+- [x] `merge_mode` knob (`LEARNING_MERGE_MODE`, default `human_review`; landed PR B) +
+      the green bar (`green_bar.py`). Forward-check + schema stay author-time gates
+      (committed-on-branch ⟹ passed). Net-new: held-out + secondary **floors** over the
+      candidate corpus — `eval_held_out.score()` (extracted) vs
+      `LEARNING_GREEN_HELDOUT_FLOOR`, `eval_secondary` catch-rate (already exposed via
+      `SecondarySummary.catch_rate`) vs `LEARNING_GREEN_SECONDARY_FLOOR`. **Floors, not
+      pr-vs-base diffs** (a baseline re-run sweep is deferred); **fails closed** (unset/
+      unmet floor or provider error → not green → human review). Providers injected;
+      defaults lazy-wire the live evals (eval_secondary re-execs at import). Backlog
+      signal = queue depth + pending-file mtime age proxy. Tests: `test_loop.py` green_bar
+      floors/fail-closed (5) + score extraction (1) + author_drain auto-merge (4).
+- [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping the
+      default to `auto_on_green`) — PR D.
+
+**Phase 3 — deferred follow-ups:**
+- Strict held-out/secondary **no-regression** (PR-corpus vs base-corpus diff) needs a
+      baseline re-run harness; today's green bar uses absolute floors.
+- True oldest-queued **finding age** needs a per-row enqueue timestamp (backlog signal
+      currently uses the pending file's mtime as a proxy).
 
 **Deferred / known scaling gaps (not MVP-blocking):**
 - Lesson loading at PLAN is enumerate-all-frontmatter; retrieval-based top-k is the

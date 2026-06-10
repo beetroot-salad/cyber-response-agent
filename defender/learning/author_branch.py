@@ -146,3 +146,10 @@ class AuthorBranch:
         failure loudly instead of silently stranding the dev on the lessons
         branch."""
         return self.git(["checkout", ref]).returncode == 0
+
+    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> bool:
+        """Enable auto-merge on the PR (GitHub merges it once required checks pass).
+        Returns True if ``gh`` accepted the request. Best-effort: a gh failure (e.g.
+        auto-merge not enabled on the repo) leaves the PR open for a manual merge."""
+        args = ["pr", "merge", pr_ref, "--auto", "--squash" if squash else "--merge"]
+        return self.gh(args).returncode == 0

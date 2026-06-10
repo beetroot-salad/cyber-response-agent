@@ -663,11 +663,14 @@ class _FakeBranch:
     ``pr_exists`` simulates the writer lease, ``dirty`` an uncommitted dev tree,
     ``commits`` whether the batch produced any commits to PR."""
 
-    def __init__(self, *, pr_exists: bool = False, dirty: bool = False, commits: int = 1):
+    def __init__(self, *, pr_exists: bool = False, dirty: bool = False, commits: int = 1,
+                 merge_ok: bool = True):
         self._pr_exists = pr_exists
         self._dirty = dirty
         self._commits = commits
+        self._merge_ok = merge_ok
         self.events: list[str] = []
+        self.merged: list[str] = []
 
     def open_lessons_pr_exists(self) -> bool:
         self.events.append("lease-check")
@@ -686,6 +689,18 @@ class _FakeBranch:
     def restore_ref(self, ref: str) -> bool:
         self.events.append(f"restore:{ref}")
         return True
+
+    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> bool:
+        self.merged.append(pr_ref)
+        return self._merge_ok
+
+
+def _green(passed: bool):
+    """A stub green_bar_evaluate returning a result with the given verdict."""
+    import green_bar as _gb  # type: ignore[import-not-found]
+    return lambda paths: _gb.GreenBarResult(
+        passed=passed, checks=[_gb.Check("stub", passed, "stub")], backlog={}
+    )
 
 
 def test_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
@@ -1186,3 +1201,150 @@ def test_author_branch_restore_ref_checks_out():
     git = _git_runner()
     ab.AuthorBranch(git=git, gh=_gh_runner()).restore_ref("my-feature")
     assert ["checkout", "my-feature"] in git.calls
+
+
+# ---------------------------------------------------------------------------
+# author_drain auto_on_green path (green bar gates the merge)
+# ---------------------------------------------------------------------------
+
+
+def _enqueue_one(paths, tmp_path, name):
+    rd = tmp_path / "tmprun" / name
+    rd.mkdir(parents=True)
+    orch._enqueue_for_authoring(rd, paths)
+    return rd
+
+
+def test_author_drain_human_review_never_merges(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(orch, "MERGE_MODE", "human_review")
+    paths, _ = _isolate(tmp_path)
+    _enqueue_one(paths, tmp_path, "case-hr")
+    branch = _FakeBranch()
+    called = {"green": 0}
+    orch.author_drain(
+        paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
+        branch=branch,
+        green_bar_evaluate=lambda p: called.__setitem__("green", called["green"] + 1),
+    )
+    assert branch.merged == []  # PR opened, left for human review
+    assert called["green"] == 0  # green bar not even consulted under human_review
+
+
+def test_author_drain_auto_on_green_merges_when_green(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(orch, "MERGE_MODE", "auto_on_green")
+    paths, _ = _isolate(tmp_path)
+    _enqueue_one(paths, tmp_path, "case-green")
+    branch = _FakeBranch(commits=1)
+    orch.author_drain(
+        paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
+        branch=branch, green_bar_evaluate=_green(True),
+    )
+    assert len(branch.merged) == 1 and branch.merged[0].startswith("PR/")  # merge_pr called
+
+
+def test_author_drain_auto_on_green_leaves_pr_when_not_green(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(orch, "MERGE_MODE", "auto_on_green")
+    paths, _ = _isolate(tmp_path)
+    _enqueue_one(paths, tmp_path, "case-red")
+    branch = _FakeBranch(commits=1)
+    orch.author_drain(
+        paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
+        branch=branch, green_bar_evaluate=_green(False),
+    )
+    assert branch.merged == []  # not green → no auto-merge
+
+
+def test_author_drain_auto_on_green_no_pr_skips_green_bar(tmp_path: Path, monkeypatch):
+    """No commits → no PR → the green bar isn't run and nothing merges."""
+    monkeypatch.setattr(orch, "MERGE_MODE", "auto_on_green")
+    paths, _ = _isolate(tmp_path)
+    _enqueue_one(paths, tmp_path, "case-nopr")
+    branch = _FakeBranch(commits=0)
+    called = {"green": 0}
+    orch.author_drain(
+        paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
+        branch=branch,
+        green_bar_evaluate=lambda p: called.__setitem__("green", called["green"] + 1),
+    )
+    assert branch.merged == []
+    assert called["green"] == 0
+
+
+# ---------------------------------------------------------------------------
+# green_bar — the no-regression gate (floors + fail-closed)
+# ---------------------------------------------------------------------------
+
+import green_bar as gb  # type: ignore[import-not-found]  # noqa: E402
+
+
+def _mk_heldout_run(runs_dir: Path, name: str, *, true: str, pred: str | None):
+    rd = runs_dir / name
+    rd.mkdir(parents=True)
+    (rd / "ground_truth.yaml").write_text(f"held_out: true\ndisposition: {true}\n")
+    if pred is not None:
+        (rd / "report.md").write_text(f"---\ndisposition: {pred}\n---\nbody\n")
+    return rd
+
+
+def test_eval_held_out_score_counts_failures_wrong(tmp_path: Path):
+    import eval_held_out  # type: ignore[import-not-found]
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_heldout_run(runs, "a", true="benign", pred="benign")      # ok
+    _mk_heldout_run(runs, "b", true="malicious", pred="benign")   # wrong
+    _mk_heldout_run(runs, "c", true="benign", pred=None)          # no report → wrong
+    correct, total, acc = eval_held_out.score(runs)
+    assert (correct, total) == (1, 3)
+    assert abs(acc - 1 / 3) < 1e-9
+
+
+def test_green_bar_passes_when_both_floors_met():
+    r = gb.evaluate(
+        held_out_floor=0.8, secondary_floor=0.5,
+        held_out_score=lambda p: (9, 10, 0.9),
+        secondary_catch_rate=lambda: 0.6,
+    )
+    assert r.passed
+    assert all(c.passed for c in r.checks)
+
+
+def test_green_bar_fails_when_held_out_below_floor():
+    r = gb.evaluate(
+        held_out_floor=0.95, secondary_floor=0.5,
+        held_out_score=lambda p: (9, 10, 0.9),
+        secondary_catch_rate=lambda: 0.6,
+    )
+    assert not r.passed
+    held = next(c for c in r.checks if c.name == "held_out")
+    assert not held.passed
+
+
+def test_green_bar_fails_closed_without_floors():
+    r = gb.evaluate(
+        held_out_score=lambda p: (10, 10, 1.0), secondary_catch_rate=lambda: 1.0,
+    )
+    assert not r.passed  # unset floors → not green
+
+
+def test_green_bar_fails_closed_on_provider_error():
+    def boom(_p):
+        raise RuntimeError("no stack")
+
+    r = gb.evaluate(
+        held_out_floor=0.5, secondary_floor=0.5,
+        held_out_score=boom, secondary_catch_rate=lambda: 0.9,
+    )
+    assert not r.passed
+    held = next(c for c in r.checks if c.name == "held_out")
+    assert not held.passed and "errored" in held.detail
+
+
+def test_green_bar_fails_when_secondary_unavailable():
+    r = gb.evaluate(
+        held_out_floor=0.5, secondary_floor=0.5,
+        held_out_score=lambda p: (10, 10, 1.0),
+        secondary_catch_rate=lambda: None,  # 0 executed / replay-incompatible
+    )
+    assert not r.passed
+    sec = next(c for c in r.checks if c.name == "secondary")
+    assert not sec.passed
