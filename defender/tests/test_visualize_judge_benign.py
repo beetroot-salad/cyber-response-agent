@@ -26,6 +26,7 @@ def _load(name: str):
 
 
 vj = _load("visualize_judge")
+vp = _load("visualize_primitives")
 
 _BENIGN_JUDGE = {
     "outcome": "survived-fp",
@@ -80,13 +81,13 @@ def test_env_observation_card_handles_missing_entities():
 
 
 def test_actor_benign_section_empty_when_story_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
     assert vj.render_judge_actor_benign_section("nope") == ""
 
 
 def test_actor_benign_section_renders_story(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "REPO_ROOT", tmp_path)
-    learn = tmp_path / "defender" / "learning" / "runs" / "case-1"
+    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
+    learn = tmp_path / "runs" / "case-1"
     learn.mkdir(parents=True)
     (learn / "actor_benign_story.md").write_text("routine sweep story")
     html = vj.render_judge_actor_benign_section("case-1")
@@ -95,7 +96,7 @@ def test_actor_benign_section_renders_story(tmp_path, monkeypatch):
 
 
 def test_oracle_benign_section_empty_when_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
     assert vj.render_judge_oracle_benign_section("nope") == ""
 
 
@@ -110,6 +111,19 @@ def test_toc_includes_benign_block_when_requested():
     assert "sec-actor-benign" in toc
     assert 'href="#benign-finding-0"' in toc
     assert "sec-judge-benign-env" in toc
+
+
+def test_learning_run_dir_honors_state_dir(tmp_path, monkeypatch):
+    # Out-of-repo concurrent mode (the off-process learn worker's reason to exist):
+    # the LEARN stage persists judge artifacts under $DEFENDER_LEARNING_STATE_DIR,
+    # so the (re-)render must resolve them there — not the in-repo learning/runs path.
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    assert vp._learning_run_dir("case-9") == (tmp_path / "state").resolve() / "runs" / "case-9"
+
+
+def test_learning_run_dir_defaults_in_repo(monkeypatch):
+    monkeypatch.delenv("DEFENDER_LEARNING_STATE_DIR", raising=False)
+    assert vp._learning_run_dir("case-9") == vp.REPO_ROOT / "defender" / "learning" / "runs" / "case-9"
 
 
 def test_adversarial_finding_anchor_unchanged():

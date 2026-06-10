@@ -204,11 +204,11 @@ def _directions_for(disposition: str) -> list[str]:
 # Curators
 # ---------------------------------------------------------------------------
 
-# Guards the transient `sys.path` mutation in `_run_curator_module`. The curators
-# now run only from the serial `author_drain` (one at a time), so this is defensive
-# rather than load-bearing — kept so a future concurrent caller can't corrupt
-# `sys.path` mid-import.
-_CURATOR_IMPORT_LOCK = threading.Lock()
+# Guards the transient `sys.path` mutation in `_run_curator_module` (curator import)
+# and `_render_transcript` (visualizer import). Both run only from serial drainers
+# today, so this is defensive rather than load-bearing — kept so a future concurrent
+# caller can't corrupt `sys.path` mid-import.
+_SYS_PATH_IMPORT_LOCK = threading.Lock()
 
 
 def _invoke_lead_author(run_dir: Path) -> None:
@@ -253,7 +253,7 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
     caller runs curators off the serial drainer.
     """
     learning_dir = str(LEARNING_DIR)
-    with _CURATOR_IMPORT_LOCK:
+    with _SYS_PATH_IMPORT_LOCK:
         added = learning_dir not in sys.path
         if added:
             sys.path.insert(0, learning_dir)
@@ -275,37 +275,33 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 # ---------------------------------------------------------------------------
 
 
-def _enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
-    """Record this run for the serial author-drainer.
-
-    The drainer needs the original (``/tmp``) run dir to lead-author its
-    catalog/template refinements; carrying the path here lets the drainer detect
-    a vanished artifact (``/tmp`` cleared between learn and author) instead of
-    silently dropping it. Written atomically (tmp + replace)."""
-    paths.author_queue_dir.mkdir(parents=True, exist_ok=True)
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
+    """Drop a ``{run_id}.json`` marker carrying the run dir into ``queue_dir``,
+    written atomically (tmp + replace). The marker carries the resolved run dir so
+    a drainer running elsewhere (no SIEM creds, ``/tmp`` possibly cleared) can find
+    the artifacts or detect a vanished one instead of silently dropping it. Shared
+    by the author and learn queues so the two stages can't drift in marker shape."""
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    marker = queue_dir / f"{run_dir.name}.json"
     tmp = marker.with_suffix(".json.tmp")
     tmp.write_text(
         json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n"
     )
     os.replace(tmp, marker)
-    _log(f"enqueued for authoring: {marker}")
+    _log(f"enqueued for {label}: {marker}")
+
+
+def _enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
+    """Record this run for the serial author-drainer (lead-author per run dir)."""
+    _enqueue_marker(run_dir, paths.author_queue_dir, "authoring")
 
 
 def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> None:
     """Record a finished run for the off-process LEARN worker (``loop.py
-    --learn-drain``). The marker carries the run dir so the worker — which holds
-    no SIEM creds and may run elsewhere — can find the artifacts to learn from.
-    Mirror of ``_enqueue_for_authoring`` one stage upstream; written atomically
-    (tmp + replace)."""
-    paths.learn_queue_dir.mkdir(parents=True, exist_ok=True)
-    marker = paths.learn_queue_dir / f"{run_dir.name}.json"
-    tmp = marker.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n"
-    )
-    os.replace(tmp, marker)
-    _log(f"enqueued for learning: {marker}")
+    --learn-drain``). The worker holds no SIEM creds and may run elsewhere; the
+    marker carries the run dir so it can find the artifacts to learn from. Mirror
+    of ``_enqueue_for_authoring`` one stage upstream."""
+    _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
 def run_one(
@@ -472,19 +468,27 @@ def author_drain(
 # ---------------------------------------------------------------------------
 
 
-_VISUALIZE_SCRIPT = LEARNING_DIR.parent / "scripts" / "visualize_run.py"
+_SCRIPTS_DIR = LEARNING_DIR.parent / "scripts"
 
 
 def _render_transcript(run_dir: Path) -> None:
     """Re-render run_dir's transcript.html (+ run-visualizations mirror) now that
-    the judge artifacts exist. Best-effort: a render failure is logged, never
-    fatal to the drain."""
-    proc = subprocess.run(
-        [sys.executable, str(_VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        _log(f"visualize_run failed for {run_dir.name}: {proc.stderr.strip()}")
+    the judge artifacts exist, by calling ``visualize_run.render_and_mirror`` in
+    process — no per-run interpreter spawn, and a render error surfaces as a
+    catchable exception. Any failure propagates to ``learn_drain``, which logs it
+    and drains on (the render is best-effort, never fatal)."""
+    scripts_dir = str(_SCRIPTS_DIR)
+    with _SYS_PATH_IMPORT_LOCK:
+        added = scripts_dir not in sys.path
+        if added:
+            sys.path.insert(0, scripts_dir)
+        try:
+            from visualize_run import render_and_mirror
+        finally:
+            if added:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(scripts_dir)
+    render_and_mirror(run_dir)
 
 
 def learn_drain(
@@ -507,7 +511,10 @@ def learn_drain(
     (a stale-inflight reaper is a follow-up, not MVP). ``run_one_fn`` / ``render``
     are injectable for tests."""
     if run_one_fn is None:
-        run_one_fn = run_one
+        # Thread the drain's own paths into the default LEARN stage, so the queue
+        # and the findings/runs/author-queue it writes resolve to one state dir.
+        def run_one_fn(rd: Path) -> int:
+            return run_one(rd, paths=paths)
     if render is None:
         render = _render_transcript
 
@@ -515,9 +522,10 @@ def learn_drain(
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
     _log(f"learn_drain: {len(markers)} run(s) queued for learning")
     inflight_dir = qdir / "inflight"
+    if markers:
+        inflight_dir.mkdir(parents=True, exist_ok=True)
     drained = 0
     for marker in markers:
-        inflight_dir.mkdir(parents=True, exist_ok=True)
         claimed = inflight_dir / marker.name
         try:
             os.replace(marker, claimed)

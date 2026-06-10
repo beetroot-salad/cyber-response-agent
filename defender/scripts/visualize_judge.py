@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
-    REPO_ROOT,
+    _learning_run_dir,
     block,
     esc,
     lead_repository,
@@ -93,7 +93,7 @@ def render_judge_defender_summary(run_dir: Path) -> str:
 
 
 def render_judge_actor_section(run_id: str) -> str:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    learn_dir = _learning_run_dir(run_id)
     archetype = learn_dir / "actor_archetype.txt"
     menu = learn_dir / "actor_menu.txt"
     story = learn_dir / "actor_story.md"
@@ -173,7 +173,7 @@ def render_judge_judge_section(judge: dict | None) -> str:
 
 
 def render_judge_oracle_section(run_id: str) -> str:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    learn_dir = _learning_run_dir(run_id)
     proj = learn_dir / "projected_telemetry.yaml"
     proj_raw = learn_dir / "projected_telemetry.raw.txt"
     inner = ""
@@ -226,7 +226,7 @@ def render_env_observation(idx: int, o: dict) -> str:
 
 
 def render_judge_actor_benign_section(run_id: str) -> str:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    learn_dir = _learning_run_dir(run_id)
     story = learn_dir / "actor_benign_story.md"
     if not story.is_file():
         return ""
@@ -293,7 +293,7 @@ def render_judge_benign_section(judge: dict | None) -> str:
 
 
 def render_judge_oracle_benign_section(run_id: str) -> str:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    learn_dir = _learning_run_dir(run_id)
     proj = learn_dir / "projected_telemetry_benign.yaml"
     proj_raw = learn_dir / "projected_telemetry_benign.raw.txt"
     inner = ""
@@ -312,7 +312,7 @@ def render_judge_oracle_benign_section(run_id: str) -> str:
 
 
 def render_judge_raw_bundle(run_id: str) -> str:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    learn_dir = _learning_run_dir(run_id)
     if not learn_dir.is_dir():
         return ""
     panels: list[str] = []

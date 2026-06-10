@@ -16,9 +16,11 @@ Pipeline:
        run_settings.json (permissions + the record_lead hook). The two
        lead/query tables are written live during the run by record_lead.py
        + record_query.py. stream-json events go to {run_dir}/tool_trace.jsonl.
-    3. Render transcript.html.
-    4. Unless --no-learn, hand the run to defender.learning.loop.run_one
-       (in-process import, not subprocess).
+    3. Unless --no-learn, drop a learn-queue marker for the off-process
+       LEARN worker (defender.learning.loop --learn-drain) — run.py does
+       not run learning itself, so its exit no longer waits on it.
+    4. Render the transcript (runtime view; the worker re-renders the
+       judge page after it learns).
 
 Steps 3–4 used to live in run.sh + the SKILL prompt; consolidating
 them here means the agent stops carrying the projection responsibility
@@ -191,9 +193,9 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
 def visualize(run_dir: Path) -> None:
     # visualize_run.py renders the judge + runtime pages AND mirrors them into
     # defender/run-visualizations/<run_id>/ (so reviews aren't gated on /tmp
-    # surviving). The off-process learn worker re-renders the same way after the
-    # judge artifacts exist, so this pre-learn pass carries only the runtime view
-    # until then.
+    # surviving). Pre-learn the judge page renders empty (no judge artifacts yet);
+    # the off-process learn worker re-renders + re-mirrors the same way once they
+    # exist, so the runtime view is the only useful part of this pass.
     proc = subprocess.run(
         [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
         capture_output=True, text=True,

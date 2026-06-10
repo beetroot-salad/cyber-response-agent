@@ -926,9 +926,10 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
+    mirrored = render_and_mirror(run_dir)
     print(f"wrote {run_dir / JUDGE_FILENAME}")
     print(f"wrote {run_dir / RUNTIME_FILENAME}")
-    for dest in render_and_mirror(run_dir):
+    for dest in mirrored:
         print(f"mirrored {dest.relative_to(_REPO_ROOT)}")
     return 0
 

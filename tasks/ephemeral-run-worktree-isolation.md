@@ -98,6 +98,14 @@ the revert path + lesson→outcome traceability surface existing; until then def
       concurrent), runs `run_one`, and re-renders the transcript so the judge page
       lands (render+mirror centralized into `visualize_run.render_and_mirror`). Tests
       in `test_loop.py` (+6).
+  - Review hardening: the judge (re-)render now resolves its artifacts through
+    `visualize_primitives._learning_run_dir`, which honors `DEFENDER_LEARNING_STATE_DIR`
+    — without it the out-of-repo worker re-rendered an empty judge page wherever the
+    findings actually landed. `_render_transcript` calls `render_and_mirror` in-process
+    (no per-run interpreter spawn; render errors are catchable), `learn_drain` threads
+    its `paths` into the default `run_one`, and the marker write is shared by both
+    queues (`_enqueue_marker`). Known follow-ups left as-is: stale-`inflight/` reaper,
+    and marker-name keyed on `run_dir.name` (mirrors the author queue).
 - [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
       lesson commit (needs claude + the v2 stack).
 

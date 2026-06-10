@@ -765,16 +765,16 @@ def test_learn_drain_runs_run_one_renders_and_clears_marker(tmp_path: Path):
     run_dir = tmp_path / "tmprun" / "case-b"
     run_dir.mkdir(parents=True)
     orch.enqueue_for_learning(run_dir, paths)
-    learned: list[Path] = []
-    rendered: list[Path] = []
+    # One ordered log so the assert proves render fires AFTER run_one, not just
+    # that both ran (two independent lists couldn't catch a reorder).
+    events: list[tuple[str, Path]] = []
     rc = orch.learn_drain(
         paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: rendered.append(rd),
+        run_one_fn=lambda rd: events.append(("run_one", rd)) or 0,
+        render=lambda rd: events.append(("render", rd)),
     )
     assert rc == 0
-    assert learned == [run_dir.resolve()]
-    assert rendered == [run_dir.resolve()]  # re-render only after run_one succeeds
+    assert events == [("run_one", run_dir.resolve()), ("render", run_dir.resolve())]
     assert not (paths.learn_queue_dir / "case-b.json").exists()
     assert not (paths.learn_queue_dir / "inflight" / "case-b.json").exists()
 
@@ -791,6 +791,8 @@ def test_learn_drain_marks_artifact_missing(tmp_path: Path):
     )
     assert learned == []  # run_one NOT called on a vanished artifact
     assert not (paths.learn_queue_dir / "case-gone.json").exists()
+    # the claim is cleared out of inflight/, not left stuck there
+    assert not (paths.learn_queue_dir / "inflight" / "case-gone.json").exists()
     failed = paths.learn_queue_dir / "failed" / "case-gone.json"
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
@@ -809,6 +811,7 @@ def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
     rendered: list[Path] = []
     orch.learn_drain(paths, run_one_fn=boom, render=lambda rd: rendered.append(rd))
     assert rendered == []
+    assert not (paths.learn_queue_dir / "inflight" / "case-poison.json").exists()
     failed = paths.learn_queue_dir / "failed" / "case-poison.json"
     assert json.loads(failed.read_text())["failed"].startswith("run-one-error")
 
@@ -831,6 +834,50 @@ def test_learn_drain_skips_already_claimed_marker(tmp_path: Path):
         render=lambda rd: None,
     )
     assert learned == []
+
+
+def test_learn_drain_skips_marker_lost_to_claim_race(tmp_path: Path, monkeypatch):
+    """The actual race branch: a marker present at glob time but already claimed by
+    another worker before THIS worker's os.replace must be skipped — the loser gets
+    FileNotFoundError and moves on, never processing the run."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-race"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+
+    def racing_replace(src, dst):  # another worker won the claim between glob+replace
+        Path(src).unlink()
+        raise FileNotFoundError(src)
+
+    monkeypatch.setattr(orch.os, "replace", racing_replace)
+    learned: list[Path] = []
+    orch.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: None,
+    )
+    assert learned == []  # the loser does not run_one the contested run
+
+
+def test_learn_drain_threads_paths_into_default_run_one(tmp_path: Path, monkeypatch):
+    """With run_one_fn NOT injected, the default must call the real run_one with the
+    drain's own `paths`, so the queue and the findings/runs it writes resolve to one
+    state dir (not DEFAULT_PATHS)."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-paths"
+    run_dir.mkdir(parents=True)
+    orch.enqueue_for_learning(run_dir, paths)
+    seen: dict = {}
+
+    def fake_run_one(rd, *, paths=None, agents=None):
+        seen["rd"] = rd
+        seen["paths"] = paths
+        return 0
+
+    monkeypatch.setattr(orch, "run_one", fake_run_one)
+    orch.learn_drain(paths, render=lambda rd: None)  # run_one_fn left to default
+    assert seen["rd"] == run_dir.resolve()
+    assert seen["paths"] is paths
 
 
 def test_learn_drain_each_queued_marker_processed_once(tmp_path: Path):

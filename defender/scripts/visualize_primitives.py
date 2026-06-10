@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -239,9 +240,24 @@ def parse_report(run_dir: Path) -> dict:
     return {**fm, "body": body}
 
 
+def _learning_run_dir(run_id: str) -> Path:
+    """The learning-state run dir for ``run_id``, honoring
+    ``DEFENDER_LEARNING_STATE_DIR``.
+
+    Must mirror ``LoopPaths.runs_dir`` (``_loop_config``): the LEARN stage
+    persists ``judge_findings.yaml`` under ``<state_root>/runs/<run_id>/`` where
+    ``state_root`` is the out-of-repo state dir when set, else the in-repo
+    ``defender/learning``. The off-process worker runs in exactly that
+    out-of-repo mode, so a renderer that assumed the in-repo path would re-render
+    an empty judge page wherever the findings actually landed.
+    """
+    raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
+    state_root = Path(raw).resolve() if raw else REPO_ROOT / "defender" / "learning"
+    return state_root / "runs" / run_id
+
+
 def load_judge_findings(run_id: str) -> dict | None:
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
-    data = load_yaml(learn_dir / "judge_findings.yaml")
+    data = load_yaml(_learning_run_dir(run_id) / "judge_findings.yaml")
     return data if isinstance(data, dict) else None
 
 
@@ -251,8 +267,7 @@ def load_judge_benign_findings(run_id: str) -> dict | None:
     The two directions persist under different names so they never collide in
     one run dir; the benign direction writes ``judge_benign_findings.yaml``.
     """
-    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
-    data = load_yaml(learn_dir / "judge_benign_findings.yaml")
+    data = load_yaml(_learning_run_dir(run_id) / "judge_benign_findings.yaml")
     return data if isinstance(data, dict) else None
 
 
