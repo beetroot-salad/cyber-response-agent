@@ -14,7 +14,7 @@ name: {slug-id}                       # short, kebab-case, unique across the cor
 description: {one short line, ~12-18 words}  # loaded into the defender's PLAN-time prompt — every word is paid for at every retrieval. Cut clause-chains; one beat about the pitfall and how the agent recognizes it.
 source_signature: [{rule.id}, ...]    # alert rule.id(s) this lesson came from / bites — the source case's signature
 telemetry_source: [{sensor}, ...]     # sensor(s) the check keys on, INCLUDING any absent source the lesson tells the agent to name
-attack_phase: [{phase}, ...]          # kill-chain phase(s) where the pitfall bites
+attack_phase: [{tactic}, ...]         # MITRE ATT&CK tactic(s) where the pitfall bites
 source_finding_ids:
   - {run_id}/{n}
 created_at: {ISO 8601 UTC}
@@ -25,21 +25,31 @@ have considered Y; here's the check."}
 ```
 
 The three retrieval dimensions are **grep-friendly inline lists** (the
-defender discovers lessons at PLAN time by `grep`-ing this frontmatter — no
-index). Draw values only from the controlled vocab below so a `grep` token
-stays stable across the corpus; coin a new value only when no existing token
-fits, and reuse the spelling exactly.
+defender discovers lessons at PLAN time by grepping this frontmatter — no
+index). **Before tagging, enumerate the values already in use** so you reuse
+an existing spelling instead of coining a near-synonym that fragments the
+grep:
 
-- `source_signature` — the alert `rule.id`. Take it from the source run's
-  `alert.json` (`rule.id`); current corpus: `v2-cross-tier-ssh-pivot`,
-  `v2-sshd-success-after-failures`, `v2-falco-suspicious-network-tool`.
-- `telemetry_source` — `sshd`, `falco`, `zeek`, `auditd`, `fim`, `cmdb`,
-  `identity`, `ssh-ca`, `host-state`, `change-mgmt`. Tag the source the
-  lesson's check actually keys on; for "this source can't see X / isn't in
+```bash
+defender-lessons --tags              # every dimension's viable values + counts
+defender-lessons --tags attack_phase # one dimension
+```
+
+Reuse an existing token whenever one fits; coin a new value only when none
+does, and keep it in the convention below.
+
+- `source_signature` — the alert `rule.id`, taken from the source run's
+  `alert.json` (`rule.id`).
+- `telemetry_source` — the sensor the lesson's check keys on (`sshd`,
+  `falco`, `zeek`, `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`,
+  `host-state`, `change-mgmt`, …). For "this source can't see X / isn't in
   the toolset" lessons, tag the **absent** source too — that's the whole
   retrieval point.
-- `attack_phase` — `initial-access`, `credential-access`, `lateral-movement`,
-  `execution`, `persistence`, `collection`, `exfiltration`.
+- `attack_phase` — the **MITRE ATT&CK tactic** slug(s) the pitfall bites
+  (`initial-access`, `credential-access`, `execution`, `persistence`,
+  `lateral-movement`, `collection`, `exfiltration`, …). Use ATT&CK tactic
+  names, not Lockheed kill-chain phases — the actor corpus already keys on
+  ATT&CK (`techniques`), so this stays one taxonomy across the project.
 
 Placeholders in templates use `{…}` — fill them in; never emit literal curly braces.
 
@@ -53,14 +63,25 @@ For each finding, in order, decide one of:
 2. **fold** — an existing lesson already targets this pitfall (or a closely related one). Read the target lesson's body, then **rewrite it holistically** to subsume both the existing teaching and the new finding. Append the new `finding_id` to `source_finding_ids`. Broaden `description` if the scope grew.
 3. **skip** — the finding is already fully covered, low signal, or doesn't generalize. Note the reason in your final report. Do not write a file.
 
-To decide: `grep` the corpus by the finding's dimensions rather than reading every file. Anchor on the source case's `source_signature` and narrow by `telemetry_source` / `attack_phase`:
+To decide, two passes — and you **must run both**, because the dimensions alone will not catch every fold:
 
-```bash
-grep -l 'source_signature:.*<rule-id>' defender/lessons/*.md \
-  | xargs grep -l 'telemetry_source:.*<sensor>'
-```
+1. **Dimension pass (find the obvious same-key candidates).** Grep the frontmatter by the finding's dimensions:
 
-Scan the `description:` line of the hits; read the body of any that looks plausibly related before deciding. Widen by dropping a dimension (or fall back to a whole-corpus enumerate) if a narrow grep returns nothing. Don't fold across pitfalls that *happen* to share a `source_signature` — folding is for the same underlying defender mistake, not the same signature family.
+   ```bash
+   defender-lessons 'source_signature:.*<rule-id>' 'telemetry_source:.*<sensor>'
+   ```
+
+2. **Description pass (catch cross-key near-duplicates).** The dimension pass misses a near-duplicate that teaches the *same defender mistake* but happens to be tagged on a different signature/sensor/tactic — and grep can't see that, because the keys don't overlap. So also enumerate the **whole corpus** and scan every description for a semantic twin, regardless of dimension overlap:
+
+   ```bash
+   defender-lessons                     # <path>\t<description> for all lessons
+   ```
+
+   Read the body of any whose description is conceptually close to the finding, even when no dimension matched.
+
+Why both: a **runtime** retrieval miss is cheap — the lesson just isn't loaded that run, and the next run recovers it. A **fold** miss is not — it writes a permanent duplicate the dimensions will keep hiding from each other. So retrieval may lean on the dimensions; folding may not. The whole-corpus description scan is the completeness backstop (16 one-line descriptions today; cheap, grows slowly).
+
+Don't fold across pitfalls that *happen* to share a `source_signature` — folding is for the same underlying defender mistake, not the same signature family.
 
 When you **fold**, reconcile the dimension lists too: union in any new `source_signature` / `telemetry_source` / `attack_phase` values the new finding introduced, so the broadened lesson stays discoverable from the new case.
 
