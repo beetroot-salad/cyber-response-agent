@@ -243,6 +243,10 @@ learning_jobs(
   seam between LLM calls, so it's reliable to record.
 - **One live learning job per tenant** — a partial unique index (at most one `queued`/`running` per
   `tenant_id`) enforces the sequencing that makes corpus authoring conflict-free by construction (§4.4).
+  > **Revised (2026-06-09):** with learning decoupled from authoring (§4.3), learning jobs run
+  > **concurrently**; the one-live / conflict-free constraint moves to a separate serial **author** job and
+  > a learning job's `stage` is `actor | oracle | judge`. The author-job schema (own row + one-live-author
+  > index, or a column here) is a follow-up re-thread of this section.
 - **No `reason` column** — auto vs. explicit re-learn is exactly `client_request_id IS NULL` vs. set; the
   GET endpoints derive the label (§2.6).
 - **Auto creation is deduped; explicit re-learn is not.** Re-learning is cheap and unlimited; only the
@@ -494,14 +498,15 @@ only on real throughput / fan-out / independent-scaling need (§6).
 
 ### 4.3 Investigation ↔ learning seam
 
-**Learning runs in a separate, SIEM-free backend worker — no container.** Its only privileged op is
-`git push` / `gh pr` over the corpus (verified: the author stages are the only corpus-mutating step —
-`author.py:217`, `lead_author.py:687-690` carry the git grants; oracle/judge/actor write run-dir artifacts
-only, e.g. the judge at `_loop_orchestrate.py:103-106`). A worker (or thread) with git + LLM creds
-suffices. **Isolation is not the safety boundary — human review is:** learning reads untrusted artifact
-content, so the risk is a poisoned lesson, which a sandbox doesn't fix; salted-delimiter tagging (§4.7) +
-the mandatory **PR review gate** (§4.4) do. Blast radius: "proposes a bad lesson in a PR," caught before
-merge.
+**Learning and authoring are SIEM-free backend work — no container.** Only the **author** holds a
+privileged op (`git push` / `gh pr`); learning (actor/oracle/judge) holds LLM + FS only (verified: the
+author stages are the only corpus-mutating step — `author.py:217`, `lead_author.py:687-690` carry the git
+grants; oracle/judge/actor write run-dir artifacts only, e.g. the judge at
+`_loop_orchestrate.py:103-106`). **Isolation is not the safety boundary:** learning reads untrusted
+artifact content, so the risk is a poisoned lesson, which a sandbox doesn't fix. The standing defenses are
+salted-delimiter tagging (§4.7), author-curates-not-copies, the automated green bar, and lessons being
+recommend-only/reversible; **human PR review is the _default_, opt-out gate (§4.4), not a mandatory one.**
+Blast radius: "a reversible bad nudge at PLAN," caught by the green bar + post-merge visibility.
 
 **Why it's a separate plane (not fused with the investigation):**
 
@@ -511,19 +516,29 @@ merge.
    single investigation has no business touching shared state.
 3. **Failure coupling** — a learning crash (a longer LLM chain) must not threaten an already-successful
    investigation.
-4. **Independent throttling** — learning is expensive and not urgent → run it sequentially, off the urgent
-   path.
+4. **Independent throttling** — learning is expensive and not urgent → throttle it off the urgent path
+   (learning fans out concurrently; only the author serializes — §4.3).
 5. **Replayable seam** — `investigation.completed → learning job` lets you re-learn from a past
    investigation without re-running defender. The actor stage already replays from `lead_sequence.yaml`
    (`learning/replay_actor.py`); orchestrating the full chain off a completed investigation is net-new.
 
-**Tenant-scoped, sequential, 1:1.** A cron/event worker claims **one** queued job per tenant
-(`… SKIP LOCKED LIMIT 1`, gated by the one-live-job index — §2.5), runs the full actor → oracle → judge →
-author chain for that single investigation, marks it `completed | skipped`, then takes the next. No fan-in,
-no cross-investigation consolidation at MVP — dropping it is exactly what makes authoring conflict-free
-(§4.4): one live job ⇒ never two authors ⇒ nothing to merge. The `stage` cursor still pays for itself (each
-stage is an expensive non-deterministic LLM call). **Do not** build a micro-stage DAG orchestrator — reuse
-the job substrate (the on-disk `_pending/*.jsonl` queues move onto it).
+**Learning is concurrent; authoring is serial — the findings queue is the seam (revised 2026-06-09).**
+actor → oracle → judge run **per investigation, concurrently** (FS + LLM, no git) and append findings to a
+shared queue (one file per finding). A **separate serial author** drains that queue with
+**cross-investigation fan-in**, folds/supersedes against the live corpus, forward-checks, and opens one PR.
+The conflict-free guarantee moves from the learning job to the author: one live _author_ per tenant ⇒ never
+two writers on the corpus (§4.4) — _not_ one live learning job. A learning job's `stage` cursor is
+`actor | oracle | judge`; authoring is its own job with its own cursor. **Do not** build a micro-stage DAG
+orchestrator — reuse the job substrate (the on-disk `_pending/` queue moves onto it as one-file-per-finding
+rows).
+
+> **Superseded:** the earlier MVP fused actor → oracle → judge → **author** into one sequential
+> per-investigation job (one live job ⇒ trivially conflict-free, no fan-in). Rejected because it (1)
+> serialized the _expensive_ part — the actor/oracle/judge LLM chain — behind the cheap commit, and (2)
+> broke the **suppression loop**: a lesson only stops a finding recurring once _merged_, so serial
+> authoring let the system re-discover and re-author the same finding while the prior one waited —
+> manufacturing the duplicate work it was meant to avoid. Decoupling parallelizes learning and lets the
+> author dedup against the live corpus.
 
 **Operational cutover.** The platform worker invokes the harness in no-learning mode (`run.py --no-learn`
 or equivalent), commits the investigation first, then creates the learning job. `investigation.completed`
@@ -535,12 +550,10 @@ always-on service. **Tools:** blob read · corpus read+write · git/PR · LLM ·
 `unparseable` don't. Keep policy a **replaceable module**, not scattered `if`s — a `learning_policy`
 table/endpoint (sampling, only-on-disagreement, tenant overrides) is deferred (§6).
 
-> **Open issue — sequential-learning backlog.** Learning on every investigation, one-at-a-time per tenant,
-> builds a backlog (compute _and_ one-PR-per-investigation human review) whenever completion outpaces the
-> learning rate. **Not MVP-blocking:** learning is off the urgent path, the queue backpressure is safe, and
-> the relief (a sampling `learning_policy`, or concurrent authors) is purely additive — no schema/API
-> change. A never-draining backlog needs sustained saturation (the §6 throughput regime). MVP should still
-> **emit the backlog signal** (oldest-queued age + depth) so the trigger is observable.
+> **Backlog, revisited.** Decoupling removes the _compute_ backlog — learning now parallelizes; only the
+> cheap author serializes, and it batches via fan-in. The residual is the **human-review** rate when
+> `merge_mode = human_review`, addressed by defaulting to `auto_on_green` (§4.4). Still **emit the backlog
+> signal** (oldest-queued finding age + queue depth) so saturation stays observable.
 
 ### 4.4 Lessons corpus: concurrent readers, one sequential writer
 
@@ -559,15 +572,31 @@ writer** — _not_ "every investigation opens a PR." Two planes:
   `lessons_corpus_version` (never hand-incremented). **No self-hosted git** — self-host only for compliance
   isolation or high-frequency commits (§6).
 
-**Conflicts are prevented, not resolved.** The one-live-learning-job-per-tenant index (§2.5) means at most
-one author touches a tenant's corpus at a time, so two authors never hold the same file — nothing to
-git-merge, and we **never rely on git auto-merge** (lessons fold/supersede, so a 3-way merge would be wrong
-and last-write-wins would drop a learning). Three choices keep even the sequential case clean:
+**Conflicts are prevented, not resolved.** A one-live-**author**-per-tenant index means at most one writer
+touches a tenant's corpus at a time, so two authors never hold the same file — nothing to git-merge, and we
+**never rely on git auto-merge** (lessons fold/supersede, so a 3-way merge would be wrong and
+last-write-wins would drop a learning). Three choices keep even the serial case clean:
 
 - **Per-tenant corpus** — cross-tenant authoring never collides (separate paths).
 - **One lesson = one file** (the `MEMORY.md` pattern) — distinct lessons land in distinct files.
 - **Generated indices are regenerated by CI on merge, never committed** (`lessons.json`, the index,
   `board.html`) — the largest conflict source simply cannot conflict.
+
+**Merge gating is a policy knob, default open (decided 2026-06-09).** `merge_mode ∈ {auto_on_green,
+human_review}`, default **`auto_on_green`**: a PR is _always_ opened (audit trail), and auto-merge fires
+when the green bar passes — schema/validator clean + forward-check GOOD + held-out/secondary eval
+no-regression. `human_review` is opt-in (high-stakes tenant or a flagged lesson class).
+
+> **Superseded:** §4.3 originally made human review _the_ safety boundary, gating every merge. Rejected
+> because the gate is self-defeating for a feedback loop — an unmerged lesson can't suppress its finding,
+> so review latency _manufactures_ duplicate findings and PRs (§4.3). The corpus serves the agent, not
+> humans, so per-lesson approval is the wrong unit of human control. The standing boundary is salted
+> tagging (§4.7) + author-curates-not-copies + the green bar + recommend-only/reversible lessons; the human
+> control loop is **post-merge visibility + one-click revert + lesson→outcome traceability** (which
+> dispositions a lesson influenced since merge — a net-new surface), not pre-merge sign-off. Accepted
+> residual: a non-regressing, non-poisoned-but-low-value lesson can land before a human sees it — bounded
+> and reversible. The **corpus hygiene** review did implicitly now rides on the author
+> **folding/superseding against the live corpus**, not appending.
 
 Across the review window the writer lease **spans author → PR → merge**: at most one open PR per tenant,
 branched off latest `main`, so no second divergent branch ever forms. An investigation pinned to vN keeps
@@ -697,7 +726,7 @@ than re-opening the core API/schema.
 | Token/tool-level live tail (SSE/WS streaming sink)                      | a product need requires live tailing (§4.5, §5.2)                                                                     |
 | Checkpoint-resume                                                       | p95 wall > 30 min, p95 cost ~10×, preemption wastes >low-single-digit % of budget, or a customer needs long runs (§4.5) |
 | Per-run history table (`runs` / `learning_runs`)                        | per-run forensics across recoveries are needed — today recovery overwrites infra in place and history lives in logs (§4.1) |
-| Concurrent / sampled learning (relieve the backlog)                     | learning queue depth / oldest-queued age grows unbounded under sustained throughput — relievers: `learning_policy` sampling and/or concurrent author PRs with rebase/replay (§4.3, §4.4) |
+| Sampled learning + concurrent authors (relieve the backlog)             | learning compute already parallelizes (§4.3); deferred relievers are _sampling_ (`learning_policy`) and _concurrent authors_ (rebase + replay-author) once one serial author can't keep up (§4.3, §4.4) |
 | Separate queue table (still in-DB)                                      | queue-only concerns (priority, delayed visibility) or churn-isolation are needed — today the queue is `job_status='queued'` rows (§4.2) |
 | Blob spill for oversized raw alerts                                     | alerts routinely exceed ~a few MB inline as `raw_alert_json` JSONB (§2.2)                                              |
 | Durable-execution engine (Temporal)                                     | orchestration grows multi-step retries/timeouts/human-in-loop (§4.1)                                                  |
@@ -706,7 +735,7 @@ than re-opening the core API/schema.
 | Global cross-tenant lessons corpus                                      | a redaction/isolation review passes (§4.3)                                                                            |
 | Eval-style investigations (model A/B, prompt eval, held-out)            | first-class version comparison through the API is scoped; until then experiments stay in the dev/replay path (§2.2)   |
 | Fuzzy alert grouping/correlation                                        | a real correlation product surface is scoped (§2.7)                                                                   |
-| `learning_policy` table/endpoint                                        | runtime rules (sampling, only-on-disagreement, tenant overrides) are needed (§4.3)                                    |
+| `learning_policy` table/endpoint                                        | runtime gating/sampling rules beyond the `auto_on_green` default — `merge_mode`, sampling, only-on-disagreement, tenant overrides (§4.3, §4.4)                                    |
 | Analyst `alerts.review_status`                                          | the product needs `open`/`acknowledged`/`closed`/`suppressed` (§2.4)                                                  |
 | FUSE-style storage shim                                                 | live storage virtualization or multi-host mid-run mutation is required (§4.6)                                         |
 | Artifact retention / GC for successful runs                             | run volume makes per-investigation storage (esp. ~1.2 MB `runtime.html`) a cost concern (§2.1, §4.1)                  |
