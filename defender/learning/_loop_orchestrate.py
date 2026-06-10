@@ -461,6 +461,7 @@ def _author_drain_locked(
     run_lead_author: Callable[[Path], None],
     trigger_author: Callable[[Path, str, str, str], None],
     branch: AuthorBranch,
+    green_bar_evaluate: Callable[[LoopPaths], Any],
 ) -> int:
     if not _has_drain_work(paths):
         _log("author_drain: nothing queued and no curator at threshold — skipping")
@@ -493,10 +494,13 @@ def _author_drain_locked(
         return 0
     _log(f"author_drain: opened lessons PR {pr}")
     if MERGE_MODE == "auto_on_green":
-        # PR C wires the green bar + `gh pr merge --auto` here; until then the PR
-        # falls through to human review even under auto_on_green.
-        _log("author_drain: merge_mode=auto_on_green — green-bar auto-merge not yet "
-             "wired (PR C); leaving PR for review")
+        result = green_bar_evaluate(paths)
+        _log("author_drain: " + result.summary().replace("\n", " | "))
+        if result.passed and branch.merge_pr(pr):
+            _log(f"author_drain: auto-merge enabled on {pr} (green bar passed)")
+        else:
+            _log("author_drain: green bar not satisfied (or merge declined) — "
+                 "leaving PR for human review")
     return 0
 
 
@@ -506,6 +510,7 @@ def author_drain(
     run_lead_author: Callable[[Path], None] | None = None,
     trigger_author: Callable[[Path, str, str, str], None] | None = None,
     branch: AuthorBranch | None = None,
+    green_bar_evaluate: Callable[[LoopPaths], Any] | None = None,
 ) -> int:
     """Serial AUTHOR stage: branch off freshly-fetched ``origin/main``, lead-author
     each queued run dir + drain the threshold-gated findings/observation curators
@@ -513,19 +518,28 @@ def author_drain(
 
     The **writer lease** (one open lessons PR at a time) plus the in-place branch
     keep batches non-conflicting; ``merge_mode`` (default ``human_review``) decides
-    whether the PR auto-merges on a green bar (PR C) or waits for a human.
+    whether the PR auto-merges on a green bar or waits for a human. Under
+    ``auto_on_green`` the PR auto-merges only if ``green_bar_evaluate`` passes (it
+    fails closed — see ``green_bar``).
 
     One live drainer at a time, guarded by a non-blocking flock on a *dedicated*
     lock (``author_drain_lock_file``) — distinct from the curators' repo lock so
     the curators it calls can take that without a same-process deadlock. A second
     drainer that can't grab the lock simply exits. ``run_lead_author`` /
-    ``trigger_author`` / ``branch`` are injectable for tests."""
+    ``trigger_author`` / ``branch`` / ``green_bar_evaluate`` are injectable for
+    tests."""
     if run_lead_author is None:
         run_lead_author = _invoke_lead_author
     if trigger_author is None:
         trigger_author = _maybe_trigger_author
     if branch is None:
         branch = AuthorBranch()
+    if green_bar_evaluate is None:
+        # Lazy import: green_bar's default providers pull in eval_secondary, which
+        # re-execs into the venv at import — keep it off the learn/run import path.
+        def green_bar_evaluate(p: LoopPaths):  # noqa: ANN202
+            import green_bar
+            return green_bar.evaluate(paths=p)
 
     lock_path = paths.author_drain_lock_file
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -536,7 +550,9 @@ def author_drain(
         except OSError:
             _log("author_drain: another drainer holds the lock — exiting")
             return 0
-        return _author_drain_locked(paths, run_lead_author, trigger_author, branch)
+        return _author_drain_locked(
+            paths, run_lead_author, trigger_author, branch, green_bar_evaluate
+        )
     finally:
         with contextlib.suppress(OSError):
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)

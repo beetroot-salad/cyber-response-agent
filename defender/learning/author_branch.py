@@ -143,3 +143,10 @@ class AuthorBranch:
         """Check the dev's original ref back out — best-effort, always called in a
         ``finally`` so the drain never strands them on the lessons branch."""
         self.git(["checkout", ref])
+
+    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> bool:
+        """Enable auto-merge on the PR (GitHub merges it once required checks pass).
+        Returns True if ``gh`` accepted the request. Best-effort: a gh failure (e.g.
+        auto-merge not enabled on the repo) leaves the PR open for a manual merge."""
+        args = ["pr", "merge", pr_ref, "--auto", "--squash" if squash else "--merge"]
+        return self.gh(args).returncode == 0
