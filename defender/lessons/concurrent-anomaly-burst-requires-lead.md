@@ -1,6 +1,9 @@
 ---
 name: concurrent-anomaly-burst-requires-lead
 description: A lead surfacing high-volume redirections or UDP anomalies beyond the primary hypothesis's baseline must spawn a follow-up lead before closing.
+telemetry_source: [falco, zeek]
+attack_phase: [exfiltration]
+source_signature: [v2-falco-suspicious-network-tool]
 source_finding_ids:
   - 20260530T133146Z-noise-alert-suspnet/2
 created_at: 2026-05-30T13:31:46Z

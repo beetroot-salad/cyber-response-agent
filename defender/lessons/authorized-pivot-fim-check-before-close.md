@@ -1,6 +1,9 @@
 ---
 name: authorized-pivot-fim-check-before-close
 description: Before closing an authorized SSH pivot benign, run a FIM or auditd lead on the landing user's authorized_keys; key appends with timestomped mtime produce no auth.log artifact.
+telemetry_source: [fim, auditd]
+attack_phase: [persistence]
+source_signature: [v2-cross-tier-ssh-pivot]
 source_finding_ids:
   - live-cross-tier-pivot-2/0
 created_at: 2026-06-04T00:00:00Z

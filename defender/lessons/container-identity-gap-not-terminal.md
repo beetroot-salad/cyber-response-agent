@@ -1,6 +1,9 @@
 ---
 name: container-identity-gap-not-terminal
 description: Container name=NA or image=NA is a query prompt, not a terminal gap; add a container-platform lead to resolve image and entrypoint.
+telemetry_source: [falco, host-state]
+attack_phase: [execution]
+source_signature: [v2-falco-suspicious-network-tool]
 source_finding_ids:
   - 20260527T150928Z-v2-noise-alert-suspicious-network-tool/benign/0
 created_at: 2026-05-30T00:00:00Z

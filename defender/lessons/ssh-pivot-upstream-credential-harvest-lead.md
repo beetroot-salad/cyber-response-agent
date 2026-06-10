@@ -1,6 +1,9 @@
 ---
 name: ssh-pivot-upstream-credential-harvest-lead
 description: Authorized SSH pivot cases need a pre-pivot source-host process lead; credential harvest is a distinct step from the sshd sequence.
+telemetry_source: [host-state, auditd]
+attack_phase: [credential-access]
+source_signature: [v2-cross-tier-ssh-pivot]
 source_finding_ids:
   - port259-smoke/1
 created_at: 2026-06-08T00:00:00Z

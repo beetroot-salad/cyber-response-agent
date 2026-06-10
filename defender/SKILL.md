@@ -184,13 +184,45 @@ Example B shows a single-fact lead (CMDB lookup); when adding an IAM
 check, that's a second `:L` row dispatched in parallel.
 
 **Lessons.** The learning loop builds up a corpus of pitfall lessons
-under `defender/lessons/` — each is a markdown file with `name` +
-`description` frontmatter and a freeform pitfall body. At PLAN time,
-enumerate `defender/lessons/*.md` and read each file's frontmatter.
-For any lesson whose `description` looks plausibly relevant to the
-current alert shape, Read the body before writing your `:H` / `:L`
-blocks. Bodies are short; they teach you what to *check next time*,
-not what conclusion to reach.
+under `defender/lessons/` — each is a markdown file with a freeform
+pitfall body and frontmatter carrying a one-line `description` plus three
+grep-friendly retrieval dimensions (inline lists):
+
+- `source_signature` — the alert `rule.id`(s) the lesson came from / bites
+  (e.g. `v2-cross-tier-ssh-pivot`, `v2-sshd-success-after-failures`,
+  `v2-falco-suspicious-network-tool`).
+- `telemetry_source` — the sensor(s) the lesson's check keys on, **including
+  the absent source it tells you to name** (`sshd`, `falco`, `zeek`,
+  `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`, `host-state`,
+  `change-mgmt`).
+- `attack_phase` — the kill-chain phase(s) the pitfall bites
+  (`initial-access`, `credential-access`, `lateral-movement`, `execution`,
+  `persistence`, `collection`, `exfiltration`).
+
+**Discover at PLAN time by dimension — do not eyeball the whole listing.**
+This is plan-time, not orient-time: you discover lessons against the lead
+you're about to write, once you know its telemetry source and the phase your
+current hypothesis is in. There is no index CLI — `grep` the frontmatter:
+
+```bash
+# always anchor on the alert's rule.id; add the planned lead's source
+# and/or the hypothesis phase to narrow. AND across dimensions = pipe greps.
+grep -l 'source_signature:.*<alert-rule-id>' defender/lessons/*.md \
+  | xargs grep -l 'telemetry_source:.*<source-of-planned-lead>' \
+  | xargs grep -l 'attack_phase:.*<phase-of-current-hypothesis>'
+```
+
+Then **scan only the `description:` line** of the matches to judge
+relevance (`grep -h '^description:'` the hits), and Read the full body of
+only the ones that fit before writing your `:H` / `:L` blocks. Don't open a
+lesson to decide whether it's relevant — that's what the description is for.
+Widen by dropping a dimension if a narrow grep returns nothing; an
+unanchored whole-corpus scan is the fallback, not the default. Bodies are
+short; they teach you what to *check next time*, not what conclusion to
+reach.
+
+(These dimensions are unproven retrieval keys on the defender corpus — we're
+running them grep-only, no index, to see whether they earn one.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is

@@ -1,6 +1,9 @@
 ---
 name: non-container-host-persistence-paths-outside-falco
 description: Falco monitors container workloads only; crontab spool and home-directory writes on non-container prod-tier hosts produce no events — name these as ceiling_test gaps instead of planning leads against absent telemetry.
+telemetry_source: [falco, auditd, fim]
+attack_phase: [persistence]
+source_signature: [v2-cross-tier-ssh-pivot]
 source_finding_ids:
   - live-cross-tier-pivot-3/2
 created_at: 2026-06-04T00:00:00Z

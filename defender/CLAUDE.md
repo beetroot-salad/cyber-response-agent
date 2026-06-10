@@ -207,8 +207,11 @@ run standalone via `python3 defender/learning/loop.py <run_dir>`.
    so `inconclusive` source cases are held rather than authored.
 
 Lessons feed back into the runtime agent: at PLAN time the agent
-enumerates `defender/lessons/*.md` frontmatter and reads the bodies
-whose description looks relevant to the current alert.
+greps `defender/lessons/*.md` frontmatter by retrieval dimension
+(`source_signature` / `telemetry_source` / `attack_phase`), scans the
+`description` of the hits, and reads the bodies whose description looks
+relevant to the lead it's about to write (no index — grep only, see
+`defender/SKILL.md` §Lessons).
 
 Design rationale: `defender/docs/learning-loop.md` (and companions
 listed at the top of this file). When a doc and the code disagree,
