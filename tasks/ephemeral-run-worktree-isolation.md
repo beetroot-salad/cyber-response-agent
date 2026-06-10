@@ -122,8 +122,19 @@ the revert path + lesson→outcome traceability surface existing; until then def
     its `paths` into the default `run_one`, and the marker write is shared by both
     queues (`_enqueue_marker`). Known follow-ups left as-is: stale-`inflight/` reaper,
     and marker-name keyed on `run_dir.name` (mirrors the author queue).
-- [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
-      lesson commit (needs claude + the v2 stack).
+- [x] Live end-to-end verification (v2 stack, 2026-06-10, run `live-e2e-1` off the
+      `v2 Falco: suspicious network tool` alert → disposition malicious/high):
+      `run.py` wrote a `learn-queue` marker and **did not commit** (HEAD unchanged,
+      tree clean); `record_lesson_load` captured the 4 lessons loaded at PLAN.
+      `--learn-drain` claimed the marker (inflight cleared), persisted artifacts
+      out-of-repo, **re-rendered the judge page** from `$STATE_DIR/runs/` (the
+      hardening), benign actor correctly **SKIP**'d (no FP on a malicious alert → 0
+      findings), wrote the author-queue marker. `--author-drain` branched off
+      `origin/main`, lead-author committed 8 catalog drafts, opened real PR **#280**,
+      and **restored HEAD** to the dev branch; a 2nd drain hit the **writer lease**
+      (PR #280 open) and skipped. `trace_lesson --all` + `<lesson>` surfaced the
+      in-context case + disposition; `revert_lesson` guard clean. PR #280 is a live-
+      test artifact (catalog refinement) — close or keep at your discretion.
 
 **Phase 3:**
 - [x] `merge_mode` knob (`LEARNING_MERGE_MODE`, default `human_review`; landed PR B) +
