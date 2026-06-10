@@ -112,6 +112,11 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         author_mod,
+        "FINDINGS_LOCK_FILE",
+        repo / "defender" / "learning" / "_pending" / ".findings.lock",
+    )
+    monkeypatch.setattr(
+        author_mod,
         "HELD_REPORT",
         repo / "defender" / "learning" / "_pending" / "held_report.log",
     )

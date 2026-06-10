@@ -8,6 +8,7 @@ instead of monkeypatching module globals.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import subprocess
@@ -203,9 +204,10 @@ def _directions_for(disposition: str) -> list[str]:
 # Curators
 # ---------------------------------------------------------------------------
 
-# Serializes the transient `sys.path` mutation in `_run_curator_module`, which can
-# run from the run_one thread pool (lead-author leg) concurrently with the direction
-# legs.
+# Guards the transient `sys.path` mutation in `_run_curator_module`. The curators
+# now run only from the serial `author_drain` (one at a time), so this is defensive
+# rather than load-bearing — kept so a future concurrent caller can't corrupt
+# `sys.path` mid-import.
 _CURATOR_IMPORT_LOCK = threading.Lock()
 
 
@@ -246,10 +248,9 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
     regressions (ImportError, TypeError, …) propagate so they fail loudly.
 
     The sibling dir is almost always already on ``sys.path`` (run.py inserts it; a
-    standalone ``loop.py`` puts it on ``sys.path[0]``), but ``_invoke_lead_author``
-    runs inside the run_one thread pool, so guard the temporary mutation with a lock
-    and remove our specific entry by value — never a positional ``pop(0)`` that a
-    concurrent insert could clobber.
+    standalone ``loop.py`` puts it on ``sys.path[0]``). The lock-guarded mutation +
+    remove-by-value (never a positional ``pop(0)``) keep this safe even if a future
+    caller runs curators off the serial drainer.
     """
     learning_dir = str(LEARNING_DIR)
     with _CURATOR_IMPORT_LOCK:
@@ -274,17 +275,35 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 # ---------------------------------------------------------------------------
 
 
+def _enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
+    """Record this run for the serial author-drainer.
+
+    The drainer needs the original (``/tmp``) run dir to lead-author its
+    catalog/template refinements; carrying the path here lets the drainer detect
+    a vanished artifact (``/tmp`` cleared between learn and author) instead of
+    silently dropping it. Written atomically (tmp + replace)."""
+    paths.author_queue_dir.mkdir(parents=True, exist_ok=True)
+    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    tmp = marker.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n"
+    )
+    os.replace(tmp, marker)
+    _log(f"enqueued for authoring: {marker}")
+
+
 def run_one(
     run_dir: Path,
     *,
     paths: LoopPaths = DEFAULT_PATHS,
     agents: Subagents | None = None,
-    run_lead_author: Callable[[Path], None] | None = None,
 ) -> int:
+    """LEARN stage: produce findings/observations into the queue + enqueue the
+    run for authoring. Does **not** author or commit — that is ``author_drain``.
+    Safe to run concurrently across processes (each direction leg serializes its
+    shared queue writes on a flock)."""
     if agents is None:
         agents = ClaudePrintSubagents()
-    if run_lead_author is None:
-        run_lead_author = _invoke_lead_author
 
     run_id = run_dir.name
     _log(f"run_id={run_id} step=normalize")
@@ -301,16 +320,14 @@ def run_one(
         f"alert_rule_key={alert_rule_key} held_out={held_out}"
     )
 
-    # Lead-author (disposition-independent catalog refinement) and the two direction
-    # legs are mutually independent: lead-author mutates only the git catalog tree
-    # under its own repo lock and reads the run dir read-only; each leg writes disjoint
-    # per-direction files and serializes shared findings/observation writes on locks.
-    # subprocess.run releases the GIL while the claude child runs, so threads give real
-    # wall-time overlap. Within a leg, actor→oracle→judge stays serial.
-    ran: dict[str, bool] = {}
+    # The direction legs are mutually independent: each writes disjoint
+    # per-direction files and serializes shared findings/observation writes on a
+    # flock (cross-process safe). subprocess.run releases the GIL while the claude
+    # child runs, so threads give real wall-time overlap. Within a leg,
+    # actor→oracle→judge stays serial.
     errors: list[tuple[str, BaseException]] = []
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures: dict[Any, str] = {pool.submit(run_lead_author, run_dir): "lead_author"}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures: dict[Any, str] = {}
         for name in directions:
             futures[pool.submit(
                 run_direction, BY_NAME[name], run_dir, learning_run_dir,
@@ -320,33 +337,105 @@ def run_one(
         for fut in as_completed(futures):
             name = futures[fut]
             try:
-                result = fut.result()
+                fut.result()
             except Exception as e:  # re-raised after all legs settle (fail loud)
                 errors.append((name, e))
-                continue
-            if name in BY_NAME:
-                ran[name] = bool(result)
 
     if errors:
         for name, e in errors:
             _log(f"{name} leg failed: {e!r}")
         raise errors[0][1]
 
+    # Hand the run to the serial author-drainer; commits happen there, never here.
+    _enqueue_for_authoring(run_dir, paths)
     if not directions:
-        _log(f"disposition={disposition} — no learning direction; skipping")
-        return 0
-
-    # Shared defender-findings curator fires if either direction appended; each
-    # per-corpus observation curator fires only for the direction that produced it.
-    if any(ran.values()):
-        _maybe_trigger_author(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
-    for name, did_run in ran.items():
-        if did_run:
-            t: ObsTrigger = BY_NAME[name].obs_trigger
-            _maybe_trigger_author(
-                t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label
-            )
+        _log(f"disposition={disposition} — no learning direction; findings queue untouched")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Author stage — serial drainer (the only stage that commits)
+# ---------------------------------------------------------------------------
+
+
+def _mark_artifact_missing(spec: dict, marker: Path, paths: LoopPaths) -> None:
+    """Surface a vanished run dir (``/tmp`` cleared between learn and author)
+    instead of silently dropping it — move the marker to author-queue/failed/."""
+    failed_dir = paths.author_queue_dir / "failed"
+    failed_dir.mkdir(parents=True, exist_ok=True)
+    rec = dict(spec)
+    rec["failed"] = "artifact-missing"
+    (failed_dir / marker.name).write_text(json.dumps(rec) + "\n")
+    with contextlib.suppress(OSError):
+        marker.unlink()
+    _log(f"author_drain: run_dir missing for {spec.get('run_id')} — marked artifact-missing")
+
+
+def _author_drain_locked(
+    paths: LoopPaths,
+    run_lead_author: Callable[[Path], None],
+    trigger_author: Callable[[Path, str, str, str], None],
+) -> int:
+    qdir = paths.author_queue_dir
+    markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
+    _log(f"author_drain: {len(markers)} run(s) queued for lead-author")
+    for marker in markers:
+        try:
+            spec = json.loads(marker.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            _log(f"author_drain: unreadable marker {marker.name}: {e!r}; skipping")
+            continue
+        run_dir = Path(spec.get("run_dir", ""))
+        if not run_dir.is_dir():
+            _mark_artifact_missing(spec, marker, paths)
+            continue
+        run_lead_author(run_dir)
+        with contextlib.suppress(OSError):
+            marker.unlink()
+
+    # Findings + per-direction observation curators drain the accumulated queues
+    # (threshold-gated — identical semantics to the old in-run trigger).
+    trigger_author(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
+    for direction in BY_NAME.values():
+        t: ObsTrigger = direction.obs_trigger
+        trigger_author(t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label)
+    return 0
+
+
+def author_drain(
+    paths: LoopPaths = DEFAULT_PATHS,
+    *,
+    run_lead_author: Callable[[Path], None] | None = None,
+    trigger_author: Callable[[Path, str, str, str], None] | None = None,
+) -> int:
+    """Serial AUTHOR stage: drain the author-work queue (lead-author per run dir)
+    then the findings/observation queues (threshold-gated), committing locally.
+
+    One live drainer at a time, guarded by a non-blocking flock on a *dedicated*
+    lock (``author_drain_lock_file``) — distinct from the curators' repo lock so
+    the curators it calls can take that without a same-process deadlock. A second
+    drainer that can't grab the lock simply exits; the live one will pick up any
+    work it enqueued. ``run_lead_author`` / ``trigger_author`` are injectable for
+    tests."""
+    if run_lead_author is None:
+        run_lead_author = _invoke_lead_author
+    if trigger_author is None:
+        trigger_author = _maybe_trigger_author
+
+    lock_path = paths.author_drain_lock_file
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = lock_path.open("a+")
+    try:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            _log("author_drain: another drainer holds the lock — exiting")
+            return 0
+        return _author_drain_locked(paths, run_lead_author, trigger_author)
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
 
 
 _HELP_EPILOG = """\
@@ -414,9 +503,30 @@ def main(argv: list[str]) -> int:
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("run_dir", type=Path, help="Defender run dir")
+    parser.add_argument(
+        "run_dir", type=Path, nargs="?",
+        help="Defender run dir (LEARN stage: produce findings + enqueue for authoring)",
+    )
+    parser.add_argument(
+        "--author-drain", action="store_true",
+        help="AUTHOR stage: serially drain the author-work + findings/observation "
+             "queues and commit lessons/templates (takes no run_dir; one drainer at a time).",
+    )
     ns = parser.parse_args(argv[1:])
 
+    if ns.author_drain:
+        if ns.run_dir is not None:
+            print("--author-drain takes no run_dir", file=sys.stderr)
+            return 1
+        try:
+            return author_drain()
+        except LoopError as e:
+            print(f"[loop] FATAL: {e}", file=sys.stderr)
+            return 2
+
+    if ns.run_dir is None:
+        print("run_dir required (or pass --author-drain)", file=sys.stderr)
+        return 1
     run_dir = ns.run_dir.resolve()
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)

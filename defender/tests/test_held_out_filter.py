@@ -133,12 +133,8 @@ def test_run_one_gate_short_circuits_before_append(tmp_path: Path) -> None:
     )
     agents = FakeSubagents(judge=judge_yaml)
     paths = loop.LoopPaths(repo_root=tmp_path)
-    lead_author_runs: list[Path] = []
 
-    rc = loop.run_one(
-        run_dir, paths=paths, agents=agents,
-        run_lead_author=lead_author_runs.append,
-    )
+    rc = loop.run_one(run_dir, paths=paths, agents=agents)
     assert rc == 0
     assert agents.calls.get("judge") == 1  # adversarial leg ran end-to-end...
     assert not paths.pending_file.exists()  # ...but held-out suppressed the append
@@ -146,19 +142,17 @@ def test_run_one_gate_short_circuits_before_append(tmp_path: Path) -> None:
 
 def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path) -> None:
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
-    adversarial one; lead-author still fires unconditionally."""
+    adversarial one; the run is enqueued for authoring regardless of disposition
+    (lead-author itself now fires later, in the serial author_drain)."""
     run_dir = _complete_run_dir(tmp_path, "malicious", held_out=False)
     # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
-    lead_author_runs: list[Path] = []
 
-    rc = loop.run_one(
-        run_dir, paths=paths, agents=agents,
-        run_lead_author=lead_author_runs.append,
-    )
+    rc = loop.run_one(run_dir, paths=paths, agents=agents)
     assert rc == 0
-    assert len(lead_author_runs) == 1, "lead-author must run regardless of disposition"
+    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    assert marker.exists(), "run must be enqueued for authoring regardless of disposition"
     assert agents.calls.get("actor", 0) == 0, "adversarial actor must not run on malicious"
     assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 

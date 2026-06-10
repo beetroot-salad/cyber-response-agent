@@ -58,6 +58,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     import _author_runner as _runner  # type: ignore[import-not-found]
     import _author_shared as _shared  # type: ignore[import-not-found]
+    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
+    from _loop_persist import rotate_queue_locked  # type: ignore[import-not-found]
 finally:
     sys.path.pop(0)
 
@@ -65,9 +67,13 @@ finally:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
-RUNS_DIR = LEARNING_DIR / "runs"
-PENDING_DIR = LEARNING_DIR / "_pending"
-PENDING_FILE = PENDING_DIR / "findings.jsonl"
+# Mutable learning state resolves from DEFAULT_PATHS so it honors
+# DEFENDER_LEARNING_STATE_DIR — the same single location the producer
+# (_loop_persist.append_findings) writes to. Prompts/corpus stay repo-relative.
+RUNS_DIR = DEFAULT_PATHS.runs_dir
+PENDING_DIR = DEFAULT_PATHS.pending_dir
+PENDING_FILE = DEFAULT_PATHS.pending_file
+FINDINGS_LOCK_FILE = DEFAULT_PATHS.findings_lock_file
 CONSUMED_FILE = PENDING_DIR / "consumed.jsonl"
 LOCK_FILE = PENDING_DIR / ".lock"
 HELD_REPORT = PENDING_DIR / "held_report.log"
@@ -353,22 +359,16 @@ def rotate_queue(
     consumed: list[dict],
     commit_sha: str | None,
 ) -> None:
-    """Atomic rewrite of findings.jsonl + append to consumed.jsonl."""
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = PENDING_FILE.with_suffix(".jsonl.tmp")
-    with tmp.open("w") as fh:
-        for entry in held:
-            fh.write(json.dumps(entry) + "\n")
-    os.replace(tmp, PENDING_FILE)
-    if consumed:
-        now = _now_iso()
-        with CONSUMED_FILE.open("a") as fh:
-            for entry in consumed:
-                rec = dict(entry)
-                rec.setdefault("consumed_at", now)
-                if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                    rec["consumed_commit"] = commit_sha
-                fh.write(json.dumps(rec) + "\n")
+    """Drain findings.jsonl under the findings flock, preserving concurrent appends."""
+    rotate_queue_locked(
+        pending_file=PENDING_FILE,
+        consumed_file=CONSUMED_FILE,
+        lock_file=FINDINGS_LOCK_FILE,
+        id_key="finding_id",
+        held=held,
+        consumed=consumed,
+        commit_sha=commit_sha,
+    )
 
 
 def write_held_report(

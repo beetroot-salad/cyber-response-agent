@@ -6,8 +6,10 @@ so tests pass `paths=LoopPaths(repo_root=tmp_path)` instead of monkeypatching gl
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import fcntl
 import json
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -70,6 +72,63 @@ def _append_jsonl(path: Path, rows: list[dict]) -> int:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
     return len(rows)
+
+
+def _read_jsonl_rows(path: Path) -> list[dict]:
+    """All rows in a JSONL file (tolerant of blank/malformed lines)."""
+    if not path.is_file():
+        return []
+    rows: list[dict] = []
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            rows.append(json.loads(s))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def rotate_queue_locked(
+    *,
+    pending_file: Path,
+    consumed_file: Path,
+    lock_file: Path,
+    id_key: str,
+    held: list[dict],
+    consumed: list[dict],
+    commit_sha: str | None,
+) -> None:
+    """Drain a JSONL queue under its flock, **preserving concurrent appends**.
+
+    An author reads its batch minutes before draining; meanwhile concurrent
+    learn processes may append new rows. Re-reading the queue under the same
+    lock the producers use (``lock_file``) lets us keep any row whose ``id_key``
+    the author never processed. The rewrite keeps the (possibly mutated) ``held``
+    rows + those untouched new arrivals, and drops ``consumed`` rows (which are
+    appended to ``consumed_file`` with ``consumed_at`` / ``consumed_commit``).
+    """
+    processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
+    pending_file.parent.mkdir(parents=True, exist_ok=True)
+    with _flock(lock_file):
+        current = _read_jsonl_rows(pending_file)
+        new_arrivals = [r for r in current if r.get(id_key) not in processed]
+        survivors = list(held) + new_arrivals
+        tmp = pending_file.with_suffix(pending_file.suffix + ".tmp")
+        with tmp.open("w") as fh:
+            for entry in survivors:
+                fh.write(json.dumps(entry) + "\n")
+        os.replace(tmp, pending_file)
+        if consumed:
+            now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+            with consumed_file.open("a") as fh:
+                for entry in consumed:
+                    rec = dict(entry)
+                    rec.setdefault("consumed_at", now)
+                    if rec.get("consumed_category") == "consumed_committed" and commit_sha:
+                        rec["consumed_commit"] = commit_sha
+                    fh.write(json.dumps(rec) + "\n")
 
 
 def _slugify(s: str) -> str:

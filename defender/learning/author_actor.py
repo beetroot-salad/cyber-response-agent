@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     import _author_runner as _runner  # type: ignore[import-not-found]
     import _author_shared as _shared  # type: ignore[import-not-found]
+    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
 finally:
     sys.path.pop(0)
 
@@ -73,10 +74,13 @@ finally:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
-PENDING_DIR = LEARNING_DIR / "_pending"
-PENDING_FILE = PENDING_DIR / "actor_observations.jsonl"
-CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
-LOCK_FILE = PENDING_DIR / ".actor.lock"
+# Mutable state resolves from DEFAULT_PATHS (honors DEFENDER_LEARNING_STATE_DIR);
+# corpus/prompts stay repo-relative. LOCK_FILE is the queue lock shared with the
+# producer (_loop_persist.append_actor_observations → actor_observations_lock_file).
+PENDING_DIR = DEFAULT_PATHS.pending_dir
+PENDING_FILE = DEFAULT_PATHS.actor_observations_file
+CONSUMED_FILE = DEFAULT_PATHS.actor_observations_consumed_file
+LOCK_FILE = DEFAULT_PATHS.actor_observations_lock_file
 
 AUTHOR_PROMPT = LEARNING_DIR / "author_actor.md"
 AUTHOR_RUN_LOG = PENDING_DIR / "author_actor_run.jsonl"
@@ -474,6 +478,12 @@ def rotate_queue(
     consumed: list[dict],
     commit_sha: str | None,
 ) -> None:
+    """Atomic rewrite of the queue + append to consumed.
+
+    No re-read-merge here (unlike ``author.rotate_queue``): ``run_batch`` holds the
+    queue lock (``acquire_queue_lock`` on ``LOCK_FILE``) across read→rotate, and the
+    producer's append blocks on that same lock, so no observation can arrive
+    mid-batch — a held-only rewrite cannot lose data."""
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     tmp = PENDING_FILE.with_suffix(".jsonl.tmp")
     with tmp.open("w") as fh:
