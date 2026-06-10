@@ -19,21 +19,54 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass(frozen=True)
 class LoopPaths:
-    """Run-dir + _pending queue layout, derived from a repo root."""
+    """Run-dir + _pending queue layout.
+
+    Two roots: ``repo_root`` resolves the in-repo prompts/code (read-only at
+    runtime); ``state_dir`` resolves the mutable learning *state* (the findings
+    queue, per-run learning dirs, the author lock + work queue). When
+    ``state_dir`` is None the state lives under ``learning_dir`` — today's
+    in-repo behavior, so tests that pass only ``repo_root`` are unaffected.
+    Concurrent live runs set ``DEFENDER_LEARNING_STATE_DIR`` so the queue lives
+    out-of-repo and every process resolves the same single location.
+    """
 
     repo_root: Path
+    state_dir: Path | None = None
 
     @property
     def learning_dir(self) -> Path:
         return self.repo_root / "defender" / "learning"
 
     @property
+    def _state_root(self) -> Path:
+        return self.state_dir if self.state_dir is not None else self.learning_dir
+
+    @property
     def runs_dir(self) -> Path:
-        return self.learning_dir / "runs"
+        return self._state_root / "runs"
 
     @property
     def pending_dir(self) -> Path:
-        return self.learning_dir / "_pending"
+        return self._state_root / "_pending"
+
+    @property
+    def lead_pending_dir(self) -> Path:
+        return self._state_root / "_pending_leads"
+
+    @property
+    def author_lock_file(self) -> Path:
+        return self._state_root / "_author.lock"
+
+    @property
+    def author_queue_dir(self) -> Path:
+        return self._state_root / "author-queue"
+
+    @property
+    def author_drain_lock_file(self) -> Path:
+        # Distinct from author_lock_file (the curators' repo lock): the drainer
+        # holds this so a second drainer exits, while the curators it calls can
+        # still take author_lock_file without a same-process deadlock.
+        return self._state_root / ".author-drain.lock"
 
     @property
     def pending_file(self) -> Path:
@@ -68,7 +101,24 @@ class LoopPaths:
         return self.pending_dir / ".environment.lock"
 
 
-DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT)
+def _env_state_dir() -> Path | None:
+    """Out-of-repo learning-state dir from ``DEFENDER_LEARNING_STATE_DIR``.
+
+    Returns None when unset (state stays in-repo). When set, the dir is
+    *resolved* so producer (run/learn) and consumer (author) processes agree on
+    one identical location — no silent fallback that would split-brain the queue
+    across concurrent runs. It is **not** created here: importing this module
+    must have no filesystem side effect, and a typo'd/unwritable path should fail
+    at first use (where each writer mkdirs the specific subdir it needs), not
+    crash the import of the whole learning subsystem.
+    """
+    raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
+    if not raw:
+        return None
+    return Path(raw).resolve()
+
+
+DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
 
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
 

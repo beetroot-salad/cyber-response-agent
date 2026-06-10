@@ -29,6 +29,8 @@ dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
 import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
+import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
+import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
 import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -602,3 +604,198 @@ def test_append_actor_observations_queues_survived_outcomes(tmp_path: Path):
     assert n == 1
     rows = _read_jsonl(paths.actor_observations_file)
     assert rows[0]["judge_outcome"] == "survived"
+
+
+# ---------------------------------------------------------------------------
+# Phase-1 decoupling: out-of-repo queue safety, author-work marker, drainer
+# ---------------------------------------------------------------------------
+
+
+def test_rotate_queue_locked_preserves_concurrent_appends(tmp_path: Path):
+    """A row appended after the author read its batch must survive the rewrite.
+
+    The author processed r/0 (committed) and r/1 (held); meanwhile a producer
+    appended r/2 the author never saw. Re-reading under the lock must keep r/2.
+    """
+    paths, _ = _isolate(tmp_path)
+    pending = paths.pending_file
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"finding_id": "r/0", "v": "f1"},
+        {"finding_id": "r/1", "v": "f2"},
+        {"finding_id": "r/2", "v": "f3-new-arrival"},
+    ]
+    pending.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    held = [{"finding_id": "r/1", "v": "f2", "held_reason": "no_ground_truth"}]
+    consumed = [{"finding_id": "r/0", "v": "f1", "consumed_category": "consumed_committed"}]
+    persist.rotate_queue_locked(
+        pending_file=pending,
+        consumed_file=paths.pending_dir / "consumed.jsonl",
+        lock_file=paths.findings_lock_file,
+        id_key="finding_id",
+        held=held,
+        consumed=consumed,
+        commit_sha="abc123",
+    )
+
+    survivors = _read_jsonl(pending)
+    assert {s["finding_id"] for s in survivors} == {"r/1", "r/2"}
+    held_row = next(s for s in survivors if s["finding_id"] == "r/1")
+    assert held_row["held_reason"] == "no_ground_truth"  # mutated held row kept
+    consumed_rows = _read_jsonl(paths.pending_dir / "consumed.jsonl")
+    assert consumed_rows[0]["consumed_commit"] == "abc123"
+    assert "consumed_at" in consumed_rows[0]
+
+
+def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-a"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    spec = json.loads((paths.author_queue_dir / "case-a.json").read_text())
+    assert spec == {"run_id": "case-a", "run_dir": str(run_dir.resolve())}
+
+
+def test_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-b"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    seen: list[Path] = []
+    orch.author_drain(
+        paths,
+        run_lead_author=lambda rd: seen.append(rd),
+        trigger_author=lambda *a: None,
+    )
+    assert seen == [run_dir.resolve()]
+    assert not (paths.author_queue_dir / "case-b.json").exists()
+
+
+def test_author_drain_marks_artifact_missing(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    gone = tmp_path / "tmprun" / "case-gone"  # never created
+    orch._enqueue_for_authoring(gone, paths)
+    seen: list[Path] = []
+    orch.author_drain(
+        paths,
+        run_lead_author=lambda rd: seen.append(rd),
+        trigger_author=lambda *a: None,
+    )
+    assert seen == []  # lead-author NOT called on a vanished artifact
+    assert not (paths.author_queue_dir / "case-gone.json").exists()
+    failed = paths.author_queue_dir / "failed" / "case-gone.json"
+    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
+
+
+def test_author_drain_triggers_three_curators(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    triggered: list[str] = []
+    orch.author_drain(
+        paths,
+        run_lead_author=lambda rd: None,
+        trigger_author=lambda pending_file, env, module, label: triggered.append(module),
+    )
+    assert triggered == ["author", "author_actor", "author_actor_benign"]
+
+
+def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
+    """A second drainer that can't grab the dedicated lock no-ops (rc 0)."""
+    import fcntl
+
+    paths, _ = _isolate(tmp_path)
+    paths.author_drain_lock_file.parent.mkdir(parents=True, exist_ok=True)
+    holder = paths.author_drain_lock_file.open("a+")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+    try:
+        worked: list[str] = []
+        rc = orch.author_drain(
+            paths,
+            run_lead_author=lambda rd: worked.append("lead"),
+            trigger_author=lambda *a: worked.append("trigger"),
+        )
+        assert rc == 0
+        assert worked == []
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_author_drain_quarantines_poison_run_dir(tmp_path: Path):
+    """A lead-author that raises on one (present) run dir must NOT wedge the
+    serial drain: the marker is quarantined to failed/ (so it can't re-poison
+    every tick) and the threshold curators still fire."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-poison"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    triggered: list[str] = []
+
+    def boom(_rd: Path) -> None:
+        raise RuntimeError("lead-author blew up")
+
+    orch.author_drain(
+        paths,
+        run_lead_author=boom,
+        trigger_author=lambda pending_file, env, module, label: triggered.append(module),
+    )
+    assert not (paths.author_queue_dir / "case-poison.json").exists()
+    failed = paths.author_queue_dir / "failed" / "case-poison.json"
+    assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
+    # the poison run dir didn't starve the accumulated findings/observation queues
+    assert triggered == ["author", "author_actor", "author_actor_benign"]
+
+
+# ---------------------------------------------------------------------------
+# Out-of-repo state_dir (DEFENDER_LEARNING_STATE_DIR) — the concurrent-run config
+# the seam exists for. Until now NO test exercised state_dir != None.
+# ---------------------------------------------------------------------------
+
+
+def test_source_run_dir_absolute_when_state_dir_out_of_repo(tmp_path: Path):
+    """_source_run_dir must not crash when the run lives out-of-repo (it used to
+    raise ValueError on relative_to) and must return an absolute path that the
+    consumer contract (``repo_root / src``) resolves back to the real run dir."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = tmp_path / "state"  # out-of-repo, like /tmp/defender-state
+    paths = LoopPaths(repo_root=repo, state_dir=state)
+    assert paths.runs_dir == state / "runs"
+
+    learning_run_dir = paths.runs_dir / "case-x"
+    src = persist._source_run_dir(learning_run_dir, paths.repo_root)
+    assert src == str(learning_run_dir) + "/"  # absolute, no crash
+    assert paths.repo_root / src.rstrip("/") == learning_run_dir  # pathlib: abs RHS wins
+
+
+def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
+    """The headline concurrent path: append_findings must not crash with the run
+    bundle out-of-repo, and the queue + its row land under state_dir, not the repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = tmp_path / "state"
+    paths = LoopPaths(repo_root=repo, state_dir=state)
+    learning_run_dir = paths.runs_dir / "case-y"
+    learning_run_dir.mkdir(parents=True)
+
+    judge_doc = {
+        "outcome": "survived",
+        "defender_findings": [
+            {
+                "type": "lead-set",
+                "subject_anchor": "host-a",
+                "subject_topic": "missed lateral move",
+                "finding": "narrative",
+                "citations": [{"source": "investigation", "quote": "..."}],
+            }
+        ],
+    }
+    n = persist.append_findings(
+        judge_doc, "case-y", "rule-1", learning_run_dir,
+        direction="adversarial", paths=paths,
+    )
+    assert n == 1
+    rows = _read_jsonl(paths.pending_file)
+    assert rows[0]["source_run_dir"] == str(learning_run_dir) + "/"
+    assert paths.pending_file.is_relative_to(state)
+    assert not paths.pending_file.is_relative_to(repo)

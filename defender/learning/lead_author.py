@@ -57,6 +57,7 @@ from typing import Any
 try:
     from defender.learning import (
         _author_shared,
+        _loop_config,
         lead_classifier,
         lead_neighbors,
         lead_render,
@@ -64,6 +65,7 @@ try:
     )
 except ImportError:  # pragma: no cover — direct-script execution fallback
     import _author_shared  # type: ignore[no-redef]
+    import _loop_config  # type: ignore[no-redef]
     import lead_classifier  # type: ignore[no-redef]
     import lead_neighbors  # type: ignore[no-redef]
     import lead_render  # type: ignore[no-redef]
@@ -76,7 +78,9 @@ CATALOG_DIR = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
 CATALOG_REL = "defender/skills/gather/queries/"
 SKILLS_DIR = REPO_ROOT / "defender" / "skills"
 SKILLS_REL = "defender/skills/"
-PENDING_DIR = LEARNING_DIR / "_pending_leads"
+# Mutable lead-author queue state resolves from DEFAULT_PATHS so it honors
+# DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs).
+PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "lead_author.md"

@@ -31,7 +31,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
-RUNS_DIR = HERE / "runs"
+# The run bundle (investigation.md + source_refs.yaml) is written under
+# DEFAULT_PATHS.runs_dir, which honors DEFENDER_LEARNING_STATE_DIR — out-of-repo
+# under concurrent runs. Resolve from the same seam the producer wrote to rather
+# than assuming the in-repo default. _loop_config is stdlib-only (no pyyaml), so
+# importing it keeps this verifier runnable under any interpreter.
+sys.path.insert(0, str(HERE))
+try:
+    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
+finally:
+    sys.path.pop(0)
+RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "verify_forward.md"
 
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
