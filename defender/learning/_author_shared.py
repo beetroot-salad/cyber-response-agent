@@ -128,3 +128,26 @@ def benign_generation_count() -> int:
     )
     prior = int(proc.stdout.strip() or "0")
     return prior + 1
+
+
+def without_consumed_category(rec: dict) -> dict:
+    """A queue row stripped of the ``consumed_*`` stamp — for re-holding a
+    just-committed row in the pending queue (``hold_committed``) so it reads
+    clean on the next batch."""
+    return {k: v for k, v in rec.items() if k != "consumed_category"}
+
+
+def partition_committed(
+    committed: list[dict], *, hold_committed: bool
+) -> tuple[list[dict], list[dict]]:
+    """Split the just-committed rows into ``(held, rotated)`` for ``rotate_queue``.
+
+    Under the serial author drain (``hold_committed``) the commit lands on an
+    unmerged PR branch, so committed rows stay queued — stripped of the consumed
+    stamp — instead of rotating to ``consumed.jsonl``; a merged PR filters them
+    via ``existing_*_ids`` next batch, a rejected PR re-authors them. Standalone
+    callers rotate them straight out (today's commit-and-rotate behavior).
+    """
+    if hold_committed:
+        return [without_consumed_category(c) for c in committed], []
+    return [], committed

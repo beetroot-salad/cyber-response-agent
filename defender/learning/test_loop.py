@@ -683,8 +683,9 @@ class _FakeBranch:
         self.events.append("finish")
         return f"PR/{batch_id}" if self._commits else None
 
-    def restore_ref(self, ref: str) -> None:
+    def restore_ref(self, ref: str) -> bool:
         self.events.append(f"restore:{ref}")
+        return True
 
 
 def test_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):

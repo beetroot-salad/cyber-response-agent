@@ -82,6 +82,9 @@ temp/
 defender/learning/_pending/
 defender/learning/_pending_leads/
 defender/learning/_author.lock
+defender/learning/author-queue/
+defender/learning/learn-queue/
+defender/learning/.author-drain.lock
 defender/learning/runs/
 defender/learning/eval/results/
 defender/learning/eval/_tmp/

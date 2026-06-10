@@ -139,7 +139,10 @@ class AuthorBranch:
             raise BranchError(f"gh pr create failed: {proc.stderr.strip()}")
         return proc.stdout.strip() or branch
 
-    def restore_ref(self, ref: str) -> None:
-        """Check the dev's original ref back out — best-effort, always called in a
-        ``finally`` so the drain never strands them on the lessons branch."""
-        self.git(["checkout", ref])
+    def restore_ref(self, ref: str) -> bool:
+        """Check the dev's original ref back out. Best-effort (always called in a
+        ``finally`` so the drain never raises while unwinding), but returns
+        whether the checkout actually succeeded so the caller can surface a
+        failure loudly instead of silently stranding the dev on the lessons
+        branch."""
+        return self.git(["checkout", ref]).returncode == 0

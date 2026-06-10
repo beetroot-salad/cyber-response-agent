@@ -28,6 +28,7 @@ from _loop_config import (
     GROUND_TRUTH_FILE,
     LEARNING_DIR,
     MERGE_MODE,
+    VALID_MERGE_MODES,
     LoopError,
     LoopPaths,
     _log,
@@ -482,11 +483,26 @@ def _author_drain_locked(
     pr = None
     try:
         _drain_lead_author_and_curators(paths, run_lead_author, trigger_author)
-        pr = branch.finish_batch(batch_id)
+        try:
+            pr = branch.finish_batch(batch_id)
+        except BranchError as e:
+            # push / `gh pr create` failed (auth, network, branch already on
+            # origin). The findings were held (hold_committed), so they stay
+            # queued and re-author next tick — don't crash the serial drainer
+            # (BranchError is not a LoopError, so main() would not catch it).
+            _log(f"author_drain: finish_batch failed: {e} — findings stay queued, "
+                 "retry next tick")
     finally:
-        # Always put the dev's HEAD back, even if the batch raised.
+        # Always put the dev's HEAD back, even if the batch raised. A swallowed
+        # restore failure strands the dev on the lessons branch and (with in-repo
+        # state) wedges every future drain on the refuse-if-dirty check, so
+        # surface it loudly instead of suppressing silently.
+        restored = False
         with contextlib.suppress(Exception):
-            branch.restore_ref(original_ref)
+            restored = branch.restore_ref(original_ref)
+        if not restored:
+            _log(f"author_drain: WARNING could not restore HEAD to {original_ref!r} "
+                 "— dev checkout may be stranded on the lessons branch")
 
     if pr is None:
         _log("author_drain: batch produced no commits — no PR opened")
@@ -520,6 +536,13 @@ def author_drain(
     the curators it calls can take that without a same-process deadlock. A second
     drainer that can't grab the lock simply exits. ``run_lead_author`` /
     ``trigger_author`` / ``branch`` are injectable for tests."""
+    if MERGE_MODE not in VALID_MERGE_MODES:
+        # Validated here (the author stage), not at _loop_config import, so an
+        # author-only misconfig fails loud for *this* stage without crashing the
+        # LEARN / run_one importers that never read it. main() maps LoopError→rc 2.
+        raise LoopError(
+            f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
+        )
     if run_lead_author is None:
         run_lead_author = _invoke_lead_author
     if trigger_author is None:
