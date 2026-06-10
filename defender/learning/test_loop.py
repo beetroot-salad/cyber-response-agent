@@ -1202,6 +1202,26 @@ def test_author_branch_restore_ref_checks_out():
     assert ["checkout", "my-feature"] in git.calls
 
 
+def test_author_branch_revert_lesson_pr_removes_and_opens_pr():
+    git = _git_runner(ref="main")
+    gh = _gh_runner(create_out="https://github.com/o/r/pull/42")
+    b = ab.AuthorBranch(git=git, gh=gh)
+    pr = b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+    assert pr == "https://github.com/o/r/pull/42"
+    assert ["checkout", "-B", "lessons/revert-bad", "origin/main"] in git.calls
+    assert ["rm", "defender/lessons/bad.md"] in git.calls
+    assert ["commit", "-m", "revert lesson: bad"] in git.calls
+    assert ["checkout", "main"] in git.calls  # HEAD restored
+    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
+    assert "revert lesson: bad" in create
+
+
+def test_author_branch_revert_refuses_dirty_tree():
+    b = ab.AuthorBranch(git=_git_runner(dirty=True), gh=_gh_runner())
+    with pytest.raises(ab.BranchError):
+        b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+
+
 # ---------------------------------------------------------------------------
 # author_drain auto_on_green path (green bar gates the merge)
 # ---------------------------------------------------------------------------

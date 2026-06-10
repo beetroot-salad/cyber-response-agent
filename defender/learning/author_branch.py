@@ -150,3 +150,34 @@ class AuthorBranch:
         auto-merge not enabled on the repo) leaves the PR open for a manual merge."""
         args = ["pr", "merge", pr_ref, "--auto", "--squash" if squash else "--merge"]
         return self.gh(args).returncode == 0
+
+    def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:
+        """Open a PR that removes one lesson file — the one-click revert (§4.4).
+
+        Branches off freshly-fetched ``origin/main`` (NOT lease-gated — a revert is a
+        corrective action that may need to land while another lessons PR is open),
+        ``git rm`` + commit + PR, and always restores the dev's HEAD. Returns the PR
+        ref. ``lesson_rel_path`` is repo-relative (``defender/lessons/<name>.md``)."""
+        if self.working_tree_dirty():
+            raise BranchError("working tree is dirty — refusing to start a revert branch")
+        original_ref = self.current_ref()
+        branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
+        self._git_ok(["fetch", "origin"])
+        self._git_ok(["checkout", "-B", branch, _BRANCH_BASE])
+        try:
+            self._git_ok(["rm", lesson_rel_path])
+            self._git_ok(["commit", "-m", f"revert lesson: {lesson_name}"])
+            self._git_ok(["push", "--set-upstream", "origin", branch])
+            proc = self.gh(
+                ["pr", "create", "--base", _PR_BASE, "--head", branch,
+                 "--title", f"revert lesson: {lesson_name}",
+                 "--body",
+                 f"One-click revert of `{lesson_rel_path}` (recommend-only/reversible "
+                 "lesson, §4.4). The cited findings become eligible to re-author once "
+                 "this merges."]
+            )
+            if proc.returncode != 0:
+                raise BranchError(f"gh pr create failed: {proc.stderr.strip()}")
+            return proc.stdout.strip() or branch
+        finally:
+            self.restore_ref(original_ref)

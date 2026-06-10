@@ -59,9 +59,17 @@ A wave of reliability hooks/validators guards the runtime loop:
   the run-dir/salt lookup with the budget hook via `hooks/_run_dir.py`.
 - **`hooks/budget_enforcer.py`** — PostToolUse per-run tool-call /
   subagent-spawn / wall-clock budget tracking (warning-only).
+- **`hooks/record_lesson_load.py`** — PostToolUse on `Read` of
+  `defender/lessons/*.md`, appending `{lesson_name, ts}` to
+  `{run_dir}/lessons_loaded.jsonl`. Feeds the post-merge lesson→outcome
+  traceability surface (`learning/trace_lesson.py`). Records lessons
+  loaded **into context**, not demonstrably *influenced* (a Read can't
+  tell triage from use) — scoped to the runtime corpus only
+  (`lessons-actor/`/`lessons-environment/` are author corpora). Exits 0.
 
-The budget + tag hooks anchor on the `DEFENDER_RUN_DIR` env var that
-run.py exports (one `claude -p` per run, so no session→run map is needed).
+The budget + tag + lesson-load hooks anchor on the `DEFENDER_RUN_DIR`
+env var that run.py exports (one `claude -p` per run, so no session→run
+map is needed).
 
 Still out of scope (port later if a case demands it): report-consistency
 judges, the phase state machine, class-slot grammar vocab, and
@@ -97,6 +105,7 @@ defender/
     invlang_validate.py                 # PreToolUse on Write|Edit: enforces the invlang schema on investigation.md (skills/invlang/validate.py)
     tag_tool_results.py                 # PostToolUse: salted untrusted-data tagging of MCP / adapter-CLI / alert.json output
     budget_enforcer.py                  # PostToolUse on *: per-run tool-call / spawn / wall-clock budget (warning-only)
+    record_lesson_load.py               # PostToolUse on Read of defender/lessons/*.md: records {lesson_name,ts} → {run_dir}/lessons_loaded.jsonl (lesson→outcome traceability)
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)
     gather/             # gather subagent (Haiku) + per-system query templates
@@ -118,6 +127,10 @@ defender/
     judge.md            # outcome classifier + finding emitter
     verify_forward.{md,py}     # forward-check gate (author-time: a candidate lesson must still resolve its own source case before it's committed)
     author.{md,py}      # lessons curator: folds queued findings into defender/lessons/
+    author_branch.py    # serial author's git/gh: in-place branch off origin/main + writer lease + one PR per batch (injected runners)
+    green_bar.py        # author merge gate (§4.4): held-out + secondary floors over the candidate corpus; fails closed
+    trace_lesson.py     # lesson→outcome: which cases had a lesson in context since merge, + their dispositions
+    revert_lesson.py    # one-click lesson revert: opens a PR that git-rm's defender/lessons/<name>.md off origin/main
     eval/               # harness-on-the-harness: scenarios for evaluating the loop itself
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
   lessons/              # checked-in pitfall lessons, authored by the loop, read by the runtime agent at PLAN time

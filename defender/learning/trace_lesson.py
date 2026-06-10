@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Lesson → in-context-outcome traceability (platform-design §4.4 control loop).
+
+For a merged lesson, surface which subsequent cases had it **in context** (the
+``record_lesson_load`` hook captured the Read at PLAN) and what disposition each
+reached — the post-merge visibility half of "no pre-merge sign-off, but a human
+control loop after". This is **in context**, not demonstrably *influenced* — see
+``defender/hooks/record_lesson_load.py``'s caveat; the green bar + one-click revert
+are the load-bearing safety controls, this is best-effort visibility.
+
+Usage:
+  trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>
+  trace_lesson.py <lesson_name>         # per-case: case_id  disposition  loaded_at
+
+Runs scanned: ``$DEFENDER_RUNS_BASE`` (or ``--runs-dir``); lessons: defender/lessons/.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
+_FRONTMATTER_END = "\n---"
+
+
+def _default_runs_dir() -> Path:
+    return Path(os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs"))
+
+
+def _parse_frontmatter(text: str) -> dict:
+    if not text.startswith("---"):
+        return {}
+    end = text.find(_FRONTMATTER_END, 3)
+    if end == -1:
+        return {}
+    try:
+        doc = yaml.safe_load(text[3:end])
+    except yaml.YAMLError:
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _parse_dt(raw) -> datetime | None:
+    if not isinstance(raw, (str, datetime)):
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+@dataclass
+class LessonMeta:
+    name: str
+    description: str
+    created_at: datetime | None
+
+
+def lesson_meta(path: Path) -> LessonMeta:
+    fm = _parse_frontmatter(path.read_text())
+    return LessonMeta(
+        name=str(fm.get("name") or path.stem),
+        description=str(fm.get("description") or ""),
+        created_at=_parse_dt(fm.get("created_at")),
+    )
+
+
+@dataclass
+class CaseHit:
+    case_id: str
+    disposition: str
+    loaded_at: str
+
+
+def _report_disposition(run_dir: Path) -> str:
+    fm = _parse_frontmatter((run_dir / "report.md").read_text()) if (run_dir / "report.md").is_file() else {}
+    return str(fm.get("disposition") or "?")
+
+
+def in_context_cases(
+    lesson_name: str, created_at: datetime | None, runs_dir: Path
+) -> list[CaseHit]:
+    """Cases whose lessons_loaded.jsonl cites ``lesson_name`` at/after ``created_at``
+    (the lesson's current incarnation), with the case's recorded disposition. One hit
+    per case (earliest qualifying load)."""
+    hits: list[CaseHit] = []
+    if not runs_dir.is_dir():
+        return hits
+    for run_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
+        loaded = run_dir / "lessons_loaded.jsonl"
+        if not loaded.is_file():
+            continue
+        earliest: str | None = None
+        for line in loaded.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("lesson_name") != lesson_name:
+                continue
+            ts = _parse_dt(row.get("ts"))
+            if created_at is not None and (ts is None or ts < created_at):
+                continue  # loaded before this lesson's current incarnation
+            if earliest is None or str(row.get("ts")) < earliest:
+                earliest = str(row.get("ts"))
+        if earliest is not None:
+            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir), earliest))
+    return hits
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument("lesson_name", nargs="?", help="lesson slug to trace")
+    p.add_argument("--all", action="store_true",
+                   help="list every lesson with its in-context case count (cheap scan)")
+    p.add_argument("--runs-dir", type=Path, default=None)
+    ns = p.parse_args(argv)
+    runs_dir = ns.runs_dir or _default_runs_dir()
+
+    if not LESSONS_DIR.is_dir():
+        print(f"no lessons dir: {LESSONS_DIR}", file=sys.stderr)
+        return 1
+
+    if ns.all:
+        for path in sorted(LESSONS_DIR.glob("*.md")):
+            m = lesson_meta(path)
+            n = len(in_context_cases(m.name, m.created_at, runs_dir))
+            print(f"{m.name}\t{m.description}\t{n}")
+        return 0
+
+    if not ns.lesson_name:
+        print("give a <lesson_name> or --all", file=sys.stderr)
+        return 1
+    path = LESSONS_DIR / f"{ns.lesson_name}.md"
+    if not path.is_file():
+        print(f"no such lesson: {path}", file=sys.stderr)
+        return 1
+    m = lesson_meta(path)
+    hits = in_context_cases(m.name, m.created_at, runs_dir)
+    print(f"# {m.name} — {len(hits)} case(s) in context since {m.created_at}")
+    for h in hits:
+        print(f"{h.case_id}\t{h.disposition}\t{h.loaded_at}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
