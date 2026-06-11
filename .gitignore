@@ -88,6 +88,7 @@ defender/learning/.author-drain.lock
 defender/learning/runs/
 defender/learning/eval/results/
 defender/learning/eval/_tmp/
+defender/learning/eval/secondary/
 
 # Defender run transcripts — local artifacts, not committed.
 defender/run-transcripts/

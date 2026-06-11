@@ -493,6 +493,30 @@ def _author_drain_locked(
             # (BranchError is not a LoopError, so main() would not catch it).
             _log(f"author_drain: finish_batch failed: {e} — findings stay queued, "
                  "retry next tick")
+        if pr is not None:
+            _log(f"author_drain: opened lessons PR {pr}")
+            if MERGE_MODE == "auto_on_green":
+                # Gate while the lessons branch is still checked out (restore
+                # happens in the finally below), so the green bar's secondary
+                # sweep runs under the candidate corpus, not the dev's original
+                # ref. Fail closed: a broken gate must leave the PR for review,
+                # never crash the drainer.
+                try:
+                    result = green_bar_evaluate(paths)
+                except Exception as e:
+                    _log(f"author_drain: green bar errored: {e!r} — leaving PR "
+                         "for human review")
+                else:
+                    _log("author_drain: " + result.summary().replace("\n", " | "))
+                    if not result.passed:
+                        _log("author_drain: green bar not satisfied — leaving PR "
+                             "for human review")
+                    elif branch.merge_pr(pr):
+                        _log(f"author_drain: auto-merge enabled on {pr} "
+                             "(green bar passed)")
+                    else:
+                        _log("author_drain: green bar passed but `gh pr merge "
+                             "--auto` was declined — leaving PR for human review")
     finally:
         # Always put the dev's HEAD back, even if the batch raised. A swallowed
         # restore failure strands the dev on the lessons branch and (with in-repo
@@ -507,16 +531,6 @@ def _author_drain_locked(
 
     if pr is None:
         _log("author_drain: batch produced no commits — no PR opened")
-        return 0
-    _log(f"author_drain: opened lessons PR {pr}")
-    if MERGE_MODE == "auto_on_green":
-        result = green_bar_evaluate(paths)
-        _log("author_drain: " + result.summary().replace("\n", " | "))
-        if result.passed and branch.merge_pr(pr):
-            _log(f"author_drain: auto-merge enabled on {pr} (green bar passed)")
-        else:
-            _log("author_drain: green bar not satisfied (or merge declined) — "
-                 "leaving PR for human review")
     return 0
 
 

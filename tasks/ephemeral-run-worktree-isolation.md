@@ -128,23 +128,42 @@ the revert path + lesson→outcome traceability surface existing; until then def
 **Phase 3:**
 - [x] `merge_mode` knob (`LEARNING_MERGE_MODE`, default `human_review`; landed PR B) +
       the green bar (`green_bar.py`). Forward-check + schema stay author-time gates
-      (committed-on-branch ⟹ passed). Net-new: held-out + secondary **floors** over the
-      candidate corpus — `eval_held_out.score()` (extracted) vs
-      `LEARNING_GREEN_HELDOUT_FLOOR`, `eval_secondary` catch-rate (already exposed via
-      `SecondarySummary.catch_rate`) vs `LEARNING_GREEN_SECONDARY_FLOOR`. **Floors, not
-      pr-vs-base diffs** (a baseline re-run sweep is deferred); **fails closed** (unset/
-      unmet floor or provider error → not green → human review). Providers injected;
-      defaults lazy-wire the live evals (eval_secondary re-execs at import). Backlog
-      signal = queue depth + pending-file mtime age proxy. Tests: `test_loop.py` green_bar
-      floors/fail-closed (5) + score extraction (1) + author_drain auto-merge (4).
+      (committed-on-branch ⟹ passed). Net-new: held-out + secondary **floors** —
+      `eval_held_out.score()` (extracted; shares `report`'s counting via
+      `held_out_verdicts`, and a missing gt disposition can never score via
+      `None == None`) vs `LEARNING_GREEN_HELDOUT_FLOOR`, `eval_secondary` catch-rate
+      (via `SecondarySummary.catch_rate`) vs `LEARNING_GREEN_SECONDARY_FLOOR`. The
+      drain gates **before** restoring the dev's ref, so the secondary sweep runs
+      under the candidate lessons checkout (held-out still scores pre-batch runs);
+      the sweep's own head-runs land in a `secondary/` subdir so they never feed
+      later held-out floors. **Floors, not pr-vs-base diffs** (baseline re-run sweep
+      deferred); **fails closed** (unset/unmet floor, provider error, or a gate
+      crash — guarded at the drain — → not green → human review; a *malformed*
+      floor value fails loud). Secondary provider skipped once held_out already
+      failed (it's a live sweep). Providers injected; defaults lazy-wire the live
+      evals (eval_secondary re-execs at import) and reuse eval_secondary's
+      `FIXTURES_DIR`/`EVAL_OUT_DIR` (now gitignored — untracked eval output would
+      wedge the next drain's refuse-if-dirty). Backlog signal = queue depth only.
+      Tests: `test_loop.py` green_bar floors/fail-closed/skip (7) + score (1) +
+      author_drain merge paths (5).
 - [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping the
       default to `auto_on_green`) — PR D.
 
 **Phase 3 — deferred follow-ups:**
 - Strict held-out/secondary **no-regression** (PR-corpus vs base-corpus diff) needs a
-      baseline re-run harness; today's green bar uses absolute floors.
-- True oldest-queued **finding age** needs a per-row enqueue timestamp (backlog signal
-      currently uses the pending file's mtime as a proxy).
+      baseline re-run harness; today's green bar uses absolute floors, and the
+      held-out floor still scores runs produced under the pre-batch corpus.
+- True oldest-queued **finding age** needs a per-row enqueue timestamp (a pending-file
+      mtime proxy is anti-correlated — appends refresh mtime — so it was dropped).
+- `gh pr merge --auto` is declined on PRs with no pending required checks (clean
+      status) and on repos without auto-merge enabled — the drain then logs
+      "declined" and leaves the PR for review; a checks-green → direct-merge
+      fallback would close that gap.
+- The secondary sweep runs inside the author-drain flock and needs the live stack
+      (SIEM creds) in the author plane; consuming the most recent persisted
+      secondary summary instead of sweeping per drain tick would decouple that.
+- Backlog signal is only emitted on the `auto_on_green` path; under the default
+      `human_review` (where review backlog actually accumulates) nothing reports it.
 
 **Deferred / known scaling gaps (not MVP-blocking):**
 - Lesson loading at PLAN is enumerate-all-frontmatter; retrieval-based top-k is the

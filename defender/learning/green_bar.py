@@ -5,13 +5,17 @@ auto-merges or waits for human review.
 Schema/validator + forward-check are **author-time** gates that revert a bad edit
 *before* commit, so anything committed to the lessons branch passed them by
 construction — the green bar's net-new work is the held-out + secondary quality
-checks over runs produced under the candidate corpus.
+floors. The author drain evaluates the bar *before* restoring the dev's original
+ref, so the secondary sweep spawns its runs under the candidate lessons checkout;
+the held-out floor, by contrast, scores previously produced runs (the pre-batch
+corpus) — re-running held-out under the candidate is a deferred follow-up.
 
 Both checks are **floors**, not pr-vs-base diffs: producing a base run-set means a
 second expensive live sweep, deferred (a strict regression gate is a follow-up). The
 floors come from env and the bar **fails closed** — an unset or unmet floor, or a
 provider that errors (e.g. no live stack), means *not green* and the PR falls through
-to human review.
+to human review. A *malformed* floor value raises instead (misconfig fails loud,
+like the MERGE_MODE validation, rather than masquerading as "no floor configured").
 
 The metric providers are injected so the decision logic is unit-testable without the
 live stack; the defaults lazily wire ``eval_held_out.score`` and
@@ -29,13 +33,15 @@ from _loop_config import DEFAULT_PATHS, LoopPaths
 
 
 def _env_float(name: str) -> float | None:
+    """None when unset/empty; a malformed value raises rather than silently
+    degrading to the (misleading) "no floor configured" check detail."""
     raw = os.environ.get(name)
     if not raw:
         return None
     try:
         return float(raw)
     except ValueError:
-        return None
+        raise ValueError(f"{name} must be a float; got {raw!r}") from None
 
 
 def _default_runs_dir() -> Path:
@@ -80,12 +86,13 @@ def _default_secondary_catch_rate() -> float | None:
     import eval_secondary
     summary = eval_secondary.run_secondary(
         k=int(os.environ.get("LEARNING_SECONDARY_K", "3")),
-        out_dir=Path(os.environ.get(
-            "LEARNING_SECONDARY_OUT",
-            str(DEFAULT_PATHS.learning_dir / "eval" / "secondary"),
-        )),
-        runs_base=_default_runs_dir(),
-        fixtures_dir=DEFAULT_PATHS.repo_root / "defender" / "fixtures",
+        out_dir=eval_secondary.EVAL_OUT_DIR,
+        # The sweep's head-runs must not land beside the runs the held-out floor
+        # scores: run.py copies each fixture's ground_truth.yaml (held_out: true)
+        # into its run dir, and held-out scoring scans direct children of the runs
+        # base — a subdir keeps sweep by-products out of every later evaluation.
+        runs_base=_default_runs_dir() / "secondary",
+        fixtures_dir=eval_secondary.FIXTURES_DIR,
         repo_root=DEFAULT_PATHS.repo_root,
     )
     caught, denom = summary.catch_rate()
@@ -96,22 +103,16 @@ def _default_secondary_catch_rate() -> float | None:
 
 
 def _backlog_signal(paths: LoopPaths) -> dict:
-    """Queue depth across the three pending queues + a pending-file mtime age proxy.
-
-    §4.3 asks for oldest-queued finding age + depth; the queue rows carry no
-    timestamp, so age is the pending file's mtime here (a follow-up adds a per-row
-    enqueue ts for true oldest-finding age)."""
-    import time
+    """Queue depth across the three pending queues. §4.3 also wants oldest-queued
+    finding age, but the queue rows carry no timestamp and a file-mtime proxy is
+    anti-correlated with it (every append refreshes mtime, so a hot queue reads
+    ~0 exactly while its oldest rows age) — age waits on a per-row enqueue ts."""
     depth = 0
-    oldest_mtime: float | None = None
     for f in (paths.pending_file, paths.actor_observations_file,
               paths.environment_observations_file):
         if f.is_file():
             depth += sum(1 for line in f.read_text().splitlines() if line.strip())
-            m = f.stat().st_mtime
-            oldest_mtime = m if oldest_mtime is None else min(oldest_mtime, m)
-    age_s = int(time.time() - oldest_mtime) if oldest_mtime is not None else None
-    return {"queue_depth": depth, "oldest_pending_age_s": age_s}
+    return {"queue_depth": depth}
 
 
 # --- the gate ---------------------------------------------------------------
@@ -170,10 +171,16 @@ def evaluate(
     if secondary_catch_rate is None:
         secondary_catch_rate = _default_secondary_catch_rate
 
-    checks = [
-        _check_held_out(runs_dir, held_out_floor, held_out_score),
-        _check_secondary(secondary_floor, secondary_catch_rate),
-    ]
+    held_out = _check_held_out(runs_dir, held_out_floor, held_out_score)
+    if held_out.passed or secondary_floor is None:
+        secondary = _check_secondary(secondary_floor, secondary_catch_rate)
+    else:
+        # The default secondary provider is a live multi-run sweep — don't pay
+        # for it when the verdict is already not-green. (A None floor never
+        # reaches the provider inside _check_secondary, so that arm stays free
+        # and keeps the accurate "no floor configured" detail.)
+        secondary = Check("secondary", False, "skipped — held_out check already failed")
+    checks = [held_out, secondary]
     return GreenBarResult(
         passed=all(c.passed for c in checks),
         checks=checks,
