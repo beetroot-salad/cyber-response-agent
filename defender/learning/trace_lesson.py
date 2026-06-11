@@ -12,19 +12,24 @@ Usage:
   trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>
   trace_lesson.py <lesson_name>         # per-case: case_id  disposition  loaded_at
 
-Runs scanned: ``$DEFENDER_RUNS_BASE`` (or ``--runs-dir``); lessons: defender/lessons/.
+Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
+``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
+where the learn worker persists each case's ``report.md`` + ``lessons_loaded.jsonl``.
+Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
+``--no-learn`` dev runs that are never persisted). Lessons: defender/lessons/.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
+
+from _loop_config import DEFAULT_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
@@ -32,7 +37,11 @@ _FRONTMATTER_END = "\n---"
 
 
 def _default_runs_dir() -> Path:
-    return Path(os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs"))
+    """The durable learning runs dir, NOT the ephemeral ``$DEFENDER_RUNS_BASE``
+    (/tmp) the live runtime writes to — that is swept on reboot, silently emptying
+    the trace. ``--no-learn`` runs (dev-only, never persisted) are out of scope by
+    default; pass ``--runs-dir`` to scan the ephemeral base directly."""
+    return DEFAULT_PATHS.runs_dir
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -49,14 +58,25 @@ def _parse_frontmatter(text: str) -> dict:
 
 
 def _parse_dt(raw) -> datetime | None:
-    if not isinstance(raw, (str, datetime)):
-        return None
+    """Parse a frontmatter/hook timestamp to a timezone-aware UTC datetime.
+
+    ``created_at`` is LLM-authored, so accept the shapes PyYAML yields: a tz-aware
+    or naive ``datetime`` (naive assumed UTC — the hook stamps ``datetime.now(UTC)``),
+    a bare ``date`` (``created_at: 2026-06-04`` → UTC midnight), or an ISO-8601
+    string. Always returns an *aware* datetime so comparisons against the aware hook
+    timestamps never raise ``TypeError: can't compare offset-naive and offset-aware``.
+    Check ``datetime`` before ``date`` — ``datetime`` is a ``date`` subclass."""
     if isinstance(raw, datetime):
-        return raw
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, date):
+        return datetime(raw.year, raw.month, raw.day, tzinfo=timezone.utc)
+    if not isinstance(raw, str):
+        return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -67,9 +87,13 @@ class LessonMeta:
 
 
 def lesson_meta(path: Path) -> LessonMeta:
+    """Lesson identity is the **file stem** — that is what ``record_lesson_load``
+    writes into ``lessons_loaded.jsonl`` and what ``trace_lesson <name>`` /
+    ``revert_lesson <name>`` take. Matching on the frontmatter ``name`` (which
+    nothing forces to equal the stem) would silently miss every recorded load."""
     fm = _parse_frontmatter(path.read_text())
     return LessonMeta(
-        name=str(fm.get("name") or path.stem),
+        name=path.stem,
         description=str(fm.get("description") or ""),
         created_at=_parse_dt(fm.get("created_at")),
     )

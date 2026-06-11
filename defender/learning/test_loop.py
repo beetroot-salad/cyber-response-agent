@@ -689,9 +689,9 @@ class _FakeBranch:
     def restore_ref(self, ref: str) -> None:
         self.events.append(f"restore:{ref}")
 
-    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> bool:
+    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> tuple[bool, str]:
         self.merged.append(pr_ref)
-        return self._merge_ok
+        return self._merge_ok, "" if self._merge_ok else "gh: auto-merge declined"
 
 
 def _green(passed: bool):
@@ -1106,7 +1106,8 @@ def _cp(stdout: str = "", returncode: int = 0, stderr: str = ""):
     return _subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
-def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1):
+def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1,
+                lesson_on_base: bool = True):
     def run(args):
         run.calls.append(list(args))
         a = list(args)
@@ -1116,6 +1117,8 @@ def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1):
             return _cp(stdout=ref)
         if a[:2] == ["rev-list", "--count"]:
             return _cp(stdout=str(ahead))
+        if a[:2] == ["cat-file", "-e"]:  # revert existence check vs origin/main
+            return _cp(returncode=0 if lesson_on_base else 1)
         return _cp()  # fetch / checkout / push succeed silently
 
     run.calls = []
@@ -1222,6 +1225,48 @@ def test_author_branch_revert_refuses_dirty_tree():
         b.revert_lesson_pr("defender/lessons/bad.md", "bad")
 
 
+def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
+    """revert() acquires the author-drain flock, then opens the revert PR."""
+    import revert_lesson as rl  # type: ignore[import-not-found]
+    paths = LoopPaths(repo_root=tmp_path)
+    git = _git_runner(ref="main")
+    b = ab.AuthorBranch(git=git, gh=_gh_runner(create_out="https://pr/7"))
+    assert rl.revert("bad", branch=b, paths=paths) == 0
+    assert ["rm", "defender/lessons/bad.md"] in git.calls
+
+
+def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
+    """A revert run while an author drain holds the lock fails fast (rc 3), without
+    touching git — no racing checkout -B against the in-flight batch."""
+    import fcntl as _fcntl
+
+    import revert_lesson as rl  # type: ignore[import-not-found]
+    paths = LoopPaths(repo_root=tmp_path)
+    lock = paths.author_drain_lock_file
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = lock.open("a+")
+    _fcntl.flock(holder.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+    try:
+        git = _git_runner(ref="main")
+        b = ab.AuthorBranch(git=git, gh=_gh_runner())
+        assert rl.revert("bad", branch=b, paths=paths) == 3
+        assert git.calls == []  # never reached revert_lesson_pr
+    finally:
+        _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_author_branch_revert_refuses_missing_lesson_on_base():
+    """Existence is checked against origin/main, not the local tree — a lesson absent
+    from the base raises before any branch churn (no stray local revert branch)."""
+    git = _git_runner(ref="main", lesson_on_base=False)
+    b = ab.AuthorBranch(git=git, gh=_gh_runner())
+    with pytest.raises(ab.BranchError):
+        b.revert_lesson_pr("defender/lessons/ghost.md", "ghost")
+    assert ["cat-file", "-e", "origin/main:defender/lessons/ghost.md"] in git.calls
+    assert not any(c[:2] == ["checkout", "-B"] for c in git.calls)  # no branch churn
+
+
 # ---------------------------------------------------------------------------
 # author_drain auto_on_green path (green bar gates the merge)
 # ---------------------------------------------------------------------------
@@ -1270,7 +1315,22 @@ def test_author_drain_auto_on_green_leaves_pr_when_not_green(tmp_path: Path, mon
         paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
         branch=branch, green_bar_evaluate=_green(False),
     )
-    assert branch.merged == []  # not green → no auto-merge
+    assert branch.merged == []  # not green → merge_pr never attempted
+
+
+def test_author_drain_auto_on_green_merge_declined_leaves_pr(tmp_path: Path, monkeypatch):
+    """Green bar passes but gh declines the merge — the attempt is made, no crash,
+    and the PR is left for human review (the merge-decline branch is distinct from
+    the red-bar branch in the orchestrator's logging)."""
+    monkeypatch.setattr(orch, "MERGE_MODE", "auto_on_green")
+    paths, _ = _isolate(tmp_path)
+    _enqueue_one(paths, tmp_path, "case-decline")
+    branch = _FakeBranch(commits=1, merge_ok=False)
+    orch.author_drain(
+        paths, run_lead_author=lambda rd: None, trigger_author=lambda *a: None,
+        branch=branch, green_bar_evaluate=_green(True),
+    )
+    assert len(branch.merged) == 1  # merge attempted (green) but gh returned not-ok
 
 
 def test_author_drain_auto_on_green_no_pr_skips_green_bar(tmp_path: Path, monkeypatch):
@@ -1317,6 +1377,20 @@ def test_eval_held_out_score_counts_failures_wrong(tmp_path: Path):
     assert abs(acc - 1 / 3) < 1e-9
 
 
+def test_eval_held_out_score_no_report_no_gt_disposition_counts_wrong(tmp_path: Path):
+    """A crashed held-out run (no report.md) whose ground_truth.yaml also lacks a
+    disposition must count wrong — `None == None` must not inflate the green bar."""
+    import eval_held_out  # type: ignore[import-not-found]
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    rd = runs / "broken"
+    rd.mkdir()
+    (rd / "ground_truth.yaml").write_text("held_out: true\n")  # no disposition, no report.md
+    correct, total, acc = eval_held_out.score(runs)
+    assert (correct, total) == (0, 1)
+    assert acc == 0.0
+
+
 def test_green_bar_passes_when_both_floors_met():
     r = gb.evaluate(
         held_out_floor=0.8, secondary_floor=0.5,
@@ -1338,7 +1412,11 @@ def test_green_bar_fails_when_held_out_below_floor():
     assert not held.passed
 
 
-def test_green_bar_fails_closed_without_floors():
+def test_green_bar_fails_closed_without_floors(monkeypatch):
+    # The "no floor configured" path keys on env absence; clear the vars so a dev who
+    # exports them (the auto_on_green config) doesn't make this pass spuriously.
+    monkeypatch.delenv("LEARNING_GREEN_HELDOUT_FLOOR", raising=False)
+    monkeypatch.delenv("LEARNING_GREEN_SECONDARY_FLOOR", raising=False)
     r = gb.evaluate(
         held_out_score=lambda p: (10, 10, 1.0), secondary_catch_rate=lambda: 1.0,
     )

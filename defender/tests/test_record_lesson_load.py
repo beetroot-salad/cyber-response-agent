@@ -75,3 +75,21 @@ def test_noop_without_run_dir(monkeypatch):
     mod = _load()
     monkeypatch.delenv("DEFENDER_RUN_DIR", raising=False)
     assert _run(mod, _read_event("/repo/defender/lessons/foo.md")) == 0
+
+
+def test_non_dict_payload_exits_zero(monkeypatch, tmp_path):
+    """A JSON array/string on stdin must not raise AttributeError — exit 0 (best-effort)."""
+    mod = _load()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    assert mod.main(stdin=io.StringIO("[]")) == 0
+    assert mod.main(stdin=io.StringIO('"x"')) == 0
+    assert not (tmp_path / "lessons_loaded.jsonl").exists()
+
+
+def test_append_oserror_exits_zero(monkeypatch, tmp_path):
+    """An OSError on the append (here: target path is a directory) must degrade to
+    exit 0, not surface a traceback into the run."""
+    mod = _load()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    (tmp_path / "lessons_loaded.jsonl").mkdir()  # open('a') → IsADirectoryError
+    assert _run(mod, _read_event("/repo/defender/lessons/foo.md")) == 0

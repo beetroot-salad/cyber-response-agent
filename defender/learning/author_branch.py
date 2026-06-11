@@ -144,12 +144,15 @@ class AuthorBranch:
         ``finally`` so the drain never strands them on the lessons branch."""
         self.git(["checkout", ref])
 
-    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> bool:
+    def merge_pr(self, pr_ref: str, *, squash: bool = True) -> tuple[bool, str]:
         """Enable auto-merge on the PR (GitHub merges it once required checks pass).
-        Returns True if ``gh`` accepted the request. Best-effort: a gh failure (e.g.
-        auto-merge not enabled on the repo) leaves the PR open for a manual merge."""
+        Returns ``(accepted, detail)``: ``accepted`` is True when ``gh`` exits 0; on
+        failure ``detail`` carries ``gh``'s stderr so the caller can tell a merge
+        decline (auto-merge disabled, wrong PR state) apart from a red green bar.
+        Best-effort: a gh failure leaves the PR open for a manual merge."""
         args = ["pr", "merge", pr_ref, "--auto", "--squash" if squash else "--merge"]
-        return self.gh(args).returncode == 0
+        proc = self.gh(args)
+        return proc.returncode == 0, proc.stderr.strip()
 
     def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:
         """Open a PR that removes one lesson file — the one-click revert (§4.4).
@@ -163,6 +166,11 @@ class AuthorBranch:
         original_ref = self.current_ref()
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
         self._git_ok(["fetch", "origin"])
+        # Existence is checked against ``origin/main`` — the base we branch off — NOT
+        # the dev's local tree (which may lag or lead it). Done before any branch
+        # churn, so a missing lesson leaves HEAD where it was.
+        if self.git(["cat-file", "-e", f"{_BRANCH_BASE}:{lesson_rel_path}"]).returncode != 0:
+            raise BranchError(f"no such lesson on {_BRANCH_BASE}: {lesson_rel_path}")
         self._git_ok(["checkout", "-B", branch, _BRANCH_BASE])
         try:
             self._git_ok(["rm", lesson_rel_path])

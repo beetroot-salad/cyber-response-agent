@@ -496,11 +496,15 @@ def _author_drain_locked(
     if MERGE_MODE == "auto_on_green":
         result = green_bar_evaluate(paths)
         _log("author_drain: " + result.summary().replace("\n", " | "))
-        if result.passed and branch.merge_pr(pr):
-            _log(f"author_drain: auto-merge enabled on {pr} (green bar passed)")
+        if not result.passed:
+            _log("author_drain: green bar not satisfied — leaving PR for human review")
         else:
-            _log("author_drain: green bar not satisfied (or merge declined) — "
-                 "leaving PR for human review")
+            merged, detail = branch.merge_pr(pr)
+            if merged:
+                _log(f"author_drain: auto-merge enabled on {pr} (green bar passed)")
+            else:
+                _log(f"author_drain: green bar passed but gh declined the merge request "
+                     f"({detail or 'no detail'}) — leaving PR for human review")
     return 0
 
 

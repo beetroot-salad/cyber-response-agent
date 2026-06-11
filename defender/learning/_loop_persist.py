@@ -238,6 +238,13 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             if not src.is_file():
                 raise LoopError(f"missing source artifact for persist: {src}")
             shutil.copy2(src, learning_run_dir / name)
+        # Best-effort: the lesson-load trace (record_lesson_load hook). Optional —
+        # a run that loaded no lesson has none — so it is NOT in PERSIST_COPY_FILES;
+        # copy it when present so trace_lesson survives the ephemeral run dir being
+        # swept (it scans this durable dir, which also carries report.md above).
+        loaded = run_dir / "lessons_loaded.jsonl"
+        if loaded.is_file():
+            shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
         # The two live tables (queries JSONL + the gather_raw/ tree). Staged
         # via the single lead_repository helper so this and the secondary-eval
         # staging step share one definition of the on-disk table set.

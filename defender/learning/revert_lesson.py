@@ -13,30 +13,49 @@ Usage:
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import sys
-from pathlib import Path
 
+from _loop_config import DEFAULT_PATHS, LoopPaths
 from author_branch import AuthorBranch, BranchError
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_REL = "defender/lessons"
 
 
-def revert(lesson_name: str, *, branch: AuthorBranch | None = None) -> int:
+def revert(
+    lesson_name: str, *, branch: AuthorBranch | None = None, paths: LoopPaths = DEFAULT_PATHS
+) -> int:
+    """Open a one-click revert PR for ``defender/lessons/<lesson_name>.md``.
+
+    Holds the author-drain flock for the duration so an in-flight ``author_drain``
+    batch can't move the shared checkout out from under the ``checkout -B`` (and vice
+    versa). Existence is verified against ``origin/main`` inside ``revert_lesson_pr``."""
     if branch is None:
         branch = AuthorBranch()
-    lesson_path = REPO_ROOT / LESSONS_REL / f"{lesson_name}.md"
-    if not lesson_path.is_file():
-        print(f"no such lesson: {lesson_path}", file=sys.stderr)
-        return 1
     rel = f"{LESSONS_REL}/{lesson_name}.md"
+
+    lock_path = paths.author_drain_lock_file
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = lock_path.open("a+")
     try:
-        pr = branch.revert_lesson_pr(rel, lesson_name)
-    except BranchError as e:
-        print(f"[revert_lesson] FATAL: {e}", file=sys.stderr)
-        return 2
-    print(f"opened revert PR: {pr}")
-    return 0
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("[revert_lesson] an author drain is in progress — retry shortly",
+                  file=sys.stderr)
+            return 3
+        try:
+            pr = branch.revert_lesson_pr(rel, lesson_name)
+        except BranchError as e:
+            print(f"[revert_lesson] FATAL: {e}", file=sys.stderr)
+            return 2
+        print(f"opened revert PR: {pr}")
+        return 0
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
 
 
 def main(argv: list[str]) -> int:

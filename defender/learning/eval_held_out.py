@@ -71,15 +71,18 @@ def held_out_runs(runs_dir: Path) -> list[Path]:
 
 def score(runs_dir: Path) -> tuple[int, int, float]:
     """(correct, total, accuracy) over held-out runs — the numeric the green bar
-    compares against a floor. Mirrors ``report``'s counting (a run that fails to
-    produce a parseable report counts wrong, never excluded). ``accuracy`` is 0.0
-    when there are no held-out runs; callers gate on ``total``."""
+    compares against a floor. A run that fails to produce a parseable report
+    (``predicted_disposition`` is None) counts **wrong**, never excluded — and never
+    matches an absent/null ground-truth disposition (``None == None`` would silently
+    inflate the gate). ``accuracy`` is 0.0 when there are no held-out runs; callers
+    gate on ``total``."""
     runs = held_out_runs(runs_dir)
     correct = 0
     for run_dir in runs:
         gt_doc = yaml.safe_load((run_dir / "ground_truth.yaml").read_text())
         true_disp = gt_doc.get("disposition") if isinstance(gt_doc, dict) else None
-        if predicted_disposition(run_dir) == true_disp:
+        pred = predicted_disposition(run_dir)
+        if pred is not None and pred == true_disp:
             correct += 1
     total = len(runs)
     return correct, total, (correct / total if total else 0.0)

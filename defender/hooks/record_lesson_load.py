@@ -45,18 +45,23 @@ def main(*, stdin=None) -> int:
         hook_data = json.loads((stdin or sys.stdin).read())
     except (json.JSONDecodeError, ValueError):
         return 0
-    if hook_data.get("tool_name") != "Read":
+    if not isinstance(hook_data, dict) or hook_data.get("tool_name") != "Read":
         return 0
-    run_dir = resolve_run_dir()
-    if run_dir is None:
+    try:
+        # Cheap string filter before resolve_run_dir's stat — most Reads aren't lessons.
+        tool_input = hook_data.get("tool_input")
+        file_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
+        name = lesson_name(str(file_path))
+        if name is None:
+            return 0
+        run_dir = resolve_run_dir()
+        if run_dir is None:
+            return 0
+        row = {"lesson_name": name, "ts": datetime.now(UTC).isoformat(timespec="seconds")}
+        with (run_dir / "lessons_loaded.jsonl").open("a") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001 — best-effort; the contract is to always exit 0
         return 0
-    file_path = (hook_data.get("tool_input") or {}).get("file_path", "")
-    name = lesson_name(str(file_path))
-    if name is None:
-        return 0
-    row = {"lesson_name": name, "ts": datetime.now(UTC).isoformat(timespec="seconds")}
-    with (run_dir / "lessons_loaded.jsonl").open("a") as fh:
-        fh.write(json.dumps(row) + "\n")
     return 0
 
 
