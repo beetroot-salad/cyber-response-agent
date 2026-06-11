@@ -466,7 +466,16 @@ def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None
         raise AuthorError(f"author result missing findings: {unseen}")
 
 
-def run_batch() -> int:
+def run_batch(*, hold_committed: bool = False) -> int:
+    """Drain a findings batch into the lessons corpus.
+
+    ``hold_committed`` (set by the serial author drain, which commits onto an
+    unmerged PR branch) keeps the just-committed findings in the queue instead of
+    rotating them to ``consumed.jsonl``, so a rejected/edited PR can't strand
+    them: they re-author next batch unless the PR merged — in which case
+    ``existing_finding_ids()`` (reading the post-fetch ``origin/main`` corpus)
+    filters them to ``consumed_idempotent`` and they rotate out cleanly. Standalone
+    callers leave it False (today's commit-and-rotate behavior)."""
     lock_fh = acquire_lock()
     if lock_fh is None:
         _log("lock held by another process — skipping this tick")
@@ -483,14 +492,14 @@ def run_batch() -> int:
         except AuthorError as e:
             _log(f"FATAL: {e}")
             return 2
-        return _run_batch_inner()
+        return _run_batch_inner(hold_committed=hold_committed)
     finally:
         if repo_lock is not None:
             _shared.release_repo_lock(repo_lock)
         release_lock(lock_fh)
 
 
-def _run_batch_inner() -> int:
+def _run_batch_inner(*, hold_committed: bool = False) -> int:
     batch = read_batch()
     if not batch:
         _log("queue empty — nothing to author")
@@ -520,10 +529,18 @@ def _run_batch_inner() -> int:
         if rc != 0:
             return rc
 
+    # Under the drain (hold_committed) the commit lands on an unmerged PR branch,
+    # so keep `committed` in the queue (stripped of the consumed stamp) rather than
+    # rotating it to consumed.jsonl. `consumed_idempotent` (already in origin/main)
+    # and `consumed_skip` (no lesson anchor → would re-author forever if held) ALWAYS
+    # rotate out. See author_branch.py / platform-design §4.4.
+    held_committed, rotated_committed = _shared.partition_committed(
+        committed, hold_committed=hold_committed
+    )
     try:
         rotate_queue(
-            held=held + held_forward_bad,
-            consumed=consumed_idempotent + committed + consumed_skip,
+            held=held + held_forward_bad + held_committed,
+            consumed=consumed_idempotent + rotated_committed + consumed_skip,
             commit_sha=commit_sha,
         )
     except AuthorError as e:

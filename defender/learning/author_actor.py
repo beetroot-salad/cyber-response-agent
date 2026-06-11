@@ -509,7 +509,13 @@ def _by_id(rows: list[dict]) -> dict[str, dict]:
     return {r["observation_id"]: r for r in rows}
 
 
-def run_batch() -> int:
+def run_batch(*, hold_committed: bool = False) -> int:
+    """Drain an actor-observation batch into the actor-lessons corpus.
+
+    ``hold_committed`` (set by the serial author drain) keeps just-committed
+    observations in the queue instead of rotating them out — see
+    ``author.run_batch`` for the rationale (a rejected PR must not strand them;
+    a merged one filters them via ``existing_*_ids`` next batch)."""
     queue_lock = acquire_queue_lock()
     if queue_lock is None:
         _log("queue lock held by another process — skipping this tick")
@@ -526,14 +532,14 @@ def run_batch() -> int:
         except AuthorError as e:
             _log(f"FATAL: {e}")
             return 2
-        return _run_batch_inner()
+        return _run_batch_inner(hold_committed=hold_committed)
     finally:
         if repo_lock is not None:
             _shared.release_repo_lock(repo_lock)
         release_queue_lock(queue_lock)
 
 
-def _run_batch_inner() -> int:
+def _run_batch_inner(*, hold_committed: bool = False) -> int:
     batch = read_batch()
     if not batch:
         _log("queue empty — nothing to author")
@@ -559,10 +565,16 @@ def _run_batch_inner() -> int:
         if rc != 0:
             return rc
 
+    # hold_committed: keep `committed` in the queue (stripped of the consumed
+    # stamp) instead of rotating it out, since the commit is on an unmerged PR
+    # branch. consumed_pre + consumed_skip always rotate out. See author.py.
+    held_committed, rotated_committed = _shared.partition_committed(
+        committed, hold_committed=hold_committed
+    )
     try:
         rotate_queue(
-            held=held,
-            consumed=consumed_pre + committed + consumed_skip,
+            held=held + held_committed,
+            consumed=consumed_pre + rotated_committed + consumed_skip,
             commit_sha=commit_sha,
         )
     except AuthorError as e:

@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
@@ -26,11 +27,14 @@ from _loop_config import (
     DEFAULT_PATHS,
     GROUND_TRUTH_FILE,
     LEARNING_DIR,
+    MERGE_MODE,
+    VALID_MERGE_MODES,
     LoopError,
     LoopPaths,
     _log,
 )
 from _loop_directions import BY_NAME, Direction, ObsTrigger
+from author_branch import AuthorBranch, BranchError
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from _loop_validate import (
@@ -236,7 +240,10 @@ def _maybe_trigger_author(
         _log(f"{pending_label}={pending_count} threshold={threshold} — {module_name} not invoked")
         return
     _log(f"step={module_name} {pending_label}={pending_count} threshold={threshold}")
-    rc = _run_curator_module(module_name, lambda mod: mod.run_batch())
+    # hold_committed: the drain commits onto an unmerged PR branch, so curators
+    # keep committed findings queued (re-authored if the PR is rejected, filtered
+    # by existing_*_ids once merged) rather than rotating them out. See author.py.
+    rc = _run_curator_module(module_name, lambda mod: mod.run_batch(hold_committed=True))
     if rc not in (0, None):
         _log(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
 
@@ -390,11 +397,37 @@ def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -
     _log(f"quarantined {spec.get('run_id')} — {reason}")
 
 
-def _author_drain_locked(
+def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
+    """The (pending_file, threshold_env) pairs the three curators drain."""
+    checks = [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
+    for direction in BY_NAME.values():
+        t: ObsTrigger = direction.obs_trigger
+        checks.append((t.pending_file(paths), t.threshold_env))
+    return checks
+
+
+def _has_drain_work(paths: LoopPaths) -> bool:
+    """Whether a drain would do anything — markers queued, or a curator queue at
+    threshold. Lets the drain skip touching git (no branch churn) on empty ticks."""
+    qdir = paths.author_queue_dir
+    if qdir.is_dir() and any(qdir.glob("*.json")):
+        return True
+    for pending_file, env in _curator_queue_checks(paths):
+        threshold = int(os.environ.get(env, "5"))
+        if pending_file.is_file():
+            n = sum(1 for line in pending_file.read_text().splitlines() if line.strip())
+            if n >= threshold:
+                return True
+    return False
+
+
+def _drain_lead_author_and_curators(
     paths: LoopPaths,
     run_lead_author: Callable[[Path], None],
     trigger_author: Callable[[Path, str, str, str], None],
-) -> int:
+) -> None:
+    """The actual authoring work: lead-author each queued run dir, then the
+    threshold-gated findings/observation curators. Runs on the lessons branch."""
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
     _log(f"author_drain: {len(markers)} run(s) queued for lead-author")
@@ -418,12 +451,68 @@ def _author_drain_locked(
         with contextlib.suppress(OSError):
             marker.unlink()
 
-    # Findings + per-direction observation curators drain the accumulated queues
-    # (threshold-gated — identical semantics to the old in-run trigger).
     trigger_author(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
     for direction in BY_NAME.values():
         t: ObsTrigger = direction.obs_trigger
         trigger_author(t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label)
+
+
+def _author_drain_locked(
+    paths: LoopPaths,
+    run_lead_author: Callable[[Path], None],
+    trigger_author: Callable[[Path, str, str, str], None],
+    branch: AuthorBranch,
+) -> int:
+    if not _has_drain_work(paths):
+        _log("author_drain: nothing queued and no curator at threshold — skipping")
+        return 0
+
+    # Writer lease (§4.4): at most one open lessons PR per tenant, so we never form
+    # a second divergent branch. Under human_review the lease naturally spans the
+    # whole review window.
+    try:
+        if branch.open_lessons_pr_exists():
+            _log("author_drain: an open lessons PR holds the writer lease — skipping")
+            return 0
+        batch_id = uuid.uuid4().hex[:12]
+        original_ref = branch.start_batch_branch(batch_id)
+    except BranchError as e:
+        _log(f"author_drain: cannot start batch branch: {e} — skipping")
+        return 0
+
+    pr = None
+    try:
+        _drain_lead_author_and_curators(paths, run_lead_author, trigger_author)
+        try:
+            pr = branch.finish_batch(batch_id)
+        except BranchError as e:
+            # push / `gh pr create` failed (auth, network, branch already on
+            # origin). The findings were held (hold_committed), so they stay
+            # queued and re-author next tick — don't crash the serial drainer
+            # (BranchError is not a LoopError, so main() would not catch it).
+            _log(f"author_drain: finish_batch failed: {e} — findings stay queued, "
+                 "retry next tick")
+    finally:
+        # Always put the dev's HEAD back, even if the batch raised. A swallowed
+        # restore failure strands the dev on the lessons branch and (with in-repo
+        # state) wedges every future drain on the refuse-if-dirty check, so
+        # surface it loudly instead of suppressing silently.
+        restored = False
+        with contextlib.suppress(Exception):
+            restored = branch.restore_ref(original_ref)
+        if not restored:
+            _log(f"author_drain: WARNING could not restore HEAD to {original_ref!r} "
+                 "— dev checkout may be stranded on the lessons branch")
+
+    if pr is None:
+        _log("author_drain: batch produced no commits — no PR opened")
+        return 0
+    _log(f"author_drain: opened lessons PR {pr}")
+    if MERGE_MODE == "auto_on_green":
+        # PR C wires the green bar + `gh pr merge --auto` here; until then the PR
+        # falls through to human review even under auto_on_green.
+        _log("author_drain: merge_mode=auto_on_green — green-bar auto-merge not yet "
+             "wired (PR C); leaving PR for review")
     return 0
 
 
@@ -432,20 +521,34 @@ def author_drain(
     *,
     run_lead_author: Callable[[Path], None] | None = None,
     trigger_author: Callable[[Path, str, str, str], None] | None = None,
+    branch: AuthorBranch | None = None,
 ) -> int:
-    """Serial AUTHOR stage: drain the author-work queue (lead-author per run dir)
-    then the findings/observation queues (threshold-gated), committing locally.
+    """Serial AUTHOR stage: branch off freshly-fetched ``origin/main``, lead-author
+    each queued run dir + drain the threshold-gated findings/observation curators
+    (committing on the branch), then push and open one PR.
+
+    The **writer lease** (one open lessons PR at a time) plus the in-place branch
+    keep batches non-conflicting; ``merge_mode`` (default ``human_review``) decides
+    whether the PR auto-merges on a green bar (PR C) or waits for a human.
 
     One live drainer at a time, guarded by a non-blocking flock on a *dedicated*
     lock (``author_drain_lock_file``) — distinct from the curators' repo lock so
     the curators it calls can take that without a same-process deadlock. A second
-    drainer that can't grab the lock simply exits; the live one will pick up any
-    work it enqueued. ``run_lead_author`` / ``trigger_author`` are injectable for
-    tests."""
+    drainer that can't grab the lock simply exits. ``run_lead_author`` /
+    ``trigger_author`` / ``branch`` are injectable for tests."""
+    if MERGE_MODE not in VALID_MERGE_MODES:
+        # Validated here (the author stage), not at _loop_config import, so an
+        # author-only misconfig fails loud for *this* stage without crashing the
+        # LEARN / run_one importers that never read it. main() maps LoopError→rc 2.
+        raise LoopError(
+            f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
+        )
     if run_lead_author is None:
         run_lead_author = _invoke_lead_author
     if trigger_author is None:
         trigger_author = _maybe_trigger_author
+    if branch is None:
+        branch = AuthorBranch()
 
     lock_path = paths.author_drain_lock_file
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -456,7 +559,7 @@ def author_drain(
         except OSError:
             _log("author_drain: another drainer holds the lock — exiting")
             return 0
-        return _author_drain_locked(paths, run_lead_author, trigger_author)
+        return _author_drain_locked(paths, run_lead_author, trigger_author, branch)
     finally:
         with contextlib.suppress(OSError):
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)

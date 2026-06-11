@@ -213,6 +213,16 @@ JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "low")
 BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "low")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
+# Author merge gating (platform-design §4.4). The serial author always opens a PR
+# (audit trail); this knob decides whether it auto-merges on a green bar or waits
+# for human review. Default `human_review` until the revert + lesson→outcome
+# traceability surface lands (PR D) — see tasks/ephemeral-run-worktree-isolation.md.
+# Validated lazily at the author stage (see _loop_orchestrate.author_drain), NOT
+# here: this module is imported by every learning stage (LEARN, run_one, run.py's
+# post-step), and a typo'd author-only knob must not crash stages that never merge.
+VALID_MERGE_MODES = ("auto_on_green", "human_review")
+MERGE_MODE = os.environ.get("LEARNING_MERGE_MODE", "human_review")
+
 
 class LoopError(Exception):
     """Fatal orchestrator error — caller should stop processing this run."""

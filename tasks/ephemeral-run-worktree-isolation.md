@@ -87,9 +87,23 @@ the revert path + lesson→outcome traceability surface existing; until then def
       per-directory (58 / 16 / 111).
 
 **Phase 2:**
-- [ ] Author **in-place branch** off freshly-fetched `origin/main` per batch +
-      `gh pr create` + auto-merge wiring (decided: in-place branch, not a worktree —
-      no `REPO_ROOT` injection).
+- [x] Author **in-place branch** off freshly-fetched `origin/main` per batch +
+      `gh pr create` (decided: in-place branch, not a worktree — no `REPO_ROOT`
+      injection). New `author_branch.py` (injected git/gh runners): writer lease
+      (`gh pr list --search "head:lessons/"` — `--head` is exact, not a glob),
+      refuse-if-dirty `start_batch_branch`, push + PR `finish_batch`, always-restore
+      `restore_ref`. `author_drain` checks the lease, branches, drains lead-author +
+      curators on the branch, opens one PR, restores HEAD; `_has_drain_work` skips git
+      churn on empty ticks. **Findings stay queued until merge:** curators get
+      `hold_committed=True` under the drain — `committed` rows stay in the queue
+      (stripped of the consumed stamp), `consumed_idempotent` + `consumed_skip` always
+      rotate out; a merged PR's findings are filtered next batch via
+      `existing_*_ids`, a rejected PR's re-author. `merge_mode` knob added
+      (`LEARNING_MERGE_MODE`, default `human_review`; `auto_on_green` path is PR C).
+      Tests: `test_loop.py` author_branch (8) + author_drain lease/no-work/dirty/
+      no-commit (4), `test_author_atomic.py` hold-committed cycle (2).
+- [ ] Auto-merge wiring (`gh pr merge --auto` on the green bar) — folded into PR C
+      (`auto_on_green`), since the gate that decides the merge lives in the green bar.
 - [x] Off-process LEARN worker (SIEM-free) draining run-dir artifacts; promoted the
       in-`run.py` learn call to a standalone stage. `run.py` now drops a
       `learn-queue/<run-id>.json` marker (instead of in-process `run_one`); a
