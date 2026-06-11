@@ -56,16 +56,12 @@
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
-  "remoteEnv": {
-    "SOC_AGENT_RUNS_DIR": "${containerWorkspaceFolder}/runs"
-  },
-
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:USERPROFILE}/.claude,target=/root/.claude,type=bind"
   ],
 
-  "postCreateCommand": "cd /workspace/soc-agent && uv sync --extra dev && docker context create soc-playground --docker host=ssh://soc-playground --description 'v2 playground VPS on Hetzner' 2>/dev/null || true",
+  "postCreateCommand": "cd /workspace/defender && uv sync --extra dev && docker context create soc-playground --docker host=ssh://soc-playground --description 'v2 playground VPS on Hetzner' 2>/dev/null || true",
   "postStartCommand": "echo 'Development environment ready!'",
 
   "remoteUser": "root",
