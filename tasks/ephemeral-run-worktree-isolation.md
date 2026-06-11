@@ -123,12 +123,37 @@ the revert path + lesson→outcome traceability surface existing; until then def
 - [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
       lesson commit (needs claude + the v2 stack).
 
-**Phase 3 — deferred:**
-- [ ] `merge_mode` knob; wire the green bar (forward-check author-time +
-      `eval_held_out.py` / `eval_secondary.py` at PR time). Default `human_review`
-      until the revert + traceability surface exist.
-- [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping
-      the default to `auto_on_green`).
+**Phase 3 — split: traceability + revert land lean; the green-bar eval gate is a
+separate future PR.** The flip to `auto_on_green` rests on two human-control
+surfaces existing — a one-click revert and a lesson→outcome trace. This PR ships
+those **without** the eval gate, so the auto-merge path stays the documented no-op
+(`merge_mode` default `human_review`). Schema + forward-check remain author-time
+gates, so committed lessons are valid by construction regardless of the eval gate.
+
+- [x] Lesson→outcome **traceability** + one-click **revert** (lean — no green bar).
+      `hooks/record_lesson_load.py` (PostToolUse on `Read` of `defender/lessons/*.md`,
+      independent run-settings entry) records `{lesson_name, ts}` →
+      `{run_dir}/lessons_loaded.jsonl`, persisted into the durable learning run dir so
+      the trace survives a `/tmp` sweep. `trace_lesson.py` surfaces which cases had a
+      lesson **in context** (matched by file **stem**) since its `created_at` + their
+      dispositions (`--all` = `name\tdescription\tcount`); tz-aware / bare-date
+      `created_at` is normalized so the trace never crashes. `revert_lesson.py` +
+      `AuthorBranch.revert_lesson_pr` open a one-click `git rm` PR off `origin/main` —
+      existence checked against the **base** (not the local tree), holding the
+      author-drain flock so a revert can't race an in-flight batch. **"In context",
+      not "influenced"** (a Read can't tell triage from use) — best-effort visibility.
+      Tests: hook (7) + trace (7) in `defender/tests/`, revert (5) in `test_loop.py`.
+      *Known revert edge cases deferred to the green-bar PR:* a 2nd revert of the same
+      lesson hits the stale remote `lessons/revert-<name>` branch (non-FF push); a
+      commit-step failure carries the staged deletion onto the dev branch; an open
+      revert PR holds the writer lease (stalls author drains until it merges/closes).
+- [ ] **Green bar + `auto_on_green` flip** (separate PR — the eval gate): held-out +
+      secondary **floors** over the candidate corpus, wired into `author_drain`'s
+      auto-merge path, then flip `MERGE_MODE` default + update platform-design §4.4.
+      Must first fix (from the §3.2 review): the gate is evaluated *after* HEAD is
+      restored, so it scores the **old** corpus, not the candidate; `gh pr merge
+      --auto` merges **instantly** on a repo without required checks; the secondary
+      sweep writes `held_out:true` replays into its own held-out denominator.
 
 **Deferred / known scaling gaps (not MVP-blocking):**
 - Lesson loading at PLAN is enumerate-all-frontmatter; retrieval-based top-k is the

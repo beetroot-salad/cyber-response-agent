@@ -1092,7 +1092,8 @@ def _cp(stdout: str = "", returncode: int = 0, stderr: str = ""):
     return _subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
-def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1):
+def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1,
+                lesson_on_base: bool = True):
     def run(args):
         run.calls.append(list(args))
         a = list(args)
@@ -1102,6 +1103,8 @@ def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1):
             return _cp(stdout=ref)
         if a[:2] == ["rev-list", "--count"]:
             return _cp(stdout=str(ahead))
+        if a[:2] == ["cat-file", "-e"]:  # revert existence check vs origin/main
+            return _cp(returncode=0 if lesson_on_base else 1)
         return _cp()  # fetch / checkout / push succeed silently
 
     run.calls = []
@@ -1186,3 +1189,70 @@ def test_author_branch_restore_ref_checks_out():
     git = _git_runner()
     ab.AuthorBranch(git=git, gh=_gh_runner()).restore_ref("my-feature")
     assert ["checkout", "my-feature"] in git.calls
+
+
+# ---------------------------------------------------------------------------
+# one-click revert (AuthorBranch.revert_lesson_pr + revert_lesson.revert)
+# ---------------------------------------------------------------------------
+
+
+def test_author_branch_revert_lesson_pr_removes_and_opens_pr():
+    git = _git_runner(ref="main")
+    gh = _gh_runner(create_out="https://github.com/o/r/pull/42")
+    b = ab.AuthorBranch(git=git, gh=gh)
+    pr = b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+    assert pr == "https://github.com/o/r/pull/42"
+    assert ["checkout", "-B", "lessons/revert-bad", "origin/main"] in git.calls
+    assert ["rm", "defender/lessons/bad.md"] in git.calls
+    assert ["commit", "-m", "revert lesson: bad"] in git.calls
+    assert ["checkout", "main"] in git.calls  # HEAD restored
+    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
+    assert "revert lesson: bad" in create
+
+
+def test_author_branch_revert_refuses_dirty_tree():
+    b = ab.AuthorBranch(git=_git_runner(dirty=True), gh=_gh_runner())
+    with pytest.raises(ab.BranchError):
+        b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+
+
+def test_author_branch_revert_refuses_missing_lesson_on_base():
+    """Existence is checked against origin/main, not the local tree — a lesson absent
+    from the base raises before any branch churn (no stray local revert branch)."""
+    git = _git_runner(ref="main", lesson_on_base=False)
+    b = ab.AuthorBranch(git=git, gh=_gh_runner())
+    with pytest.raises(ab.BranchError):
+        b.revert_lesson_pr("defender/lessons/ghost.md", "ghost")
+    assert ["cat-file", "-e", "origin/main:defender/lessons/ghost.md"] in git.calls
+    assert not any(c[:2] == ["checkout", "-B"] for c in git.calls)  # no branch churn
+
+
+def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
+    """revert() acquires the author-drain flock, then opens the revert PR."""
+    import revert_lesson as rl  # type: ignore[import-not-found]
+    paths = LoopPaths(repo_root=tmp_path)
+    git = _git_runner(ref="main")
+    b = ab.AuthorBranch(git=git, gh=_gh_runner(create_out="https://pr/7"))
+    assert rl.revert("bad", branch=b, paths=paths) == 0
+    assert ["rm", "defender/lessons/bad.md"] in git.calls
+
+
+def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
+    """A revert run while an author drain holds the lock fails fast (rc 3), without
+    touching git — no racing checkout -B against the in-flight batch."""
+    import fcntl as _fcntl
+
+    import revert_lesson as rl  # type: ignore[import-not-found]
+    paths = LoopPaths(repo_root=tmp_path)
+    lock = paths.author_drain_lock_file
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = lock.open("a+")
+    _fcntl.flock(holder.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+    try:
+        git = _git_runner(ref="main")
+        b = ab.AuthorBranch(git=git, gh=_gh_runner())
+        assert rl.revert("bad", branch=b, paths=paths) == 3
+        assert git.calls == []  # never reached revert_lesson_pr
+    finally:
+        _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
+        holder.close()

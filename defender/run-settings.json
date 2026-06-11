@@ -102,6 +102,15 @@
             "command": "${PYTHON} ${DEFENDER_DIR}/hooks/tag_tool_results.py"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/record_lesson_load.py"
+          }
+        ]
       }
     ]
   }
