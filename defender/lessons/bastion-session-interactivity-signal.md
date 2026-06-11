@@ -1,6 +1,9 @@
 ---
 name: bastion-session-interactivity-signal
 description: On bastion logins, check PTY allocation and session duration from sshd or auditd to distinguish interactive human pivots from automated scripts.
+telemetry_source: [sshd, auditd]
+attack_phase: [lateral-movement]
+source_signature: [v2-cross-tier-ssh-pivot]
 source_finding_ids:
   - live-cross-tier-pivot-1/2
 created_at: 2026-06-04T00:00:00Z

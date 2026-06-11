@@ -1,6 +1,9 @@
 ---
 name: source-ip-check-auth-log-not-just-enrollment
 description: A source IP in a container exec or process alert needs an SSH auth-log query on the receiving host; enrollment records miss sshd entry events.
+telemetry_source: [sshd, cmdb]
+attack_phase: [initial-access]
+source_signature: [v2-falco-suspicious-network-tool]
 source_finding_ids:
   - live-falco-nettool-1/2
 created_at: 2026-06-04T00:00:00Z

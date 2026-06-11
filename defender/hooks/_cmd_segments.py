@@ -32,8 +32,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # This is the single source of truth for the split — all three gate hooks
 # (approve_shim_invocations, block_unwrapped_adapter_calls,
 # block_main_loop_raw_access) derive their adapter set from here.
+# `defender-lessons` is read-only corpus tooling (frontmatter grep / tag
+# enumeration); it queries no data source, so it stays a non-adapter and
+# remains allowed in the main loop.
 NON_ADAPTER_SHIMS = frozenset(
-    {"defender-invlang", "defender-record-query", "defender-data-source-debug"}
+    {"defender-invlang", "defender-record-query", "defender-data-source-debug",
+     "defender-lessons"}
 )
 
 # A raw adapter-CLI path form (`scripts/tools/<name>_cli.py`), i.e. the shim's

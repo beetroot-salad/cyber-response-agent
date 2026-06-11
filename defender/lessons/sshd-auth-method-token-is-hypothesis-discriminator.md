@@ -1,6 +1,9 @@
 ---
 name: sshd-auth-method-token-is-hypothesis-discriminator
 description: Parse sshd Accepted auth-method token on every session; when the observed credential type contradicts the oracle-projected type for a service account, treat the mismatch as a first-order hypothesis discriminator requiring explicit resolution, not a partial-grade note.
+telemetry_source: [sshd]
+attack_phase: [initial-access, credential-access]
+source_signature: [v2-cross-tier-ssh-pivot, v2-sshd-success-after-failures]
 source_finding_ids:
   - live-xtier-pivot-3/1
   - live-cross-tier-pivot-3/1

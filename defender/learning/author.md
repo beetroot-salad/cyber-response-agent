@@ -3,7 +3,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 ## What you receive
 
 - **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `direction`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. `direction` is `adversarial` (a missed-attack / FN lesson) or `benign` (an over-escalation / FP lesson) — you pass it to the forward-check unchanged (see below). The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
-- **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_finding_ids`, `created_at`) and a freeform pitfall body.
+- **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_signature`, `telemetry_source`, `attack_phase`, `source_finding_ids`, `created_at`) and a freeform pitfall body.
 - **`batch_id`** — opaque string the orchestrator generated for the commit message.
 
 ## Lesson shape
@@ -12,6 +12,9 @@ You are the **defender lessons curator**. The defender learning loop has produce
 ---
 name: {slug-id}                       # short, kebab-case, unique across the corpus
 description: {one short line, ~12-18 words}  # loaded into the defender's PLAN-time prompt — every word is paid for at every retrieval. Cut clause-chains; one beat about the pitfall and how the agent recognizes it.
+source_signature: [{rule.id}, ...]    # alert rule.id(s) this lesson came from / bites — the source case's signature
+telemetry_source: [{sensor}, ...]     # sensor(s) the check keys on, INCLUDING any absent source the lesson tells the agent to name
+attack_phase: [{tactic}, ...]         # MITRE ATT&CK tactic(s) where the pitfall bites
 source_finding_ids:
   - {run_id}/{n}
 created_at: {ISO 8601 UTC}
@@ -20,6 +23,33 @@ created_at: {ISO 8601 UTC}
 {freeform pitfall body — pattern: "you assumed/skipped X; should
 have considered Y; here's the check."}
 ```
+
+The three retrieval dimensions are **grep-friendly inline lists** (the
+defender discovers lessons at PLAN time by grepping this frontmatter — no
+index). **Before tagging, enumerate the values already in use** so you reuse
+an existing spelling instead of coining a near-synonym that fragments the
+grep:
+
+```bash
+defender-lessons --tags              # every dimension's viable values + counts
+defender-lessons --tags attack_phase # one dimension
+```
+
+Reuse an existing token whenever one fits; coin a new value only when none
+does, and keep it in the convention below.
+
+- `source_signature` — the alert `rule.id`, taken from the source run's
+  `alert.json` (`rule.id`).
+- `telemetry_source` — the sensor the lesson's check keys on (`sshd`,
+  `falco`, `zeek`, `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`,
+  `host-state`, `change-mgmt`, …). For "this source can't see X / isn't in
+  the toolset" lessons, tag the **absent** source too — that's the whole
+  retrieval point.
+- `attack_phase` — the **MITRE ATT&CK tactic** slug(s) the pitfall bites
+  (`initial-access`, `credential-access`, `execution`, `persistence`,
+  `lateral-movement`, `collection`, `exfiltration`, …). Use ATT&CK tactic
+  names, not Lockheed kill-chain phases — the actor corpus already keys on
+  ATT&CK (`techniques`), so this stays one taxonomy across the project.
 
 Placeholders in templates use `{…}` — fill them in; never emit literal curly braces.
 
@@ -33,7 +63,27 @@ For each finding, in order, decide one of:
 2. **fold** — an existing lesson already targets this pitfall (or a closely related one). Read the target lesson's body, then **rewrite it holistically** to subsume both the existing teaching and the new finding. Append the new `finding_id` to `source_finding_ids`. Broaden `description` if the scope grew.
 3. **skip** — the finding is already fully covered, low signal, or doesn't generalize. Note the reason in your final report. Do not write a file.
 
-To decide: enumerate `defender/lessons/*.md` and read the `name + description` frontmatter of each. If a description looks plausibly related to the finding, read the body before deciding. Don't fold across pitfalls that *happen* to live in the same signature family — folding is for the same underlying defender mistake.
+To decide, two passes — and you **must run both**, because the dimensions alone will not catch every fold:
+
+1. **Dimension pass (find the obvious same-key candidates).** Grep the frontmatter by the finding's dimensions:
+
+   ```bash
+   defender-lessons 'source_signature:.*<rule-id>' 'telemetry_source:.*<sensor>'
+   ```
+
+2. **Description pass (catch cross-key near-duplicates).** The dimension pass misses a near-duplicate that teaches the *same defender mistake* but happens to be tagged on a different signature/sensor/tactic — and grep can't see that, because the keys don't overlap. So also enumerate the **whole corpus** and scan every description for a semantic twin, regardless of dimension overlap:
+
+   ```bash
+   defender-lessons                     # <path>\t<description> for all lessons
+   ```
+
+   Read the body of any whose description is conceptually close to the finding, even when no dimension matched.
+
+Why both: a **runtime** retrieval miss is cheap — the lesson just isn't loaded that run, and the next run recovers it. A **fold** miss is not — it writes a permanent duplicate the dimensions will keep hiding from each other. So retrieval may lean on the dimensions; folding may not. The whole-corpus description scan is the completeness backstop (16 one-line descriptions today; cheap, grows slowly).
+
+Don't fold across pitfalls that *happen* to share a `source_signature` — folding is for the same underlying defender mistake, not the same signature family.
+
+When you **fold**, reconcile the dimension lists too: union in any new `source_signature` / `telemetry_source` / `attack_phase` values the new finding introduced, so the broadened lesson stays discoverable from the new case.
 
 ## Per-lesson forward-check gate
 
@@ -112,5 +162,5 @@ The orchestrator parses this line. Make sure every finding from the input appear
 - One file per lesson. Flat layout. No subdirectories.
 - Bodies are short — half a screen is the target, one screen is the ceiling. If a lesson wants to be three sections, it's probably two lessons. Strip preamble; lead with the pitfall.
 - Don't reference the finding text verbatim in the body; rewrite for the future agent who'll consult the lesson without seeing the source case.
-- Don't add fields to the frontmatter. The retrieval surface is `name + description`; everything else is bookkeeping.
+- The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) — populate all three on every lesson, from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
 - If a finding is `type: observability` (system gap, no covering data source), still write a pitfall lesson teaching the agent to stop planning gather steps that need the missing system. Add the finding to the `Observability gaps:` block in the commit message and to `observability_gaps` in the result JSON.

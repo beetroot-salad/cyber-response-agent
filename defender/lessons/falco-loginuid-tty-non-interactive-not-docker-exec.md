@@ -1,6 +1,9 @@
 ---
 name: falco-loginuid-tty-non-interactive-not-docker-exec
 description: loginuid=-1 + tty=0 means non-interactive automated context only; both container init and docker exec match, so exec origin requires ancestry evidence Falco cannot provide.
+telemetry_source: [falco]
+attack_phase: [execution]
+source_signature: [v2-falco-suspicious-network-tool]
 source_finding_ids:
   - lotl-oracle-test-1/benign/1
 created_at: 2026-06-07T00:00:00Z

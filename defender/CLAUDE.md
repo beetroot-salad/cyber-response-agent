@@ -221,9 +221,12 @@ The serial AUTHOR stage (`--author-drain`) is what commits.
    correctly-resolved case) reverts it. Needs a ground-truth disposition,
    so `inconclusive` source cases are held rather than authored.
 
-Lessons feed back into the runtime agent: at PLAN time the agent
-enumerates `defender/lessons/*.md` frontmatter and reads the bodies
-whose description looks relevant to the current alert.
+Lessons feed back into the runtime agent: at PLAN time the agent runs the
+`defender-lessons` shim (frontmatter-only grep over the retrieval dimensions
+`source_signature` / `telemetry_source` / `attack_phase`, plus `--tags` to
+enumerate viable values), scans the `description` of the hits, and reads the
+bodies whose description looks relevant to the lead it's about to write (no
+index — grep only, see `defender/SKILL.md` §Lessons).
 
 Design rationale: `defender/docs/learning-loop.md` (and companions
 listed at the top of this file). When a doc and the code disagree,

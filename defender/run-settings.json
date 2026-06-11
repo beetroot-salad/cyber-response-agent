@@ -32,7 +32,6 @@
       "Read(**/.env)",
       "Read(**/credentials*)",
       "Read(**/.ssh/**)",
-      "Read(/workspace/soc-agent/**)",
       "Read(**/ground_truth*)",
       "Read(**/ground-truth*)",
       "Read(**/cases.json)",

@@ -1,6 +1,9 @@
 ---
 name: behavioral-anomaly-needs-affirmative-explanation
 description: Authorization confirms access rights, not automation pattern; anomalous timing or sub-second session duration needs a process-audit or scheduler lead, not inferred attribution.
+telemetry_source: [sshd, host-state]
+attack_phase: [initial-access, execution]
+source_signature: [v2-sshd-success-after-failures]
 source_finding_ids:
   - live-sshd-success-1/0
 created_at: 2026-06-03T00:00:00Z

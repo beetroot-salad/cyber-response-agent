@@ -1,6 +1,9 @@
 ---
 name: post-auth-lead-targets-landing-host-not-source
 description: After a suspicious short session, gather post-auth artifacts from the destination (landing) host, not from the source workstation.
+telemetry_source: [sshd, fim, auditd]
+attack_phase: [persistence, execution]
+source_signature: [v2-sshd-success-after-failures]
 source_finding_ids:
   - live-sshd-success-1/1
   - live-sshd-success-1/2

@@ -1,6 +1,9 @@
 ---
 name: authz-scope-discrepancy-needs-reconciliation-lead
 description: When SIEM authz telemetry returns host scope wider than the provisioning oracle projects, spawn a reconciliation lead; an unexplained discrepancy is an unresolved model inconsistency, not a background credential-exposure note.
+telemetry_source: [identity]
+attack_phase: [lateral-movement]
+source_signature: [v2-cross-tier-ssh-pivot]
 source_finding_ids:
   - live-cross-tier-pivot-2/2
 created_at: 2026-06-04T00:00:00Z

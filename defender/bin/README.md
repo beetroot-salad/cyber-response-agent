@@ -32,7 +32,8 @@ in `run-settings.json`). `run.py` puts this dir first on `PATH` and exports
   must be **wrapped** in `defender-record-query` — `hooks/block_unwrapped_adapter_calls.py`
   denies a bare adapter call there so every query lands in the queries table.
   The non-adapter shims (`defender-invlang`, `defender-record-query`,
-  `defender-data-source-debug`) stay allowed in the main loop. The adapter vs.
+  `defender-data-source-debug`, `defender-lessons`) stay allowed in the main
+  loop. The adapter vs.
   non-adapter split is defined once in `hooks/_cmd_segments.py`
   (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`) and is read by
   all three gate hooks (`approve_shim_invocations.py`,

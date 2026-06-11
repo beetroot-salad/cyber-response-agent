@@ -98,17 +98,20 @@ def init_git(tmp: Path) -> None:
 
 
 def _find_venv_py() -> Path:
-    candidates = [REAL_REPO_ROOT / "soc-agent" / ".venv" / "bin" / "python3"]
+    env = os.environ.get("LEARNING_VERIFIER_PYTHON")
+    if env:
+        return Path(env).resolve()
+    candidates = [REAL_REPO_ROOT / "defender" / ".venv" / "bin" / "python3"]
     p = REAL_REPO_ROOT.parent
     for _ in range(5):
-        candidates.append(p / "soc-agent" / ".venv" / "bin" / "python3")
+        candidates.append(p / "defender" / ".venv" / "bin" / "python3")
         if p.parent == p:
             break
         p = p.parent
     for c in candidates:
         if c.is_file():
             return c
-    sys.exit(f"no soc-agent venv found; tried {candidates}")
+    sys.exit(f"no defender venv found; tried {candidates}")
 
 
 def run_author(tmp: Path) -> tuple[subprocess.CompletedProcess, float]:

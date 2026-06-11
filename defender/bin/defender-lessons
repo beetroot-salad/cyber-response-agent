@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Stable invocation shim for the lessons frontmatter CLI: grep over lesson
+# frontmatter only + viable-tag enumeration (scripts/lessons_fm.py). Non-adapter,
+# read-only tooling — stays allowed in the main loop (see hooks/_cmd_segments.py
+# NON_ADAPTER_SHIMS). The script resolves the lessons dir from its own path, so
+# cwd does not matter.
+DEFENDER="${DEFENDER_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+PY="${DEFENDER}/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+exec "$PY" "${DEFENDER}/scripts/lessons_fm.py" "$@"

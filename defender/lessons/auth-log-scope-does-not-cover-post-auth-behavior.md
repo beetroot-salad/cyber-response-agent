@@ -1,6 +1,9 @@
 ---
 name: auth-log-scope-does-not-cover-post-auth-behavior
 description: Auth-log leads expose login events only; claiming post-auth behavioral cleanliness on any session host requires a separate process-execution lead covering the session window on that host.
+telemetry_source: [sshd, auditd, zeek, fim]
+attack_phase: [execution, persistence]
+source_signature: [v2-cross-tier-ssh-pivot, v2-sshd-success-after-failures]
 source_finding_ids:
   - live-cross-tier-pivot-1/0
   - live-cross-tier-pivot-1/1

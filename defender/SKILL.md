@@ -184,13 +184,45 @@ Example B shows a single-fact lead (CMDB lookup); when adding an IAM
 check, that's a second `:L` row dispatched in parallel.
 
 **Lessons.** The learning loop builds up a corpus of pitfall lessons
-under `defender/lessons/` — each is a markdown file with `name` +
-`description` frontmatter and a freeform pitfall body. At PLAN time,
-enumerate `defender/lessons/*.md` and read each file's frontmatter.
-For any lesson whose `description` looks plausibly relevant to the
-current alert shape, Read the body before writing your `:H` / `:L`
-blocks. Bodies are short; they teach you what to *check next time*,
-not what conclusion to reach.
+under `defender/lessons/` — each is a markdown file with a freeform
+pitfall body and frontmatter carrying a one-line `description` plus three
+retrieval dimensions (inline lists):
+
+- `source_signature` — the alert `rule.id`(s) the lesson came from / bites.
+- `telemetry_source` — the sensor(s) the lesson's check keys on, **including
+  the absent source it tells you to name**.
+- `attack_phase` — the MITRE ATT&CK tactic(s) where the pitfall bites
+  (tactic slugs, e.g. `lateral-movement`, `persistence`).
+
+**Discover at PLAN time, by dimension — do not eyeball the whole listing.**
+This is plan-time, not orient-time: you discover lessons against the lead
+you're about to write, once you know its telemetry source and the ATT&CK
+tactic your current hypothesis sits in. Use the `defender-lessons` shim — it
+greps the **frontmatter only** (the body can't false-match a tag) and prints
+`<path>\t<description>`:
+
+```bash
+# 1. See the viable tags first — only these values are worth grepping:
+defender-lessons --tags                      # all three dimensions + counts
+defender-lessons --tags telemetry_source     # one dimension
+
+# 2. Anchor on the alert's rule.id, narrow by the planned lead's source
+#    and/or the hypothesis tactic. Multiple patterns AND (= piped greps):
+defender-lessons 'source_signature:.*<alert-rule-id>' \
+                 'telemetry_source:.*<source-of-planned-lead>' \
+                 'attack_phase:.*<tactic-of-current-hypothesis>'
+```
+
+The printed `description` line is the scan surface: judge relevance from it,
+then **Read the full body of only the ones that fit** before writing your
+`:H` / `:L` blocks. Don't open a lesson to decide whether it's relevant —
+that's what the description is for. Widen by dropping a pattern if a narrow
+query returns nothing; a bare `defender-lessons` (whole-corpus
+`<path>\t<description>`) is the fallback, not the default. Bodies are short;
+they teach you what to *check next time*, not what conclusion to reach.
+
+(These dimensions are unproven retrieval keys on the defender corpus — we're
+running them grep-only, no index, to see whether they earn one.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is
