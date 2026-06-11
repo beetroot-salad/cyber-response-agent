@@ -38,6 +38,7 @@ Usage:
 """
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -85,6 +86,37 @@ from visualize_runtime import (
 
 JUDGE_FILENAME = "transcript.html"
 RUNTIME_FILENAME = "runtime.html"
+
+_DEFENDER_DIR = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _DEFENDER_DIR.parent
+
+
+def render_and_mirror(run_dir: Path) -> list[Path]:
+    """Render the judge + runtime pages into ``run_dir`` and mirror them into
+    ``defender/run-visualizations/<run_id>/``.
+
+    The mirror lives here (not just in run.py) so every renderer — run.py's
+    pre-learn pass AND the off-process learn worker's post-learn re-render —
+    refreshes it identically; the post-learn pass wins (last write), leaving the
+    repo-persisted copy carrying the judge eval even if /tmp is later cleared.
+    The judge page resolves its artifacts by case_id from the learning state
+    dir (``load_judge_findings``), so re-rendering picks them up wherever they
+    landed. Mirrored into a per-run subdir because the pages cross-link via
+    relative hrefs.
+    """
+    (run_dir / JUDGE_FILENAME).write_text(render_judge_page(run_dir))
+    (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir))
+    dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
+    mirrored: list[Path] = []
+    for fname in (JUDGE_FILENAME, RUNTIME_FILENAME):
+        src = run_dir / fname
+        if not src.is_file():
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / fname
+        shutil.copyfile(src, dest)
+        mirrored.append(dest)
+    return mirrored
 
 
 # ---------------------------------------------------------------------------
@@ -894,12 +926,11 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    judge_out = run_dir / JUDGE_FILENAME
-    runtime_out = run_dir / RUNTIME_FILENAME
-    judge_out.write_text(render_judge_page(run_dir))
-    runtime_out.write_text(render_runtime_page(run_dir))
-    print(f"wrote {judge_out}")
-    print(f"wrote {runtime_out}")
+    mirrored = render_and_mirror(run_dir)
+    print(f"wrote {run_dir / JUDGE_FILENAME}")
+    print(f"wrote {run_dir / RUNTIME_FILENAME}")
+    for dest in mirrored:
+        print(f"mirrored {dest.relative_to(_REPO_ROOT)}")
     return 0
 
 

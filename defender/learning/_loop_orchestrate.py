@@ -204,11 +204,11 @@ def _directions_for(disposition: str) -> list[str]:
 # Curators
 # ---------------------------------------------------------------------------
 
-# Guards the transient `sys.path` mutation in `_run_curator_module`. The curators
-# now run only from the serial `author_drain` (one at a time), so this is defensive
-# rather than load-bearing — kept so a future concurrent caller can't corrupt
-# `sys.path` mid-import.
-_CURATOR_IMPORT_LOCK = threading.Lock()
+# Guards the transient `sys.path` mutation in `_run_curator_module` (curator import)
+# and `_render_transcript` (visualizer import). Both run only from serial drainers
+# today, so this is defensive rather than load-bearing — kept so a future concurrent
+# caller can't corrupt `sys.path` mid-import.
+_SYS_PATH_IMPORT_LOCK = threading.Lock()
 
 
 def _invoke_lead_author(run_dir: Path) -> None:
@@ -253,7 +253,7 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
     caller runs curators off the serial drainer.
     """
     learning_dir = str(LEARNING_DIR)
-    with _CURATOR_IMPORT_LOCK:
+    with _SYS_PATH_IMPORT_LOCK:
         added = learning_dir not in sys.path
         if added:
             sys.path.insert(0, learning_dir)
@@ -275,21 +275,33 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 # ---------------------------------------------------------------------------
 
 
-def _enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
-    """Record this run for the serial author-drainer.
-
-    The drainer needs the original (``/tmp``) run dir to lead-author its
-    catalog/template refinements; carrying the path here lets the drainer detect
-    a vanished artifact (``/tmp`` cleared between learn and author) instead of
-    silently dropping it. Written atomically (tmp + replace)."""
-    paths.author_queue_dir.mkdir(parents=True, exist_ok=True)
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
+    """Drop a ``{run_id}.json`` marker carrying the run dir into ``queue_dir``,
+    written atomically (tmp + replace). The marker carries the resolved run dir so
+    a drainer running elsewhere (no SIEM creds, ``/tmp`` possibly cleared) can find
+    the artifacts or detect a vanished one instead of silently dropping it. Shared
+    by the author and learn queues so the two stages can't drift in marker shape."""
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    marker = queue_dir / f"{run_dir.name}.json"
     tmp = marker.with_suffix(".json.tmp")
     tmp.write_text(
         json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n"
     )
     os.replace(tmp, marker)
-    _log(f"enqueued for authoring: {marker}")
+    _log(f"enqueued for {label}: {marker}")
+
+
+def _enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
+    """Record this run for the serial author-drainer (lead-author per run dir)."""
+    _enqueue_marker(run_dir, paths.author_queue_dir, "authoring")
+
+
+def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> None:
+    """Record a finished run for the off-process LEARN worker (``loop.py
+    --learn-drain``). The worker holds no SIEM creds and may run elsewhere; the
+    marker carries the run dir so it can find the artifacts to learn from. Mirror
+    of ``_enqueue_for_authoring`` one stage upstream."""
+    _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
 def run_one(
@@ -363,18 +375,19 @@ def run_one(
 # ---------------------------------------------------------------------------
 
 
-def _quarantine_marker(spec: dict, marker: Path, paths: LoopPaths, reason: str) -> None:
-    """Move a marker we can't process to author-queue/failed/ — surfaced for a
+def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -> None:
+    """Move a marker we can't process to ``<queue_dir>/failed/`` — surfaced for a
     human, not silently dropped, and (crucially) not left to re-poison the queue
-    on every subsequent drain tick."""
-    failed_dir = paths.author_queue_dir / "failed"
+    on every subsequent drain tick. ``queue_dir`` is the queue the marker came
+    from (author-queue or learn-queue), so each stage quarantines under its own."""
+    failed_dir = queue_dir / "failed"
     failed_dir.mkdir(parents=True, exist_ok=True)
     rec = dict(spec)
     rec["failed"] = reason
     (failed_dir / marker.name).write_text(json.dumps(rec) + "\n")
     with contextlib.suppress(OSError):
         marker.unlink()
-    _log(f"author_drain: quarantined {spec.get('run_id')} — {reason}")
+    _log(f"quarantined {spec.get('run_id')} — {reason}")
 
 
 def _author_drain_locked(
@@ -393,14 +406,14 @@ def _author_drain_locked(
             continue
         run_dir = Path(spec.get("run_dir", ""))
         if not run_dir.is_dir():
-            _quarantine_marker(spec, marker, paths, "artifact-missing")
+            _quarantine_marker(spec, marker, paths.author_queue_dir, "artifact-missing")
             continue
         try:
             run_lead_author(run_dir)
         except Exception as e:  # noqa: BLE001 — one poison run dir must not wedge
             # the whole serial drain (and re-crash every tick on the same
             # marker): quarantine it and move on to the remaining work.
-            _quarantine_marker(spec, marker, paths, f"lead-author-error: {e!r}")
+            _quarantine_marker(spec, marker, paths.author_queue_dir, f"lead-author-error: {e!r}")
             continue
         with contextlib.suppress(OSError):
             marker.unlink()
@@ -450,6 +463,99 @@ def author_drain(
         fh.close()
 
 
+# ---------------------------------------------------------------------------
+# Learn stage — off-process worker (concurrent; SIEM-free)
+# ---------------------------------------------------------------------------
+
+
+_SCRIPTS_DIR = LEARNING_DIR.parent / "scripts"
+
+
+def _render_transcript(run_dir: Path) -> None:
+    """Re-render run_dir's transcript.html (+ run-visualizations mirror) now that
+    the judge artifacts exist, by calling ``visualize_run.render_and_mirror`` in
+    process — no per-run interpreter spawn, and a render error surfaces as a
+    catchable exception. Any failure propagates to ``learn_drain``, which logs it
+    and drains on (the render is best-effort, never fatal)."""
+    scripts_dir = str(_SCRIPTS_DIR)
+    with _SYS_PATH_IMPORT_LOCK:
+        added = scripts_dir not in sys.path
+        if added:
+            sys.path.insert(0, scripts_dir)
+        try:
+            from visualize_run import render_and_mirror
+        finally:
+            if added:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(scripts_dir)
+    render_and_mirror(run_dir)
+
+
+def learn_drain(
+    paths: LoopPaths = DEFAULT_PATHS,
+    *,
+    run_one_fn: Callable[[Path], int] | None = None,
+    render: Callable[[Path], None] | None = None,
+) -> int:
+    """Off-process LEARN worker: drain the learn-queue, running actor → oracle →
+    judge (``run_one``) per finished run and re-rendering its transcript so the
+    judge page lands. SIEM-free — holds none of the creds the investigation
+    carried.
+
+    Concurrency-safe across workers **without** a one-at-a-time lock: each marker
+    is claimed by an atomic rename into ``learn-queue/inflight/`` before
+    processing, so two workers never run the same run dir (the loser's
+    ``os.replace`` raises ``FileNotFoundError`` and it moves on). Learning stays
+    concurrent (§4.3); the author drain is the only serial stage. A worker that
+    dies mid-``run_one`` leaves its marker in ``inflight/`` — surfaced, not lost
+    (a stale-inflight reaper is a follow-up, not MVP). ``run_one_fn`` / ``render``
+    are injectable for tests."""
+    if run_one_fn is None:
+        # Thread the drain's own paths into the default LEARN stage, so the queue
+        # and the findings/runs/author-queue it writes resolve to one state dir.
+        def run_one_fn(rd: Path) -> int:
+            return run_one(rd, paths=paths)
+    if render is None:
+        render = _render_transcript
+
+    qdir = paths.learn_queue_dir
+    markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
+    _log(f"learn_drain: {len(markers)} run(s) queued for learning")
+    inflight_dir = qdir / "inflight"
+    if markers:
+        inflight_dir.mkdir(parents=True, exist_ok=True)
+    drained = 0
+    for marker in markers:
+        claimed = inflight_dir / marker.name
+        try:
+            os.replace(marker, claimed)
+        except FileNotFoundError:
+            continue  # another worker claimed it first
+        try:
+            spec = json.loads(claimed.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
+            continue
+        run_dir = Path(spec.get("run_dir", ""))
+        if not run_dir.is_dir():
+            _quarantine_marker(spec, claimed, qdir, "artifact-missing")
+            continue
+        try:
+            run_one_fn(run_dir)
+        except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
+            _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
+            continue
+        try:
+            render(run_dir)
+        except Exception as e:  # noqa: BLE001 — render is best-effort
+            _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
+        with contextlib.suppress(OSError):
+            claimed.unlink()
+        drained += 1
+    _log(f"learn_drain: drained {drained} run(s)")
+    return 0
+
+
 _HELP_EPILOG = """\
 Direction dispatch (by the defender's normalized disposition):
   benign        → adversarial direction only (hunt the missed attack / FN)
@@ -495,8 +601,10 @@ Environment:
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before author_actor runs
   LEARNING_AUTHOR_ENV_THRESHOLD        pending env observations before author_actor_benign runs
 
-Typical use: invoked in-process by `defender/run.py` after the runtime loop exits. Run
-standalone with `python3 defender/learning/loop.py <run_dir>` to re-process a run dir.
+Typical use (off-process): `defender/run.py` enqueues a learn-queue marker per finished
+run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --learn-drain`
+(running this LEARN stage + re-rendering each transcript). `python3
+defender/learning/loop.py <run_dir>` runs LEARN directly for a single run (re-processing).
 
 Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 LoopError / 1 usage.
 """
@@ -524,7 +632,17 @@ def main(argv: list[str]) -> int:
         help="AUTHOR stage: serially drain the author-work + findings/observation "
              "queues and commit lessons/templates (takes no run_dir; one drainer at a time).",
     )
+    parser.add_argument(
+        "--learn-drain", action="store_true",
+        help="LEARN stage (off-process worker): drain the learn-queue, running "
+             "actor → oracle → judge per finished run + re-rendering its transcript "
+             "(takes no run_dir; SIEM-free, safe to run concurrently).",
+    )
     ns = parser.parse_args(argv[1:])
+
+    if ns.author_drain and ns.learn_drain:
+        print("--author-drain and --learn-drain are mutually exclusive", file=sys.stderr)
+        return 1
 
     if ns.author_drain:
         if ns.run_dir is not None:
@@ -532,6 +650,16 @@ def main(argv: list[str]) -> int:
             return 1
         try:
             return author_drain()
+        except LoopError as e:
+            print(f"[loop] FATAL: {e}", file=sys.stderr)
+            return 2
+
+    if ns.learn_drain:
+        if ns.run_dir is not None:
+            print("--learn-drain takes no run_dir", file=sys.stderr)
+            return 1
+        try:
+            return learn_drain()
         except LoopError as e:
             print(f"[loop] FATAL: {e}", file=sys.stderr)
             return 2

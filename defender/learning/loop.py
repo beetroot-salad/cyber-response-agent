@@ -35,7 +35,9 @@ from _loop_config import (  # noqa: E402
 )
 from _loop_orchestrate import (  # noqa: E402
     author_drain,
+    enqueue_for_learning,
     is_held_out,
+    learn_drain,
     main,
     read_ground_truth,
     run_one,
@@ -70,7 +72,8 @@ from _prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
     "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",
-    "run_one", "author_drain", "main", "is_held_out", "read_ground_truth",
+    "run_one", "author_drain", "learn_drain", "enqueue_for_learning",
+    "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence",
     "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",

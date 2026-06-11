@@ -58,6 +58,15 @@ class LoopPaths:
         return self._state_root / "_author.lock"
 
     @property
+    def learn_queue_dir(self) -> Path:
+        # run.py drops a marker here per finished run; the off-process learn
+        # worker (loop.py --learn-drain) claims + drains it. Mirror of
+        # author_queue_dir, one stage upstream. No drain lock: learning is
+        # concurrent (§4.3), so cross-worker safety is the per-marker
+        # rename-claim into learn-queue/inflight/, not a one-at-a-time lock.
+        return self._state_root / "learn-queue"
+
+    @property
     def author_queue_dir(self) -> Path:
         return self._state_root / "author-queue"
 

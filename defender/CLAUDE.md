@@ -111,7 +111,7 @@ defender/
     visualize_run.py           # post-run transcript renderer
   learning/             # offline learning loop — see §Learning loop below
     lead_repository.py  # the single read/join surface over the two tables (leads + queries)
-    loop.py             # orchestrator (per-run-dir entry point); imported in-process by run.py
+    loop.py             # orchestrator CLI: <run_dir> (LEARN one) / --learn-drain (off-process worker) / --author-drain (serial commit)
     actor.md            # adversarial counterfactual story
     mitre_corpus.py     # hand-curated MITRE ATT&CK technique pool for actor-menu sampling
     oracle.md           # telemetry oracle: per-lead synthesized events
@@ -156,9 +156,9 @@ ANALYZE → REPORT, dispatching the gather subagent (Haiku) per query →
 emits `investigation.md`, `report.md`, and the two live tables
 (`executed_queries.jsonl` + `gather_raw/`) into a run dir under
 `/tmp/defender-runs/`. After the agent exits, `run.py` renders
-`transcript.html` and (unless `--no-learn`) hands off to
-`defender.learning.loop.run_one`. Pass `--no-learn` to skip the learning
-step when iterating on the runtime loop only.
+`transcript.html` and (unless `--no-learn`) drops a **learn-queue marker**
+for the off-process learning worker — it does not run learning itself.
+Pass `--no-learn` to skip enqueuing when iterating on the runtime loop only.
 
 `SKILL.md` is the spec. Everything below is reference material for
 the run dir's on-disk shape and the two-table contract — kept here
@@ -166,9 +166,12 @@ so there's one doc to read at the root.
 
 ## Learning loop
 
-This is the headlining experiment. `run.py` invokes it in-process
-after the runtime loop exits (skip with `--no-learn`); it can also be
-run standalone via `python3 defender/learning/loop.py <run_dir>`.
+This is the headlining experiment. It runs **off-process**: `run.py`
+enqueues a learn-queue marker per finished run (skip with `--no-learn`),
+and a SIEM-free worker drains it via `python3 defender/learning/loop.py
+--learn-drain` (concurrent-safe; re-renders each transcript's judge page).
+Run `python3 defender/learning/loop.py <run_dir>` to LEARN one run directly.
+The serial AUTHOR stage (`--author-drain`) is what commits.
 
 1. **Normalizes** disposition from `report.md` frontmatter. The disposition
    selects which direction(s) run: `benign` → adversarial only (hunt the
