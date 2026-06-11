@@ -462,6 +462,7 @@ def _author_drain_locked(
     run_lead_author: Callable[[Path], None],
     trigger_author: Callable[[Path, str, str, str], None],
     branch: AuthorBranch,
+    green_bar_evaluate: Callable[[LoopPaths], Any],
 ) -> int:
     if not _has_drain_work(paths):
         _log("author_drain: nothing queued and no curator at threshold — skipping")
@@ -492,6 +493,30 @@ def _author_drain_locked(
             # (BranchError is not a LoopError, so main() would not catch it).
             _log(f"author_drain: finish_batch failed: {e} — findings stay queued, "
                  "retry next tick")
+        if pr is not None:
+            _log(f"author_drain: opened lessons PR {pr}")
+            if MERGE_MODE == "auto_on_green":
+                # Gate while the lessons branch is still checked out (restore
+                # happens in the finally below), so the green bar's secondary
+                # sweep runs under the candidate corpus, not the dev's original
+                # ref. Fail closed: a broken gate must leave the PR for review,
+                # never crash the drainer.
+                try:
+                    result = green_bar_evaluate(paths)
+                except Exception as e:
+                    _log(f"author_drain: green bar errored: {e!r} — leaving PR "
+                         "for human review")
+                else:
+                    _log("author_drain: " + result.summary().replace("\n", " | "))
+                    if not result.passed:
+                        _log("author_drain: green bar not satisfied — leaving PR "
+                             "for human review")
+                    elif branch.merge_pr(pr):
+                        _log(f"author_drain: auto-merge enabled on {pr} "
+                             "(green bar passed)")
+                    else:
+                        _log("author_drain: green bar passed but `gh pr merge "
+                             "--auto` was declined — leaving PR for human review")
     finally:
         # Always put the dev's HEAD back, even if the batch raised. A swallowed
         # restore failure strands the dev on the lessons branch and (with in-repo
@@ -506,13 +531,6 @@ def _author_drain_locked(
 
     if pr is None:
         _log("author_drain: batch produced no commits — no PR opened")
-        return 0
-    _log(f"author_drain: opened lessons PR {pr}")
-    if MERGE_MODE == "auto_on_green":
-        # PR C wires the green bar + `gh pr merge --auto` here; until then the PR
-        # falls through to human review even under auto_on_green.
-        _log("author_drain: merge_mode=auto_on_green — green-bar auto-merge not yet "
-             "wired (PR C); leaving PR for review")
     return 0
 
 
@@ -522,6 +540,7 @@ def author_drain(
     run_lead_author: Callable[[Path], None] | None = None,
     trigger_author: Callable[[Path, str, str, str], None] | None = None,
     branch: AuthorBranch | None = None,
+    green_bar_evaluate: Callable[[LoopPaths], Any] | None = None,
 ) -> int:
     """Serial AUTHOR stage: branch off freshly-fetched ``origin/main``, lead-author
     each queued run dir + drain the threshold-gated findings/observation curators
@@ -529,13 +548,16 @@ def author_drain(
 
     The **writer lease** (one open lessons PR at a time) plus the in-place branch
     keep batches non-conflicting; ``merge_mode`` (default ``human_review``) decides
-    whether the PR auto-merges on a green bar (PR C) or waits for a human.
+    whether the PR auto-merges on a green bar or waits for a human. Under
+    ``auto_on_green`` the PR auto-merges only if ``green_bar_evaluate`` passes (it
+    fails closed — see ``green_bar``).
 
     One live drainer at a time, guarded by a non-blocking flock on a *dedicated*
     lock (``author_drain_lock_file``) — distinct from the curators' repo lock so
     the curators it calls can take that without a same-process deadlock. A second
     drainer that can't grab the lock simply exits. ``run_lead_author`` /
-    ``trigger_author`` / ``branch`` are injectable for tests."""
+    ``trigger_author`` / ``branch`` / ``green_bar_evaluate`` are injectable for
+    tests."""
     if MERGE_MODE not in VALID_MERGE_MODES:
         # Validated here (the author stage), not at _loop_config import, so an
         # author-only misconfig fails loud for *this* stage without crashing the
@@ -549,6 +571,12 @@ def author_drain(
         trigger_author = _maybe_trigger_author
     if branch is None:
         branch = AuthorBranch()
+    if green_bar_evaluate is None:
+        # Lazy import: green_bar's default providers pull in eval_secondary, which
+        # re-execs into the venv at import — keep it off the learn/run import path.
+        def green_bar_evaluate(p: LoopPaths):  # noqa: ANN202
+            import green_bar
+            return green_bar.evaluate(paths=p)
 
     lock_path = paths.author_drain_lock_file
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -559,7 +587,9 @@ def author_drain(
         except OSError:
             _log("author_drain: another drainer holds the lock — exiting")
             return 0
-        return _author_drain_locked(paths, run_lead_author, trigger_author, branch)
+        return _author_drain_locked(
+            paths, run_lead_author, trigger_author, branch, green_bar_evaluate
+        )
     finally:
         with contextlib.suppress(OSError):
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)

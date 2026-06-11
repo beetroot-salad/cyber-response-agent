@@ -102,8 +102,10 @@ the revert path + lesson→outcome traceability surface existing; until then def
       (`LEARNING_MERGE_MODE`, default `human_review`; `auto_on_green` path is PR C).
       Tests: `test_loop.py` author_branch (8) + author_drain lease/no-work/dirty/
       no-commit (4), `test_author_atomic.py` hold-committed cycle (2).
-- [ ] Auto-merge wiring (`gh pr merge --auto` on the green bar) — folded into PR C
-      (`auto_on_green`), since the gate that decides the merge lives in the green bar.
+- [x] Auto-merge wiring (`gh pr merge --auto` on the green bar) — `author_drain`'s
+      `auto_on_green` path calls `green_bar.evaluate` (injectable) and, on pass,
+      `branch.merge_pr` (`gh pr merge --auto --squash`). `human_review` never consults
+      the bar. Fails closed (left for review) on any not-green/merge-declined.
 - [x] Off-process LEARN worker (SIEM-free) draining run-dir artifacts; promoted the
       in-`run.py` learn call to a standalone stage. `run.py` now drops a
       `learn-queue/<run-id>.json` marker (instead of in-process `run_one`); a
@@ -123,12 +125,45 @@ the revert path + lesson→outcome traceability surface existing; until then def
 - [ ] Live end-to-end verification: real alert → concurrent `run.py` → drain →
       lesson commit (needs claude + the v2 stack).
 
-**Phase 3 — deferred:**
-- [ ] `merge_mode` knob; wire the green bar (forward-check author-time +
-      `eval_held_out.py` / `eval_secondary.py` at PR time). Default `human_review`
-      until the revert + traceability surface exist.
-- [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping
-      the default to `auto_on_green`).
+**Phase 3:**
+- [x] `merge_mode` knob (`LEARNING_MERGE_MODE`, default `human_review`; landed PR B) +
+      the green bar (`green_bar.py`). Forward-check + schema stay author-time gates
+      (committed-on-branch ⟹ passed). Net-new: held-out + secondary **floors** —
+      `eval_held_out.score()` (extracted; shares `report`'s counting via
+      `held_out_verdicts`, and a missing gt disposition can never score via
+      `None == None`) vs `LEARNING_GREEN_HELDOUT_FLOOR`, `eval_secondary` catch-rate
+      (via `SecondarySummary.catch_rate`) vs `LEARNING_GREEN_SECONDARY_FLOOR`. The
+      drain gates **before** restoring the dev's ref, so the secondary sweep runs
+      under the candidate lessons checkout (held-out still scores pre-batch runs);
+      the sweep's own head-runs land in a `secondary/` subdir so they never feed
+      later held-out floors. **Floors, not pr-vs-base diffs** (baseline re-run sweep
+      deferred); **fails closed** (unset/unmet floor, provider error, or a gate
+      crash — guarded at the drain — → not green → human review; a *malformed*
+      floor value fails loud). Secondary provider skipped once held_out already
+      failed (it's a live sweep). Providers injected; defaults lazy-wire the live
+      evals (eval_secondary re-execs at import) and reuse eval_secondary's
+      `FIXTURES_DIR`/`EVAL_OUT_DIR` (now gitignored — untracked eval output would
+      wedge the next drain's refuse-if-dirty). Backlog signal = queue depth only.
+      Tests: `test_loop.py` green_bar floors/fail-closed/skip (7) + score (1) +
+      author_drain merge paths (5).
+- [ ] Automated revert hook + lesson→outcome traceability surface (gates flipping the
+      default to `auto_on_green`) — PR D.
+
+**Phase 3 — deferred follow-ups:**
+- Strict held-out/secondary **no-regression** (PR-corpus vs base-corpus diff) needs a
+      baseline re-run harness; today's green bar uses absolute floors, and the
+      held-out floor still scores runs produced under the pre-batch corpus.
+- True oldest-queued **finding age** needs a per-row enqueue timestamp (a pending-file
+      mtime proxy is anti-correlated — appends refresh mtime — so it was dropped).
+- `gh pr merge --auto` is declined on PRs with no pending required checks (clean
+      status) and on repos without auto-merge enabled — the drain then logs
+      "declined" and leaves the PR for review; a checks-green → direct-merge
+      fallback would close that gap.
+- The secondary sweep runs inside the author-drain flock and needs the live stack
+      (SIEM creds) in the author plane; consuming the most recent persisted
+      secondary summary instead of sweeping per drain tick would decouple that.
+- Backlog signal is only emitted on the `auto_on_green` path; under the default
+      `human_review` (where review backlog actually accumulates) nothing reports it.
 
 **Deferred / known scaling gaps (not MVP-blocking):**
 - Lesson loading at PLAN is enumerate-all-frontmatter; retrieval-based top-k is the

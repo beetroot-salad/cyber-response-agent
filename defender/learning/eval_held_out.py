@@ -55,7 +55,11 @@ def predicted_disposition(run_dir: Path) -> str | None:
     return None
 
 
-def held_out_runs(runs_dir: Path) -> list[Path]:
+def held_out_verdicts(runs_dir: Path) -> list[tuple[Path, str | None, str | None]]:
+    """(run_dir, true_disposition, predicted_disposition) per held-out run —
+    the single counting surface ``score`` and ``report`` share, one ground-truth
+    parse per run. A run with a missing/None ground-truth disposition is kept
+    (it scores wrong downstream), never excluded."""
     out = []
     for child in sorted(runs_dir.iterdir()):
         if not child.is_dir():
@@ -63,30 +67,48 @@ def held_out_runs(runs_dir: Path) -> list[Path]:
         gt = child / "ground_truth.yaml"
         if not gt.is_file():
             continue
-        doc = yaml.safe_load(gt.read_text()) or {}
+        doc = yaml.safe_load(gt.read_text())
         if isinstance(doc, dict) and doc.get("held_out") is True:
-            out.append(child)
+            out.append((child, doc.get("disposition"), predicted_disposition(child)))
     return out
 
 
+def _correct(true_disp: str | None, pred: str | None) -> bool:
+    # Only a real match scores: a run whose ground truth lacks a disposition AND
+    # whose report is unparseable must not count as a hit via None == None.
+    return true_disp is not None and pred == true_disp
+
+
+def score(runs_dir: Path) -> tuple[int, int, float]:
+    """(correct, total, accuracy) over held-out runs — the numeric the green bar
+    compares against a floor. Shares ``report``'s counting (a run that fails to
+    produce a parseable report counts wrong, never excluded). ``accuracy`` is 0.0
+    when there are no held-out runs; callers gate on ``total``."""
+    verdicts = held_out_verdicts(runs_dir)
+    correct = sum(1 for _, true_disp, pred in verdicts if _correct(true_disp, pred))
+    total = len(verdicts)
+    return correct, total, (correct / total if total else 0.0)
+
+
 def report(runs_dir: Path) -> int:
-    runs = held_out_runs(runs_dir)
-    if not runs:
+    verdicts = held_out_verdicts(runs_dir)
+    if not verdicts:
         print(f"no held-out runs found under {runs_dir}", file=sys.stderr)
         return 1
 
     by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
     failures: list[tuple[str, str]] = []
-    for run_dir in runs:
-        gt_doc = yaml.safe_load((run_dir / "ground_truth.yaml").read_text())
-        true_disp = gt_doc.get("disposition")
-        pred = predicted_disposition(run_dir)
-        verdict = "ok" if pred == true_disp else "wrong"
+    for run_dir, true_disp, pred in verdicts:
+        verdict = "ok" if _correct(true_disp, pred) else "wrong"
         if pred is None:
             failures.append((run_dir.name, "no parseable report.md"))
-        by_class[true_disp].append((run_dir.name, pred, verdict))
+        if true_disp is None:
+            failures.append((run_dir.name, "no ground-truth disposition"))
+        by_class[true_disp or "(no ground-truth disposition)"].append(
+            (run_dir.name, pred, verdict)
+        )
 
-    total = sum(len(v) for v in by_class.values())
+    total = len(verdicts)
     correct = sum(1 for v in by_class.values() for _, _, vd in v if vd == "ok")
     print(f"# Held-out eval — {total} runs, {len(failures)} failure(s)")
     print()
