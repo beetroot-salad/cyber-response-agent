@@ -21,6 +21,12 @@ import pytest
 _DEFENDER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_DEFENDER))
 
+# Skip the whole module at collection when the runtime extra isn't installed
+# (CI syncs `--extra dev` only). Must precede the driver import, which pulls in
+# pydantic_ai. This is also why the permission tests live in a separate module —
+# they need none of the runtime extra and must run in CI.
+pytest.importorskip("pydantic_ai")
+
 from runtime import driver  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 
