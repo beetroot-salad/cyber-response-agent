@@ -4,6 +4,13 @@
   "service": "devcontainer",
   "workspaceFolder": "/workspace",
 
+  // Only the coding env auto-starts. The v1 wazuh playground (wazuh.manager,
+  // target-endpoint, monitoring-host, falco, wazuh-mcp-server, ...) stays
+  // defined in the compose files above — kept listed so the cross-file
+  // depends_on stays valid — but is brought up on demand, not at attach:
+  //   playground/scripts/compose.sh up -d
+  "runServices": ["devcontainer"],
+
   "customizations": {
     "vscode": {
       "extensions": [
