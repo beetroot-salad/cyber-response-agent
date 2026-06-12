@@ -8,6 +8,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Runtime investigation loop (PydanticAI migration off `claude -p`; see
+# docs/runtime-pydanticai-migration.md). Kept out of the core deps so
+# learning-loop / CI installs (which are SIEM- and runtime-free) don't pull
+# the Anthropic + MCP stack. Slim variant + extras only — no other model
+# providers. Install with: uv pip install -e '.[runtime]'.
+runtime = [
+    "pydantic-ai-slim[anthropic,mcp]>=1.107",
+]
 dev = [
     "pytest>=8.0",
     "ruff",
@@ -23,6 +31,15 @@ markers = [
 
 [tool.uv]
 package = false
+
+# defender is not an importable package — its modules are invoked by path
+# (run.py re-execs into the venv; learning/ does sys.path.insert). The
+# pyproject exists only to declare deps + the venv. Without this, an
+# editable install (`uv pip install -e .`) triggers setuptools flat-layout
+# auto-discovery, which errors on the multiple top-level dirs (hooks/,
+# skills/, learning/, …). Discover nothing: install metadata + deps only.
+[tool.setuptools]
+py-modules = []
 
 [tool.ruff.lint]
 # Hard gate (CI-blocking) is `select = ["E","F"]` minus E402/E501, run with
