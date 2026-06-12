@@ -146,13 +146,25 @@ derived from the whole payload rather than the truncated view.
 ### 3.5 Validate the result (before you summarize)
 
 A result you haven't validated is not a finished measurement. Before
-§4, gate every dispatch on validity: a *negative or suspect* result —
-an empty search (0 hits), a not-found lookup (404 / adapter exit 1 on a
-key lookup), or a declared field that came back **sentinel** (`<NA>`,
-`null`, `-`, empty) or **absent** (not in the document) — is a *claim*
-the defender would otherwise weigh as evidence. The check is part of
-measuring, so it runs **in your context, every time**. Validate first;
-investigate only if the result is healthy-but-unresolved.
+§4, gate every dispatch on validity: a result is suspect — and the
+defender would weigh a *claim* rather than a measurement — when its
+**absence**, **volume**, or **shape** is off. Those are the same axes
+the defender grades every observation on, so a result that's wrong on
+any of them poisons ANALYZE:
+
+- **Absence** — an empty search (0 hits) or a not-found lookup
+  (404 / adapter exit 1 on a key lookup).
+- **Volume** — non-zero but untrustworthy: suspiciously **sparse** (far
+  fewer rows than the lead implies), or **truncated** (the count is
+  limit-capped — a ceiling, not the value).
+- **Shape** — populated but structurally off: a declared field is
+  **sentinel** (`<NA>`/`null`/`-`/empty) or **absent** (not in the
+  document), the data sits under a **sibling/renamed field**, or the
+  decoder version differs from the template's assumption.
+
+The check is part of measuring, so it runs **in your context, every
+time**. Validate first; investigate only if the result is
+healthy-but-unresolved.
 
 **Branch on the adapter exit code first** (`payload_status` records it):
 
@@ -165,7 +177,7 @@ investigate only if the result is healthy-but-unresolved.
 - **exit 0 — the source answered.** Run the validity check for the
   result shape you got.
 
-**Empty result / not-found lookup — is the absence real?** Run a
+**Absence or sparse volume — is the (near-)nothing real?** Run a
 **positive control**: a query that *must* return rows if the adapter is
 healthy — the system's inventory `list`, the entity named in the alert
 (a just-fired alert guarantees its index holds events for it), or
@@ -189,16 +201,24 @@ invocation is fixed, never the tooling.
   control populated, broader query also empty)" so the defender knows
   which kind of empty it is.
 
-**Sentinel / absent declared field — is the value really missing?** The
-check fires **per declared field**, not per dispatch (two sentinel
-fields → two checks); only fields declared in `what_to_summarize` gate.
-§4 may not summarize a sentinel/absent declared field until the check
-produces a value, and you may **not** inline a substitute you "know"
-without recording it — your local fix isn't a system-level fix. Cheap
-step: read `{defender_dir}/skills/{system}/SKILL.md` for a "Known
-data-source quirks" entry matching the field+sentinel (apply the
-documented substitute if found), and sample one raw event for a sibling
-field carrying the value.
+A **sparse** non-zero result runs this same control: if dropping a
+clause restores the volume the lead implies, your filter was
+over-narrow; if it doesn't, the low count is real — report it as
+measured. **Truncated** volume is the exception, not this path — the
+rows exist but the count is limit-capped, so don't hand-count the
+ceiling; widen `--limit` or report `payload_status: partial` (§3).
+
+**Shape — sentinel, absent, or misplaced field.** The check fires **per
+declared field**, not per dispatch (two suspect fields → two checks);
+only fields declared in `what_to_summarize` gate. §4 may not summarize a
+field whose value is sentinel/absent until the check produces one, and
+you may **not** inline a substitute you "know" without recording it —
+your local fix isn't a system-level fix. Cheap step: read
+`{defender_dir}/skills/{system}/SKILL.md` for a "Known data-source
+quirks" entry matching the field+sentinel (apply the documented
+substitute if found), and sample one raw event to see whether the value
+sits under a **sibling/renamed field** or a drifted decoder
+(`source.ip` vs `client.ip`, `host.name` vs `host.hostname`).
 
 **Then investigate — only if healthy-but-unresolved.** When the source
 is confirmed healthy but you can't resolve it cheaply (a stubborn empty
