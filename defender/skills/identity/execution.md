@@ -35,7 +35,7 @@ elastic_cli for rule installs is reused here.
 If a call exits 2 (connectivity / docker / upstream), the data source
 is unreachable: **stop and escalate immediately** with the error — do
 not probe with `docker`/`netstat`/`ss` or hunt for config. That's a
-data-source outage, not a query problem (see gather SKILL §debug leads).
+data-source outage, not a query problem (see gather SKILL §3.5 validity check).
 
 ## Config
 

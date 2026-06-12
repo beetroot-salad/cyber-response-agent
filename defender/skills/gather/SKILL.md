@@ -119,6 +119,11 @@ the inner command, so you don't echo them; pass `--system` explicitly only
 if the inner command has no `defender-<system>` shim. Run one wrapper
 invocation per query; the wrapper handles per-lead sequencing.
 
+**This shim form is the only sanctioned invocation.** Never substitute
+the path form (`python3 …/record_query.py`), `python -m`, or an
+env-prefixed (`VAR=… …`) variant — they trip the permission flow and
+dead-end. Vary the *query*, never the tooling.
+
 **Watch for limit-capped breakdowns.** When a count or distribution
 matters, verify the indexer's `total` is ≤ the `--limit` you passed
 before reporting a Counter over the returned hits. If the run is
@@ -143,43 +148,96 @@ jq '[.hits[] | select(.message | test("Failed password") and test("::1"))] | len
 Report the number the filter returns — that is the measured value,
 derived from the whole payload rather than the truncated view.
 
-### 3.5 Validate declared fields
+### 3.5 Validate the result (before you summarize)
 
-Before §4, run a mechanical per-field check against the raw
-payload. Walk `what_to_summarize` and identify each field's
-status:
+A result you haven't validated is not a finished measurement. Before
+§4, gate every dispatch on validity: a result is suspect — and the
+defender would weigh a *claim* rather than a measurement — when its
+**absence**, **volume**, or **shape** is off. A result wrong on any of
+them poisons ANALYZE — the defender weighs it as a measurement when it
+is really an artifact:
 
-- **concrete** — the field carries the data the lead asked for
-- **sentinel** — `<NA>`, `null`, empty string, `-`, or similar
-  placeholder where a value was expected
-- **absent** — the field is not present in the document at all
+- **Absence** — an empty search (0 hits) or a not-found lookup
+  (404 / adapter exit 1 on a key lookup).
+- **Volume** — non-zero but untrustworthy: suspiciously **sparse** (far
+  fewer rows than the lead implies), or **truncated** (the count is
+  limit-capped — a ceiling, not the value).
+- **Shape** — populated but structurally off: a declared field is
+  **sentinel** (`<NA>`/`null`/`-`/empty) or **absent** (not in the
+  document), the data sits under a **sibling/renamed field**, or the
+  decoder version differs from the template's assumption.
 
-For each declared field whose status is **sentinel** or **absent**,
-run the resolution protocol below. The protocol fires **per field,
-not per dispatch**: a payload with two sentinel-or-absent declared
-fields produces two wrapper invocations (or two cache hits), never
-one. Status of fields the dispatch did **not** declare in
-`what_to_summarize` does not gate; only declared fields gate.
+The check is part of measuring, so it runs **in your context, every
+time**. Validate first; investigate only if the result is
+healthy-but-unresolved.
 
-§4 may not summarize a declared field whose status is sentinel or
-absent until the resolution protocol has produced a value for that
-field. **Do not inline a substitute you "know" from prior knowledge
-without invoking the wrapper.** The wrapper's job is to deposit
-the substitute as a draft so the lesson propagates into the system
-SKILL's `## Known data-source quirks` section — your local
-resolution is not a system-level resolution, and skipping the
-wrapper traps the lesson in this one run.
+**Branch on the adapter exit code first** (the code the `Bash` call
+returns — `payload_status` is too coarse, it folds exit 1 and 2 into
+`error`):
 
-When the trigger fires (cache miss or no prior knowledge), run the
-resolution protocol in order.
+- **exit 2 — connectivity / auth / config:** the source is
+  **unreachable**, not mis-queried. Stop and **escalate immediately**
+  with the adapter's error. Do **not** probe the connection or the
+  harness — no `netstat`/`ss`/`docker`/`/dev/tcp`, no `.env`/credential
+  hunting, no re-running to "confirm". A `2` is a data-source outage for
+  the human to resolve.
+- **exit 1 — query error or not-found:** on a *search* it's a malformed
+  query / unknown index — fix the query and re-run; on a *key lookup*
+  (e.g. `get-host <ip>`) it's the **Absence** case below (the key isn't
+  there).
+- **exit 0 — the source answered.** Run the validity check for the
+  result shape you got.
 
-**Step 1 — cache check.** Read
-`{defender_dir}/skills/{system}/SKILL.md` and look for a "Known
-data-source quirks" entry matching the sentinel pattern (same
-field, same sentinel). If documented, apply the substitute and
-continue to §4 with the resolved data.
+**Absence or sparse volume — is the (near-)nothing real?** Run a
+**positive control**: a query that *must* return rows if the adapter is
+healthy — the system's inventory `list`, the entity named in the alert
+(a just-fired alert guarantees its index holds events for it), or
+another entity you know to be active. Vary only the *query* — keep the
+`defender-record-query … -- defender-<system> …` form exactly; the
+invocation is fixed, never the tooling.
 
-**Step 2 — cache miss: invoke the data-source-debug wrapper.**
+- **Control also empty ⇒ the tool, not your query, is at fault.**
+  Escalate as a tool fault, citing the control — an adapter that returns
+  nothing for a guaranteed-populated probe is an outage, exactly like
+  exit 2. Don't debug the harness (§3).
+- **Control returns rows ⇒ the adapter is healthy**, so the absence is
+  genuine or query-shaped — one narrowing step decides which. Drop the
+  most-specific clause (or, for a key lookup, broaden the key) and
+  re-run. If the broader query returns what should have matched, a
+  filter value is mis-shaped — wrong field, wrong literal type, NAT
+  collapse, or a sibling field (`source.ip` vs `client.ip`, `host.name`
+  vs `host.hostname`); report the differential. If the broader query is
+  also empty, the absence is **genuine** — report "empty (verified:
+  control populated, broader query also empty)" so the defender knows
+  which kind of empty it is.
+
+A **sparse** non-zero result runs this same control: if dropping a
+clause restores the volume the lead implies, your filter was
+over-narrow; if it doesn't, the low count is real — report it as
+measured. **Truncated** volume is the exception, not this path — the
+rows exist but the count is limit-capped, so don't hand-count the
+ceiling; widen `--limit` or report `payload_status: partial` (§3).
+
+**Shape — sentinel, absent, or misplaced field.** The check fires **per
+declared field**, not per dispatch (two suspect fields → two checks);
+only fields declared in `what_to_summarize` gate. §4 may not summarize a
+field whose value is sentinel/absent until the check produces one, and
+you may **not** inline a substitute you "know" without recording it —
+your local fix isn't a system-level fix. Cheap step: read
+`{defender_dir}/skills/{system}/SKILL.md` for a "Known data-source
+quirks" entry matching the field+sentinel (apply the documented
+substitute if found), and sample one raw event to see whether the value
+sits under a **sibling/renamed field** or a drifted decoder
+(`source.ip` vs `client.ip`, `host.name` vs `host.hostname`).
+
+**Then investigate — only if healthy-but-unresolved.** When the source
+is confirmed healthy but you can't resolve it cheaply (a stubborn empty
+whose cause isn't an obvious clause, a mis-routed index / wrong field
+vocabulary, or a sentinel with no documented quirk), hand off to the
+**investigate** subagent (`defender-data-source-debug`). It runs in a
+fresh `claude -p` context, so the open-ended diagnosis — system SKILL +
+catalog reading, payload sampling, cross-source resolution — doesn't
+crowd yours, and returns a tight verdict:
 
 ```bash
 defender-data-source-debug \
@@ -190,22 +248,19 @@ defender-data-source-debug \
 ```
 
 `{raw-payload-path}` is the path the capture wrapper reported on stderr
-for the query you just ran (`[record_query] raw payload: gather_raw/…`).
-
-The wrapper spawns a fresh top-level `claude -p` with the
-data-source-debug SKILL loaded and returns three sections on
-stdout: `## Verdict`
+(`[record_query] raw payload: gather_raw/…`). Phrase `--question` as
+natural language grounded in the payload — e.g.
+"`falco.output_fields.container.name` returned `<NA>` for container id
+`45388dd0bf3a`; find a substitute field or a cheap cross-source
+resolution." It returns `## Verdict`
 (`data-source-quirk` | `parser-quirk` | `genuine-missing-data`),
-`## Workaround` (substitute field, cross-source query, or
-explanation), `## Deposited` (`_draft/` path + scope, or none).
-Apply Workaround to your §4 summary; capture any Deposited path
-for §6's `## Proposed`.
+`## Workaround` (substitute field / cross-source query / explanation),
+and `## Deposited` (`_draft/` path + scope, or none). Apply the
+Workaround to your §4 summary; carry any Deposited path to §6's
+`## Proposed`.
 
-Phrase `--question` as natural language grounded in the payload —
-e.g. "`falco.output_fields.container.name` returned `<NA>` for
-container id `45388dd0bf3a`; find a substitute field in the same
-document or a cheap cross-source resolution." NL-in,
-structured-out.
+The bound: if a positive control plus one narrowing step can't settle
+it, it's an investigate — hand off, don't iterate.
 
 ### 4. Summarize
 
@@ -229,41 +284,10 @@ tooling." Characterizing the data is ANALYZE, the defender's phase; an
 interpretation in your summary pre-empts it, and when it contradicts the
 numbers you reported it sends the defender back into the raw payload.
 
-#### Smell test before reporting empty / sparse
-
-When a query returns no rows or far fewer than the lead expected, do
-not just report the empty result and stop. Take one round of self-
-reflection first — these are the smells that catch silent
-mis-queries:
-
-- **Does an empty result make sense for this lead?** A 90-day window
-  on a populated system showing zero auth events for a known-active
-  user is suspicious; an alert that just fired naming the entity
-  guarantees the index has *some* events for it. If the math doesn't
-  add up, the query is probably wrong.
-- **Does the unfiltered index have events in this window?** If the
-  system CLI surfaces an unfiltered event count for the same window,
-  compare against it. Non-zero unfiltered with zero filtered means
-  your filter is the suspect, not the data.
-- **Drop the most specific clause and re-run.** If the broader query
-  returns events that should have matched the original, one of the
-  filter values is mis-shaped (wrong field, wrong literal type, NAT
-  collapse, decoder version drift). Identify which clause was
-  load-bearing and report the differential.
-- **Is there a sibling field the data is actually under?** `source.ip`
-  vs `client.ip`, `user.name` vs `user.target.name`, `host.name` vs
-  `host.hostname` — decoder shifts and pipeline rewrites move events
-  between similar fields. If a query returns zero on the named field
-  but the unfiltered window is populated, sample one raw event and
-  check field placement.
-
-If after the smell test the empty result is genuine — index is
-populated, broader query also returns nothing relevant — report
-"empty (verified: broader-query also empty / unfiltered window
-populated but filter rules events out / etc.)" so the defender
-knows which kind of empty it is. Do not run the full debug protocol
-on your own (that's the defender's explicit dispatch — §Debug
-leads); one round of smell-check, then report.
+Every empty or sentinel result is already typed by the §3.5 validity
+check before you reach this point — report the **verified** result
+("empty (verified: ...)", or the resolved substitute), never a raw
+unchecked zero or a bare sentinel.
 
 ### 5. The executed-query record (wrapper-owned)
 
@@ -345,8 +369,8 @@ How to search without a template:
 2. Compose the narrowest query that answers the lead, run it through
    the wrapper, and read the result.
 3. If it's empty/wrong-shaped, iterate (widen the window, drop a
-   clause, try a sibling field — same moves as the §4 smell test) until
-   it answers the lead.
+   clause, try a sibling field — same moves as the §3.5 validity
+   check) until it answers the lead.
 4. Name the final measurement and run it under that id:
 
 ```bash
@@ -359,40 +383,6 @@ Reserve the literal `--query-id ad-hoc` for the genuinely unnameable —
 a one-off exploratory probe with no measurement worth a name (e.g. "does
 this index have any rows at all?"). Those records exist for the audit
 trail but are not catalog candidates.
-
-### Debug leads
-
-First branch on the adapter's exit code (the `payload_status` the
-wrapper records) — it already tells you which kind of problem you have:
-
-- **`error` (exit 2 — connectivity / auth / config):** the data source
-  is **unreachable**, not mis-queried. Stop and **escalate
-  immediately** with the adapter's error. Do **not** probe the
-  connection — no `netstat`/`ss`/`docker`/`/dev/tcp`, no hunting for
-  `.env` or credentials, no re-running to "confirm". The adapter owns
-  connectivity and auth; a `2` is a data-source outage for the human to
-  resolve.
-- **`empty` (exit 0, 0 hits):** the source answered; it just had
-  nothing matching. This is the only case the debug protocol below
-  applies to.
-
-When a dispatch returned **empty** and the defender suspects a
-mis-bound query rather than genuine no-events, the defender dispatches a
-**debug lead**. The protocol (query-level only — never a host/network
-probe):
-
-1. Broaden the time window by 10× and re-run.
-2. Drop the most specific filter clause and re-run.
-3. Drop the next-most-specific clause; iterate until either rows
-   appear or all filters are stripped.
-4. Report the differential: "rows appear when `data.srcip` filter is
-   dropped — likely IP normalization / NAT issue" or "no rows at any
-   widening — index empty or misrouted." For a stubborn empty whose
-   cause isn't a filter (suspected mis-routed index, wrong field
-   vocabulary), escalate to the data-source-debug subagent (§3.5),
-   which now covers connected-but-empty payloads as well as sentinels.
-
-The defender decides what the differential means; you report it.
 
 ## Discipline
 

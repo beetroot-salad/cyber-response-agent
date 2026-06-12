@@ -167,8 +167,8 @@ def derive_system(inner: list[str]) -> str | None:
 
 
 def payload_status(exit_code: int, stdout: str) -> str:
-    """Coarse structural status. The empty-vs-suspect_empty smell test
-    stays with the model / debug-lead protocol; this is the structural floor."""
+    """Coarse structural status. The empty-vs-suspect-empty validity check
+    stays with the model (gather SKILL §3.5); this is the structural floor."""
     if exit_code != 0:
         return "error"
     if not stdout.strip():
