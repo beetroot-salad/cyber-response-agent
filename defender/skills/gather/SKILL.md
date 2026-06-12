@@ -378,14 +378,31 @@ wrapper records) — it already tells you which kind of problem you have:
 
 When a dispatch returned **empty** and the defender suspects a
 mis-bound query rather than genuine no-events, the defender dispatches a
-**debug lead**. The protocol (query-level only — never a host/network
-probe):
+**debug lead**. The protocol (query-level only — never a host/network/
+harness probe):
 
-1. Broaden the time window by 10× and re-run.
-2. Drop the most specific filter clause and re-run.
-3. Drop the next-most-specific clause; iterate until either rows
+1. **Positive control first.** Before debugging your query, prove the
+   adapter is healthy: run a query that *must* return rows if it is —
+   the system's inventory `list` (cmdb), or the entity named in the
+   alert (a just-fired alert guarantees its index holds events for that
+   entity; another entity you know to be active works too). Vary only
+   the query content — keep the `defender-record-query … --
+   defender-<system> …` form exactly; the invocation is fixed.
+   - **Control also empty ⇒ the tool, not your query, is at fault.**
+     Stop and **escalate as a tool fault**, citing the control you ran.
+     Do **not** debug the harness — no path-form
+     (`python3 …/record_query.py`), `python -m`, or env-prefixed
+     (`VAR=… …`) invocations, no `netstat`/`ss`/`docker`/`.env` hunting,
+     no re-running to "confirm". An adapter that returns nothing for a
+     guaranteed-populated probe is an outage for the human to resolve,
+     exactly like an exit-2.
+   - **Control returns rows ⇒ the adapter is healthy** and the empty is
+     query-shaped. Continue.
+2. Broaden the time window by 10× and re-run.
+3. Drop the most specific filter clause and re-run.
+4. Drop the next-most-specific clause; iterate until either rows
    appear or all filters are stripped.
-4. Report the differential: "rows appear when `data.srcip` filter is
+5. Report the differential: "rows appear when `data.srcip` filter is
    dropped — likely IP normalization / NAT issue" or "no rows at any
    widening — index empty or misrouted." For a stubborn empty whose
    cause isn't a filter (suspected mis-routed index, wrong field
