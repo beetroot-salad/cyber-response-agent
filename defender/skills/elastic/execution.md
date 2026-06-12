@@ -33,7 +33,7 @@ the connection.
 ## Exit codes
 
 - `0` — success (includes a connected-but-empty result; 0 hits is a
-  finding, not an error — see gather SKILL §debug leads)
+  finding, not an error — see gather SKILL §3.5 validity check)
 - `1` — query error (malformed query string, unknown index)
 - `2` — connectivity / auth failure. The data source is unreachable:
   **stop and escalate immediately** with the error. Do not retry-probe,

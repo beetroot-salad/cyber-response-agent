@@ -119,6 +119,11 @@ the inner command, so you don't echo them; pass `--system` explicitly only
 if the inner command has no `defender-<system>` shim. Run one wrapper
 invocation per query; the wrapper handles per-lead sequencing.
 
+**This shim form is the only sanctioned invocation.** Never substitute
+the path form (`python3 …/record_query.py`), `python -m`, or an
+env-prefixed (`VAR=… …`) variant — they trip the permission flow and
+dead-end. Vary the *query*, never the tooling.
+
 **Watch for limit-capped breakdowns.** When a count or distribution
 matters, verify the indexer's `total` is ≤ the `--limit` you passed
 before reporting a Counter over the returned hits. If the run is
@@ -148,9 +153,9 @@ derived from the whole payload rather than the truncated view.
 A result you haven't validated is not a finished measurement. Before
 §4, gate every dispatch on validity: a result is suspect — and the
 defender would weigh a *claim* rather than a measurement — when its
-**absence**, **volume**, or **shape** is off. Those are the same axes
-the defender grades every observation on, so a result that's wrong on
-any of them poisons ANALYZE:
+**absence**, **volume**, or **shape** is off. A result wrong on any of
+them poisons ANALYZE — the defender weighs it as a measurement when it
+is really an artifact:
 
 - **Absence** — an empty search (0 hits) or a not-found lookup
   (404 / adapter exit 1 on a key lookup).
@@ -166,7 +171,9 @@ The check is part of measuring, so it runs **in your context, every
 time**. Validate first; investigate only if the result is
 healthy-but-unresolved.
 
-**Branch on the adapter exit code first** (`payload_status` records it):
+**Branch on the adapter exit code first** (the code the `Bash` call
+returns — `payload_status` is too coarse, it folds exit 1 and 2 into
+`error`):
 
 - **exit 2 — connectivity / auth / config:** the source is
   **unreachable**, not mis-queried. Stop and **escalate immediately**
@@ -174,6 +181,10 @@ healthy-but-unresolved.
   harness — no `netstat`/`ss`/`docker`/`/dev/tcp`, no `.env`/credential
   hunting, no re-running to "confirm". A `2` is a data-source outage for
   the human to resolve.
+- **exit 1 — query error or not-found:** on a *search* it's a malformed
+  query / unknown index — fix the query and re-run; on a *key lookup*
+  (e.g. `get-host <ip>`) it's the **Absence** case below (the key isn't
+  there).
 - **exit 0 — the source answered.** Run the validity check for the
   result shape you got.
 
@@ -186,10 +197,9 @@ another entity you know to be active. Vary only the *query* — keep the
 invocation is fixed, never the tooling.
 
 - **Control also empty ⇒ the tool, not your query, is at fault.**
-  Escalate as a tool fault, citing the control. Do **not** debug the
-  harness — no path-form (`python3 …/record_query.py`), `python -m`, or
-  env-prefixed (`VAR=… …`) invocations. An adapter that returns nothing
-  for a guaranteed-populated probe is an outage, exactly like exit 2.
+  Escalate as a tool fault, citing the control — an adapter that returns
+  nothing for a guaranteed-populated probe is an outage, exactly like
+  exit 2. Don't debug the harness (§3).
 - **Control returns rows ⇒ the adapter is healthy**, so the absence is
   genuine or query-shaped — one narrowing step decides which. Drop the
   most-specific clause (or, for a key lookup, broaden the key) and
@@ -249,12 +259,8 @@ and `## Deposited` (`_draft/` path + scope, or none). Apply the
 Workaround to your §4 summary; carry any Deposited path to §6's
 `## Proposed`.
 
-The line is **check vs investigate**: the check is cheap, bounded, and
-part of taking the measurement, so it stays inline and always runs; the
-investigate is open-ended, so it lives behind the subagent wall and runs
-only when the check can't settle it. If a positive control plus one
-narrowing step can't answer it, it's an investigate — hand off, don't
-iterate.
+The bound: if a positive control plus one narrowing step can't settle
+it, it's an investigate — hand off, don't iterate.
 
 ### 4. Summarize
 
