@@ -20,11 +20,20 @@ import shutil
 import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 import lead_repository
 import mitre_corpus
+from _loop_comparison import (
+    build_comparison,
+    judge_settings_dict,
+    parse_investigation_companion,
+    render_manifest,
+    render_synthesis,
+    write_comparison_files,
+)
 from _loop_oracle import (
     assemble_oracle_doc,
     build_lead_user_prompt,
@@ -294,6 +303,31 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     return dump_oracle_doc(assemble_oracle_doc(projections))
 
 
+def _run_judge_claude(
+    prompt_path: Path,
+    model: str,
+    effort: str,
+    trace_name: str,
+    label: str,
+    user: str,
+    learning_run_dir: Path,
+    *,
+    settings_path: Path | None = None,
+    add_dir: Path | list[Path] | None = None,
+    permission_mode: str | None = None,
+) -> str:
+    """Shared tail for both judge paths: session id + ``claude -p`` + transcript copy."""
+    session_id = str(uuid.uuid4())
+    _log(f"step={label} session_id={session_id}")
+    try:
+        return _run_claude(
+            prompt_path, user, model=model, session_id=session_id, effort=effort,
+            settings_path=settings_path, add_dir=add_dir, permission_mode=permission_mode,
+        )
+    finally:
+        _copy_transcript(session_id, learning_run_dir / trace_name)
+
+
 def _invoke_judge(
     prompt_path: Path,
     model: str,
@@ -320,22 +354,100 @@ def _invoke_judge(
         + _section("actor_story", actor_story_path.read_text())
         + _section("projected_telemetry", projected_telemetry_path.read_text())
     )
-    session_id = str(uuid.uuid4())
-    _log(f"step={label} session_id={session_id}")
-    try:
-        return _run_claude(
-            prompt_path, user, model=model, session_id=session_id, effort=effort
+    return _run_judge_claude(
+        prompt_path, model, effort, trace_name, label, user, learning_run_dir
+    )
+
+
+@dataclass(frozen=True)
+class JudgeInvocation:
+    """The assembled adversarial-judge call — a pure-ish seam for testing."""
+
+    user_text: str
+    add_dirs: list
+    settings_path: Path
+    comparison_paths: list
+
+
+def build_judge_invocation(
+    run_dir: Path,
+    actor_story_path: Path,
+    projected_telemetry_path: Path,
+    learning_run_dir: Path,
+) -> JudgeInvocation:
+    """Assemble the grounded judge call: write the per-lead comparison files + the per-run
+    read-only settings, and build the context message. The comparison join + synthesis are
+    the structural grounding (the judge can't avoid seeing the actuals); jq over the
+    add-dir'd ``gather_raw/`` is its discretionary verification surface for absence-checks.
+    """
+    run_dir = Path(run_dir)
+    learning_run_dir = Path(learning_run_dir)
+    gather_raw = run_dir / "gather_raw"
+    comparison_dir = learning_run_dir / "comparison"
+
+    companion = parse_investigation_companion(run_dir)
+    comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
+    comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
+
+    settings_path = learning_run_dir / "judge-settings.resolved.json"
+    settings_path.write_text(
+        json.dumps(judge_settings_dict(gather_raw, comparison_dir), indent=2)
+    )
+    add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
+
+    report = run_dir / "report.md"
+    user = (
+        _section("alert", (run_dir / "alert.json").read_text())
+        + _section(
+            "report", report.read_text() if report.is_file() else "(report.md missing)",
+            "the defender's disposition + rationale — the claim you are scoring",
         )
-    finally:
-        _copy_transcript(session_id, learning_run_dir / trace_name)
+        + _section("actor_story", actor_story_path.read_text())
+        + _section(
+            "synthesis", render_synthesis(companion),
+            "the defender's cross-lead hypotheses, belief movement, authorization "
+            "reasoning, and conclusion — WHY it reached the disposition",
+        )
+        + _section(
+            "coverage_manifest", lead_repository.render_joined_yaml(run_dir),
+            "the authoritative record of what was queried per lead (id, params, "
+            "status) — ground truth for coverage",
+        )
+        + _section(
+            "comparison_files", render_manifest(comparisons),
+            f"per-lead projection-vs-actual files under {comparison_dir} — read each at "
+            f"its turn; query the full payloads under {gather_raw} with jq to check "
+            "absence (the refute primitive), never inferring it from the sample",
+        )
+    )
+    return JudgeInvocation(
+        user_text=user, add_dirs=add_dirs, settings_path=settings_path,
+        comparison_paths=comparison_paths,
+    )
 
 
-def invoke_judge(alert_path, investigation_path, lead_view_text, actor_story_path,
-                 projected_telemetry_path, learning_run_dir) -> str:
-    return _invoke_judge(
+def _invoke_judge_grounded(
+    run_dir: Path,
+    actor_story_path: Path,
+    projected_telemetry_path: Path,
+    learning_run_dir: Path,
+) -> str:
+    inv = build_judge_invocation(
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
+    )
+    return _run_judge_claude(
         JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-        alert_path, investigation_path, lead_view_text, actor_story_path,
-        projected_telemetry_path, learning_run_dir,
+        inv.user_text, learning_run_dir,
+        settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
+    )
+
+
+def invoke_judge(run_dir, actor_story_path, projected_telemetry_path,
+                 learning_run_dir) -> str:
+    """Adversarial judge, grounded: scores the encounter against the actual evidence
+    (per-lead comparison files + jq over ``gather_raw/``), not the narrative."""
+    return _invoke_judge_grounded(
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
     )
 
 
@@ -343,7 +455,8 @@ def invoke_judge_benign(alert_path, investigation_path, lead_view_text,
                         actor_story_path, projected_telemetry_path,
                         learning_run_dir) -> str:
     """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
-    environment-observation stream alongside defender findings."""
+    environment-observation stream alongside defender findings. Not yet grounded — the
+    grounding rework is adversarial-only for now (see #275 follow-up)."""
     return _invoke_judge(
         JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
         "judge_benign_trace.jsonl", "judge-benign",
@@ -391,9 +504,7 @@ class ClaudePrintSubagents:
     def judge(self, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge(
-            run_dir / "alert.json", run_dir / "investigation.md",
-            lead_repository.render_joined_yaml(run_dir),
-            actor_story_path, projected_telemetry_path, learning_run_dir,
+            run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         )
 
     def judge_benign(self, run_dir: Path, actor_story_path: Path,

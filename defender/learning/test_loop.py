@@ -28,9 +28,11 @@ LoopPaths = loop.LoopPaths
 dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
+import _loop_comparison as comparison  # type: ignore[import-not-found]  # noqa: E402
 import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
 import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
 import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
+import _loop_subagents as subagents  # type: ignore[import-not-found]  # noqa: E402
 import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -1256,3 +1258,185 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     finally:
         _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
         holder.close()
+
+
+# ---------------------------------------------------------------------------
+# _loop_comparison — the grounding zipper (judge rework, #275)
+# ---------------------------------------------------------------------------
+
+
+def _make_run_dir(tmp_path: Path, *, disposition="benign", with_payload=True) -> Path:
+    """A minimal defender run dir: alert + report + the two tables + one payload."""
+    run = tmp_path / "run"
+    (run / "gather_raw" / "l-001").mkdir(parents=True)
+    (run / "alert.json").write_text(json.dumps({"rule": {"id": "r1"}}))
+    (run / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
+    qrow = {
+        "lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search",
+        "query_id": "elastic.auth", "params": {"host": "h1"}, "raw_command": "x",
+        "exit_code": 0, "payload_status": "ok", "payload_digest": "d",
+        "payload_path": "gather_raw/l-001/0.json",
+    }
+    (run / "executed_queries.jsonl").write_text(json.dumps(qrow) + "\n")
+    (run / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"goal": "check auth", "what_to_summarize": ["accepted vs failed"]})
+    )
+    if with_payload:
+        events = [{"user": "dev.dana", "outcome": "success"}]
+        payload = (
+            "### Summary\n3 events\n\n### Raw Sample Events\n\n"
+            "```json\n" + json.dumps(events) + "\n```\n"
+        )
+        (run / "gather_raw" / "l-001" / "0.json").write_text(payload)
+    return run
+
+
+def _make_projection(tmp_path: Path, projections=None) -> Path:
+    p = tmp_path / "projected_telemetry.yaml"
+    if projections is None:
+        projections = [{"lead_id": "l-001", "events": [{"user": "attacker", "outcome": "success"}]}]
+    p.write_text(__import__("yaml").safe_dump({"projections": projections}))
+    return p
+
+
+_COMPANION = {
+    "hypothesize": {"hypotheses": [{"id": "h-mal", "name": "malicious-cred-validation", "weight": "+"}]},
+    "findings": [{
+        "id": "l-001",
+        "resolutions": [{
+            "hypothesis": "h-mal", "before": "+", "after": "--",
+            "reasoning": "2s cadence => conclusively scripted automation => benign",
+        }],
+        "outcome": {"authorization_resolutions": [
+            {"resolved_by_lead": "l-001", "fulfills": "ac1", "verdict": "authorized"},
+        ]},
+    }],
+    "conclude": {"disposition": "benign"},
+}
+
+
+def test_build_comparison_joins_projection_sample_and_invlang(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    proj = _make_projection(tmp_path)
+    comps = comparison.build_comparison(run, proj, companion=_COMPANION)
+    assert len(comps) == 1
+    c = comps[0]
+    assert c.lead_id == "l-001"
+    assert c.projected_events == [{"user": "attacker", "outcome": "success"}]
+    assert "dev.dana" in c.real_sample  # column [2] is unredacted (the judge is the scorer)
+    assert c.resolutions  # column [3] belief movement
+    assert c.resolutions[0]["after"] == "--"
+    assert c.authz
+    assert c.authz[0]["verdict"] == "authorized"
+
+
+def test_real_sample_text_keeps_values_where_lead_sample_text_scrubs(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    lead = lr.joined(run)[0]
+    real = oracle_mod.real_sample_text(lead)
+    redacted = oracle_mod.lead_sample_text(lead)
+    assert "dev.dana" in real
+    assert "dev.dana" not in redacted
+    assert "<user>" in redacted
+
+
+def test_build_comparison_monitor_run_is_empty(tmp_path: Path):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "alert.json").write_text("{}")
+    proj = _make_projection(tmp_path, projections=[])
+    comps = comparison.build_comparison(run, proj)
+    assert comps == []
+    assert "monitor" in comparison.render_manifest(comps)
+
+
+def test_build_comparison_missing_payload_degrades_sample(tmp_path: Path):
+    run = _make_run_dir(tmp_path, with_payload=False)
+    proj = _make_projection(tmp_path)
+    comps = comparison.build_comparison(run, proj)
+    assert comps[0].real_sample.startswith("(")  # placeholder, no crash
+
+
+def test_build_comparison_lead_without_projection(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    proj = _make_projection(tmp_path, projections=[])  # no projection for l-001
+    comps = comparison.build_comparison(run, proj)
+    assert comps[0].projected_events is None  # "(no projection emitted)" downstream
+
+
+def test_build_comparison_orphan_projection_surfaced(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    proj = _make_projection(tmp_path, projections=[
+        {"lead_id": "l-001", "events": []},
+        {"lead_id": "l-999", "events": [{"x": 1}]},  # projection for a lead not in the tables
+    ])
+    comps = comparison.build_comparison(run, proj)
+    by_id = {c.lead_id: c for c in comps}
+    assert "l-999" in by_id  # projection for a lead not in the tables — surfaced, not dropped
+    assert by_id["l-999"].note  # anomaly annotated
+    assert "anomaly" in comparison.render_manifest(comps)
+
+
+def test_parse_investigation_companion_degrades_on_garbage(tmp_path: Path):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "investigation.md").write_text("just prose, no invlang fences")
+    assert comparison.parse_investigation_companion(run) == {}
+    # missing file → {} too
+    assert comparison.parse_investigation_companion(tmp_path / "nope") == {}
+
+
+def test_write_comparison_files_one_per_lead(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    proj = _make_projection(tmp_path)
+    comps = comparison.build_comparison(run, proj, companion=_COMPANION)
+    out = tmp_path / "cmp"
+    paths = comparison.write_comparison_files(comps, out, run / "gather_raw")
+    assert [p.name for p in paths] == ["l-001.md"]
+    txt = paths[0].read_text()
+    assert "[1] Oracle projection" in txt
+    assert "[3] What the defender" in txt
+    assert "gather_raw/l-001/0.json" in txt  # jq hint with the absolute payload path
+    assert "scripted automation" in txt  # the per-lead belief-movement reasoning
+
+
+def test_render_synthesis_includes_reasoning_and_conclude():
+    out = comparison.render_synthesis(_COMPANION)
+    assert "h-mal" in out
+    assert "scripted automation" in out  # the :T resolutions reasoning (the "why")
+    assert "benign" in out  # the conclude block
+    assert comparison.render_synthesis({}).startswith("(")  # empty → placeholder
+
+
+def test_judge_settings_dict_is_readonly_and_unhooked(tmp_path: Path):
+    s = comparison.judge_settings_dict(tmp_path / "gr", tmp_path / "cmp")
+    assert "hooks" not in s  # the runtime block_main_loop_raw_access gate must NOT apply
+    allow, deny = s["permissions"]["allow"], s["permissions"]["deny"]
+    assert any(a.startswith("Bash(jq") for a in allow)
+    assert any(str(tmp_path / "gr") in a for a in allow)
+    for d in ("Task", "Agent", "Write(**)", "Edit(**)"):
+        assert d in deny
+    assert any("ground_truth" in d for d in deny)
+
+
+def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    proj = _make_projection(tmp_path)
+    story = tmp_path / "actor_story.md"
+    story.write_text("Attack story\nGoal\nBypass\n")
+    lrd = tmp_path / "lrd"
+    lrd.mkdir()
+
+    inv = subagents.build_judge_invocation(run, story, proj, lrd)
+
+    assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
+    assert inv.settings_path == lrd / "judge-settings.resolved.json"
+    assert inv.settings_path.is_file()
+    settings = json.loads(inv.settings_path.read_text())
+    assert "hooks" not in settings
+    assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
+    # The user message is context + the comparison manifest, grounded on the actuals.
+    assert str(run / "gather_raw") in inv.user_text
+    assert "disposition: benign" in inv.user_text     # report.md — the claim being scored
+    assert "scripted automation" not in inv.user_text  # per-lead "why" lives in the files, not inline
+    assert "comparison" in inv.user_text.lower()
