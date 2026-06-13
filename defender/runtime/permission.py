@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 # defender/ (parents[1]) and the repo root (parents[2]); mirror the hooks'
@@ -33,6 +34,7 @@ for _p in (str(_REPO_ROOT), str(_DEFENDER_DIR / "hooks")):
 from _cmd_segments import (  # noqa: E402  (sys.path set above)
     ADAPTER_CLI_RE,
     NON_ADAPTER_SHIMS,
+    all_defender_shims,
     unwrap,
 )
 # Reuse the gate predicates verbatim — these are pure (no stdin/exit), so the
@@ -82,6 +84,27 @@ def _names_a_gather_payload_tool(cmd: str) -> bool:
     return any(tok in cmd for tok in _GATHER_PAYLOAD_TOKENS)
 
 
+# The bin/ roster and the adapter regex are constant for this process's lifetime
+# (under `claude -p` each hook was a fresh subprocess, so per-call rebuild was
+# unavoidable; in-process it's wasted work + a per-call dir scan). Memoize both.
+@lru_cache(maxsize=1)
+def _cached_adapter_re():
+    return _adapter_shim_re()
+
+
+@lru_cache(maxsize=1)
+def _safe_main_tokens() -> frozenset:
+    return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS))
+
+
+@lru_cache(maxsize=1)
+def _safe_gather_tokens() -> frozenset:
+    # The gather subagent additionally runs the data-source adapter shims (they
+    # reach the `defender-record-query` wrapper); mirrors approve_shim_invocations'
+    # subagent branch (`safe |= all_defender_shims()`).
+    return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS) | all_defender_shims())
+
+
 def decide_bash(command: str, *, is_main_session: bool) -> Decision:
     """Allow/deny a Bash command, porting the three Bash gate hooks.
 
@@ -95,16 +118,24 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
         return Decision(True)
 
     if not is_main_session:
-        # Gather subagent: block_unwrapped_adapter_calls owns the rule.
+        # Gather subagent: block_unwrapped_adapter_calls denies a bare adapter,
+        # then the approve_shim_invocations subagent gate requires every segment
+        # to be a safe shim / read-only viewer (so arbitrary shell — `rm`,
+        # `curl|bash`, `python3 …` — still fails closed, not just adapters).
         if _has_unwrapped_adapter(cmd):
             return Decision(False, UNWRAPPED_DENY_REASON)
+        inner = unwrap(cmd)
+        if inner is None:
+            return Decision(False, FALLTHROUGH_DENY_REASON)
+        if not _all_segments_safe(inner, _safe_gather_tokens()):
+            return Decision(False, FALLTHROUGH_DENY_REASON)
         return Decision(True)
 
     # --- main loop (block_main_loop_raw_access + approve_shim_invocations) ---
     if RAW_MARKER in cmd and not _names_a_gather_payload_tool(cmd):
         return Decision(False, RAW_DENY_REASON)
 
-    shim_re = _adapter_shim_re()
+    shim_re = _cached_adapter_re()
     is_adapter = bool(ADAPTER_CLI_RE.search(cmd)) or bool(shim_re and shim_re.search(cmd))
     wrapped = "record_query.py" in cmd or "defender-record-query" in cmd
     if is_adapter and not wrapped:
@@ -115,8 +146,7 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
     inner = unwrap(cmd)
     if inner is None:
         return Decision(False, FALLTHROUGH_DENY_REASON)
-    safe = frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS))
-    if not _all_segments_safe(inner, safe):
+    if not _all_segments_safe(inner, _safe_main_tokens()):
         return Decision(False, FALLTHROUGH_DENY_REASON)
     return Decision(True)
 
@@ -135,7 +165,12 @@ def decide_read(path: Path, *, is_main_session: bool) -> Decision:
     parts = set(p.parts)
     if _READ_DENY_DIR in parts or any(s in name for s in _READ_DENY_SUBSTR):
         return Decision(False, f"Blocked: {name} is a denied read (secrets / ground truth).")
-    if is_main_session and RAW_MARKER in str(p) and not _names_a_gather_payload_tool(str(p)):
+    # No gather-payload-tool exemption here: that exemption is about a Bash
+    # *command* invoking record-query/data-source-debug (which legitimately name
+    # gather_raw paths). block_main_loop_raw_access never applies it to a Read
+    # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path
+    # is unconditionally clamped.
+    if is_main_session and RAW_MARKER in str(p):
         return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 
@@ -169,7 +204,16 @@ def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
 
     if path.name == "investigation.md":
         current = path.read_text() if path.is_file() else None
-        errors = validate_companion(proposed_text, current)
+        # Fail closed on an internal validator error — same as invlang_validate's
+        # hook, which exits 2 (block) rather than letting the write through.
+        try:
+            errors = validate_companion(proposed_text, current)
+        except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
+            return Decision(
+                False,
+                f"investigation.md validation errored — failing closed: {e!r}. "
+                "Simplify the invlang and rewrite.",
+            )
         if errors:
             return Decision(
                 False,

@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic_ai import Agent
 from pydantic_ai.capabilities.hooks import Hooks
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.usage import UsageLimits
 
@@ -122,20 +123,31 @@ async def run_investigation(
     prompt = _user_prompt(run_id, run_dir, alert_path)
 
     t0 = time.time()
-    async with agent.iter(
-        prompt, deps=deps,
-        usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
-    ) as run:
-        async for node in run:
-            _log_node(node)
-    result = run.result
+    # Hitting request_limit is an expected loop terminator, not a crash:
+    # UsageLimitExceeded propagates out of `agent.iter`, but the partial
+    # messages/usage stay accessible on the run object. Catch it so the trace
+    # is still written and the post-steps run; let any other error stay loud.
+    try:
+        async with agent.iter(
+            prompt, deps=deps,
+            usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
+        ) as run:
+            async for node in run:
+                _log_node(node)
+    except UsageLimitExceeded as e:
+        print(f"[run_pai] request limit reached ({e}); writing partial trace",
+              file=sys.stderr)
     wall_ms = (time.time() - t0) * 1000.0
 
-    messages = result.all_messages()
-    usage = result.usage  # property (not a method) in pydantic-ai 1.x
+    # Source messages/usage from the run, not run.result: result is None when
+    # the run ends without an End node (e.g. the request-limit path above).
+    result = run.result
+    messages = run.all_messages()
+    usage = run.usage  # property (not a method) in pydantic-ai 1.x
     observe.write_trace(
         run_dir, messages, usage,
         model=model_name, wall_ms=wall_ms,
         num_turns=int(getattr(usage, "requests", 0) or 0),
     )
-    return {"output": result.output, "model": model_name, "requests": getattr(usage, "requests", 0)}
+    output = result.output if result is not None else None
+    return {"output": output, "model": model_name, "requests": getattr(usage, "requests", 0)}

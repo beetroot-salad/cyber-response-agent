@@ -113,6 +113,14 @@ def register_tools(agent) -> None:
         file. The resulting full text is validated (invlang for investigation.md)."""
         p = Path(path)
         current = p.read_text() if p.is_file() else ""
+        if not old_string and p.is_file():
+            # Empty old_string against an existing file would replace the WHOLE
+            # file with new_string (silent clobber). Mirror Claude Code's Edit:
+            # empty old_string is create-only. Use write_file for a full replace.
+            raise ModelRetry(
+                f"{path} already exists; an empty old_string would overwrite it. "
+                "Pass a unique old_string to edit, or use write_file to replace it."
+            )
         if old_string and old_string not in current:
             raise ModelRetry(f"old_string not found in {path}")
         new_text = current.replace(old_string, new_string, 1) if old_string else new_string
