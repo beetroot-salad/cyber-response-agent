@@ -239,6 +239,100 @@ exactly this kind of engine swap. The runtime side gets the same treatment
 — the adapter owns all PydanticAI plumbing; orchestration/validators/
 artifacts stay engine-agnostic.
 
+### Phase C — full-pipeline migration (scoped per-agent contexts)
+
+Phases A/B migrate the **runtime triage loop** (main + gather). Phase C is
+the *optional* extension to the **learning-loop** agents (actor, oracle,
+judge, author, verify-forward). It is deliberately gated behind A/B and
+**not justified by the same driver**: compaction is a long-investigation
+concern, and the learning-loop agents are short single-shots where context
+cost is noise. If Phase C happens, it earns itself on three other grounds,
+ranked:
+
+1. **Enforceable information asymmetry (the real prize).** The loop's
+   *validity* rests on visibility invariants — the actor is gray-box, the
+   judge grades blind (the oracle sits between them so it isn't grading its
+   own imagination), and the actor never sees `ground_truth.yaml`. Today
+   each is a **soft discipline**: `lead_repository.actor_view`
+   (lead_repository.py:259) redacts as a *"column-set boundary, not
+   field-by-field stripping"* (line 28); `ground_truth` simply happens not
+   to be read; `workspace_map.py:75` hand-excludes `gather_raw/` from the
+   main agent's map. In-process, where we own `read_file`, each becomes a
+   **hard scope boundary** the agent's gate cannot cross. For an experiment
+   only as trustworthy as its blinding, that is correctness, not ergonomics.
+2. **Uniform observability.** The `llm_requests.jsonl` boundary log
+   (one `wrap_model_request` site) covers *every* agent — one audit format
+   across the pipeline, replacing the bespoke per-stage `claude -p` capture.
+3. **Typed in-process handoffs.** `loop.py` orchestrates actor→oracle→judge
+   via subprocess + file passing; in-process they become function calls with
+   pydantic-schema'd handoffs (and structured-output validation falls out).
+
+**The model: `Workspace = {scope, policy, view}`.** Every agent is a scope
+(the read/write subtree it may touch — the hard boundary), a policy (the
+command/adapter rules — `permission.decide_bash`, parameterized), and a view
+(its workspace map, *generated from the scope*). The payoff is unification:
+the map and the gate stop being two things that must agree. "Main can't see
+`gather_raw`" is written twice today — `workspace_map.py:75` (what it's
+told) and `block_main_loop_raw_access` (what it's allowed). A scope is the
+single source; the map is `render(scope)`, the gate is `enforce(scope)`. The
+same parity-drift theme as the rest of the runtime, one level up.
+
+```python
+@dataclass(frozen=True)
+class Workspace:
+    reads:  tuple[str, ...]   # path globs readable (its scope)
+    writes: tuple[str, ...]   # path globs writable
+    policy: Policy            # the command/adapter rules, per-agent
+    # view = render_map(run_dir, reads) — the per-agent workspace map, derived
+```
+
+Run dir restructured so scopes are clean subtrees, not carve-outs:
+
+```
+{run_id}/
+  alert.json                 # main:r gather:r actor:r judge:r
+  investigation.md report.md # main:rw                  (actor/judge: —)
+  gather/{lead}/             # gather:rw   main: summary only, raw clamped
+  learning/
+    actor_view.yaml          # actor:r   (the column-redacted projection)
+    actor_story.md           # actor:w → oracle:r → judge:r
+    oracle_events.json       # oracle:w → judge:r
+    findings.jsonl           # judge:w → author:r
+    ground_truth.yaml        # author:r verify:r  ← actor/judge: HARD-DENIED
+```
+
+| agent | reads | writes | invariant the scope makes hard |
+|---|---|---|---|
+| main | alert, skills, lessons, investigation/report | investigation, report | no raw `gather/**` (today: two soft mechanisms) |
+| gather(l) | its lead, skills, `gather/{l}/` | `gather/{l}/`, queries | can't see sibling leads / report |
+| actor | alert, `actor_view.yaml`, menu, archetype | `actor_story.md` | blind to goal/what_to_summarize, leads table, **ground truth** |
+| oracle | `actor_story.md`, lead set | `oracle_events.json` | doesn't see ground truth or the judge |
+| judge | alert, `actor_story.md`, `oracle_events.json` | `findings.jsonl` | **grades blind** — `ground_truth.yaml` out of scope |
+| author / verify | findings, lessons, `ground_truth.yaml` | lessons | the only stages *allowed* the answer |
+
+`is_untrusted_read` composes onto this orthogonally: scope decides *can you
+open it*, the salted wrap decides *is it attacker-influenced* — both already
+in `permission.py`.
+
+**What this means for the `permission.py` framework.** The "configurable
+per-agent gate" critique is right, but its primary axis is **read-scope /
+visibility**, not the adapter-handling that main-vs-gather differ on. The
+current `is_main_session` bool captures the adapter axis and is blind to the
+scope axis — and scope is what carries Phase C's value. So the framework
+should *not* be generalized against only main + gather (near-identical
+scopes); design the `Workspace`/scope abstraction when the **actor** lands
+in-process, since it's the first agent whose value *is* its scope. Until
+then: keep `permission.py` as the shared-taxonomy gate (policy may become a
+small `Policy` dataclass; scope stays a documented future axis).
+
+**Sequencing.** Actor first (highest asymmetry payoff, cleanest scope), then
+oracle/judge, then author/verify. Per
+`feedback_isolate_one_variable_in_experiments`, migrate one stage at a time
+and confirm the loop's dispositions/findings are unchanged against the
+held-out fixtures before taking the next — the scope boundaries are a
+behavior change (an agent that *was* reading something it shouldn't will now
+be denied), so each stage is its own parity gate.
+
 ## Open questions / risks
 
 - **Compaction boundary correctness.** Dropping a resolved lead's raw
@@ -260,6 +354,12 @@ artifacts stay engine-agnostic.
   inadvertently bust the cache it's meant to exploit.
 - **Cost of the rebuild.** No turnkey skills/hooks — this is the accepted
   tradeoff. Keep the surface minimal; don't port hooks that dissolve.
+- **Phase C billing fan-out.** `run.py` used the Claude Code subscription;
+  the PydanticAI engine bills the first-party API. The learning loop fans
+  out many agents per case (actor + oracle + judge × both directions +
+  author), so migrating it is a real metered-cost change — weigh it against
+  the asymmetry/observability payoff, and note Phase C is *not* compaction-
+  driven, so the Phase B token saving doesn't offset it.
 
 ## Dependency
 

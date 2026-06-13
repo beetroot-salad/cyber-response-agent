@@ -410,7 +410,7 @@ it:
 
 ```
 ---
-case_id: <run id>
+case_id: <run id — the run-dir basename>
 disposition: benign | inconclusive | malicious
 confidence: high | medium | low
 ---

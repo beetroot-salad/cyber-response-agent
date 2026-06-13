@@ -152,6 +152,20 @@ def build_prompt(run_id: str, run_dir: Path) -> str:
     )
 
 
+def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+    """The runtime agent's shell environment — shared by both engines (this
+    `claude -p` spawn and the PydanticAI tools' bash). `bin/` goes first on PATH
+    so the `defender-*` shims resolve by a single stable token regardless of cwd,
+    venv path, or compound wrapping; the run-dir anchors the budget/tag hooks and
+    the invlang corpus root (`DEFENDER_RUNS_BASE == run_dir.parent`)."""
+    env = dict(os.environ)
+    env["DEFENDER_DIR"] = str(defender_dir)
+    env["DEFENDER_RUN_DIR"] = str(run_dir)
+    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, effort: str | None) -> int:
     trace = run_dir / "tool_trace.jsonl"
     # `--add-dir REPO_ROOT` is what lets Task-tool subagents Read paths
@@ -173,18 +187,7 @@ def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, ef
     if effort:
         args.extend(["--effort", effort])
     print(f"[run.py] run_dir={run_dir} model={model}" + (f" effort={effort}" if effort else ""), file=sys.stderr)
-    env = dict(os.environ)
-    env["DEFENDER_DIR"] = str(DEFENDER_DIR)
-    # Single run-dir anchor for the budget + tag hooks (one claude -p per
-    # run, so no session→run map is needed). Inherited by hook subshells.
-    env["DEFENDER_RUN_DIR"] = str(run_dir)
-    # Put the invocation shims (defender/bin/defender-*) first on PATH so the
-    # agent and its subagents call `defender-invlang` / `defender-elastic` /
-    # … by a single stable token — matched by one allowlist rule regardless of
-    # cwd, venv path, or compound wrapping. DEFENDER_RUNS_BASE is the invlang
-    # corpus root the shim injects (run_dir.parent == the runs base).
-    env["PATH"] = f"{DEFENDER_DIR / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env = run_env(DEFENDER_DIR, run_dir)
     with trace.open("w") as out:
         proc = subprocess.run(args, input=prompt, text=True, stdout=out, env=env, cwd=str(REPO_ROOT))
     return proc.returncode

@@ -2,10 +2,11 @@
 
 SKILL.md is the system prompt (`instructions`, verbatim — never "Read the
 skill"); the four generic tools are the surface; the permission gate lives in
-the tools; budget is an in-process `after_tool_execute` hook; observability is
-the captured message stream. The loop is `agent.iter()` over nodes — live
-observability now, and the exact seam Phase B's `ProcessHistory` compaction
-plugs into (this slice passes history through unmodified).
+the tools; budget is an in-process `after_tool_execute` hook; observability is a
+`wrap_model_request` hook logging every API request live to `llm_requests.jsonl`
+(observe.py projects `tool_trace.jsonl` from it). The loop is `agent.iter()` over
+nodes — the exact seam Phase B's `ProcessHistory` compaction plugs into (this
+slice passes history through unmodified).
 """
 
 from __future__ import annotations
@@ -57,19 +58,18 @@ def _build_instructions(defender_dir: Path) -> str:
     return (defender_dir / "SKILL.md").read_text() + "\n" + _SLICE1_SCAFFOLD
 
 
-def _user_prompt(run_id: str, run_dir: Path, alert_path: Path) -> str:
-    # Run context only — no "Read SKILL.md" (it's the system prompt).
+def _user_prompt(run_dir: Path, alert_path: Path) -> str:
+    # Run context only. The procedure — artifacts to write, the stop condition,
+    # case_id (= the run-dir basename) — all lives in SKILL.md, the system
+    # prompt; don't restate it, and don't say "Read SKILL.md" (it IS the prompt).
     return (
         "Begin the investigation.\n\n"
-        f"case_id: {run_id}\n"
         f"run_dir: {run_dir}\n"
-        f"alert: {alert_path}\n\n"
-        "The run dir already contains alert.json. Write all artifacts "
-        "(investigation.md, report.md) into the run dir. Stop when both exist."
+        f"alert: {alert_path}\n"
     )
 
 
-def build_agent(model_name: str, defender_dir: Path) -> Agent:
+def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
     model = AnthropicModel(model_name)
     hooks = Hooks()
 
@@ -84,6 +84,24 @@ def build_agent(model_name: str, defender_dir: Path) -> Agent:
         except Exception as e:  # noqa: BLE001 — budget must never break the run
             print(f"[run_pai] budget accounting skipped: {e!r}", file=sys.stderr)
         return result
+
+    @hooks.on.wrap_model_request
+    async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
+        # The single observability site: log every API request's full input,
+        # output, usage, and timing at the boundary (observe.py projects the
+        # rest from these records). Logging must never break the run.
+        t0 = time.time()
+        resp = await handler(request_context)
+        try:
+            logger.log(
+                request_messages=request_context.messages,
+                response=resp,
+                run_step=int(getattr(ctx, "run_step", 0) or 0),
+                duration_ms=(time.time() - t0) * 1000.0,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[run_pai] request logging skipped: {e!r}", file=sys.stderr)
+        return resp
 
     agent = Agent(
         model,
@@ -115,18 +133,19 @@ async def run_investigation(
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary."""
     model_name = model_name or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
-    agent = build_agent(model_name, defender_dir)
+    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    agent = build_agent(model_name, defender_dir, logger)
     deps = RunDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt, is_main_session=True,
     )
-    prompt = _user_prompt(run_id, run_dir, alert_path)
+    prompt = _user_prompt(run_dir, alert_path)
 
     t0 = time.time()
     # Hitting request_limit is an expected loop terminator, not a crash:
-    # UsageLimitExceeded propagates out of `agent.iter`, but the partial
-    # messages/usage stay accessible on the run object. Catch it so the trace
-    # is still written and the post-steps run; let any other error stay loud.
+    # UsageLimitExceeded propagates out of `agent.iter`. Catch it so the
+    # post-steps run; every request up to the limit is already in the live
+    # request log either way. Let any other error stay loud.
     try:
         async with agent.iter(
             prompt, deps=deps,
@@ -139,15 +158,11 @@ async def run_investigation(
               file=sys.stderr)
     wall_ms = (time.time() - t0) * 1000.0
 
-    # Source messages/usage from the run, not run.result: result is None when
-    # the run ends without an End node (e.g. the request-limit path above).
+    # result is None when the run ends without an End node (e.g. the request-limit
+    # path above). The trace is projected from the live request log, not the run
+    # object, so it survives that case (and a crash) unchanged.
     result = run.result
-    messages = run.all_messages()
-    usage = run.usage  # property (not a method) in pydantic-ai 1.x
-    observe.write_trace(
-        run_dir, messages, usage,
-        model=model_name, wall_ms=wall_ms,
-        num_turns=int(getattr(usage, "requests", 0) or 0),
-    )
+    observe.write_trace(run_dir, logger.records, model=model_name, wall_ms=wall_ms)
+    logger.close()
     output = result.output if result is not None else None
-    return {"output": output, "model": model_name, "requests": getattr(usage, "requests", 0)}
+    return {"output": output, "model": model_name, "requests": len(logger.records)}

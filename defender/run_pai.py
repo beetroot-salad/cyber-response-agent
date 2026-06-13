@@ -40,7 +40,10 @@ DEFENDER_DIR = _DEFENDER_DIR
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, help="Path to alert.json fixture")
-    p.add_argument("--run-id", default=None, help="Override auto-generated run id")
+    p.add_argument("--run-id", default=None,
+                   help="Pin the run id for a named A/B or live run (learning-loop "
+                        "commits reference it) instead of the auto timestamp id; a "
+                        "collision with an existing run dir is rejected by materialize_run_dir")
     p.add_argument("--no-learn", action="store_true", help="Skip enqueuing for learning")
     p.add_argument("--model", default=None, help="model id (overrides $DEFENDER_MODEL)")
     return p.parse_args(argv)

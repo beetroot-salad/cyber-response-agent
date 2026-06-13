@@ -11,7 +11,6 @@ clean version of the `tag_tool_results` annotation.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,14 +39,10 @@ class RunDeps:
 
 
 def _bash_env(deps: RunDeps) -> dict[str, str]:
-    """The same environment run.py exports: bin/ first on PATH so `defender-*`
-    shims resolve, and the run-dir anchor the shims/CLIs read."""
-    env = dict(os.environ)
-    env["DEFENDER_DIR"] = str(deps.defender_dir)
-    env["DEFENDER_RUN_DIR"] = str(deps.run_dir)
-    env["DEFENDER_RUNS_BASE"] = str(deps.run_dir.parent)
-    env["PATH"] = f"{deps.defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    return env
+    """The runtime agent's shell environment — defined once in run.py and shared
+    with the `claude -p` engine (defender/ is on sys.path[0] under run_pai)."""
+    import run  # noqa: E402
+    return run.run_env(deps.defender_dir, deps.run_dir)
 
 
 def register_tools(agent) -> None:
