@@ -36,6 +36,13 @@ from budget_enforcer import (  # noqa: E402
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_REQUEST_LIMIT = 60
+# The permission gate denies disallowed tool calls via ModelRetry — control-flow
+# feedback ("pick another command"), the in-process twin of the claude -p hook's
+# exit-2, not a hard error. pydantic-ai resets a tool's retry counter on success,
+# so this budget bounds only *consecutive* denials/errors; the request limit caps
+# total work. max_retries=1 (the default) would abort the run on the 2nd back-to-
+# back gate denial — far too brittle for a gate used as feedback.
+DEFAULT_TOOL_RETRIES = 10
 
 # TEMPORARY (slice 1): the gather subagent / Task dispatch is not wired yet.
 # Remove this note when gather lands in slice 2 — at which point the agent works
@@ -85,7 +92,7 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
             print(f"[run_pai] budget accounting skipped: {e!r}", file=sys.stderr)
         return result
 
-    @hooks.on.wrap_model_request
+    @hooks.on.model_request  # the wrap-style model-request hook
     async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
         # The single observability site: log every API request's full input,
         # output, usage, and timing at the boundary (observe.py projects the
@@ -108,6 +115,7 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         deps_type=RunDeps,
         instructions=_build_instructions(defender_dir),
         capabilities=[hooks],
+        retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
     return agent
