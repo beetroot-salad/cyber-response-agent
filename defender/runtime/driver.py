@@ -20,11 +20,11 @@ from typing import Any
 from pydantic_ai import Agent
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from . import observe
-from .tools import RunDeps, register_tools
+from .tools import GatherDeps, RunDeps, register_gather_tool, register_tools
 
 # permission.py put defender/hooks on sys.path on import; reuse the budget logic.
 from . import permission  # noqa: F401  (import for its sys.path bootstrap)
@@ -35,7 +35,9 @@ from budget_enforcer import (  # noqa: E402
 )
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
+GATHER_MODEL = "claude-haiku-4-5"
 DEFAULT_REQUEST_LIMIT = 60
+GATHER_REQUEST_LIMIT = 20  # gather is a short, mechanical loop per lead
 # The permission gate denies disallowed tool calls via ModelRetry — control-flow
 # feedback ("pick another command"), the in-process twin of the claude -p hook's
 # exit-2, not a hard error. pydantic-ai resets a tool's retry counter on success,
@@ -44,25 +46,22 @@ DEFAULT_REQUEST_LIMIT = 60
 # back gate denial — far too brittle for a gate used as feedback.
 DEFAULT_TOOL_RETRIES = 10
 
-# TEMPORARY (slice 1): the gather subagent / Task dispatch is not wired yet.
-# Remove this note when gather lands in slice 2 — at which point the agent works
-# the full ORIENT→PLAN→GATHER→ANALYZE→REPORT loop.
-_SLICE1_SCAFFOLD = """
----
-## Build note (temporary — this runtime is mid-migration)
-
-The gather subagent and its `Task` dispatch are **not available in this build**.
-Do not attempt to dispatch gather, run any `defender-<system>` data-source
-adapter, or read `gather_raw/`. Work the loop ORIENT → PLAN → ANALYZE → REPORT
-using only the alert itself plus the read-only shims (`defender-invlang`,
-`defender-lessons`). If reaching a confident disposition would require gathering
-data you cannot obtain, conclude `disposition: inconclusive` and say so. Always
-produce both `investigation.md` (valid invlang) and `report.md`.
-"""
+# Cache the byte-stable preamble — the SKILL system prompt (~9K tokens, re-sent
+# every request) and the tool schemas — so only the growing message tail is
+# uncached. Message-level caching is Phase B; instructions/tools are stable per
+# run, so this is a safe, immediate win on the slice-1 cache=0 baseline.
+_CACHE_SETTINGS = AnthropicModelSettings(
+    anthropic_cache_instructions="1h",
+    anthropic_cache_tool_definitions="1h",
+)
 
 
-def _build_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "SKILL.md").read_text() + "\n" + _SLICE1_SCAFFOLD
+def _main_instructions(defender_dir: Path) -> str:
+    return (defender_dir / "SKILL.md").read_text()
+
+
+def _gather_instructions(defender_dir: Path) -> str:
+    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
 
 
 def _user_prompt(run_dir: Path, alert_path: Path) -> str:
@@ -76,8 +75,10 @@ def _user_prompt(run_dir: Path, alert_path: Path) -> str:
     )
 
 
-def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
-    model = AnthropicModel(model_name)
+def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
+    """The budget + observability hooks, shared by the main and gather agents.
+    `agent_id` tags this instance's logged requests ("main" / "gather:{lead_id}")
+    and binds the same run-scoped budget (keyed by run_dir, locked)."""
     hooks = Hooks()
 
     @hooks.on.after_tool_execute
@@ -95,8 +96,8 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
     @hooks.on.model_request  # the wrap-style model-request hook
     async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
         # The single observability site: log every API request's full input,
-        # output, usage, and timing at the boundary (observe.py projects the
-        # rest from these records). Logging must never break the run.
+        # output, usage, and timing at the boundary, tagged by agent instance
+        # (observe.py projects the main-only trace from these). Never break the run.
         t0 = time.time()
         resp = await handler(request_context)
         try:
@@ -105,19 +106,47 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
                 response=resp,
                 run_step=int(getattr(ctx, "run_step", 0) or 0),
                 duration_ms=(time.time() - t0) * 1000.0,
+                agent_id=agent_id,
             )
         except Exception as e:  # noqa: BLE001
             print(f"[run_pai] request logging skipped: {e!r}", file=sys.stderr)
         return resp
 
+    return hooks
+
+
+def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
+    """A nested gather subagent: Haiku, the gather SKILL as its system prompt, the
+    same generic tools (the bash tool auto-captures adapter calls under
+    `is_main_session=False`). One per dispatch so `agent_id` binds to the lead."""
     agent = Agent(
-        model,
-        deps_type=RunDeps,
-        instructions=_build_instructions(defender_dir),
-        capabilities=[hooks],
+        AnthropicModel(GATHER_MODEL),
+        deps_type=GatherDeps,
+        instructions=_gather_instructions(defender_dir),
+        capabilities=[_make_hooks(logger, agent_id)],
+        model_settings=_CACHE_SETTINGS,
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
+    return agent
+
+
+def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
+    agent = Agent(
+        AnthropicModel(model_name),
+        deps_type=RunDeps,
+        instructions=_main_instructions(defender_dir),
+        capabilities=[_make_hooks(logger, "main")],
+        model_settings=_CACHE_SETTINGS,
+        retries=DEFAULT_TOOL_RETRIES,
+    )
+    register_tools(agent)
+    # The gather dispatch tool builds a fresh nested gather agent per lead.
+    register_gather_tool(
+        agent,
+        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id),
+        GATHER_REQUEST_LIMIT,
+    )
     return agent
 
 

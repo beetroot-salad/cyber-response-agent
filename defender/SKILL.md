@@ -172,10 +172,10 @@ just prediction grading. Do not fetch from registry systems inline
 at ORIENT or PLAN; the registry is a system of record and its
 queries belong in the lead sequence.
 
-**One question = one lead = one gather Task.** Independent questions
+**One question = one lead = one gather call.** Independent questions
 that happen to ground the same hypothesis ("is the source IP
 documented?" + "is the account active?") are *separate* leads,
-dispatched as separate parallel `Task` calls — not bundled into one
+dispatched as separate parallel `gather` calls — not bundled into one
 lead. A composition lead is only the right shape when the answer is
 a **correlation across raw data** (which session was open when this
 file changed, which process initiated this connection); when the
@@ -304,35 +304,14 @@ read disposition off them.
 
 ### GATHER
 
-Dispatch the gather subagent on **Haiku** with a prompt that points it
-at its own SKILL on disk plus a fenced YAML dispatch block. Don't
-inline the SKILL body — the file on disk is the single source of
-truth.
-
-**Use absolute paths in the dispatch.** The Task tool routes the
-subagent into a Claude-Code-managed worktree whose cwd is not under
-`DEFENDER_DIR`. Relative paths (`defender/skills/...`) resolve
-against the subagent's cwd and silently land in the wrong tree (a
-stale checkout of another branch). The workspace map prints the
-absolute `DEFENDER_DIR` — use it for every `Read` path the dispatch
-references, and put the same value in the dispatch YAML so gather
-can reach scripts and templates.
+Dispatch the gather subagent (Haiku) for a lead with the `gather` tool:
 
 ```
-Task(
-  model="haiku",
-  prompt="Read {DEFENDER_DIR}/skills/gather/SKILL.md and follow it.\n\n"
-         "## Dispatch\n"
-         "```yaml\n"
-         "defender_dir: {DEFENDER_DIR}\n"
-         "run_dir: {run_dir}\n"
-         "lead_id: l-NNN          # ECHO the id from this lead's :L findings row — do not mint a new one\n"
-         "system: <system-name>   # the :L row's system cell\n"
-         "goal: <one-sentence measurement contract>\n"
-         "what_to_summarize:\n"
-         "  - <dimension 1>\n"
-         "  - <dimension 2>\n"
-         "```\n"
+gather(
+  lead_id="l-NNN",                 # ECHO this lead's :L findings row id — never mint a new one
+  system="<system-name>",          # the :L row's system cell
+  goal="<one-sentence measurement contract>",
+  what_to_summarize=["<dimension 1>", "<dimension 2>"],
 )
 ```
 
@@ -340,28 +319,21 @@ Task(
 (column `id`, e.g. `l-001`) — author the `:L` row **before** dispatching
 its gather lead, then echo that id here. You are reusing an existing id,
 not assigning one; the `:L` set is append-only, so a retry of a lead is a
-*new* `:L` row with a *new* id (never a reused id — `record_lead.py`
-rejects reuse with exit 2).
+*new* `:L` row with a *new* id. The tool claims the id on dispatch and
+**rejects a reused one** — append a fresh `:L` row instead.
 
-Two PreToolUse hooks parse that YAML block. `record_lead.py` writes the
-leads-table row `{run_dir}/gather_raw/{lead_id}.lead.json` and claims the
-id (exclusive create; reuse → exit 2). `inject_system_skill_description.py`
-looks up `system` and
-appends `defender/skills/{system}/SKILL.md`'s frontmatter
-`description:` to the dispatch — the subagent uses it to confirm
-relevance and then Reads the full SKILL body. Keep the YAML
-well-formed and put `system` / `goal` / `what_to_summarize` at the top
-level; omitting `system` silently disables the SKILL injection and
-forces the subagent to discover the right env SKILL on its own.
+The tool writes the leads-table row
+`{run_dir}/gather_raw/{lead_id}.lead.json`, looks up
+`defender/skills/{system}/SKILL.md`'s frontmatter `description:` and hands
+it to the subagent (to confirm relevance, then Read the full SKILL body),
+and runs the nested gather agent. Its returned summary is the only thing
+that enters your context — the raw payloads stay in the queries table.
 
 Haiku is the default because gather's job is mechanical — pick a
 template, bind params, run the CLI, summarize. Structural correctness
-is enforced by the system CLIs (e.g. `wazuh_cli.py` rejects JSON
+is enforced by the system CLIs (e.g. `elastic_cli.py` rejects JSON
 bodies missing a time-range filter), so the lighter model carries the
-load without losing rigor. Escalate to Sonnet only when a dispatch
-genuinely requires multi-step reasoning the SKILL doesn't already
-script — and prefer fixing the SKILL or the CLI's structural
-guardrails over routing more dispatches to the heavier model.
+load without losing rigor.
 
 Gather picks a query template from
 `defender/skills/gather/queries/{system}/`, or authors a new one and
@@ -370,15 +342,12 @@ writes it back. Gather returns: summary of observations + the
 by `(lead_id, seq)` in the queries table — are the authoritative record
 you reason from.
 
-When PLAN issued multiple leads in one turn, dispatch them as parallel
-`Task` calls — **all `Task` tool uses in the same assistant message**.
-Multiple Task blocks in one message run concurrently; sequential
-turn-per-Task dispatch makes the gather subagents run serially and
-roughly doubles wall time. If you find yourself ending an assistant
-turn after issuing one Task while another PLAN lead is still pending,
-you've already lost the parallelism — emit them together up front.
-When gather fans a single dispatch into multiple queries, those
-collapse into one `queries[]` list per sequence entry.
+When PLAN issued multiple leads in one turn, **emit all the `gather`
+calls in the same assistant message** so the subagents run concurrently;
+sequential turn-per-`gather` dispatch runs them serially and roughly
+doubles wall time. If you end an assistant turn after one `gather` call
+while another PLAN lead is still pending, you've lost the parallelism —
+emit them together up front.
 
 ### ANALYZE
 
@@ -437,9 +406,9 @@ loops back to PLAN) are the exception — those are genuine separate
 turns.
 
 Stop after that — the lead/query tables are written live as you dispatch
-gather (the `record_lead.py` hook + the `record_query.py` wrapper), and the
-harness (`defender/run.py`) renders the visualizer after you exit. There is
-nothing to hand-author and no post-run projection.
+gather (the `gather` tool claims the lead; the subagent's queries are
+captured automatically), and the harness renders the visualizer after you
+exit. There is nothing to hand-author and no post-run projection.
 
 ## Skills
 
@@ -508,19 +477,16 @@ l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|±10m
 GATHER dispatch (single-lead, parallel-of-one):
 
 ```
-Task(model="haiku",
-     prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
-            "## Dispatch\n"
-            "```yaml\n"
-            "run_dir: {run_dir}\n"
-            "lead_id: l-001\n"
-            "system: host-query\n"
-            "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
-            "what_to_summarize:\n"
-            "  - apt history events ±10m around the FIM timestamp\n"
-            "  - checksum_after vs the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5\n"
-            "  - fleet upgrade pattern for the same window\n"
-            "```\n")
+gather(
+  lead_id="l-001",
+  system="host-query",
+  goal="Did the file modification at 02:14:01Z trace to a managed apt upgrade?",
+  what_to_summarize=[
+    "apt history events ±10m around the FIM timestamp",
+    "checksum_after vs the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5",
+    "fleet upgrade pattern for the same window",
+  ],
+)
 ```
 
 Gather authored a new template (`host-query.apt-history-around` —

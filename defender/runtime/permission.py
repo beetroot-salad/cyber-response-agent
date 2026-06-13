@@ -17,6 +17,7 @@ free, with no model call.
 
 from __future__ import annotations
 
+import shlex
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -34,7 +35,7 @@ for _p in (str(_REPO_ROOT), str(_DEFENDER_DIR / "hooks")):
 from _cmd_segments import (  # noqa: E402  (sys.path set above)
     ADAPTER_CLI_RE,
     NON_ADAPTER_SHIMS,
-    all_defender_shims,
+    split_segments,
     unwrap,
 )
 # Reuse the gate predicates verbatim — these are pure (no stdin/exit), so the
@@ -49,10 +50,6 @@ from block_main_loop_raw_access import (  # noqa: E402
     RAW_MARKER,
     _adapter_shim_re,
 )
-from block_unwrapped_adapter_calls import (  # noqa: E402
-    DENY_REASON as UNWRAPPED_DENY_REASON,
-    _has_unwrapped_adapter,
-)
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
@@ -63,6 +60,15 @@ FALLTHROUGH_DENY_REASON = (
     "Blocked: only the defender-* shims and read-only viewers (jq/ls/cat/…) are "
     "permitted from the main loop. Dispatch gather for data-source access; do not "
     "run arbitrary shell."
+)
+
+# Gather may run a data-source adapter directly — it's captured transparently —
+# but only as a standalone command (a pipeline/compound makes "the payload"
+# ambiguous). Run it solo, then filter the persisted payload file.
+ADAPTER_STANDALONE_REASON = (
+    "Blocked: run the data-source adapter as a standalone command (it is captured "
+    "automatically — no wrapper needed), then filter the persisted payload file "
+    "with jq/grep/Read. Don't pipe or chain the adapter call."
 )
 
 # The gather-payload tools legitimately name `gather_raw` paths on the command
@@ -97,12 +103,40 @@ def _safe_main_tokens() -> frozenset:
     return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS))
 
 
-@lru_cache(maxsize=1)
-def _safe_gather_tokens() -> frozenset:
-    # The gather subagent additionally runs the data-source adapter shims (they
-    # reach the `defender-record-query` wrapper); mirrors approve_shim_invocations'
-    # subagent branch (`safe |= all_defender_shims()`).
-    return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS) | all_defender_shims())
+def _segment_is_adapter(seg: str) -> bool:
+    """True iff the segment's COMMAND (first token) is a data-source adapter — a
+    `defender-<system>` shim or a `<system>_cli.py` script. Anchored to command
+    position: an adapter name appearing as an *argument* (`which defender-elastic`,
+    `cat …/defender-elastic`) is NOT a query and must not be captured."""
+    try:
+        toks = shlex.split(seg)
+    except ValueError:
+        return False
+    if not toks:
+        return False
+    cmd = toks[0]
+    if cmd in ("python", "python3") and len(toks) > 1:
+        cmd = toks[1]  # raw `python3 …/<system>_cli.py` form
+    if cmd.startswith("defender-"):
+        return cmd not in NON_ADAPTER_SHIMS
+    return bool(ADAPTER_CLI_RE.search(cmd))
+
+
+def adapter_argv(command: str) -> list[str] | None:
+    """If `command` is a STANDALONE adapter invocation (the gather-captured case),
+    return its argv; else None. Standalone = a single shell segment whose command
+    is an adapter, after unwrapping a leading `timeout`/`bash -c`. The gather bash
+    tool uses this to route the call through the transparent capture path."""
+    inner = unwrap(command.strip())
+    if inner is None:
+        return None
+    segs = [s for s in split_segments(inner) if s.strip()]
+    if len(segs) != 1 or not _segment_is_adapter(segs[0]):
+        return None
+    try:
+        return shlex.split(segs[0])
+    except ValueError:
+        return None
 
 
 def decide_bash(command: str, *, is_main_session: bool) -> Decision:
@@ -118,16 +152,22 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
         return Decision(True)
 
     if not is_main_session:
-        # Gather subagent: block_unwrapped_adapter_calls denies a bare adapter,
-        # then the approve_shim_invocations subagent gate requires every segment
-        # to be a safe shim / read-only viewer (so arbitrary shell — `rm`,
-        # `curl|bash`, `python3 …` — still fails closed, not just adapters).
-        if _has_unwrapped_adapter(cmd):
-            return Decision(False, UNWRAPPED_DENY_REASON)
+        # Gather subagent. A standalone adapter call is allowed directly — the
+        # harness captures it (queries table + payload), so no record-query
+        # wrapper is needed. But only solo: capturing one adapter inside a
+        # pipeline/compound is ambiguous, so a compound containing an adapter is
+        # denied (run it standalone, then filter the payload). Non-adapter
+        # commands must be read-only viewers / non-adapter shims, so arbitrary
+        # shell (`rm`, `curl|bash`, `python3 …`) still fails closed.
         inner = unwrap(cmd)
         if inner is None:
             return Decision(False, FALLTHROUGH_DENY_REASON)
-        if not _all_segments_safe(inner, _safe_gather_tokens()):
+        segs = [s for s in split_segments(inner) if s.strip()]
+        if any(_segment_is_adapter(s) for s in segs):
+            if len(segs) != 1:
+                return Decision(False, ADAPTER_STANDALONE_REASON)
+            return Decision(True)
+        if not _all_segments_safe(inner, _safe_main_tokens()):
             return Decision(False, FALLTHROUGH_DENY_REASON)
         return Decision(True)
 

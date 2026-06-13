@@ -44,17 +44,54 @@ def test_main_loop_denies(cmd, reason_substr):
     assert reason_substr in d.reason
 
 
-# --- bash, gather subagent (slice 2 semantics) -----------------------------
+# --- bash, gather subagent (slice 2: transparent capture) ------------------
 
-def test_gather_denies_unwrapped_adapter():
-    assert not permission.decide_bash(
+def test_gather_allows_standalone_adapter():
+    # Adapters are captured transparently by the harness — gather runs them
+    # directly, no record-query wrapper. A standalone adapter call is allowed.
+    assert permission.decide_bash(
         "defender-elastic query foo --raw", is_main_session=False).allow
 
 
-def test_gather_allows_wrapped_adapter():
-    assert permission.decide_bash(
-        "defender-record-query --lead l-1 --query-id ad-hoc -- defender-elastic query foo",
-        is_main_session=False).allow
+@pytest.mark.parametrize("cmd", [
+    "defender-elastic query foo --raw | jq '.'",   # piped
+    "defender-elastic query foo && ls",            # chained
+    "ls; defender-elastic query foo",              # sequenced
+])
+def test_gather_denies_compound_with_adapter(cmd):
+    d = permission.decide_bash(cmd, is_main_session=False)
+    assert not d.allow
+    assert "standalone" in d.reason
+
+
+@pytest.mark.parametrize("cmd", [
+    "jq '.' gather_raw/l-001/0.json",
+    "defender-invlang enum types",
+    "cat gather_raw/l-001/0.json",
+])
+def test_gather_allows_readonly_viewers(cmd):
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+
+
+@pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
+def test_gather_denies_arbitrary_shell(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+
+
+def test_adapter_argv_extracts_standalone():
+    assert permission.adapter_argv("defender-elastic query foo --raw") == [
+        "defender-elastic", "query", "foo", "--raw"]
+    assert permission.adapter_argv("timeout 60 defender-cmdb host-lookup web-1") == [
+        "defender-cmdb", "host-lookup", "web-1"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "defender-elastic query foo | jq '.'",  # compound → not captured here
+    "jq '.' x.json",                        # not an adapter
+    "defender-invlang enum types",          # non-adapter shim
+])
+def test_adapter_argv_none_for_non_standalone_adapter(cmd):
+    assert permission.adapter_argv(cmd) is None
 
 
 # --- read ------------------------------------------------------------------

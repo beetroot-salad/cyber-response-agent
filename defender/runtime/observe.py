@@ -85,11 +85,16 @@ class RequestLogger:
         self.records: list[dict] = []
 
     def log(
-        self, *, request_messages: list[Any], response: Any, run_step: int, duration_ms: float
+        self, *, request_messages: list[Any], response: Any, run_step: int,
+        duration_ms: float, agent_id: str = "main",
     ) -> None:
         cap = _max_chars()
         record = {
             "event_type": "model_request",
+            # Per-instance id: "main" for the orchestrator, "gather:{lead_id}" per
+            # gather dispatch. Disambiguates interleaved nested-agent requests
+            # (each nested run restarts run_step at 0).
+            "agent_id": agent_id,
             "run_step": run_step,
             "model": getattr(response, "model_name", None),
             "duration_ms": round(duration_ms, 1),
@@ -150,14 +155,23 @@ def _user_event(msg: dict) -> dict | None:
     return ev
 
 
+def _main_records(records: list[dict]) -> list[dict]:
+    """Records from the orchestrator instance only. Nested gather agents log to
+    the same file (their own conversations); the trace is the MAIN conversation,
+    so its projection must exclude them — else an interleaved gather request
+    landing last would reconstruct gather's history as the trace."""
+    return [r for r in records if r.get("agent_id", "main") == "main"]
+
+
 def _full_messages(records: list[dict]) -> list[dict]:
-    """The complete conversation = the last request's input (all prior history)
-    plus its response — equivalent to `run.all_messages()`. A tool-return produced
-    *after* the final model request rides in no request's input, so it is omitted;
-    runs almost always end on the final assistant message, so this is negligible."""
-    if not records:
+    """The complete conversation = the last MAIN request's input (all prior
+    history) plus its response — equivalent to `run.all_messages()`. A tool-return
+    produced *after* the final model request rides in no request's input, so it is
+    omitted; runs almost always end on the final assistant message, so negligible."""
+    main = _main_records(records)
+    if not main:
         return []
-    last = records[-1]
+    last = main[-1]
     return list(last.get("input", [])) + [last["output"]]
 
 
@@ -183,13 +197,13 @@ def write_trace(run_dir: Path, records: list[dict], *, model: str, wall_ms: floa
     """Project `llm_requests.jsonl` records → `tool_trace.jsonl`. Post-mortem;
     cost is computed from the exact token totals via scripts/pricing.py."""
     events = _trace_events(records)
-    totals = _usage_totals(records)
+    totals = _usage_totals(records)  # all instances → cost includes gather's Haiku
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),  # no separate API timing from the SDK
         "total_cost_usd": round(usage_cost(model, totals), 6),
-        "num_turns": len(records),
+        "num_turns": len(_main_records(records)),  # matches the emitted main events
         "usage": totals,
     })
     (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))

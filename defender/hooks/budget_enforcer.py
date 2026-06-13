@@ -70,7 +70,9 @@ def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
         # wall-clock check never silently drops out for the rest of the run.
         budget.setdefault("started_at", datetime.now(UTC).isoformat())
         budget["tool_calls"] = budget.get("tool_calls", 0) + 1
-        if tool_name in ("Task", "Agent"):
+        # "Task"/"Agent" = the claude -p subagent dispatch; "gather" = the
+        # in-process PydanticAI gather dispatch tool. Both count as a spawn.
+        if tool_name in ("Task", "Agent", "gather"):
             budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1
         f.seek(0)
         f.truncate()
