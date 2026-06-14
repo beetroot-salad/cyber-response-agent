@@ -141,6 +141,7 @@ JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
 BENIGN_ACTOR_SETTINGS = LEARNING_DIR / "benign-actor-settings.json"
+ORACLE_SETTINGS = LEARNING_DIR / "oracle-settings.json"
 LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
 LESSONS_ENVIRONMENT_DIR = REPO_ROOT / "defender" / "lessons-environment"
 

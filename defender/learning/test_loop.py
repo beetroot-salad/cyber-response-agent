@@ -33,6 +33,7 @@ import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E40
 import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
 import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
 import _loop_subagents as subagents  # type: ignore[import-not-found]  # noqa: E402
+import agent_surface  # type: ignore[import-not-found]  # noqa: E402
 import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -1429,14 +1430,101 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
 
     inv = subagents.build_judge_invocation(run, story, proj, lrd)
 
-    assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
-    assert inv.settings_path == lrd / "judge-settings.resolved.json"
+    # The judge reads a STAGED surface under the run dir (cwd + --add-dir), not the
+    # learning run dir and not the original gather_raw (whose ground_truth sibling
+    # would otherwise be one `..` away). See test_stage_agent_surface_* for the seal.
+    surface = run / "_agents" / "judge"
+    assert inv.cwd == surface
+    assert (surface / "comparison" / "l-001.md") in inv.comparison_paths
+    assert inv.settings_path == surface / "judge-settings.resolved.json"
     assert inv.settings_path.is_file()
     settings = json.loads(inv.settings_path.read_text())
     assert "hooks" not in settings
-    assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
+    assert set(inv.add_dirs) == {surface / "gather_raw", surface / "comparison"}
+    # gather_raw is a REAL hardlinked dir in the surface — the judge's jq target.
+    assert (surface / "gather_raw" / "l-001" / "0.json").is_file()
     # The user message is context + the comparison manifest, grounded on the actuals.
-    assert str(run / "gather_raw") in inv.user_text
+    assert str(surface / "gather_raw") in inv.user_text
     assert "disposition: benign" in inv.user_text     # report.md — the claim being scored
     assert "scripted automation" not in inv.user_text  # per-lead "why" lives in the files, not inline
     assert "comparison" in inv.user_text.lower()
+
+
+def test_stage_agent_surface_excludes_ground_truth(tmp_path: Path):
+    # The leak this whole change closes: ground_truth.yaml is a sibling of gather_raw
+    # in the run dir; the staged surface must not expose it via gather_raw/.. .
+    run = _make_run_dir(tmp_path)
+    (run / "ground_truth.yaml").write_text("disposition: malicious\n")
+
+    surface = agent_surface.stage_agent_surface(run, "judge", include_tables=True)
+
+    gather = surface / "gather_raw"
+    assert gather.is_dir() and not gather.is_symlink()  # REAL dir, never a dir symlink
+    assert (gather / "l-001" / "0.json").is_file()      # payload staged
+    assert (surface / "executed_queries.jsonl").is_file()
+    # The natural one-level traversal lands in the clean staged parent, not the run dir.
+    assert not (gather / ".." / "ground_truth.yaml").exists()
+    assert list(surface.glob("**/ground_truth.yaml")) == []
+
+
+def test_stage_agent_surface_creates_symlink_mirror(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    target = tmp_path / "lessons-actor"
+    target.mkdir()
+    (target / "x.md").write_text("lesson\n")
+
+    surface = agent_surface.stage_agent_surface(
+        run, "actor", symlinks={"defender/lessons-actor": target},
+    )
+
+    link = surface / "defender" / "lessons-actor"
+    assert link.is_symlink()
+    assert (link / "x.md").read_text() == "lesson\n"  # resolves through the symlink
+
+
+def test_stage_agent_surface_is_idempotent(tmp_path: Path):
+    run = _make_run_dir(tmp_path)
+    first = agent_surface.stage_agent_surface(run, "judge", include_tables=True)
+    (first / "stale.txt").write_text("stale\n")
+    second = agent_surface.stage_agent_surface(run, "judge", include_tables=True)
+    assert second == first
+    assert not (second / "stale.txt").exists()  # rebuilt fresh
+
+
+def test_build_judge_invocation_seals_eval_secondary_ground_truth(tmp_path: Path):
+    # eval_secondary.run_head_oracle_and_judge passes head_run_dir (which holds
+    # ground_truth.yaml as a sibling of gather_raw) straight to invoke_judge. Every
+    # add-dir must point inside the staged surface, and the label must not be reachable.
+    run = _make_run_dir(tmp_path)
+    (run / "ground_truth.yaml").write_text("disposition: malicious\n")
+    proj = _make_projection(tmp_path)
+    story = tmp_path / "actor_story.md"
+    story.write_text("Attack story\n")
+    lrd = tmp_path / "lrd"
+    lrd.mkdir()
+
+    inv = subagents.build_judge_invocation(run, story, proj, lrd)
+
+    surface = run / "_agents" / "judge"
+    assert all(surface in d.parents for d in inv.add_dirs)  # never the original run dir
+    assert list(surface.glob("**/ground_truth.yaml")) == []
+    assert "malicious" not in inv.user_text  # the label never enters the prompt
+
+
+def test_transcript_path_finds_by_session_id(tmp_path: Path, monkeypatch):
+    # Claude Code's cwd→slug sanitization has drifted (it maps '_' as well as '/' to
+    # '-'), and our surfaces live under _agents/; locating the transcript by its unique
+    # session id is robust to that drift, so a surface-cwd run is still copied even when
+    # the slug we'd reconstruct doesn't match the one Claude actually wrote.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    sid = "sess-abc"
+    # The slug here intentionally does NOT equal replace('/','-') of any cwd below.
+    slug_dir = tmp_path / ".claude" / "projects" / "-tmp-defender-runs-r1--agents-judge"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / f"{sid}.jsonl").write_text("{}\n")
+
+    got = subagents._transcript_path(sid, Path("/tmp/defender-runs/r1/_agents/judge"))
+    assert got == slug_dir / f"{sid}.jsonl"  # found by id, slug irrelevant
+    # Miss → deterministic fallback under the projects base (won't exist).
+    miss = subagents._transcript_path("no-such-sid", Path("/x/_agents/judge"))
+    assert miss.name == "no-such-sid.jsonl" and not miss.is_file()

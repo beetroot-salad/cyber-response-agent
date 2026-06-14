@@ -335,6 +335,13 @@ def judge_settings_dict(gather_raw: Path, comparison_dir: Path) -> dict:
     paths it is granted (`--add-dir` is the real access boundary; the allow-globs just
     have to match). No `hooks` key — the runtime `block_main_loop_raw_access` gate must
     NOT apply, so the judge (the scorer) can freely jq the actuals the defender cannot.
+
+    Since the judge now runs in a staged surface (`stage_agent_surface`) whose parent
+    holds no labels, the per-agent dir is the *primary* read boundary. The `deny` block
+    below is defense-in-depth: `--add-dir` does not bound `Bash(cat/grep *)`, so an
+    absolute-path or deep-`..` read could still reach a `ground_truth.yaml` outside the
+    surface — these denies (and the `lint_ground_truth_leak` invariant) backstop that
+    non-sandbox residual.
     """
     gather_raw = Path(gather_raw)
     comparison_dir = Path(comparison_dir)
