@@ -131,7 +131,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
         return driver.build_gather_agent(sb, logger, agent_id)
 
     out = asyncio.run(tools._run_gather(
-        deps, None, factory, driver.GATHER_REQUEST_LIMIT,
+        deps, factory, driver.GATHER_REQUEST_LIMIT,
         lead_id, system, params["goal"], params["what_to_summarize"],
     ))
     logger.close()
@@ -146,6 +146,6 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     # A reused lead_id is rejected with ModelRetry (bounces the defender to PLAN).
     with pytest.raises(ModelRetry):
         asyncio.run(tools._run_gather(
-            deps, None, factory, driver.GATHER_REQUEST_LIMIT,
+            deps, factory, driver.GATHER_REQUEST_LIMIT,
             lead_id, system, params["goal"], params["what_to_summarize"],
         ))

@@ -11,9 +11,11 @@ clean version of the `tag_tool_results` annotation.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic_ai import RunContext
@@ -32,9 +34,18 @@ if str(_SCRIPTS_TOOLS) not in sys.path:
 from tag_tool_results import wrap as _wrap  # noqa: E402
 from record_lead import claim_lead as _claim_lead  # noqa: E402
 from inject_system_skill_description import read_description as _read_description  # noqa: E402
-from record_query import capture as _capture  # noqa: E402
+from record_query import capture as _capture, LEAD_ID_RE as _LEAD_ID_RE  # noqa: E402
+from record_lesson_load import lesson_name as _lesson_name  # noqa: E402
 
 _BASH_TIMEOUT_S = 120
+
+
+def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = "") -> str:
+    """The bash tool's result envelope, shared by the plain shell path and the
+    transparent adapter-capture path so both surface results in one shape."""
+    out = stdout if stdout else ""
+    err = f"\n--- stderr ---\n{stderr}" if stderr.strip() else ""
+    return f"exit={exit_code}\n--- stdout ---\n{out}{err}{note}"
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,23 @@ class GatherDeps(RunDeps):
     the capture path). Always constructed with `is_main_session=False`."""
 
     lead_id: str = ""
+
+
+def _record_lesson_load(deps: RunDeps, path: Path) -> None:
+    """Append a `lessons_loaded.jsonl` row when a runtime lesson is read into
+    context — the in-process equivalent of the `record_lesson_load` PostToolUse
+    hook (reusing its `lesson_name` matcher), feeding learning/trace_lesson.py's
+    lesson→outcome surface. Records loads into context, not demonstrable influence
+    (same caveat as the hook). Best-effort — never breaks a read."""
+    name = _lesson_name(str(path))
+    if name is None:
+        return
+    try:
+        row = {"lesson_name": name, "ts": datetime.now(UTC).isoformat(timespec="seconds")}
+        with (deps.run_dir / "lessons_loaded.jsonl").open("a") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001 — best-effort observability
+        pass
 
 
 def _bash_env(deps: RunDeps) -> dict[str, str]:
@@ -92,9 +120,7 @@ def register_tools(agent) -> None:
             )
         except subprocess.TimeoutExpired:
             raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}")
-        out = proc.stdout if proc.stdout else ""
-        err = f"\n--- stderr ---\n{proc.stderr}" if proc.stderr.strip() else ""
-        return f"exit={proc.returncode}\n--- stdout ---\n{out}{err}"
+        return _format_bash_result(proc.returncode, proc.stdout, proc.stderr)
 
     @agent.tool
     async def read_file(ctx: RunContext[RunDeps], path: str) -> str:
@@ -108,6 +134,7 @@ def register_tools(agent) -> None:
         if not p.is_file():
             raise ModelRetry(f"file not found: {path}")
         text = p.read_text()
+        _record_lesson_load(ctx.deps, p)  # lesson→outcome traceability (best-effort)
         if permission.is_untrusted_read(p):
             # Attacker-influenced data — wrap so injected instructions inside it
             # are inert. Same delimiter as the rest of the system.
@@ -144,6 +171,15 @@ def register_tools(agent) -> None:
             )
         if old_string and old_string not in current:
             raise ModelRetry(f"old_string not found in {path}")
+        if old_string and current.count(old_string) > 1:
+            # Mirror Claude Code's Edit: a non-unique old_string is ambiguous.
+            # Replacing the first match silently would edit the wrong occurrence
+            # (e.g. a repeated invlang row marker) and can pass invlang validation.
+            raise ModelRetry(
+                f"old_string is not unique in {path} ({current.count(old_string)} "
+                "occurrences); include enough surrounding context to match exactly "
+                "one, or use write_file to replace the whole file."
+            )
         new_text = current.replace(old_string, new_string, 1) if old_string else new_string
         decision = permission.decide_write(p, new_text, run_dir=ctx.deps.run_dir)
         if not decision.allow:
@@ -160,18 +196,19 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     from deps — the harness owns capture; the model never supplies it."""
     try:
         passthrough, stderr, record = _capture(
-            deps.run_dir, getattr(deps, "lead_id", ""), argv, env=_bash_env(deps)
+            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps)
         )
     except ValueError as e:
         raise ModelRetry(str(e))
-    err = f"\n--- stderr ---\n{stderr}" if stderr.strip() else ""
     # Surface the persisted payload path (the gather SKILL filters against it for
-    # large payloads) — mirrors the record_query CLI's stderr note.
+    # large payloads). Report it ABSOLUTE: the bash/read tools resolve relative to
+    # the repo root, not run_dir, so the relative table FK (record['payload_path'])
+    # would be unresolvable. Matches build_truncated_view's absolute path.
     note = (
-        f"\n[record_query] raw payload: {record['payload_path']}"
+        f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
         if record.get("payload_path") else ""
     )
-    return f"exit={record['exit_code']}\n--- stdout ---\n{passthrough}{err}{note}"
+    return _format_bash_result(record["exit_code"], passthrough, stderr, note)
 
 
 def _gather_prompt(
@@ -205,12 +242,21 @@ _LEAD_REUSE_RETRY = (
 
 
 async def _run_gather(
-    deps: RunDeps, usage, gather_factory, request_limit: int,
+    deps: RunDeps, gather_factory, request_limit: int,
     lead_id: str, system: str, goal: str, what_to_summarize: list[str],
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
     without the main model: claim the lead → inject the system description → run
     the nested gather agent → wrap the summary."""
+    # 0. Fail fast on a malformed lead_id. claim_lead treats a bad id as a benign
+    # skip (returns 0, no sidecar), which would otherwise half-dispatch the lead
+    # (nested agent spawned, no leads-table row) until capture() later rejects the
+    # same id mid-run. Reject it here, with the grammar the FK actually uses.
+    if not _LEAD_ID_RE.match(lead_id):
+        raise ModelRetry(
+            f"invalid lead_id {lead_id!r}: echo the :L findings row id (an `l-` id) "
+            "verbatim — it is the FK joining the leads and queries tables."
+        )
     # 1. Claim the lead id (atomic O_EXCL); a reused id bounces back to PLAN.
     if _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
@@ -221,7 +267,11 @@ async def _run_gather(
     # 2. Inject the target system's SKILL description (relevance + pointer).
     desc = _read_description(system)
 
-    # 3. Run the nested gather agent; fold its usage into the run total.
+    # 3. Run the nested gather agent. It gets its OWN usage object: sharing the
+    # main run's usage would make request_limit (a cumulative check) abort gather
+    # the moment the main loop has already issued `request_limit` requests, so the
+    # per-lead cap would not bound gather's own requests. Cost still folds in — the
+    # request log (observe.write_trace) sums every instance's usage independently.
     gagent = gather_factory(f"gather:{lead_id}")
     gdeps = GatherDeps(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
@@ -230,7 +280,7 @@ async def _run_gather(
     prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, desc)
     try:
         result = await gagent.run(
-            prompt, deps=gdeps, usage=usage,
+            prompt, deps=gdeps,
             usage_limits=UsageLimits(request_limit=request_limit),
         )
         output = str(result.output or "")
@@ -265,6 +315,6 @@ def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None
         the queries it runs are captured to the queries table automatically. Issue
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
         return await _run_gather(
-            ctx.deps, ctx.usage, gather_factory, request_limit,
+            ctx.deps, gather_factory, request_limit,
             lead_id, system, goal, what_to_summarize,
         )

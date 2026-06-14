@@ -161,7 +161,7 @@ engine fires" to "Python the loop runs".
 | `invlang_validate.py` (PreToolUse Write/Edit) | block non-conforming `investigation.md` writes (exit 2) | `before_tool_validate` on `write_investigation`, or raise `ModelRetry` from the tool → model retries with the validator error |
 | `tag_tool_results.py` (PostToolUse) | salted untrusted-data wrapping of tool output | `after_tool_execute` hook (or `ProcessHistory`) wrapping gather + MCP results before they enter context |
 | `budget_enforcer.py` (PostToolUse) | per-run tool/spawn/wall-clock budget (warn) | `before_model_request` / node hook with a per-run counter (or `usage_limits` for a hard cap) |
-| `record_lesson_load.py` (PostToolUse Read) | log lessons read into context | the `lessons` retrieval tool records loads itself |
+| `record_lesson_load.py` (PostToolUse Read) | log lessons read into context | `read_file` appends a `lessons_loaded.jsonl` row on a runtime-lesson read (reuses `record_lesson_load.lesson_name`) → feeds `learning/trace_lesson.py` |
 
 Two themes: the *integrity-gate* hooks (`record_lead`, `record_query`,
 `invlang_validate`) become tool wrappers / validators that keep their

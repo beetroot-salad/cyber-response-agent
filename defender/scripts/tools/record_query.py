@@ -87,6 +87,18 @@ _SAMPLE_MAX_CHARS = 600
 _RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
 
 
+def _args_after_script(inner: list[str]) -> list[str]:
+    """The argv after the CLI script/shim token (the first token ending in
+    ``.py`` or starting with ``defender-``), or the whole argv when none is
+    found. The leading element of the result, if not a flag, is the adapter
+    subcommand (verb) — both ``parse_params`` and ``_derive_verb`` split on it."""
+    script_idx = next(
+        (i for i, t in enumerate(inner)
+         if t.endswith(".py") or t.startswith("defender-")), None
+    )
+    return inner[script_idx + 1 :] if script_idx is not None else list(inner)
+
+
 def parse_params(inner: list[str]) -> dict:
     """Extract bound params from an inner CLI argv, generically.
 
@@ -103,11 +115,7 @@ def parse_params(inner: list[str]) -> dict:
     stable per template, so ``arg0`` is sufficient and portable. The
     verbatim command is preserved separately as ``raw_command``.
     """
-    script_idx = next(
-        (i for i, t in enumerate(inner)
-         if t.endswith(".py") or t.startswith("defender-")), None
-    )
-    rest = inner[script_idx + 1 :] if script_idx is not None else list(inner)
+    rest = _args_after_script(inner)
     # Drop the leading subcommand token (the verb); it is already in query_id.
     if rest and not rest[0].startswith("-"):
         rest = rest[1:]
@@ -264,11 +272,7 @@ def _next_seq(run_dir: Path, lead: str) -> int:
 def _derive_verb(inner: list[str]) -> str | None:
     """The adapter subcommand token (after the shim/script path), or None for a
     flags-only invocation. Mirrors parse_params' leading-subcommand drop."""
-    script_idx = next(
-        (i for i, t in enumerate(inner)
-         if t.endswith(".py") or t.startswith("defender-")), None
-    )
-    rest = inner[script_idx + 1:] if script_idx is not None else list(inner)
+    rest = _args_after_script(inner)
     if rest and not rest[0].startswith("-"):
         return rest[0]
     return None
@@ -304,8 +308,9 @@ def capture(
     system = system or derive_system(inner)
     if not system:
         raise ValueError(
-            "could not derive system from the adapter command "
-            "(expected a defender-<system> shim or <system>_cli.py path)"
+            "system could not be derived from the adapter command "
+            "(expected a defender-<system> shim or <system>_cli.py path); "
+            "pass --system to override"
         )
     # Validate the FK before it becomes a path segment: an unvalidated lead
     # (traversal / absolute) would escape gather_raw/ and break the join.

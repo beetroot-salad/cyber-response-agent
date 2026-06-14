@@ -199,7 +199,7 @@ async def run_investigation(
     # path above). The trace is projected from the live request log, not the run
     # object, so it survives that case (and a crash) unchanged.
     result = run.result
-    observe.write_trace(run_dir, logger.records, model=model_name, wall_ms=wall_ms)
+    observe.write_trace(run_dir, logger.messages, wall_ms=wall_ms)
     logger.close()
     output = result.output if result is not None else None
-    return {"output": output, "model": model_name, "requests": len(logger.records)}
+    return {"output": output, "model": model_name, "requests": logger.n_requests}
