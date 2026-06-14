@@ -134,6 +134,49 @@ def lead_sample_text(lead) -> str:
     return "(no schema sample available for this lead)"
 
 
+def unredacted_exemplar(text: str) -> str:
+    """Like ``redact_exemplar`` but keeps the real leaf values.
+
+    The judge is the *scorer*, not a gray-box actor, so it sees real values — the
+    sample orients it (field names + example values to shape a jq query); it still
+    queries the full payload for absence-checks. Reuses the same two block regexes as
+    ``redact_exemplar`` so the extraction can't drift. Leading ``(`` on a return value
+    signals ``real_sample_text`` to try a sibling payload, matching ``lead_sample_text``.
+    """
+    header_m = _RAW_SAMPLE_HEADER_RE.search(text)
+    if not header_m:
+        return "(no sample available for this lead)"
+    block = text[header_m.start():]
+    header_line = block.split("\n", 1)[0]
+    json_m = _JSON_BLOCK_RE.search(block)
+    if not json_m:
+        return f"{header_line}\n(sample not in JSON form)"
+    try:
+        sample = json.loads(json_m.group(1))
+    except json.JSONDecodeError:
+        return f"{header_line}\n(could not parse sample as JSON)"
+    if not sample:
+        return "(sample block is empty; none for this lead)"
+    return (
+        f"{header_line} (real values — orientation only)\n\n"
+        f"```json\n{json.dumps(sample, indent=2)}\n```"
+    )
+
+
+def real_sample_text(lead) -> str:
+    """One unredacted sample event for a lead (for the grounded judge).
+
+    Same per-lead ``raw_ref`` scan as ``lead_sample_text``, but returns real values.
+    """
+    for q in lead.queries:
+        if q.raw_ref is None or not q.raw_ref.is_file():
+            continue
+        body = unredacted_exemplar(q.raw_ref.read_text())
+        if not body.startswith("("):
+            return body
+    return "(no sample available for this lead)"
+
+
 # ---------------------------------------------------------------------------
 # Per-lead user prompt
 # ---------------------------------------------------------------------------

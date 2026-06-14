@@ -489,9 +489,7 @@ def run_head_oracle_and_judge(
 
     try:
         judge_yaml = loop_mod.invoke_judge(
-            head_run_dir / "alert.json",
-            head_run_dir / "investigation.md",
-            loop_mod.lead_repository.render_joined_yaml(head_run_dir),
+            head_run_dir,
             actor_story_path,
             projected_path,
             staging_dir,
