@@ -20,11 +20,13 @@ jobs:
         run: uv python install 3.11
 
       # defender/pyproject.toml is package = false — `uv sync` installs the
-      # dependencies (incl. the dev extra) into defender/.venv without trying to
-      # build defender itself as an installable package.
+      # dependencies into defender/.venv without trying to build defender itself
+      # as an installable package. The runtime extra (pydantic-ai) is synced so
+      # the runtime/ package import-checks during collection and slice-2's
+      # hermetic gather tests can run; the llm-marked smoke still skips here.
       - name: Sync defender venv
         working-directory: defender
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra runtime
 
       - name: Run unit tests
         working-directory: defender

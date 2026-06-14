@@ -87,6 +87,18 @@ _SAMPLE_MAX_CHARS = 600
 _RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
 
 
+def _args_after_script(inner: list[str]) -> list[str]:
+    """The argv after the CLI script/shim token (the first token ending in
+    ``.py`` or starting with ``defender-``), or the whole argv when none is
+    found. The leading element of the result, if not a flag, is the adapter
+    subcommand (verb) — both ``parse_params`` and ``_derive_verb`` split on it."""
+    script_idx = next(
+        (i for i, t in enumerate(inner)
+         if t.endswith(".py") or t.startswith("defender-")), None
+    )
+    return inner[script_idx + 1 :] if script_idx is not None else list(inner)
+
+
 def parse_params(inner: list[str]) -> dict:
     """Extract bound params from an inner CLI argv, generically.
 
@@ -103,11 +115,7 @@ def parse_params(inner: list[str]) -> dict:
     stable per template, so ``arg0`` is sufficient and portable. The
     verbatim command is preserved separately as ``raw_command``.
     """
-    script_idx = next(
-        (i for i, t in enumerate(inner)
-         if t.endswith(".py") or t.startswith("defender-")), None
-    )
-    rest = inner[script_idx + 1 :] if script_idx is not None else list(inner)
+    rest = _args_after_script(inner)
     # Drop the leading subcommand token (the verb); it is already in query_id.
     if rest and not rest[0].startswith("-"):
         rest = rest[1:]
@@ -261,6 +269,107 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     return n
 
 
+def _derive_verb(inner: list[str]) -> str | None:
+    """The adapter subcommand token (after the shim/script path), or None for a
+    flags-only invocation. Mirrors parse_params' leading-subcommand drop."""
+    rest = _args_after_script(inner)
+    if rest and not rest[0].startswith("-"):
+        return rest[0]
+    return None
+
+
+_ADAPTER_TIMEOUT_S = int(os.environ.get("DEFENDER_ADAPTER_TIMEOUT_SEC", "120"))
+
+
+def capture(
+    run_dir: Path,
+    lead: str,
+    inner: list[str],
+    *,
+    query_id: str | None = None,
+    system: str | None = None,
+    env: dict | None = None,
+    timeout: int = _ADAPTER_TIMEOUT_S,
+) -> tuple[str, str, dict]:
+    """Run an adapter command and record it to the queries table + payload.
+
+    The harness capability behind gather's data-source access (and the body of
+    the legacy ``defender-record-query`` CLI): subprocess-run ``inner``, persist
+    its stdout to ``gather_raw/{lead}/{seq}.json``, and append the executed-query
+    row to ``executed_queries.jsonl``. Returns ``(passthrough_view, stderr,
+    record)`` — the (possibly size-capped) stdout view for the caller to surface,
+    the raw stderr, and the recorded row.
+
+    ``query_id`` defaults to ``{system}.{verb}`` (derived from the command) when
+    the caller doesn't bind a catalog template id — the in-process gather path
+    has no model-supplied id. Raises ``ValueError`` on an undetectable system or
+    a malformed lead id (the structural preconditions the CLI checked inline).
+    """
+    system = system or derive_system(inner)
+    if not system:
+        raise ValueError(
+            "system could not be derived from the adapter command "
+            "(expected a defender-<system> shim or <system>_cli.py path); "
+            "pass --system to override"
+        )
+    # Validate the FK before it becomes a path segment: an unvalidated lead
+    # (traversal / absolute) would escape gather_raw/ and break the join.
+    if not LEAD_ID_RE.match(lead):
+        raise ValueError(f"invalid lead id {lead!r} (expected an `l-` row id)")
+    if query_id is None:
+        verb = _derive_verb(inner)
+        query_id = f"{system}.{verb}" if verb else f"{system}.ad-hoc"
+
+    try:
+        proc = subprocess.run(
+            inner, capture_output=True, text=True, env=env, timeout=timeout
+        )
+        rc, out, err = proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        # A hung adapter must not hang the investigation — record it as an error.
+        rc, out, err = 124, "", f"adapter timed out after {timeout}s"
+
+    lead_dir = run_dir / "gather_raw" / lead
+    seq = _next_seq(run_dir, lead)
+    payload_path = lead_dir / f"{seq}.json"
+    payload_rel = None
+    try:
+        lead_dir.mkdir(parents=True, exist_ok=True)
+        payload_path.write_text(out)
+        payload_rel = str(payload_path.relative_to(run_dir))
+    except OSError as e:
+        print(f"record_query: could not write payload: {e}", file=sys.stderr)
+
+    record = {
+        "lead_id": lead,
+        "seq": seq,
+        "system": system,
+        "verb": query_id.split(".", 1)[1] if "." in query_id else query_id,
+        "query_id": query_id,
+        "params": parse_params(inner),
+        "raw_command": shlex.join(inner),
+        "payload_path": payload_rel,
+        "exit_code": rc,
+        "payload_status": payload_status(rc, out),
+        "payload_digest": payload_digest(out, err, rc),
+    }
+    try:
+        log = run_dir / "executed_queries.jsonl"
+        with log.open("a") as fh:  # append is atomic for one short line
+            fh.write(json.dumps(record) + "\n")
+    except OSError as e:
+        print(f"record_query: could not append record: {e}", file=sys.stderr)
+
+    # Cap the in-context view: an oversized payload is replaced by count +
+    # samples + a nudge to filter the persisted file with code (the full payload
+    # is always on disk at payload_path).
+    if rc == 0 and len(out) > PASSTHROUGH_MAX_BYTES:
+        passthrough = build_truncated_view(out, payload_rel, run_dir)
+    else:
+        passthrough = out
+    return passthrough, err, record
+
+
 def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
     if "--" not in argv:
         return argv, []
@@ -293,77 +402,20 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    run_dir = Path(run_dir_arg)
 
-    system = ns.system or derive_system(inner)
-    if not system:
-        print(
-            "record_query.py: --system not given and could not be derived from "
-            "the inner command (expected a defender-<system> shim or "
-            "<system>_cli.py path)",
-            file=sys.stderr,
+    try:
+        passthrough, stderr, record = capture(
+            Path(run_dir_arg), ns.lead, inner, query_id=ns.query_id, system=ns.system
         )
+    except ValueError as e:
+        print(f"record_query.py: {e}", file=sys.stderr)
         return 2
 
-    lead = ns.lead
-    # Validate the FK before it becomes a path segment: an unvalidated --lead
-    # (traversal / absolute) would escape gather_raw/ and break the join.
-    # Mirrors hooks/record_lead.py's claim-side guard.
-    if not LEAD_ID_RE.match(lead):
-        print(
-            f"record_query.py: invalid --lead {lead!r} (expected an `l-` row id)",
-            file=sys.stderr,
-        )
-        return 2
-    query_id = ns.query_id
-    verb = query_id.split(".", 1)[1] if "." in query_id else query_id
-
-    proc = subprocess.run(inner, capture_output=True, text=True)
-
-    lead_dir = run_dir / "gather_raw" / lead
-    seq = _next_seq(run_dir, lead)
-    payload_path = lead_dir / f"{seq}.json"
-    payload_rel = None
-    try:
-        lead_dir.mkdir(parents=True, exist_ok=True)
-        payload_path.write_text(proc.stdout)
-        payload_rel = str(payload_path.relative_to(run_dir))
-    except OSError as e:
-        print(f"record_query.py: could not write payload: {e}", file=sys.stderr)
-
-    record = {
-        "lead_id": lead,
-        "seq": seq,
-        "system": system,
-        "verb": verb,
-        "query_id": query_id,
-        "params": parse_params(inner),
-        "raw_command": shlex.join(inner),
-        "payload_path": payload_rel,
-        "exit_code": proc.returncode,
-        "payload_status": payload_status(proc.returncode, proc.stdout),
-        "payload_digest": payload_digest(proc.stdout, proc.stderr, proc.returncode),
-    }
-    try:
-        log = run_dir / "executed_queries.jsonl"
-        with log.open("a") as fh:  # append is atomic for one short line
-            fh.write(json.dumps(record) + "\n")
-    except OSError as e:
-        print(f"record_query.py: could not append record: {e}", file=sys.stderr)
-
-    # Pass the result through for the subagent's reasoning, but cap the
-    # in-context view: an oversized payload is replaced by count + samples +
-    # a nudge to filter the persisted file with code (the full payload is
-    # already on disk at payload_path). The §3.5 data-source-debug protocol
-    # and §filter-with-code both point at that path.
-    if proc.returncode == 0 and len(proc.stdout) > PASSTHROUGH_MAX_BYTES:
-        sys.stdout.write(build_truncated_view(proc.stdout, payload_rel, run_dir))
-    else:
-        sys.stdout.write(proc.stdout)
-    sys.stderr.write(proc.stderr)
-    if payload_rel:
-        print(f"[record_query] raw payload: {payload_rel}", file=sys.stderr)
-    return proc.returncode
+    sys.stdout.write(passthrough)
+    sys.stderr.write(stderr)
+    if record["payload_path"]:
+        print(f"[record_query] raw payload: {record['payload_path']}", file=sys.stderr)
+    return record["exit_code"]
 
 
 if __name__ == "__main__":
