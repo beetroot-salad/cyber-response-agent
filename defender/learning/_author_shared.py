@@ -130,6 +130,27 @@ def benign_generation_count() -> int:
     return prior + 1
 
 
+def actor_env_generation_count() -> int:
+    """Generation this adversarial environment-lesson commit would assert.
+
+    The adversarial source feeding the SHARED lessons-environment/ corpus
+    (issue #298). Counts prior adversarial-env commits by their required
+    ``Actor-Env-Model:`` trailer — a third independent counter, disjoint from
+    the ``Actor-Model:`` (tradecraft) and ``Benign-Actor-Model:`` (FP env)
+    trailers, so per-stream generation analytics stay clean even though the
+    adversarial-env and FP-env commits land in the same corpus.
+    """
+    proc = subprocess.run(
+        ["git", "rev-list", "--count", "--grep=^Actor-Env-Model: ", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    prior = int(proc.stdout.strip() or "0")
+    return prior + 1
+
+
 def without_consumed_category(rec: dict) -> dict:
     """A queue row stripped of the ``consumed_*`` stamp — for re-holding a
     just-committed row in the pending queue (``hold_committed``) so it reads

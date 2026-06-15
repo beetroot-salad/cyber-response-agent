@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 from _loop_config import LoopPaths
-from _loop_persist import append_actor_observations, append_environment_observations
+from _loop_persist import (
+    append_actor_environment_observations,
+    append_actor_observations,
+    append_environment_observations,
+)
 from _loop_validate import validate_judge_benign_doc, validate_judge_doc
 
 
@@ -36,6 +40,13 @@ class Direction:
     judge_name: str
     judge_raw_name: str
     obs_trigger: ObsTrigger
+    # Optional second observation stream from the same judge doc. The adversarial
+    # direction also emits positive-polarity env facts into the SHARED
+    # lessons-environment/ corpus (issue #298): `append_env_observations` queues
+    # them and each entry in `extra_obs_triggers` drains a stream the same way
+    # `obs_trigger` drains the primary one.
+    append_env_observations: Callable | None = None
+    extra_obs_triggers: tuple[ObsTrigger, ...] = ()
 
 
 ADVERSARIAL = Direction(
@@ -55,6 +66,15 @@ ADVERSARIAL = Direction(
         threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
         module_name="author_actor",
         pending_label="actor_pending",
+    ),
+    append_env_observations=append_actor_environment_observations,
+    extra_obs_triggers=(
+        ObsTrigger(
+            pending_file=lambda p: p.actor_environment_observations_file,
+            threshold_env="LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD",
+            module_name="author_actor_env",
+            pending_label="actor_env_pending",
+        ),
     ),
 )
 

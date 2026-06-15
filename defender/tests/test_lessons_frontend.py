@@ -71,12 +71,14 @@ def test_lesson_record_shape():
             assert isinstance(lesson["metadata"], dict)
 
 
-def test_actor_lesson_field_mapping():
-    """The known actor seed maps subject→title, relevance_criteria→description."""
-    actor = serialize.build_view()["groups"]["actor"]["lessons"]
-    seed = next((rec for rec in actor if rec["title"] == "wazuh-rule-5712-threshold"), None)
-    assert seed is not None, "actor seed 'wazuh-rule-5712-threshold' missing from corpus"
-    assert seed["description"].startswith("defender uses Wazuh rule 5712")
+def test_environment_seed_field_mapping():
+    """The known env seed maps subject→title, relevance_criteria→description via
+    build_view. wazuh-rule-5712-threshold moved from the actor corpus to the
+    shared environment corpus in issue #298."""
+    env = serialize.build_view()["groups"]["environment"]["lessons"]
+    seed = next((rec for rec in env if rec["title"] == "wazuh-rule-5712-threshold"), None)
+    assert seed is not None, "env seed 'wazuh-rule-5712-threshold' missing from corpus"
+    assert "Wazuh rule 5712" in seed["description"]
     assert seed["metadata"]["alert_rule_ids"] == [5712]
     assert seed["body"]  # the lesson body is carried for the expander
 

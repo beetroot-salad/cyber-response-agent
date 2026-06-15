@@ -366,16 +366,25 @@ def _append_observations(
     run_id: str,
     observations: list[dict],
     build_row: Callable[[int, dict, str], dict],
+    *,
+    id_prefix: str = "",
 ) -> int:
     """Dedup ``observations`` on ``observation_id`` against active + consumed, then
-    append the rows ``build_row`` produces. Shared by both direction streams."""
+    append the rows ``build_row`` produces. Shared by all observation streams.
+
+    ``id_prefix`` namespaces the minted ``observation_id`` (``{run_id}/{prefix}{i}``).
+    Streams that share one downstream corpus — and thus one corpus-wide idempotency
+    set — must use distinct prefixes so a single ``run_id`` cannot collide across
+    them (the adversarial + benign env streams both feed lessons-environment/; an
+    ``inconclusive`` case runs both). Mirrors the ``benign/`` namespace in
+    ``append_findings``."""
     with _flock(lock_file):
         existing = _load_jsonl_ids(queue_file, "observation_id") | _load_jsonl_ids(
             consumed_file, "observation_id"
         )
         rows: list[dict] = []
         for i, obs in enumerate(observations):
-            obs_id = f"{run_id}/{i}"
+            obs_id = f"{run_id}/{id_prefix}{i}"
             if obs_id in existing:
                 continue
             rows.append(build_row(i, obs, obs_id))
@@ -487,4 +496,61 @@ def append_environment_observations(
         paths.environment_observations_consumed_file,
         paths.environment_observations_lock_file,
         run_id, observations, build_row,
+    )
+
+
+def append_actor_environment_observations(
+    judge_doc: dict,
+    run_id: str,
+    alert_rule_key: str,
+    learning_run_dir: Path,
+    *,
+    paths: LoopPaths = DEFAULT_PATHS,
+) -> int:
+    """Append the adversarial judge's ``environment_observations`` to the SHARED
+    lessons-environment/ corpus, via a dedicated adversarial env queue (issue #298).
+
+    The adversarial direction's finding-bearing outcomes are ``caught``/``incoherent``
+    (a grounded misprediction whose refutation cites real telemetry); the env author's
+    adversarial config owns that outcome policy. Rows carry the same retrieval keys the
+    benign env producer emits — ``alert_rule_key`` + ``source_run_dir`` are what
+    ``verify_forward_env.py`` reads, and ``alert_rule_ids``/``entities`` drive
+    retrieval. Ids are namespaced ``adv-env/`` so they cannot collide with benign env
+    ids from the same ``run_id`` in the shared corpus's idempotency set."""
+    outcome = _outcome_keyword(judge_doc["outcome"])
+    if outcome == "skip-passthrough":
+        return 0
+    observations = judge_doc.get("environment_observations") or []
+    if not observations:
+        return 0
+    src = _source_run_dir(learning_run_dir, paths.repo_root)
+
+    def build_row(i: int, obs: dict, obs_id: str) -> dict:
+        row = {
+            "observation_id": obs_id,
+            "run_id": run_id,
+            "observation_index": i,
+            "alert_rule_key": alert_rule_key,
+        }
+        subject = obs.get("subject")
+        if subject:
+            row["subject"] = subject
+        row.update({
+            "alert_rule_ids": _anchor_with_case_key(obs["alert_rule_ids"], alert_rule_key),
+            "entities": obs.get("entities") or [],
+            "relevance_criteria": obs["relevance_criteria"],
+            "fact": obs["fact"],
+            "citations": obs.get("citations") or [],
+            "judge_outcome": outcome,
+            "source_run_dir": src,
+            "provenance": "adversarial",
+        })
+        return row
+
+    return _append_observations(
+        paths.actor_environment_observations_file,
+        paths.actor_environment_observations_consumed_file,
+        paths.actor_environment_observations_lock_file,
+        run_id, observations, build_row,
+        id_prefix="adv-env/",
     )
