@@ -449,21 +449,29 @@ def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]
     return ids
 
 
-def append_environment_observations(
-    judge_benign_doc: dict,
+def _append_env_fact_observations(
+    judge_doc: dict,
     run_id: str,
     alert_rule_key: str,
     learning_run_dir: Path,
     *,
-    paths: LoopPaths = DEFAULT_PATHS,
+    paths: LoopPaths,
+    outcome_keyword: Callable[[Any], str],
+    queue_file: Path,
+    consumed_file: Path,
+    lock_file: Path,
+    id_prefix: str,
+    provenance: str,
 ) -> int:
-    """Append benign-judge ``environment_observations`` to the env queue (FP mirror of
-    ``append_actor_observations``). Rows carry the retrieval keys the curator and
-    ``verify_forward_env.py`` read directly."""
-    outcome = _benign_outcome_keyword(judge_benign_doc["outcome"])
+    """Append judge ``environment_observations`` to one env queue feeding the SHARED
+    lessons-environment/ corpus (issue #298). The two sources differ only in their
+    outcome-keyword enum, queue paths, id namespace, and ``provenance`` tag — the env
+    row shape (the retrieval keys the curator and ``verify_forward_env.py`` read) is
+    one definition here so the streams can't drift apart in the shared corpus."""
+    outcome = outcome_keyword(judge_doc["outcome"])
     if outcome == "skip-passthrough":
         return 0
-    observations = judge_benign_doc.get("environment_observations") or []
+    observations = judge_doc.get("environment_observations") or []
     if not observations:
         return 0
     src = _source_run_dir(learning_run_dir, paths.repo_root)
@@ -488,14 +496,37 @@ def append_environment_observations(
             "citations": obs.get("citations") or [],
             "judge_outcome": outcome,
             "source_run_dir": src,
+            "provenance": provenance,
         })
         return row
 
     return _append_observations(
-        paths.environment_observations_file,
-        paths.environment_observations_consumed_file,
-        paths.environment_observations_lock_file,
+        queue_file, consumed_file, lock_file,
         run_id, observations, build_row,
+        id_prefix=id_prefix,
+    )
+
+
+def append_environment_observations(
+    judge_benign_doc: dict,
+    run_id: str,
+    alert_rule_key: str,
+    learning_run_dir: Path,
+    *,
+    paths: LoopPaths = DEFAULT_PATHS,
+) -> int:
+    """Append benign-judge ``environment_observations`` to the env queue (FP mirror of
+    ``append_actor_observations``). Rows carry the retrieval keys the curator and
+    ``verify_forward_env.py`` read directly, tagged ``provenance: benign``."""
+    return _append_env_fact_observations(
+        judge_benign_doc, run_id, alert_rule_key, learning_run_dir,
+        paths=paths,
+        outcome_keyword=_benign_outcome_keyword,
+        queue_file=paths.environment_observations_file,
+        consumed_file=paths.environment_observations_consumed_file,
+        lock_file=paths.environment_observations_lock_file,
+        id_prefix="",
+        provenance="benign",
     )
 
 
@@ -512,45 +543,16 @@ def append_actor_environment_observations(
 
     The adversarial direction's finding-bearing outcomes are ``caught``/``incoherent``
     (a grounded misprediction whose refutation cites real telemetry); the env author's
-    adversarial config owns that outcome policy. Rows carry the same retrieval keys the
-    benign env producer emits — ``alert_rule_key`` + ``source_run_dir`` are what
-    ``verify_forward_env.py`` reads, and ``alert_rule_ids``/``entities`` drive
-    retrieval. Ids are namespaced ``adv-env/`` so they cannot collide with benign env
-    ids from the same ``run_id`` in the shared corpus's idempotency set."""
-    outcome = _outcome_keyword(judge_doc["outcome"])
-    if outcome == "skip-passthrough":
-        return 0
-    observations = judge_doc.get("environment_observations") or []
-    if not observations:
-        return 0
-    src = _source_run_dir(learning_run_dir, paths.repo_root)
-
-    def build_row(i: int, obs: dict, obs_id: str) -> dict:
-        row = {
-            "observation_id": obs_id,
-            "run_id": run_id,
-            "observation_index": i,
-            "alert_rule_key": alert_rule_key,
-        }
-        subject = obs.get("subject")
-        if subject:
-            row["subject"] = subject
-        row.update({
-            "alert_rule_ids": _anchor_with_case_key(obs["alert_rule_ids"], alert_rule_key),
-            "entities": obs.get("entities") or [],
-            "relevance_criteria": obs["relevance_criteria"],
-            "fact": obs["fact"],
-            "citations": obs.get("citations") or [],
-            "judge_outcome": outcome,
-            "source_run_dir": src,
-            "provenance": "adversarial",
-        })
-        return row
-
-    return _append_observations(
-        paths.actor_environment_observations_file,
-        paths.actor_environment_observations_consumed_file,
-        paths.actor_environment_observations_lock_file,
-        run_id, observations, build_row,
+    adversarial config owns that outcome policy. Ids are namespaced ``adv-env/`` so they
+    cannot collide with benign env ids from the same ``run_id`` in the shared corpus's
+    idempotency set; rows are tagged ``provenance: adversarial``."""
+    return _append_env_fact_observations(
+        judge_doc, run_id, alert_rule_key, learning_run_dir,
+        paths=paths,
+        outcome_keyword=_outcome_keyword,
+        queue_file=paths.actor_environment_observations_file,
+        consumed_file=paths.actor_environment_observations_consumed_file,
+        lock_file=paths.actor_environment_observations_lock_file,
         id_prefix="adv-env/",
+        provenance="adversarial",
     )

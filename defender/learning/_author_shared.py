@@ -89,66 +89,47 @@ def release_repo_lock(fh: Any) -> None:
         fh.close()
 
 
-def actor_generation_count() -> int:
-    """Return the generation number this commit would assert.
+def _generation_count(trailer_label: str) -> int:
+    """Generation a commit carrying a ``{trailer_label}:`` trailer would assert:
+    1 + the count of prior commits bearing that trailer.
 
-    Equals 1 + the count of prior author commits, identified by the
-    ``Actor-Model:`` trailer they're required to carry. The first
-    author commit asserts ``Generation: 1``. No-op author runs do not
-    advance the counter because they produce no commit. The trailer is
-    the canonical manifest — counting path-touching commits would
-    miscount corpus-structure and template commits that predate the
-    author flow.
+    The trailer is the canonical manifest — counting path-touching commits would
+    miscount corpus-structure/template commits that predate the author flow, and
+    no-op author runs produce no commit so they don't advance it. The grep anchors
+    on the trailer key with **no** required space after the colon, so it counts
+    exactly the commits ``author_*.assert_head_trailers`` accepts (whose regex also
+    tolerates a zero-space trailer) — a stricter ``^label: `` would skip a no-space
+    commit, letting two batches assert the same generation. Labels are disjoint, so
+    a counter never crosses streams (``^Actor-Model:`` cannot match a
+    ``Benign-Actor-Model:`` line, which starts with ``Benign-``).
     """
     proc = subprocess.run(
-        ["git", "rev-list", "--count", "--grep=^Actor-Model: ", "HEAD"],
+        ["git", "rev-list", "--count", f"--grep=^{trailer_label}:", "HEAD"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
-    prior = int(proc.stdout.strip() or "0")
-    return prior + 1
+    return int(proc.stdout.strip() or "0") + 1
+
+
+def actor_generation_count() -> int:
+    """Generation for a tradecraft (``Actor-Model:``) ``lessons-actor/`` commit."""
+    return _generation_count("Actor-Model")
 
 
 def benign_generation_count() -> int:
-    """Generation this environment-lesson commit would assert.
-
-    The false-positive-direction analog of ``actor_generation_count`` —
-    counts prior environment-lesson commits by their required
-    ``Benign-Actor-Model:`` trailer. The two directions advance independent
-    generation counters off disjoint trailers.
-    """
-    proc = subprocess.run(
-        ["git", "rev-list", "--count", "--grep=^Benign-Actor-Model: ", "HEAD"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    prior = int(proc.stdout.strip() or "0")
-    return prior + 1
+    """Generation for an FP-env (``Benign-Actor-Model:``) ``lessons-environment/``
+    commit — the false-positive-direction analog of ``actor_generation_count``."""
+    return _generation_count("Benign-Actor-Model")
 
 
 def actor_env_generation_count() -> int:
-    """Generation this adversarial environment-lesson commit would assert.
-
-    The adversarial source feeding the SHARED lessons-environment/ corpus
-    (issue #298). Counts prior adversarial-env commits by their required
-    ``Actor-Env-Model:`` trailer — a third independent counter, disjoint from
-    the ``Actor-Model:`` (tradecraft) and ``Benign-Actor-Model:`` (FP env)
-    trailers, so per-stream generation analytics stay clean even though the
-    adversarial-env and FP-env commits land in the same corpus.
-    """
-    proc = subprocess.run(
-        ["git", "rev-list", "--count", "--grep=^Actor-Env-Model: ", "HEAD"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    prior = int(proc.stdout.strip() or "0")
-    return prior + 1
+    """Generation for an adversarial-env (``Actor-Env-Model:``) ``lessons-environment/``
+    commit (issue #298) — a third counter disjoint from the other two, so per-stream
+    generation analytics stay clean even though adversarial-env and FP-env commits
+    land in the same corpus."""
+    return _generation_count("Actor-Env-Model")
 
 
 def without_consumed_category(rec: dict) -> dict:

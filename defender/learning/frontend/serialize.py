@@ -13,7 +13,8 @@ The three corpora (authored by distinct learning-loop curators):
 
     defender     defender/lessons/             author.py
     actor        defender/lessons-actor/       author_actor.py
-    environment  defender/lessons-environment/ author_actor_benign.py
+    environment  defender/lessons-environment/ author_actor_benign.py (FP)
+                                               + author_actor_env.py (adversarial, #298)
 
 Each corpus is enumerated locally with one read per file
 (``_iter_corpus`` → ``_read_lesson``), matching the indexer discovery
@@ -157,7 +158,7 @@ GROUPS = {
     "actor": {
         "label": "Actor lessons",
         "dir": "lessons-actor",
-        "blurb": "Tradecraft and detector facts the adversarial actor learned — what cover holds and what trips the defender.",
+        "blurb": "Pattern/tradecraft lessons the adversarial actor learned — what cover holds and what trips the defender. Standing deployment facts now live in the shared environment corpus (issue #298).",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
         "fields": [
@@ -170,7 +171,7 @@ GROUPS = {
     "environment": {
         "label": "Environment lessons",
         "dir": "lessons-environment",
-        "blurb": "Standing deployment facts the benign ops-teamer actor uses to ground routine activity.",
+        "blurb": "Standing deployment facts both actors retrieve to ground their stories — fed by the benign (FP) and adversarial directions alike (issue #298).",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
         "fields": [

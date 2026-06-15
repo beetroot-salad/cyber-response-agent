@@ -119,19 +119,42 @@ class AuthorError(Exception):
 
 @dataclass(frozen=True)
 class EnvAuthorConfig:
-    name: str
     pending_file: Path
     consumed_file: Path
     lock_file: Path
-    pending_file_rel: str          # passed to verify_forward_env.py --pending
-    run_log: Path
     outcome_author: frozenset[str]
     outcome_skip: frozenset[str]
     trailer_label: str             # commit-message trailer key (no colon)
-    trailer_re: Pattern[str]
     generation_fn: Callable[[], int]
     actor_model: str
     log_prefix: str
+
+    @property
+    def pending_file_rel(self) -> str:
+        """Repo-relative queue path passed to ``verify_forward_env.py --pending``.
+
+        Derived from ``pending_file`` (not a fixed string) so a relocated
+        ``DEFENDER_LEARNING_STATE_DIR`` queue and the forward-check stay in sync —
+        an out-of-repo queue falls back to its absolute path, which the verifier
+        resolves directly, instead of a stale ``defender/learning/_pending/...``
+        string the agent's cwd-relative read would miss."""
+        try:
+            return str(self.pending_file.relative_to(REPO_ROOT))
+        except ValueError:
+            return str(self.pending_file)
+
+    @property
+    def run_log(self) -> Path:
+        return _PENDING_DIR / f"{self.log_prefix}_run.jsonl"
+
+    @property
+    def trailer_re(self) -> Pattern[str]:
+        """Matcher for the commit's model trailer, derived from ``trailer_label`` so
+        the label and the pattern cannot drift. Tolerates a zero-space trailer to
+        match what the generation counter (``_generation_count``) counts."""
+        return re.compile(
+            rf"^{re.escape(self.trailer_label)}:\s*(\S.*?)\s*$", re.MULTILINE
+        )
 
 
 _PENDING_DIR = DEFAULT_PATHS.pending_dir
@@ -140,16 +163,12 @@ _PENDING_DIR = DEFAULT_PATHS.pending_dir
 # outcome whose routine story held against the evidence, so the standing facts it
 # grounds are reliable. Other outcomes yield no trustworthy env fact.
 BENIGN_CONFIG = EnvAuthorConfig(
-    name="benign",
     pending_file=DEFAULT_PATHS.environment_observations_file,
     consumed_file=DEFAULT_PATHS.environment_observations_consumed_file,
     lock_file=DEFAULT_PATHS.environment_observations_lock_file,
-    pending_file_rel="defender/learning/_pending/environment_observations.jsonl",
-    run_log=_PENDING_DIR / "author_actor_benign_run.jsonl",
     outcome_author=frozenset({"survived"}),
     outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
     trailer_label="Benign-Actor-Model",
-    trailer_re=re.compile(r"^Benign-Actor-Model:\s*(\S.*?)\s*$", re.MULTILINE),
     generation_fn=_shared.benign_generation_count,
     actor_model=BENIGN_ACTOR_MODEL,
     log_prefix="author_actor_benign",
@@ -160,16 +179,12 @@ BENIGN_CONFIG = EnvAuthorConfig(
 # author_actor.py: ``caught``/``incoherent`` (the refutation cited real
 # telemetry); ``survived``/``undecidable`` carry no reliable env fact.
 ADVERSARIAL_CONFIG = EnvAuthorConfig(
-    name="adversarial",
     pending_file=DEFAULT_PATHS.actor_environment_observations_file,
     consumed_file=DEFAULT_PATHS.actor_environment_observations_consumed_file,
     lock_file=DEFAULT_PATHS.actor_environment_observations_lock_file,
-    pending_file_rel="defender/learning/_pending/actor_environment_observations.jsonl",
-    run_log=_PENDING_DIR / "author_actor_env_run.jsonl",
     outcome_author=frozenset({"caught", "incoherent"}),
     outcome_skip=frozenset({"survived", "undecidable"}),
     trailer_label="Actor-Env-Model",
-    trailer_re=re.compile(r"^Actor-Env-Model:\s*(\S.*?)\s*$", re.MULTILINE),
     generation_fn=_shared.actor_env_generation_count,
     actor_model=ACTOR_MODEL,
     log_prefix="author_actor_env",
@@ -231,18 +246,30 @@ def read_batch(cfg: EnvAuthorConfig) -> list[dict]:
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
 
+# Cache of the corpus-wide id set, keyed on a (name, mtime_ns) signature of the
+# corpus files. Both env curators (benign + adversarial) drain in one serial tick
+# and each calls this; the repo lock means the corpus only changes when a commit
+# lands, which bumps the signature and invalidates the cache. So a second drain on
+# an unchanged corpus reuses the parse instead of re-globbing + re-parsing YAML.
+_EXISTING_IDS_CACHE: dict[tuple[tuple[str, int], ...], set[str]] = {}
+
 
 def existing_observation_ids() -> set[str]:
     """Union of source_observation_ids across all environment lessons.
 
     Corpus-wide (both sources share the corpus), so an id already authored by
     either direction is treated as consumed."""
-    ids: set[str] = set()
     if not LESSONS_ENV_DIR.is_dir():
-        return ids
-    for path in sorted(LESSONS_ENV_DIR.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
+        return set()
+    paths = [
+        p for p in sorted(LESSONS_ENV_DIR.glob("*.md")) if not p.name.startswith("_")
+    ]
+    sig = tuple((p.name, p.stat().st_mtime_ns) for p in paths)
+    cached = _EXISTING_IDS_CACHE.get(sig)
+    if cached is not None:
+        return set(cached)
+    ids: set[str] = set()
+    for path in paths:
         m = _FRONTMATTER_RE.match(path.read_text())
         if not m:
             continue
@@ -257,6 +284,8 @@ def existing_observation_ids() -> set[str]:
             for sid in sids:
                 if isinstance(sid, str):
                     ids.add(sid)
+    _EXISTING_IDS_CACHE.clear()  # keep only the latest signature
+    _EXISTING_IDS_CACHE[sig] = set(ids)
     return ids
 
 

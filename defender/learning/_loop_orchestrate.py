@@ -695,8 +695,11 @@ Outputs:
     when count >= LEARNING_AUTHOR_THRESHOLD the lessons curator (author.py) runs.
   defender/learning/_pending/actor_observations.jsonl   (adversarial direction)
     when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD, author_actor.py runs.
-  defender/learning/_pending/environment_observations.jsonl   (benign direction)
+  defender/learning/_pending/environment_observations.jsonl   (benign/FP direction)
     when count >= LEARNING_AUTHOR_ENV_THRESHOLD, author_actor_benign.py runs.
+  defender/learning/_pending/actor_environment_observations.jsonl  (adversarial direction, #298)
+    adversarial env facts → the SHARED lessons-environment/ corpus; when count >=
+    LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD, author_actor_env.py runs.
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
@@ -710,7 +713,8 @@ Environment:
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 450)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before author_actor runs
-  LEARNING_AUTHOR_ENV_THRESHOLD        pending env observations before author_actor_benign runs
+  LEARNING_AUTHOR_ENV_THRESHOLD        pending FP env observations before author_actor_benign runs
+  LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD  pending adversarial env observations before author_actor_env runs (#298)
 
 Typical use (off-process): `defender/run.py` enqueues a learn-queue marker per finished
 run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --learn-drain`

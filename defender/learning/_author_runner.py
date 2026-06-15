@@ -123,7 +123,8 @@ def _summarize_tool_use(blk: dict) -> str:
     name = blk.get("name", "?")
     inp = blk.get("input") or {}
     if name == "Bash":
-        cmd = (inp.get("command") or "").splitlines()[0][:120]
+        lines = (inp.get("command") or "").splitlines()
+        cmd = lines[0][:120] if lines else ""
         return f"tool:Bash {cmd}"
     if name in ("Read", "Glob", "Grep"):
         target = inp.get("file_path") or inp.get("pattern") or ""
