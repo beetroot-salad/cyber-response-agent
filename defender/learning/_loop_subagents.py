@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import shutil
 import subprocess
 import uuid
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import agent_surface
 import lead_repository
 import mitre_corpus
 from _loop_comparison import (
@@ -66,6 +68,7 @@ from _loop_config import (
     ORACLE_MAX_CONCURRENCY,
     ORACLE_MODEL,
     ORACLE_PROMPT,
+    ORACLE_SETTINGS,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
     _log,
@@ -87,12 +90,17 @@ def _run_claude(
     permission_mode: str | None = None,
     session_id: str | None = None,
     effort: str | None = None,
+    cwd: Path | None = None,
 ) -> str:
     """One-shot ``claude -p`` call, returning concatenated assistant text.
 
     Optional kwargs scope the tool surface (settings + add-dir + permission-mode)
     and pin the session id so the caller can copy the persistent transcript after
     the call. ``effort`` pins reasoning depth; None inherits the global default.
+    ``cwd`` scopes the agent's working dir (defaults to ``REPO_ROOT``); a caller
+    passing a per-agent surface here MUST pass the same ``cwd`` to
+    ``_copy_transcript`` or the transcript copy silently no-ops (Claude Code keys
+    the transcript file on the cwd slug — see ``_transcript_path``).
 
     stream-json + concat all assistant text messages: `--output-format text`
     returns only the final assistant message, silently dropping earlier assistant
@@ -126,7 +134,7 @@ def _run_claude(
         capture_output=True,
         text=True,
         timeout=SUBAGENT_TIMEOUT,
-        cwd=str(REPO_ROOT),
+        cwd=str(cwd if cwd is not None else REPO_ROOT),
     )
     if proc.returncode != 0:
         raise LoopError(
@@ -160,18 +168,27 @@ def _extract_assistant_text_parts(stdout: str) -> list[str]:
     return parts
 
 
-def _transcript_path(session_id: str) -> Path:
-    """Persistent transcript Claude Code writes for ``--session-id``.
+def _transcript_path(session_id: str, cwd: Path | None = None) -> Path:
+    """Locate the persistent transcript Claude Code writes for ``--session-id``.
 
-    Path = ``~/.claude/projects/{sanitized-cwd}/{session_id}.jsonl`` where the
-    sanitization is ``cwd.replace('/', '-')``.
+    Claude writes ``~/.claude/projects/{slug}/{session_id}.jsonl`` where ``slug``
+    sanitizes the cwd. That sanitization has drifted (it now maps ``_`` as well as
+    ``/`` to ``-``) and our per-agent surfaces live under ``_agents/``, so we find
+    the file by its globally-unique session id instead of reconstructing the slug —
+    robust to any further drift. ``cwd`` is used only to derive a deterministic
+    fallback path (which may not exist) when no transcript is found, so callers can
+    ``is_file()``-check uniformly.
     """
-    cwd_slug = str(REPO_ROOT).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / cwd_slug / f"{session_id}.jsonl"
+    base = Path.home() / ".claude" / "projects"
+    hits = sorted(base.glob(f"*/{session_id}.jsonl"))
+    if hits:
+        return hits[0]
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(cwd if cwd is not None else REPO_ROOT))
+    return base / slug / f"{session_id}.jsonl"
 
 
-def _copy_transcript(session_id: str, dst: Path) -> None:
-    src = _transcript_path(session_id)
+def _copy_transcript(session_id: str, dst: Path, cwd: Path | None = None) -> None:
+    src = _transcript_path(session_id, cwd)
     if src.is_file():
         shutil.copy2(src, dst)
     else:
@@ -202,7 +219,29 @@ def is_skip_story(actor_story: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Path) -> str:
+def _actor_surface(run_dir: Path, agent: str, *, include_actor_lessons: bool) -> Path:
+    """Build the actor's symlink repo-mirror surface and return it as the cwd.
+
+    The actor's only repo dependency is the lessons corpora + the two retrieval
+    scripts, all under ``REPO_ROOT/defender``. We mirror exactly those into
+    ``{run_dir}/_agents/{agent}/defender/`` as SYMLINKS (not copies): the scripts
+    derive ``REPO_ROOT``/venv from ``Path(__file__).resolve().parents[2]``, which a
+    copy would break but a symlink preserves (``.resolve()`` follows it to the real
+    file). The narrow allow-list (`actor-settings.json`) — only the lessons dirs and
+    the two ``python3 defender/scripts/...`` shims — is what backstops a ``..`` escape
+    through the symlinked dirs; the surface presents nothing else to reach for.
+    """
+    symlinks = {
+        "defender/scripts": REPO_ROOT / "defender" / "scripts",
+        "defender/lessons-environment": LESSONS_ENVIRONMENT_DIR,
+    }
+    if include_actor_lessons:
+        symlinks["defender/lessons-actor"] = LESSONS_ACTOR_DIR
+    return agent_surface.stage_agent_surface(run_dir, agent, symlinks=symlinks)
+
+
+def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Path,
+                 *, run_dir: Path | None = None) -> str:
     rng = random.Random(_actor_seed(learning_run_dir.name))
     archetype = rng.choice(["internal", "external"])
     menu_text = mitre_corpus.format_menu(mitre_corpus.sample_menu(rng))
@@ -219,14 +258,16 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
         + _section("actor_archetype", archetype)
         + _section("mitre_menu", menu_text)
     )
+    cwd = _actor_surface(run_dir, "actor", include_actor_lessons=True) \
+        if run_dir is not None else None
     session_id = str(uuid.uuid4())
     story = _run_claude(
         ACTOR_PROMPT, user, model=ACTOR_MODEL, effort=ACTOR_EFFORT,
         settings_path=ACTOR_SETTINGS,
         add_dir=[LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR],
-        permission_mode="acceptEdits", session_id=session_id,
+        permission_mode="acceptEdits", session_id=session_id, cwd=cwd,
     )
-    _copy_transcript(session_id, learning_run_dir / "actor_trace.jsonl")
+    _copy_transcript(session_id, learning_run_dir / "actor_trace.jsonl", cwd)
     return story
 
 
@@ -235,6 +276,8 @@ def invoke_actor_benign(
     case_entities: str,
     alert_rule_key: str,
     learning_run_dir: Path,
+    *,
+    run_dir: Path | None = None,
 ) -> str:
     """Benign (ops-teamer) actor for the FP direction — no MITRE menu.
 
@@ -248,25 +291,29 @@ def invoke_actor_benign(
         + _section("alert_rule_id", alert_rule_key)
         + _section("case_entities", case_entities)
     )
+    cwd = _actor_surface(run_dir, "actor_benign", include_actor_lessons=False) \
+        if run_dir is not None else None
     session_id = str(uuid.uuid4())
     story = _run_claude(
         ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL, effort=BENIGN_ACTOR_EFFORT,
         settings_path=BENIGN_ACTOR_SETTINGS, add_dir=LESSONS_ENVIRONMENT_DIR,
-        permission_mode="acceptEdits", session_id=session_id,
+        permission_mode="acceptEdits", session_id=session_id, cwd=cwd,
     )
-    _copy_transcript(session_id, learning_run_dir / "actor_benign_trace.jsonl")
+    _copy_transcript(session_id, learning_run_dir / "actor_benign_trace.jsonl", cwd)
     return story
 
 
-def invoke_oracle_lead(lead, story: str, sample_text: str) -> list:
+def invoke_oracle_lead(lead, story: str, sample_text: str, *, cwd: Path | None = None) -> list:
     """Project one lead. Sees only this lead — sanitized ``what_to_summarize`` +
     queries + a scrubbed sample event — plus the story; no goal, no alert, no other lead.
     Returns the lead's ``events`` list (mappings, a single baseline-diff marker, or empty).
 
-    ``lead`` is a ``lead_repository.JoinedLead``.
+    ``lead`` is a ``lead_repository.JoinedLead``. ``cwd`` is the staged (empty) oracle
+    surface — the oracle reads nothing from disk, so this just removes REPO_ROOT reach.
     """
     user = build_lead_user_prompt(lead, story, sample_text)
-    raw = _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT)
+    raw = _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL, effort=ORACLE_EFFORT,
+                      settings_path=ORACLE_SETTINGS, cwd=cwd)
     return parse_lead_events(raw, lead.lead_id)
 
 
@@ -280,12 +327,13 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     """
     story = actor_story_path.read_text()
     leads = lead_repository.joined(run_dir)
+    oracle_cwd = agent_surface.stage_agent_surface(run_dir, "oracle")
     samples = [lead_sample_text(jl) for jl in leads]
     max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(leads) or 1))
     events_per_lead: list = [None] * len(leads)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         fut_to_idx = {
-            pool.submit(invoke_oracle_lead, jl, story, s): i
+            pool.submit(invoke_oracle_lead, jl, story, s, cwd=oracle_cwd): i
             for i, (jl, s) in enumerate(zip(leads, samples))
         }
         try:
@@ -315,6 +363,7 @@ def _run_judge_claude(
     settings_path: Path | None = None,
     add_dir: Path | list[Path] | None = None,
     permission_mode: str | None = None,
+    cwd: Path | None = None,
 ) -> str:
     """Shared tail for both judge paths: session id + ``claude -p`` + transcript copy."""
     session_id = str(uuid.uuid4())
@@ -323,9 +372,10 @@ def _run_judge_claude(
         return _run_claude(
             prompt_path, user, model=model, session_id=session_id, effort=effort,
             settings_path=settings_path, add_dir=add_dir, permission_mode=permission_mode,
+            cwd=cwd,
         )
     finally:
-        _copy_transcript(session_id, learning_run_dir / trace_name)
+        _copy_transcript(session_id, learning_run_dir / trace_name, cwd)
 
 
 def _invoke_judge(
@@ -367,6 +417,7 @@ class JudgeInvocation:
     add_dirs: list
     settings_path: Path
     comparison_paths: list
+    cwd: Path
 
 
 def build_judge_invocation(
@@ -375,21 +426,33 @@ def build_judge_invocation(
     projected_telemetry_path: Path,
     learning_run_dir: Path,
 ) -> JudgeInvocation:
-    """Assemble the grounded judge call: write the per-lead comparison files + the per-run
-    read-only settings, and build the context message. The comparison join + synthesis are
-    the structural grounding (the judge can't avoid seeing the actuals); jq over the
-    add-dir'd ``gather_raw/`` is its discretionary verification surface for absence-checks.
+    """Assemble the grounded judge call: stage the judge's read surface, write the per-lead
+    comparison files + the per-run read-only settings, and build the context message. The
+    comparison join + synthesis are the structural grounding (the judge can't avoid seeing
+    the actuals); jq over the staged ``gather_raw/`` is its discretionary verification
+    surface for absence-checks.
+
+    The judge runs with ``cwd`` + ``--add-dir`` = ``{run_dir}/_agents/judge/`` — a staged
+    surface holding only a hardlinked ``gather_raw/`` + the comparison files. ``ground_truth.yaml``
+    is a sibling of the *real* ``gather_raw`` in the run dir but is NOT staged in, so the
+    judge can't reach it via the natural ``gather_raw/..`` traversal. The deny-list in
+    ``judge_settings_dict`` is the defense-in-depth backstop for absolute-path / deep-``..``
+    Bash reads, which ``--add-dir`` does not bound.
     """
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
-    gather_raw = run_dir / "gather_raw"
-    comparison_dir = learning_run_dir / "comparison"
+    surface = agent_surface.stage_agent_surface(
+        run_dir, "judge", include_tables=True,
+        extra_files={"alert.json": run_dir / "alert.json"},
+    )
+    gather_raw = surface / "gather_raw"
+    comparison_dir = surface / "comparison"
 
     companion = parse_investigation_companion(run_dir)
     comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
-    settings_path = learning_run_dir / "judge-settings.resolved.json"
+    settings_path = surface / "judge-settings.resolved.json"
     settings_path.write_text(
         json.dumps(judge_settings_dict(gather_raw, comparison_dir), indent=2)
     )
@@ -422,7 +485,7 @@ def build_judge_invocation(
     )
     return JudgeInvocation(
         user_text=user, add_dirs=add_dirs, settings_path=settings_path,
-        comparison_paths=comparison_paths,
+        comparison_paths=comparison_paths, cwd=surface,
     )
 
 
@@ -439,6 +502,7 @@ def _invoke_judge_grounded(
         JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
         inv.user_text, learning_run_dir,
         settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
+        cwd=inv.cwd,
     )
 
 
@@ -489,13 +553,15 @@ class ClaudePrintSubagents:
         # written as a real side-artifact for transcripts/visualizers.
         actor_input_path = learning_run_dir / "actor_input.yaml"
         actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir))
-        return invoke_actor(run_dir / "alert.json", actor_input_path, learning_run_dir)
+        return invoke_actor(run_dir / "alert.json", actor_input_path, learning_run_dir,
+                            run_dir=run_dir)
 
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str:
         case_entities = extract_case_entities(run_dir / "investigation.md")
         return invoke_actor_benign(
-            run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
+            run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir,
+            run_dir=run_dir,
         )
 
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str:

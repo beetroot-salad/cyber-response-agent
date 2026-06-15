@@ -32,6 +32,7 @@ boundary, not field-by-field stripping.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -290,7 +291,47 @@ def actor_view(run_dir: Path) -> dict:
 # --------------------------------------------------------------------------
 
 
-def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
+def _link_or_copy_file(src: Path, dst: Path) -> None:
+    """Hardlink `src`→`dst`, falling back to a byte copy across filesystems.
+
+    Hardlinking is cheap (a new name for the same inode, no data copy) and has
+    no `..`-escape, but it only works within one filesystem; `os.link` raises
+    `OSError` (EXDEV / EMLINK / EPERM) otherwise, and we copy instead. A missing
+    `src` is a no-op (a query-less monitor run has no payloads), matching the
+    best-effort contract of `stage_tables`.
+    """
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_file():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def _link_or_copy_tree(src_dir: Path, dst_dir: Path) -> None:
+    """Replicate a directory tree as REAL dirs, hardlinking (or copying) files.
+
+    Never symlinks a directory: a directory symlink would make `dst_dir/..`
+    resolve through the link back to the source's parent (re-exposing a sibling
+    like `ground_truth.yaml`), which is exactly the leak the agent surfaces
+    exist to close. Real dirs keep `dst_dir/..` pointing at the staged parent.
+    """
+    src_dir = Path(src_dir)
+    dst_dir = Path(dst_dir)
+    if not src_dir.is_dir():
+        return
+    for child in sorted(src_dir.rglob("*")):
+        target = dst_dir / child.relative_to(src_dir)
+        if child.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif child.is_file():
+            _link_or_copy_file(child, target)
+
+
+def stage_tables(src_run_dir: Path, dst_dir: Path, *, link: bool = False) -> None:
     """Copy the two live tables from one run dir into another.
 
     The queries table (`executed_queries.jsonl`, a flat file) plus the leads
@@ -299,14 +340,23 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
     the single definition of "what files constitute the tables on disk",
     shared by the learning-loop persist stage and the secondary-eval staging
     step so the two can't drift.
+
+    `link=True` hardlinks (with a cross-filesystem copy fallback) instead of
+    copying — used when staging a read-only agent surface, where dedup matters
+    and the files are never mutated. The default `False` keeps the plain-copy
+    semantics the persist / secondary-eval callers rely on.
     """
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
     ledger = src_run_dir / QUERIES_LOG
+    gather_src = src_run_dir / GATHER_DIR
+    if link:
+        _link_or_copy_file(ledger, dst_dir / ledger.name)
+        _link_or_copy_tree(gather_src, dst_dir / GATHER_DIR)
+        return
     if ledger.is_file():
         shutil.copy2(ledger, dst_dir / ledger.name)
-    gather_src = src_run_dir / GATHER_DIR
     if gather_src.is_dir():
         shutil.copytree(gather_src, dst_dir / GATHER_DIR, dirs_exist_ok=True)
 

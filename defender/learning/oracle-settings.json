@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Task",
+      "Agent",
+      "Write(**)",
+      "Edit(**)",
+      "MultiEdit(**)",
+      "Read(**/.env)",
+      "Read(**/credentials*)",
+      "Read(**/.ssh/**)",
+      "Read(**/ground_truth*)",
+      "Read(**/ground-truth*)",
+      "Read(**/cases.json)",
+      "Grep(**/ground_truth*)",
+      "Glob(**/ground_truth*)"
+    ]
+  }
+}
