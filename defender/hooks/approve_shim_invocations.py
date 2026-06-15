@@ -52,10 +52,38 @@ from _cmd_segments import (  # noqa: E402
 
 # Read-only utilities safe to approve in any composition. Deliberately small:
 # viewers/filters over already-materialized files, plus navigation. No `env`,
-# `printenv`, `export`, `source`, `find`, `python3`, `netstat`, `docker`.
+# `printenv`, `export`, `python3`, `netstat`, `docker`.
 READONLY_TOOLS = frozenset(
     {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "sort", "uniq", "true"}
 )
+
+# Extra read-only tools the GATHER subagent gets but the main loop does not:
+# `find` for query-template discovery under skills/gather/queries/. The main loop
+# is oriented by the injected workspace map and stays without it (least privilege).
+# `find` is read-only ONLY without its action flags — `-exec`/`-execdir`/`-ok`/
+# `-okdir` run a command, `-delete` removes files, `-fprint*`/`-fls` write files —
+# so those are rejected by _FIND_DANGER_RE wherever find is allowed.
+GATHER_READONLY_TOOLS = frozenset({"find"})
+
+_FIND_DANGER_RE = re.compile(
+    r"(?<!\S)-(?:execdir|exec|okdir|ok|delete|fprintf|fprint|fls)\b"
+)
+
+# find must not be a back door around the read denylist: it can't run a command
+# or write (above), and it can't be used to *locate* secrets / ground truth /
+# the held-out manifest either (the files decide_read denies outright). Mirrors
+# permission._READ_DENY_SUBSTR + _READ_DENY_DIR — a find naming any of these
+# falls through (unapproved) even though its action flags are clean.
+_FIND_SENSITIVE_RE = re.compile(
+    r"(\.env|credentials|ground[-_]truth|cases\.json|\.ssh)", re.IGNORECASE
+)
+
+# Benign stderr redirects — discard (`2>/dev/null`) or merge (`2>&1`) of stderr.
+# The agent appends these reflexively; they don't write a file or exfiltrate
+# (the harness captures stderr regardless), so strip them BEFORE the unsafe-token
+# check rather than denying the whole command. A *stdout* file redirect
+# (`> out`, `1> out`, `&> out`) is NOT matched here and stays denied.
+_BENIGN_STDERR_RE = re.compile(r"\s*2>\s*(?:/dev/null|&1)|\s*2>&1")
 
 # Tokens that make a command unsafe to approve regardless of leading word:
 # output redirects, command substitution, env-assignment prefixes. If any
@@ -75,13 +103,22 @@ def _is_main_session(hook_data: dict) -> bool:
 
 def _all_segments_safe(script: str, safe_leading: frozenset) -> bool:
     for raw in _split_segments(script):
-        seg = raw.strip()
+        # Drop benign stderr redirects first (2>/dev/null, 2>&1) — they're not a
+        # file write or exfil vector, just noise the agent appends. A real stdout
+        # redirect still carries a bare `>` and trips _UNSAFE_TOKEN_RE below.
+        seg = _BENIGN_STDERR_RE.sub("", raw).strip()
         if not seg:
             continue
         if _UNSAFE_TOKEN_RE.search(seg):
             return False
         head = seg.split(None, 1)[0]
         if head not in safe_leading:
+            return False
+        # `find` is read-only only without its action flags (-exec/-delete/…),
+        # and must not be a locator for denied-read files (secrets / ground truth).
+        # Reject either wherever find is in safe_leading (gather); in the main loop
+        # find isn't in the set, so the head check above already denied it.
+        if head == "find" and (_FIND_DANGER_RE.search(seg) or _FIND_SENSITIVE_RE.search(seg)):
             return False
     return True
 
@@ -109,8 +146,9 @@ def main() -> int:
     # main session — in the main loop they must reach the clamp, not be approved.
     safe = set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS)
     if not main_session:
-        # Subagent context: any defender-* shim is fine (gather runs adapters).
-        safe |= _all_defender_shims()
+        # Subagent context: any defender-* shim is fine (gather runs adapters),
+        # plus the gather-only read-only tools (find, for template discovery).
+        safe |= _all_defender_shims() | GATHER_READONLY_TOOLS
 
     inner = _unwrap(cmd)
     if inner is None:

@@ -22,6 +22,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
+from . import circuit_breaker
 from . import permission
 
 # `permission` import above bootstrapped defender/hooks onto sys.path; add
@@ -33,8 +34,8 @@ if str(_SCRIPTS_TOOLS) not in sys.path:
 
 from tag_tool_results import wrap as _wrap  # noqa: E402
 from record_lead import claim_lead as _claim_lead  # noqa: E402
-from inject_system_skill_description import read_description as _read_description  # noqa: E402
-from record_query import capture as _capture, LEAD_ID_RE as _LEAD_ID_RE  # noqa: E402
+from inject_system_skill_description import descriptor_catalog as _descriptor_catalog  # noqa: E402
+from record_query import capture as _capture, derive_system as _derive_system, LEAD_ID_RE as _LEAD_ID_RE  # noqa: E402
 from record_lesson_load import lesson_name as _lesson_name  # noqa: E402
 
 _BASH_TIMEOUT_S = 120
@@ -111,6 +112,12 @@ def register_tools(agent) -> None:
         if not ctx.deps.is_main_session:
             argv = permission.adapter_argv(command)
             if argv is not None:
+                # Circuit-breaker in-gather gate: refuse a call to a system already
+                # tripped this run before it runs again, so one dispatch can't keep
+                # hammering a dead source. Mirrors the dispatch gate in _run_gather.
+                system = _derive_system(argv)
+                if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
+                    raise ModelRetry(circuit_breaker.down_message(ctx.deps.run_dir, system))
                 return _capture_adapter(ctx.deps, argv)
         try:
             proc = subprocess.run(
@@ -200,6 +207,14 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
         )
     except ValueError as e:
         raise ModelRetry(str(e))
+    # Circuit breaker: record this system call's outcome. An infra failure
+    # (connectivity/auth exit, or timeout) advances the per-system counter and may
+    # raise RunAborted via the run-wide kill switch (caught by the driver, which
+    # writes the partial trace). record['system'] is the system the capture bound
+    # the query to — authoritative over re-deriving from argv.
+    circuit_breaker.record_outcome(
+        deps.run_dir, record.get("system", ""), record["exit_code"], stderr
+    )
     # Surface the persisted payload path (the gather SKILL filters against it for
     # large payloads). Report it ABSOLUTE: the bash/read tools resolve relative to
     # the repo root, not run_dir, so the relative table FK (record['payload_path'])
@@ -213,10 +228,13 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
 
 def _gather_prompt(
     deps: RunDeps, lead_id: str, system: str, goal: str,
-    what_to_summarize: list[str], desc: str | None,
+    what_to_summarize: list[str], catalog: str | None,
 ) -> str:
-    """The gather subagent's user prompt: the dispatch block its SKILL reads,
-    plus the injected system-SKILL description (relevance + where to read more)."""
+    """The gather subagent's user prompt: the dispatch block its SKILL reads, plus
+    the descriptor catalog (every data-source system + its one-line description) —
+    the progressive-disclosure index. Gather confirms its target (`system:` above)
+    from the catalog, then Reads that system's full SKILL.md + execution.md on
+    demand. Falls back to no catalog when it can't be built."""
     wts = "\n".join(f"  - {d}" for d in what_to_summarize) or "  - (unspecified)"
     block = (
         "Begin gathering this lead.\n\n"
@@ -229,8 +247,13 @@ def _gather_prompt(
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )
-    if desc:
-        block += f"\n## System `{system}` (from its SKILL frontmatter)\n{desc}\n"
+    if catalog:
+        block += (
+            "\n## Systems of record (descriptor index — your target is "
+            f"`system: {system}` above; confirm it here, then Read that system's "
+            "full SKILL.md + execution.md before querying)\n\n"
+            f"{catalog}\n"
+        )
     return block
 
 
@@ -264,8 +287,21 @@ async def _run_gather(
     }) == 2:
         raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
 
-    # 2. Inject the target system's SKILL description (relevance + pointer).
-    desc = _read_description(system)
+    # 1b. Circuit-breaker dispatch gate: if this system is down for the run, do
+    # not spawn gather and do not inject its SKILL — the block is transparent to
+    # the main loop, which gets a measurement-shaped "system down" summary it can
+    # reason from (and must not re-dispatch). The lead is already claimed above, so
+    # it shows in the leads table as planned-but-unmeasured. Returned UNWRAPPED:
+    # this is a trusted harness control message, not attacker-influenced data, so
+    # the "do not re-dispatch" directive must survive the untrusted-content rule.
+    # Generalizes to MCP — a tripped system's server/toolset simply isn't attached.
+    if circuit_breaker.is_tripped(deps.run_dir, system):
+        return circuit_breaker.down_message(deps.run_dir, system)
+
+    # 2. Inject the descriptor catalog (all data-source systems + descriptions) —
+    # the progressive-disclosure index. Gather confirms its target from it, then
+    # Reads that system's full SKILL.md + execution.md on demand.
+    catalog = _descriptor_catalog()
 
     # 3. Run the nested gather agent. It gets its OWN usage object: sharing the
     # main run's usage would make request_limit (a cumulative check) abort gather
@@ -277,7 +313,7 @@ async def _run_gather(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         run_id=deps.run_id, salt=deps.salt, is_main_session=False, lead_id=lead_id,
     )
-    prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, desc)
+    prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
     try:
         result = await gagent.run(
             prompt, deps=gdeps,

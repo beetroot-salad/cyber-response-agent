@@ -41,6 +41,7 @@ from _cmd_segments import (  # noqa: E402  (sys.path set above)
 # Reuse the gate predicates verbatim — these are pure (no stdin/exit), so the
 # in-process gate and the subprocess hooks can never disagree on the taxonomy.
 from approve_shim_invocations import (  # noqa: E402
+    GATHER_READONLY_TOOLS,
     READONLY_TOOLS,
     _all_segments_safe,
 )
@@ -101,6 +102,14 @@ def _cached_adapter_re():
 @lru_cache(maxsize=1)
 def _safe_main_tokens() -> frozenset:
     return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS))
+
+
+@lru_cache(maxsize=1)
+def _safe_gather_tokens() -> frozenset:
+    # Gather gets the main safe set plus its discovery tools (find). The
+    # find action-flag guard lives in _all_segments_safe, so a `-exec`/`-delete`
+    # find is still denied here.
+    return frozenset(_safe_main_tokens() | GATHER_READONLY_TOOLS)
 
 
 def _segment_is_adapter(seg: str) -> bool:
@@ -167,7 +176,7 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
             if len(segs) != 1:
                 return Decision(False, ADAPTER_STANDALONE_REASON)
             return Decision(True)
-        if not _all_segments_safe(inner, _safe_main_tokens()):
+        if not _all_segments_safe(inner, _safe_gather_tokens()):
             return Decision(False, FALLTHROUGH_DENY_REASON)
         return Decision(True)
 

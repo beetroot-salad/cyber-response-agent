@@ -110,9 +110,11 @@ def _docker_exec_curl(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
         )
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(f"error: docker exec curl timed out after {timeout_sec + 5}s (target: {url})")
+        print(f"error: docker exec curl timed out after {timeout_sec + 5}s (target: {url})", file=sys.stderr)
+        sys.exit(2)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -153,14 +155,20 @@ def _request(config: dict[str, str], url: str, *, method: str, body: dict | None
     rc, stdout, stderr = _docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
 
     if rc != 0 and not stdout:
-        # curl never produced output → transport-level failure.
+        # curl never produced output → transport-level failure. Exit 2 (the
+        # connectivity/docker/unreachable code in every stub's exit contract) so
+        # the gather exit-code protocol and the circuit breaker both see it as a
+        # down system, not a query error.
         hint = stderr.strip() or "no stderr"
         if "No such container" in hint or "is not running" in hint:
-            sys.exit(
+            print(
                 f"error: bastion container {bastion!r} unreachable: {hint}\n"
-                f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running."
+                f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running.",
+                file=sys.stderr,
             )
-        sys.exit(f"error: docker exec failed (rc={rc}): {hint}")
+            sys.exit(2)
+        print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
+        sys.exit(2)
 
     body_text, status = _split_status(stdout)
     if not status:
@@ -222,12 +230,15 @@ def docker_exec_raw(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
         )
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(
+        print(
             f"error: docker exec timed out after {timeout_sec + 5}s "
-            f"(bastion: {bastion}, argv: {shlex.join(argv)})"
+            f"(bastion: {bastion}, argv: {shlex.join(argv)})",
+            file=sys.stderr,
         )
+        sys.exit(2)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -253,10 +264,13 @@ def docker_inspect_raw(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
         )
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(
+        print(
             f"error: docker inspect timed out after {timeout_sec + 5}s "
-            f"(target: {target})"
+            f"(target: {target})",
+            file=sys.stderr,
         )
+        sys.exit(2)
     return proc.returncode, proc.stdout, proc.stderr

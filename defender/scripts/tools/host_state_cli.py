@@ -64,16 +64,20 @@ def _exit_on_docker_error(rc: int, stderr: str, host: str):
     if rc == 0:
         return
     s = stderr.strip()
+    # Transport/unreachable failures exit 2 (the system-of-record contract: 2 =
+    # connectivity/docker/unreachable, matching this CLI's SKILL and the gather
+    # exit-code protocol). Verb-level errors (a missing file) stay exit 1 — a
+    # query error the caller reasons about, not a down host.
     if not s:
-        sys.exit(f"error: docker exec on {host} returned rc={rc} with no stderr")
+        print(f"error: docker exec on {host} returned rc={rc} with no stderr", file=sys.stderr)
+        sys.exit(2)
     if "No such container" in s or "is not running" in s:
-        sys.exit(
+        print(
             f"error: host {host!r} unreachable: {s}\n"
-            f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts."
+            f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts.",
+            file=sys.stderr,
         )
-    # Pass through verb-level errors (cat: No such file) as exit 1 — caller
-    # contexts decide. We don't differentiate here because verbs wrap small
-    # commands whose stderr is the useful signal.
+        sys.exit(2)
     print(f"error: docker exec on {host} (rc={rc}): {s}", file=sys.stderr)
     sys.exit(1)
 
@@ -84,14 +88,18 @@ def cmd_health_check(args, _config):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(f"error: `docker --context {transport.DOCKER_CONTEXT} ps` timed out after 10s")
+        print(f"error: `docker --context {transport.DOCKER_CONTEXT} ps` timed out after 10s", file=sys.stderr)
+        sys.exit(2)
     if proc.returncode != 0:
-        sys.exit(
+        print(
             f"error: docker context {transport.DOCKER_CONTEXT!r} unreachable: "
-            f"{proc.stderr.strip()}"
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
         )
+        sys.exit(2)
     names = set(proc.stdout.split())
     print("connected")
     print(f"docker context: {transport.DOCKER_CONTEXT}")

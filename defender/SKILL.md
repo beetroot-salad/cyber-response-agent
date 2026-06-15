@@ -107,8 +107,10 @@ triage question — what behavior is being flagged and what you need to
 determine to disposition it.
 
 `:V type`, `:E rel`, and several `class` / `attrs.kind` slots draw
-from closed catalogs. When you need a value and don't already know
-it, Bash the `enum` subcommand — don't memorize the catalog:
+from closed catalogs. The **full catalog (every slot + values) is in the
+Orientation → invlang catalog block of your first message** — author from
+there; don't memorize it and don't re-fetch what's shown. Bash the `enum`
+subcommand only for a slot the block somehow lacks:
 
 ```bash
 defender-invlang enum                # slot names
@@ -195,11 +197,14 @@ retrieval dimensions (inline lists):
   (tactic slugs, e.g. `lateral-movement`, `persistence`).
 
 **Discover at PLAN time, by dimension — do not eyeball the whole listing.**
-This is plan-time, not orient-time: you discover lessons against the lead
-you're about to write, once you know its telemetry source and the ATT&CK
-tactic your current hypothesis sits in. Use the `defender-lessons` shim — it
-greps the **frontmatter only** (the body can't false-match a tag) and prints
-`<path>\t<description>`:
+This signature's `source_signature` hits and the viable tags are already in the
+**Orientation → Lessons block** of your first message (`<path>\t<description>`) —
+scan those descriptions and Read the bodies that fit the lead you're about to
+write. You discover lessons against the lead once you know its telemetry source
+and the ATT&CK tactic your current hypothesis sits in. Use the `defender-lessons`
+shim to *widen* (by `telemetry_source` / `attack_phase`, or by dropping a
+pattern) beyond the signature hits already shown — it greps the **frontmatter
+only** (the body can't false-match a tag) and prints `<path>\t<description>`:
 
 ```bash
 # 1. See the viable tags first — only these values are worth grepping:
@@ -420,9 +425,9 @@ Loaded on demand:
   itself when dispatched; you do not need to load it.
 - `defender/skills/{system}/SKILL.md` — per-system **visibility**
   reference: what data the system holds and what it can/can't answer.
-  Enumerate `defender/skills/*/SKILL.md` at ORIENT to discover what's
-  reachable in this environment, then load the ones whose `description:`
-  frontmatter looks relevant to the alert. The CLI/query surface and
+  The reachable systems are already listed in the **Orientation → Workspace
+  block** of your first message — don't re-enumerate them; just Read the
+  bodies whose name/role looks relevant to the alert. The CLI/query surface and
   any connectivity detail live in the gather subagent's surface (e.g.
   `skills/elastic/execution.md`), not here — you route to systems, you
   do not query them.
