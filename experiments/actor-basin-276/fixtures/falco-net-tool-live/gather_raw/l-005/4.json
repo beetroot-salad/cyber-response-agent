@@ -1,0 +1,3 @@
+connected
+docker context: soc-playground
+hosts present (8/8): canary-1, db-1, dev-ws-1, jump-box-1, office-ws-1, office-ws-2, web-1, web-2

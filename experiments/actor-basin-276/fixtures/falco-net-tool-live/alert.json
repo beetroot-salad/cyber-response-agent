@@ -1,0 +1,78 @@
+{
+  "alert_id": "91c83088ec1be2ec3812ad604e21850b10a17f0da0f017ef87949c4574a0ff40",
+  "alert_timestamp": "2026-06-14T19:10:34.859Z",
+  "rule": {
+    "id": "v2-falco-suspicious-network-tool",
+    "name": "v2 Falco: suspicious network tool in container",
+    "type": "query",
+    "severity": "medium",
+    "risk_score": 47,
+    "tags": [
+      "v2",
+      "falco",
+      "container",
+      "execution"
+    ],
+    "description": "Falco rule 'Launch Suspicious Network Tool in Container' fired \u2014 nc, ncat, socat, nmap, telnet, etc. inside one of the playground role-host containers. Triage: which container, which process spawned the tool, what destination.",
+    "language": "kuery",
+    "query": "falco.rule: \"Launch Suspicious Network Tool in Container\"",
+    "index": [
+      "logs-falco.alerts-*"
+    ]
+  },
+  "reason": "Falco rule 'Launch Suspicious Network Tool in Container' fired \u2014 process nc (`nc -z -w1 jump-box-1 22`) spawned by bash under uid 1001 in container id 7e76d1cea7c4; captured by Falco on soc-playground at 2026-06-14T19:10:26.005695Z.",
+  "host": {
+    "name": "soc-playground",
+    "hostname": "soc-playground",
+    "containerized": false
+  },
+  "process": {
+    "name": "nc",
+    "executable": "/usr/bin/nc.openbsd",
+    "command_line": "nc -z -w1 jump-box-1 22",
+    "parent": {
+      "name": "bash"
+    }
+  },
+  "user": {
+    "id": "1001",
+    "name": "<NA>"
+  },
+  "container": {
+    "id": "7e76d1cea7c4",
+    "name": "<NA>",
+    "image": null
+  },
+  "falco": {
+    "rule": "Launch Suspicious Network Tool in Container",
+    "priority": "Notice",
+    "source": "syscall",
+    "tags": [
+      "T1059",
+      "container",
+      "maturity_incubating",
+      "mitre_execution",
+      "network",
+      "process"
+    ],
+    "output": "19:10:26.005694959: Notice Network tool launched in container | evt_type=execve user=<NA> user_uid=1001 user_loginuid=-1 process=nc proc_exepath=/usr/bin/nc.openbsd parent=bash command=nc -z -w1 jump-box-1 22 terminal=0 exe_flags=EXE_LOWER_LAYER container=<NA> (id=7e76d1cea7c4 image=<NA>)",
+    "output_fields": {
+      "user.uid": 1001,
+      "proc.pname": "bash",
+      "evt.type": "execve",
+      "proc.cmdline": "nc -z -w1 jump-box-1 22",
+      "user.name": "<NA>",
+      "proc.exepath": "/usr/bin/nc.openbsd",
+      "container.id": "7e76d1cea7c4",
+      "evt.arg.flags": "EXE_LOWER_LAYER",
+      "user.loginuid": -1,
+      "container.name": "<NA>",
+      "container.image.repository": null,
+      "proc.name": "nc",
+      "proc.tty": 0,
+      "evt.time": 1781464226005695000
+    },
+    "event_time": "2026-06-14T19:10:26.005695Z"
+  },
+  "ancestor_events": []
+}

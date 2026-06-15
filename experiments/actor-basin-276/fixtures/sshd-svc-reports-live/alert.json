@@ -1,0 +1,59 @@
+{
+  "alert_id": "9e619c98d789cbc04d589564e59f66a63e3c88d9fa238e3b6fefc9875692f4a4",
+  "alert_timestamp": "2026-06-15T05:32:15.000Z",
+  "rule": {
+    "id": "v2-sshd-success-after-failures",
+    "name": "v2 sshd success after failures",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 65,
+    "tags": [
+      "v2",
+      "auth",
+      "ssh",
+      "correlation",
+      "brute-force-success"
+    ],
+    "description": "Successful sshd login on a host preceded by three or more failed password attempts on the same host within 10 minutes. The EQL sequence keys by host.name; same-user join would be more precise but the system.auth integration does not extract user.name from the sshd 'Failed password for X' message reliably across PAM and openssh log lines.",
+    "language": "eql",
+    "query": "sequence by host.name with maxspan=10m\n  [any where process.name == \"sshd\" and event.outcome == \"failure\"] with runs=3\n  [any where process.name == \"sshd\" and event.outcome == \"success\"]"
+  },
+  "reason": "authentication event with process sshd, source 172.18.0.7:36300, by svc.reports on web-1 created high alert v2 sshd success after failures.",
+  "host": {
+    "hostname": "web-1",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "jammy",
+      "name": "Ubuntu",
+      "family": "debian",
+      "type": "linux",
+      "version": "22.04.5 LTS (Jammy Jellyfish)",
+      "platform": "ubuntu"
+    },
+    "containerized": false,
+    "ip": [
+      "172.18.0.7"
+    ],
+    "name": "web-1",
+    "mac": [
+      "06-69-B7-8F-B8-0D"
+    ],
+    "architecture": "x86_64"
+  },
+  "user": {
+    "name": "svc.reports"
+  },
+  "source": {
+    "address": "172.18.0.7",
+    "port": 36300,
+    "ip": "172.18.0.7"
+  },
+  "ancestor_events": [
+    {
+      "id": "AZ7JxKPk6cqAU2E-f4Oa",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"username": "svc.monitoring", "email": "svc-monitoring@soc-playground.local", "first_name": "Monitoring", "last_name": "Service", "enabled": true, "realm_role": "service-account", "authorized_hosts": ["canary-1", "ci-1", "config-mgmt-1", "db-1", "dev-ws-1", "jump-box-1", "office-ws-1", "office-ws-2", "scanner-1", "web-1", "web-2"], "sudo_hosts": []}

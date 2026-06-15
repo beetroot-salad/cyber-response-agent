@@ -1,0 +1,3 @@
+# arm-run outputs are ephemeral/regenerable — not tracked (see results/*.md for distilled findings)
+runs/
+runs-*/

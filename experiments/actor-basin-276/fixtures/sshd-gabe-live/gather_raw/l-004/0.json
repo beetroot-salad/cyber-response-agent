@@ -1,0 +1,1 @@
+{"username": "dev.gabe", "email": "gabe@soc-playground.local", "first_name": "Gabe", "last_name": "Iverson", "enabled": true, "realm_role": "developer", "authorized_hosts": ["dev-ws-1", "jump-box-1"], "sudo_hosts": []}
