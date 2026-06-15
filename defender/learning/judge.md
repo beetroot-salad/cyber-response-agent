@@ -58,9 +58,23 @@ actor_observations:
     subject_topic: {short phrase naming the observation}
     observation: |
       {one short paragraph}
+environment_observations:
+  - subject: {kebab referent this fact is about, e.g. jump-box-1 — or omit if the fact is not about one named referent}
+    alert_rule_ids: [{the alert rule id(s) this standing fact explains}]
+    entities:
+      - {type: <invlang vertex type>, class: <type/class slot>}
+    relevance_criteria: {one-line predicate a future actor scans during retrieval}
+    fact: |
+      {1–2 short paragraphs — the standing deployment fact in POSITIVE polarity
+      and what grounds it, written observationally for a future actor who will
+      not see this case}
+    citations:
+      - source: comparison | synthesis | coverage_manifest | report | actor | alert
+        quote: |
+          {only the load-bearing span}
 ```
 
-Placeholders in the skeleton above use `{…}` to flag content you must fill in — they are notational, never emit literal curly braces in your output. `actor_observations` is optional — omit the key entirely if nothing load-bearing surfaced (do not emit `actor_observations: []` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
+Placeholders in the skeleton above use `{…}` to flag content you must fill in — they are notational, never emit literal curly braces in your output. `actor_observations` and `environment_observations` are each optional — omit the key entirely if nothing load-bearing surfaced (do not emit `[]` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
 
 **The verdict reasoning, the lead-by-lead walk, and your confidence self-check are internal thinking — work through them (see §Reasoning) but do not emit them as output sections.** Everything you reason through lands in the `finding` / `observation` text and the `outcome` enum; there is no separate rationale, encounter-analysis, or confidence field. This keeps the output compact without losing the analysis — a finding that names the gap, grounds it in a quoted span, and generalizes in one line carries the same teaching as a multi-paragraph walk, at a fraction of the length.
 
@@ -166,6 +180,19 @@ Type options:
 #### What would have made this story sharper?
 
 After picking observations, briefly ask the teacher-side companion to the defender-side disambiguation question: **what story choice would have made this encounter a stronger test of the defender?** What different framing, attack class, or bypass dimension would have moved the encounter away from getting decided on incidentals and toward exposing a real capability gap? If a single, specific answer surfaces, fold it into the most relevant observation. If the story was already well-targeted, say so in one line and emit fewer observations.
+
+### Environment observations (max 3, load-bearing only)
+
+When you **refuted** the story by citing the deployment's actual telemetry — the classic `misprediction`, where the actor assumed something about the environment and a lead's actuals showed otherwise — you are holding a true, durable deployment fact. Emit it here so it lands in the shared environment corpus the *blind* actor reads, instead of being discarded once the story is rejected. This is the second, complementary output of one refutation: the same misprediction also yields a teacher-side `actor_observation` ("verify the dimension before asserting a blend") — emit **both**; they are not mutually exclusive.
+
+The discipline that makes these usable:
+
+- **Positive polarity (the crux).** The refutation is negatively framed ("the actor assumed 443 blends with this host's outbound; the actuals show none"). Author the env fact as the **standing positive fact** the actuals established — "jump-box-1's outbound baseline is ports 9200 and 22 only; there is no 443 in it" — not the negation of the actor's guess. A future actor reads this without your case and reasons *with* the fact; write what is TRUE about the deployment, grounded in the system of record that establishes it.
+- **Only emit what the actuals established.** The fact must be one a lead's actual result (or your `jq` over the raw payload) directly grounded — cite the load-bearing span (`comparison` for a projection-vs-actual span, `synthesis` for the defender's resolution, `report`/`alert`/`actor` as needed). A fact you inferred but did not observe is not an env observation.
+- **`alert_rule_ids`** — read the rule id(s) this standing fact explains from the alert; this is the retrieval anchor, always emit it.
+- **`entities` — selector discipline (load-bearing).** Key only on **prologue-observable** entity types — `process`, `socket`, `file`, `credential`, `compute` — drawn from the investigation's `:V prologue.vertices` block, using that block's `type/class` slot vocabulary verbatim (a selector with fewer slots matches more). **Never** emit an `identity` selector: the downstream forward-check re-derives the case's entities from the prologue and drops any lesson whose selector the prologue cannot satisfy, and an identity the defender grounded mid-investigation is not in the prologue. The identity grounding (e.g. "svc.monitoring is the authorized fleet monitor") is the *content* of the `fact`, not a selector. Omit `entities` entirely for a pure detector/threshold fact that is not bound to a prologue entity (it then matches every case on its rule anchor).
+
+`subject` is the smallest independently-mutable referent the fact is about (kebab-case, e.g. `jump-box-1`), or omit if the fact is not about one named referent. Treat these with the same max-3 load-bearing discipline as the other streams.
 
 ### Confidence self-check (internal — do not emit)
 

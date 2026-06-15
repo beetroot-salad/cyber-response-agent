@@ -183,6 +183,15 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
             raise LoopError("judge `actor_observations` is not a list")
         for i, o in enumerate(observations):
             _validate_actor_observation(i, o)
+    # The adversarial judge also emits positive-polarity env facts from grounded
+    # mispredictions, into the SHARED lessons-environment/ corpus (issue #298).
+    # Same schema as the benign env stream — reuse the gate.
+    if "environment_observations" in doc:
+        obs = doc["environment_observations"]
+        if not isinstance(obs, list):
+            raise LoopError("judge `environment_observations` is not a list")
+        for i, o in enumerate(obs):
+            _validate_environment_observation(i, o)
     return doc
 
 

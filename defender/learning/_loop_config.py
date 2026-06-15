@@ -109,6 +109,23 @@ class LoopPaths:
     def environment_observations_lock_file(self) -> Path:
         return self.pending_dir / ".environment.lock"
 
+    # Adversarial env-fact stream — a second source for the SHARED
+    # lessons-environment/ corpus (issue #298). Separate queue from the benign
+    # environment_observations so each drains in its own single-direction batch
+    # (clean per-commit trailers + per-direction outcome policy); both authors
+    # commit into defender/lessons-environment/.
+    @property
+    def actor_environment_observations_file(self) -> Path:
+        return self.pending_dir / "actor_environment_observations.jsonl"
+
+    @property
+    def actor_environment_observations_consumed_file(self) -> Path:
+        return self.pending_dir / "actor_environment_observations.consumed.jsonl"
+
+    @property
+    def actor_environment_observations_lock_file(self) -> Path:
+        return self.pending_dir / ".actor_environment.lock"
+
 
 def _env_state_dir() -> Path | None:
     """Out-of-repo learning-state dir from ``DEFENDER_LEARNING_STATE_DIR``.

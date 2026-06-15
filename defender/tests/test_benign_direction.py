@@ -212,6 +212,115 @@ def test_append_environment_observations_skip_passthrough(loop_paths) -> None:
 
 
 # --------------------------------------------------------------------------
+# Adversarial env stream → shared lessons-environment corpus (issue #298):
+# validate_judge_doc env block + append_actor_environment_observations
+# --------------------------------------------------------------------------
+
+
+def _valid_adversarial_doc_with_env() -> dict:
+    return {
+        "outcome": "caught",
+        "defender_findings": [
+            {"type": "detection-confirmed", "subject_anchor": "l-002",
+             "subject_topic": "outbound baseline", "finding": "f", "citations": []},
+        ],
+        "actor_observations": [
+            {"type": "misprediction", "subject_anchor": "cover",
+             "subject_topic": "443 blend", "observation": "assumed 443 blends"},
+        ],
+        "environment_observations": [
+            {
+                "subject": "jump-box-1",
+                "alert_rule_ids": ["v2-falco-suspicious-network-tool"],
+                "entities": [
+                    {"type": "process", "class": "nc"},
+                    {"type": "socket", "class": "tcp-endpoint"},
+                ],
+                "relevance_criteria": "outbound from jump-box-1",
+                "fact": "jump-box-1 outbound baseline is ports 9200 and 22 only",
+                "citations": [],
+            }
+        ],
+    }
+
+
+def test_validate_judge_doc_accepts_environment_observations() -> None:
+    assert loop.validate_judge_doc(_valid_adversarial_doc_with_env())
+
+
+def test_validate_judge_doc_rejects_empty_env_rule_anchor() -> None:
+    doc = _valid_adversarial_doc_with_env()
+    doc["environment_observations"][0]["alert_rule_ids"] = []
+    with pytest.raises(loop.LoopError, match="alert_rule_ids"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_malformed_env_selector() -> None:
+    doc = _valid_adversarial_doc_with_env()
+    doc["environment_observations"][0]["entities"] = [{"type": "process"}]
+    with pytest.raises(loop.LoopError, match="type, class"):
+        loop.validate_judge_doc(doc)
+
+
+def test_append_actor_environment_observations(loop_paths) -> None:
+    paths, lrd = loop_paths
+    doc = _valid_adversarial_doc_with_env()
+    n = loop.append_actor_environment_observations(
+        doc, "case-1", "v2-falco-suspicious-network-tool", lrd, paths=paths
+    )
+    assert n == 1
+    rows = _read_jsonl(paths.actor_environment_observations_file)
+    # adv-env/ namespace prevents collision with benign env ids on the same run.
+    assert rows[0]["observation_id"] == "case-1/adv-env/0"
+    assert rows[0]["subject"] == "jump-box-1"
+    assert rows[0]["fact"].startswith("jump-box-1 outbound baseline")
+    assert rows[0]["judge_outcome"] == "caught"
+    assert rows[0]["provenance"] == "adversarial"
+    # carries the keys verify_forward_env.py reads.
+    assert rows[0]["alert_rule_key"] == "v2-falco-suspicious-network-tool"
+    assert "source_run_dir" in rows[0]
+    # idempotent re-append writes nothing new.
+    assert loop.append_actor_environment_observations(
+        doc, "case-1", "v2-falco-suspicious-network-tool", lrd, paths=paths
+    ) == 0
+
+
+def test_append_actor_environment_observations_skip_passthrough(loop_paths) -> None:
+    paths, lrd = loop_paths
+    doc = {"outcome": "skip-passthrough", "defender_findings": [],
+           "environment_observations": []}
+    assert loop.append_actor_environment_observations(
+        doc, "case-1", "rule-x", lrd, paths=paths
+    ) == 0
+
+
+def test_append_actor_environment_observations_unions_canonical_key(loop_paths) -> None:
+    paths, lrd = loop_paths
+    doc = _valid_adversarial_doc_with_env()
+    n = loop.append_actor_environment_observations(doc, "case-1", "rule-100110", lrd, paths=paths)
+    assert n == 1
+    rows = _read_jsonl(paths.actor_environment_observations_file)
+    assert rows[0]["alert_rule_ids"] == [
+        "rule-100110", "v2-falco-suspicious-network-tool"]
+
+
+def test_adversarial_and_benign_env_ids_do_not_collide(loop_paths) -> None:
+    """An ``inconclusive`` case runs both directions; both env streams feed the
+    one shared corpus. The ids must differ so the second drain's idempotency
+    check (corpus-wide) does not swallow a genuinely distinct observation."""
+    paths, lrd = loop_paths
+    benign = _valid_benign_doc()
+    adv = _valid_adversarial_doc_with_env()
+    loop.append_environment_observations(benign, "case-1", "rule-x", lrd, paths=paths)
+    loop.append_actor_environment_observations(adv, "case-1", "rule-x", lrd, paths=paths)
+    benign_id = _read_jsonl(paths.environment_observations_file)[0]["observation_id"]
+    adv_id = _read_jsonl(paths.actor_environment_observations_file)[0]["observation_id"]
+    assert benign_id == "case-1/0"
+    assert adv_id == "case-1/adv-env/0"
+    assert benign_id != adv_id
+
+
+# --------------------------------------------------------------------------
 # author.py direction-aware ground-truth gate
 # --------------------------------------------------------------------------
 

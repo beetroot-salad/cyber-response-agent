@@ -23,12 +23,13 @@ Mirrors ``defender/learning/author.py`` but works on the actor side:
   Agent invocation (Claude Code, file-edit + Bash tools):
     Hand the remaining observations + generation + actor_model to the
     curator agent (``author_actor.md``). It enumerates existing
-    lessons, decomposes observations into env-fact + pattern halves
-    where applicable, decides fold/supersede/new/skip per resulting
-    lesson, performs contradiction-with-replacement on mutable lessons,
-    cross-links via ``applies_to``, commits with the required
-    Generation/Actor-Model trailers, and emits a final
-    ``AUTHOR_RESULT: {...}`` line.
+    lessons and authors pattern/tradecraft lessons only — standing
+    deployment facts now flow to the shared ``lessons-environment/``
+    corpus via the judge's ``environment_observations`` (issue #298),
+    not decomposed here. It decides fold/supersede/new/skip per lesson,
+    performs contradiction-with-replacement on the rare subject-bound
+    mutable lesson, commits with the required Generation/Actor-Model
+    trailers, and emits a final ``AUTHOR_RESULT: {...}`` line.
 
   Post-flight (Python):
     8. Parse AUTHOR_RESULT. Cross-check against git: if commit_sha is
@@ -42,8 +43,8 @@ Mirrors ``defender/learning/author.py`` but works on the actor side:
        consumed rows append to actor_observations.consumed.jsonl with
        category + consumed_at + commit_sha.
 
-The agent owns decomposition, fold/supersede/new judgment, and
-mutability/staleness flow; this module enforces the transaction envelope.
+The agent owns fold/supersede/new judgment and mutability/staleness
+flow; this module enforces the transaction envelope.
 """
 from __future__ import annotations
 

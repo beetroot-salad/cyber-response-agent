@@ -1,6 +1,12 @@
-# Lessons-actor schema v2 — design + v2.1 delta
+# Lessons-actor schema v2 — design + v2.1 / v2.2 deltas
 
-**Status: v2 implemented; v2.1 simplification applied 2026-05-15.** v2 (flat corpus, multi-key index) is live under `defender/lessons-actor/*.md` and is what `defender/learning/author_actor.md` and `defender/learning/actor.md` target. The v2.1 delta (this section) drops two fields the empirical N=5 retrieval probe showed had no retrieval value. When this doc and the code disagree, the code wins.
+**Status: v2 implemented; v2.1 simplification applied 2026-05-15; v2.2 env-fact split applied 2026-06-15.** v2 (flat corpus, multi-key index) is live under `defender/lessons-actor/*.md` and is what `defender/learning/author_actor.md` and `defender/learning/actor.md` target. The v2.1 delta drops two fields the empirical N=5 retrieval probe showed had no retrieval value. When this doc and the code disagree, the code wins.
+
+## v2.2 delta — env-facts moved to the shared environment corpus (issue #298)
+
+The original v2 schema carried **two** lesson shapes — env-fact and pattern — and `author_actor.md` decomposed each observation into both halves. v2.2 removes the env-fact shape from this corpus: `defender/lessons-actor/` is now **pattern/tradecraft-only**. Standing deployment facts are authored exclusively into the shared `defender/lessons-environment/` corpus, which both actors retrieve and which the loop now feeds from both directions — the adversarial judge emits positive-polarity env facts from grounded mispredictions (`environment_observations`), draining via `author_actor_env.py` into the same corpus the benign FP direction writes. The 14 pre-existing env-fact lessons were migrated out of `lessons-actor/` in the same change.
+
+Consequences for this doc's sections below: the env-fact frontmatter (`subject` required, `mutable: true`) and the decomposition/cross-shape-fold rules describe the *historical* v2 design and are retained as design context only. In the live corpus, `subject` is rare (only a pattern bound to one referent), `mutable` is normally `false`, and `applies_to` references env-fact subjects that now live in `lessons-environment/` (a human cross-reference, not a fold target).
 
 ## v2.1 delta — dropped fields
 

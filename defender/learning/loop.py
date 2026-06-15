@@ -44,6 +44,7 @@ from _loop_orchestrate import (  # noqa: E402
     _directions_for,
 )
 from _loop_persist import (  # noqa: E402
+    append_actor_environment_observations,
     append_actor_observations,
     append_environment_observations,
     append_findings,
@@ -78,6 +79,7 @@ __all__ = [
     "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",
     "append_findings", "append_actor_observations", "append_environment_observations",
+    "append_actor_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_oracle",
     "invoke_judge", "invoke_judge_benign", "is_skip_story", "lead_repository",

@@ -33,7 +33,7 @@ from _loop_config import (
     LoopPaths,
     _log,
 )
-from _loop_directions import BY_NAME, Direction, ObsTrigger
+from _loop_directions import BY_NAME, Direction
 from author_branch import AuthorBranch, BranchError
 from _loop_persist import append_findings, derive_alert_rule_key, persist_run
 from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
@@ -186,7 +186,15 @@ def run_direction(
     n_o = spec.append_observations(
         judge_doc, run_id, alert_rule_key, learning_run_dir, paths=paths
     )
-    _log(f"appended {n_f} finding(s), {n_o} observation(s) ({spec.name})")
+    n_env = 0
+    if spec.append_env_observations is not None:
+        n_env = spec.append_env_observations(
+            judge_doc, run_id, alert_rule_key, learning_run_dir, paths=paths
+        )
+    _log(
+        f"appended {n_f} finding(s), {n_o} observation(s), "
+        f"{n_env} env-observation(s) ({spec.name})"
+    )
     return True
 
 
@@ -401,8 +409,8 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     """The (pending_file, threshold_env) pairs the three curators drain."""
     checks = [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
     for direction in BY_NAME.values():
-        t: ObsTrigger = direction.obs_trigger
-        checks.append((t.pending_file(paths), t.threshold_env))
+        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
+            checks.append((t.pending_file(paths), t.threshold_env))
     return checks
 
 
@@ -453,8 +461,8 @@ def _drain_lead_author_and_curators(
 
     trigger_author(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
     for direction in BY_NAME.values():
-        t: ObsTrigger = direction.obs_trigger
-        trigger_author(t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label)
+        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
+            trigger_author(t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label)
 
 
 def _author_drain_locked(
@@ -687,8 +695,11 @@ Outputs:
     when count >= LEARNING_AUTHOR_THRESHOLD the lessons curator (author.py) runs.
   defender/learning/_pending/actor_observations.jsonl   (adversarial direction)
     when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD, author_actor.py runs.
-  defender/learning/_pending/environment_observations.jsonl   (benign direction)
+  defender/learning/_pending/environment_observations.jsonl   (benign/FP direction)
     when count >= LEARNING_AUTHOR_ENV_THRESHOLD, author_actor_benign.py runs.
+  defender/learning/_pending/actor_environment_observations.jsonl  (adversarial direction, #298)
+    adversarial env facts → the SHARED lessons-environment/ corpus; when count >=
+    LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD, author_actor_env.py runs.
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
@@ -702,7 +713,8 @@ Environment:
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 450)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before author_actor runs
-  LEARNING_AUTHOR_ENV_THRESHOLD        pending env observations before author_actor_benign runs
+  LEARNING_AUTHOR_ENV_THRESHOLD        pending FP env observations before author_actor_benign runs
+  LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD  pending adversarial env observations before author_actor_env runs (#298)
 
 Typical use (off-process): `defender/run.py` enqueues a learn-queue marker per finished
 run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --learn-drain`
