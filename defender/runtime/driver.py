@@ -46,13 +46,23 @@ GATHER_REQUEST_LIMIT = 20  # gather is a short, mechanical loop per lead
 # back gate denial — far too brittle for a gate used as feedback.
 DEFAULT_TOOL_RETRIES = 10
 
-# Cache the byte-stable preamble — the SKILL system prompt (~9K tokens, re-sent
-# every request) and the tool schemas — so only the growing message tail is
-# uncached. Message-level caching is Phase B; instructions/tools are stable per
-# run, so this is a safe, immediate win on the slice-1 cache=0 baseline.
+# Three-part caching. The byte-stable preamble — the SKILL system prompt (~9K
+# tokens, re-sent every request) and the tool schemas — is cached at 1h: it's
+# written ~once and must survive the one gap that can exceed 5m (a long gather
+# sub-run blocks the main loop while no main request refreshes its cache). The
+# growing message tail uses `anthropic_cache` — a top-level breakpoint the server
+# moves forward as the conversation grows — at 5m: the tail is re-read on the very
+# next turn (max main-loop gap is bash's 120s timeout, always < 5m, and each read
+# slides the TTL), and each turn writes only the new delta, so 5m's 1.25x write
+# beats 1h's 2x on every one of up to DEFAULT_REQUEST_LIMIT turns. Budget: the
+# automatic breakpoint claims one of Anthropic's 4 cache-point slots, leaving 3
+# for explicit ones; instructions(1) + tools(1) = 2, within budget (pydantic-ai
+# trims excess newest-first if it's ever exceeded). Verify via the per-response
+# cache_read/creation token counts already logged in observe.py.
 _CACHE_SETTINGS = AnthropicModelSettings(
     anthropic_cache_instructions="1h",
     anthropic_cache_tool_definitions="1h",
+    anthropic_cache="5m",
 )
 
 
