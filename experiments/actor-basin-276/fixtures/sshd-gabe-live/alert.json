@@ -1,0 +1,77 @@
+{
+  "alert_id": "a5eee3a88430f8e2b44ebc8fde66cdc1786f031ef9b584484634d54800ac7734",
+  "alert_timestamp": "2026-06-15T07:45:34.514Z",
+  "rule": {
+    "id": "v2-sshd-success-after-failures",
+    "name": "v2 sshd success after failures",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 65,
+    "tags": [
+      "v2",
+      "auth",
+      "ssh",
+      "correlation",
+      "brute-force-success"
+    ],
+    "description": "Successful sshd login on a host preceded by three or more failed password attempts on the same host within 10 minutes. The EQL sequence keys by host.name; same-user join would be more precise but the system.auth integration does not extract user.name from the sshd 'Failed password for X' message reliably across PAM and openssh log lines.",
+    "language": "eql",
+    "query": "sequence by host.name with maxspan=10m\n  [any where process.name == \"sshd\" and event.outcome == \"failure\"] with runs=3\n  [any where process.name == \"sshd\" and event.outcome == \"success\"]"
+  },
+  "reason": "authentication event with process sshd, source 172.18.0.25 by dev.gabe on jump-box-1 created high alert v2 sshd success after failures.",
+  "host": {
+    "hostname": "jump-box-1",
+    "containerized": false,
+    "ip": [
+      "172.18.0.18"
+    ],
+    "name": "jump-box-1",
+    "id": "017c9eb282844b55ab9840ac242a1155",
+    "mac": [
+      "FE-D4-D8-6C-72-F2"
+    ],
+    "architecture": "x86_64",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "noble",
+      "name": "Ubuntu",
+      "family": "debian",
+      "type": "linux",
+      "version": "24.04.4 LTS (Noble Numbat)",
+      "platform": "ubuntu"
+    }
+  },
+  "user": {
+    "name": "dev.gabe"
+  },
+  "source": {
+    "address": "172.18.0.25",
+    "ip": "172.18.0.25"
+  },
+  "ancestor_events": [
+    {
+      "id": "AZ7KPaPk6cqAU2JctPMJ",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ7KPaPk6cqAU2JctPML",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ7KPaPk6cqAU2JctPMM",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ7KPaPk6cqAU2JctPMO",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    }
+  ]
+}

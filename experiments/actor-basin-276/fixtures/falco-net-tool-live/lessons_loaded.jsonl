@@ -1,0 +1,6 @@
+{"lesson_name": "container-id-anchor-before-uid-lookup", "ts": "2026-06-14T19:21:33+00:00"}
+{"lesson_name": "container-identity-gap-not-terminal", "ts": "2026-06-14T19:21:33+00:00"}
+{"lesson_name": "falco-loginuid-tty-non-interactive-not-docker-exec", "ts": "2026-06-14T19:21:33+00:00"}
+{"lesson_name": "falco-terminal-phase-no-upstream-chain", "ts": "2026-06-14T19:21:33+00:00"}
+{"lesson_name": "container-id-anchor-before-uid-lookup", "ts": "2026-06-14T19:30:00+00:00"}
+{"lesson_name": "container-identity-gap-not-terminal", "ts": "2026-06-14T19:30:00+00:00"}

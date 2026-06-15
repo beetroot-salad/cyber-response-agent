@@ -1,0 +1,7 @@
+---
+case_id: sshd-gabe-s1
+disposition: benign
+confidence: medium
+---
+
+Rule `v2-sshd-success-after-failures` fired on jump-box-1 at 2026-06-15T07:44:32Z: three failed password attempts for `dev.gabe` from 172.18.0.25 followed immediately by a successful login. The auth sequence (l-001) showed inter-attempt intervals of 0.68–2.58 seconds — consistent with user retry, not automated spray — and the 7-day baseline (l-002) confirmed this exact 3-failure-then-success pattern is normal for this source: identical sequences appeared for dev.dana, dev.ethan, and dev.fatima from 172.18.0.25 on 2026-06-14/15, with password-only auth throughout. The source IP (l-003: CMDB IP lookup returned 404; l-006: Elastic agent metadata) resolved to `dev-ws-1`, a corporate developer workstation enrolled in Elastic and present in jump-box-1's CMDB trust_edges_out — a CMDB data quality gap (hostname registered, IP not indexed) explained the initial 404. IAM check (l-004) confirmed dev.gabe is active, holds the developer role, and has authorized shell access to jump-box-1 (ac2: authorized; ac1: authorized). Post-auth coverage (l-005, l-007) found no Falco authorized_keys alerts, no privilege escalation, and dev.gabe's authorized_keys file is empty — no persistence artifacts. Confidence is medium rather than high because dev.gabe's session close was not observed in the 1-hour post-auth window and per-session process-audit data for dev.gabe specifically was not available, leaving the session's internal activity unconfirmed.
