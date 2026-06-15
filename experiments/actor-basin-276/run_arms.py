@@ -14,7 +14,9 @@ Corpus retirement is intentionally NOT applied: the canonical human-mimicry less
 net-tool alert, so retiring it is inert for this fixture. armA therefore isolates the
 reframed objective alone. See results/ for the writeup.
 """
-import sys, json, traceback
+import json
+import sys
+import traceback
 from pathlib import Path
 
 LEARNING = Path("/workspace/defender/learning")

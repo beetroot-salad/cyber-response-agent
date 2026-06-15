@@ -11,7 +11,10 @@ inter-attempt gaps are 0.68-2.58s while the retired lesson prescribes 8-20s "hum
 lesson encodes a stale timing prior for THIS deployment. The test: does retiring it (armA) + seeing
 the real cadence (armB) help the actor match the actual basin vs the lesson's prior.
 """
-import sys, json, traceback, shutil
+import json
+import shutil
+import sys
+import traceback
 from pathlib import Path
 
 LEARNING = Path("/workspace/defender/learning")
