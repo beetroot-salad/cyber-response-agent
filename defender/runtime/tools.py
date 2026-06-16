@@ -114,10 +114,15 @@ def register_tools(agent) -> None:
             if argv is not None:
                 # Circuit-breaker in-gather gate: refuse a call to a system already
                 # tripped this run before it runs again, so one dispatch can't keep
-                # hammering a dead source. Mirrors the dispatch gate in _run_gather.
+                # hammering a dead source. RETURN the down-message (don't raise
+                # ModelRetry): a tripped system won't recover within the run, so a
+                # retry is pointless, and if the model re-issued the same call it
+                # would burn the bash tool's retry budget into an UnexpectedModel-
+                # Behavior that crashes the run instead of writing a partial trace.
+                # Returning mirrors the dispatch gate in _run_gather.
                 system = _derive_system(argv)
                 if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
-                    raise ModelRetry(circuit_breaker.down_message(ctx.deps.run_dir, system))
+                    return circuit_breaker.down_message(ctx.deps.run_dir, system)
                 return _capture_adapter(ctx.deps, argv)
         try:
             proc = subprocess.run(

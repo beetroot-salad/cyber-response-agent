@@ -40,12 +40,14 @@ DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 CONFIG_PATH = (
     DEFENDER_DIR / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
 )
+# Note: SSL verification is not configurable here — curl runs container-local
+# against the stack's self-signed cert and always passes `-k` (mirrors es.sh), so
+# ELASTIC_SSL_VERIFY / ELASTIC_CA_CERT are no longer read and are not required.
 REQUIRED_CONFIG_KEYS = [
     "ELASTICSEARCH_URL",
     "KIBANA_URL",
     "ELASTIC_EVENTS_INDEX",
     "ELASTIC_ALERTS_INDEX",
-    "ELASTIC_SSL_VERIFY",
 ]
 
 # The playground stack is reached over the soc-playground docker context — the
@@ -167,8 +169,11 @@ def _http_json(method, url, config, headers=None, body=None, timeout=None):
            "sh", "-c", inner, "--", *curl_args]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=secs + 10)
-    except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+    except FileNotFoundError as e:
+        # docker missing from PATH is a transport failure, not a query error —
+        # route it through TransportError so the caller exits 2 (the breaker
+        # contract), consistent with _stub_transport / host_state_cli.
+        raise TransportError("docker CLI not found on PATH") from e
     except subprocess.TimeoutExpired as e:
         raise TransportError(f"docker exec curl timed out after {secs + 10}s") from e
 
@@ -182,6 +187,15 @@ def _http_json(method, url, config, headers=None, body=None, timeout=None):
         # failure (no such container, context down, TLS handshake refused, …).
         detail = proc.stderr.strip() or f"docker exec rc={proc.returncode}, no output"
         raise TransportError(detail) from e
+    if status == 0:
+        # curl reports HTTP 000 when it never received a response (connection
+        # refused, DNS failure, TLS handshake rejected, --max-time before any
+        # headers). It still writes "\n000" to stdout, so the int() parse above
+        # SUCCEEDS — the most common ES-down case. Treat 0 as the transport
+        # failure it is, not a real HTTP status, so it routes to exit 2 (and the
+        # circuit breaker counts it) instead of being mis-scored as a query error.
+        detail = proc.stderr.strip() or f"curl reported HTTP 000 (no response; rc={proc.returncode})"
+        raise TransportError(detail)
 
     try:
         parsed = json.loads(body_text) if body_text else {}
@@ -236,6 +250,12 @@ def search(config, index_pattern, query_string, time_start, time_end, time_field
         if status in (401, 403):
             print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
             sys.exit(2)
+        if status >= 500:
+            # 5xx is the server being unavailable (cluster restarting, no shard,
+            # gateway) — an infra failure the breaker should count, not a query
+            # error. Mirrors _stub_transport._request's code>=500 → exit 2.
+            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
         print(f"error: Elasticsearch query failed (HTTP {status}): {msg}", file=sys.stderr)
         sys.exit(1)
 
@@ -262,7 +282,8 @@ def health_check(config):
 
     if status != 200:
         print(f"error: elasticsearch HTTP {status}: {body}", file=sys.stderr)
-        sys.exit(2 if status in (401, 403) else 1)
+        # auth (401/403) and server-unavailable (5xx) are infra → exit 2.
+        sys.exit(2 if status in (401, 403) or status >= 500 else 1)
 
     print("connected")
     print(f"elasticsearch: {body.get('status', 'unknown')}")

@@ -60,25 +60,34 @@ def _exec(host: str, argv: list[str], *, timeout_sec: int = DEFAULT_TIMEOUT_SEC)
 
 
 def _exit_on_docker_error(rc: int, stderr: str, host: str):
-    """Map docker-exec stderr patterns to clean exits."""
+    """Map docker-exec stderr patterns to clean exits.
+
+    Transport/unreachable failures exit 2 (the system-of-record contract: 2 =
+    connectivity/docker/unreachable, matching this CLI's SKILL and the gather
+    exit-code protocol) so the circuit breaker counts them. They are identified by
+    docker's own connection/lookup signatures, because docker is *loud* about them
+    (container missing, daemon/context unreachable). Everything else — including a
+    quiet non-zero inner command with empty stderr — is a verb-level error (exit 1)
+    the caller reasons about, not a down host: a quiet command failure has empty
+    stderr precisely because docker exec itself succeeded, and scoring it as infra
+    would spuriously trip the breaker on a perfectly reachable host.
+    """
     if rc == 0:
         return
     s = stderr.strip()
-    # Transport/unreachable failures exit 2 (the system-of-record contract: 2 =
-    # connectivity/docker/unreachable, matching this CLI's SKILL and the gather
-    # exit-code protocol). Verb-level errors (a missing file) stay exit 1 — a
-    # query error the caller reasons about, not a down host.
-    if not s:
-        print(f"error: docker exec on {host} returned rc={rc} with no stderr", file=sys.stderr)
-        sys.exit(2)
-    if "No such container" in s or "is not running" in s:
+    transport_down = (
+        "No such container" in s or "is not running" in s
+        or "Cannot connect to the Docker daemon" in s
+        or "error during connect" in s
+    )
+    if transport_down:
         print(
             f"error: host {host!r} unreachable: {s}\n"
             f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts.",
             file=sys.stderr,
         )
         sys.exit(2)
-    print(f"error: docker exec on {host} (rc={rc}): {s}", file=sys.stderr)
+    print(f"error: docker exec on {host} (rc={rc}): {s or 'no stderr'}", file=sys.stderr)
     sys.exit(1)
 
 

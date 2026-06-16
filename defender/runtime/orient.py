@@ -30,6 +30,7 @@ pack just means the agent falls back to fetching that piece live.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -79,9 +80,16 @@ def _alert_signature(alert_path: Path) -> str | None:
 def orientation(run_dir: Path, defender_dir: Path, alert_path: Path) -> str:
     """Assemble the ORIENT pack for this run. Never raises — a section that can't
     be built is skipped with a note. Returns a markdown block for the user prompt."""
-    import run  # defender/run.py — run_env builds PATH(bin/) + DEFENDER_* vars
-
-    env = run.run_env(defender_dir, run_dir)
+    # run.run_env builds PATH(bin/) + DEFENDER_* vars for the shims below. Guarded:
+    # orientation() is called from _user_prompt BEFORE the driver's try/except, so a
+    # raise here would crash the run at setup — exactly what the fail-safe contract
+    # forbids. On failure the shim-backed sections (lessons/corpus) simply omit;
+    # the workspace + catalog sections don't need env and still build.
+    try:
+        import run  # defender/run.py
+        env = run.run_env(defender_dir, run_dir)
+    except Exception:  # noqa: BLE001 — orientation must never break the run
+        env = {}
     sig = _alert_signature(alert_path)
 
     sections: list[str] = [
@@ -108,7 +116,14 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path) -> str:
 
     # 3. Lessons: viable tags + this signature's hits (path \t description).
     tags = _shim(["defender-lessons", "--tags"], env)
-    hits = _shim(["defender-lessons", f"source_signature:.*{sig}"], env) if sig else None
+    # re.escape: rule.id is interpolated into a regex defender-lessons compiles.
+    # Unescaped metachars would over-match (`.`, `+`) or raise re.error (unbalanced
+    # `[`/`(`) → the hits section silently drops. The display strings below keep the
+    # raw sig (human-readable); only the grep pattern is escaped.
+    hits = (
+        _shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
+        if sig else None
+    )
     lesson_lines = []
     if tags:
         lesson_lines.append("### Viable tags\n" + tags)

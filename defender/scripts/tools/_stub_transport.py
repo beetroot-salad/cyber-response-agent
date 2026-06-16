@@ -25,7 +25,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
-DOCKER_CONTEXT = "soc-playground"
+# Single source of truth for the docker context across every adapter (elastic_cli
+# reads the same env var) — so overriding it points the whole stack, not half of
+# it, at a different environment.
+DOCKER_CONTEXT = os.environ.get("SOC_PLAYGROUND_DOCKER_CONTEXT", "soc-playground")
 
 
 def _config_path(system: str) -> Path:

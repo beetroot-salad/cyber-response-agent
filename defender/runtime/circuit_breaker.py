@@ -111,9 +111,11 @@ def record_outcome(run_dir: Path, system: str, exit_code: int, stderr: str = "")
     """Record one system-call outcome under an exclusive lock. Increments the
     system's failure counter (and the run total) only on an infra failure (see
     `is_infra_failure`). Returns the updated state. Raises `RunAborted` when the
-    run-wide kill threshold is crossed — callers let it propagate."""
+    run-wide kill threshold is crossed — callers let it propagate. Returns `{}`
+    (no state change to report) on the no-op path — the common success case — so a
+    clean query doesn't pay a file read; callers don't use the return there."""
     if not system or not is_infra_failure(exit_code, stderr):
-        return _load(run_dir)
+        return {}
 
     p = _path(run_dir)
     p.touch(exist_ok=True)
@@ -135,8 +137,8 @@ def record_outcome(run_dir: Path, system: str, exit_code: int, stderr: str = "")
         f.write(json.dumps(state, indent=2))
 
     if state.get("total_failures", 0) >= RUN_FAIL_KILL_LIMIT:
-        failed = [s for s, v in state["systems"].items() for _ in range(v.get("failures", 0))]
-        raise RunAborted(state["total_failures"], failed)
+        # RunAborted already de-dups + sorts, so pass the distinct system names.
+        raise RunAborted(state["total_failures"], list(state["systems"]))
     return state
 
 
@@ -149,13 +151,6 @@ def is_tripped(run_dir: Path, system: str) -> bool:
     return bool(rec) and rec.get("failures", 0) >= PER_SYSTEM_FAIL_LIMIT
 
 
-def tripped_systems(run_dir: Path) -> list[str]:
-    return [
-        s for s, v in _load(run_dir).get("systems", {}).items()
-        if v.get("failures", 0) >= PER_SYSTEM_FAIL_LIMIT
-    ]
-
-
 def down_message(run_dir: Path, system: str) -> str:
     """The transparent 'system is down' summary returned to the agent in place of
     a gather result (dispatch gate) or as a denial (adapter gate)."""
@@ -163,8 +158,9 @@ def down_message(run_dir: Path, system: str) -> str:
     n = rec.get("failures", PER_SYSTEM_FAIL_LIMIT)
     return (
         f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
-        f"connectivity/auth failures (adapter exit 2) tripped the breaker, so this "
-        f"dispatch did not run and {system}'s reference skill was not loaded. This "
+        f"connectivity/auth failures or timeouts (adapter exit 2 / 124) tripped the "
+        f"breaker, so this dispatch did not run and {system}'s reference skill was "
+        f"not loaded. This "
         f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "
         f"name the missing evidence in your analysis and escalate (inconclusive) "
         f"if it blocks disposition."

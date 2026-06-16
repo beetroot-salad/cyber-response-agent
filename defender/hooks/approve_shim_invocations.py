@@ -66,7 +66,7 @@ READONLY_TOOLS = frozenset(
 GATHER_READONLY_TOOLS = frozenset({"find"})
 
 _FIND_DANGER_RE = re.compile(
-    r"(?<!\S)-(?:execdir|exec|okdir|ok|delete|fprintf|fprint|fls)\b"
+    r"(?<!\S)-(?:execdir|exec|okdir|ok|delete|fprintf|fprint0|fprint|fls)\b"
 )
 
 # find must not be a back door around the read denylist: it can't run a command
@@ -83,7 +83,10 @@ _FIND_SENSITIVE_RE = re.compile(
 # (the harness captures stderr regardless), so strip them BEFORE the unsafe-token
 # check rather than denying the whole command. A *stdout* file redirect
 # (`> out`, `1> out`, `&> out`) is NOT matched here and stays denied.
-_BENIGN_STDERR_RE = re.compile(r"\s*2>\s*(?:/dev/null|&1)|\s*2>&1")
+# The trailing `(?=\s|$)` anchors the match to a complete token so a redirect to
+# a *different* target sharing the prefix (e.g. `2>/dev/nullX`, a real stderr→file
+# write) is NOT stripped — it keeps its `>` and trips _UNSAFE_TOKEN_RE below.
+_BENIGN_STDERR_RE = re.compile(r"\s*2>\s*(?:/dev/null|&1)(?=\s|$)")
 
 # Tokens that make a command unsafe to approve regardless of leading word:
 # output redirects, command substitution, env-assignment prefixes. If any
