@@ -269,6 +269,15 @@ Contracts:
   query, written by-ref by the gather capture wrapper
   (`scripts/tools/record_query.py`). The agent works from gather's
   summary and Reads raw on demand if the summary is too thin.
+- **`summaries.jsonl`** — the SUMMARIES table (#289), written live by
+  `scripts/tools/record_summary.py` (via the `defender-record-summary`
+  shim). Each *computable* `what_to_summarize` dimension is a recorded
+  pure-transform computation (jq / datamash / coreutils) over a persisted
+  payload whose **stdout is the reported value** — so gather's summary
+  numbers are deterministic and re-runnable, not asserted prose. FK
+  `(lead_id, payload_seq)`. Offline-only: consumed by the #275 judge for
+  fault attribution — **not yet wired into `lead_repository.py`** (a filed
+  follow-up). Rationale: `docs/gather-verifiable-summary.md`.
 
 ## Two-table schema
 
@@ -314,6 +323,7 @@ breaking changes through the PoC phase.
 | Runtime loop shape, phase discipline, gather dispatch ergonomics | `defender/SKILL.md` |
 | Per-system reference (what data the system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
 | Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
+| Gather's verifiable summary computations (the suite, the gate) | `defender/scripts/tools/record_summary.py` + `skills/gather/SKILL.md` §4 (rationale: `docs/gather-verifiable-summary.md`) |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` (the single join surface) |
 | Actor / oracle / judge / verify-forward / author prompts | `defender/learning/*.md` (paired with a `.py` driver in the same dir) |
 | Lessons corpus | `defender/lessons/*.md` (authored by the curator; hand-edits fine if they match `author.md`'s schema) |

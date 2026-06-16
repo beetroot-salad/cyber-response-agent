@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # enumeration); it queries no data source, so it stays a non-adapter and
 # remains allowed in the main loop.
 NON_ADAPTER_SHIMS = frozenset(
-    {"defender-invlang", "defender-record-query", "defender-record-analysis",
+    {"defender-invlang", "defender-record-query", "defender-record-summary",
      "defender-data-source-debug", "defender-lessons"}
 )
 

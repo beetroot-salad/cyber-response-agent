@@ -256,18 +256,74 @@ Workaround to your §4 summary; carry any Deposited path to §6's
 The bound: if a positive control plus one narrowing step can't settle
 it, it's an investigate — hand off, don't iterate.
 
-### 4. Summarize
+### 4. Summarize — compute the facts, don't assert them
 
-For every bullet in `what_to_summarize`, report a value — even
-if it is "not available" or "not observed." Be specific: exact IPs,
-counts, usernames, timestamps.
+For every bullet in `what_to_summarize`, report a value — even if it is
+"not available" or "not observed." Be specific: exact IPs, counts,
+usernames, timestamps.
 
-**Measurement only.** Same rule across every surface you emit (the
-agent-return summary in §6 and the `payload_digest` in §5). Report
-numbers — counts, cardinalities, distributions, ratios, named
-timestamps. The defender weighs what they mean in ANALYZE. A
-striking value (5-minute cadence, single source IP, 7-day baseline)
-stands on its own — its size is the finding.
+**Each computable bullet is a recorded computation, not a prose claim.**
+A bullet you could in principle answer by reading the payload — a count, a
+cardinality, a distribution, a min/max, a first/last timestamp, a duration,
+a ratio, a top-N — you answer by running **analysis code over the persisted
+payload**, and the code's **output is the value you report**. You do not
+eyeball the payload (or the truncated passthrough samples) and assert a
+number; an asserted number over data the defender can never see is exactly
+the failure this loop is closing. The samples show you the *field shape* to
+write the filter — never the *answer*.
+
+The capture wrapper records each computation to the summaries table and
+prints its output back to you:
+
+```bash
+defender-record-summary --lead {lead_id} --label {kebab-dimension} -- \
+    jq '<expression>' {raw-payload-path}
+```
+
+- It runs the snippet, appends a `{label, snippet, output}` row to
+  `{run_dir}/summaries.jsonl`, and passes the output straight through to you.
+  The value it prints is what you report for that dimension — never retype a
+  value you didn't compute.
+- `{raw-payload-path}` is the path the §3 capture reported back on stderr
+  (`[record_query] raw payload: …`). `{label}` is a kebab name for the
+  dimension (`distinct-srcips`, `session-duration`, `failed-count`).
+- **Tool suite (pure transforms only).** `jq` reshapes and filters JSON and
+  covers most dimensions. For real statistics (median, percentile, stddev,
+  grouped aggregates) and columnar/set work, pipe into **`datamash`** and the
+  coreutils filters (`sort`, `uniq -c`, `cut`, `comm`, `join`, `wc`, `tr`,
+  `paste`, `nl`) — flatten with `jq -r '… | @tsv'` first. To record a pipeline,
+  **quote the whole thing as one argument** so the outer shell doesn't split it:
+
+  ```bash
+  defender-record-summary --lead {lead_id} --label srcip-distribution -- \
+      "jq -r '.[].data.srcip' {raw-payload-path} | sort | uniq -c | sort -rn"
+  ```
+
+  These filters are the only tools permitted — they have no exec/network/write
+  surface, so they need no sandbox. A snippet that reaches for anything else
+  (`python3`, `awk`, `sqlite3`, …) is denied; ask for that dimension to be
+  computed differently, or report it as not-computable.
+
+**Self-test the snippet before the full run.** You write correct code when you
+check it: first run the bare tool (a plain `jq`/`sort`/…, not the wrapper) over
+~5 sample records — `jq '.[0:5] | <expression>' {raw-payload-path}`, or the
+`sample[i]` records from the §3 passthrough — to confirm your field paths and
+filter logic produce the shape you expect. Only then run the validated snippet
+via `defender-record-summary` over the **whole** payload. The self-test catches
+wrong field paths (`source.ip` vs `client.ip`) and broken filters; the full run
+produces the value.
+
+**Interpretive bullets stay a narrow claim — anchored to the numbers above
+them.** A bullet that asks for meaning rather than a value ("is this cadence
+consistent with automation?") is not computable; answer it in one sentence,
+sitting directly under the computed facts it rests on. The *salience* call —
+which entity matters, which timestamp is the finding — is yours; the *numbers*
+it rests on are computed, never asserted.
+
+**Measurement only — and the same rule on every surface** (the §6 return and
+the `payload_digest` in §5). Report numbers; the defender weighs what they mean
+in ANALYZE. A striking value (5-minute cadence, single source IP, 7-day
+baseline) stands on its own — its size is the finding.
 
 **Do not interpret.** State observables, never their meaning. Banned:
 labelling activity ("interactive vs automated", "brute-force pattern",
@@ -296,7 +352,10 @@ lead-author reads these two tables directly (via
 ### 6. Return
 
 Report a `## Summary` — the measurement the defender reasons from,
-expressed as observations: values, counts, timing, entity bindings.
+expressed as observations: values, counts, timing, entity bindings. Every
+computable line is the **output of a recorded summary snippet** (§4), not a
+re-typed estimate; the summaries table holds the snippet that produced it, so
+the value is auditable and re-runnable.
 **Never write a `gather_raw/...` path — or any raw-payload file path —
 into your return.** The harness already persisted the payloads (§5);
 the defender addresses them by `(lead_id, seq)` through the queries
