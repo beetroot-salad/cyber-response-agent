@@ -45,7 +45,6 @@ import time  # noqa: E402
 sys.path.insert(0, str(_DEFENDER_DIR))
 
 import yaml  # noqa: E402
-import run as _run  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402

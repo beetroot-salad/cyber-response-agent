@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -205,7 +204,8 @@ def _fmt(v, nd=2):
 
 def _print_table(agg: list) -> None:
     hdr = f"{'fixture':22} {'variant':9} {'n':>2} {'compl':>5} {'A2':>5} {'exact/dim':>9} {'replay':>6} {'reqs':>5} {'wall_s':>6} {'out_tok':>7}"
-    print(hdr); print("-" * len(hdr))
+    print(hdr)
+    print("-" * len(hdr))
     for c in sorted(agg, key=lambda x: (x["fixture"], x["variant"])):
         exact = f"{_fmt(c['exact_mean'],1)}/{c['ndim']}"
         print(f"{c['fixture']:22} {c['variant']:9} {c['n']:>2} {c['complete']:>5} "
