@@ -15,11 +15,11 @@ Exit codes:
     0 — success
     1 — query error (404, bad arg, missing --at)
     2 — connectivity / docker / upstream 5xx
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -111,7 +111,7 @@ def cmd_list_changes(args, config):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description="Change-mgmt stub CLI — authorized-change-window lookups.",
     )
     sub = p.add_subparsers(dest="subcommand", required=True)

@@ -23,6 +23,7 @@ Exit codes:
     0 — success
     1 — query error (bad syntax, unknown field, partial result)
     2 — connection / auth / config failure
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
@@ -401,7 +402,7 @@ def format_alerts_output(query_string, index_pattern, time_start, time_end, hits
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description=(
             "Elastic Stack CLI — search raw events (`query`) and detection-engine "
             "signals (`alerts`) against the v2 playground Elasticsearch."

@@ -20,11 +20,11 @@ Exit codes:
     0 — success
     1 — verb-level error (file not found, user not present)
     2 — docker / host-unreachable / timeout
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import subprocess
@@ -293,7 +293,7 @@ def _utcnow_z() -> str:
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description="Host live-state CLI — per-host point-in-time observations via docker exec.",
     )
     sub = p.add_subparsers(dest="subcommand", required=True)

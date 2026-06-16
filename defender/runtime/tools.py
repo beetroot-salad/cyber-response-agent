@@ -218,7 +218,7 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     # writes the partial trace). record['system'] is the system the capture bound
     # the query to — authoritative over re-deriving from argv.
     circuit_breaker.record_outcome(
-        deps.run_dir, record.get("system", ""), record["exit_code"], stderr
+        deps.run_dir, record.get("system", ""), record["exit_code"]
     )
     # Surface the persisted payload path (the gather SKILL filters against it for
     # large payloads). Report it ABSOLUTE: the bash/read tools resolve relative to

@@ -174,6 +174,11 @@ returns — `payload_status` is too coarse, it folds exit 1 and 2 into
   query / unknown index — fix the query and re-run; on a *key lookup*
   (e.g. `get-host <ip>`) it's the **Absence** case below (the key isn't
   there).
+- **exit 64 — usage error (your CLI mistake):** a bad flag, unknown
+  subcommand, or missing required arg — *you* called the adapter wrong,
+  the source is fine. Read the `usage:` line in stderr, fix the
+  invocation, and re-run. This is **not** an outage: do not escalate and
+  do not treat it like an `exit 2`.
 - **exit 0 — the source answered.** Run the validity check for the
   result shape you got.
 

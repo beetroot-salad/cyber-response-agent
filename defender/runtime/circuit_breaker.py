@@ -11,9 +11,11 @@ escalate immediately").
 connectivity/auth code (2 — the contract shared by every adapter's `execution.md`
 and the gather exit-code protocol) or times out (124, synthesized by
 `record_query.capture`). Exit 1 is a *query* error (bad syntax, zero results) —
-normal investigative iteration, deliberately NOT counted. Exit 2 is also what
-argparse emits on a usage error (a bad flag the agent passed), so those are
-excluded by stderr signature: a usage error must not hide a working system.
+normal investigative iteration, deliberately NOT counted. A usage error (a bad
+flag/subcommand the agent passed) is exit 64, not 2 — adapters parse argv with
+`_stub_transport.AdapterArgumentParser`, which reserves 64 for argparse errors so
+the agent's own CLI typos can't trip the breaker and hide a working system. The
+exit code alone is the signal; no stderr inspection.
 
 **Two enforcement points share this state** (both in runtime/tools.py):
   - the gather *dispatch* gate — a tripped system is not dispatched and its
@@ -35,7 +37,6 @@ via the shared `_run_dir.update_json_locked` helper (the same primitive behind
 from __future__ import annotations
 
 import json
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,29 +58,19 @@ RUN_FAIL_KILL_LIMIT = 5
 
 # Adapter exit codes that mean "the system is down", not "the query was wrong".
 # 2 = connectivity/auth/config (every adapter's contract); 124 = adapter timeout
-# (record_query.capture synthesizes it on a hung call).
+# (record_query.capture synthesizes it on a hung call). A usage error (the agent's
+# bad flag/subcommand) is exit 64 (_stub_transport.AdapterArgumentParser), and a
+# query error is exit 1 — neither is in this set, so neither trips the breaker.
+# The exit code IS the signal: no stderr-phrase sniffing needed to separate the
+# agent's CLI typos from a real down system.
 INFRA_EXIT_CODES = frozenset({2, 124})
 
-# argparse emits exit 2 on a usage error too (e.g. a bad flag the agent passed,
-# like `--raw` on a verb that doesn't take it). Those are the agent's mistake, not
-# a down system — exclude them so they can't trip the breaker and hide a working
-# source. These markers are argparse's own stable phrasings.
-# Substring match (no \b wrapping — argparse phrases end in punctuation like
-# "usage:", where a trailing word boundary would never match).
-_ARGPARSE_USAGE_RE = re.compile(
-    r"(usage:|unrecognized arguments|invalid choice|"
-    r"the following arguments are required|expected (?:one|at least one) argument|"
-    r"error: argument |not allowed with argument)",
-    re.IGNORECASE,
-)
 
-
-def is_infra_failure(exit_code: int, stderr: str = "") -> bool:
-    """True iff this outcome should count against the breaker: an infra exit code
-    that is not an argparse usage error."""
-    if exit_code not in INFRA_EXIT_CODES:
-        return False
-    return not _ARGPARSE_USAGE_RE.search(stderr or "")
+def is_infra_failure(exit_code: int) -> bool:
+    """True iff this outcome counts against the breaker: a connectivity/auth/config
+    failure (2) or a timeout (124). A usage error (64) and a query error (1) are the
+    agent's own mistakes to reason about, and never count."""
+    return exit_code in INFRA_EXIT_CODES
 
 
 class RunAborted(Exception):
@@ -115,14 +106,14 @@ def _load(run_dir: Path) -> dict:
         return _blank()
 
 
-def record_outcome(run_dir: Path, system: str, exit_code: int, stderr: str = "") -> dict:
+def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
     """Record one system-call outcome under an exclusive lock. Increments the
     system's failure counter (and the run total) only on an infra failure (see
     `is_infra_failure`). Returns the updated state. Raises `RunAborted` when the
     run-wide kill threshold is crossed — callers let it propagate. Returns `{}`
     (no state change to report) on the no-op path — the common success case — so a
     clean query doesn't pay a file read; callers don't use the return there."""
-    if not system or not is_infra_failure(exit_code, stderr):
+    if not system or not is_infra_failure(exit_code):
         return {}
 
     def _mutate(state: dict) -> None:

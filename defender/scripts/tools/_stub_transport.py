@@ -13,6 +13,7 @@ and uses host_state_cli.py's own transport, not this module.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shlex
@@ -25,6 +26,30 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
+
+# Reserved exit code for an agent-side CLI mistake (bad flag, unknown subcommand,
+# missing required arg). Distinct from transport's exit 2 so the circuit breaker
+# counts only genuine connectivity/auth failures, not the agent's typos — see
+# runtime/circuit_breaker.is_infra_failure. EX_USAGE from sysexits.h.
+USAGE_EXIT_CODE = 64
+
+
+class AdapterArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of
+    argparse's default 2.
+
+    Every data-source adapter uses this so a bad flag / unknown subcommand / missing
+    arg the agent passed is *structurally* distinct from a connectivity/auth failure
+    (which adapters signal with exit 2). The circuit breaker then keys on the exit
+    code alone — no fragile stderr-phrase sniffing to tell the two apart. Subparsers
+    built via ``add_subparsers()`` inherit this class automatically
+    (``parser_class=type(self)``), so subcommand usage errors and explicit
+    ``parser.error(...)`` calls exit 64 too.
+    """
+
+    def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)
+        self.print_usage(sys.stderr)
+        self.exit(USAGE_EXIT_CODE, f"{self.prog}: error: {message}\n")
 # Single source of truth for the docker context across every adapter (elastic_cli
 # reads the same env var) — so overriding it points the whole stack, not half of
 # it, at a different environment.
