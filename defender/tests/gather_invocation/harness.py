@@ -184,6 +184,10 @@ def run_fixture(
     )
 
     env = dict(os.environ)
+    # Strip the first-party key so this real `claude -p` bills against the
+    # subscription, never the metered API key (reserved for PydanticAI). Mirrors
+    # run.py's run_env().
+    env.pop("ANTHROPIC_API_KEY", None)
     env["STUB_ELASTIC_PAYLOAD"] = str(fixture_dir / "elastic_payload.json")
     env["STUB_DSD_TRACE"] = str(trace_path)
     # Make the `defender-*` invocation shims resolve against the sandbox stubs:

@@ -30,6 +30,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _subscription_env() -> dict[str, str]:
+    """Env for the ``claude --print`` author subprocess: strip
+    ``ANTHROPIC_API_KEY`` so the call bills against the subscription, never the
+    metered first-party key (reserved for the PydanticAI engine — see
+    defender/run_pai.py)."""
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    return env
+
+
 class RunnerError(Exception):
     """Fatal subprocess error — caller decides whether to retry."""
 
@@ -306,6 +316,7 @@ def _drive_subprocess(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         bufsize=0,
+        env=_subscription_env(),
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
