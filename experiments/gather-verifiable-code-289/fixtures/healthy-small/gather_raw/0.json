@@ -1,0 +1,682 @@
+[
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:45:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "nagios",
+      "srcip": "172.22.0.10",
+      "srcport": "57884"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 17,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:45:01 target-endpoint sshd[34390]: Invalid user nagios from 172.22.0.10 port 57884",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:45:01.332Z",
+    "location": "/var/log/auth.log",
+    "id": "1778139901.10490582",
+    "timestamp": "2026-05-07T07:45:01.332+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:40:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "nagios",
+      "srcip": "172.22.0.10",
+      "srcport": "60504"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 15,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:40:01 target-endpoint sshd[33711]: Invalid user nagios from 172.22.0.10 port 60504",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:40:01.544Z",
+    "location": "/var/log/auth.log",
+    "id": "1778139601.10377816",
+    "timestamp": "2026-05-07T07:40:01.544+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:42:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "zabbix",
+      "srcip": "172.22.0.10",
+      "srcport": "41534"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 16,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:42:01 target-endpoint sshd[33821]: Invalid user zabbix from 172.22.0.10 port 41534",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:42:01.447Z",
+    "location": "/var/log/auth.log",
+    "id": "1778139721.10425575",
+    "timestamp": "2026-05-07T07:42:01.447+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:32:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "zabbix",
+      "srcip": "172.22.0.10",
+      "srcport": "55340"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 12,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:32:01 target-endpoint sshd[33051]: Invalid user zabbix from 172.22.0.10 port 55340",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:32:01.362Z",
+    "location": "/var/log/auth.log",
+    "id": "1778139121.10217946",
+    "timestamp": "2026-05-07T07:32:01.362+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  5 06:53:49"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "sensu",
+      "srcip": "172.22.0.10",
+      "srcport": "55094"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 29,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  5 06:53:49 target-endpoint sshd[26793]: Invalid user sensu from 172.22.0.10 port 55094",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-05T06:53:49.950Z",
+    "location": "/var/log/auth.log",
+    "id": "1777964029.14966488",
+    "timestamp": "2026-05-05T06:53:49.950+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  5 06:53:49"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "sensu",
+      "srcip": "172.22.0.10",
+      "srcport": "55088"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 28,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  5 06:53:49 target-endpoint sshd[26789]: Invalid user sensu from 172.22.0.10 port 55088",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-05T06:53:49.950Z",
+    "location": "/var/log/auth.log",
+    "id": "1777964029.14965412",
+    "timestamp": "2026-05-05T06:53:49.950+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:37:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "healthcheck",
+      "srcip": "172.22.0.10",
+      "srcport": "58266"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 14,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:37:01 target-endpoint sshd[33649]: Invalid user healthcheck from 172.22.0.10 port 58266",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:37:01.730Z",
+    "location": "/var/log/auth.log",
+    "id": "1778139421.10316070",
+    "timestamp": "2026-05-07T07:37:01.730+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 07:22:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "healthcheck",
+      "srcip": "172.22.0.10",
+      "srcport": "45600"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 9,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 07:22:01 target-endpoint sshd[31756]: Invalid user healthcheck from 172.22.0.10 port 45600",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T07:22:02.172Z",
+    "location": "/var/log/auth.log",
+    "id": "1778138522.10042655",
+    "timestamp": "2026-05-07T07:22:02.172+0000"
+  }
+]

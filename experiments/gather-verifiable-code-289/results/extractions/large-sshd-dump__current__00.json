@@ -1,0 +1,57 @@
+{
+  "total_events": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "distinct_srcip_count": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "distinct_srcips": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "distinct_srcuser_count": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "distinct_srcusers": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "first_ts": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "last_ts": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "top_srcip": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "top_srcip_count": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "srcport_min": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  },
+  "srcport_max": {
+    "status": "dropped",
+    "reported": null,
+    "note": "No summary produced"
+  }
+}

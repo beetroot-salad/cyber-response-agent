@@ -1,0 +1,16 @@
+{
+  "_note": "Ground truth for the healthy-small control (8-record clean slice). Prose gather should already hit these; the arm measures cost/latency, not fidelity lift.",
+  "dimensions": {
+    "total_events": {"jq": "length", "expected": 8},
+    "distinct_srcip_count": {"jq": "[.[].data.srcip]|unique|length", "expected": 1},
+    "distinct_srcips": {"jq": "[.[].data.srcip]|unique", "expected": ["172.22.0.10"]},
+    "distinct_srcuser_count": {"jq": "[.[].data.srcuser]|unique|length", "expected": 4},
+    "distinct_srcusers": {"jq": "[.[].data.srcuser]|unique", "expected": ["healthcheck","nagios","sensu","zabbix"]},
+    "first_ts": {"jq": "[.[].\"@timestamp\"]|sort|first", "expected": "2026-05-05T06:53:49.950Z"},
+    "last_ts": {"jq": "[.[].\"@timestamp\"]|sort|last", "expected": "2026-05-07T07:45:01.332Z"},
+    "top_srcip": {"jq": "[.[].data.srcip]|group_by(.)|map({ip:.[0],n:length})|max_by(.n)|.ip", "expected": "172.22.0.10"},
+    "top_srcip_count": {"jq": "[.[].data.srcip]|group_by(.)|map(length)|max", "expected": 8},
+    "srcport_min": {"jq": "[.[].data.srcport|tonumber]|min", "expected": 41534},
+    "srcport_max": {"jq": "[.[].data.srcport|tonumber]|max", "expected": 60504}
+  }
+}

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# fake elastic adapter (#289 harness): return the frozen fixture payload.
+cat "${FAKE_PAYLOAD:?FAKE_PAYLOAD unset}"

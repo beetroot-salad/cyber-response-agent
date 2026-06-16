@@ -1,0 +1,57 @@
+{
+  "total_events": {
+    "status": "exact",
+    "reported": "8 total events",
+    "note": "Matches ground truth of 8"
+  },
+  "distinct_srcip_count": {
+    "status": "exact",
+    "reported": "Single source IP",
+    "note": "Implies count of 1, matches ground truth"
+  },
+  "distinct_srcips": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "The single source IP is named correctly"
+  },
+  "distinct_srcuser_count": {
+    "status": "exact",
+    "reported": "4 distinct invalid usernames",
+    "note": "Matches ground truth of 4"
+  },
+  "distinct_srcusers": {
+    "status": "exact",
+    "reported": "healthcheck, nagios, sensu, zabbix",
+    "note": "All four users listed, matches ground truth"
+  },
+  "first_ts": {
+    "status": "dropped",
+    "reported": null,
+    "note": "Only 'May 5-7, 2026' range given, no precise first timestamp"
+  },
+  "last_ts": {
+    "status": "dropped",
+    "reported": null,
+    "note": "Only 'May 5-7, 2026' range given, no precise last timestamp"
+  },
+  "top_srcip": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "Stated as originating all attempts"
+  },
+  "top_srcip_count": {
+    "status": "exact",
+    "reported": "8 (all 8 events from this IP)",
+    "note": "8 total events all from single IP implies count of 8"
+  },
+  "srcport_min": {
+    "status": "exact",
+    "reported": "41534",
+    "note": "Range 41534-60504 stated explicitly"
+  },
+  "srcport_max": {
+    "status": "exact",
+    "reported": "60504",
+    "note": "Range 41534-60504 stated explicitly"
+  }
+}

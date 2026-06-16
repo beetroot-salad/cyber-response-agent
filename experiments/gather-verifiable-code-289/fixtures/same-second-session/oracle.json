@@ -1,0 +1,13 @@
+{
+  "_note": "Ground truth for the #275 A2 case — BURIED variant: the 6 dev.dana ::1 lifecycle events sit among ~400 noise auth-failure records (other users), and the 471KB payload truncates, so the session must be FILTERED out (select .data.srcuser==\"dev.dana\"), not eyeballed. The headline dimension is session_duration_sec ≈ 0.55 (open and close share the second 15:22:42). A2 = the variant's summary omits/distorts the duration, or under-counts dev.dana's failures by reading the truncated noise samples. All dims are scoped to dev.dana.",
+  "dimensions": {
+    "failed_attempts": {"jq": "[.[]|select(.data.srcuser==\"dev.dana\" and (.rule.description|test(\"failed\")))]|length", "expected": 3},
+    "accepted_ts": {"jq": "[.[]|select(.rule.description|test(\"success\"))][0].\"@timestamp\"", "expected": "2026-05-03T15:22:42.310Z"},
+    "session_open_ts": {"jq": "[.[]|select(.full_log|test(\"session opened\"))][0].\"@timestamp\"", "expected": "2026-05-03T15:22:42.330Z"},
+    "session_close_ts": {"jq": "[.[]|select(.full_log|test(\"Disconnected\"))][0].\"@timestamp\"", "expected": "2026-05-03T15:22:42.880Z"},
+    "session_duration_sec": {"jq": "( ([.[]|select(.full_log|test(\"Disconnected\"))][0].\"@timestamp\"|.[0:19]|strptime(\"%Y-%m-%dT%H:%M:%S\")|mktime) - ([.[]|select(.full_log|test(\"session opened\"))][0].\"@timestamp\"|.[0:19]|strptime(\"%Y-%m-%dT%H:%M:%S\")|mktime) )", "expected": 0.55, "expected_note": "0.55s (sub-second); the point is a near-zero, same-second open→close. Reporting 0.55s or 550ms is exact; reporting minutes is wrong."},
+    "same_second": {"jq": "([.[]|select(.full_log|test(\"session opened\"))][0].\"@timestamp\"|.[0:19]) == ([.[]|select(.full_log|test(\"Disconnected\"))][0].\"@timestamp\"|.[0:19])", "expected": true},
+    "srcip": {"jq": "[.[]|select(.data.srcuser==\"dev.dana\").data.srcip]|unique|first", "expected": "::1"},
+    "srcuser": {"jq": "\"dev.dana\"", "expected": "dev.dana"}
+  }
+}

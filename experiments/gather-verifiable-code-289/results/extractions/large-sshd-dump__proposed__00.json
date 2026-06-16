@@ -1,0 +1,57 @@
+{
+  "total_events": {
+    "status": "exact",
+    "reported": "2319",
+    "note": "Matches ground truth exactly"
+  },
+  "distinct_srcip_count": {
+    "status": "exact",
+    "reported": "1",
+    "note": "Correctly states 1 distinct source IP"
+  },
+  "distinct_srcips": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "Correctly identifies the single source IP"
+  },
+  "distinct_srcuser_count": {
+    "status": "exact",
+    "reported": "5",
+    "note": "Correctly states 5 distinct usernames"
+  },
+  "distinct_srcusers": {
+    "status": "exact",
+    "reported": "healthcheck, monitorprobe, nagios, sensu, zabbix",
+    "note": "All 5 usernames listed correctly"
+  },
+  "first_ts": {
+    "status": "exact",
+    "reported": "2026-04-30T07:50:02.813Z",
+    "note": "Exact match"
+  },
+  "last_ts": {
+    "status": "exact",
+    "reported": "2026-05-07T07:45:01.332Z",
+    "note": "Exact match"
+  },
+  "top_srcip": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "Correct top source IP"
+  },
+  "top_srcip_count": {
+    "status": "exact",
+    "reported": "2319",
+    "note": "Correct count for top IP"
+  },
+  "srcport_min": {
+    "status": "exact",
+    "reported": "32784",
+    "note": "Exact match"
+  },
+  "srcport_max": {
+    "status": "exact",
+    "reported": "60998",
+    "note": "Exact match"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "_note": "Ground truth for the large-sshd-dump arm, computed deterministically over gather_raw/0.json (2319 records). analyze.py scores each variant's summary dimension against `expected`; `jq` is the oracle that produced it (and what the proposed variant should reproduce). The sharp A2 trap is distinct_invalid_usernames=5 — the truncated samples are dominated by `nagios`, so a prose summary that eyeballs the passthrough under-reports it.",
+  "dimensions": {
+    "total_events": {"jq": "length", "expected": 2319},
+    "distinct_srcip_count": {"jq": "[.[].data.srcip]|unique|length", "expected": 1},
+    "distinct_srcips": {"jq": "[.[].data.srcip]|unique", "expected": ["172.22.0.10"]},
+    "distinct_srcuser_count": {"jq": "[.[].data.srcuser]|unique|length", "expected": 5},
+    "distinct_srcusers": {"jq": "[.[].data.srcuser]|unique", "expected": ["healthcheck","monitorprobe","nagios","sensu","zabbix"]},
+    "first_ts": {"jq": "[.[].\"@timestamp\"]|sort|first", "expected": "2026-04-30T07:50:02.813Z"},
+    "last_ts": {"jq": "[.[].\"@timestamp\"]|sort|last", "expected": "2026-05-07T07:45:01.332Z"},
+    "top_srcip": {"jq": "[.[].data.srcip]|group_by(.)|map({ip:.[0],n:length})|max_by(.n)|.ip", "expected": "172.22.0.10"},
+    "top_srcip_count": {"jq": "[.[].data.srcip]|group_by(.)|map(length)|max", "expected": 2319},
+    "srcport_min": {"jq": "[.[].data.srcport|tonumber]|min", "expected": 32784},
+    "srcport_max": {"jq": "[.[].data.srcport|tonumber]|max", "expected": 60998}
+  }
+}

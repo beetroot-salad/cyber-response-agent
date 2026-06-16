@@ -1,0 +1,6 @@
+{
+  "rule": {"id": "100051", "description": "sshd: successful login after repeated failures", "level": 8, "groups": ["syslog","sshd","authentication_success","authentication_failures"]},
+  "agent": {"name": "office-ws-1", "id": "014", "ip": "172.22.0.31"},
+  "data": {"srcuser": "dev.dana", "srcip": "::1", "srcport": "50128"},
+  "timestamp": "2026-05-03T15:22:42.330+0000"
+}

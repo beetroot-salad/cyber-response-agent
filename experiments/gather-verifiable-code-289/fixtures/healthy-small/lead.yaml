@@ -1,0 +1,16 @@
+# Cost/latency control arm: same lead as large-sshd-dump, but an 8-record clean
+# payload (a slice of the real dump). Prose gather is already correct here; the
+# question is whether code-first gather burns extra turns for no fidelity gain.
+lead_id: l-001
+system: elastic
+goal: >-
+  Characterize the sshd invalid-user authentication failures recorded against
+  target-endpoint (172.22.0.13) over the captured window.
+what_to_summarize:
+  - total number of authentication-failure events
+  - distinct source IPs (count, and the values)
+  - distinct invalid usernames attempted (count, and the values)
+  - time span of the activity (first and last event timestamp)
+  - the single highest-volume source IP and its event count
+  - source-port range (lowest and highest port observed)
+adapter_cmd: defender-elastic query 'rule.groups:authentication_failed AND agent.ip:172.22.0.13' --index logs-wazuh-* --limit 100 --raw
