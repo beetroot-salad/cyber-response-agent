@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -77,6 +78,15 @@ from _loop_config import (
 # ---------------------------------------------------------------------------
 
 
+def _subscription_env() -> dict[str, str]:
+    """Env for the ``claude -p`` subagent: strip ``ANTHROPIC_API_KEY`` so the
+    call bills against the subscription, never the metered first-party key
+    (reserved for the PydanticAI engine — see defender/run_pai.py)."""
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    return env
+
+
 def _run_claude(
     system_prompt_path: Path,
     user_prompt: str,
@@ -127,6 +137,7 @@ def _run_claude(
         text=True,
         timeout=SUBAGENT_TIMEOUT,
         cwd=str(REPO_ROOT),
+        env=_subscription_env(),
     )
     if proc.returncode != 0:
         raise LoopError(

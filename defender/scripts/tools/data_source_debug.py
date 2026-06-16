@@ -56,6 +56,15 @@ def extract_verdict(stdout: str) -> str:
     return stdout[match.start():]
 
 
+def _subscription_env() -> dict[str, str]:
+    """Env for the ``claude -p`` debug subagent: strip ``ANTHROPIC_API_KEY`` so
+    the call bills against the subscription, never the metered first-party key
+    (reserved for the PydanticAI engine — see defender/run_pai.py)."""
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    return env
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--defender-dir", required=True, help="Absolute path to the defender repo root")
@@ -94,7 +103,7 @@ def main() -> int:
     ]
 
     print(f"[data_source_debug] invoking claude -p model={args.model} system={args.system}", file=sys.stderr)
-    proc = subprocess.run(claude_args, input=prompt, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run(claude_args, input=prompt, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_subscription_env())
 
     if proc.stderr:
         sys.stderr.write(proc.stderr)

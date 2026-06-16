@@ -157,8 +157,15 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     `claude -p` spawn and the PydanticAI tools' bash). `bin/` goes first on PATH
     so the `defender-*` shims resolve by a single stable token regardless of cwd,
     venv path, or compound wrapping; the run-dir anchors the budget/tag hooks and
-    the invlang corpus root (`DEFENDER_RUNS_BASE == run_dir.parent`)."""
+    the invlang corpus root (`DEFENDER_RUNS_BASE == run_dir.parent`).
+
+    `ANTHROPIC_API_KEY` is stripped: the `claude -p` spawn and any bash tool
+    that shells out to `claude` must bill against the subscription, never the
+    metered first-party key. The key is reserved for the PydanticAI engine,
+    which authenticates in-process from `os.environ` (untouched here) — see
+    `run_pai.py`."""
     env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
