@@ -1,0 +1,57 @@
+{
+  "total_events": {
+    "status": "exact",
+    "reported": "8",
+    "note": "Summary states 8 total events"
+  },
+  "distinct_srcip_count": {
+    "status": "exact",
+    "reported": "1",
+    "note": "Summary states 1 distinct source IP"
+  },
+  "distinct_srcips": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "Summary lists only 172.22.0.10"
+  },
+  "distinct_srcuser_count": {
+    "status": "exact",
+    "reported": "4",
+    "note": "Summary states 4 distinct invalid usernames"
+  },
+  "distinct_srcusers": {
+    "status": "exact",
+    "reported": "healthcheck, nagios, sensu, zabbix",
+    "note": "All four users listed"
+  },
+  "first_ts": {
+    "status": "exact",
+    "reported": "2026-05-05T06:53:49.950Z",
+    "note": "Matches ground truth exactly"
+  },
+  "last_ts": {
+    "status": "exact",
+    "reported": "2026-05-07T07:45:01.332Z",
+    "note": "Matches ground truth exactly"
+  },
+  "top_srcip": {
+    "status": "exact",
+    "reported": "172.22.0.10",
+    "note": "Correct top source IP"
+  },
+  "top_srcip_count": {
+    "status": "exact",
+    "reported": "8",
+    "note": "Correct count of 8 events"
+  },
+  "srcport_min": {
+    "status": "exact",
+    "reported": "41534",
+    "note": "Matches ground truth"
+  },
+  "srcport_max": {
+    "status": "exact",
+    "reported": "60504",
+    "note": "Matches ground truth"
+  }
+}

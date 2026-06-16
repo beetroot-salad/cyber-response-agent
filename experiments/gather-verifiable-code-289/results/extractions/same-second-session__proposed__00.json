@@ -1,0 +1,42 @@
+{
+  "failed_attempts": {
+    "status": "exact",
+    "reported": "3",
+    "note": "Matches ground truth"
+  },
+  "accepted_ts": {
+    "status": "exact",
+    "reported": "2026-05-03T15:22:42.310Z",
+    "note": "Matches ground truth"
+  },
+  "session_open_ts": {
+    "status": "exact",
+    "reported": "2026-05-03T15:22:42.330Z",
+    "note": "Matches ground truth"
+  },
+  "session_close_ts": {
+    "status": "exact",
+    "reported": "2026-05-03T15:22:42.880Z",
+    "note": "Matches ground truth"
+  },
+  "session_duration_sec": {
+    "status": "exact",
+    "reported": "0.55 seconds",
+    "note": "Matches ground truth"
+  },
+  "same_second": {
+    "status": "dropped",
+    "reported": null,
+    "note": "Summary does not explicitly address whether events occurred in the same second"
+  },
+  "srcip": {
+    "status": "exact",
+    "reported": "::1",
+    "note": "Matches ground truth"
+  },
+  "srcuser": {
+    "status": "exact",
+    "reported": "dev.dana",
+    "note": "Matches ground truth"
+  }
+}

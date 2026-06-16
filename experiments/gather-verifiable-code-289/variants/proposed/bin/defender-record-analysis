@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Prototype shim for the #289 record-analysis wrapper (experiment-local).
+# Mirrors defender/bin/defender-record-query: stable token, path-independent.
+PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+exec "$PY" "${RECORD_ANALYSIS_PY:?RECORD_ANALYSIS_PY is not set}" "$@"

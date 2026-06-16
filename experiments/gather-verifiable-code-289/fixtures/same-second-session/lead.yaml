@@ -1,0 +1,17 @@
+# The #275 A2 dropped-dimension case, small payload. The successful session's
+# open (…42.330Z) and close (…42.880Z) fall in the SAME second — a ~0.55s,
+# effectively-zero session. A prose summary that narrates "a successful session"
+# and the failures but omits the session's *duration* drops exactly the
+# dimension #275 found dropped in port259-smoke. Code computes the delta.
+lead_id: l-001
+system: elastic
+goal: >-
+  Reconstruct the authentication sequence and the successful session's
+  lifecycle for dev.dana from ::1 on office-ws-1.
+what_to_summarize:
+  - count of failed password attempts before the successful login
+  - timestamp of the accepted (successful) login
+  - the successful session's open and close timestamps
+  - the successful session's duration (open to close)
+  - source IP and username
+adapter_cmd: defender-elastic query 'data.srcuser:dev.dana AND agent.name:office-ws-1' --index logs-wazuh-* --limit 100 --raw

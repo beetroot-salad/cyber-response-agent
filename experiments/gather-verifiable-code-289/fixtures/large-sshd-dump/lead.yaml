@@ -1,0 +1,18 @@
+# Gather dispatch for the large-dump reliability arm. The harness renders this
+# into the gather subagent's prompt (defender/runtime/tools._gather_prompt shape)
+# and serves gather_raw/0.json as the (faked) adapter result.
+lead_id: l-001
+system: elastic
+goal: >-
+  Characterize the sshd invalid-user authentication failures recorded against
+  target-endpoint (172.22.0.13) over the captured window.
+what_to_summarize:
+  - total number of authentication-failure events
+  - distinct source IPs (count, and the values)
+  - distinct invalid usernames attempted (count, and the values)
+  - time span of the activity (first and last event timestamp)
+  - the single highest-volume source IP and its event count
+  - source-port range (lowest and highest port observed)
+# The adapter query the harness fakes (records as elastic.<verb> in the queries
+# table). Any elastic search verb works; the payload returned is fixed.
+adapter_cmd: defender-elastic query 'rule.groups:authentication_failed AND agent.ip:172.22.0.13' --index logs-wazuh-* --limit 5000 --raw
