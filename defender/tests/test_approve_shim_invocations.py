@@ -68,8 +68,11 @@ def _decide(mod, monkeypatch, capsys, command: str, cwd: str | None) -> str:
     "bash -c 'defender-invlang enum types'",
     "timeout 5 bash -c 'defender-elastic query foo --raw'",
     "defender-record-query --run-dir /r --lead l-1 --system elastic --query-id elastic.q -- defender-elastic query foo --raw",
+    "defender-record-summary --lead l-1 --label distinct-users -- jq '[.[].data.srcuser]|unique|length' /r/gather_raw/l-1/0.json",
     "tail -1 /r/executed_queries.jsonl | jq .",
     "cat /r/gather_raw/0/0.json | jq '.hits | length'",
+    "jq -r '.[].data.srcip' /r/gather_raw/l-1/0.json | sort | uniq -c | sort -rn",  # self-test pipeline
+    "jq -r '.[].v' /r/gather_raw/l-1/0.json | datamash median 1",                   # datamash self-test
 ])
 def test_approves_safe_shapes_in_subagent(monkeypatch, capsys, command):
     mod = _load(monkeypatch)

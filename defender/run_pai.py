@@ -10,8 +10,13 @@ untouched so both engines coexist for A/B.
 Usage:
     python3 defender/run_pai.py <alert.json> [--run-id ID] [--no-learn] [--model M]
 
-Requires ANTHROPIC_API_KEY (first-party Anthropic API) — unlike run.py, which
-used the Claude Code subscription.
+Billing / credentials: the PydanticAI engine calls the first-party Anthropic
+REST API, so it needs a real API key — unlike run.py, whose nested `claude -p`
+rides the Claude Code subscription. Inside a Claude Code session the *ambient*
+ANTHROPIC_API_KEY is the subscription credential (it 401s against the REST API),
+so run_pai sources its own billable key from a `.env` file
+(`resolve_first_party_key`), which takes precedence over the ambient value. This
+is the seam that keeps the two engines on different billing without colliding.
 """
 
 from __future__ import annotations
@@ -37,6 +42,63 @@ from runtime import driver  # noqa: E402
 DEFENDER_DIR = _DEFENDER_DIR
 
 
+def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
+    """Extract a single var from a `.env` file. Deliberately *not* a full dotenv
+    load — we only want the API key, not to clobber adapter config (elastic creds,
+    docker-context vars) that also live in these files. Returns the value or None."""
+    try:
+        text = env_file.read_text()
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        k, sep, v = line.partition("=")
+        if sep and k.strip() == var:
+            return v.strip().strip('"').strip("'") or None
+    return None
+
+
+def resolve_first_party_key(defender_dir: Path) -> tuple[str | None, Path | None]:
+    """The billable first-party API key for the PydanticAI engine, sourced from a
+    `.env` file rather than the ambient ANTHROPIC_API_KEY.
+
+    Inside a Claude Code session the ambient key is the *subscription* credential
+    (run.py's nested `claude -p` rides it; it 401s against the first-party REST
+    API this engine calls), so the `.env` key takes precedence. First existing
+    file with an ANTHROPIC_API_KEY wins:
+
+      1. ``$DEFENDER_ENV_FILE``  — explicit override
+      2. ``<repo_root>/.env``
+      3. ``/workspace/.env``     — canonical host location (repo_root differs under a git worktree)
+      4. ``<defender_dir>/../.env``
+
+    Returns ``(key, source_path)`` or ``(None, None)``.
+    """
+    candidates: list[Path] = []
+    explicit = os.environ.get("DEFENDER_ENV_FILE")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates += [
+        _run.REPO_ROOT / ".env",
+        Path("/workspace/.env"),
+        defender_dir.parent / ".env",
+    ]
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.is_file():
+            key = _read_env_key(path)
+            if key:
+                return key, path
+    return None, None
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, help="Path to alert.json fixture")
@@ -51,9 +113,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     ns = parse_args(argv)
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("[run_pai] ERROR: ANTHROPIC_API_KEY is not set (the PydanticAI engine "
-              "uses the first-party Anthropic API).", file=sys.stderr)
+
+    # Source the billable first-party key from .env (overrides the ambient
+    # subscription credential a Claude Code session exports). See module docstring.
+    key, src = resolve_first_party_key(DEFENDER_DIR)
+    if key:
+        os.environ["ANTHROPIC_API_KEY"] = key
+        print(f"[run_pai] first-party API key sourced from {src} "
+              "(overrides the ambient subscription credential)", file=sys.stderr)
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        print("[run_pai] WARNING: no .env key found; using the ambient "
+              "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
+              "subscription credential and will 401 against the first-party API.",
+              file=sys.stderr)
+    else:
+        print("[run_pai] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
+              "/workspace/.env, <repo>/.env, or $DEFENDER_ENV_FILE (the PydanticAI "
+              "engine bills the first-party Anthropic API).", file=sys.stderr)
         return 2
 
     alert = ns.alert.resolve()
