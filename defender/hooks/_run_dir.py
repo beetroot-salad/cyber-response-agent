@@ -11,10 +11,40 @@ defender analogue of soc-agent's ``hooks/scripts/run_context.py``.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import secrets
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+
+def update_json_locked(
+    path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
+) -> dict:
+    """Atomic read-modify-write of a JSON file under an exclusive ``flock``.
+
+    Reads ``path`` (empty or corrupt content → ``default()``), calls
+    ``mutate(state)`` to update the dict in place *while the lock is held*,
+    writes it back pretty-printed, and returns the mutated state. The single
+    locked-update primitive behind the per-run ``budget.json`` and
+    ``circuit_breaker.json`` files, so concurrent gather subagents can't race.
+    """
+    path = Path(path)
+    path.touch(exist_ok=True)
+    with open(path, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        raw = f.read()
+        try:
+            state = json.loads(raw) if raw else default()
+        except json.JSONDecodeError:
+            state = default()
+        mutate(state)
+        f.seek(0)
+        f.truncate()
+        f.write(json.dumps(state, indent=2))
+    return state
 
 
 def resolve_run_dir() -> Path | None:

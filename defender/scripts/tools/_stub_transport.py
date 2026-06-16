@@ -79,49 +79,65 @@ def load_config(system: str, prefix: str) -> dict[str, str]:
     return cfg
 
 
-def _docker_exec_curl(
-    bastion: str,
+class TransportError(Exception):
+    """The docker-exec transport itself failed (docker CLI missing, exec timed
+    out) — distinct from an HTTP-level error returned by a reachable service.
+    Callers map it to exit 2 (the connectivity/unreachable contract)."""
+
+
+def docker_exec_curl(
+    container: str,
     url: str,
     *,
     method: str = "GET",
+    headers: dict[str, str] | None = None,
     body: dict | None = None,
     timeout_sec: int = 10,
+    insecure: bool = False,
+    auth: str | None = None,
 ) -> tuple[int, str, str]:
-    """Run `docker --context soc-playground exec <bastion> curl ...`.
+    """Run curl inside `container` over the soc-playground docker context.
 
-    Returns (returncode, stdout, stderr). curl runs with -sS and -w to
-    suffix the HTTP status code on its own line — we split that off
-    before returning the JSON body.
+    Returns (returncode, stdout, stderr); stdout carries the response body
+    followed by ``\\n<http_code>`` (recover with `split_status`). Raises
+    `TransportError` when the docker exec itself fails (CLI missing / timeout),
+    so a reachable-but-erroring service still returns its status + body.
+
+    `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
+    container's shell so the ``${VAR}`` secret expands *there*, against the
+    container's own env, never on this host; None = no ``-u`` (the auth-less
+    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS.
     """
-    curl_argv = [
-        "curl", "-sS",
-        "--max-time", str(timeout_sec),
-        "-X", method,
-        "-H", "Accept: application/json",
-    ]
+    flags = ["-sS"] + (["-k"] if insecure else [])
+    args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
+    for key, val in (headers or {}).items():
+        args += ["-H", f"{key}: {val}"]
     if body is not None:
-        curl_argv += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     # Write HTTP status on its own trailing line so we can recover it from stdout.
-    curl_argv += ["-w", "\n%{http_code}", url]
+    args += ["-w", "\n%{http_code}", url]
 
-    cmd = [
-        "docker", "--context", DOCKER_CONTEXT, "exec", bastion,
-        *curl_argv,
-    ]
+    if auth:
+        # Static flags live in the in-container shell so ${VAR} expands there;
+        # everything dynamic is forwarded as argv after `--` (so a JSON body with
+        # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
+        inner = f'exec curl {" ".join(flags)} -u "{auth}" "$@"'
+        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", "-i", container,
+               "sh", "-c", inner, "--", *args]
+    else:
+        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "curl", *flags, *args]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
-        )
-    except FileNotFoundError:
-        print("error: docker CLI not found on PATH", file=sys.stderr)
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print(f"error: docker exec curl timed out after {timeout_sec + 5}s (target: {url})", file=sys.stderr)
-        sys.exit(2)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10)
+    except FileNotFoundError as e:
+        raise TransportError("docker CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise TransportError(
+            f"docker exec curl timed out after {timeout_sec + 10}s (target: {url})"
+        ) from e
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def _split_status(stdout: str) -> tuple[str, str]:
+def split_status(stdout: str) -> tuple[str, str]:
     """Recover (body, http_status) from curl -w '\\n%{http_code}' output.
 
     Returns ('', '') when stdout is empty (e.g. curl failed before any
@@ -155,7 +171,12 @@ def http_post(config: dict[str, str], path: str, body: dict) -> dict | list:
 def _request(config: dict[str, str], url: str, *, method: str, body: dict | None = None) -> dict | list:
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
-    rc, stdout, stderr = _docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
+    try:
+        rc, stdout, stderr = docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
+    except TransportError as e:
+        # docker CLI missing / exec timeout → connectivity failure (exit 2).
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
 
     if rc != 0 and not stdout:
         # curl never produced output → transport-level failure. Exit 2 (the
@@ -173,7 +194,7 @@ def _request(config: dict[str, str], url: str, *, method: str, body: dict | None
         print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
         sys.exit(2)
 
-    body_text, status = _split_status(stdout)
+    body_text, status = split_status(stdout)
     if not status:
         # curl exited non-zero but emitted partial output — show what we got.
         sys.exit(

@@ -30,10 +30,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+
+import _stub_transport as transport
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
@@ -50,14 +51,14 @@ REQUIRED_CONFIG_KEYS = [
     "ELASTIC_ALERTS_INDEX",
 ]
 
-# The playground stack is reached over the soc-playground docker context — the
-# same transport the identity/cmdb/host-state adapters use. We exec `curl`
-# inside the target container, where the service answers on its own localhost
-# (ES :9200, Kibana :5601) and supplies its own ELASTIC_PASSWORD. This removes
-# the host-side SSH tunnel and the separate V2_ELASTIC_PASSWORD that the direct
-# urllib path needed (and which left elastic the lone adapter that broke when
-# the tunnel was down). Mirrors infra/bin/es.sh.
-DOCKER_CONTEXT = os.environ.get("SOC_PLAYGROUND_DOCKER_CONTEXT", "soc-playground")
+# The playground stack is reached over the soc-playground docker context using
+# the SAME shared transport as the identity/cmdb/host-state adapters
+# (`_stub_transport.docker_exec_curl`): we exec `curl` inside the target
+# container, where the service answers on its own localhost (ES :9200, Kibana
+# :5601) and supplies its own ELASTIC_PASSWORD. This removed the host-side SSH
+# tunnel and the V2_ELASTIC_PASSWORD the direct urllib path needed. Mirrors
+# infra/bin/es.sh. DOCKER_CONTEXT is the transport's single source of truth.
+DOCKER_CONTEXT = transport.DOCKER_CONTEXT
 ES_CONTAINER = os.environ.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch")
 KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 
@@ -103,10 +104,9 @@ def load_config() -> dict:
     return config
 
 
-class TransportError(Exception):
-    """The docker-exec transport itself failed (daemon/context unreachable,
-    container missing/stopped) — distinct from an HTTP-level error returned by a
-    reachable service. Callers map it to exit 2 via `_exit_unreachable`."""
+# Shared with the stub adapters: the docker-exec transport failed (CLI missing,
+# exec timeout). Callers map it to exit 2 via `_exit_unreachable`.
+TransportError = transport.TransportError
 
 
 def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
@@ -152,40 +152,21 @@ def _http_json(method, url, config, headers=None, body=None, timeout=None):
     its status + body for the caller to handle)."""
     container = _container_for(url, config)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
-
-    # Static flags live in the in-container shell so ${ELASTIC_PASSWORD} expands
-    # *there*, against the container's own env — never on this host. Everything
-    # dynamic (method, headers, body, url) is forwarded as argv after `--`, so a
-    # JSON body with spaces/quotes survives intact (no shell re-parsing).
-    inner = 'exec curl -sS -k -u "elastic:${ELASTIC_PASSWORD}" "$@"'
-    curl_args = ["-X", method, "--max-time", str(secs), "-H", "Accept: application/json"]
-    for key, val in (headers or {}).items():
-        curl_args += ["-H", f"{key}: {val}"]
-    if body is not None:
-        curl_args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
-    curl_args += ["-w", "\n%{http_code}", url]
-
-    cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", "-i", container,
-           "sh", "-c", inner, "--", *curl_args]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=secs + 10)
-    except FileNotFoundError as e:
-        # docker missing from PATH is a transport failure, not a query error —
-        # route it through TransportError so the caller exits 2 (the breaker
-        # contract), consistent with _stub_transport / host_state_cli.
-        raise TransportError("docker CLI not found on PATH") from e
-    except subprocess.TimeoutExpired as e:
-        raise TransportError(f"docker exec curl timed out after {secs + 10}s") from e
-
-    sep = proc.stdout.rfind("\n")
-    body_text = proc.stdout[:sep] if sep != -1 else ""
-    status_str = (proc.stdout[sep + 1:] if sep != -1 else proc.stdout).strip()
+    # `insecure=True`: container-local self-signed cert (matches es.sh). `auth`
+    # expands ${ELASTIC_PASSWORD} inside the container's own shell, never on this
+    # host. Raises TransportError on a docker-exec failure (CLI missing/timeout),
+    # which the callers map to exit 2 via _exit_unreachable.
+    rc, stdout, stderr = transport.docker_exec_curl(
+        container, url, method=method, headers=headers, body=body,
+        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}",
+    )
+    body_text, status_str = transport.split_status(stdout)
     try:
         status = int(status_str)
     except ValueError as e:
         # No HTTP status line ⇒ curl never completed a request ⇒ transport-level
         # failure (no such container, context down, TLS handshake refused, …).
-        detail = proc.stderr.strip() or f"docker exec rc={proc.returncode}, no output"
+        detail = stderr.strip() or f"docker exec rc={rc}, no output"
         raise TransportError(detail) from e
     if status == 0:
         # curl reports HTTP 000 when it never received a response (connection
@@ -194,7 +175,7 @@ def _http_json(method, url, config, headers=None, body=None, timeout=None):
         # SUCCEEDS — the most common ES-down case. Treat 0 as the transport
         # failure it is, not a real HTTP status, so it routes to exit 2 (and the
         # circuit breaker counts it) instead of being mis-scored as a query error.
-        detail = proc.stderr.strip() or f"curl reported HTTP 000 (no response; rc={proc.returncode})"
+        detail = stderr.strip() or f"curl reported HTTP 000 (no response; rc={rc})"
         raise TransportError(detail)
 
     try:

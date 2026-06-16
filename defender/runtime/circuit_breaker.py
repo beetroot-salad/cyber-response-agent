@@ -28,17 +28,25 @@ logic applies: record the MCP tool result's failure against its system, gate
 whether that system's MCP toolset is attached, and (optionally) detach it on trip.
 
 State lives in `{run_dir}/circuit_breaker.json`, mutated under an exclusive flock
-(mirrors budget_enforcer.update_budget_locked) so concurrent gather subagents
-don't race.
+via the shared `_run_dir.update_json_locked` helper (the same primitive behind
+`budget.json`) so concurrent gather subagents don't race.
 """
 
 from __future__ import annotations
 
-import fcntl
 import json
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+# defender/hooks on sys.path for the shared locked-JSON helper. circuit_breaker is
+# imported by tools.py/driver.py *before* permission.py runs its own bootstrap, so
+# it can't rely on hooks already being importable — mirror permission.py here.
+_HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
+if str(_HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOKS_DIR))
+from _run_dir import update_json_locked  # noqa: E402
 
 # A system trips after this many connectivity/auth failures; the run aborts after
 # this many across all systems. With the per-system block at 2, reaching 5 total
@@ -117,25 +125,18 @@ def record_outcome(run_dir: Path, system: str, exit_code: int, stderr: str = "")
     if not system or not is_infra_failure(exit_code, stderr):
         return {}
 
-    p = _path(run_dir)
-    p.touch(exist_ok=True)
-    with open(p, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        raw = f.read()
-        try:
-            state = json.loads(raw) if raw else _blank()
-        except json.JSONDecodeError:
-            state = _blank()
+    def _mutate(state: dict) -> None:
         state.setdefault("systems", {})
         sysrec = state["systems"].setdefault(system, {"failures": 0})
         sysrec["failures"] += 1
         state["total_failures"] = state.get("total_failures", 0) + 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-        f.seek(0)
-        f.truncate()
-        f.write(json.dumps(state, indent=2))
 
+    state = update_json_locked(_path(run_dir), _mutate, default=_blank)
+
+    # Run-wide kill switch — checked after the locked update (a redundant raise
+    # from a racing subagent is harmless; the driver catches the first).
     if state.get("total_failures", 0) >= RUN_FAIL_KILL_LIMIT:
         # RunAborted already de-dups + sorts, so pass the distinct system names.
         raise RunAborted(state["total_failures"], list(state["systems"]))
