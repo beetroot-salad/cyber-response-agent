@@ -39,7 +39,8 @@ from budget_enforcer import (  # noqa: E402
 DEFAULT_MODEL = "claude-sonnet-4-6"
 GATHER_MODEL = "claude-haiku-4-5"
 DEFAULT_REQUEST_LIMIT = 60
-GATHER_REQUEST_LIMIT = 20  # gather is a short, mechanical loop per lead
+GATHER_REQUEST_LIMIT = 40  # gather's per-lead loop; large multi-dimension leads
+# need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
 # The permission gate denies disallowed tool calls via ModelRetry — control-flow
 # feedback ("pick another command"), the in-process twin of the claude -p hook's
 # exit-2, not a hard error. pydantic-ai resets a tool's retry counter on success,
