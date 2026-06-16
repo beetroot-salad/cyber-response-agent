@@ -22,7 +22,6 @@ Exit codes:
 
 from __future__ import annotations
 
-import fcntl
 import json
 import sys
 from datetime import UTC, datetime
@@ -33,7 +32,7 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 if str(_HOOK_DIR) not in sys.path:
     sys.path.insert(0, str(_HOOK_DIR))
-from _run_dir import resolve_run_dir  # noqa: E402
+from _run_dir import resolve_run_dir, update_json_locked  # noqa: E402
 
 # Caps are intentionally inline + single-default: the defender has no
 # per-signature permissions.yaml to overlay, so there is nothing to
@@ -57,15 +56,7 @@ def make_budget_state(run_id: str) -> dict:
 
 def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
     """Atomic read-modify-write of budget.json under an exclusive lock."""
-    budget_path = run_dir / "budget.json"
-    budget_path.touch(exist_ok=True)
-    with open(budget_path, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        raw = f.read()
-        try:
-            budget = json.loads(raw) if raw else make_budget_state(run_id)
-        except json.JSONDecodeError:
-            budget = make_budget_state(run_id)
+    def _mutate(budget: dict) -> None:
         # Backfill started_at if an older/partial budget.json lacks it, so the
         # wall-clock check never silently drops out for the rest of the run.
         budget.setdefault("started_at", datetime.now(UTC).isoformat())
@@ -74,10 +65,10 @@ def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
         # in-process PydanticAI gather dispatch tool. Both count as a spawn.
         if tool_name in ("Task", "Agent", "gather"):
             budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1
-        f.seek(0)
-        f.truncate()
-        f.write(json.dumps(budget, indent=2))
-    return budget
+
+    return update_json_locked(
+        run_dir / "budget.json", _mutate, default=lambda: make_budget_state(run_id)
+    )
 
 
 def _ratio_warning(label: str, current: float, cap: float, unit: str = "") -> str | None:

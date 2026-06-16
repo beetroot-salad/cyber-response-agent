@@ -20,11 +20,11 @@ Exit codes:
     0 — success
     1 — verb-level error (file not found, user not present)
     2 — docker / host-unreachable / timeout
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import subprocess
@@ -60,21 +60,34 @@ def _exec(host: str, argv: list[str], *, timeout_sec: int = DEFAULT_TIMEOUT_SEC)
 
 
 def _exit_on_docker_error(rc: int, stderr: str, host: str):
-    """Map docker-exec stderr patterns to clean exits."""
+    """Map docker-exec stderr patterns to clean exits.
+
+    Transport/unreachable failures exit 2 (the system-of-record contract: 2 =
+    connectivity/docker/unreachable, matching this CLI's SKILL and the gather
+    exit-code protocol) so the circuit breaker counts them. They are identified by
+    docker's own connection/lookup signatures, because docker is *loud* about them
+    (container missing, daemon/context unreachable). Everything else — including a
+    quiet non-zero inner command with empty stderr — is a verb-level error (exit 1)
+    the caller reasons about, not a down host: a quiet command failure has empty
+    stderr precisely because docker exec itself succeeded, and scoring it as infra
+    would spuriously trip the breaker on a perfectly reachable host.
+    """
     if rc == 0:
         return
     s = stderr.strip()
-    if not s:
-        sys.exit(f"error: docker exec on {host} returned rc={rc} with no stderr")
-    if "No such container" in s or "is not running" in s:
-        sys.exit(
+    transport_down = (
+        "No such container" in s or "is not running" in s
+        or "Cannot connect to the Docker daemon" in s
+        or "error during connect" in s
+    )
+    if transport_down:
+        print(
             f"error: host {host!r} unreachable: {s}\n"
-            f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts."
+            f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts.",
+            file=sys.stderr,
         )
-    # Pass through verb-level errors (cat: No such file) as exit 1 — caller
-    # contexts decide. We don't differentiate here because verbs wrap small
-    # commands whose stderr is the useful signal.
-    print(f"error: docker exec on {host} (rc={rc}): {s}", file=sys.stderr)
+        sys.exit(2)
+    print(f"error: docker exec on {host} (rc={rc}): {s or 'no stderr'}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -84,14 +97,18 @@ def cmd_health_check(args, _config):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(f"error: `docker --context {transport.DOCKER_CONTEXT} ps` timed out after 10s")
+        print(f"error: `docker --context {transport.DOCKER_CONTEXT} ps` timed out after 10s", file=sys.stderr)
+        sys.exit(2)
     if proc.returncode != 0:
-        sys.exit(
+        print(
             f"error: docker context {transport.DOCKER_CONTEXT!r} unreachable: "
-            f"{proc.stderr.strip()}"
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
         )
+        sys.exit(2)
     names = set(proc.stdout.split())
     print("connected")
     print(f"docker context: {transport.DOCKER_CONTEXT}")
@@ -276,7 +293,7 @@ def _utcnow_z() -> str:
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description="Host live-state CLI — per-host point-in-time observations via docker exec.",
     )
     sub = p.add_subparsers(dest="subcommand", required=True)

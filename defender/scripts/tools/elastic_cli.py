@@ -23,46 +23,45 @@ Exit codes:
     0 — success
     1 — query error (bad syntax, unknown field, partial result)
     2 — connection / auth / config failure
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
-import ssl
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
+
+import _stub_transport as transport
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 CONFIG_PATH = (
     DEFENDER_DIR / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
 )
-# playground-v2 .env lives one level above the worktree on this host.
-# Probed for V2_ELASTIC_PASSWORD when the env var isn't already set.
-PLAYGROUND_ENV_CANDIDATES = (
-    DEFENDER_DIR.parent.parent / "playground-v2" / ".env",
-    Path("/workspace/playground-v2/.env"),
-)
-
+# Note: SSL verification is not configurable here — curl runs container-local
+# against the stack's self-signed cert and always passes `-k` (mirrors es.sh), so
+# ELASTIC_SSL_VERIFY / ELASTIC_CA_CERT are no longer read and are not required.
 REQUIRED_CONFIG_KEYS = [
     "ELASTICSEARCH_URL",
     "KIBANA_URL",
     "ELASTIC_EVENTS_INDEX",
     "ELASTIC_ALERTS_INDEX",
-    "ELASTIC_SSL_VERIFY",
 ]
 
-# playground-v2 convention: V2_-prefixed to avoid collision with v1 ELASTIC_PASSWORD
-# in /workspace/.env (shell env shadows compose .env).
-PASSWORD_ENV = "V2_ELASTIC_PASSWORD"
-USERNAME_ENV = "V2_ELASTIC_USERNAME"
-DEFAULT_USERNAME = "elastic"
+# The playground stack is reached over the soc-playground docker context using
+# the SAME shared transport as the identity/cmdb/host-state adapters
+# (`_stub_transport.docker_exec_curl`): we exec `curl` inside the target
+# container, where the service answers on its own localhost (ES :9200, Kibana
+# :5601) and supplies its own ELASTIC_PASSWORD. This removed the host-side SSH
+# tunnel and the V2_ELASTIC_PASSWORD the direct urllib path needed. Mirrors
+# infra/bin/es.sh. DOCKER_CONTEXT is the transport's single source of truth.
+DOCKER_CONTEXT = transport.DOCKER_CONTEXT
+ES_CONTAINER = os.environ.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch")
+KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 10000
@@ -106,85 +105,29 @@ def load_config() -> dict:
     return config
 
 
-def _read_password_from_env_file(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    try:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            if key.strip() == PASSWORD_ENV:
-                return val.strip().strip('"').strip("'")
-    except OSError:
-        return None
-    return None
-
-
-def get_credentials() -> tuple[str, str]:
-    user = os.environ.get(USERNAME_ENV, DEFAULT_USERNAME)
-    password = os.environ.get(PASSWORD_ENV)
-    if not password:
-        # Fallback: source from playground-v2/.env. Avoids the
-        # subshell/source dance that every gather subagent otherwise
-        # repeats — see traces of OPT-* runs.
-        for candidate in PLAYGROUND_ENV_CANDIDATES:
-            password = _read_password_from_env_file(candidate)
-            if password:
-                break
-    if not password:
-        searched = ", ".join(str(p) for p in PLAYGROUND_ENV_CANDIDATES)
-        sys.exit(
-            f"error: {PASSWORD_ENV} not set and not found in any of: {searched}\n"
-            f"hint: export {PASSWORD_ENV}=... or restore playground-v2/.env.\n"
-            f"      {USERNAME_ENV} defaults to {DEFAULT_USERNAME!r} if unset.\n"
-            f"hint: non-secret config lives in {CONFIG_PATH}"
-        )
-    return user, password
-
-
-def _ssl_context(config: dict) -> ssl.SSLContext | None:
-    verify = config.get("ELASTIC_SSL_VERIFY", "true").lower() in ("true", "1", "yes")
-    if verify:
-        ctx = ssl.create_default_context()
-        ca_cert = config.get("ELASTIC_CA_CERT", "").strip()
-        if ca_cert:
-            ctx.load_verify_locations(ca_cert)
-        return ctx
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
-
-
-def _auth_header(user: str, password: str) -> str:
-    creds = base64.b64encode(f"{user}:{password}".encode()).decode()
-    return f"Basic {creds}"
+# Shared with the stub adapters: the docker-exec transport failed (CLI missing,
+# exec timeout). Callers map it to exit 2 via `_exit_unreachable`.
+TransportError = transport.TransportError
 
 
 def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
-    """Exit with a useful hint when ES/Kibana is unreachable.
+    """Exit (2) with a useful hint when ES/Kibana can't be reached.
 
-    The playground exposes ES/Kibana only on the VPS's 127.0.0.1; the
-    devcontainer reaches them through an SSH tunnel documented in
-    config.env. A bare "Connection refused" is opaque — surface the
-    tunnel command so a missing tunnel doesn't get rediagnosed
-    every time.
+    Transport is the soc-playground docker context — a failure here means the
+    context/daemon is down or the target container isn't running, not a missing
+    SSH tunnel. Surface the check so it doesn't get rediagnosed every time.
     """
     msg = f"error: {target} unreachable: {exc}"
-    host = urllib.parse.urlparse(url).hostname or ""
-    refused = "Connection refused" in str(exc) or getattr(
-        getattr(exc, "reason", None), "errno", None
-    ) == 111
-    if refused and host in ("localhost", "127.0.0.1", "::1"):
-        msg += (
-            "\nhint: no listener on localhost:" + str(urllib.parse.urlparse(url).port or "?")
-            + " — the playground stack runs on the soc-playground VPS."
-            "\n      start the documented SSH tunnel and retry:"
-            "\n        ssh -fN -L 9200:localhost:9200 -L 5601:localhost:5601 soc-playground"
-        )
-    sys.exit(msg)
+    msg += (
+        f"\nhint: the playground stack is reached via "
+        f"`docker --context {DOCKER_CONTEXT} exec`; confirm it is up:"
+        f"\n      docker --context {DOCKER_CONTEXT} ps "
+        f"| grep -E '{ES_CONTAINER}|{KIBANA_CONTAINER}'"
+    )
+    # Exit 2 = connection/auth/config failure, per this module's exit-code
+    # contract (the direct-urllib path used to exit 1 here — a known mismatch).
+    print(msg, file=sys.stderr)
+    sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -192,32 +135,55 @@ def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _http_json(method, url, config, headers=None, body=None, timeout=None):
-    user, password = get_credentials()
-    hdrs = {
-        "Authorization": _auth_header(user, password),
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if headers:
-        hdrs.update(headers)
+def _container_for(url: str, config: dict) -> str:
+    """Which compose container to exec curl inside. ES and Kibana each answer on
+    their own localhost port *within their own container* (matching es.sh), so
+    route by which configured base URL this request targets."""
+    kibana_base = (config.get("KIBANA_URL") or "").rstrip("/")
+    if kibana_base and url.startswith(kibana_base):
+        return KIBANA_CONTAINER
+    return ES_CONTAINER
 
-    data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
-    ctx = _ssl_context(config) if url.startswith("https://") else None
+
+def _http_json(method, url, config, headers=None, body=None, timeout=None):
+    """Issue an HTTP request to ES/Kibana by exec'ing curl inside the target
+    container over the soc-playground docker context (mirrors infra/bin/es.sh).
+    Returns (http_status:int, parsed_json:dict). Raises TransportError when the
+    docker exec itself fails (so a reachable-but-erroring service still returns
+    its status + body for the caller to handle)."""
+    container = _container_for(url, config)
+    secs = int(timeout or REQUEST_TIMEOUT_SEC)
+    # `insecure=True`: container-local self-signed cert (matches es.sh). `auth`
+    # expands ${ELASTIC_PASSWORD} inside the container's own shell, never on this
+    # host. Raises TransportError on a docker-exec failure (CLI missing/timeout),
+    # which the callers map to exit 2 via _exit_unreachable.
+    rc, stdout, stderr = transport.docker_exec_curl(
+        container, url, method=method, headers=headers, body=body,
+        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}",
+    )
+    body_text, status_str = transport.split_status(stdout)
     try:
-        with urllib.request.urlopen(
-            req, context=ctx, timeout=timeout or REQUEST_TIMEOUT_SEC
-        ) as resp:
-            raw = resp.read()
-            parsed = json.loads(raw) if raw else {}
-            return resp.getcode(), parsed
-    except urllib.error.HTTPError as e:
-        try:
-            err_body = json.loads(e.read() or b"{}")
-        except (ValueError, OSError):
-            err_body = {"error": f"HTTP {e.code}"}
-        return e.code, err_body
+        status = int(status_str)
+    except ValueError as e:
+        # No HTTP status line ⇒ curl never completed a request ⇒ transport-level
+        # failure (no such container, context down, TLS handshake refused, …).
+        detail = stderr.strip() or f"docker exec rc={rc}, no output"
+        raise TransportError(detail) from e
+    if status == 0:
+        # curl reports HTTP 000 when it never received a response (connection
+        # refused, DNS failure, TLS handshake rejected, --max-time before any
+        # headers). It still writes "\n000" to stdout, so the int() parse above
+        # SUCCEEDS — the most common ES-down case. Treat 0 as the transport
+        # failure it is, not a real HTTP status, so it routes to exit 2 (and the
+        # circuit breaker counts it) instead of being mis-scored as a query error.
+        detail = stderr.strip() or f"curl reported HTTP 000 (no response; rc={rc})"
+        raise TransportError(detail)
+
+    try:
+        parsed = json.loads(body_text) if body_text else {}
+    except json.JSONDecodeError:
+        parsed = {"error": body_text[:500]}
+    return status, parsed
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +223,7 @@ def search(config, index_pattern, query_string, time_start, time_end, time_field
     )
     try:
         status, resp = _http_json("POST", url, config, body=body)
-    except urllib.error.URLError as e:
+    except TransportError as e:
         _exit_unreachable("Elasticsearch", url, e)
 
     if status != 200:
@@ -265,6 +231,12 @@ def search(config, index_pattern, query_string, time_start, time_end, time_field
         msg = err.get("reason") if isinstance(err, dict) else str(err)
         if status in (401, 403):
             print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
+        if status >= 500:
+            # 5xx is the server being unavailable (cluster restarting, no shard,
+            # gateway) — an infra failure the breaker should count, not a query
+            # error. Mirrors _stub_transport._request's code>=500 → exit 2.
+            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
             sys.exit(2)
         print(f"error: Elasticsearch query failed (HTTP {status}): {msg}", file=sys.stderr)
         sys.exit(1)
@@ -287,12 +259,13 @@ def health_check(config):
     es_url = config["ELASTICSEARCH_URL"].rstrip("/") + "/_cluster/health"
     try:
         status, body = _http_json("GET", es_url, config, timeout=10)
-    except urllib.error.URLError as e:
+    except TransportError as e:
         _exit_unreachable("elasticsearch", es_url, e)
 
     if status != 200:
         print(f"error: elasticsearch HTTP {status}: {body}", file=sys.stderr)
-        sys.exit(2 if status in (401, 403) else 1)
+        # auth (401/403) and server-unavailable (5xx) are infra → exit 2.
+        sys.exit(2 if status in (401, 403) or status >= 500 else 1)
 
     print("connected")
     print(f"elasticsearch: {body.get('status', 'unknown')}")
@@ -303,7 +276,7 @@ def health_check(config):
         kb_status, kb_body = _http_json(
             "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10
         )
-    except urllib.error.URLError as e:
+    except TransportError as e:
         print(f"kibana: unreachable ({e})")
         return
 
@@ -429,7 +402,7 @@ def format_alerts_output(query_string, index_pattern, time_start, time_end, hits
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description=(
             "Elastic Stack CLI — search raw events (`query`) and detection-engine "
             "signals (`alerts`) against the v2 playground Elasticsearch."

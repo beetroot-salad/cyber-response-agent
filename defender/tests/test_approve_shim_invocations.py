@@ -113,6 +113,65 @@ def test_unsafe_shapes_pass_through(monkeypatch, capsys, command):
     assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "PASSTHROUGH"
 
 
+# --- find: gather-only discovery, guarded ---------------------------------
+
+@pytest.mark.parametrize("command", [
+    "find /workspace/defender/skills/gather/queries/elastic -name '*.md'",
+    "find /workspace/defender/skills/gather/queries/host-state -type f -name '*.md' | head",
+])
+def test_find_approved_for_gather(monkeypatch, capsys, command):
+    """Plain read-only find is approved in the subagent (template discovery)."""
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    "find /r -delete",                          # action flag: delete
+    "find / -exec rm -rf {} +",                 # action flag: exec
+    "find /r -execdir cat {} ;",                # action flag: execdir
+    "find /r -fprintf /tmp/x %p",               # action flag: write
+    "find /workspace -name .env",               # locating a denied-read file
+    "find / -name ground_truth.yaml",           # locating ground truth
+    "find /r -path '*/.ssh/*'",                 # locating ssh material
+])
+def test_find_dangerous_or_sensitive_passes_through(monkeypatch, capsys, command):
+    """find with an action flag or naming a denied-read file is NOT approved,
+    even in the subagent — it falls through to the normal flow."""
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "PASSTHROUGH"
+
+
+# --- benign stderr redirects are tolerated; real redirects are not ---------
+
+@pytest.mark.parametrize("command", [
+    "ls -la /r/gather_raw 2>/dev/null",
+    "grep -rl 'sshd' /workspace/defender/skills/gather/queries/elastic/ 2>/dev/null",
+    "find /workspace/defender/skills/gather/queries/cmdb -name '*.md' 2>/dev/null | head",
+    "cat /r/x.json 2>&1 | jq .",
+])
+def test_benign_stderr_redirect_approved(monkeypatch, capsys, command):
+    """2>/dev/null and 2>&1 are noise the agent appends; they don't write a file
+    or exfiltrate, so they don't block an otherwise-safe read-only command."""
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    "cat /etc/passwd > /tmp/out",       # stdout file redirect — real exfil shape
+    "cat x 1> /tmp/out",                # explicit stdout redirect
+    "find / -delete 2>/dev/null",       # danger flag survives the stderr strip
+])
+def test_real_redirect_or_danger_still_passes_through(monkeypatch, capsys, command):
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "PASSTHROUGH"
+
+
+def test_find_passes_through_in_main(monkeypatch, capsys):
+    """find is gather-only; the main loop has the workspace map and never gets it."""
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, "find /workspace -name SKILL.md", MAIN_CWD) == "PASSTHROUGH"
+
+
 def test_non_bash_ignored(monkeypatch, capsys):
     mod = _load(monkeypatch)
     payload = {"tool_name": "Read", "tool_input": {"file_path": "/r/x"}, "cwd": SUBAGENT_CWD}

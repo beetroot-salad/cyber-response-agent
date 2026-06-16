@@ -75,13 +75,25 @@ def _trim(obj: Any, cap: int) -> Any:
 
 def _usage_dict(usage: Any) -> dict[str, int]:
     """RequestUsage → the `tool_trace.jsonl` usage key shape (the names
-    run_stats.py and pricing.usage_cost read)."""
+    run_stats.py and pricing.usage_cost read).
+
+    PydanticAI reports `input_tokens` as the TOTAL input — cache reads + cache
+    writes + the genuinely-uncached remainder (verified: per response,
+    input_tokens == cache_read + cache_write + ~1). But the trace contract (and
+    `pricing.usage_cost`, shared with the legacy `claude -p` path) treats
+    `input_tokens` as the UNCACHED count, pricing cache reads/writes separately.
+    So we subtract the cache fields here — otherwise the ~cached tokens are billed
+    at the full input rate AND again at the cache rate (a ~4-5x cost overcount).
+    Normalize at this projection boundary so `pricing` stays correct for both
+    engines and the on-disk `input_tokens` means the same thing everywhere."""
     g = lambda n: int(getattr(usage, n, 0) or 0)  # noqa: E731
+    cache_r = g("cache_read_tokens")
+    cache_w = g("cache_write_tokens")
     return {
-        "input_tokens": g("input_tokens"),
+        "input_tokens": max(0, g("input_tokens") - cache_r - cache_w),
         "output_tokens": g("output_tokens"),
-        "cache_read_input_tokens": g("cache_read_tokens"),
-        "cache_creation_input_tokens": g("cache_write_tokens"),
+        "cache_read_input_tokens": cache_r,
+        "cache_creation_input_tokens": cache_w,
     }
 
 

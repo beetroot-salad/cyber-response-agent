@@ -19,11 +19,11 @@ Exit codes:
     0 — success (including verdict=unknown)
     1 — query error (bad arg)
     2 — connectivity / docker / upstream 5xx
+    64 — usage error (bad flag / unknown subcommand)
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import urllib.parse
 
@@ -84,7 +84,7 @@ def cmd_list_indicators(args, config):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = transport.AdapterArgumentParser(
         description="Threat-intel stub CLI — offline reputation lookups (VT/OTX shape).",
     )
     sub = p.add_subparsers(dest="subcommand", required=True)

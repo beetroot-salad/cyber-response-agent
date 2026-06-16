@@ -13,6 +13,7 @@ and uses host_state_cli.py's own transport, not this module.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shlex
@@ -25,7 +26,34 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
-DOCKER_CONTEXT = "soc-playground"
+
+# Reserved exit code for an agent-side CLI mistake (bad flag, unknown subcommand,
+# missing required arg). Distinct from transport's exit 2 so the circuit breaker
+# counts only genuine connectivity/auth failures, not the agent's typos — see
+# runtime/circuit_breaker.is_infra_failure. EX_USAGE from sysexits.h.
+USAGE_EXIT_CODE = 64
+
+
+class AdapterArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of
+    argparse's default 2.
+
+    Every data-source adapter uses this so a bad flag / unknown subcommand / missing
+    arg the agent passed is *structurally* distinct from a connectivity/auth failure
+    (which adapters signal with exit 2). The circuit breaker then keys on the exit
+    code alone — no fragile stderr-phrase sniffing to tell the two apart. Subparsers
+    built via ``add_subparsers()`` inherit this class automatically
+    (``parser_class=type(self)``), so subcommand usage errors and explicit
+    ``parser.error(...)`` calls exit 64 too.
+    """
+
+    def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)
+        self.print_usage(sys.stderr)
+        self.exit(USAGE_EXIT_CODE, f"{self.prog}: error: {message}\n")
+# Single source of truth for the docker context across every adapter (elastic_cli
+# reads the same env var) — so overriding it points the whole stack, not half of
+# it, at a different environment.
+DOCKER_CONTEXT = os.environ.get("SOC_PLAYGROUND_DOCKER_CONTEXT", "soc-playground")
 
 
 def _config_path(system: str) -> Path:
@@ -76,47 +104,65 @@ def load_config(system: str, prefix: str) -> dict[str, str]:
     return cfg
 
 
-def _docker_exec_curl(
-    bastion: str,
+class TransportError(Exception):
+    """The docker-exec transport itself failed (docker CLI missing, exec timed
+    out) — distinct from an HTTP-level error returned by a reachable service.
+    Callers map it to exit 2 (the connectivity/unreachable contract)."""
+
+
+def docker_exec_curl(
+    container: str,
     url: str,
     *,
     method: str = "GET",
+    headers: dict[str, str] | None = None,
     body: dict | None = None,
     timeout_sec: int = 10,
+    insecure: bool = False,
+    auth: str | None = None,
 ) -> tuple[int, str, str]:
-    """Run `docker --context soc-playground exec <bastion> curl ...`.
+    """Run curl inside `container` over the soc-playground docker context.
 
-    Returns (returncode, stdout, stderr). curl runs with -sS and -w to
-    suffix the HTTP status code on its own line — we split that off
-    before returning the JSON body.
+    Returns (returncode, stdout, stderr); stdout carries the response body
+    followed by ``\\n<http_code>`` (recover with `split_status`). Raises
+    `TransportError` when the docker exec itself fails (CLI missing / timeout),
+    so a reachable-but-erroring service still returns its status + body.
+
+    `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
+    container's shell so the ``${VAR}`` secret expands *there*, against the
+    container's own env, never on this host; None = no ``-u`` (the auth-less
+    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS.
     """
-    curl_argv = [
-        "curl", "-sS",
-        "--max-time", str(timeout_sec),
-        "-X", method,
-        "-H", "Accept: application/json",
-    ]
+    flags = ["-sS"] + (["-k"] if insecure else [])
+    args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
+    for key, val in (headers or {}).items():
+        args += ["-H", f"{key}: {val}"]
     if body is not None:
-        curl_argv += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     # Write HTTP status on its own trailing line so we can recover it from stdout.
-    curl_argv += ["-w", "\n%{http_code}", url]
+    args += ["-w", "\n%{http_code}", url]
 
-    cmd = [
-        "docker", "--context", DOCKER_CONTEXT, "exec", bastion,
-        *curl_argv,
-    ]
+    if auth:
+        # Static flags live in the in-container shell so ${VAR} expands there;
+        # everything dynamic is forwarded as argv after `--` (so a JSON body with
+        # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
+        inner = f'exec curl {" ".join(flags)} -u "{auth}" "$@"'
+        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", "-i", container,
+               "sh", "-c", inner, "--", *args]
+    else:
+        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "curl", *flags, *args]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
-        )
-    except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
-    except subprocess.TimeoutExpired:
-        sys.exit(f"error: docker exec curl timed out after {timeout_sec + 5}s (target: {url})")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10)
+    except FileNotFoundError as e:
+        raise TransportError("docker CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise TransportError(
+            f"docker exec curl timed out after {timeout_sec + 10}s (target: {url})"
+        ) from e
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def _split_status(stdout: str) -> tuple[str, str]:
+def split_status(stdout: str) -> tuple[str, str]:
     """Recover (body, http_status) from curl -w '\\n%{http_code}' output.
 
     Returns ('', '') when stdout is empty (e.g. curl failed before any
@@ -150,19 +196,30 @@ def http_post(config: dict[str, str], path: str, body: dict) -> dict | list:
 def _request(config: dict[str, str], url: str, *, method: str, body: dict | None = None) -> dict | list:
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
-    rc, stdout, stderr = _docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
+    try:
+        rc, stdout, stderr = docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
+    except TransportError as e:
+        # docker CLI missing / exec timeout → connectivity failure (exit 2).
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
 
     if rc != 0 and not stdout:
-        # curl never produced output → transport-level failure.
+        # curl never produced output → transport-level failure. Exit 2 (the
+        # connectivity/docker/unreachable code in every stub's exit contract) so
+        # the gather exit-code protocol and the circuit breaker both see it as a
+        # down system, not a query error.
         hint = stderr.strip() or "no stderr"
         if "No such container" in hint or "is not running" in hint:
-            sys.exit(
+            print(
                 f"error: bastion container {bastion!r} unreachable: {hint}\n"
-                f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running."
+                f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running.",
+                file=sys.stderr,
             )
-        sys.exit(f"error: docker exec failed (rc={rc}): {hint}")
+            sys.exit(2)
+        print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
+        sys.exit(2)
 
-    body_text, status = _split_status(stdout)
+    body_text, status = split_status(stdout)
     if not status:
         # curl exited non-zero but emitted partial output — show what we got.
         sys.exit(
@@ -222,12 +279,15 @@ def docker_exec_raw(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
         )
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(
+        print(
             f"error: docker exec timed out after {timeout_sec + 5}s "
-            f"(bastion: {bastion}, argv: {shlex.join(argv)})"
+            f"(bastion: {bastion}, argv: {shlex.join(argv)})",
+            file=sys.stderr,
         )
+        sys.exit(2)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -253,10 +313,13 @@ def docker_inspect_raw(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
         )
     except FileNotFoundError:
-        sys.exit("error: docker CLI not found on PATH")
+        print("error: docker CLI not found on PATH", file=sys.stderr)
+        sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.exit(
+        print(
             f"error: docker inspect timed out after {timeout_sec + 5}s "
-            f"(target: {target})"
+            f"(target: {target})",
+            file=sys.stderr,
         )
+        sys.exit(2)
     return proc.returncode, proc.stdout, proc.stderr

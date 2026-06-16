@@ -24,6 +24,8 @@ from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from . import observe
+from . import orient
+from .circuit_breaker import RunAborted
 from .tools import GatherDeps, RunDeps, register_gather_tool, register_tools
 
 # permission.py put defender/hooks on sys.path on import; reuse the budget logic.
@@ -74,14 +76,20 @@ def _gather_instructions(defender_dir: Path) -> str:
     return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
 
 
-def _user_prompt(run_dir: Path, alert_path: Path) -> str:
-    # Run context only. The procedure — artifacts to write, the stop condition,
-    # case_id (= the run-dir basename) — all lives in SKILL.md, the system
-    # prompt; don't restate it, and don't say "Read SKILL.md" (it IS the prompt).
+def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path) -> str:
+    # Run context + the precomputed ORIENT pack. The procedure — artifacts to
+    # write, the stop condition, case_id (= the run-dir basename) — all lives in
+    # SKILL.md, the system prompt; don't restate it, and don't say "Read SKILL.md"
+    # (it IS the prompt). The orientation block hands the agent the deterministic
+    # context it used to spend ~18 round-trips fetching (catalog, system map,
+    # this signature's lessons/corpus) so ORIENT reasons over given material.
+    # Built fail-safe: a degraded pack just means the agent fetches a piece live.
+    orientation = orient.orientation(run_dir, defender_dir, alert_path)
     return (
         "Begin the investigation.\n\n"
         f"run_dir: {run_dir}\n"
-        f"alert: {alert_path}\n"
+        f"alert: {alert_path}\n\n"
+        f"{orientation}"
     )
 
 
@@ -186,7 +194,7 @@ async def run_investigation(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt, is_main_session=True,
     )
-    prompt = _user_prompt(run_dir, alert_path)
+    prompt = _user_prompt(run_dir, alert_path, defender_dir)
 
     t0 = time.time()
     # Hitting request_limit is an expected loop terminator, not a crash:
@@ -203,6 +211,11 @@ async def run_investigation(
     except UsageLimitExceeded as e:
         print(f"[run_pai] request limit reached ({e}); writing partial trace",
               file=sys.stderr)
+    except RunAborted as e:
+        # Run-wide circuit breaker: the environment is broadly unreachable. Stop
+        # the loop and write the partial trace, same as the request-limit path —
+        # every request up to here is already in the live request log.
+        print(f"[run_pai] {e}; writing partial trace", file=sys.stderr)
     wall_ms = (time.time() - t0) * 1000.0
 
     # result is None when the run ends without an End node (e.g. the request-limit

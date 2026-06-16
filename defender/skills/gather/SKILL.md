@@ -36,18 +36,17 @@ in at run setup). The query catalog lives at
 
 Read `{run_dir}/alert.json`.
 
-The dispatch you receive carries the active system's SKILL.md
-`description:` auto-injected at the end (see
-`{defender_dir}/hooks/inject_system_skill_description.py`). The
-description tells you **what this system is for** and **when it's the
-right target** — use it to confirm your lead actually wants this
-system. If the lead does target this system, Read the full
-`{defender_dir}/skills/{system}/SKILL.md` before running anything; the
-body carries the field vocabularies and load-bearing rules that the
-description does not. If the system has an adjacent
-`{defender_dir}/skills/{system}/execution.md` (e.g. elastic), Read it
-too — that's where its CLI surface, query syntax, and connectivity
-notes live ("use `--help`, don't read source").
+The dispatch you receive carries a **descriptor catalog of the systems
+of record** (each system + its one-line `description:`) and names your
+target in the `system:` field. The catalog is an index, not the rules —
+use it to confirm your lead actually wants that system (or to recognize
+it needs a different one). Then **Read the full
+`{defender_dir}/skills/{system}/SKILL.md`** for the system you'll query —
+its body carries the field vocabularies and load-bearing rules the
+descriptor does not — and, if present, its adjacent
+`{defender_dir}/skills/{system}/execution.md` (e.g. elastic), where the
+CLI surface, query syntax, and connectivity notes live ("use `--help`,
+don't read source").
 
 ### 2. Find a template, or name the measurement
 
@@ -175,6 +174,11 @@ returns — `payload_status` is too coarse, it folds exit 1 and 2 into
   query / unknown index — fix the query and re-run; on a *key lookup*
   (e.g. `get-host <ip>`) it's the **Absence** case below (the key isn't
   there).
+- **exit 64 — usage error (your CLI mistake):** a bad flag, unknown
+  subcommand, or missing required arg — *you* called the adapter wrong,
+  the source is fine. Read the `usage:` line in stderr, fix the
+  invocation, and re-run. This is **not** an outage: do not escalate and
+  do not treat it like an `exit 2`.
 - **exit 0 — the source answered.** Run the validity check for the
   result shape you got.
 
