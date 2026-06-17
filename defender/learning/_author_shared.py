@@ -96,10 +96,11 @@ def _generation_count(trailer_label: str) -> int:
     The trailer is the canonical manifest — counting path-touching commits would
     miscount corpus-structure/template commits that predate the author flow, and
     no-op author runs produce no commit so they don't advance it. The grep anchors
-    on the trailer key with **no** required space after the colon, so it counts
-    exactly the commits ``author_*.assert_head_trailers`` accepts (whose regex also
-    tolerates a zero-space trailer) — a stricter ``^label: `` would skip a no-space
-    commit, letting two batches assert the same generation. Labels are disjoint, so
+    on the trailer key with **no** required space after the colon, so a differently-
+    spaced or hand-written trailer still counts — the curator stamps a canonical
+    ``Label: value`` (``_author_curator.stamp_head_trailers``), but a stricter
+    ``^label: `` would skip a no-space commit, letting two batches assert the same
+    generation. Labels are disjoint, so
     a counter never crosses streams (``^Actor-Model:`` cannot match a
     ``Benign-Actor-Model:`` line, which starts with ``Benign-``).
     """

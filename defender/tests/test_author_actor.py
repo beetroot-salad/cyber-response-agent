@@ -83,7 +83,7 @@ def _cfg(ctx: dict, invoke_agent) -> curator.CuratorConfig:
     )
 
 
-def _consume_all(observations, batch_id, generation, cfg):
+def _consume_all(observations, batch_id, cfg):
     """A no-commit AUTHOR_RESULT that routes every to_author obs to consumed_skip."""
     return {
         "committed": [],
@@ -153,9 +153,9 @@ def test_outcome_policy_filter_drops_survived_and_undecidable(
     # The to_author list handed to the agent must contain only caught + incoherent.
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, cfg):
+    def fake_invoke(observations, batch_id, cfg):
         captured.append(observations)
-        return _consume_all(observations, batch_id, generation, cfg)
+        return _consume_all(observations, batch_id, cfg)
 
     rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
@@ -201,9 +201,9 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
 
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, cfg):
+    def fake_invoke(observations, batch_id, cfg):
         captured.append(observations)
-        return _consume_all(observations, batch_id, generation, cfg)
+        return _consume_all(observations, batch_id, cfg)
 
     rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
@@ -230,9 +230,9 @@ def test_held_out_double_check_holds_observation(monkeypatch, tmp_path: Path):
 
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, cfg):
+    def fake_invoke(observations, batch_id, cfg):
         captured.append(observations)
-        return _consume_all(observations, batch_id, generation, cfg)
+        return _consume_all(observations, batch_id, cfg)
 
     rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
@@ -285,34 +285,129 @@ def test_result_partition_rejects_missing_observation():
         curator.validate_agent_result_partition(result, to_author)
 
 
-def test_post_flight_rejects_missing_generation_trailer(monkeypatch, tmp_path: Path):
-    ctx = _isolate(monkeypatch, tmp_path)
-    # Land a commit inside lessons-actor with no trailers.
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "no trailers here"],
-        check=True,
-    )
-    with pytest.raises(AuthorError, match="Generation:"):
-        curator.assert_head_trailers(1, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
-
-
-def test_post_flight_accepts_correct_trailers(monkeypatch, tmp_path: Path):
+def test_stamp_head_trailers_appends_provenance(monkeypatch, tmp_path: Path):
+    """The loop — not the agent — writes the Generation/model trailers onto the
+    committed lesson, so the recorded provenance can't drift from the prompt."""
     ctx = _isolate(monkeypatch, tmp_path)
     (ctx["lessons"] / "x.md").write_text("hello\n")
     subprocess.run(
         ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
-    msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
-    subprocess.run(["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True)
-    curator.assert_head_trailers(1, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
-    # And the head-only-corpus predicate accepts this commit.
+    # The agent commits a PLAIN message — no trailers.
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "defender/actor: lesson batch abc"],
+        check=True,
+    )
+    new_sha = curator.stamp_head_trailers(3, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    assert new_sha == curator.git_head_sha()
+    msg = curator.head_commit_message()
+    assert "Generation: 3" in msg
+    assert "Actor-Model: claude-sonnet-4-6" in msg
+    # The freshly-stamped trailer is exactly what the generation counter greps, so the
+    # next generation advances — provenance round-trips through git history.
+    assert shared.actor_generation_count() == 2
+    # The amend is message-only: the commit still touches only the corpus.
     assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is True
+
+
+def test_stamp_head_trailers_ignores_stray_staged_file(monkeypatch, tmp_path: Path):
+    """The stamping amend must not fold a file the agent left staged *outside* the
+    corpus into the lesson commit. ``verify_agent_state`` checks scope on the
+    un-amended commit, so ``--only`` (HEAD's own tree) is what keeps the integrity
+    gate's 'touches only the corpus' guarantee true after the amend."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    (ctx["lessons"] / "x.md").write_text("hello\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "defender/actor: lesson batch abc"],
+        check=True,
+    )
+    # A stray file staged outside the corpus, left in the index but never committed.
+    (ctx["repo"] / "stray.txt").write_text("stray\n")
+    subprocess.run(["git", "-C", str(ctx["repo"]), "add", "stray.txt"], check=True)
+
+    curator.stamp_head_trailers(3, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    # The amended commit still touches only the corpus — stray.txt was NOT folded in.
+    assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is True
+    files = subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "show", "--name-only", "--pretty=format:", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert "stray.txt" not in files
+
+
+def test_stamp_head_trailers_rejects_agent_written_trailers(monkeypatch, tmp_path: Path):
+    """If the agent disobeys the prompt and writes its own trailers, ``git --trailer``
+    would *append* a second set — and the first-match readers (``eval_secondary``) would
+    pin the agent's value over the loop's. Stamping must refuse (queue intact for retry)
+    rather than silently produce duplicate provenance."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    (ctx["lessons"] / "x.md").write_text("hello\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m",
+         "defender/actor: lesson batch abc\n\nGeneration: 99\nActor-Model: wrong-model"],
+        check=True,
+    )
+    head_before = curator.git_head_sha()
+    with pytest.raises(AuthorError, match="already carries"):
+        curator.stamp_head_trailers(3, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    # Refused without rewriting HEAD — no duplicate trailers stamped.
+    assert curator.git_head_sha() == head_before
+
+
+def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
+    """End-to-end: the agent commits a plain message; run_batch stamps the provenance
+    trailers and rotates the committed observation out against the rewritten sha."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    _write_queue(ctx["pending"], [_row("a/0", "caught")])
+
+    def committing_invoke(observations, batch_id, cfg):
+        # Mimic the agent: write a lesson, commit a PLAIN message (no trailers).
+        oid = observations[0]["observation_id"]
+        (ctx["lessons"] / "lesson.md").write_text(
+            f"---\nsource_observation_ids: [{oid}]\n---\nbody\n"
+        )
+        subprocess.run(
+            ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/lesson.md"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m",
+             f"defender/actor: lesson batch {batch_id}"],
+            check=True,
+        )
+        return {
+            "committed": [oid],
+            "consumed_skip": [],
+            "commit_sha": curator.git_head_sha(),
+        }
+
+    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
+    assert rc == 0
+    # The loop stamped the trailers the agent never wrote.
+    msg = curator.head_commit_message()
+    assert "Generation: 1" in msg
+    assert "Actor-Model: claude-sonnet-4-6" in msg
+    # a/0 rotated out to consumed, stamped with the amended (post-trailer) sha.
+    consumed = [
+        json.loads(line)
+        for line in (ctx["pending"] / "actor_observations.consumed.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    by_id = {r["observation_id"]: r for r in consumed}
+    assert by_id["a/0"]["consumed_category"] == "consumed_committed"
+    assert by_id["a/0"]["consumed_commit"] == curator.git_head_sha()
+    # Queue drained.
+    assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
 
 
 def test_post_flight_rejects_commit_outside_lessons_actor(monkeypatch, tmp_path: Path):
@@ -344,9 +439,7 @@ def test_post_flight_rejects_no_commit_result_when_head_changed(
     result = {"committed": [], "consumed_skip": [], "commit_sha": None}
 
     with pytest.raises(AuthorError, match="HEAD changed"):
-        curator.verify_agent_state(
-            result, 1, "claude-sonnet-4-6", pre_agent_head, _cfg(ctx, _consume_all)
-        )
+        curator.verify_agent_state(result, pre_agent_head, _cfg(ctx, _consume_all))
 
 
 # ---------------------------------------------------------------------------

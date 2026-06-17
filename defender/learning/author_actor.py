@@ -49,17 +49,16 @@ AuthorError = _curator.AuthorError
 def invoke_agent(
     observations: list[dict],
     batch_id: str,
-    generation: int,
     cfg: _curator.CuratorConfig,
 ) -> dict:
     """Spawn the actor curator agent. Returns the parsed AUTHOR_RESULT dict.
 
     The actor corpus forward-checks per-lesson (``verify_forward_actor.py``) with a
     batch wrapper (``verify_batch.py``), so it hands the agent both command templates
-    and allows both verifier scripts."""
+    and allows both verifier scripts. The commit-trailer provenance is stamped by the
+    loop, not the agent, so nothing trailer-related goes in the prompt."""
     verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
     extra_prompt = (
-        f"trailer_label: {cfg.trailer_label}\n"
         f"verify_forward_command: {verifier_py} defender/learning/verify_forward_actor.py "
         f"<lesson_path> <observation_id>\n"
         f"verify_batch_command: {verifier_py} defender/learning/verify_batch.py "
@@ -71,7 +70,7 @@ def invoke_agent(
         f"Bash({verifier_py} defender/learning/verify_forward_actor.py:*),"
     )
     return _curator.invoke_curator_agent(
-        cfg, observations, batch_id, generation,
+        cfg, observations, batch_id,
         extra_prompt=extra_prompt, extra_tools=extra_tools,
     )
 

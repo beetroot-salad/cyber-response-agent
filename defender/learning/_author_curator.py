@@ -4,11 +4,17 @@
 ``author_actor.py`` (actor tradecraft) and ``author_actor_benign.py`` (the two
 environment-lessons directions) are the same curator: lock the queue, lock the
 repo, clean-scope check, partition the batch, hand the survivors to a ``claude -p``
-curator agent, cross-check what it committed against git, then rotate the queue.
-Only the corpus directory, queue paths, outcome policy, commit trailer, generation
-counter, curator-agent prompt/model, and forward-check invocation differ — captured
-in a ``CuratorConfig``. This module owns the envelope; the direction modules own the
-config + the one genuinely-divergent piece (``invoke_agent``).
+curator agent, cross-check what it committed against git, stamp the provenance
+trailers onto that commit, then rotate the queue. Only the corpus directory, queue
+paths, outcome policy, commit trailer, generation counter, curator-agent prompt/model,
+and forward-check invocation differ — captured in a ``CuratorConfig``. This module owns
+the envelope; the direction modules own the config + the one genuinely-divergent piece
+(``invoke_agent``).
+
+The ``Generation:`` / ``{trailer_label}:`` provenance trailers are written by this
+module (``stamp_head_trailers``), not the agent: the loop already computes both values,
+so stamping them keeps the recorded provenance from drifting off a hand-typed literal
+in the agent prompt and out of the agent's reach entirely.
 
 The agent owns fold/supersede/new judgment and the forward-check flow; this module
 enforces the transaction envelope (mirrors the prose in ``author.py`` /
@@ -25,7 +31,6 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from re import Pattern
 from collections.abc import Callable
 
 import yaml
@@ -79,8 +84,8 @@ class CuratorConfig:
     author_timeout: int
     author_effort: str
     # The one genuinely-divergent step: build the AUTHOR_RESULT dict from the
-    # batch. Signature: (observations, batch_id, generation, cfg) -> dict.
-    invoke_agent: Callable[[list[dict], str, int, CuratorConfig], dict]
+    # batch. Signature: (observations, batch_id, cfg) -> dict.
+    invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
 
     @property
     def pending_file_rel(self) -> str:
@@ -97,15 +102,6 @@ class CuratorConfig:
     @property
     def run_log(self) -> Path:
         return _PENDING_DIR / f"{self.log_prefix}_run.jsonl"
-
-    @property
-    def trailer_re(self) -> Pattern[str]:
-        """Matcher for the commit's model trailer, derived from ``trailer_label`` so
-        the label and the pattern cannot drift. Tolerates a zero-space trailer to
-        match what the generation counter (``_generation_count``) counts."""
-        return re.compile(
-            rf"^{re.escape(self.trailer_label)}:\s*(\S.*?)\s*$", re.MULTILINE
-        )
 
 
 def _logger(cfg: CuratorConfig) -> Callable[[str], None]:
@@ -248,7 +244,6 @@ def invoke_curator_agent(
     cfg: CuratorConfig,
     observations: list[dict],
     batch_id: str,
-    generation: int,
     *,
     extra_prompt: str,
     extra_tools: str,
@@ -258,12 +253,12 @@ def invoke_curator_agent(
     ``extra_prompt`` carries the direction's forward-check command line(s); it is
     spliced between the standard header and the observations. ``extra_tools`` carries
     the direction's verifier ``Bash(...)`` allowances, spliced into the corpus-scoped
-    git + edit allowlist."""
+    git + edit allowlist. The agent is handed neither the generation nor the model: the
+    loop stamps those provenance trailers itself (``stamp_head_trailers``), so the agent
+    only authors lesson content + a plain commit message."""
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {cfg.corpus_dir_rel}\n"
-        f"generation: {generation}\n"
-        f"actor_model: {cfg.actor_model}\n"
         f"{extra_prompt}"
         f"observations ({len(observations)}):\n"
         f"{json.dumps(observations, indent=2)}\n"
@@ -333,25 +328,44 @@ def head_commit_message() -> str:
     return proc.stdout
 
 
-_TRAILER_GEN = re.compile(r"^Generation:\s*(\d+)\s*$", re.MULTILINE)
+def stamp_head_trailers(generation: int, model: str, cfg: CuratorConfig) -> str:
+    """Append the provenance trailers to HEAD and return the rewritten sha.
 
+    The curator agent commits a plain message; the loop — not the agent — owns the
+    ``Generation:`` / ``{trailer_label}:`` provenance (it already computes both), so the
+    recorded values can't drift from a hand-typed literal in the agent prompt. Amends in
+    place (message-only; the tree is unchanged) under the repo lock the caller already
+    holds. The ``{trailer_label}:`` trailer is exactly what ``_generation_count`` greps
+    to count generations, so stamping keeps that counter correct on the next batch.
 
-def assert_head_trailers(
-    expected_generation: int, expected_model: str, cfg: CuratorConfig
-) -> None:
-    msg = head_commit_message()
-    m_gen = _TRAILER_GEN.search(msg)
-    if m_gen is None or int(m_gen.group(1)) != expected_generation:
+    Two guards keep the amend from rewriting provenance the integrity gate already
+    cleared. ``--only`` (with no pathspec) re-uses HEAD's own tree, so a file the agent
+    left staged *outside* the corpus can't ride into the lesson commit — a plain
+    ``--amend`` commits the whole index, which ``verify_agent_state``'s pre-amend
+    scope check (run on the un-amended commit) would never catch. And a pre-amend scan
+    refuses to stamp a commit that already carries the trailers: ``git --trailer``
+    *appends*, so a disobedient agent's hand-written trailer would survive alongside
+    ours and shadow it for first-match readers (``eval_secondary.parse_trailers``)."""
+    if re.search(
+        rf"(?m)^(?:Generation|{re.escape(cfg.trailer_label)}):", head_commit_message()
+    ):
         raise AuthorError(
-            f"HEAD commit missing or wrong Generation: trailer "
-            f"(expected {expected_generation}); message was:\n{msg}"
+            f"agent commit already carries Generation:/{cfg.trailer_label}: trailers; "
+            "the loop owns provenance and git --trailer would append duplicates — "
+            "refusing to stamp (queue intact for retry)"
         )
-    m_model = cfg.trailer_re.search(msg)
-    if m_model is None or m_model.group(1).strip() != expected_model:
+    proc = subprocess.run(
+        ["git", "commit", "--amend", "--only", "--no-edit",
+         "--trailer", f"Generation: {generation}",
+         "--trailer", f"{cfg.trailer_label}: {model}"],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
         raise AuthorError(
-            f"HEAD commit missing or wrong {cfg.trailer_label}: trailer "
-            f"(expected {expected_model}); message was:\n{msg}"
+            f"failed to stamp Generation:/{cfg.trailer_label}: trailers onto HEAD: "
+            f"{proc.stderr.strip()}"
         )
+    return git_head_sha()
 
 
 def _canonical_sha(sha: str) -> str:
@@ -430,11 +444,14 @@ def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None
 
 def verify_agent_state(
     result: dict,
-    expected_generation: int,
-    expected_model: str,
     pre_agent_head: str,
     cfg: CuratorConfig,
 ) -> None:
+    """Cross-check the agent's reported state against git before the loop stamps
+    provenance + rotates. On a claimed commit: HEAD matches the reported sha, touches
+    only the corpus, and leaves it clean. On no commit: HEAD is unchanged and the corpus
+    clean. The provenance trailers are written afterward by ``stamp_head_trailers``, not
+    verified here — the loop authors them, so there is nothing to check."""
     commit_sha = result.get("commit_sha")
     committed = _result_list(result, "committed")
     if committed and not commit_sha:
@@ -458,7 +475,6 @@ def verify_agent_state(
             raise AuthorError(
                 f"author committed but {cfg.corpus_dir_rel} still has uncommitted edits"
             )
-        assert_head_trailers(expected_generation, expected_model, cfg)
     else:
         head = git_head_sha()
         if head != pre_agent_head:
@@ -644,17 +660,22 @@ def _author_to_author(
     log = _logger(cfg)
     pre_agent_head = git_head_sha()
     try:
-        result = cfg.invoke_agent(to_author, batch_id, generation, cfg)
+        result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
         log(f"FATAL: {e}")
         return 2, None, [], []
     try:
-        verify_agent_state(result, generation, cfg.actor_model, pre_agent_head, cfg)
+        verify_agent_state(result, pre_agent_head, cfg)
         validate_agent_result_partition(result, to_author)
+        commit_sha = result.get("commit_sha")
+        if commit_sha:
+            # The loop owns the provenance trailers, not the agent: stamp
+            # Generation:/<model> onto the verified commit and rotate against the
+            # rewritten sha.
+            commit_sha = stamp_head_trailers(generation, cfg.actor_model, cfg)
     except AuthorError as e:
         log(f"FATAL: {e}")
         return 2, None, [], []
-    commit_sha = result.get("commit_sha")
     committed: list[dict] = []
     consumed_skip: list[dict] = []
     for oid in _result_list(result, "committed"):
