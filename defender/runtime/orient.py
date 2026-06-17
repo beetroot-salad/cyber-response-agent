@@ -32,15 +32,10 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = _DEFENDER_DIR.parent
-# scripts/ for workspace_map, repo root for the `defender.skills.invlang` package.
-for _p in (str(_DEFENDER_DIR / "scripts"), str(_REPO_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO_ROOT = _DEFENDER_DIR.parent  # subprocess cwd for the `defender-*` shims below.
 
 _SHIM_TIMEOUT_S = 20
 
@@ -86,7 +81,7 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path) -> str:
     # forbids. On failure the shim-backed sections (lessons/corpus) simply omit;
     # the workspace + catalog sections don't need env and still build.
     try:
-        import run  # defender/run.py
+        from defender import run
         env = run.run_env(defender_dir, run_dir)
     except Exception:  # noqa: BLE001 — orientation must never break the run
         env = {}
@@ -100,7 +95,7 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path) -> str:
 
     # 1. Workspace map (systems, adapters, query templates, run-dir layout).
     try:
-        from workspace_map import workspace_map
+        from defender.scripts.workspace_map import workspace_map
         sections.append("## Workspace\n" + workspace_map(run_dir).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run
         sections.append(f"## Workspace\n_(unavailable: {e!r} — discover via ls/Read)_")

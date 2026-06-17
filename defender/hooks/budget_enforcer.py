@@ -27,12 +27,11 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Sibling-import the shared run-dir helper. Inserting our own dir covers
-# the importlib-loaded test path; running as a script adds it automatically.
-_HOOK_DIR = Path(__file__).resolve().parent
-if str(_HOOK_DIR) not in sys.path:
-    sys.path.insert(0, str(_HOOK_DIR))
-from _run_dir import resolve_run_dir, update_json_locked  # noqa: E402
+# Sibling-import the shared run-dir helper. defender/hooks/<this>.py → parents[2]
+# is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+from defender.hooks._run_dir import resolve_run_dir, update_json_locked  # noqa: E402
 
 # Caps are intentionally inline + single-default: the defender has no
 # per-signature permissions.yaml to overlay, so there is nothing to

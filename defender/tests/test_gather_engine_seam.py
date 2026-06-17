@@ -12,17 +12,15 @@ pure decision/prompt/strip helpers below don't):
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_DEFENDER))
 
 pytest.importorskip("pydantic_ai")
 
-from runtime import driver, observe, permission, tools  # noqa: E402
+from defender.runtime import driver, observe, permission, tools  # noqa: E402
 
 
 def _tool_names(agent) -> set:

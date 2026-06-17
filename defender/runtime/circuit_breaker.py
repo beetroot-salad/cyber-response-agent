@@ -37,17 +37,12 @@ via the shared `_run_dir.update_json_locked` helper (the same primitive behind
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# defender/hooks on sys.path for the shared locked-JSON helper. circuit_breaker is
-# imported by tools.py/driver.py *before* permission.py runs its own bootstrap, so
-# it can't rely on hooks already being importable — mirror permission.py here.
-_HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
-if str(_HOOKS_DIR) not in sys.path:
-    sys.path.insert(0, str(_HOOKS_DIR))
-from _run_dir import update_json_locked  # noqa: E402
+# Shared locked-JSON helper. The workspace root is on sys.path via the
+# entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+from defender.hooks._run_dir import update_json_locked
 
 # A system trips after this many connectivity/auth failures; the run aborts after
 # this many across all systems. With the per-system block at 2, reaching 5 total

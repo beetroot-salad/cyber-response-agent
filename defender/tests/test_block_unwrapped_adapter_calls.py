@@ -24,8 +24,9 @@ def _load(monkeypatch):
     assert spec.loader is not None
     spec.loader.exec_module(mod)
     # Deterministic adapter roster (don't depend on the real bin/ dir contents).
-    # The hook reads `adapter_shims` from its `_cmd_segments` import; patch that.
-    import _cmd_segments  # type: ignore[import-not-found]
+    # The hook reads `adapter_shims` from its `_cmd_segments` import; patch the
+    # canonical module the hook resolves (`defender.hooks._cmd_segments`).
+    from defender.hooks import _cmd_segments
     monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
         "defender-invlang", "defender-record-query", "defender-data-source-debug",
         "defender-elastic", "defender-cmdb", "defender-identity", "defender-host-state",

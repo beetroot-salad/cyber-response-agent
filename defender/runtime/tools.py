@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,23 +24,19 @@ from pydantic_ai.usage import UsageLimits
 from . import circuit_breaker
 from . import permission
 
-# `permission` import above bootstrapped defender/hooks onto sys.path; add
-# scripts/tools/ for the capture core. Reuse the hook/wrapper helpers in-process
-# (the clean version of the claude -p PreToolUse hooks).
-_SCRIPTS_TOOLS = Path(__file__).resolve().parents[1] / "scripts" / "tools"
-if str(_SCRIPTS_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_TOOLS))
-
-from tag_tool_results import wrap as _wrap  # noqa: E402
-from record_lead import claim_lead as _claim_lead  # noqa: E402
-from inject_system_skill_description import descriptor_catalog as _descriptor_catalog  # noqa: E402
-from record_query import (  # noqa: E402
+# Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
+# PreToolUse hooks + the gather capture core). The workspace root is on sys.path
+# via the entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+from defender.hooks.tag_tool_results import wrap as _wrap
+from defender.hooks.record_lead import claim_lead as _claim_lead
+from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
+from defender.scripts.tools.record_query import (
     capture as _capture,
     derive_system as _derive_system,
     LEAD_ID_RE as _LEAD_ID_RE,
     PASSTHROUGH_MAX_BYTES as _READ_CHAR_CAP,
 )
-from record_lesson_load import lesson_name as _lesson_name  # noqa: E402
+from defender.hooks.record_lesson_load import lesson_name as _lesson_name
 
 _BASH_TIMEOUT_S = 120
 
@@ -122,8 +117,8 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
 
 def _bash_env(deps: RunDeps) -> dict[str, str]:
     """The runtime agent's shell environment — defined once in run.py and shared
-    with the `claude -p` engine (defender/ is on sys.path[0] under run_pai)."""
-    import run  # noqa: E402
+    with the `claude -p` engine."""
+    from defender import run
     return run.run_env(deps.defender_dir, deps.run_dir)
 
 

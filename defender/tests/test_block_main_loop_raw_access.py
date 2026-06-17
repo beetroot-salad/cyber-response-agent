@@ -247,8 +247,9 @@ def test_newly_onboarded_adapter_auto_gates_in_main_loop(monkeypatch, capsys):
     """A new adapter dropped in bin/ auto-gates here too — the shim roster is
     sourced from the shared _cmd_segments taxonomy, not a hardcoded list. This
     pins the PR's 'single source of truth' claim for the main-loop clamp."""
-    mod = _load(monkeypatch)  # exec inserts the hooks dir on sys.path
-    import _cmd_segments  # type: ignore[import-not-found]
+    mod = _load(monkeypatch)
+    # Patch the canonical module the hook resolves (`defender.hooks._cmd_segments`).
+    from defender.hooks import _cmd_segments
     monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
         "defender-record-query", "defender-invlang", "defender-data-source-debug",
         "defender-elastic", "defender-foo",  # 'foo' is the freshly onboarded adapter

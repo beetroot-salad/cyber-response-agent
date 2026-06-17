@@ -11,17 +11,15 @@ dumps a line window can't page.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_DEFENDER))
 
 pytest.importorskip("pydantic_ai")
 
-from runtime import tools  # noqa: E402
+from defender.runtime import tools  # noqa: E402
 
 CAP = tools._READ_CHAR_CAP
 

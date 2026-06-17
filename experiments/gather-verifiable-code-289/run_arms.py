@@ -41,8 +41,9 @@ import json  # noqa: E402
 import shutil  # noqa: E402
 import time  # noqa: E402
 
-# defender/ on sys.path → `import run`, `from runtime import ...` resolve as in run_pai.
-sys.path.insert(0, str(_DEFENDER_DIR))
+# Workspace root on sys.path → `defender.*` namespace imports resolve, as in run_pai.
+if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
+    sys.path.insert(0, _root)
 
 import yaml  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
@@ -50,8 +51,8 @@ from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 
-from runtime import driver, observe, tools  # noqa: E402
-from inject_system_skill_description import read_description  # noqa: E402
+from defender.runtime import driver, observe, tools  # noqa: E402
+from defender.hooks.inject_system_skill_description import read_description  # noqa: E402
 
 FIXTURES = _EXP_DIR / "fixtures"
 VARIANTS = _EXP_DIR / "variants"
