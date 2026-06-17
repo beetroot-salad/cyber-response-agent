@@ -66,7 +66,7 @@ def _summary(
     summary_seq: int,
     *,
     label: str = "distinct-users",
-    snippet: str = "jq '[.[].data.srcuser] | unique | length' gather_raw/l-001/0.json",
+    snippet: str | None = None,
     output: str = "3",
     output_status: str = "ok",
 ) -> None:
@@ -74,8 +74,15 @@ def _summary(
 
     `tools` defaults to `["jq"]` and `exit_code` is derived from `output_status`
     (the wrapper's invariant); a test needing other values writes the row raw.
+    The default `snippet` reads *this row's own* `(lead_id, payload_seq)` payload
+    so the recorded code stays consistent with the FK it is filed under.
     """
     run.mkdir(parents=True, exist_ok=True)
+    if snippet is None:
+        seq = payload_seq if isinstance(payload_seq, int) else 0
+        snippet = (
+            f"jq '[.[].data.srcuser] | unique | length' gather_raw/{lead_id}/{seq}.json"
+        )
     rec = {
         "lead_id": lead_id,
         "payload_seq": payload_seq,

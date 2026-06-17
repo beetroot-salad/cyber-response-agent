@@ -1080,7 +1080,7 @@ def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
     assert not paths.pending_file.is_relative_to(repo)
 
 
-def test_validate_judge_doc_accepts_gather_fidelity(tmp_path: Path):
+def test_validate_judge_doc_accepts_gather_fidelity():
     # gather-fidelity (#311) is an audit-only adversarial finding type.
     doc = _full_judge_doc()
     doc["defender_findings"][0]["type"] = "gather-fidelity"
