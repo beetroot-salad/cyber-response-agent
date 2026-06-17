@@ -17,7 +17,6 @@ free, with no model call.
 
 from __future__ import annotations
 
-import shlex
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -124,15 +123,12 @@ def _safe_gather_tokens() -> frozenset:
     return frozenset(_safe_main_tokens() | GATHER_READONLY_TOOLS)
 
 
-def _segment_is_adapter(seg: str) -> bool:
+def _segment_is_adapter(toks: list[str]) -> bool:
     """True iff the segment's COMMAND (first token) is a data-source adapter — a
-    `defender-<system>` shim or a `<system>_cli.py` script. Anchored to command
-    position: an adapter name appearing as an *argument* (`which defender-elastic`,
-    `cat …/defender-elastic`) is NOT a query and must not be captured."""
-    try:
-        toks = shlex.split(seg)
-    except ValueError:
-        return False
+    `defender-<system>` shim or a `<system>_cli.py` script. `toks` is one command's
+    token list from `split_segments`. Anchored to command position: an adapter name
+    appearing as an *argument* (`which defender-elastic`, `cat …/defender-elastic`)
+    is NOT a query and must not be captured."""
     if not toks:
         return False
     cmd = toks[0]
@@ -151,13 +147,10 @@ def adapter_argv(command: str) -> list[str] | None:
     inner = unwrap(command.strip())
     if inner is None:
         return None
-    segs = [s for s in split_segments(inner) if s.strip()]
+    segs = [s for s in split_segments(inner) if s]
     if len(segs) != 1 or not _segment_is_adapter(segs[0]):
         return None
-    try:
-        return shlex.split(segs[0])
-    except ValueError:
-        return None
+    return segs[0]  # the command's token list IS the argv (shlex-resolved)
 
 
 def decide_bash(command: str, *, is_main_session: bool) -> Decision:
@@ -183,7 +176,7 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
         inner = unwrap(cmd)
         if inner is None:
             return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
-        segs = [s for s in split_segments(inner) if s.strip()]
+        segs = [s for s in split_segments(inner) if s]
         if any(_segment_is_adapter(s) for s in segs):
             if len(segs) != 1:
                 return Decision(False, ADAPTER_STANDALONE_REASON)

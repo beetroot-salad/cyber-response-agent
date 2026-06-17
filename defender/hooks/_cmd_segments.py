@@ -93,34 +93,43 @@ def unwrap(cmd: str) -> str | None:
     return cmd
 
 
-def split_segments(script: str) -> list[str]:
-    """Split on shell operators (`&&`, `||`, `|`, `;`) that are OUTSIDE quotes.
-    A naive regex split would cut a `|` inside a jq filter (`jq '.a | .b'`)."""
-    segs: list[str] = []
-    buf: list[str] = []
-    quote: str | None = None
-    i, n = 0, len(script)
-    while i < n:
-        c = script[i]
-        if quote is not None:
-            buf.append(c)
-            if c == quote:
-                quote = None
-            i += 1
-        elif c in ("'", '"'):
-            quote = c
-            buf.append(c)
-            i += 1
-        elif script.startswith("&&", i) or script.startswith("||", i):
-            segs.append("".join(buf))
-            buf = []
-            i += 2
-        elif c in "|;":
-            segs.append("".join(buf))
-            buf = []
-            i += 1
+# Shell command separators: a `;`/`|`/`||`/`&&` at top level ends one command and
+# begins the next. (A bare `&` background operator is intentionally NOT a separator
+# here, preserving the prior splitter's behavior.) `shlex(punctuation_chars=True)`
+# emits these — and redirects like `>` — as their own tokens, but only when they
+# are OUTSIDE quotes; a `|`/`>` inside a jq filter stays part of its token.
+_SEGMENT_SEPARATORS = frozenset({"|", "||", "&&", ";"})
+
+
+def tokenize(script: str) -> list[str] | None:
+    """Shell tokens via stdlib `shlex` (POSIX + `punctuation_chars`): quotes and
+    backslash escapes are resolved by the tokenizer, and shell operators
+    (`|`/`||`/`&&`/`;`/`&`/redirects) come back as their own tokens. Returns the
+    token list, or None on unbalanced quotes (callers fail closed). Replaces the
+    hand-rolled quote/escape state machine this module used to carry."""
+    lex = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        return list(lex)
+    except ValueError:
+        return None
+
+
+def split_segments(script: str) -> list[list[str]]:
+    """Decompose a command into per-command token lists, split on top-level shell
+    separators (`|`/`||`/`&&`/`;`). Tokenization is `shlex`'s job, so a `|`/`;`/an
+    escaped `\\"` inside a jq filter is token content, not a separator (the false
+    splits the old char-scanner made on a stray `\\"` are gone). Returns a list of
+    token lists (each the argv of one command, with redirect/operator tokens kept
+    in place); on unbalanced quotes, the whole script comes back as a single opaque
+    token so the head/safety checks refuse it rather than mis-parsing."""
+    toks = tokenize(script)
+    if toks is None:
+        return [[script]]
+    segs: list[list[str]] = [[]]
+    for t in toks:
+        if t in _SEGMENT_SEPARATORS:
+            segs.append([])
         else:
-            buf.append(c)
-            i += 1
-    segs.append("".join(buf))
+            segs[-1].append(t)
     return segs

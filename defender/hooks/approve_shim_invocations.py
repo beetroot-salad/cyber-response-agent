@@ -83,22 +83,60 @@ _FIND_SENSITIVE_RE = re.compile(
     r"(\.env|credentials|ground[-_]truth|cases\.json|\.ssh)", re.IGNORECASE
 )
 
-# Benign stderr redirects — discard (`2>/dev/null`) or merge (`2>&1`) of stderr.
-# The agent appends these reflexively; they don't write a file or exfiltrate
-# (the harness captures stderr regardless), so strip them BEFORE the unsafe-token
-# check rather than denying the whole command. A *stdout* file redirect
-# (`> out`, `1> out`, `&> out`) is NOT matched here and stays denied.
-# The trailing `(?=\s|$)` anchors the match to a complete token so a redirect to
-# a *different* target sharing the prefix (e.g. `2>/dev/nullX`, a real stderr→file
-# write) is NOT stripped — it keeps its `>` and trips _UNSAFE_TOKEN_RE below.
-_BENIGN_STDERR_RE = re.compile(r"\s*2>\s*(?:/dev/null|&1)(?=\s|$)")
+# A leading `VAR=value` env-assignment prefix (the credential-groping vector) —
+# matched against the first token of a segment only.
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# Tokens that make a command unsafe to approve regardless of leading word:
-# output redirects, command substitution, env-assignment prefixes. If any
-# segment carries one, fall through to the normal flow. Over-cautious by design
-# (a `>` inside a quoted jq filter trips it) — a false passthrough is harmless,
-# a false approval is not.
-_UNSAFE_TOKEN_RE = re.compile(r"(\$\(|`|>|<|\bexport\b|^[A-Za-z_][A-Za-z0-9_]*=)")
+
+def _is_redirect(tok: str) -> bool:
+    """True for a shell redirect *operator* token — `>`, `>>`, `<`, `>&`, `<&`,
+    `&>`, `>|`, … `shlex(punctuation_chars=True)` only emits these as standalone
+    tokens when they are UNQUOTED; a `>`/`<` inside a quoted jq filter stays inside
+    its token, so it never reaches here. A bare `&` (background) is not a redirect."""
+    return bool(tok) and set(tok) <= {"<", ">", "&"} and ("<" in tok or ">" in tok)
+
+
+def _is_benign_stderr(toks: list[str], i: int) -> bool:
+    """Is the redirect token at `toks[i]` a benign stderr redirect — `2>/dev/null`
+    (discard) or `2>&1` (merge into stdout)? Tokenized as `2 > /dev/null` /
+    `2 >& 1`. These don't write a file or exfiltrate (the harness captures stderr
+    regardless), so they don't disqualify an otherwise read-only command. Any other
+    redirect (a stdout `>`, `1>`, a stderr write to a real file) is NOT benign."""
+    prev = toks[i - 1] if i > 0 else None
+    nxt = toks[i + 1] if i + 1 < len(toks) else None
+    if prev != "2":
+        return False
+    return (toks[i] == ">" and nxt == "/dev/null") or (toks[i] in (">", ">&") and nxt == "1")
+
+
+def _segment_unsafe(toks: list[str]) -> bool:
+    """True if a command's token list carries a construct unsafe to auto-approve:
+    a (non-benign) redirect, a command substitution (`$(`/backtick), an `export`,
+    or a leading `VAR=` assignment. Quote-correct: a `>`/`<` inside a quoted jq
+    filter is token content (see `_is_redirect`), so jq comparisons don't trip
+    this — the false positive that hard-denied valid summary computations in the
+    in-process gate. A real redirect/substitution still does. Conservative on the
+    rare single-quoted `$(`/backtick literal (flagged though inert) — a false
+    passthrough, never a false approval."""
+    for i, t in enumerate(toks):
+        if _is_redirect(t):
+            if _is_benign_stderr(toks, i):
+                continue
+            return True
+        # An UNQUOTED `(`/`)` is its own token (punctuation_chars) — a subshell or
+        # `$(…)` command substitution. Quoted parens inside a jq filter stay inside
+        # their token and never appear here, so jq `select(…)` is unaffected.
+        if t in ("(", ")"):
+            return True
+        # `$(…)`/backtick that survived as a single token (the quoted form, e.g.
+        # `"$(cmd)"`, which the shell still evaluates).
+        if "$(" in t or "`" in t:
+            return True
+        if t == "export":
+            return True
+        if i == 0 and _ENV_ASSIGN_RE.match(t):
+            return True
+    return False
 
 
 def _is_main_session(hook_data: dict) -> bool:
@@ -110,24 +148,22 @@ def _is_main_session(hook_data: dict) -> bool:
 
 
 def _all_segments_safe(script: str, safe_leading: frozenset) -> bool:
-    for raw in _split_segments(script):
-        # Drop benign stderr redirects first (2>/dev/null, 2>&1) — they're not a
-        # file write or exfil vector, just noise the agent appends. A real stdout
-        # redirect still carries a bare `>` and trips _UNSAFE_TOKEN_RE below.
-        seg = _BENIGN_STDERR_RE.sub("", raw).strip()
-        if not seg:
+    for toks in _split_segments(script):
+        if not toks:
             continue
-        if _UNSAFE_TOKEN_RE.search(seg):
+        if _segment_unsafe(toks):
             return False
-        head = seg.split(None, 1)[0]
+        head = toks[0]
         if head not in safe_leading:
             return False
         # `find` is read-only only without its action flags (-exec/-delete/…),
         # and must not be a locator for denied-read files (secrets / ground truth).
         # Reject either wherever find is in safe_leading (gather); in the main loop
         # find isn't in the set, so the head check above already denied it.
-        if head == "find" and (_FIND_DANGER_RE.search(seg) or _FIND_SENSITIVE_RE.search(seg)):
-            return False
+        if head == "find":
+            joined = " ".join(toks)
+            if _FIND_DANGER_RE.search(joined) or _FIND_SENSITIVE_RE.search(joined):
+                return False
     return True
 
 

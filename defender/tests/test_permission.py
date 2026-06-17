@@ -94,6 +94,35 @@ def test_adapter_argv_none_for_non_standalone_adapter(cmd):
     assert permission.adapter_argv(cmd) is None
 
 
+# --- jq comparison operators are not redirects (quote-aware unsafe scan) -----
+# Regression: `>`/`<` inside a quoted jq filter (a comparison) were read as shell
+# redirects and hard-denied in-process. They must be allowed; real redirects and
+# command substitution outside quotes must still be denied.
+
+@pytest.mark.parametrize("cmd", [
+    # plain jq with comparisons (single-quoted filter, double-quoted literals)
+    '''jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' f.json''',
+    '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
+    # record-summary with the jq payload single-quoted ...
+    '''defender-record-summary --lead l-1 --label x -- 'jq "[.h[] | select(.n > 0)]" f.json' ''',
+    # ... and double-quoted with escaped inner quotes (the form gather emits)
+    '''defender-record-summary --lead l-1 --label x -- "jq '[.hits[] | select(.\\"@timestamp\\" >= \\"2026-05-25T12:53:35Z\\")]' f.json"''',
+])
+def test_gather_allows_quoted_jq_comparisons(cmd):
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+    assert permission.decide_bash(cmd, is_main_session=True).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    "jq '.x' f.json > /tmp/out",            # real stdout redirect outside quotes
+    "cat f.json 1> /tmp/out",               # explicit fd redirect
+    "jq '.x' $(cat injected)",              # command substitution outside quotes
+    'jq ".x" "$(rm -rf /)"',                # substitution live inside double quotes
+])
+def test_gather_still_denies_real_redirect_and_substitution(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+
+
 # --- read ------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [
