@@ -56,10 +56,8 @@ from typing import Any
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
-import sys as _sys  # noqa: E402
-from pathlib import Path as _Path  # noqa: E402
-if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
-    _sys.path.insert(0, _root)
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
 
 from defender.learning import (
     _author_shared,

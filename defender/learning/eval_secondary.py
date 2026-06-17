@@ -103,6 +103,11 @@ import yaml
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Put the workspace root on sys.path so the on-demand sibling loaders below
+# (_load_shared / _load_loop exec modules whose imports are absolute
+# `defender.learning.*`) resolve when this harness is run directly.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 EVAL_OUT_DIR = LEARNING_DIR / "eval" / "secondary"
 FIXTURES_DIR = REPO_ROOT / "defender" / "fixtures" / "held-out"

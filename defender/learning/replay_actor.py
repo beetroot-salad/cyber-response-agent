@@ -46,6 +46,14 @@ from pathlib import Path
 
 import yaml
 
+# Put the workspace root on sys.path so the sibling loaders below resolve the
+# modules' absolute `defender.learning.*` imports when this script is run
+# directly (or as the eval_secondary subprocess). _loop_subagents.py and
+# lead_repository.py are library modules — unlike the entry points, they don't
+# self-bootstrap. See defender/tests/conftest.py.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
 
 def _load_sibling(modname: str, path: Path):
     spec = importlib.util.spec_from_file_location(modname, path)
