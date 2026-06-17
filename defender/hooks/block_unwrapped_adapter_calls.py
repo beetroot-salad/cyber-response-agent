@@ -122,8 +122,7 @@ def _has_unwrapped_adapter(cmd: str) -> bool:
     if inner is None:
         return False
     adapters = adapter_shims()
-    for raw in split_segments(inner):
-        parts = raw.split()
+    for parts in split_segments(inner):  # each a shlex token list (one command)
         if not parts:
             continue
         if _is_wrapper_segment(parts):

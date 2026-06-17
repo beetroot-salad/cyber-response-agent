@@ -81,46 +81,83 @@ def unwrap(cmd: str) -> str | None:
             i += 1
     if i < len(tokens) and tokens[i] in ("bash", "sh") and "-c" in tokens[i:]:
         c_idx = tokens.index("-c", i)
-        if c_idx + 1 < len(tokens):
-            return tokens[c_idx + 1]  # the quoted script payload
-        return None
+        if c_idx + 1 >= len(tokens):
+            return None
+        # Anything AFTER the `-c` payload (`bash -c '…' ; rm`, `… && curl`, a trailing
+        # newline + command) is a SEPARATE command the OUTER shell runs but the gate
+        # would never inspect — we only analyze the payload. Fail closed.
+        if c_idx + 2 < len(tokens):
+            return None
+        return tokens[c_idx + 1]  # the quoted script payload
     if i > 0:
-        # A `timeout <n>` prefix was stripped but no `bash -c` followed — return
-        # the remainder so callers see the real command at the head, not
-        # `timeout`. (Re-quote only this stripped case; leave a plain command's
-        # original text untouched to avoid spurious quoting differences.)
-        return shlex.join(tokens[i:])
+        # A `timeout <n>` prefix was stripped but no `bash -c` followed — return the
+        # remainder so callers see the real command at the head, not `timeout`. Strip
+        # the prefix off the ORIGINAL text rather than `shlex.join`-ing the remaining
+        # tokens: join would quote operators (`|` → `'|'`, hiding a pipeline from the
+        # splitter) and collapse a newline into a space (hiding a second command the
+        # shell still runs). The prefix tokens are simple unquoted words, so consume
+        # them off the raw string verbatim.
+        rest = cmd.lstrip(" \t")
+        for tok in tokens[:i]:
+            if not rest.startswith(tok):
+                return None  # prefix didn't sit at the head as parsed — fail closed
+            rest = rest[len(tok):].lstrip(" \t")
+        return rest
     return cmd
 
 
-def split_segments(script: str) -> list[str]:
-    """Split on shell operators (`&&`, `||`, `|`, `;`) that are OUTSIDE quotes.
-    A naive regex split would cut a `|` inside a jq filter (`jq '.a | .b'`)."""
-    segs: list[str] = []
-    buf: list[str] = []
-    quote: str | None = None
-    i, n = 0, len(script)
-    while i < n:
-        c = script[i]
-        if quote is not None:
-            buf.append(c)
-            if c == quote:
-                quote = None
-            i += 1
-        elif c in ("'", '"'):
-            quote = c
-            buf.append(c)
-            i += 1
-        elif script.startswith("&&", i) or script.startswith("||", i):
-            segs.append("".join(buf))
-            buf = []
-            i += 2
-        elif c in "|;":
-            segs.append("".join(buf))
-            buf = []
-            i += 1
-        else:
-            buf.append(c)
-            i += 1
-    segs.append("".join(buf))
+# Shell command separators: a `;`/`|`/`||`/`&&` at top level ends one command and
+# begins the next. (A bare `&` background operator is intentionally NOT a separator
+# here, preserving the prior splitter's behavior.) `shlex(punctuation_chars=True)`
+# emits these — and redirects like `>` — as their own tokens, but only when they
+# are OUTSIDE quotes; a `|`/`>` inside a jq filter stays part of its token.
+_SEGMENT_SEPARATORS = frozenset({"|", "||", "&&", ";"})
+
+
+def tokenize(script: str) -> list[str] | None:
+    """Shell tokens via stdlib `shlex` (POSIX + `punctuation_chars`): quotes and
+    backslash escapes are resolved by the tokenizer, and shell operators
+    (`|`/`||`/`&&`/`;`/`&`/redirects) come back as their own tokens. Returns the
+    token list, or None on unbalanced quotes (callers fail closed). Replaces the
+    hand-rolled quote/escape state machine this module used to carry."""
+    lex = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    # Disable comment stripping (shlex defaults `commenters="#"`). The shell only
+    # starts a comment at a `#` that begins a word; shlex would strip from ANY
+    # unquoted `#` to end-of-line, silently truncating a query value/pattern/path
+    # that contains a `#` (e.g. `grep INC#1234 f.json` -> `['grep','INC']`). The
+    # old `shlex.split`-based path disabled comments too; keep that parity.
+    lex.commenters = ""
+    try:
+        return list(lex)
+    except ValueError:
+        return None
+
+
+def split_segments(script: str) -> list[list[str]]:
+    """Decompose a command into per-command token lists, split on top-level shell
+    separators (`|`/`||`/`&&`/`;` AND an unquoted newline). Tokenization is `shlex`'s
+    job, so a `|`/`;`/an escaped `\\"` inside a jq filter is token content, not a
+    separator (the false splits the old char-scanner made on a stray `\\"` are gone).
+    Returns a list of token lists (each the argv of one command, with redirect/
+    operator tokens kept in place); on unbalanced quotes, the whole script comes back
+    as a single opaque token so the head/safety checks refuse it rather than
+    mis-parsing."""
+    segs: list[list[str]] = [[]]
+    # A shell treats an unquoted newline as a command separator, but `shlex`
+    # (whitespace_split) swallows it as ordinary whitespace — so `jq x⏎rm -rf /`
+    # would tokenize to ONE command and the `rm` would hide as args behind a safe
+    # head. Tokenize per physical line so the newline boundary survives as a split.
+    # A quote that spans a newline makes a line untokenizable → opaque (fail closed);
+    # an inline multi-line quoted arg has a single-line rewrite and isn't worth a hole.
+    for line in script.split("\n"):
+        toks = tokenize(line)
+        if toks is None:
+            return [[script]]
+        for t in toks:
+            if t in _SEGMENT_SEPARATORS:
+                segs.append([])
+            else:
+                segs[-1].append(t)
+        segs.append([])  # the newline itself ends this command
     return segs

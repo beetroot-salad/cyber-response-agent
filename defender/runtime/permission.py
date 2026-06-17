@@ -17,7 +17,6 @@ free, with no model call.
 
 from __future__ import annotations
 
-import shlex
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -61,6 +60,18 @@ FALLTHROUGH_DENY_REASON = (
     "Blocked: only the defender-* shims and read-only viewers (jq/ls/cat/…) are "
     "permitted from the main loop. Dispatch gather for data-source access; do not "
     "run arbitrary shell."
+)
+
+# The gather subagent IS the data-access layer, so the main-loop "dispatch gather"
+# advice is nonsensical here — it would tell gather to dispatch itself. Gather may
+# run a data-source adapter (`defender-<system> …`) directly as a standalone
+# command (captured automatically) plus read-only viewers; everything else fails
+# closed. Give it that lane verbatim instead of the main-loop reason.
+GATHER_FALLTHROUGH_DENY_REASON = (
+    "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as "
+    "a standalone command — it is captured automatically — plus read-only viewers "
+    "(jq/grep/ls/cat/…). To read data, run the adapter directly; don't run "
+    "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
 )
 
 # Gather may run a data-source adapter directly — it's captured transparently —
@@ -112,16 +123,21 @@ def _safe_gather_tokens() -> frozenset:
     return frozenset(_safe_main_tokens() | GATHER_READONLY_TOOLS)
 
 
-def _segment_is_adapter(seg: str) -> bool:
+def _segment_is_adapter(toks: list[str]) -> bool:
     """True iff the segment's COMMAND (first token) is a data-source adapter — a
-    `defender-<system>` shim or a `<system>_cli.py` script. Anchored to command
-    position: an adapter name appearing as an *argument* (`which defender-elastic`,
-    `cat …/defender-elastic`) is NOT a query and must not be captured."""
-    try:
-        toks = shlex.split(seg)
-    except ValueError:
-        return False
+    `defender-<system>` shim or a `<system>_cli.py` script. `toks` is one command's
+    token list from `split_segments`. Anchored to command position: an adapter name
+    appearing as an *argument* (`which defender-elastic`, `cat …/defender-elastic`)
+    is NOT a query and must not be captured."""
     if not toks:
+        return False
+    # split_segments hands back the whole script as one opaque token when it can't
+    # parse it (a quote spanning a newline). A real command's head is a single
+    # whitespace-free word, so a head carrying whitespace IS that opaque fallback —
+    # never an adapter. Refusing it routes the command to the fail-closed deny in
+    # decide_bash/_all_segments_safe instead of the capture path (which would only
+    # error on an unrunnable argv).
+    if any(c.isspace() for c in toks[0]):
         return False
     cmd = toks[0]
     if cmd in ("python", "python3") and len(toks) > 1:
@@ -139,13 +155,10 @@ def adapter_argv(command: str) -> list[str] | None:
     inner = unwrap(command.strip())
     if inner is None:
         return None
-    segs = [s for s in split_segments(inner) if s.strip()]
+    segs = [s for s in split_segments(inner) if s]
     if len(segs) != 1 or not _segment_is_adapter(segs[0]):
         return None
-    try:
-        return shlex.split(segs[0])
-    except ValueError:
-        return None
+    return segs[0]  # the command's token list IS the argv (shlex-resolved)
 
 
 def decide_bash(command: str, *, is_main_session: bool) -> Decision:
@@ -170,14 +183,14 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
         # shell (`rm`, `curl|bash`, `python3 …`) still fails closed.
         inner = unwrap(cmd)
         if inner is None:
-            return Decision(False, FALLTHROUGH_DENY_REASON)
-        segs = [s for s in split_segments(inner) if s.strip()]
+            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
+        segs = [s for s in split_segments(inner) if s]
         if any(_segment_is_adapter(s) for s in segs):
             if len(segs) != 1:
                 return Decision(False, ADAPTER_STANDALONE_REASON)
             return Decision(True)
         if not _all_segments_safe(inner, _safe_gather_tokens()):
-            return Decision(False, FALLTHROUGH_DENY_REASON)
+            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
         return Decision(True)
 
     # --- main loop (block_main_loop_raw_access + approve_shim_invocations) ---

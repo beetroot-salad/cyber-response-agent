@@ -40,13 +40,22 @@ The dispatch you receive carries a **descriptor catalog of the systems
 of record** (each system + its one-line `description:`) and names your
 target in the `system:` field. The catalog is an index, not the rules —
 use it to confirm your lead actually wants that system (or to recognize
-it needs a different one). Then **Read the full
+it needs a different one).
+<!-- GATHER-PAI-TRIM:BEGIN — TEMPORARY engine seam. The PydanticAI driver
+     (runtime/driver.py:_strip_temporary_pai_trims) strips this span because that
+     engine injects the target system's frontmatter (the descriptor catalog —
+     progressive disclosure) and lets gather pull the body on demand, so reading
+     it up front on every dispatch is the redundant double-read we measured. The
+     `claude -p` engine keeps this span and Reads the body itself. Remove the
+     span + the seam when the two engines stop sharing one gather SKILL. -->
+Then **Read the full
 `{defender_dir}/skills/{system}/SKILL.md`** for the system you'll query —
 its body carries the field vocabularies and load-bearing rules the
 descriptor does not — and, if present, its adjacent
 `{defender_dir}/skills/{system}/execution.md` (e.g. elastic), where the
 CLI surface, query syntax, and connectivity notes live ("use `--help`,
 don't read source").
+<!-- GATHER-PAI-TRIM:END -->
 
 ### 2. Find a template, or name the measurement
 

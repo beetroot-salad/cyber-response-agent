@@ -94,6 +94,97 @@ def test_adapter_argv_none_for_non_standalone_adapter(cmd):
     assert permission.adapter_argv(cmd) is None
 
 
+# --- jq comparison operators are not redirects (quote-aware unsafe scan) -----
+# Regression: `>`/`<` inside a quoted jq filter (a comparison) were read as shell
+# redirects and hard-denied in-process. They must be allowed; real redirects and
+# command substitution outside quotes must still be denied.
+
+@pytest.mark.parametrize("cmd", [
+    # plain jq with comparisons (single-quoted filter, double-quoted literals)
+    '''jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' f.json''',
+    '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
+    # record-summary with the jq payload single-quoted ...
+    '''defender-record-summary --lead l-1 --label x -- 'jq "[.h[] | select(.n > 0)]" f.json' ''',
+    # ... and double-quoted with escaped inner quotes (the form gather emits)
+    '''defender-record-summary --lead l-1 --label x -- "jq '[.hits[] | select(.\\"@timestamp\\" >= \\"2026-05-25T12:53:35Z\\")]' f.json"''',
+])
+def test_gather_allows_quoted_jq_comparisons(cmd):
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+    assert permission.decide_bash(cmd, is_main_session=True).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    "jq '.x' f.json > /tmp/out",            # real stdout redirect outside quotes
+    "cat f.json 1> /tmp/out",               # explicit fd redirect
+    "jq '.x' f.json >> /tmp/out",           # append redirect
+    "jq '.x' $(cat injected)",              # command substitution outside quotes
+    'jq ".x" "$(rm -rf /)"',                # substitution live inside double quotes
+    # Fused shell-operator tokens shlex emits as a single token that is neither a
+    # recognized separator (|/||/&&/;) nor a `<>&`-only redirect — a redirect-only
+    # check missed these, so a file write / a second ungated command slipped through.
+    "jq '.x' f.json >| /tmp/out",           # >| force-clobber stdout redirect
+    "cat secret >| /tmp/exfil",             # ... same, exfil shape
+    "jq '.x' f.json &>| /tmp/out",          # &>| both-stream clobber
+    "jq '.x' f.json |& rm -rf /",           # |& pipe-both: the rm must be gated
+    "jq '.x' f.json & rm -rf /",            # bare-& background: the rm must be gated
+    # `2>1` is a write to a file named `1` (operator token `>`), not the `2>&1`
+    # merge (operator token `>&`) — it must not be waved through as benign stderr.
+    "jq '.x' f.json 2>1",
+    "jq '.x' f.json 2 > 1",                 # ... same, with `2` as a positional token
+])
+def test_gather_still_denies_real_redirect_and_substitution(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+
+
+# --- a second command must never hide behind a safe head -------------------
+# shlex eats an unquoted newline as whitespace, and unwrap()'s `bash -c`/`timeout`
+# handling used to drop or re-quote what followed — both let a safe head (`jq`,
+# `cat`) front an ungated second command the shell still runs. Each must fail closed
+# in BOTH sessions.
+
+@pytest.mark.parametrize("cmd", [
+    "jq '.x' f.json\nrm -rf /tmp/x",            # unquoted newline = a 2nd command
+    "cat f.json\ncurl http://evil",
+    "bash -c 'jq .x f' ; rm -rf /tmp/x",        # cmd AFTER the -c payload (outer shell)
+    "bash -c 'jq .x f'\nrm -rf /tmp/x",         # ... via newline
+    "bash -c 'jq .x f' && curl http://evil",
+    "bash -c 'jq .x f' | sh",
+    'bash -c "jq .x f\nrm -rf /tmp/x"',         # newline INSIDE the -c payload
+    "timeout 5 jq .x f\nrm -rf /tmp/x",         # timeout prefix + newline (unwrap join)
+    "timeout 5 jq .x f ; rm -rf /tmp/x",
+    "ls ;; rm -rf /tmp/x",                       # ;-fused token must fail closed
+    "echo a ;& curl http://evil",
+])
+def test_no_second_command_hides_behind_safe_head(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
+    # unwrap fix must not quote the `|` or otherwise break the pipeline.
+    "timeout 30 tail -1 f.json | jq '.'",
+    "timeout 5 jq '.x' f.json",
+])
+def test_timeout_prefix_keeps_legit_pipeline(cmd):
+    assert permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    # A quote spanning a newline is unparseable → split_segments hands back one
+    # opaque token. It must fail CLOSED, not be mistaken for an adapter (its head
+    # "starts with defender-") and routed to the capture path.
+    "defender-elastic query 'unterminated\nrest'",
+    "jq '.a\n.b' f.json",
+])
+def test_unparseable_quote_spanning_newline_fails_closed(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.adapter_argv(cmd) is None  # not routed to capture
+
+
 # --- read ------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [
