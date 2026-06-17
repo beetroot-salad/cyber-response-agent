@@ -59,6 +59,7 @@ def invoke_agent(
     and allows both verifier scripts."""
     verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
     extra_prompt = (
+        f"trailer_label: {cfg.trailer_label}\n"
         f"verify_forward_command: {verifier_py} defender/learning/verify_forward_actor.py "
         f"<lesson_path> <observation_id>\n"
         f"verify_batch_command: {verifier_py} defender/learning/verify_batch.py "
