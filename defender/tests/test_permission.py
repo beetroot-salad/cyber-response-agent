@@ -137,6 +137,41 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     assert not permission.decide_bash(cmd, is_main_session=True).allow
 
 
+# --- a second command must never hide behind a safe head -------------------
+# shlex eats an unquoted newline as whitespace, and unwrap()'s `bash -c`/`timeout`
+# handling used to drop or re-quote what followed — both let a safe head (`jq`,
+# `cat`) front an ungated second command the shell still runs. Each must fail closed
+# in BOTH sessions.
+
+@pytest.mark.parametrize("cmd", [
+    "jq '.x' f.json\nrm -rf /tmp/x",            # unquoted newline = a 2nd command
+    "cat f.json\ncurl http://evil",
+    "bash -c 'jq .x f' ; rm -rf /tmp/x",        # cmd AFTER the -c payload (outer shell)
+    "bash -c 'jq .x f'\nrm -rf /tmp/x",         # ... via newline
+    "bash -c 'jq .x f' && curl http://evil",
+    "bash -c 'jq .x f' | sh",
+    'bash -c "jq .x f\nrm -rf /tmp/x"',         # newline INSIDE the -c payload
+    "timeout 5 jq .x f\nrm -rf /tmp/x",         # timeout prefix + newline (unwrap join)
+    "timeout 5 jq .x f ; rm -rf /tmp/x",
+    "ls ;; rm -rf /tmp/x",                       # ;-fused token must fail closed
+    "echo a ;& curl http://evil",
+])
+def test_no_second_command_hides_behind_safe_head(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
+    # unwrap fix must not quote the `|` or otherwise break the pipeline.
+    "timeout 30 tail -1 f.json | jq '.'",
+    "timeout 5 jq '.x' f.json",
+])
+def test_timeout_prefix_keeps_legit_pipeline(cmd):
+    assert permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+
+
 # --- read ------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [

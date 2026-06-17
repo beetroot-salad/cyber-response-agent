@@ -85,6 +85,29 @@ def test_gather_agent_has_no_file_writers(tmp_path):
     assert {"bash", "read_file", "write_file", "edit_file", "gather"} <= mtools
 
 
+class _ToolRecorder:
+    """Minimal stand-in for a pydantic-ai Agent: `register_tools` only uses `.tool`
+    as a decorator, so this records the registered tool names without constructing
+    an `AnthropicModel` (which needs an API key). Lets the writers-gating assertion —
+    the PR's headline behavior — run in CI, unlike the skipif'd test above."""
+
+    def __init__(self):
+        self.names: list = []
+
+    def tool(self, fn):
+        self.names.append(fn.__name__)
+        return fn
+
+
+def test_register_tools_writers_flag_gates_file_writers():
+    ro = _ToolRecorder()
+    tools.register_tools(ro, writers=False)
+    assert ro.names == ["bash", "read_file"]  # gather: read-only pair, no writers
+    full = _ToolRecorder()
+    tools.register_tools(full, writers=True)  # main: the full four
+    assert full.names == ["bash", "read_file", "write_file", "edit_file"]
+
+
 # --- #2: gather-specific deny message ---------------------------------------
 
 def test_gather_deny_message_is_not_main_loop_worded():
@@ -92,7 +115,11 @@ def test_gather_deny_message_is_not_main_loop_worded():
     assert not d.allow
     assert "main loop" not in d.reason
     assert "Dispatch gather" not in d.reason  # nonsensical advice to gather itself
-    assert "adapter" in d.reason  # gather-appropriate guidance
+    # Pin the exact gather fallthrough reason: a bare `"adapter" in reason` substring
+    # check is near-tautological (ADAPTER_STANDALONE_REASON also contains it), so it
+    # would not catch the fallthrough path regressing to the wrong gather message.
+    assert d.reason == permission.GATHER_FALLTHROUGH_DENY_REASON
+    assert "read-only viewers" in d.reason  # gather-appropriate guidance
 
 
 # --- #4: progressive-disclosure prompt header ------------------------------

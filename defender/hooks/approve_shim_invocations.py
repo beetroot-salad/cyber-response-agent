@@ -91,14 +91,16 @@ _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Shell-operator metacharacters. `shlex(punctuation_chars=True)` returns a RUN of
 # these as one standalone token, but only when UNQUOTED (a `>`/`|` inside a quoted
 # jq filter stays inside its word-token). After `split_segments` consumes the
-# top-level separators (`|`/`||`/`&&`/`;`), the only all-operator tokens left in a
-# segment are redirects (`>`, `>>`, `<`, `>&`, `&>`), a bare background `&`, and the
-# FUSED forms shlex emits but the splitter does NOT separate (`>|`, `|&`, `&>|`).
-# Any such token is unsafe to auto-approve (except a benign stderr redirect). We
-# test set-membership, not specific spellings, so a new fused operator can't slip
-# through a hardcoded list (the bug a `set(tok) <= {"<",">","&"}` redirect-only
-# check had: `>|`/`|&` carry a `|` and were silently treated as safe word tokens).
-_OPERATOR_CHARS = frozenset("<>|&")
+# top-level separators (`|`/`||`/`&&`/`;`/newline), the only all-operator tokens left
+# in a segment are redirects (`>`, `>>`, `<`, `>&`, `&>`), a bare background `&`, and
+# the FUSED forms shlex emits but the splitter does NOT separate (`>|`, `|&`, `&>|`,
+# and the `;`-fused `;;`/`;&`/`;|`). Any such token is unsafe to auto-approve (except
+# a benign stderr redirect). We test set-membership, not specific spellings, so a new
+# fused operator can't slip through a hardcoded list (the bug a `set(tok) <= {"<",">",
+# "&"}` redirect-only check had: `>|`/`|&` carry a `|` and were silently treated as
+# safe word tokens). `;` is in the set so a `;;`/`;&`/`;|` run fails closed too,
+# rather than riding through as a harmless-looking arg behind a safe head.
+_OPERATOR_CHARS = frozenset("<>|&;")
 
 
 def _is_benign_stderr(toks: list[str], i: int) -> bool:

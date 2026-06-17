@@ -81,15 +81,28 @@ def unwrap(cmd: str) -> str | None:
             i += 1
     if i < len(tokens) and tokens[i] in ("bash", "sh") and "-c" in tokens[i:]:
         c_idx = tokens.index("-c", i)
-        if c_idx + 1 < len(tokens):
-            return tokens[c_idx + 1]  # the quoted script payload
-        return None
+        if c_idx + 1 >= len(tokens):
+            return None
+        # Anything AFTER the `-c` payload (`bash -c '…' ; rm`, `… && curl`, a trailing
+        # newline + command) is a SEPARATE command the OUTER shell runs but the gate
+        # would never inspect — we only analyze the payload. Fail closed.
+        if c_idx + 2 < len(tokens):
+            return None
+        return tokens[c_idx + 1]  # the quoted script payload
     if i > 0:
-        # A `timeout <n>` prefix was stripped but no `bash -c` followed — return
-        # the remainder so callers see the real command at the head, not
-        # `timeout`. (Re-quote only this stripped case; leave a plain command's
-        # original text untouched to avoid spurious quoting differences.)
-        return shlex.join(tokens[i:])
+        # A `timeout <n>` prefix was stripped but no `bash -c` followed — return the
+        # remainder so callers see the real command at the head, not `timeout`. Strip
+        # the prefix off the ORIGINAL text rather than `shlex.join`-ing the remaining
+        # tokens: join would quote operators (`|` → `'|'`, hiding a pipeline from the
+        # splitter) and collapse a newline into a space (hiding a second command the
+        # shell still runs). The prefix tokens are simple unquoted words, so consume
+        # them off the raw string verbatim.
+        rest = cmd.lstrip(" \t")
+        for tok in tokens[:i]:
+            if not rest.startswith(tok):
+                return None  # prefix didn't sit at the head as parsed — fail closed
+            rest = rest[len(tok):].lstrip(" \t")
+        return rest
     return cmd
 
 
@@ -123,19 +136,28 @@ def tokenize(script: str) -> list[str] | None:
 
 def split_segments(script: str) -> list[list[str]]:
     """Decompose a command into per-command token lists, split on top-level shell
-    separators (`|`/`||`/`&&`/`;`). Tokenization is `shlex`'s job, so a `|`/`;`/an
-    escaped `\\"` inside a jq filter is token content, not a separator (the false
-    splits the old char-scanner made on a stray `\\"` are gone). Returns a list of
-    token lists (each the argv of one command, with redirect/operator tokens kept
-    in place); on unbalanced quotes, the whole script comes back as a single opaque
-    token so the head/safety checks refuse it rather than mis-parsing."""
-    toks = tokenize(script)
-    if toks is None:
-        return [[script]]
+    separators (`|`/`||`/`&&`/`;` AND an unquoted newline). Tokenization is `shlex`'s
+    job, so a `|`/`;`/an escaped `\\"` inside a jq filter is token content, not a
+    separator (the false splits the old char-scanner made on a stray `\\"` are gone).
+    Returns a list of token lists (each the argv of one command, with redirect/
+    operator tokens kept in place); on unbalanced quotes, the whole script comes back
+    as a single opaque token so the head/safety checks refuse it rather than
+    mis-parsing."""
     segs: list[list[str]] = [[]]
-    for t in toks:
-        if t in _SEGMENT_SEPARATORS:
-            segs.append([])
-        else:
-            segs[-1].append(t)
+    # A shell treats an unquoted newline as a command separator, but `shlex`
+    # (whitespace_split) swallows it as ordinary whitespace — so `jq x⏎rm -rf /`
+    # would tokenize to ONE command and the `rm` would hide as args behind a safe
+    # head. Tokenize per physical line so the newline boundary survives as a split.
+    # A quote that spans a newline makes a line untokenizable → opaque (fail closed);
+    # an inline multi-line quoted arg has a single-line rewrite and isn't worth a hole.
+    for line in script.split("\n"):
+        toks = tokenize(line)
+        if toks is None:
+            return [[script]]
+        for t in toks:
+            if t in _SEGMENT_SEPARATORS:
+                segs.append([])
+            else:
+                segs[-1].append(t)
+        segs.append([])  # the newline itself ends this command
     return segs

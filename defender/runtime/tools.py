@@ -308,9 +308,9 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {system}` above; "
             "confirm it here. These descriptions are usually enough to pick a "
             f"template or name a measurement — Read the target's full "
-            f"`skills/{system}/SKILL.md` (and execution.md if present) ONLY on "
-            "demand, when you need field vocab or CLI specifics the descriptor "
-            "lacks; not on every dispatch.\n\n"
+            f"`{deps.defender_dir}/skills/{system}/SKILL.md` (and execution.md if "
+            "present) ONLY on demand, when you need field vocab or CLI specifics the "
+            "descriptor lacks; not on every dispatch.\n\n"
             f"{catalog}\n"
         )
     return block
