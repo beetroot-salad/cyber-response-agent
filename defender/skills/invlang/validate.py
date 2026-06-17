@@ -219,64 +219,75 @@ def _check_edge_authority(companion: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _check_vocab(value: Any, allowed: Any, errmsg: str) -> list[str]:
+    """Return `[errmsg]` if `value` is a non-empty string drawn from outside
+    `allowed`, else `[]`. The flat closed-vocab guard shared across every
+    slot check below."""
+    if isinstance(value, str) and value and value not in allowed:
+        return [errmsg]
+    return []
+
+
 def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
     errors: list[str] = []
 
     for v in _walkers.all_vertices(companion):
         t = v.get("type")
-        if isinstance(t, str) and t and t not in vocab.TYPES:
-            errors.append(
-                f"vertex {v.get('id', '?')}: type {t!r} is not a known vertex "
-                f"type (`enum types`)"
-            )
+        errors += _check_vocab(
+            t, vocab.TYPES,
+            f"vertex {v.get('id', '?')}: type {t!r} is not a known vertex "
+            f"type (`enum types`)",
+        )
 
     for e in _walkers.all_edges(companion):
         rel = e.get("relation")
-        if isinstance(rel, str) and rel and rel not in vocab.RELATIONS:
-            errors.append(
-                f"edge {e.get('id', '?')}: rel {rel!r} is not a known relation "
-                f"(`enum relations`)"
-            )
+        errors += _check_vocab(
+            rel, vocab.RELATIONS,
+            f"edge {e.get('id', '?')}: rel {rel!r} is not a known relation "
+            f"(`enum relations`)",
+        )
         kind = (e.get("authority") or {}).get("kind")
-        if isinstance(kind, str) and kind and kind not in vocab.AUTH_KINDS:
-            errors.append(
-                f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "
-                f"observational authority (`enum auth-kinds`)"
-            )
+        errors += _check_vocab(
+            kind, vocab.AUTH_KINDS,
+            f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "
+            f"observational authority (`enum auth-kinds`)",
+        )
 
     # Proposed parent vertices on hypotheses also carry a type.
     for h in _walkers.all_hypotheses(companion).values():
         pv = (h.get("proposed_edge") or {}).get("parent_vertex") or {}
         pt = pv.get("type")
-        if isinstance(pt, str) and pt and pt not in vocab.TYPES:
-            errors.append(
-                f"hypothesis {h.get('id', '?')}: parent_type {pt!r} is not a "
-                f"known vertex type (`enum types`)"
-            )
+        errors += _check_vocab(
+            pt, vocab.TYPES,
+            f"hypothesis {h.get('id', '?')}: parent_type {pt!r} is not a "
+            f"known vertex type (`enum types`)",
+        )
         rel = (h.get("proposed_edge") or {}).get("relation")
-        if isinstance(rel, str) and rel and rel not in vocab.RELATIONS:
-            errors.append(
-                f"hypothesis {h.get('id', '?')}: rel {rel!r} is not a known "
-                f"relation (`enum relations`)"
-            )
+        errors += _check_vocab(
+            rel, vocab.RELATIONS,
+            f"hypothesis {h.get('id', '?')}: rel {rel!r} is not a known "
+            f"relation (`enum relations`)",
+        )
 
     # anchor_kind on contracts and on authz resolutions.
     for h in _walkers.all_hypotheses(companion).values():
         for c in h.get("authorization_contract") or []:
-            ak = c.get("anchor_kind") if isinstance(c, dict) else None
-            if isinstance(ak, str) and ak and ak not in vocab.ANCHOR_KINDS:
-                errors.append(
-                    f"hypothesis {h.get('id', '?')} contract "
-                    f"{c.get('id', '?')}: anchor_kind {ak!r} is not known "
-                    f"(`enum anchor-kinds`)"
-                )
+            if not isinstance(c, dict):
+                continue
+            ak = c.get("anchor_kind")
+            errors += _check_vocab(
+                ak, vocab.ANCHOR_KINDS,
+                f"hypothesis {h.get('id', '?')} contract "
+                f"{c.get('id', '?')}: anchor_kind {ak!r} is not known "
+                f"(`enum anchor-kinds`)",
+            )
     for row in _walkers.iter_authz_resolutions(companion):
         ak = row.get("anchor_kind")
-        if isinstance(ak, str) and ak and ak not in vocab.ANCHOR_KINDS:
-            errors.append(
-                f"authz resolution for contract {row.get('fulfills_contract', '?')}: "
-                f"anchor_kind {ak!r} is not known (`enum anchor-kinds`)"
-            )
+        errors += _check_vocab(
+            ak, vocab.ANCHOR_KINDS,
+            f"authz resolution for contract {row.get('fulfills_contract', '?')}: "
+            f"anchor_kind {ak!r} is not known (`enum anchor-kinds`)",
+        )
 
     # `:R attr_updates` key grammar: only `class` or `attrs.<name>` (defender
     # SKILL §Open-questions). A bare key (e.g. `provenance`) is silently

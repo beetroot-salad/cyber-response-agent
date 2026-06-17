@@ -169,6 +169,25 @@ e-001|teleported|v-003|v-001|2026-05-05T03:47:12Z|guesswork:nobody|outcome=faile
     assert any("not a known observational authority" in e for e in errors), errors
 
 
+def test_closed_vocab_tolerates_non_dict_contract_entry():
+    """`_check_closed_vocab` must not crash on a malformed (non-dict)
+    `authorization_contract` entry. The closed-vocab dedupe routes each
+    check through a shared `_check_vocab(value, allowed, errmsg)` helper
+    whose `errmsg` f-string calls `c.get('id', '?')`; that argument is
+    built eagerly, so the per-contract guard must skip non-dict entries
+    before the call (matching the original silent leniency)."""
+    from defender.skills.invlang.validate import _check_closed_vocab
+
+    companion = {
+        "hypothesize": {
+            "hypotheses": [
+                {"id": "h-1", "authorization_contract": ["not-a-dict", None]}
+            ]
+        }
+    }
+    assert _check_closed_vocab(companion) == []
+
+
 def test_benign_blocked_by_unresolved_open_slot():
     text = fence(
         """

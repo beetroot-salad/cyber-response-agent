@@ -179,6 +179,22 @@ def test_parent_attrs_subblock_attaches_to_proposed_edge():
     assert pv["attributes"] == {"kind": "service-account", "team": "data-platform"}
 
 
+def test_parent_attrs_subblock_without_header_uses_key_value_default():
+    """A `:H ...parent_attrs` block written without the explicit
+    `[key|value]` header must still project (the `[key, value]` fallback),
+    exactly like the other headerless `:H` sub-blocks. Regression guard for
+    the row-projection dedupe, which routes parent_attrs through
+    `_for_each_row`."""
+    body, warnings = parse_dense_companion(
+        _WITH_PARENT_ATTRS.replace(
+            ":H h-003.parent_attrs [key|value]", ":H h-003.parent_attrs"
+        )
+    )
+    assert warnings == []
+    pv = body["hypothesize"]["hypotheses"][0]["proposed_edge"]["parent_vertex"]
+    assert pv["attributes"] == {"kind": "service-account", "team": "data-platform"}
+
+
 # ---------------------------------------------------------------------------
 # Strict rejection of legacy `:H` header (14-col or 11-col)
 # ---------------------------------------------------------------------------
