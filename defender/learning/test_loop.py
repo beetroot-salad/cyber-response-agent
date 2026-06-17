@@ -7,33 +7,24 @@ smoke-run script; this file pins the bits we can test cheaply without spawning
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-# Load loop.py directly — there is no package __init__ chain to anchor
-# `import defender.learning.loop`, and the loop is designed to run as a
-# standalone script.
-_LOOP_PATH = Path(__file__).resolve().parent / "loop.py"
-_spec = importlib.util.spec_from_file_location("_defender_learning_loop", _LOOP_PATH)
-loop = importlib.util.module_from_spec(_spec)
-sys.modules["_defender_learning_loop"] = loop
-_spec.loader.exec_module(loop)
+from defender.learning import loop
 
 LoopError = loop.LoopError
 LoopPaths = loop.LoopPaths
 dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
-import _loop_comparison as comparison  # type: ignore[import-not-found]  # noqa: E402
-import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
-import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
-import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
-import _loop_subagents as subagents  # type: ignore[import-not-found]  # noqa: E402
-import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_comparison as comparison  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_subagents as subagents  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _qr(query_id, params=None, *, seq=0, raw_ref=None, lead_id="l-001"):
@@ -1130,7 +1121,7 @@ def test_append_findings_filters_gather_fidelity_not_queueable(tmp_path: Path):
 
 import subprocess as _subprocess  # noqa: E402
 
-import author_branch as ab  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import author_branch as ab  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _cp(stdout: str = "", returncode: int = 0, stderr: str = ""):
@@ -1274,7 +1265,7 @@ def test_author_branch_revert_refuses_missing_lesson_on_base():
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
     """revert() acquires the author-drain flock, then opens the revert PR."""
-    import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     git = _git_runner(ref="main")
     b = ab.AuthorBranch(git=git, gh=_gh_runner(create_out="https://pr/7"))
@@ -1287,7 +1278,7 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     touching git — no racing checkout -B against the in-flight batch."""
     import fcntl as _fcntl
 
-    import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     lock = paths.author_drain_lock_file
     lock.parent.mkdir(parents=True, exist_ok=True)

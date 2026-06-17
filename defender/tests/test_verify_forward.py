@@ -1,17 +1,14 @@
 """verify_forward.py verdict parser + run-context loader."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 
 HERE = Path(__file__).resolve().parent
-LEARNING_DIR = HERE.parent / "learning"
-sys.path.insert(0, str(LEARNING_DIR))
 
-import verify_forward as vf  # type: ignore[import-not-found]
+from defender.learning import verify_forward as vf  # type: ignore[import-not-found]
 
 
 def test_parse_verdict_good():

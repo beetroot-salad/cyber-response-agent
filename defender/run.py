@@ -47,7 +47,6 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import argparse
-import contextlib
 import datetime as _dt
 import json
 import secrets
@@ -57,6 +56,10 @@ import tempfile
 
 DEFENDER_DIR = _DEFENDER_DIR
 REPO_ROOT = DEFENDER_DIR.parent
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve
+# (the learning modules are imported lazily below); see tests/conftest.py.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 SETTINGS_TEMPLATE = DEFENDER_DIR / "run-settings.json"
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize_run.py"
 
@@ -227,18 +230,13 @@ def cross_check_tables(run_dir: Path) -> None:
     """
     if not (run_dir / "investigation.md").is_file():
         return
-    learning = str(DEFENDER_DIR / "learning")
-    sys.path.insert(0, learning)
     try:
-        import lead_repository  # type: ignore[import-not-found]
+        from defender.learning import lead_repository
 
         xcheck = lead_repository.narration_crosscheck_from_run(run_dir)
     except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
         print(f"[run.py] narration cross-check skipped: {e!r}", file=sys.stderr)
         return
-    finally:
-        with contextlib.suppress(ValueError):
-            sys.path.remove(learning)
     if not xcheck["ok"]:
         print(
             "[run.py] WARN narration cross-check FAILED — the live tables "
@@ -258,11 +256,8 @@ def enqueue_learning(run_dir: Path) -> None:
     learn-queue marker. run.py holds SIEM creds; learning is SIEM-free and runs
     in a separate process (loop.py --learn-drain), so the investigation's exit
     no longer waits on — or is rolled back by — the learning chain."""
-    sys.path.insert(0, str(DEFENDER_DIR / "learning"))
-    try:
-        import loop as _loop  # type: ignore[import-not-found]
-    finally:
-        sys.path.pop(0)
+    from defender.learning import loop as _loop
+
     _loop.enqueue_for_learning(run_dir)
 
 

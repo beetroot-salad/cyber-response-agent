@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 REAL_REPO = Path(__file__).resolve().parents[2]
-LEARNING_SRC = REAL_REPO / "defender" / "learning"
-sys.path.insert(0, str(LEARNING_SRC))
 
-import loop  # type: ignore[import-not-found]
+from defender.learning import loop  # type: ignore[import-not-found]
 
 
 class FakeSubagents:

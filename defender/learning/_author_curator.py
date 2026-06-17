@@ -35,15 +35,10 @@ from collections.abc import Callable
 
 import yaml
 
-# Sibling modules — imported by path (no package __init__ chain).
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import _author_runner as _runner  # type: ignore[import-not-found]
-    import _author_shared as _shared  # type: ignore[import-not-found]
-    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
-    from _loop_persist import rotate_queue_locked  # type: ignore[import-not-found]
-finally:
-    sys.path.pop(0)
+from defender.learning import _author_runner as _runner
+from defender.learning import _author_shared as _shared
+from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_persist import rotate_queue_locked
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

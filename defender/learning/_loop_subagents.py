@@ -25,9 +25,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-import lead_repository
-import mitre_corpus
-from _loop_comparison import (
+from defender.learning import lead_repository
+from defender.learning import mitre_corpus
+from defender.learning._loop_comparison import (
     build_comparison,
     judge_settings_dict,
     parse_investigation_companion,
@@ -35,17 +35,17 @@ from _loop_comparison import (
     render_synthesis,
     write_comparison_files,
 )
-from _loop_oracle import (
+from defender.learning._loop_oracle import (
     assemble_oracle_doc,
     build_lead_user_prompt,
     lead_sample_text,
     parse_lead_events,
 )
-from _loop_persist import derive_alert_rule_key
-from _loop_validate import dump_oracle_doc
-from _prologue import extract_case_entities
+from defender.learning._loop_persist import derive_alert_rule_key
+from defender.learning._loop_validate import dump_oracle_doc
+from defender.learning._prologue import extract_case_entities
 
-from _loop_config import (
+from defender.learning._loop_config import (
     ACTOR_BENIGN_PROMPT,
     ACTOR_EFFORT,
     ACTOR_MODEL,

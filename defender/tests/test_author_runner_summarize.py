@@ -8,15 +8,10 @@ sanity run). The driver is shared by all four authors, so the guard matters for
 every direction."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import pytest
 
-LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
-sys.path.insert(0, str(LEARNING_SRC))
-
-import _author_runner as runner  # type: ignore[import-not-found]
+from defender.learning import _author_runner as runner
 
 
 @pytest.mark.parametrize("command", [None, "", "   ", "\n"])

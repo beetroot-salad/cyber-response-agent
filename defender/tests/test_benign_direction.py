@@ -9,12 +9,11 @@ from pathlib import Path
 import pytest
 
 REAL_REPO = Path(__file__).resolve().parents[2]
-LEARNING_SRC = REAL_REPO / "defender" / "learning"
-sys.path.insert(0, str(LEARNING_SRC))
+LEARNING_SRC = REAL_REPO / "defender" / "learning"  # source dir for file-path refs
 
-import author  # type: ignore[import-not-found]
-import loop  # type: ignore[import-not-found]
-import verify_forward  # type: ignore[import-not-found]
+from defender.learning import author  # type: ignore[import-not-found]
+from defender.learning import loop  # type: ignore[import-not-found]
+from defender.learning import verify_forward  # type: ignore[import-not-found]
 
 
 # --------------------------------------------------------------------------
@@ -431,7 +430,7 @@ def test_retrieve_skips_empty_anchor_on_rule_query(tmp_path: Path) -> None:
 # (P2-b / #1), not the observation's own selectors.
 # --------------------------------------------------------------------------
 
-import verify_forward_env  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import verify_forward_env  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _make_source_run(tmp_path: Path, prologue_rows: str) -> Path:

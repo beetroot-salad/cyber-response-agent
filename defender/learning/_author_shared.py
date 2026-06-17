@@ -31,15 +31,7 @@ LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 # Resolve the shared repo lock from DEFAULT_PATHS so it honors
 # DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs) — the single
 # location every curator serializes on.
-try:
-    from defender.learning._loop_config import DEFAULT_PATHS
-except ImportError:  # pragma: no cover — direct-script execution fallback
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).resolve().parent))
-    try:
-        from _loop_config import DEFAULT_PATHS  # type: ignore[no-redef]
-    finally:
-        _sys.path.pop(0)
+from defender.learning._loop_config import DEFAULT_PATHS
 REPO_LOCK_FILE = DEFAULT_PATHS.author_lock_file
 LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
 

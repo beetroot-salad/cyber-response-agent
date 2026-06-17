@@ -19,15 +19,15 @@ import os
 import sys
 from pathlib import Path
 
-# Sibling modules — invoked as a script, so import by path (no package chain).
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import _author_curator as _curator  # type: ignore[import-not-found]
-    import _author_runner as _runner  # type: ignore[import-not-found]
-    import _author_shared as _shared  # type: ignore[import-not-found]
-    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
-finally:
-    sys.path.pop(0)
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender.learning import _author_curator as _curator  # noqa: E402
+from defender.learning import _author_runner as _runner  # noqa: E402
+from defender.learning import _author_shared as _shared  # noqa: E402
+from defender.learning._loop_config import DEFAULT_PATHS  # noqa: E402
 
 
 REPO_ROOT = _curator.REPO_ROOT

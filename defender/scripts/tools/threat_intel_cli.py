@@ -27,7 +27,14 @@ from __future__ import annotations
 import json
 import urllib.parse
 
-import _stub_transport as transport
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+import sys as _sys  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from defender.scripts.tools import _stub_transport as transport
 
 SYSTEM = "threat-intel"
 PREFIX = "THREAT_INTEL"

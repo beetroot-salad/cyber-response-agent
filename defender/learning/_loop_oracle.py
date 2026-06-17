@@ -22,8 +22,8 @@ import re
 
 import yaml
 
-from _loop_config import LoopError
-from _loop_validate import strip_yaml_fence
+from defender.learning._loop_config import LoopError
+from defender.learning._loop_validate import strip_yaml_fence
 
 
 # ---------------------------------------------------------------------------

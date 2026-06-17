@@ -521,13 +521,7 @@ def narration_crosscheck(run_dir: Path, l_ids: set[str]) -> dict:
 def narration_crosscheck_from_run(run_dir: Path) -> dict:
     """`narration_crosscheck` with the `:L` id set parsed from investigation.md."""
     run_dir = Path(run_dir)
-    try:
-        from defender.skills.invlang.parser import parse_dense_companion
-    except ImportError:  # pragma: no cover — direct-script execution fallback
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from skills.invlang.parser import parse_dense_companion  # type: ignore
+    from defender.skills.invlang.parser import parse_dense_companion
 
     text = (run_dir / "investigation.md").read_text()
     companion, _ = parse_dense_companion(text)

@@ -18,7 +18,7 @@ for _p in (_DEFENDER, _DEFENDER / "hooks", _DEFENDER / "scripts" / "tools"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from record_query import capture  # noqa: E402
+from defender.scripts.tools.record_query import capture  # noqa: E402
 from record_lead import claim_lead  # noqa: E402
 
 # A stub adapter named like an adapter CLI so derive_system → "elastic".

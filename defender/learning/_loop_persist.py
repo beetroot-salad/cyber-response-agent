@@ -17,15 +17,15 @@ from typing import Any, Callable
 
 import yaml
 
-import lead_repository
-from _loop_config import (
+from defender.learning import lead_repository
+from defender.learning._loop_config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
     DEFAULT_PATHS,
     LoopError,
     LoopPaths,
 )
-from _loop_validate import _benign_outcome_keyword, _outcome_keyword
+from defender.learning._loop_validate import _benign_outcome_keyword, _outcome_keyword
 
 
 # ---------------------------------------------------------------------------

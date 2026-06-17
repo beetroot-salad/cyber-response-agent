@@ -7,13 +7,11 @@ live on-disk corpora so the serializer must enumerate exactly those files.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(DEFENDER / "learning" / "frontend"))
 
-import serialize
+from defender.learning.frontend import serialize  # noqa: E402
 
 
 CORPUS_DIR = {

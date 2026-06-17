@@ -17,15 +17,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
-sys.path.insert(0, str(LEARNING_SRC))
-
 # The curator engine, the lock/generation helpers, and the actor config wrapper.
 # Each resolves to one module instance (the path imports inside the modules use the
 # same names), so patching ``curator.REPO_ROOT`` / ``shared.*`` reaches them.
-import _author_curator as curator  # type: ignore[import-not-found]  # noqa: E402
-import _author_shared as shared  # type: ignore[import-not-found]  # noqa: E402
-import author_actor as aa  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _author_curator as curator  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _author_shared as shared  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import author_actor as aa  # type: ignore[import-not-found]  # noqa: E402
 
 AuthorError = curator.AuthorError
 

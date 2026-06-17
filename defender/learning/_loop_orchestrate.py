@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import importlib
 import json
 import os
 import subprocess
 import sys
-import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -21,23 +21,22 @@ from typing import Any, Callable
 
 import yaml
 
-from _loop_config import (
+from defender.learning._loop_config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
     GROUND_TRUTH_FILE,
-    LEARNING_DIR,
     MERGE_MODE,
     VALID_MERGE_MODES,
     LoopError,
     LoopPaths,
     _log,
 )
-from _loop_directions import BY_NAME, Direction
-from author_branch import AuthorBranch, BranchError
-from _loop_persist import append_findings, derive_alert_rule_key, persist_run
-from _loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
-from _loop_validate import (
+from defender.learning._loop_directions import BY_NAME, Direction
+from defender.learning.author_branch import AuthorBranch, BranchError
+from defender.learning._loop_persist import append_findings, derive_alert_rule_key, persist_run
+from defender.learning._loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
+from defender.learning._loop_validate import (
     normalize_disposition,
     strip_yaml_fence,
 )
@@ -216,12 +215,6 @@ def _directions_for(disposition: str) -> list[str]:
 # Curators
 # ---------------------------------------------------------------------------
 
-# Guards the transient `sys.path` mutation in `_run_curator_module` (curator import)
-# and `_render_transcript` (visualizer import). Both run only from serial drainers
-# today, so this is defensive rather than load-bearing — kept so a future concurrent
-# caller can't corrupt `sys.path` mid-import.
-_SYS_PATH_IMPORT_LOCK = threading.Lock()
-
 
 def _invoke_lead_author(run_dir: Path) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge."""
@@ -257,27 +250,12 @@ def _maybe_trigger_author(
 
 
 def _run_curator_module(module_name: str, call: Callable[[Any], int]):
-    """Import a sibling curator by name (loop runs as a script) and run it.
+    """Import a curator from the ``defender.learning`` package by name and run it.
 
     Narrow swallow for ``lead_author``-style child-process / filesystem hiccups; real
     regressions (ImportError, TypeError, …) propagate so they fail loudly.
-
-    The sibling dir is almost always already on ``sys.path`` (run.py inserts it; a
-    standalone ``loop.py`` puts it on ``sys.path[0]``). The lock-guarded mutation +
-    remove-by-value (never a positional ``pop(0)``) keep this safe even if a future
-    caller runs curators off the serial drainer.
     """
-    learning_dir = str(LEARNING_DIR)
-    with _SYS_PATH_IMPORT_LOCK:
-        added = learning_dir not in sys.path
-        if added:
-            sys.path.insert(0, learning_dir)
-        try:
-            mod = __import__(module_name)
-        finally:
-            if added:
-                with contextlib.suppress(ValueError):
-                    sys.path.remove(learning_dir)
+    mod = importlib.import_module(f"defender.learning.{module_name}")
     try:
         return call(mod)
     except (subprocess.SubprocessError, OSError) as e:
@@ -579,26 +557,14 @@ def author_drain(
 # ---------------------------------------------------------------------------
 
 
-_SCRIPTS_DIR = LEARNING_DIR.parent / "scripts"
-
-
 def _render_transcript(run_dir: Path) -> None:
     """Re-render run_dir's transcript.html (+ run-visualizations mirror) now that
     the judge artifacts exist, by calling ``visualize_run.render_and_mirror`` in
     process — no per-run interpreter spawn, and a render error surfaces as a
     catchable exception. Any failure propagates to ``learn_drain``, which logs it
     and drains on (the render is best-effort, never fatal)."""
-    scripts_dir = str(_SCRIPTS_DIR)
-    with _SYS_PATH_IMPORT_LOCK:
-        added = scripts_dir not in sys.path
-        if added:
-            sys.path.insert(0, scripts_dir)
-        try:
-            from visualize_run import render_and_mirror
-        finally:
-            if added:
-                with contextlib.suppress(ValueError):
-                    sys.path.remove(scripts_dir)
+    from defender.scripts.visualize_run import render_and_mirror
+
     render_and_mirror(run_dir)
 
 

@@ -16,7 +16,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from visualize_data import (
+from defender.scripts.visualize_data import (
     extract_main_subagents,
     merge_assistant_events,
     normalize_phase_names,
@@ -24,7 +24,7 @@ from visualize_data import (
     split_investigation_phases,
     subagent_cost_by_task,
 )
-from visualize_primitives import (
+from defender.scripts.visualize_primitives import (
     REPO_ROOT,
     block,
     esc,
