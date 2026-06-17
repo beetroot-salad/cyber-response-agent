@@ -77,3 +77,77 @@ def test_char_slice_never_splits_multibyte() -> None:
     head = out.split("\n\n[read_file]")[0]
     assert head == "é" * CAP
     head.encode("utf-8")  # would raise on a split surrogate; chars are intact
+
+
+def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
+    """Drive the real `read_file` tool through a FunctionModel that issues one
+    read_file call, and return the ToolReturn content the model would see. No
+    network — the model is scripted, so this needs no API key."""
+    import asyncio
+
+    from pydantic_ai import Agent
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
+
+    calls: list[int] = []
+
+    def _model_fn(messages, info):  # noqa: ANN001 — pydantic_ai FunctionDef shape
+        calls.append(1)
+        if len(calls) == 1:
+            return ModelResponse(parts=[ToolCallPart("read_file", {"path": str(path)})])
+        return ModelResponse(parts=[TextPart("done")])
+
+    agent = Agent(deps_type=tools.RunDeps)
+    tools.register_tools(agent)
+    deps = tools.RunDeps(
+        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt, is_main_session=True
+    )
+    result = asyncio.run(agent.run("go", deps=deps, model=FunctionModel(_model_fn)))
+
+    for msg in result.all_messages():
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if getattr(part, "tool_name", None) == "read_file":
+                    return part.content
+    raise AssertionError("no read_file ToolReturn found")
+
+
+def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
+    """The load-bearing ordering: read_file caps FIRST, then untrusted-wraps, so
+    the head (and the appended notice) land INSIDE the salted delimiters — never
+    a full multi-MB dump, and never a wrap whose closing tag was truncated away.
+    Driven through the real `read_file` tool, so a refactor that inverted the
+    order (wrap then cap) would fail here, not just in a comment."""
+    salt = "SALT123"
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    # alert.json is an untrusted read (permission.is_untrusted_read) that the main
+    # session is allowed to read — unlike gather_raw, which it's clamped from.
+    alert = run_dir / "alert.json"
+    alert.write_text("y" * (CAP + 5000))
+
+    out = _read_file_tool_output(run_dir, alert, salt)
+
+    opener, closer = f"<run-{salt}-untrusted>", f"</run-{salt}-untrusted>"
+    assert out.startswith(opener), "untrusted read was not wrapped"
+    assert out.rstrip().endswith(closer), "closing delimiter missing/truncated"
+    assert "[read_file]" in out, "oversized read was not capped"
+    # the notice (hence the bounded head) sits INSIDE the wrap, not after it —
+    # this is what cap-before-wrap buys, and what a reorder would break.
+    assert out.index("[read_file]") < out.index(closer)
+    # and the full dump never reached the model: the wrapped body is the bounded
+    # head + a short notice, not CAP+5000 chars.
+    assert len(out) < CAP + 2000
+
+
+def test_under_cap_untrusted_read_is_verbatim_and_wrapped(tmp_path) -> None:
+    """A small untrusted file comes back whole (no notice) but still wrapped."""
+    salt = "SALT123"
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    alert = run_dir / "alert.json"
+    alert.write_text('{"id": 1}')
+
+    out = _read_file_tool_output(run_dir, alert, salt)
+    assert out == f'<run-{salt}-untrusted>\n{{"id": 1}}\n</run-{salt}-untrusted>'
+    assert "[read_file]" not in out
