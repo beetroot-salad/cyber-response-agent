@@ -12,6 +12,7 @@ import pytest
 LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
 sys.path.insert(0, str(LEARNING_SRC))
 
+import _author_curator as curator  # type: ignore[import-not-found]
 import author_actor_benign as aenv  # type: ignore[import-not-found]
 import author_actor_env  # type: ignore[import-not-found]
 
@@ -31,7 +32,7 @@ def _ids(rows: list[dict]) -> set[str]:
 
 
 def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
-    held, consumed_pre, to_author = aenv._partition_pre_author(
+    held, consumed_pre, to_author = curator._partition_pre_author(
         _rows(), aenv.ADVERSARIAL_CONFIG
     )
     assert _ids(to_author) == {"t/0", "t/1"}              # caught + incoherent author
@@ -40,7 +41,7 @@ def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
 
 
 def test_benign_outcome_policy_authors_only_survived() -> None:
-    held, consumed_pre, to_author = aenv._partition_pre_author(
+    held, consumed_pre, to_author = curator._partition_pre_author(
         _rows(), aenv.BENIGN_CONFIG
     )
     assert _ids(to_author) == {"t/2"}                     # only survived authors
@@ -61,12 +62,12 @@ def test_configs_are_distinct() -> None:
 
 def test_assert_head_trailers_matches_per_config(monkeypatch) -> None:
     msg = "defender/environment: batch\n\nGeneration: 3\nActor-Env-Model: claude-x\n"
-    monkeypatch.setattr(aenv, "head_commit_message", lambda: msg)
+    monkeypatch.setattr(curator, "head_commit_message", lambda: msg)
     # the adversarial config's trailer regex accepts it
-    aenv.assert_head_trailers(3, "claude-x", aenv.ADVERSARIAL_CONFIG)
+    curator.assert_head_trailers(3, "claude-x", aenv.ADVERSARIAL_CONFIG)
     # the benign config looks for Benign-Actor-Model: → absent → raises
-    with pytest.raises(aenv.AuthorError, match="Benign-Actor-Model"):
-        aenv.assert_head_trailers(3, "claude-x", aenv.BENIGN_CONFIG)
+    with pytest.raises(curator.AuthorError, match="Benign-Actor-Model"):
+        curator.assert_head_trailers(3, "claude-x", aenv.BENIGN_CONFIG)
     # wrong generation also raises under the right trailer
-    with pytest.raises(aenv.AuthorError, match="Generation"):
-        aenv.assert_head_trailers(4, "claude-x", aenv.ADVERSARIAL_CONFIG)
+    with pytest.raises(curator.AuthorError, match="Generation"):
+        curator.assert_head_trailers(4, "claude-x", aenv.ADVERSARIAL_CONFIG)
