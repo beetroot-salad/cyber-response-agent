@@ -12,6 +12,7 @@ slice passes history through unmodified).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -73,8 +74,41 @@ def _main_instructions(defender_dir: Path) -> str:
     return (defender_dir / "SKILL.md").read_text()
 
 
+# --- TEMPORARY gather engine seam (remove when the engines stop sharing one SKILL) ---
+# defender/skills/gather/SKILL.md is the gather subagent's instructions for BOTH
+# runtime engines: run.py's `claude -p` (via dispatch.py, which points the
+# subagent at the file) and this PydanticAI driver (which loads it as the agent's
+# system prompt). A span there tells gather to Read the full {system}/SKILL.md +
+# execution.md up front on every dispatch. This engine instead injects the target
+# system's FRONTMATTER (the descriptor catalog — progressive disclosure) and lets
+# gather pull the body on demand, so that unconditional double-read is pure
+# redundancy here (measured: the same system SKILL re-read once per sibling lead).
+# The SKILL marks such spans with GATHER-PAI-TRIM:BEGIN/END comments; we strip
+# them for this engine and leave them intact for `claude -p`, which still needs
+# them. This is TEMPORARY: once the engines no longer share one SKILL, delete this
+# seam and the markers, and the trim becomes a plain SKILL edit.
+_PAI_TRIM_RE = re.compile(
+    r"[ \t]*<!--\s*GATHER-PAI-TRIM:BEGIN.*?GATHER-PAI-TRIM:END\s*-->\n?",
+    re.DOTALL,
+)
+
+
+def _strip_temporary_pai_trims(skill_text: str) -> str:
+    """Strip GATHER-PAI-TRIM spans from the gather SKILL for this engine (see the
+    banner above). Fail-safe: with no markers present the text passes through
+    unchanged, and we log a one-line note so a SKILL refactor that drops the
+    markers is noticed rather than silently reinstating the redundant read."""
+    out, n = _PAI_TRIM_RE.subn("", skill_text)
+    if n == 0:
+        print("[run_pai] note: gather SKILL carries no GATHER-PAI-TRIM markers; "
+              "progressive-disclosure trim seam was a no-op", file=sys.stderr)
+    return out
+
+
 def _gather_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
+    return _strip_temporary_pai_trims(
+        (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
+    )
 
 
 def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path) -> str:
@@ -135,9 +169,13 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
 
 
 def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
-    """A nested gather subagent: Haiku, the gather SKILL as its system prompt, the
-    same generic tools (the bash tool auto-captures adapter calls under
-    `is_main_session=False`). One per dispatch so `agent_id` binds to the lead."""
+    """A nested gather subagent: Haiku, the gather SKILL as its system prompt, and
+    the read-only slice of the generic tools (bash + read_file; the bash tool
+    auto-captures adapter calls under `is_main_session=False`). One per dispatch so
+    `agent_id` binds to the lead. `writers=False`: gather measures and returns a
+    summary — it never authors investigation.md/report.md, so denying it
+    write_file/edit_file keeps it in lane (it was burning its request budget on
+    blocked investigation.md writes and leaving stray summary files behind)."""
     agent = Agent(
         AnthropicModel(GATHER_MODEL),
         deps_type=GatherDeps,
@@ -146,7 +184,7 @@ def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
         model_settings=_CACHE_SETTINGS,
         retries=DEFAULT_TOOL_RETRIES,
     )
-    register_tools(agent)
+    register_tools(agent, writers=False)
     return agent
 
 

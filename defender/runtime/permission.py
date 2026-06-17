@@ -63,6 +63,18 @@ FALLTHROUGH_DENY_REASON = (
     "run arbitrary shell."
 )
 
+# The gather subagent IS the data-access layer, so the main-loop "dispatch gather"
+# advice is nonsensical here — it would tell gather to dispatch itself. Gather may
+# run a data-source adapter (`defender-<system> …`) directly as a standalone
+# command (captured automatically) plus read-only viewers; everything else fails
+# closed. Give it that lane verbatim instead of the main-loop reason.
+GATHER_FALLTHROUGH_DENY_REASON = (
+    "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as "
+    "a standalone command — it is captured automatically — plus read-only viewers "
+    "(jq/grep/ls/cat/…). To read data, run the adapter directly; don't run "
+    "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
+)
+
 # Gather may run a data-source adapter directly — it's captured transparently —
 # but only as a standalone command (a pipeline/compound makes "the payload"
 # ambiguous). Run it solo, then filter the persisted payload file.
@@ -170,14 +182,14 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
         # shell (`rm`, `curl|bash`, `python3 …`) still fails closed.
         inner = unwrap(cmd)
         if inner is None:
-            return Decision(False, FALLTHROUGH_DENY_REASON)
+            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
         segs = [s for s in split_segments(inner) if s.strip()]
         if any(_segment_is_adapter(s) for s in segs):
             if len(segs) != 1:
                 return Decision(False, ADAPTER_STANDALONE_REASON)
             return Decision(True)
         if not _all_segments_safe(inner, _safe_gather_tokens()):
-            return Decision(False, FALLTHROUGH_DENY_REASON)
+            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
         return Decision(True)
 
     # --- main loop (block_main_loop_raw_access + approve_shim_invocations) ---

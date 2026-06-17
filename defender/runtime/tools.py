@@ -127,8 +127,16 @@ def _bash_env(deps: RunDeps) -> dict[str, str]:
     return run.run_env(deps.defender_dir, deps.run_dir)
 
 
-def register_tools(agent) -> None:
-    """Register the four generic tools on `agent` (deps_type must be RunDeps)."""
+def register_tools(agent, *, writers: bool = True) -> None:
+    """Register the generic tools on `agent` (deps_type must be RunDeps).
+
+    `writers=True` (the main agent) registers all four: bash, read_file,
+    write_file, edit_file. `writers=False` (the gather subagent) registers only
+    the read-only pair (bash + read_file) — gather's contract is to measure and
+    return a summary, never to author run-dir artifacts, so it gets no file
+    writers at all (the gate would block its investigation.md writes anyway, but
+    not the stray summary.md / gather_summary.md ones; withholding the tools is
+    the clean lane boundary)."""
 
     @agent.tool
     async def bash(ctx: RunContext[RunDeps], command: str) -> str:
@@ -190,6 +198,10 @@ def register_tools(agent) -> None:
             # are inert. Same delimiter as the rest of the system.
             return _wrap(text, "untrusted", ctx.deps.salt)
         return text
+
+    # Gather stops here: read-only surface (bash + read_file), no file writers.
+    if not writers:
+        return
 
     @agent.tool
     async def write_file(ctx: RunContext[RunDeps], path: str, content: str) -> str:
@@ -292,9 +304,13 @@ def _gather_prompt(
     )
     if catalog:
         block += (
-            "\n## Systems of record (descriptor index — your target is "
-            f"`system: {system}` above; confirm it here, then Read that system's "
-            "full SKILL.md + execution.md before querying)\n\n"
+            "\n## Systems of record (descriptor index — frontmatter only, "
+            f"progressive disclosure). Your target is `system: {system}` above; "
+            "confirm it here. These descriptions are usually enough to pick a "
+            f"template or name a measurement — Read the target's full "
+            f"`skills/{system}/SKILL.md` (and execution.md if present) ONLY on "
+            "demand, when you need field vocab or CLI specifics the descriptor "
+            "lacks; not on every dispatch.\n\n"
             f"{catalog}\n"
         )
     return block
