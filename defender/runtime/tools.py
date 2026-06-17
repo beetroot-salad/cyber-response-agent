@@ -35,10 +35,44 @@ if str(_SCRIPTS_TOOLS) not in sys.path:
 from tag_tool_results import wrap as _wrap  # noqa: E402
 from record_lead import claim_lead as _claim_lead  # noqa: E402
 from inject_system_skill_description import descriptor_catalog as _descriptor_catalog  # noqa: E402
-from record_query import capture as _capture, derive_system as _derive_system, LEAD_ID_RE as _LEAD_ID_RE  # noqa: E402
+from record_query import (  # noqa: E402
+    capture as _capture,
+    derive_system as _derive_system,
+    LEAD_ID_RE as _LEAD_ID_RE,
+    PASSTHROUGH_MAX_BYTES as _READ_CHAR_CAP,
+)
 from record_lesson_load import lesson_name as _lesson_name  # noqa: E402
 
 _BASH_TIMEOUT_S = 120
+
+# read_file char ceiling: the SAME constant that caps the gather capture's
+# passthrough (record_query.PASSTHROUGH_MAX_BYTES). A gather payload is persisted
+# whole on disk, but the in-context VIEW of it — whether seen through the capture
+# passthrough OR a later read_file of the same file — must stay bounded, or a
+# multi-MB dump overflows the model's context window (#303). Sharing one constant
+# is the point: the on-disk read can never defeat the passthrough cap. Compared
+# against str length (chars), matching record_query's own check.
+
+
+def _bounded_read(text: str, path: str) -> str:
+    """Bound a file read to `_READ_CHAR_CAP` chars. Under the cap → verbatim (the
+    common case: every SKILL/lesson/doc fits with room to spare). Over it → the
+    head, plus a notice carrying the FULL size (chars + lines, so the model knows
+    the true scale it can't see) and the only resolution that works on a payload
+    this big: filter on disk and read the filtered result. No paging — the files
+    that overflow are single-document JSON dumps (one giant line), so an
+    offset/limit window is a no-op; jq/grep is the way through. Slices by char,
+    not byte, so a multibyte sequence is never split."""
+    if len(text) <= _READ_CHAR_CAP:
+        return text
+    total_lines = text.count("\n") + 1
+    note = (
+        f"\n\n[read_file] {len(text)} chars / {total_lines} line(s); showing the "
+        f"first {_READ_CHAR_CAP}. This file is too large to read whole — do not "
+        "treat this head as complete. Filter it on disk (jq, grep, the Grep tool), "
+        f"write the result to a file, then read that:\n  jq '<filter>' {path}"
+    )
+    return text[:_READ_CHAR_CAP] + note
 
 
 def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = "") -> str:
@@ -147,6 +181,10 @@ def register_tools(agent) -> None:
             raise ModelRetry(f"file not found: {path}")
         text = p.read_text()
         _record_lesson_load(ctx.deps, p)  # lesson→outcome traceability (best-effort)
+        # Bound the in-context view BEFORE wrapping: an oversized payload read
+        # whole would overflow the model's window (#303). Cap first so the head is
+        # what gets tag-wrapped (injected text in it stays inert), not the full dump.
+        text = _bounded_read(text, path)
         if permission.is_untrusted_read(p):
             # Attacker-influenced data — wrap so injected instructions inside it
             # are inert. Same delimiter as the rest of the system.

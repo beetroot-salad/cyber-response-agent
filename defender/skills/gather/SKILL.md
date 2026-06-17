@@ -105,7 +105,7 @@ row (system, verb, query_id, bound params, raw command) to the queries
 table, with per-lead sequencing. You do **not** wrap it, name files, or
 record anything yourself. (The recorded `query_id` is derived from the
 command as `{system}.{verb}`.) To filter or post-process a payload, run
-the adapter standalone first, then read/jq the persisted payload file (the
+the adapter standalone first, then jq/grep the persisted payload file (the
 path is reported back to you) in a separate command.
 
 **This shim form is the only sanctioned invocation.** Never substitute
