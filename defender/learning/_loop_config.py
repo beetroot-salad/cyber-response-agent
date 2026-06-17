@@ -187,11 +187,19 @@ QUEUEABLE_FINDING_TYPES = {
     "analyze-discipline",
     "observability",
 }
-ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
+# Audit-only adversarial types: validated + emitted for analysis, but never
+# queued as lessons (filtered in ``_loop_persist.append_findings``), so the
+# author / lesson schema / verify_forward need not route them.
+#   detection-confirmed — a justified detection worth preserving.
+#   gather-fidelity (#311) — gather misreported a computed value (no backing
+#     summary row, or a snippet that is wrong code for its label).
+ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed", "gather-fidelity"}
+ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
 # Benign defender findings share the queueable types; ``disposition-confirmed``
 # is the FP-direction audit-only type (the adversarial ``detection-confirmed``
 # analog — a justified escalation, filtered out of the queued lessons).
-BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"disposition-confirmed"}
+BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
+BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")

@@ -10,15 +10,17 @@ You work from:
 
 1. **The per-lead comparison files** — `<comparison_files>` lists them; read each `{lead_id}.md` at its turn. Each joins three columns: **[1]** the oracle's projection for that lead; **[2]** a real sample event from the lead's *actual* payload (orientation only); **[3]** the defender's own per-lead reasoning from the invlang (`:T resolutions` belief movement + `:R authz`) — *why* it read that lead the way it did. These files are your work surface.
 
-2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json` (the absolute path is named in `<comparison_files>`); you have `jq` and `grep` to query them. **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the refutation the defender's narrative can hide: an event present in the raw it never wrote down.
+2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json` (the absolute path is named in `<comparison_files>`); you have `jq` and `grep` to query them, and you may **replay a recorded summary snippet** (see the `summaries` source) — re-running its pure-transform pipeline over the payload. A snippet's `gather_raw/{lead_id}/{seq}.json` argument is recorded **relative to the run dir**, so root it at the absolute payload path above before running (your shell's cwd is elsewhere — a verbatim relative path will not resolve). **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the refutation the defender's narrative can hide: an event present in the raw it never wrote down.
 
 3. **`report.md`** — the defender's disposition + one-paragraph rationale: the claim you are scoring.
 
 4. **`synthesis`** — the defender's cross-lead hypotheses (+ final weights), belief movement (`:T resolutions`), authorization reasoning (`:R authz`), and conclusion (`:T conclude`): the WHY behind the disposition. There is no separate prose "analyze section" — this *is* the defender's reasoning, lifted from the invlang.
 
-5. **`coverage_manifest`** — the joined leads+queries view: the **authoritative record of every query the defender executed**, per lead (id, params, status). Ground truth for *coverage*: whether a system/index/entity was ever queried is answered here. A `lead-set`/`no-lead-exists` finding is only valid if this confirms the absence. When a query *was* run but scoped wrong (wrong index/host/IP, too-narrow window) so it would still miss the projected event, that is a sharper `lead-quality` finding, not a `lead-set` gap.
+5. **`coverage_manifest`** — the joined leads+queries view: the **authoritative record of every query the defender executed**, per lead (id, params, status). Ground truth for *coverage*: whether a system/index/entity was ever queried is answered here. A `lead-set`/`no-lead-exists` finding is only valid if this confirms the absence. When a query *was* run but scoped wrong (wrong index/host/IP, too-narrow window) so it would still miss the projected event, that is a sharper `lead-quality` finding, not a `lead-set` gap. Each payload here also carries gather's **recorded computations** nested under it (next source).
 
-6. **The actor's story** (Attack story / Goal / Bypass) and **the original alert**.
+6. **`summaries`** (nested in `coverage_manifest` under each payload) — gather's **verifiable summary** step: each is a `{label, snippet, output_status}` recording of a pure-transform computation gather ran over that payload, where *the snippet's stdout was the value gather handed the defender*. You are given the **code, not the value** — replay `snippet` yourself (per source 2) to reconstruct the value; never assume a number. This is the layer that lets you **attribute** a wrong belief (§attribution): gather's computed value sits between the actual payload and the defender's reasoning, and is otherwise invisible. A summary whose FK matched no payload appears under a lead-level `unattached_summaries`.
+
+7. **The actor's story** (Attack story / Goal / Bypass) and **the original alert**.
 
 The oracle that produced column [1] saw only the alert + the *queries* (results redacted) + the story, and projected — independently, per lead — what the attack would have surfaced *if the story were true*, as a signed diff over the lead's routine baseline ("standard environment noise"). Each projection is one of:
    - **a list of event mappings** — distinguishable events the attack *adds*. Compare against the lead's actual result (the existential / subset rule in §refute).
@@ -41,7 +43,7 @@ Emit a **single YAML document** as your entire response. **Critical:** do **not*
 ```yaml
 outcome: {enum keyword — one of caught | survived | incoherent | undecidable | skip-passthrough; plain scalar, no quotes, no punctuation}
 defender_findings:
-  - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed
+  - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed | gather-fidelity
     subject_anchor: {plain scalar — see §subject rules below; no quotes, no parens, no trailing prose}
     subject_topic: {plain scalar — short phrase naming the issue, e.g. host-daemon authorization. No internal quotes}
     finding: |
@@ -130,6 +132,15 @@ When `report.md` records a **benign** disposition, run one extra step before fin
 
 If you find one, emit it as an `analyze-discipline` finding anchored on the lead whose resolution carried the under-justified inference. Name the dual-consistent observable and the malicious mechanism it fails to rule out, and target the **defender's supporting evidence and the weight it placed on it**. This is *not* a refutation — you are not claiming the actuals contradict the disposition — and it does **not** change `outcome`; it is a reasoning-quality finding about the disposition logic. Do not force it: if the benign-supporting evidence genuinely discriminates (the malicious twin would have produced a *distinguishable* event the actuals lack), say so and emit nothing here.
 
+#### Attribution check (gather vs. defender) {#attribution}
+
+When the defender's reasoning (column [3] / `synthesis`) leans on a **computable number** (a count, distinct-cardinality, min/max/window, distribution), find its backing `summaries` row and **re-run the `snippet`** to get the value gather handed up (`G`); read the payload's true value independently (`T`). Then attribute:
+
+- **No backing row**, or the snippet is wrong code for its `label`, or `G ≠ T` → gather misreported a computed value: **`gather-fidelity`** (anchor the lead id, or `no-backing-row` when no row exists).
+- **`G == T` but the defender's belief diverges from it** → reasoned wrong from a correct number: **`analyze-discipline`**, not gather-fidelity.
+
+`gather-fidelity` is **audit-only** (like `detection-confirmed`): emit it for analysis, but it does **not** change `outcome` and is not queued as a lesson. Don't force it — if every computable belief is backed by a faithful row, emit nothing here. An `output_status` of `error`/`empty` on a row the defender still drew a number from is itself a `gather-fidelity` signal.
+
 ### Defender findings (max 3, load-bearing only)
 
 Pick the 2–3 most load-bearing things the encounter exposed about the defender — gaps in the lead set, lead quality, or analyze step, observability surfaces that matter for this story class, or detections where the encounter confirms a capability worth preserving. Skip lesser items even if you spot them. If only one finding is load-bearing, emit one.
@@ -146,6 +157,7 @@ Allowed values of `subject_anchor` by finding type:
 - `lead-quality` / `analyze-discipline` — the specific lead position id (`l-001`, `l-002`, …).
 - `detection-confirmed` — the lead position id that caught the story.
 - `observability` — a system directory name under `defender/skills/` (e.g. `host-query`, `wazuh`), or the literal `no-system-covers-this` if no skills directory covers the load-bearing system.
+- `gather-fidelity` — the lead position id (`l-001`, …) whose summary misreported a computed value, or the literal `no-backing-row` when the defender asserted a computable value with no summary row at all (see §attribution).
 
 Example: `subject_anchor: no-lead-exists` + `subject_topic: host-daemon authorization` (not `subject: "No lead exists" (host-daemon authorization)`).
 

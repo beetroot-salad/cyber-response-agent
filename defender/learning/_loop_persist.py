@@ -18,7 +18,13 @@ from typing import Any, Callable
 import yaml
 
 import lead_repository
-from _loop_config import DEFAULT_PATHS, LoopError, LoopPaths
+from _loop_config import (
+    ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
+    BENIGN_AUDIT_ONLY_FINDING_TYPES,
+    DEFAULT_PATHS,
+    LoopError,
+    LoopPaths,
+)
 from _loop_validate import _benign_outcome_keyword, _outcome_keyword
 
 
@@ -316,24 +322,25 @@ def append_findings(
     """Append queueable defender findings to the shared pending queue.
 
     Both directions feed ``_pending/findings.jsonl`` → ``defender/lessons/``. The
-    audit-only finding type is filtered (``detection-confirmed`` adversarially,
-    ``disposition-confirmed`` benignly). Each row is tagged with ``direction`` so the
-    shared curator applies the right ground-truth gate; benign ids live in a
-    ``benign/`` namespace so the two directions never collide on a ``run_id``.
+    audit-only finding types are filtered out (``detection-confirmed`` +
+    ``gather-fidelity`` adversarially, ``disposition-confirmed`` benignly). Each
+    row is tagged with ``direction`` so the shared curator applies the right
+    ground-truth gate; benign ids live in a ``benign/`` namespace so the two
+    directions never collide on a ``run_id``.
     """
     if direction == "benign":
         outcome = _benign_outcome_keyword(judge_doc["outcome"])
-        audit_only_type, namespace = "disposition-confirmed", "benign/"
+        audit_only_types, namespace = BENIGN_AUDIT_ONLY_FINDING_TYPES, "benign/"
     else:
         outcome = _outcome_keyword(judge_doc["outcome"])
-        audit_only_type, namespace = "detection-confirmed", ""
+        audit_only_types, namespace = ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES, ""
     src = _source_run_dir(learning_run_dir, paths.repo_root)
     appended = 0
     paths.pending_dir.mkdir(parents=True, exist_ok=True)
     with _flock(paths.findings_lock_file):
         with paths.pending_file.open("a") as fh:
             for n, f in enumerate(judge_doc["defender_findings"]):
-                if f["type"] == audit_only_type:
+                if f["type"] in audit_only_types:
                     continue
                 entry = {
                     "schema_version": 1,
