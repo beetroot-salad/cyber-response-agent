@@ -9,13 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from _loop_config import LoopPaths
-from _loop_persist import (
+from defender.learning._loop_config import LoopPaths
+from defender.learning._loop_persist import (
     append_actor_environment_observations,
     append_actor_observations,
     append_environment_observations,
 )
-from _loop_validate import validate_judge_benign_doc, validate_judge_doc
+from defender.learning._loop_validate import validate_judge_benign_doc, validate_judge_doc
 
 
 @dataclass(frozen=True)

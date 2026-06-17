@@ -5,15 +5,10 @@ transaction envelope (issue #298)."""
 from __future__ import annotations
 
 import subprocess
-import sys
-from pathlib import Path
 
-LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
-sys.path.insert(0, str(LEARNING_SRC))
-
-import _author_curator as curator  # type: ignore[import-not-found]
-import author_actor_benign as aenv  # type: ignore[import-not-found]
-import author_actor_env  # type: ignore[import-not-found]
+from defender.learning import _author_curator as curator
+from defender.learning import author_actor_benign as aenv
+from defender.learning import author_actor_env
 
 
 def _rows() -> list[dict]:
@@ -56,7 +51,7 @@ def test_configs_are_distinct() -> None:
     assert b.outcome_author == frozenset({"survived"})
     assert a.outcome_author == frozenset({"caught", "incoherent"})
     # the adversarial entry point delegates with the adversarial config.
-    assert author_actor_env.run_batch.__module__ == "author_actor_env"
+    assert author_actor_env.run_batch.__module__ == "defender.learning.author_actor_env"
 
 
 def test_stamp_head_trailers_uses_per_config_label(tmp_path, monkeypatch) -> None:

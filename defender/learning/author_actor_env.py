@@ -8,18 +8,22 @@ it as its own module keeps the serial drain's uniform ``mod.run_batch(...)`` cal
 shape (``_loop_orchestrate._run_curator_module``) — the trigger names this module
 and the config selection happens here, not in the caller.
 
-The sibling ``author_actor_benign`` resolves on ``sys.path`` because every importer
-already puts the learning dir there first: ``_run_curator_module`` inserts it (under
-a lock), a direct ``python author_actor_env.py`` run gets it as ``sys.path[0]``, and
-the tests insert it before importing this module. So a plain top-level import
-suffices — no per-module ``sys.path`` insert/``pop(0)`` (the positional pop the
-orchestrator deliberately avoids, since it can drop another caller's entry).
+The sibling ``author_actor_benign`` is imported via the ``defender.learning``
+namespace package; the entry-point bootstrap below puts the workspace root on
+``sys.path`` so that resolves whether this module is imported by the curator
+dispatch (``_loop_orchestrate._run_curator_module``) or run directly.
 """
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-import author_actor_benign as _benign  # type: ignore[import-not-found]
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender.learning import author_actor_benign as _benign  # type: ignore[import-not-found]
 
 
 def run_batch(*, hold_committed: bool = False) -> int:

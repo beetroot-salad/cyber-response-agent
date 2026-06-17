@@ -54,22 +54,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-try:
-    from defender.learning import (
-        _author_shared,
-        _loop_config,
-        lead_classifier,
-        lead_neighbors,
-        lead_render,
-        lead_repository,
-    )
-except ImportError:  # pragma: no cover — direct-script execution fallback
-    import _author_shared  # type: ignore[no-redef]
-    import _loop_config  # type: ignore[no-redef]
-    import lead_classifier  # type: ignore[no-redef]
-    import lead_neighbors  # type: ignore[no-redef]
-    import lead_render  # type: ignore[no-redef]
-    import lead_repository  # type: ignore[no-redef]
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+import sys as _sys  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from defender.learning import (
+    _author_shared,
+    _loop_config,
+    lead_classifier,
+    lead_neighbors,
+    lead_render,
+    lead_repository,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
+from defender.scripts.visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
     _learning_run_dir,
     block,
     esc,

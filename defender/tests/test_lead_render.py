@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import lead_render  # type: ignore[import-not-found]
+from defender.learning import lead_render  # type: ignore[import-not-found]
 
 
 def _write_template(tmp_path: Path, query_body: str) -> Path:

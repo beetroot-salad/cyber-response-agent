@@ -36,11 +36,11 @@ REPO_ROOT = HERE.parents[1]
 # under concurrent runs. Resolve from the same seam the producer wrote to rather
 # than assuming the in-repo default. _loop_config is stdlib-only (no pyyaml), so
 # importing it keeps this verifier runnable under any interpreter.
-sys.path.insert(0, str(HERE))
-try:
-    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
-finally:
-    sys.path.pop(0)
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from defender.learning._loop_config import DEFAULT_PATHS  # noqa: E402
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "verify_forward.md"
 

@@ -41,11 +41,13 @@ def _reexec_into_venv() -> None:
 if __name__ == "__main__":
     _reexec_into_venv()
 
-sys.path.insert(0, str(HERE.parent))           # serialize.py
-sys.path.insert(0, str(DEFENDER / "scripts"))  # visualize_run CSS tokens
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if str(DEFENDER.parent) not in sys.path:
+    sys.path.insert(0, str(DEFENDER.parent))
 
-import serialize
-from visualize_run import CSS as RUN_CSS
+from defender.learning.frontend import serialize  # noqa: E402
+from defender.scripts.visualize_run import CSS as RUN_CSS  # noqa: E402
 
 # Each group's left-accent reuses the run visualizer's stage palette:
 # defender=blue, actor=red, environment=amber (oracle).

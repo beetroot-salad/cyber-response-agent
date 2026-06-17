@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from _loop_config import (
+from defender.learning._loop_config import (
     ACTOR_OBSERVATION_TYPES,
     ALL_FINDING_TYPES,
     BENIGN_ALL_FINDING_TYPES,

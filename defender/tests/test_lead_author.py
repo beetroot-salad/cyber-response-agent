@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-import lead_author  # type: ignore[import-not-found]
-import lead_neighbors  # type: ignore[import-not-found]
+from defender.learning import lead_author  # type: ignore[import-not-found]
+from defender.learning import lead_neighbors  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------

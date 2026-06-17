@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-import lead_neighbors as ln  # type: ignore[import-not-found]
+from defender.learning import lead_neighbors as ln  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------

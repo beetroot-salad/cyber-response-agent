@@ -19,7 +19,7 @@ for _p in (_DEFENDER, _DEFENDER / "scripts" / "tools"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import _stub_transport as transport  # noqa: E402
+from defender.scripts.tools import _stub_transport as transport  # noqa: E402
 from runtime import circuit_breaker as cb  # noqa: E402
 
 # Every data-source adapter; each fails fast at argparse on a bad invocation,

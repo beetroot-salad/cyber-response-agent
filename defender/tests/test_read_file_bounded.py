@@ -29,7 +29,7 @@ CAP = tools._READ_CHAR_CAP
 def test_cap_matches_passthrough() -> None:
     """The read cap IS record_query's passthrough cap — one shared constant so
     the on-disk read can't defeat the capture's bound."""
-    from record_query import PASSTHROUGH_MAX_BYTES
+    from defender.scripts.tools.record_query import PASSTHROUGH_MAX_BYTES
 
     assert CAP == PASSTHROUGH_MAX_BYTES
 

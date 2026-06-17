@@ -24,6 +24,10 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+# Put the workspace root (rootdir is defender/, so "..") on sys.path for every
+# test, so `defender.*` namespace imports resolve in tests under both tests/ and
+# learning/ — in isolation or in a full run — without per-file sys.path hacks.
+pythonpath = [".."]
 markers = [
     "llm: spawns a real claude -p subprocess (skip in CI with -m 'not llm')",
     "live: requires live external infrastructure (skip in CI with -m 'not live')",

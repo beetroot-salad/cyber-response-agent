@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import lead_author
-import lead_neighbors
+from defender.learning import lead_author
+from defender.learning import lead_neighbors
 
 
 def _lead(query_id: str, params: dict | None = None) -> "lead_author.ExecutedLead":

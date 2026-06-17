@@ -33,8 +33,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _prologue import extract_case_entities  # noqa: E402
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+from defender.learning._prologue import extract_case_entities  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent

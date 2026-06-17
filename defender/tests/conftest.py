@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -20,11 +19,11 @@ import pytest
 REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
-sys.path.insert(0, str(LEARNING_SRC))
-# Allow `from defender.skills.invlang import ...` from tests living
-# inside the defender package (the workspace root isn't on sys.path
-# by default since tests run from /workspace/defender as rootdir).
-sys.path.insert(0, str(REAL_REPO))
+# The workspace root is on sys.path via `pythonpath = [".."]` in pyproject.toml's
+# [tool.pytest.ini_options], so `defender.*` namespace imports resolve. Note that
+# learning/ is intentionally NOT on the path: a bare `import author` must fail
+# loudly so a missed migration surfaces instead of silently creating a second
+# module object (defender.learning.author vs author) that monkeypatch misses.
 
 
 @pytest.fixture
@@ -76,8 +75,8 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_git("commit", "-q", "-m", "init")
 
     # Re-import author with REPO_ROOT pointed at the tmp tree.
-    import _author_shared as shared_mod  # type: ignore[import-not-found]
-    import author as author_mod  # type: ignore[import-not-found]
+    from defender.learning import _author_shared as shared_mod  # type: ignore[import-not-found]
+    from defender.learning import author as author_mod  # type: ignore[import-not-found]
 
     importlib.reload(shared_mod)
     importlib.reload(author_mod)

@@ -27,13 +27,20 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 # Public surface re-exported for run.py, replay_actor.py, and the test suites.
-import lead_repository  # noqa: E402
-from _loop_config import (  # noqa: E402
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+import sys as _sys  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from defender.learning import lead_repository  # noqa: E402
+from defender.learning._loop_config import (  # noqa: E402
     DEFAULT_PATHS,
     LoopError,
     LoopPaths,
 )
-from _loop_orchestrate import (  # noqa: E402
+from defender.learning._loop_orchestrate import (  # noqa: E402
     author_drain,
     enqueue_for_learning,
     is_held_out,
@@ -43,7 +50,7 @@ from _loop_orchestrate import (  # noqa: E402
     run_one,
     _directions_for,
 )
-from _loop_persist import (  # noqa: E402
+from defender.learning._loop_persist import (  # noqa: E402
     append_actor_environment_observations,
     append_actor_observations,
     append_environment_observations,
@@ -51,7 +58,7 @@ from _loop_persist import (  # noqa: E402
     derive_alert_rule_key,
     _anchor_with_case_key,
 )
-from _loop_subagents import (  # noqa: E402
+from defender.learning._loop_subagents import (  # noqa: E402
     ClaudePrintSubagents,
     Subagents,
     invoke_actor,
@@ -61,7 +68,7 @@ from _loop_subagents import (  # noqa: E402
     invoke_oracle,
     is_skip_story,
 )
-from _loop_validate import (  # noqa: E402
+from defender.learning._loop_validate import (  # noqa: E402
     dump_oracle_doc,
     normalize_disposition,
     strip_yaml_fence,
@@ -69,7 +76,7 @@ from _loop_validate import (  # noqa: E402
     validate_judge_doc,
     _outcome_keyword,
 )
-from _prologue import extract_case_entities  # noqa: E402
+from defender.learning._prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
     "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",

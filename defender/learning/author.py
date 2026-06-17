@@ -53,19 +53,20 @@ from typing import Any
 
 import yaml
 
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import _author_runner as _runner  # type: ignore[import-not-found]
-    import _author_shared as _shared  # type: ignore[import-not-found]
-    from _loop_config import DEFAULT_PATHS  # type: ignore[import-not-found]
-    from _loop_persist import (  # type: ignore[import-not-found]
-        _flock,
-        _read_jsonl_rows,
-        rotate_queue_locked,
-    )
-finally:
-    sys.path.pop(0)
+from defender.learning import _author_runner as _runner  # noqa: E402
+from defender.learning import _author_shared as _shared  # noqa: E402
+from defender.learning._loop_config import DEFAULT_PATHS  # noqa: E402
+from defender.learning._loop_persist import (  # noqa: E402
+    _flock,
+    _read_jsonl_rows,
+    rotate_queue_locked,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

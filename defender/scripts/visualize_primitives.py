@@ -5,8 +5,9 @@ everything here is either a tiny HTML helper, a file-loading shim, or
 a renderer that turns a single stream-json event / artifact into HTML.
 The judge and runtime views both import from here.
 
-Sibling imports work because `python3 defender/scripts/visualize_run.py`
-puts ``defender/scripts/`` on sys.path; no package boilerplate needed.
+Cross-module imports use the ``defender.scripts``/``defender.learning``
+namespace packages; entry points (``visualize_run.py``, ``run.py``) put the
+workspace root on ``sys.path`` so they resolve.
 """
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ import html
 import json
 import os
 import re
-import sys
 from pathlib import Path
 
 try:
@@ -25,11 +25,9 @@ except ImportError:  # pragma: no cover — yaml is in defender deps
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The two-table read/join surface lives in defender/learning/; add it to the
-# path so the visualizers render from `joined()` rather than the retired
-# lead_sequence.yaml projection.
-sys.path.insert(0, str(REPO_ROOT / "defender" / "learning"))
-import lead_repository  # noqa: E402
+# The two-table read/join surface lives in defender/learning/ — reached via the
+# `defender.learning` namespace package (callers put the repo root on sys.path).
+from defender.learning import lead_repository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

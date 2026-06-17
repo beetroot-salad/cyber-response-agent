@@ -27,8 +27,8 @@ from pathlib import Path
 
 import yaml
 
-import lead_repository
-from _loop_oracle import real_sample_text
+from defender.learning import lead_repository
+from defender.learning._loop_oracle import real_sample_text
 
 
 # ---------------------------------------------------------------------------
@@ -39,15 +39,8 @@ from _loop_oracle import real_sample_text
 def _invlang():
     """Return (parser_module, walkers_module); lazily imported so the readers stay
     importable in minimal contexts (the only cross-package dependency)."""
-    try:
-        from defender.skills.invlang import _walkers as w
-        from defender.skills.invlang import parser as p
-    except ImportError:  # pragma: no cover — direct-script execution fallback
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from skills.invlang import _walkers as w  # type: ignore
-        from skills.invlang import parser as p  # type: ignore
+    from defender.skills.invlang import _walkers as w
+    from defender.skills.invlang import parser as p
     return p, w
 
 
