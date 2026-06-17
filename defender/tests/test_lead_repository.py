@@ -59,6 +59,38 @@ def _query(
         fh.write(json.dumps(rec) + "\n")
 
 
+def _summary(
+    run: Path,
+    lead_id: str,
+    payload_seq: int | None,
+    summary_seq: int,
+    *,
+    label: str = "distinct-users",
+    snippet: str = "jq '[.[].data.srcuser] | unique | length' gather_raw/l-001/0.json",
+    output: str = "3",
+    output_status: str = "ok",
+) -> None:
+    """Append one row to summaries.jsonl, matching record_summary's schema.
+
+    `tools` defaults to `["jq"]` and `exit_code` is derived from `output_status`
+    (the wrapper's invariant); a test needing other values writes the row raw.
+    """
+    run.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "lead_id": lead_id,
+        "payload_seq": payload_seq,
+        "summary_seq": summary_seq,
+        "label": label,
+        "tools": ["jq"],
+        "snippet": snippet,
+        "output": output,
+        "exit_code": 0 if output_status == "ok" else 1,
+        "output_status": output_status,
+    }
+    with (run / "summaries.jsonl").open("a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
 # --------------------------------------------------------------------------
 # load_leads
 # --------------------------------------------------------------------------
@@ -379,3 +411,127 @@ def test_lead_ids_from_companion_filters_resolution_references():
         ]
     }
     assert lr._lead_ids_from_companion(companion) == {"l-001", "l-002"}
+
+
+# --------------------------------------------------------------------------
+# load_summaries + summaries join/render (#311)
+# --------------------------------------------------------------------------
+
+
+def test_load_summaries_missing_file_is_empty(tmp_path):
+    assert lr.load_summaries(tmp_path / "run") == []
+
+
+def test_load_summaries_parses_rows_in_order(tmp_path):
+    run = tmp_path / "run"
+    _summary(run, "l-001", 0, 0, label="a")
+    # second row written raw to exercise multi-tool `tools` parsing
+    with (run / "summaries.jsonl").open("a") as fh:
+        fh.write(json.dumps(
+            {"lead_id": "l-001", "payload_seq": 0, "summary_seq": 1, "label": "b",
+             "tools": ["jq", "sort", "uniq"], "snippet": "jq . f | sort | uniq",
+             "output": "x", "exit_code": 0, "output_status": "ok"}
+        ) + "\n")
+    rows = lr.load_summaries(run)
+    assert [r.summary_seq for r in rows] == [0, 1]
+    assert [r.label for r in rows] == ["a", "b"]
+    assert rows[0].payload_seq == 0
+    assert rows[1].tools == ["jq", "sort", "uniq"]
+
+
+def test_load_summaries_skips_malformed_and_lead_less(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir(parents=True)
+    (run / "summaries.jsonl").write_text(
+        "\n".join(
+            [
+                "",  # blank
+                "not json",  # non-JSON
+                json.dumps([1, 2]),  # non-dict
+                json.dumps({"payload_seq": 0, "label": "x"}),  # no lead_id
+                json.dumps(
+                    {"lead_id": "l-001", "payload_seq": 0, "summary_seq": 0,
+                     "label": "ok", "snippet": "jq . f", "output": "1",
+                     "exit_code": 0, "output_status": "ok"}
+                ),
+            ]
+        )
+    )
+    rows = lr.load_summaries(run)
+    assert len(rows) == 1
+    assert rows[0].label == "ok"
+
+
+def test_load_summaries_null_payload_seq(tmp_path):
+    run = tmp_path / "run"
+    _summary(run, "l-001", None, 0)
+    rows = lr.load_summaries(run)
+    assert rows[0].payload_seq is None
+
+
+def test_joined_nests_summaries_on_lead_seq_sorted(tmp_path):
+    run = tmp_path / "run"
+    _lead(run, "l-001", "g1", ["d1"])
+    _query(run, "l-001", 0)
+    _summary(run, "l-001", 0, 1, label="second")
+    _summary(run, "l-001", 0, 0, label="first")
+    jl = lr.joined(run)
+    assert len(jl) == 1
+    assert [s.label for s in jl[0].summaries] == ["first", "second"]
+
+
+def test_joined_summary_only_lead_surfaces_as_orphan(tmp_path):
+    # A summary whose lead has no sidecar and no query must not be dropped.
+    run = tmp_path / "run"
+    _summary(run, "l-009", 0, 0, label="orphaned")
+    jl = lr.joined(run)
+    assert len(jl) == 1
+    assert jl[0].lead_id == "l-009"
+    assert jl[0].orphan is True
+    assert [s.label for s in jl[0].summaries] == ["orphaned"]
+
+
+def test_render_joined_yaml_nests_summary_code_not_value(tmp_path):
+    import yaml
+
+    run = tmp_path / "run"
+    _lead(run, "l-001", "the goal", ["dim"])
+    _query(run, "l-001", 0)
+    _summary(run, "l-001", 0, 0, label="distinct-users",
+             snippet="jq 'length' gather_raw/l-001/0.json", output="42")
+    doc = yaml.safe_load(lr.render_joined_yaml(run))
+    summ = doc["leads"][0]["queries"][0]["summaries"]
+    assert summ == [
+        {"label": "distinct-users",
+         "snippet": "jq 'length' gather_raw/l-001/0.json",
+         "output_status": "ok"}
+    ]
+    # pure A: the recorded value is never rendered.
+    assert "output" not in summ[0]
+    assert "42" not in lr.render_joined_yaml(run)
+
+
+def test_render_joined_yaml_unattached_summaries(tmp_path):
+    import yaml
+
+    run = tmp_path / "run"
+    _lead(run, "l-001", "g", ["d"])
+    _query(run, "l-001", 0)
+    _summary(run, "l-001", None, 0, label="no-payload")  # payload_seq None
+    _summary(run, "l-001", 7, 1, label="no-such-seq")    # seq with no query
+    doc = yaml.safe_load(lr.render_joined_yaml(run))
+    lead = doc["leads"][0]
+    assert "summaries" not in lead["queries"][0]
+    labels = {s["label"] for s in lead["unattached_summaries"]}
+    assert labels == {"no-payload", "no-such-seq"}
+
+
+def test_stage_tables_copies_summaries(tmp_path):
+    run = tmp_path / "run"
+    _lead(run, "l-001", "g", ["d"])
+    _query(run, "l-001", 0)
+    _summary(run, "l-001", 0, 0)
+    dst = tmp_path / "staged"
+    lr.stage_tables(run, dst)
+    assert (dst / "summaries.jsonl").is_file()
+    assert lr.load_summaries(dst)[0].lead_id == "l-001"

@@ -351,6 +351,23 @@ def judge_settings_dict(gather_raw: Path, comparison_dir: Path) -> dict:
                 "Bash(grep *)",
                 "Bash(cat *)",
                 "Bash(ls *)",
+                # Replay surface for gather's recorded summary snippets (#311):
+                # each pipe segment's head is gated independently, so the judge
+                # needs the full pure-transform suite (== record_summary's
+                # ANALYSIS_TOOLS) to re-run a `jq … | sort | uniq -c`-style
+                # snippet and reconstruct gather's value rather than trust it.
+                "Bash(datamash *)",
+                "Bash(sort *)",
+                "Bash(uniq *)",
+                "Bash(cut *)",
+                "Bash(comm *)",
+                "Bash(join *)",
+                "Bash(wc *)",
+                "Bash(tr *)",
+                "Bash(paste *)",
+                "Bash(nl *)",
+                "Bash(head *)",
+                "Bash(tail *)",
             ],
             "deny": [
                 "Task",

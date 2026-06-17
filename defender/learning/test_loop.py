@@ -1080,6 +1080,49 @@ def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
     assert not paths.pending_file.is_relative_to(repo)
 
 
+def test_validate_judge_doc_accepts_gather_fidelity(tmp_path: Path):
+    # gather-fidelity (#311) is an audit-only adversarial finding type.
+    doc = _full_judge_doc()
+    doc["defender_findings"][0]["type"] = "gather-fidelity"
+    doc["defender_findings"][0]["subject_anchor"] = "no-backing-row"
+    loop.validate_judge_doc(doc)
+
+
+def test_append_findings_filters_gather_fidelity_not_queueable(tmp_path: Path):
+    # gather-fidelity is audit-only: emitted + validated, but never queued as a
+    # lesson — alongside detection-confirmed. A queueable lead-set in the same
+    # doc still lands.
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    learning_run_dir = paths.runs_dir / "case-gf"
+    learning_run_dir.mkdir(parents=True)
+    judge_doc = {
+        "outcome": "caught",
+        "defender_findings": [
+            {
+                "type": "gather-fidelity",
+                "subject_anchor": "l-001",
+                "subject_topic": "distinct-users miscount",
+                "finding": "snippet counted rows, not distinct users.",
+                "citations": [{"source": "coverage_manifest", "quote": "..."}],
+            },
+            {
+                "type": "lead-set",
+                "subject_anchor": "no-lead-exists",
+                "subject_topic": "missed lateral move",
+                "finding": "narrative",
+                "citations": [{"source": "coverage_manifest", "quote": "..."}],
+            },
+        ],
+    }
+    n = persist.append_findings(
+        judge_doc, "case-gf", "rule-1", learning_run_dir,
+        direction="adversarial", paths=paths,
+    )
+    assert n == 1
+    rows = _read_jsonl(paths.pending_file)
+    assert [r["type"] for r in rows] == ["lead-set"]
+
+
 # ---------------------------------------------------------------------------
 # author_branch — git/gh helpers for the in-place-branch + PR discipline
 # (injected runners; no real git/gh is ever invoked)
