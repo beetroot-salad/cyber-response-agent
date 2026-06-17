@@ -1,10 +1,14 @@
-"""Unit tests for author_actor.py — the actor lessons curator.
+"""Unit tests for the actor lessons curator.
 
-Covers the deterministic pre/post-flight without spawning ``claude -p``.
+Covers the deterministic pre/post-flight without spawning ``claude -p``. The
+transaction envelope lives in ``_author_curator``; ``author_actor`` supplies the
+actor ``CuratorConfig``. Tests drive the engine with a config pointed at a tmp repo
+and an injected ``invoke_agent`` — no module-global monkeypatching beyond the single
+repo-root seam shared with ``_author_shared`` (git/lock/generation operations).
 """
 from __future__ import annotations
 
-import importlib.util
+import dataclasses
 import json
 import subprocess
 import sys
@@ -13,27 +17,17 @@ from pathlib import Path
 import pytest
 import yaml
 
+LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
+sys.path.insert(0, str(LEARNING_SRC))
 
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+# The curator engine, the lock/generation helpers, and the actor config wrapper.
+# Each resolves to one module instance (the path imports inside the modules use the
+# same names), so patching ``curator.REPO_ROOT`` / ``shared.*`` reaches them.
+import _author_curator as curator  # type: ignore[import-not-found]  # noqa: E402
+import _author_shared as shared  # type: ignore[import-not-found]  # noqa: E402
+import author_actor as aa  # type: ignore[import-not-found]  # noqa: E402
 
-
-# Pre-load _author_runner / _author_shared so the import inside
-# author_actor.py resolves the same way it does at runtime.
-_HERE = Path(__file__).resolve().parent
-_load("_author_runner_t", _HERE / "_author_runner.py")
-sys.modules["_author_runner"] = sys.modules["_author_runner_t"]
-_load("_author_shared_t", _HERE / "_author_shared.py")
-sys.modules["_author_shared"] = sys.modules["_author_shared_t"]
-
-aa = _load("author_actor_t", _HERE / "author_actor.py")
-shared = sys.modules["_author_shared"]
-
-AuthorError = aa.AuthorError
+AuthorError = curator.AuthorError
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +36,9 @@ AuthorError = aa.AuthorError
 
 
 def _isolate(monkeypatch, tmp_path: Path):
-    """Run author_actor against a tmp repo. Returns dict of pointers."""
+    """Point the curator's git/lock/generation operations at a fresh tmp repo.
+
+    Returns a dict of pointers; build a config with ``_cfg(ctx, invoke)``."""
     repo = tmp_path / "repo"
     learning = repo / "defender" / "learning"
     pending = learning / "_pending"
@@ -51,30 +47,17 @@ def _isolate(monkeypatch, tmp_path: Path):
     pending.mkdir(parents=True)
 
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "config", "user.email", "t@t"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(repo), "config", "user.name", "t"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
     # Seed an initial commit so HEAD exists and rev-list works.
     seed = repo / "README"
     seed.write_text("seed\n")
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
 
-    monkeypatch.setattr(aa, "REPO_ROOT", repo)
-    monkeypatch.setattr(aa, "LEARNING_DIR", learning)
-    monkeypatch.setattr(aa, "LESSONS_ACTOR_DIR", lessons)
-    monkeypatch.setattr(aa, "PENDING_DIR", pending)
-    monkeypatch.setattr(aa, "PENDING_FILE", pending / "actor_observations.jsonl")
-    monkeypatch.setattr(
-        aa, "CONSUMED_FILE", pending / "actor_observations.consumed.jsonl"
-    )
-    monkeypatch.setattr(aa, "LOCK_FILE", pending / ".actor.lock")
-    monkeypatch.setattr(aa, "AUTHOR_RUN_LOG", pending / "author_actor_run.jsonl")
+    # The engine runs all git operations at curator.REPO_ROOT; the repo lock +
+    # generation counter live in _author_shared. Both point at the tmp repo.
+    monkeypatch.setattr(curator, "REPO_ROOT", repo)
     monkeypatch.setattr(shared, "REPO_ROOT", repo)
     monkeypatch.setattr(shared, "LEARNING_DIR", learning)
     monkeypatch.setattr(shared, "REPO_LOCK_FILE", learning / "_author.lock")
@@ -84,6 +67,31 @@ def _isolate(monkeypatch, tmp_path: Path):
         "learning": learning,
         "pending": pending,
         "lessons": lessons,
+    }
+
+
+def _cfg(ctx: dict, invoke_agent) -> curator.CuratorConfig:
+    """The production actor config, repointed at the tmp repo's queue + corpus and
+    given an injected ``invoke_agent`` so no ``claude -p`` runs."""
+    return dataclasses.replace(
+        aa.ACTOR_CONFIG,
+        corpus_dir=ctx["lessons"],
+        pending_file=ctx["pending"] / "actor_observations.jsonl",
+        consumed_file=ctx["pending"] / "actor_observations.consumed.jsonl",
+        lock_file=ctx["pending"] / ".actor.lock",
+        invoke_agent=invoke_agent,
+    )
+
+
+def _consume_all(observations, batch_id, generation, cfg):
+    """A no-commit AUTHOR_RESULT that routes every to_author obs to consumed_skip."""
+    return {
+        "committed": [],
+        "consumed_skip": [
+            {"observation_id": o["observation_id"], "reason": "test"}
+            for o in observations
+        ],
+        "commit_sha": None,
     }
 
 
@@ -98,7 +106,8 @@ def _row(observation_id: str, outcome: str, source_run_dir: str = "") -> dict:
         "subject_topic": "topic",
         "observation": "obs body",
         "judge_outcome": outcome,
-        "source_run_dir": source_run_dir or f"defender/learning/runs/{observation_id.split('/')[0]}/",
+        "source_run_dir": source_run_dir
+        or f"defender/learning/runs/{observation_id.split('/')[0]}/",
     }
 
 
@@ -141,24 +150,14 @@ def test_outcome_policy_filter_drops_survived_and_undecidable(
             _row("d/0", "incoherent"),
         ],
     )
-    # Stub invoke_agent so the test never spawns claude; the to_author
-    # list it sees must contain only caught + incoherent.
+    # The to_author list handed to the agent must contain only caught + incoherent.
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, actor_model):
+    def fake_invoke(observations, batch_id, generation, cfg):
         captured.append(observations)
-        # Return a no-commit result that consumes all to_author.
-        return {
-            "committed": [],
-            "consumed_skip": [
-                {"observation_id": o["observation_id"], "reason": "test"}
-                for o in observations
-            ],
-            "commit_sha": None,
-        }
+        return _consume_all(observations, batch_id, generation, cfg)
 
-    monkeypatch.setattr(aa, "invoke_agent", fake_invoke)
-    rc = aa.run_batch()
+    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
     assert len(captured) == 1
     sent_ids = {o["observation_id"] for o in captured[0]}
@@ -198,25 +197,15 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
         ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "seed lesson"],
         check=True,
     )
-    _write_queue(
-        ctx["pending"], [_row("a/0", "caught"), _row("b/0", "caught")]
-    )
+    _write_queue(ctx["pending"], [_row("a/0", "caught"), _row("b/0", "caught")])
 
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, actor_model):
+    def fake_invoke(observations, batch_id, generation, cfg):
         captured.append(observations)
-        return {
-            "committed": [],
-            "consumed_skip": [
-                {"observation_id": o["observation_id"], "reason": "test"}
-                for o in observations
-            ],
-            "commit_sha": None,
-        }
+        return _consume_all(observations, batch_id, generation, cfg)
 
-    monkeypatch.setattr(aa, "invoke_agent", fake_invoke)
-    rc = aa.run_batch()
+    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
     sent_ids = {o["observation_id"] for o in captured[0]}
     assert sent_ids == {"b/0"}
@@ -241,19 +230,11 @@ def test_held_out_double_check_holds_observation(monkeypatch, tmp_path: Path):
 
     captured: list[list[dict]] = []
 
-    def fake_invoke(observations, batch_id, generation, actor_model):
+    def fake_invoke(observations, batch_id, generation, cfg):
         captured.append(observations)
-        return {
-            "committed": [],
-            "consumed_skip": [
-                {"observation_id": o["observation_id"], "reason": "t"}
-                for o in observations
-            ],
-            "commit_sha": None,
-        }
+        return _consume_all(observations, batch_id, generation, cfg)
 
-    monkeypatch.setattr(aa, "invoke_agent", fake_invoke)
-    rc = aa.run_batch()
+    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
     assert rc == 0
     sent_ids = {o["observation_id"] for o in captured[0]}
     assert sent_ids == {"ok/0"}
@@ -275,8 +256,7 @@ def test_held_out_double_check_holds_observation(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_result_partition_rejects_unknown_observation(monkeypatch, tmp_path: Path):
-    _isolate(monkeypatch, tmp_path)
+def test_result_partition_rejects_unknown_observation():
     to_author = [_row("a/0", "caught")]
     result = {
         "committed": ["a/0", "bogus/9"],
@@ -284,13 +264,10 @@ def test_result_partition_rejects_unknown_observation(monkeypatch, tmp_path: Pat
         "commit_sha": "deadbeef",
     }
     with pytest.raises(AuthorError, match="unknown observations"):
-        aa.validate_agent_result_partition(result, to_author)
+        curator.validate_agent_result_partition(result, to_author)
 
 
-def test_result_partition_rejects_duplicate_across_buckets(
-    monkeypatch, tmp_path: Path
-):
-    _isolate(monkeypatch, tmp_path)
+def test_result_partition_rejects_duplicate_across_buckets():
     to_author = [_row("a/0", "caught")]
     result = {
         "committed": ["a/0"],
@@ -298,22 +275,20 @@ def test_result_partition_rejects_duplicate_across_buckets(
         "commit_sha": "deadbeef",
     }
     with pytest.raises(AuthorError, match="more than once"):
-        aa.validate_agent_result_partition(result, to_author)
+        curator.validate_agent_result_partition(result, to_author)
 
 
-def test_result_partition_rejects_missing_observation(monkeypatch, tmp_path: Path):
-    _isolate(monkeypatch, tmp_path)
+def test_result_partition_rejects_missing_observation():
     to_author = [_row("a/0", "caught"), _row("b/0", "caught")]
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_sha": "x"}
     with pytest.raises(AuthorError, match="missing observations"):
-        aa.validate_agent_result_partition(result, to_author)
+        curator.validate_agent_result_partition(result, to_author)
 
 
 def test_post_flight_rejects_missing_generation_trailer(monkeypatch, tmp_path: Path):
     ctx = _isolate(monkeypatch, tmp_path)
     # Land a commit inside lessons-actor with no trailers.
-    p = ctx["lessons"] / "x.md"
-    p.write_text("hello\n")
+    (ctx["lessons"] / "x.md").write_text("hello\n")
     subprocess.run(
         ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
@@ -323,24 +298,21 @@ def test_post_flight_rejects_missing_generation_trailer(monkeypatch, tmp_path: P
         check=True,
     )
     with pytest.raises(AuthorError, match="Generation:"):
-        aa.assert_head_trailers(1, "claude-sonnet-4-6")
+        curator.assert_head_trailers(1, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
 
 
 def test_post_flight_accepts_correct_trailers(monkeypatch, tmp_path: Path):
     ctx = _isolate(monkeypatch, tmp_path)
-    p = ctx["lessons"] / "x.md"
-    p.write_text("hello\n")
+    (ctx["lessons"] / "x.md").write_text("hello\n")
     subprocess.run(
         ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
     msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
-    subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True
-    )
-    aa.assert_head_trailers(1, "claude-sonnet-4-6")
-    # And the head-only-lessons-actor predicate accepts this commit.
-    assert aa.head_changed_only_lessons_actor() is True
+    subprocess.run(["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True)
+    curator.assert_head_trailers(1, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    # And the head-only-corpus predicate accepts this commit.
+    assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is True
 
 
 def test_post_flight_rejects_commit_outside_lessons_actor(monkeypatch, tmp_path: Path):
@@ -352,32 +324,29 @@ def test_post_flight_rejects_commit_outside_lessons_actor(monkeypatch, tmp_path:
         ["git", "-C", str(ctx["repo"]), "add", "defender/lessons/y.md"], check=True
     )
     subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "wrong dir"],
-        check=True,
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "wrong dir"], check=True
     )
-    assert aa.head_changed_only_lessons_actor() is False
+    assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is False
 
 
 def test_post_flight_rejects_no_commit_result_when_head_changed(
     monkeypatch, tmp_path: Path
 ):
     ctx = _isolate(monkeypatch, tmp_path)
-    pre_agent_head = aa.git_head_sha()
-    p = ctx["lessons"] / "x.md"
-    p.write_text("hello\n")
+    pre_agent_head = curator.git_head_sha()
+    (ctx["lessons"] / "x.md").write_text("hello\n")
     subprocess.run(
         ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
     msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
-    subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg],
-        check=True,
-    )
+    subprocess.run(["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True)
     result = {"committed": [], "consumed_skip": [], "commit_sha": None}
 
     with pytest.raises(AuthorError, match="HEAD changed"):
-        aa.verify_agent_state(result, 1, "claude-sonnet-4-6", pre_agent_head)
+        curator.verify_agent_state(
+            result, 1, "claude-sonnet-4-6", pre_agent_head, _cfg(ctx, _consume_all)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -390,12 +359,9 @@ def test_actor_generation_count_starts_at_1(monkeypatch, tmp_path: Path):
     assert shared.actor_generation_count() == 1
 
 
-def test_actor_generation_count_ignores_pre_author_commits(
-    monkeypatch, tmp_path: Path
-):
-    """Pre-author commits that touch lessons-actor/ (corpus structure,
-    templates) must NOT advance the counter — only commits carrying the
-    Actor-Model: trailer do."""
+def test_actor_generation_count_ignores_pre_author_commits(monkeypatch, tmp_path: Path):
+    """Pre-author commits that touch lessons-actor/ (corpus structure, templates)
+    must NOT advance the counter — only commits carrying the Actor-Model: trailer do."""
     ctx = _isolate(monkeypatch, tmp_path)
     pre = ctx["lessons"] / "_TEMPLATE.md"
     pre.write_text("template\n")
@@ -454,16 +420,16 @@ def test_repo_lock_blocks_second_acquire(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_rotate_queue_preserves_held_and_appends_consumed(
-    monkeypatch, tmp_path: Path
-):
+def test_rotate_queue_preserves_held_and_appends_consumed(monkeypatch, tmp_path: Path):
     ctx = _isolate(monkeypatch, tmp_path)
     held = [{**_row("h/0", "caught"), "held_reason": "x"}]
     consumed = [
         {**_row("c/0", "caught"), "consumed_category": "consumed_committed"},
         {**_row("s/0", "caught"), "consumed_category": "consumed_skip", "skip_reason": "low"},
     ]
-    aa.rotate_queue(held=held, consumed=consumed, commit_sha="abc123")
+    curator.rotate_queue(
+        held=held, consumed=consumed, commit_sha="abc123", cfg=_cfg(ctx, _consume_all)
+    )
 
     left = [
         json.loads(line)
@@ -491,9 +457,9 @@ def test_rotate_queue_preserves_held_and_appends_consumed(
 
 
 def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
-    """The runtime actor uses lessons_actor_index.py; stale lessons must
-    not be surfaced unless --include-stale is passed. v2: stale-hiding
-    applies to any mutable=true lesson, not just env-channel."""
+    """The runtime actor uses lessons_actor_index.py; stale lessons must not be
+    surfaced unless --include-stale is passed. v2: stale-hiding applies to any
+    mutable=true lesson, not just env-channel."""
     ctx = _isolate(monkeypatch, tmp_path)
     _write_lesson(
         ctx["lessons"],
@@ -520,9 +486,7 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
             "source_observation_ids": ["r0/0"],
         },
     )
-    script = (
-        Path(__file__).resolve().parents[1] / "scripts" / "lessons_actor_index.py"
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "lessons_actor_index.py"
     fake_scripts = ctx["repo"] / "defender" / "scripts"
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
