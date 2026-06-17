@@ -172,6 +172,19 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
     assert permission.decide_bash(cmd, is_main_session=False).allow
 
 
+@pytest.mark.parametrize("cmd", [
+    # A quote spanning a newline is unparseable → split_segments hands back one
+    # opaque token. It must fail CLOSED, not be mistaken for an adapter (its head
+    # "starts with defender-") and routed to the capture path.
+    "defender-elastic query 'unterminated\nrest'",
+    "jq '.a\n.b' f.json",
+])
+def test_unparseable_quote_spanning_newline_fails_closed(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.adapter_argv(cmd) is None  # not routed to capture
+
+
 # --- read ------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [

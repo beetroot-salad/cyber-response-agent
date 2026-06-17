@@ -131,6 +131,14 @@ def _segment_is_adapter(toks: list[str]) -> bool:
     is NOT a query and must not be captured."""
     if not toks:
         return False
+    # split_segments hands back the whole script as one opaque token when it can't
+    # parse it (a quote spanning a newline). A real command's head is a single
+    # whitespace-free word, so a head carrying whitespace IS that opaque fallback —
+    # never an adapter. Refusing it routes the command to the fail-closed deny in
+    # decide_bash/_all_segments_safe instead of the capture path (which would only
+    # error on an unrunnable argv).
+    if any(c.isspace() for c in toks[0]):
+        return False
     cmd = toks[0]
     if cmd in ("python", "python3") and len(toks) > 1:
         cmd = toks[1]  # raw `python3 …/<system>_cli.py` form
