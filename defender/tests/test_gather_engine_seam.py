@@ -1,5 +1,7 @@
-"""Tests for the gather-engine seams added with the optimization pass — no model
-call (constructing an Agent needs no API key, only running one does):
+"""Tests for the gather-engine seams added with the optimization pass. No model
+is *run*, but `AnthropicModel(...)` builds its provider eagerly, so the tests that
+construct an agent (#1) need `ANTHROPIC_API_KEY` and are skipped without it (the
+pure decision/prompt/strip helpers below don't):
 
   - #1 the gather subagent's read-only tool surface (bash + read_file, no file
     writers), vs the main agent's full surface;
@@ -9,6 +11,7 @@ call (constructing an Agent needs no API key, only running one does):
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -64,6 +67,11 @@ def test_real_gather_skill_loses_unconditional_body_read_for_pai():
 
 # --- #1: gather's read-only tool surface -----------------------------------
 
+@pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="needs first-party ANTHROPIC_API_KEY (AnthropicModel constructs its "
+           "provider eagerly, so even building the agent requires the key)",
+)
 def test_gather_agent_has_no_file_writers(tmp_path):
     logger = observe.RequestLogger(tmp_path / "l.jsonl")
     gather = driver.build_gather_agent(_DEFENDER, logger, "gather:l-001")

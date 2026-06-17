@@ -116,11 +116,25 @@ def test_gather_allows_quoted_jq_comparisons(cmd):
 @pytest.mark.parametrize("cmd", [
     "jq '.x' f.json > /tmp/out",            # real stdout redirect outside quotes
     "cat f.json 1> /tmp/out",               # explicit fd redirect
+    "jq '.x' f.json >> /tmp/out",           # append redirect
     "jq '.x' $(cat injected)",              # command substitution outside quotes
     'jq ".x" "$(rm -rf /)"',                # substitution live inside double quotes
+    # Fused shell-operator tokens shlex emits as a single token that is neither a
+    # recognized separator (|/||/&&/;) nor a `<>&`-only redirect — a redirect-only
+    # check missed these, so a file write / a second ungated command slipped through.
+    "jq '.x' f.json >| /tmp/out",           # >| force-clobber stdout redirect
+    "cat secret >| /tmp/exfil",             # ... same, exfil shape
+    "jq '.x' f.json &>| /tmp/out",          # &>| both-stream clobber
+    "jq '.x' f.json |& rm -rf /",           # |& pipe-both: the rm must be gated
+    "jq '.x' f.json & rm -rf /",            # bare-& background: the rm must be gated
+    # `2>1` is a write to a file named `1` (operator token `>`), not the `2>&1`
+    # merge (operator token `>&`) — it must not be waved through as benign stderr.
+    "jq '.x' f.json 2>1",
+    "jq '.x' f.json 2 > 1",                 # ... same, with `2` as a positional token
 ])
 def test_gather_still_denies_real_redirect_and_substitution(cmd):
     assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
 
 
 # --- read ------------------------------------------------------------------

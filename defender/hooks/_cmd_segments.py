@@ -109,6 +109,12 @@ def tokenize(script: str) -> list[str] | None:
     hand-rolled quote/escape state machine this module used to carry."""
     lex = shlex.shlex(script, posix=True, punctuation_chars=True)
     lex.whitespace_split = True
+    # Disable comment stripping (shlex defaults `commenters="#"`). The shell only
+    # starts a comment at a `#` that begins a word; shlex would strip from ANY
+    # unquoted `#` to end-of-line, silently truncating a query value/pattern/path
+    # that contains a `#` (e.g. `grep INC#1234 f.json` -> `['grep','INC']`). The
+    # old `shlex.split`-based path disabled comments too; keep that parity.
+    lex.commenters = ""
     try:
         return list(lex)
     except ValueError:
