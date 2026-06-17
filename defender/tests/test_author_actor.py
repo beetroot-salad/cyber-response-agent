@@ -311,6 +311,58 @@ def test_stamp_head_trailers_appends_provenance(monkeypatch, tmp_path: Path):
     assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is True
 
 
+def test_stamp_head_trailers_ignores_stray_staged_file(monkeypatch, tmp_path: Path):
+    """The stamping amend must not fold a file the agent left staged *outside* the
+    corpus into the lesson commit. ``verify_agent_state`` checks scope on the
+    un-amended commit, so ``--only`` (HEAD's own tree) is what keeps the integrity
+    gate's 'touches only the corpus' guarantee true after the amend."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    (ctx["lessons"] / "x.md").write_text("hello\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "defender/actor: lesson batch abc"],
+        check=True,
+    )
+    # A stray file staged outside the corpus, left in the index but never committed.
+    (ctx["repo"] / "stray.txt").write_text("stray\n")
+    subprocess.run(["git", "-C", str(ctx["repo"]), "add", "stray.txt"], check=True)
+
+    curator.stamp_head_trailers(3, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    # The amended commit still touches only the corpus — stray.txt was NOT folded in.
+    assert curator.head_changed_only(aa.ACTOR_CONFIG.corpus_dir_rel) is True
+    files = subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "show", "--name-only", "--pretty=format:", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert "stray.txt" not in files
+
+
+def test_stamp_head_trailers_rejects_agent_written_trailers(monkeypatch, tmp_path: Path):
+    """If the agent disobeys the prompt and writes its own trailers, ``git --trailer``
+    would *append* a second set — and the first-match readers (``eval_secondary``) would
+    pin the agent's value over the loop's. Stamping must refuse (queue intact for retry)
+    rather than silently produce duplicate provenance."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    (ctx["lessons"] / "x.md").write_text("hello\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m",
+         "defender/actor: lesson batch abc\n\nGeneration: 99\nActor-Model: wrong-model"],
+        check=True,
+    )
+    head_before = curator.git_head_sha()
+    with pytest.raises(AuthorError, match="already carries"):
+        curator.stamp_head_trailers(3, "claude-sonnet-4-6", aa.ACTOR_CONFIG)
+    # Refused without rewriting HEAD — no duplicate trailers stamped.
+    assert curator.git_head_sha() == head_before
+
+
 def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
     """End-to-end: the agent commits a plain message; run_batch stamps the provenance
     trailers and rotates the committed observation out against the rewritten sha."""

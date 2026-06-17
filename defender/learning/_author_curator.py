@@ -336,9 +336,26 @@ def stamp_head_trailers(generation: int, model: str, cfg: CuratorConfig) -> str:
     recorded values can't drift from a hand-typed literal in the agent prompt. Amends in
     place (message-only; the tree is unchanged) under the repo lock the caller already
     holds. The ``{trailer_label}:`` trailer is exactly what ``_generation_count`` greps
-    to count generations, so stamping keeps that counter correct on the next batch."""
+    to count generations, so stamping keeps that counter correct on the next batch.
+
+    Two guards keep the amend from rewriting provenance the integrity gate already
+    cleared. ``--only`` (with no pathspec) re-uses HEAD's own tree, so a file the agent
+    left staged *outside* the corpus can't ride into the lesson commit — a plain
+    ``--amend`` commits the whole index, which ``verify_agent_state``'s pre-amend
+    scope check (run on the un-amended commit) would never catch. And a pre-amend scan
+    refuses to stamp a commit that already carries the trailers: ``git --trailer``
+    *appends*, so a disobedient agent's hand-written trailer would survive alongside
+    ours and shadow it for first-match readers (``eval_secondary.parse_trailers``)."""
+    if re.search(
+        rf"(?m)^(?:Generation|{re.escape(cfg.trailer_label)}):", head_commit_message()
+    ):
+        raise AuthorError(
+            f"agent commit already carries Generation:/{cfg.trailer_label}: trailers; "
+            "the loop owns provenance and git --trailer would append duplicates — "
+            "refusing to stamp (queue intact for retry)"
+        )
     proc = subprocess.run(
-        ["git", "commit", "--amend", "--no-edit",
+        ["git", "commit", "--amend", "--only", "--no-edit",
          "--trailer", f"Generation: {generation}",
          "--trailer", f"{cfg.trailer_label}: {model}"],
         cwd=REPO_ROOT, capture_output=True, text=True,
