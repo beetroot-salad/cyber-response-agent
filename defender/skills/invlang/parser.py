@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -95,6 +95,61 @@ class Block:
 # ---------------------------------------------------------------------------
 
 
+def _split_quoted(
+    s: str, sep: str, *, unescape_delim: bool = False, keep_empty: bool = False
+) -> list[str]:
+    """Split `s` on `sep`, honoring double-quoted spans (a `sep` inside a
+    `"..."` span is not a delimiter). Each token is `.strip()`ped.
+
+    Two knobs capture the only differences between the cell (`|`) and
+    sub-cell (`;`) tokenizers:
+
+    - `unescape_delim`: when True, `\\<sep>` collapses to a literal `sep`
+      and any *other* backslash is an ordinary character (so it can still
+      let a following `"` toggle the quote state). When False, *any*
+      `\\X` pair passes through verbatim (a `\\"` therefore does NOT
+      toggle the quote).
+    - `keep_empty`: when True, empty tokens are retained (the cell form
+      needs them for the strict cell-count check); when False they are
+      dropped.
+    """
+    parts: list[str] = []
+    cur: list[str] = []
+    in_q = False
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\\" and i + 1 < len(s):
+            if not unescape_delim:
+                cur.append(s[i : i + 2])
+                i += 2
+                continue
+            if s[i + 1] == sep:
+                cur.append(sep)
+                i += 2
+                continue
+            # unescape_delim, but the next char isn't the delimiter: the
+            # backslash is an ordinary char (and may precede a quote).
+        if ch == '"':
+            in_q = not in_q
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == sep and not in_q:
+            tok = "".join(cur).strip()
+            if keep_empty or tok:
+                parts.append(tok)
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    tok = "".join(cur).strip()
+    if keep_empty or tok:
+        parts.append(tok)
+    return parts
+
+
 def _split_cells(row: str) -> list[str]:
     """Split a row on `|`, honoring two ways to escape:
 
@@ -105,30 +160,7 @@ def _split_cells(row: str) -> list[str]:
     current schema expects (`flags="EXE_WRITABLE|EXE_LOWER_LAYER"`).
     The backslash form is retained because it's free and harmless.
     """
-    parts: list[str] = []
-    cur: list[str] = []
-    in_q = False
-    i = 0
-    while i < len(row):
-        ch = row[i]
-        if ch == "\\" and i + 1 < len(row) and row[i + 1] == "|":
-            cur.append("|")
-            i += 2
-            continue
-        if ch == '"':
-            in_q = not in_q
-            cur.append(ch)
-            i += 1
-            continue
-        if ch == "|" and not in_q:
-            parts.append("".join(cur).strip())
-            cur = []
-            i += 1
-            continue
-        cur.append(ch)
-        i += 1
-    parts.append("".join(cur).strip())
-    return parts
+    return _split_quoted(row, "|", unescape_delim=True, keep_empty=True)
 
 
 def _row_cells(block: Block, row: str, expected: int) -> list[str]:
@@ -146,6 +178,25 @@ def _row_cells(block: Block, row: str, expected: int) -> list[str]:
     if len(cells) < expected:
         cells = cells + [""] * (expected - len(cells))
     return cells
+
+
+def _row_dict(
+    block: Block, row: str, default_cols: list[str] | None = None
+) -> dict[str, str]:
+    """The shared record-projector preamble: tokenize `row` to cells,
+    pad/strict-check against the column count, and zip onto the column
+    names. `block.columns` wins; `default_cols` (possibly empty) is the
+    fallback when the block carried no `[...]` header.
+    """
+    cols = block.columns or default_cols or []
+    cells = _row_cells(block, row, len(cols))
+    return dict(zip(cols, cells, strict=False))
+
+
+def _require(rec: dict[str, str], *keys: str, msg: str) -> None:
+    """Raise `RowError(msg)` unless every named key is present and truthy."""
+    if not all(rec.get(k) for k in keys):
+        raise RowError(msg)
 
 
 def _parse_attrs(cell: str) -> dict[str, str]:
@@ -232,34 +283,7 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> dict[str, Any]:
 
 def _split_subcells(cell: str) -> list[str]:
     """Top-level semicolon-split that honors double-quoted spans."""
-    out: list[str] = []
-    cur: list[str] = []
-    in_q = False
-    i = 0
-    while i < len(cell):
-        ch = cell[i]
-        if ch == "\\" and i + 1 < len(cell):
-            cur.append(cell[i : i + 2])
-            i += 2
-            continue
-        if ch == '"':
-            in_q = not in_q
-            cur.append(ch)
-            i += 1
-            continue
-        if ch == ";" and not in_q:
-            tok = "".join(cur).strip()
-            if tok:
-                out.append(tok)
-            cur = []
-            i += 1
-            continue
-        cur.append(ch)
-        i += 1
-    tok = "".join(cur).strip()
-    if tok:
-        out.append(tok)
-    return out
+    return _split_quoted(cell, ";")
 
 
 # ---------------------------------------------------------------------------
@@ -323,11 +347,8 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 
 
 def _vertex_record(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or _VERTEX_COLS
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("type"):
-        raise RowError("vertex missing id/type")
+    rec = _row_dict(block, row, _VERTEX_COLS)
+    _require(rec, "id", "type", msg="vertex missing id/type")
     out: dict[str, Any] = {
         "id": rec["id"],
         "type": rec["type"],
@@ -341,10 +362,8 @@ def _vertex_record(block: Block, row: str) -> dict[str, Any]:
 
 def _edge_record(block: Block, row: str) -> dict[str, Any]:
     cols = block.columns or _EDGE_COLS
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("rel"):
-        raise RowError("edge missing id/rel")
+    rec = _row_dict(block, row, _EDGE_COLS)
+    _require(rec, "id", "rel", msg="edge missing id/rel")
     out: dict[str, Any] = {
         "id": rec["id"],
         "relation": rec["rel"],
@@ -386,11 +405,8 @@ def _is_current_hyp_header(cols: list[str] | None) -> bool:
 
 
 def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or []
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("name"):
-        raise RowError("hypothesis missing id/name")
+    rec = _row_dict(block, row)
+    _require(rec, "id", "name", msg="hypothesis missing id/name")
     out: dict[str, Any] = {"id": rec["id"], "name": rec["name"]}
     if rec.get("attached_to"):
         anchor = rec["attached_to"]
@@ -439,11 +455,8 @@ _HYP_PREFIX_RE = re.compile(
 
 
 def _hyp_sub_pred_row(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or ["id", "subject", "claim"]
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("subject"):
-        raise RowError("preds row missing id/subject")
+    rec = _row_dict(block, row, ["id", "subject", "claim"])
+    _require(rec, "id", "subject", msg="preds row missing id/subject")
     return {
         "id": rec["id"],
         "subject": rec["subject"],
@@ -452,11 +465,11 @@ def _hyp_sub_pred_row(block: Block, row: str) -> dict[str, Any]:
 
 
 def _hyp_sub_attr_pred_row(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or ["id", "target", "attribute", "claim"]
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("target") or not rec.get("attribute"):
-        raise RowError("attr_preds row missing id/target/attribute")
+    rec = _row_dict(block, row, ["id", "target", "attribute", "claim"])
+    _require(
+        rec, "id", "target", "attribute",
+        msg="attr_preds row missing id/target/attribute",
+    )
     return {
         "id": rec["id"],
         "target": rec["target"],
@@ -466,11 +479,8 @@ def _hyp_sub_attr_pred_row(block: Block, row: str) -> dict[str, Any]:
 
 
 def _hyp_sub_refut_row(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or ["id", "refutes", "claim"]
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id"):
-        raise RowError("refuts row missing id")
+    rec = _row_dict(block, row, ["id", "refutes", "claim"])
+    _require(rec, "id", msg="refuts row missing id")
     out: dict[str, Any] = {
         "id": rec["id"],
         "claim": _unquote(rec.get("claim", "")),
@@ -481,13 +491,10 @@ def _hyp_sub_refut_row(block: Block, row: str) -> dict[str, Any]:
 
 
 def _hyp_sub_authz_row(block: Block, row: str) -> dict[str, Any]:
-    cols = block.columns or [
+    rec = _row_dict(block, row, [
         "id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "on_indet",
-    ]
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("anchor_kind"):
-        raise RowError("authz row missing id/anchor_kind")
+    ])
+    _require(rec, "id", "anchor_kind", msg="authz row missing id/anchor_kind")
     return {
         "id": rec["id"],
         "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
@@ -496,15 +503,6 @@ def _hyp_sub_authz_row(block: Block, row: str) -> dict[str, Any]:
         "on_unauthorized": rec.get("on_unauth", "escalate") or "escalate",
         "on_indeterminate": rec.get("on_indet", "escalate") or "escalate",
     }
-
-
-def _hyp_sub_parent_attrs_row(block: Block, row: str) -> tuple[str, str]:
-    cols = block.columns or ["key", "value"]
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("key"):
-        raise RowError("parent_attrs row missing key")
-    return rec["key"], _unquote(rec.get("value", ""))
 
 
 _HYP_SUB_DISPATCH = {
@@ -532,16 +530,15 @@ def _project_hyp_subblock(
         return
     if sub == "parent_attrs":
         attrs: dict[str, str] = {}
-        for idx, row in enumerate(block.rows):
-            try:
-                k, v = _hyp_sub_parent_attrs_row(block, row)
-            except RowError as e:
+        for _idx, _row, rec in _for_each_row(block, warnings):
+            key = rec.get("key")
+            if not key:
                 warnings.append(ParseWarning(
-                    block=f":H {block.name}", row_index=idx,
-                    row=row, reason=str(e),
+                    block=f":{block.tag} {block.name}", row_index=_idx,
+                    row=_row, reason="parent_attrs row missing key",
                 ))
                 continue
-            attrs[k] = v
+            attrs[key] = _unquote(rec.get("value", ""))
         if attrs:
             hyp.setdefault("proposed_edge", {}).setdefault(
                 "parent_vertex", {}
@@ -556,13 +553,11 @@ def _project_hyp_subblock(
 
 
 def _lead_header_record(
-    block: Block, row: str
+    rec: dict[str, str]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    cols = block.columns or []
-    cells = _row_cells(block, row, len(cols))
-    rec = dict(zip(cols, cells, strict=False))
-    if not rec.get("id") or not rec.get("name"):
-        raise RowError("findings row missing id/name")
+    """Project a findings (`:L`) record dict onto (identity, query_details).
+    The id/name guard lives in the caller so the whole loop shares the
+    `_for_each_row` recovery path."""
     identity: dict[str, Any] = {
         "id": rec["id"], "name": rec["name"], "target": rec.get("target", ""),
     }
@@ -719,6 +714,28 @@ def _project_rows(
                 reason=str(e),
             ))
     return out
+
+
+def _for_each_row(
+    block: Block, warnings: list[ParseWarning]
+) -> Iterator[tuple[int, str, dict[str, str]]]:
+    """Yield `(idx, row, rec)` for each row, projecting cells to a record
+    dict via `_row_dict`. A malformed row (cell-count overflow) is recorded
+    as a ParseWarning and skipped — the same per-row recovery `_project_rows`
+    gives, but for consumers that need the raw `rec` plus side effects rather
+    than a returned list."""
+    for idx, row in enumerate(block.rows):
+        try:
+            rec = _row_dict(block, row)
+        except RowError as e:
+            warnings.append(ParseWarning(
+                block=f":{block.tag} {block.name}",
+                row_index=idx,
+                row=row,
+                reason=str(e),
+            ))
+            continue
+        yield idx, row, rec
 
 
 def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:
@@ -931,15 +948,14 @@ def _project_findings_block(
     current_lead: str | None,
 ) -> str | None:
     last_lead_id: str | None = None
-    for idx, row in enumerate(block.rows):
-        try:
-            identity, query_details = _lead_header_record(block, row)
-        except RowError as e:
+    for idx, row, rec in _for_each_row(block, warnings):
+        if not rec.get("id") or not rec.get("name"):
             warnings.append(ParseWarning(
                 block=f":{block.tag} {block.name}", row_index=idx,
-                row=row, reason=str(e),
+                row=row, reason="findings row missing id/name",
             ))
             continue
+        identity, query_details = _lead_header_record(rec)
         lead = lead_bucket(identity["id"])
         lead.update(identity)
         if query_details:
@@ -955,17 +971,8 @@ def _project_resolution_block(
     current_lead: str | None,
 ) -> None:
     tag, name = block.tag, block.name
-    cols = block.columns or []
     bucket_key = _RESOLUTION_BUCKET_KEY[name]
-    for idx, row in enumerate(block.rows):
-        try:
-            cells = _row_cells(block, row, len(cols))
-        except RowError as e:
-            warnings.append(ParseWarning(
-                block=f":{tag} {name}", row_index=idx, row=row, reason=str(e),
-            ))
-            continue
-        rec = dict(zip(cols, cells, strict=False))
+    for idx, row, rec in _for_each_row(block, warnings):
         # `resolved_by` / `lead` are the dense column names for the
         # back-pointer; look them up *before* canonicalization so
         # attribution still works.
@@ -1039,17 +1046,7 @@ def _project_shelved_block(
     warnings: list[ParseWarning],
     current_lead: str | None,
 ) -> None:
-    tag, name = block.tag, block.name
-    cols = block.columns or []
-    for idx, row in enumerate(block.rows):
-        try:
-            cells = _row_cells(block, row, len(cols))
-        except RowError as e:
-            warnings.append(ParseWarning(
-                block=f":{tag} {name}", row_index=idx, row=row, reason=str(e),
-            ))
-            continue
-        rec = dict(zip(cols, cells, strict=False))
+    for _idx, _row, rec in _for_each_row(block, warnings):
         hyp = rec.get("hyp_id")
         if not hyp:
             continue
