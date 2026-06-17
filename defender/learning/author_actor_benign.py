@@ -63,26 +63,26 @@ AuthorError = _curator.AuthorError
 def invoke_agent(
     observations: list[dict],
     batch_id: str,
-    generation: int,
     cfg: _curator.CuratorConfig,
 ) -> dict:
     """Spawn the environment curator agent. Returns the parsed AUTHOR_RESULT dict.
 
     The env corpus forward-checks the whole batch in one pass
     (``verify_forward_env.py --corpus --pending``), so it hands the agent that single
-    command plus the trailer label it must stamp."""
+    command. The commit-trailer provenance (including the per-direction trailer label)
+    is stamped by the loop, not the agent, so nothing trailer-related goes in the
+    prompt."""
     verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
     forward_check_command = (
         f"{verifier_py} {VERIFY_SCRIPT_REL} "
         f"--corpus {LESSONS_ENV_DIR_REL} --pending {cfg.pending_file_rel}"
     )
     extra_prompt = (
-        f"trailer_label: {cfg.trailer_label}\n"
         f"forward_check_command: {forward_check_command}\n"
     )
     extra_tools = f"Bash({verifier_py} {VERIFY_SCRIPT_REL}:*),"
     return _curator.invoke_curator_agent(
-        cfg, observations, batch_id, generation,
+        cfg, observations, batch_id,
         extra_prompt=extra_prompt, extra_tools=extra_tools,
     )
 

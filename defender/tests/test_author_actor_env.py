@@ -4,10 +4,9 @@ distinct outcome policy + commit trailer + generation counter, but share the
 transaction envelope (issue #298)."""
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 LEARNING_SRC = Path(__file__).resolve().parents[1] / "learning"
 sys.path.insert(0, str(LEARNING_SRC))
@@ -60,14 +59,29 @@ def test_configs_are_distinct() -> None:
     assert author_actor_env.run_batch.__module__ == "author_actor_env"
 
 
-def test_assert_head_trailers_matches_per_config(monkeypatch) -> None:
-    msg = "defender/environment: batch\n\nGeneration: 3\nActor-Env-Model: claude-x\n"
-    monkeypatch.setattr(curator, "head_commit_message", lambda: msg)
-    # the adversarial config's trailer regex accepts it
-    curator.assert_head_trailers(3, "claude-x", aenv.ADVERSARIAL_CONFIG)
-    # the benign config looks for Benign-Actor-Model: → absent → raises
-    with pytest.raises(curator.AuthorError, match="Benign-Actor-Model"):
-        curator.assert_head_trailers(3, "claude-x", aenv.BENIGN_CONFIG)
-    # wrong generation also raises under the right trailer
-    with pytest.raises(curator.AuthorError, match="Generation"):
-        curator.assert_head_trailers(4, "claude-x", aenv.ADVERSARIAL_CONFIG)
+def test_stamp_head_trailers_uses_per_config_label(tmp_path, monkeypatch) -> None:
+    """The loop stamps the model trailer using the per-direction ``trailer_label``, so
+    each source records its own provenance key (Actor-Env-Model vs Benign-Actor-Model)
+    onto the shared corpus's commits."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    monkeypatch.setattr(curator, "REPO_ROOT", repo)
+
+    def _plain_commit(subject: str) -> None:
+        (repo / "f").write_text(subject)
+        subprocess.run(["git", "-C", str(repo), "add", "f"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", subject], check=True)
+
+    _plain_commit("adversarial batch")
+    curator.stamp_head_trailers(3, "claude-x", aenv.ADVERSARIAL_CONFIG)
+    msg = curator.head_commit_message()
+    assert "Generation: 3" in msg
+    assert "Actor-Env-Model: claude-x" in msg
+    assert "Benign-Actor-Model" not in msg
+
+    _plain_commit("benign batch")
+    curator.stamp_head_trailers(2, "claude-y", aenv.BENIGN_CONFIG)
+    assert "Benign-Actor-Model: claude-y" in curator.head_commit_message()
