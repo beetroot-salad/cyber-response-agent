@@ -272,7 +272,9 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
     # anchor_kind on contracts and on authz resolutions.
     for h in _walkers.all_hypotheses(companion).values():
         for c in h.get("authorization_contract") or []:
-            ak = c.get("anchor_kind") if isinstance(c, dict) else None
+            if not isinstance(c, dict):
+                continue
+            ak = c.get("anchor_kind")
             errors += _check_vocab(
                 ak, vocab.ANCHOR_KINDS,
                 f"hypothesis {h.get('id', '?')} contract "

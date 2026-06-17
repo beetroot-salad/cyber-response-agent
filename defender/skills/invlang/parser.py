@@ -530,7 +530,7 @@ def _project_hyp_subblock(
         return
     if sub == "parent_attrs":
         attrs: dict[str, str] = {}
-        for _idx, _row, rec in _for_each_row(block, warnings):
+        for _idx, _row, rec in _for_each_row(block, warnings, ["key", "value"]):
             key = rec.get("key")
             if not key:
                 warnings.append(ParseWarning(
@@ -717,16 +717,19 @@ def _project_rows(
 
 
 def _for_each_row(
-    block: Block, warnings: list[ParseWarning]
+    block: Block,
+    warnings: list[ParseWarning],
+    default_cols: list[str] | None = None,
 ) -> Iterator[tuple[int, str, dict[str, str]]]:
     """Yield `(idx, row, rec)` for each row, projecting cells to a record
     dict via `_row_dict`. A malformed row (cell-count overflow) is recorded
     as a ParseWarning and skipped — the same per-row recovery `_project_rows`
     gives, but for consumers that need the raw `rec` plus side effects rather
-    than a returned list."""
+    than a returned list. `default_cols` is the headerless-block fallback
+    passed through to `_row_dict` (e.g. parent_attrs' `[key, value]`)."""
     for idx, row in enumerate(block.rows):
         try:
-            rec = _row_dict(block, row)
+            rec = _row_dict(block, row, default_cols)
         except RowError as e:
             warnings.append(ParseWarning(
                 block=f":{block.tag} {block.name}",
