@@ -68,3 +68,21 @@ def test_render_user_prompt_substitutes(monkeypatch, tmp_path):
     assert "T=the transcript" in out
     assert "L=the lesson" in out
     assert "D=benign" in out
+
+
+def test_expected_disposition_direction_aware():
+    """The forward-check target is direction-aware (#317). An adversarial lesson is
+    authored off a `benign` source and must PRESERVE that benign call, so the target is
+    the recorded disposition. A benign (FP) lesson is authored off a `malicious` source
+    it exists to CORRECT toward benign, so the target is `benign` — never the recorded
+    `malicious` (which would mark every de-escalation lesson BAD and hold the FP path)."""
+    # Real data flow: the author gate (`_has_confident_ground_truth`) holds any
+    # `inconclusive`-source finding before the forward-check runs, so production only
+    # ever calls this with a `benign`/`malicious` recorded disposition.
+    assert vf.expected_disposition("adversarial", "benign") == "benign"
+    assert vf.expected_disposition("benign", "malicious") == "benign"
+    # The `inconclusive` rows below are defensive domain-completeness checks (the
+    # function is total over the disposition enum), NOT a reachable production path —
+    # they pin that a future change keeps the pure function well-defined, nothing more.
+    assert vf.expected_disposition("adversarial", "inconclusive") == "inconclusive"
+    assert vf.expected_disposition("benign", "inconclusive") == "benign"
