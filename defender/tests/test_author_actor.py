@@ -320,19 +320,28 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
 
 
 def test_commit_corpus_stages_only_corpus(monkeypatch, tmp_path: Path):
-    """``git add`` is path-scoped to the corpus, so a file the agent left *outside* it
-    can't ride into the lesson commit (replaces the old ``--amend --only`` guard)."""
+    """The commit is pathspec-scoped to the corpus, so a file already **staged** outside
+    it (the shared worktree holds a sibling author's ``_draft/`` deposits in the index)
+    can't ride into the lesson commit. This is the case the old ``--amend --only`` guard
+    covered — staging the corpus alone does NOT bound an index-global ``git commit``."""
     ctx = _isolate(monkeypatch, tmp_path)
     cfg = _cfg(ctx, _consume_all)
     (ctx["lessons"] / "x.md").write_text("hello\n")
+    # A stray file *staged in the index* before the curator commits — not merely
+    # untracked. A bare `git commit` (no pathspec) would sweep this into the commit.
     (ctx["repo"] / "stray.txt").write_text("stray\n")  # outside the corpus
+    subprocess.run(["git", "-C", str(ctx["repo"]), "add", "stray.txt"], check=True)
 
     curator.commit_corpus(3, "claude-sonnet-4-6", "defender/actor: batch abc", cfg)
     files = _head_files(ctx["repo"])
     assert files == ["defender/lessons-actor/x.md"]
     assert "stray.txt" not in files
-    # The stray stays uncommitted in the working tree.
-    assert (ctx["repo"] / "stray.txt").exists()
+    # The stray stays staged-but-uncommitted in the index, untouched by the lesson commit.
+    status = subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "status", "--porcelain", "--", "stray.txt"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert status.startswith("A  ")  # still staged, never committed
 
 
 def test_commit_corpus_no_op_when_nothing_authored(monkeypatch, tmp_path: Path):

@@ -194,6 +194,45 @@ def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
     assert a.PENDING_FILE.read_text() == pre_pending
 
 
+def test_prestaged_stray_does_not_ride_into_lesson_commit(
+    tmp_repo, helpers, monkeypatch
+):
+    """A file already **staged** outside defender/lessons/ before the batch (a sibling
+    author's _draft/ deposit left in the shared index) is in ``baseline_stray``, so the
+    scope gate tolerates it — but the pathspec-scoped commit must NOT sweep it into the
+    lesson commit. A bare index-global ``git commit`` would; this guards commit_lessons'
+    ``-- defender/lessons/`` pathspec."""
+    a = tmp_repo.author
+    helpers.write_source_refs(a.RUNS_DIR, "run-8", "benign")
+    helpers.write_finding(a.PENDING_FILE, finding_id="run-8/0", run_id="run-8")
+    # Pre-stage a stray OUTSIDE the corpus, present before the agent runs.
+    (tmp_repo.root / "sibling_draft.md").write_text("unrelated staged work\n")
+    tmp_repo.run_git("add", "sibling_draft.md")
+
+    def fake_invoke(findings, batch_id):
+        _write_lesson(tmp_repo, "lessonH", "run-8/0")  # no git
+        return {
+            "committed": ["run-8/0"],
+            "held_forward_bad": [],
+            "consumed_skip": [],
+            "commit_message": "defender: lesson lessonH",
+        }
+
+    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    assert a.run_batch() == 0
+    head_files = tmp_repo.run_git(
+        "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout.split()
+    assert head_files == ["defender/lessons/lessonH.md"]
+    assert "sibling_draft.md" not in head_files
+    # The stray stays staged-but-uncommitted, untouched by the lesson commit.
+    status = tmp_repo.run_git(
+        "status", "--porcelain", "--", "sibling_draft.md"
+    ).stdout
+    assert status.startswith("A  ")
+    assert a.PENDING_FILE.read_text().strip() == ""  # finding rotated out
+
+
 @pytest.mark.parametrize(
     "agent_result",
     [

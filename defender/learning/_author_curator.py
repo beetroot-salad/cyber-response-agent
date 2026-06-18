@@ -341,9 +341,13 @@ def commit_corpus(
     time, not via a follow-up ``--amend``. The loop owns the ``Generation:`` /
     ``{trailer_label}:`` provenance (it already computes both), so the recorded values
     can't drift from a hand-typed literal, and ``{trailer_label}:`` stays exactly what
-    ``_generation_count`` greps. ``git add`` is path-scoped to the corpus, so nothing the
-    agent left modified *outside* it can ride into the lesson commit. Returns the new
-    sha, or ``None`` when the agent authored nothing (empty index → no commit).
+    ``_generation_count`` greps. The ``git commit`` is **pathspec-scoped** to the corpus
+    (``-- <corpus_dir>``): staging alone does not bound a commit — a plain index-global
+    ``git commit`` sweeps in whatever else sits staged in the shared worktree (e.g. a
+    sibling author's ``_draft/`` deposits from ``lead_author._stage_pending_drafts``), so
+    the pathspec is what keeps anything *outside* the corpus out of the lesson commit.
+    Returns the new sha, or ``None`` when the agent authored nothing (empty index → no
+    commit).
 
     A guard refuses a ``commit_message`` that already carries the trailers: ``git
     --trailer`` *appends*, so a hand-written one would survive alongside ours and shadow
@@ -354,20 +358,29 @@ def commit_corpus(
             "trailers; the loop owns provenance and git --trailer would append "
             "duplicates — refusing to commit (queue intact for retry)"
         )
-    subprocess.run(
+    add = subprocess.run(
         ["git", "add", "--", str(cfg.corpus_dir)],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        cwd=REPO_ROOT, capture_output=True, text=True,
     )
+    if add.returncode != 0:
+        raise AuthorError(
+            f"failed to stage {cfg.corpus_dir_rel} batch: {add.stderr.strip()}"
+        )
     staged = subprocess.run(
         ["git", "diff", "--cached", "--quiet", "--", str(cfg.corpus_dir)],
         cwd=REPO_ROOT, capture_output=True, text=True,
     )
     if staged.returncode == 0:
         return None  # nothing staged — no commit
+    if staged.returncode != 1:  # 0=no diff, 1=diff, >1=git error (don't commit blind)
+        raise AuthorError(
+            f"git diff --cached failed for {cfg.corpus_dir_rel}: {staged.stderr.strip()}"
+        )
     proc = subprocess.run(
         ["git", "commit", "-F", "-",
          "--trailer", f"Generation: {generation}",
-         "--trailer", f"{cfg.trailer_label}: {model}"],
+         "--trailer", f"{cfg.trailer_label}: {model}",
+         "--", str(cfg.corpus_dir)],
         cwd=REPO_ROOT, input=message, capture_output=True, text=True,
     )
     if proc.returncode != 0:

@@ -307,22 +307,33 @@ def commit_lessons(message: str) -> str | None:
     """Stage ``defender/lessons/``, commit it with the agent's message, return the sha.
 
     The agent authors lesson content + a commit message but runs no git: the loop is the
-    **sole committer**. ``git add`` is path-scoped to the corpus, so nothing the agent
-    left modified outside it can ride into the lesson commit. No provenance trailers —
-    unlike the actor/env curators, the findings corpus carries none. Returns the new sha,
-    or ``None`` when the agent authored nothing (empty index → no commit)."""
-    subprocess.run(
+    **sole committer**. The ``git commit`` is **pathspec-scoped** to the corpus
+    (``-- defender/lessons/``): staging alone does not bound a commit — a plain
+    index-global ``git commit`` sweeps in whatever else sits staged in the shared worktree
+    (e.g. a sibling author's ``_draft/`` deposits), so the pathspec is what keeps anything
+    outside the corpus out of the lesson commit. No provenance trailers — unlike the
+    actor/env curators, the findings corpus carries none. Returns the new sha, or ``None``
+    when the agent authored nothing (empty index → no commit)."""
+    add = subprocess.run(
         ["git", "add", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        cwd=REPO_ROOT, capture_output=True, text=True,
     )
+    if add.returncode != 0:
+        raise AuthorError(
+            f"failed to stage defender/lessons/ batch: {add.stderr.strip()}"
+        )
     staged = subprocess.run(
         ["git", "diff", "--cached", "--quiet", "--", str(LESSONS_DIR)],
         cwd=REPO_ROOT, capture_output=True, text=True,
     )
     if staged.returncode == 0:
         return None  # nothing staged — no commit
+    if staged.returncode != 1:  # 0=no diff, 1=diff, >1=git error (don't commit blind)
+        raise AuthorError(
+            f"git diff --cached failed for defender/lessons/: {staged.stderr.strip()}"
+        )
     proc = subprocess.run(
-        ["git", "commit", "-F", "-"],
+        ["git", "commit", "-F", "-", "--", str(LESSONS_DIR)],
         cwd=REPO_ROOT, input=message, capture_output=True, text=True,
     )
     if proc.returncode != 0:
