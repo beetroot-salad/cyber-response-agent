@@ -18,12 +18,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.usage import UsageLimits
 
+from . import compaction
 from . import observe
 from . import orient
 from .circuit_breaker import RunAborted
@@ -186,12 +189,84 @@ def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
     return agent
 
 
+# --- Phase B: per-loop, invlang-based compaction --------------------------
+# The live adapter for the pure rewrite in `compaction.py`. It plugs into the
+# `agent.iter()` seam via PydanticAI's `ProcessHistory` capability (a
+# `before_model_request` history rewrite) — added to the MAIN agent only, and
+# only when `DEFENDER_COMPACTION` is enabled, so Phase A stays byte-identical
+# when off (this is the A/B toggle). Design: docs/runtime-per-loop-compaction-
+# design.md. The processor sees PydanticAI's canonical (append-only) history
+# each request; it dumps to the dict form `compaction` operates on, and
+# re-validates a rewritten result back to message objects.
+
+
+def _compaction_enabled() -> bool:
+    return os.environ.get("DEFENDER_COMPACTION", "").strip().lower() in (
+        "1", "on", "true", "yes")
+
+
+def _summary_pointers(run_dir: Path) -> dict[str, str]:
+    """{lead_id: path} for persisted gather summaries (tools._persist_gather_summary),
+    so the compacted frontier can point the agent at detail it dropped."""
+    d = run_dir / "gather_summaries"
+    if not d.is_dir():
+        return {}
+    return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
+
+
+def _compact_messages(messages: list, run_dir: Path, holder: dict) -> list:
+    """Dump → compact → re-validate. Returns the message list to send.
+
+    Returns the original objects untouched on passthrough/fallback (no
+    round-trip, zero risk); only a froze/reused rewrite is re-validated. Factored
+    out of the closure so it's unit-testable without a live agent run."""
+    inv = run_dir / "investigation.md"
+    inv_text = inv.read_text() if inv.is_file() else ""
+    dict_history = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    step = compaction.compact(
+        dict_history, inv_text, holder.get("state"),
+        summary_pointers=_summary_pointers(run_dir),
+    )
+    holder["state"] = step.state
+    if step.action == "fallback":
+        print(f"[run_pai] compaction fallback ({step.reason}); sending full history",
+              file=sys.stderr)
+    if step.action in ("passthrough", "fallback"):
+        return messages
+    return ModelMessagesTypeAdapter.validate_python(step.history)
+
+
+def _make_compaction_processor():
+    """A per-run history processor (closure over the frozen-prefix state).
+    Never raises into the run: any failure falls back to the full history."""
+    holder: dict = {"state": None}
+
+    # The first param MUST be annotated `RunContext[...]` — pydantic-ai's
+    # `takes_run_context` detects the ctx-taking variant by the annotation, not
+    # the name; an unannotated `ctx` is silently called as a no-ctx processor.
+    async def process(ctx: RunContext[RunDeps], messages: list) -> list:
+        try:
+            return _compact_messages(messages, ctx.deps.run_dir, holder)
+        except Exception as e:  # noqa: BLE001 — compaction must never break the run
+            print(f"[run_pai] compaction skipped: {e!r}", file=sys.stderr)
+            return messages
+
+    return process
+
+
 def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
+    capabilities = [_make_hooks(logger, "main")]
+    if _compaction_enabled():
+        # Main agent only — gather sub-runs are short single leads, nothing to
+        # compact. Listed after the hooks so observability wraps the rewritten
+        # request (the recorded usage then reflects the compacted token cost).
+        capabilities.append(ProcessHistory(_make_compaction_processor()))
+        print("[run_pai] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
     agent = Agent(
         AnthropicModel(model_name),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
-        capabilities=[_make_hooks(logger, "main")],
+        capabilities=capabilities,
         model_settings=_CACHE_SETTINGS,
         retries=DEFAULT_TOOL_RETRIES,
     )

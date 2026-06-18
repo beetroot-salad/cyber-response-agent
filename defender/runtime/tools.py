@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -318,6 +319,23 @@ _LEAD_REUSE_RETRY = (
 )
 
 
+def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
+    """Persist the wrapped gather summary to `{run_dir}/gather_summaries/{lead_id}.md`.
+
+    The recovery surface for per-loop compaction (design doc §Recovery): when
+    the main loop's history is compacted to the invlang frontier, a summary it
+    later needs is a cheap Read away instead of a gather re-dispatch. Best-effort
+    — a failed persist must never break the run (the in-context summary is still
+    returned)."""
+    try:
+        d = run_dir / "gather_summaries"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{lead_id}.md").write_text(wrapped)
+    except Exception as e:  # noqa: BLE001 — persistence must never break the run
+        print(f"[run_pai] gather-summary persist skipped for {lead_id}: {e!r}",
+              file=sys.stderr)
+
+
 async def _run_gather(
     deps: RunDeps, gather_factory, request_limit: int,
     lead_id: str, system: str, goal: str, what_to_summarize: list[str],
@@ -383,7 +401,15 @@ async def _run_gather(
 
     # 4. Wrap the summary as untrusted — it's the primary attacker-influenced
     # channel into the main loop. Same salt as the rest of the run.
-    return _wrap(output, "untrusted", deps.salt)
+    wrapped = _wrap(output, "untrusted", deps.salt)
+    # 5. Persist the wrapped summary so the main loop can re-read it if per-loop
+    # compaction later drops it from context (recovery path, design doc
+    # §Recovery). It's the summary, not raw payloads, so this respects the #264
+    # isolation invariant — and it lives OUTSIDE gather_raw/, so decide_read
+    # permits the main-loop read; stored pre-wrapped so a re-read stays
+    # untrusted-tagged (is_untrusted_read keys on gather_raw/, so no double-wrap).
+    _persist_gather_summary(deps.run_dir, lead_id, wrapped)
+    return wrapped
 
 
 def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None:
