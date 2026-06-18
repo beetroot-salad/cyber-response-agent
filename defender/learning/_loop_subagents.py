@@ -339,40 +339,9 @@ def _run_judge_claude(
         _copy_transcript(session_id, learning_run_dir / trace_name)
 
 
-def _invoke_judge(
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
-    alert_path: Path,
-    investigation_path: Path,
-    lead_view_text: str,
-    actor_story_path: Path,
-    projected_telemetry_path: Path,
-    learning_run_dir: Path,
-) -> str:
-    user = (
-        _section("alert", alert_path.read_text())
-        + _section("investigation", investigation_path.read_text())
-        + _section(
-            "lead_sequence", lead_view_text,
-            "the defender's actual executed queries per lead (the joined "
-            "leads+queries view) — the authoritative record of what was queried "
-            "(id, params, status). investigation.md is the narrative; this is "
-            "ground truth for coverage.",
-        )
-        + _section("actor_story", actor_story_path.read_text())
-        + _section("projected_telemetry", projected_telemetry_path.read_text())
-    )
-    return _run_judge_claude(
-        prompt_path, model, effort, trace_name, label, user, learning_run_dir
-    )
-
-
 @dataclass(frozen=True)
 class JudgeInvocation:
-    """The assembled adversarial-judge call — a pure-ish seam for testing."""
+    """The assembled grounded-judge call (either direction) — a pure-ish seam for testing."""
 
     user_text: str
     add_dirs: list
@@ -385,22 +354,30 @@ def build_judge_invocation(
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
+    *,
+    comparison_dirname: str = "comparison",
+    settings_name: str = "judge-settings.resolved.json",
 ) -> JudgeInvocation:
     """Assemble the grounded judge call: write the per-lead comparison files + the per-run
     read-only settings, and build the context message. The comparison join + synthesis are
     the structural grounding (the judge can't avoid seeing the actuals); jq over the
     add-dir'd ``gather_raw/`` is its discretionary verification surface for absence-checks.
+
+    ``comparison_dirname`` / ``settings_name`` are per-direction so the adversarial and
+    benign legs — which run **concurrently** on an ``inconclusive`` case over a shared
+    ``learning_run_dir`` — write disjoint files: their projections differ, so a single
+    shared ``comparison/{lead_id}.md`` would let one leg clobber the other's grounding.
     """
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
     gather_raw = run_dir / "gather_raw"
-    comparison_dir = learning_run_dir / "comparison"
+    comparison_dir = learning_run_dir / comparison_dirname
 
     companion = parse_investigation_companion(run_dir)
     comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
-    settings_path = learning_run_dir / "judge-settings.resolved.json"
+    settings_path = learning_run_dir / settings_name
     settings_path.write_text(
         json.dumps(judge_settings_dict(gather_raw, comparison_dir), indent=2)
     )
@@ -437,17 +414,52 @@ def build_judge_invocation(
     )
 
 
+@dataclass(frozen=True)
+class _JudgeWiring:
+    """Per-direction judge knobs — the only things that differ between the adversarial
+    and benign grounded-judge calls (the projection itself rides
+    ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
+    the per-direction config lives in one place instead of being threaded as loose kwargs
+    through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
+    direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
+    grounding files (see ``build_judge_invocation``)."""
+
+    prompt_path: Path
+    model: str
+    effort: str
+    trace_name: str
+    label: str
+    comparison_dirname: str
+    settings_name: str
+
+
+_ADVERSARIAL_WIRING = _JudgeWiring(
+    JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+    "comparison", "judge-settings.resolved.json",
+)
+_BENIGN_WIRING = _JudgeWiring(
+    JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
+    "judge_benign_trace.jsonl", "judge-benign",
+    "comparison_benign", "judge-benign-settings.resolved.json",
+)
+
+
 def _invoke_judge_grounded(
     run_dir: Path,
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
+    wiring: _JudgeWiring,
 ) -> str:
+    """Shared grounded-judge runner for both directions: write the per-lead comparison
+    files + read-only settings (under the wiring's per-direction names), then score
+    against the actuals (not the narrative)."""
     inv = build_judge_invocation(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        comparison_dirname=wiring.comparison_dirname, settings_name=wiring.settings_name,
     )
     return _run_judge_claude(
-        JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+        wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
         settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
     )
@@ -458,21 +470,20 @@ def invoke_judge(run_dir, actor_story_path, projected_telemetry_path,
     """Adversarial judge, grounded: scores the encounter against the actual evidence
     (per-lead comparison files + jq over ``gather_raw/``), not the narrative."""
     return _invoke_judge_grounded(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        _ADVERSARIAL_WIRING,
     )
 
 
-def invoke_judge_benign(alert_path, investigation_path, lead_view_text,
-                        actor_story_path, projected_telemetry_path,
+def invoke_judge_benign(run_dir, actor_story_path, projected_telemetry_path,
                         learning_run_dir) -> str:
-    """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
-    environment-observation stream alongside defender findings. Not yet grounded — the
-    grounding rework is adversarial-only for now (see #275 follow-up)."""
-    return _invoke_judge(
-        JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
-        "judge_benign_trace.jsonl", "judge-benign",
-        alert_path, investigation_path, lead_view_text, actor_story_path,
-        projected_telemetry_path, learning_run_dir,
+    """FP-direction judge, grounded: scores the routine-operation story against the
+    actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
+    narrative. A routine story that SURVIVES is the FP signal; emits the
+    environment-observation stream alongside defender findings."""
+    return _invoke_judge_grounded(
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        _BENIGN_WIRING,
     )
 
 
@@ -521,7 +532,5 @@ class ClaudePrintSubagents:
     def judge_benign(self, run_dir: Path, actor_story_path: Path,
                      projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge_benign(
-            run_dir / "alert.json", run_dir / "investigation.md",
-            lead_repository.render_joined_yaml(run_dir),
-            actor_story_path, projected_telemetry_path, learning_run_dir,
+            run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         )
