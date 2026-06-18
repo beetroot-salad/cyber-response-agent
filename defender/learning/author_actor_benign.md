@@ -69,10 +69,6 @@ Stale-only flips don't need a forward check — there's no new body to evaluate.
 - Don't add fields beyond what the template carries. Retrieval surface is `alert_rule_ids` + `entities` + `relevance_criteria` + `subject`; everything else is bookkeeping.
 - Filename matches `name`. For a subject-bearing fact, `name == subject` is the natural shape; you may diverge if a more readable name is warranted.
 
-## Commit (loop-owned — you run no git)
-
-You **never run git**. The loop is the sole committer: it stages `{lessons_dir}`, commits it with the `Generation:` and per-direction model provenance trailers, and pushes. Your job is to leave the corpus in **exactly** the state you want committed — write/fold/flip lesson files with Edit/Write, `rm` the files you are deleting (stale prunes, forward-BAD `new` reverts), and re-Edit any forward-BAD `fold` back to its pre-batch content. Do **not** write `Generation:` or model trailers anywhere — they are the loop's, and a hand-written one would be a duplicate.
-
 ## Final output (last thing you emit)
 
 Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
@@ -81,7 +77,7 @@ Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
 AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_message": "{message}" or null}
 ```
 
-Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` is the message body the loop will commit with — set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD (no lesson edits → no commit). Use this message shape (a JSON string, so newlines are `\n`):
+Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` summarizes this batch's lesson edits; set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD. Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender/environment: lesson batch {batch_id}
@@ -97,5 +93,3 @@ Removed: {name-7}
 ```
 
 Omit any `New: / Folded: / Stale: / Stale-only: / Removed:` line that would be empty.
-
-The orchestrator verifies your working tree touched only `{lessons_dir}*.md` and that the corpus is dirty **iff** you committed anything (`committed` non-empty), then commits it with the provenance trailers — a change outside the corpus, or a `committed`/working-tree mismatch, fails the run and the queue stays intact for retry.

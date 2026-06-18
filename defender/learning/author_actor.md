@@ -62,10 +62,6 @@ For folds where one observation produces GOOD and another BAD on the same target
 - Don't add fields beyond what the template carries. Retrieval surface is `relevance_criteria` (+ `techniques` / `alert_rule_ids` / `defender_lead_tags`); everything else is bookkeeping.
 - Filename matches `name`.
 
-## Commit (loop-owned — you run no git)
-
-You **never run git**. The loop is the sole committer: it stages `defender/lessons-actor/`, commits it with the `Generation:` / `Actor-Model:` provenance trailers, and pushes. Your job is to leave the corpus in **exactly** the state you want committed — write/fold/flip lesson files with Edit/Write, `rm` the files you are deleting (stale prunes, forward-BAD `new` reverts), and re-Edit any forward-BAD `fold` back to its pre-batch content. Do **not** write `Generation:` or model trailers anywhere — they are the loop's, and a hand-written one would be a duplicate.
-
 ## Final output (last thing you emit)
 
 Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
@@ -74,7 +70,7 @@ Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
 AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_message": "{message}" or null}
 ```
 
-Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` is the message body the loop will commit with — set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD (no lesson edits → no commit). Use this message shape (a JSON string, so newlines are `\n`):
+Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` summarizes this batch's lesson edits; set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD. Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender/actor: lesson batch {batch_id}
@@ -91,5 +87,3 @@ Removed: {name-7}
 ```
 
 Omit any `New: / Folded: / Decomposed: / Stale: / Stale-only: / Removed:` line if it would be empty.
-
-The orchestrator verifies your working tree touched only `defender/lessons-actor/*.md` and that the corpus is dirty **iff** you committed anything (`committed` non-empty), then commits it with the provenance trailers — a change outside the corpus, or a `committed`/working-tree mismatch, fails the run and the queue stays intact for retry.
