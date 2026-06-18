@@ -339,40 +339,9 @@ def _run_judge_claude(
         _copy_transcript(session_id, learning_run_dir / trace_name)
 
 
-def _invoke_judge(
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
-    alert_path: Path,
-    investigation_path: Path,
-    lead_view_text: str,
-    actor_story_path: Path,
-    projected_telemetry_path: Path,
-    learning_run_dir: Path,
-) -> str:
-    user = (
-        _section("alert", alert_path.read_text())
-        + _section("investigation", investigation_path.read_text())
-        + _section(
-            "lead_sequence", lead_view_text,
-            "the defender's actual executed queries per lead (the joined "
-            "leads+queries view) — the authoritative record of what was queried "
-            "(id, params, status). investigation.md is the narrative; this is "
-            "ground truth for coverage.",
-        )
-        + _section("actor_story", actor_story_path.read_text())
-        + _section("projected_telemetry", projected_telemetry_path.read_text())
-    )
-    return _run_judge_claude(
-        prompt_path, model, effort, trace_name, label, user, learning_run_dir
-    )
-
-
 @dataclass(frozen=True)
 class JudgeInvocation:
-    """The assembled adversarial-judge call — a pure-ish seam for testing."""
+    """The assembled grounded-judge call (either direction) — a pure-ish seam for testing."""
 
     user_text: str
     add_dirs: list
@@ -442,12 +411,22 @@ def _invoke_judge_grounded(
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
+    *,
+    prompt_path: Path,
+    model: str,
+    effort: str,
+    trace_name: str,
+    label: str,
 ) -> str:
+    """Shared grounded-judge runner for both directions: write the per-lead comparison
+    files + read-only settings, then score against the actuals (not the narrative). The
+    only per-direction inputs are the prompt/model/effort/trace/label and the
+    direction's ``projected_telemetry_path`` (benign vs adversarial projection)."""
     inv = build_judge_invocation(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
     )
     return _run_judge_claude(
-        JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+        prompt_path, model, effort, trace_name, label,
         inv.user_text, learning_run_dir,
         settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
     )
@@ -458,21 +437,23 @@ def invoke_judge(run_dir, actor_story_path, projected_telemetry_path,
     """Adversarial judge, grounded: scores the encounter against the actual evidence
     (per-lead comparison files + jq over ``gather_raw/``), not the narrative."""
     return _invoke_judge_grounded(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        prompt_path=JUDGE_PROMPT, model=JUDGE_MODEL, effort=JUDGE_EFFORT,
+        trace_name="judge_trace.jsonl", label="judge",
     )
 
 
-def invoke_judge_benign(alert_path, investigation_path, lead_view_text,
-                        actor_story_path, projected_telemetry_path,
+def invoke_judge_benign(run_dir, actor_story_path, projected_telemetry_path,
                         learning_run_dir) -> str:
-    """FP-direction judge: a routine story that SURVIVES is the FP signal; emits the
-    environment-observation stream alongside defender findings. Not yet grounded — the
-    grounding rework is adversarial-only for now (see #275 follow-up)."""
-    return _invoke_judge(
-        JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
-        "judge_benign_trace.jsonl", "judge-benign",
-        alert_path, investigation_path, lead_view_text, actor_story_path,
-        projected_telemetry_path, learning_run_dir,
+    """FP-direction judge, grounded: scores the routine-operation story against the
+    actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
+    narrative. A routine story that SURVIVES is the FP signal; emits the
+    environment-observation stream alongside defender findings."""
+    return _invoke_judge_grounded(
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        prompt_path=JUDGE_BENIGN_PROMPT, model=BENIGN_JUDGE_MODEL,
+        effort=BENIGN_JUDGE_EFFORT, trace_name="judge_benign_trace.jsonl",
+        label="judge-benign",
     )
 
 
@@ -521,7 +502,5 @@ class ClaudePrintSubagents:
     def judge_benign(self, run_dir: Path, actor_story_path: Path,
                      projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge_benign(
-            run_dir / "alert.json", run_dir / "investigation.md",
-            lead_repository.render_joined_yaml(run_dir),
-            actor_story_path, projected_telemetry_path, learning_run_dir,
+            run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         )

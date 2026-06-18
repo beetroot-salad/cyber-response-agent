@@ -1474,3 +1474,48 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
     assert "disposition: benign" in inv.user_text     # report.md — the claim being scored
     assert "scripted automation" not in inv.user_text  # per-lead "why" lives in the files, not inline
     assert "comparison" in inv.user_text.lower()
+
+
+def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
+    """The FP-direction judge is grounded on the actuals (#317): it writes per-lead
+    comparison files + a read-only settings dict, add-dirs gather_raw + comparison, and
+    shells out with the BENIGN prompt/model — the same zipper the adversarial judge uses,
+    not the old narrative path. The FP direction fires on a malicious-disposed source."""
+    run = _make_run_dir(tmp_path, disposition="malicious")
+    proj = _make_projection(tmp_path)
+    story = tmp_path / "actor_benign_story.md"
+    story.write_text("1. Routine-activity story\n2. Benign grounding\n")
+    lrd = tmp_path / "lrd"
+    lrd.mkdir()
+
+    captured: dict = {}
+
+    def _fake_run_judge_claude(prompt_path, model, *args, **kwargs):
+        # positional tail mirrors _run_judge_claude: effort, trace_name, label, user,
+        # learning_run_dir; settings_path/add_dir/permission_mode arrive as kwargs.
+        _effort, _trace, label, user, _lrd = args
+        captured.update(
+            prompt_path=prompt_path, model=model, label=label, user=user,
+            settings_path=kwargs.get("settings_path"), add_dir=kwargs.get("add_dir"),
+        )
+        return "outcome: survived\ndefender_findings: []\n"
+
+    monkeypatch.setattr(subagents, "_run_judge_claude", _fake_run_judge_claude)
+
+    out = subagents.invoke_judge_benign(run, story, proj, lrd)
+
+    assert out.startswith("outcome:")
+    # Grounded surface: per-lead comparison file + settings written; actuals add-dir'd.
+    assert (lrd / "comparison" / "l-001.md").is_file()
+    assert captured["settings_path"] == lrd / "judge-settings.resolved.json"
+    assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison"}
+    # Benign prompt/model/label — not the adversarial ones.
+    assert captured["prompt_path"] == subagents.JUDGE_BENIGN_PROMPT
+    assert captured["model"] == subagents.BENIGN_JUDGE_MODEL
+    assert captured["label"] == "judge-benign"
+    # Scores the actuals, not the narrative — the old investigation / lead_sequence
+    # sections are gone; report + the comparison manifest are in.
+    assert "<investigation>" not in captured["user"]
+    assert "<lead_sequence>" not in captured["user"]
+    assert "disposition: malicious" in captured["user"]   # report.md, the claim scored
+    assert "<comparison_files>" in captured["user"]
