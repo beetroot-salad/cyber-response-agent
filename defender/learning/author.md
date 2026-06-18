@@ -117,18 +117,25 @@ a `BATCH:` summary. Read that single output; do not poll.
 
 - **GOOD** → keep the file as-is.
 - **BAD** → revert that file:
-  - For a **new** lesson: delete the file.
-  - For a **fold** rewrite: `git checkout -- {path}` to restore the pre-edit body. Do *not* attempt to rewrite around the BAD verdict; the finding routes to the held-back report and the next batch will revisit.
+  - For a **new** lesson: `rm` the file.
+  - For a **fold** rewrite: re-Edit it back to its pre-edit body (you read the original at the start of the batch). Do *not* attempt to rewrite around the BAD verdict; the finding routes to the held-back report and the next batch will revisit.
 - **ERROR** (the check could not run) → re-run that one pair once via the single-file `verify_forward_command:`; if it errors again, revert the file like a BAD and note `forward_check_error` in its held-back reason.
 
 For folds where one finding produces GOOD and another BAD on the same target file, keep the GOOD edit. Each finding is gated independently against its own source case.
 
-## Commit
+## Commit (loop-owned — you run no git)
 
-After processing every finding:
+You **never run git**. The loop is the sole committer: it stages `defender/lessons/`, commits it with your message, and pushes. Your job is to leave the corpus in **exactly** the state you want committed — write/fold lesson files with Edit/Write, `rm` the files you are deleting, and re-Edit any forward-BAD `fold` back to its pre-edit body.
 
-1. `git add defender/lessons/{each-touched-file}` — explicit paths only, never `git add .`.
-2. `git commit -m "{message}" -- defender/lessons/{each-touched-file}` — pass the same paths with a `--` pathspec so the commit is scoped to your edits only. A bare `git commit` is index-global and would sweep in any files another curator has left staged in the shared worktree. Use this message shape:
+## Final output (last thing you emit)
+
+Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
+
+```
+AUTHOR_RESULT: {"committed": ["{finding_id}", ...], "held_forward_bad": [{"finding_id": "...", "reason": "..."}], "consumed_skip": [{"finding_id": "...", "reason": "..."}], "commit_message": "{message}" or null, "observability_gaps": ["{finding_id}", ...]}
+```
+
+The orchestrator parses this line. Make sure every finding from the input appears in exactly one of `committed`, `held_forward_bad`, or `consumed_skip`. `commit_message` is the message body the loop will commit with — set it whenever `committed` is non-empty, or `null` if there are no lesson edits (every finding was BAD/skip → no commit; held-back lessons are surfaced in `_pending/held_report.log` regardless). Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender: lesson batch {batch_id}
@@ -147,17 +154,7 @@ Observability gaps:
 - {finding_id} — {subject_anchor} / {subject_topic}: {gap}
 ```
 
-If there are no committed lesson edits (every finding was BAD/skip), do **not** create an empty commit. Skip the commit step. The orchestrator will surface held-back lessons in `_pending/held_report.log` regardless.
-
-## Final output (last thing you emit)
-
-After committing (or deciding not to), emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
-
-```
-AUTHOR_RESULT: {"committed": ["{finding_id}", ...], "held_forward_bad": [{"finding_id": "...", "reason": "..."}], "consumed_skip": [{"finding_id": "...", "reason": "..."}], "commit_sha": "{sha}" or null, "observability_gaps": ["{finding_id}", ...]}
-```
-
-The orchestrator parses this line. Make sure every finding from the input appears in exactly one of `committed`, `held_forward_bad`, or `consumed_skip`. `commit_sha` is the HEAD sha after your commit, or `null` if you skipped the commit step.
+The orchestrator verifies your working tree touched only `defender/lessons/*.md` and that the corpus is dirty **iff** you committed anything (`committed` non-empty), then commits it — a change outside the corpus, or a `committed`/working-tree mismatch, fails the run and the queue stays intact for retry.
 
 ## Discipline
 

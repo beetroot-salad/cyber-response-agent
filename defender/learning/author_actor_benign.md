@@ -54,7 +54,7 @@ This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the
 - **GOOD** → the lesson is retrievable by the case it bears on; keep it.
 - **BAD** → the lesson cannot be retrieved for its own source case — almost always a mis-keyed anchor or selector (empty/wrong `alert_rule_ids`, a `class` slot narrower than the case entity, or an `identity` selector that the case prologue can't satisfy). One rewrite attempt allowed: re-read the observation, fix the frontmatter keys, re-run.
   - Second run `GOOD` → keep.
-  - Still `BAD` → revert: delete the file (for a `new`) or `git checkout -- {path}` (for a `fold`), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
+  - Still `BAD` → revert: `rm` the file (for a `new`) or re-Edit it back to its pre-batch content (for a `fold` — you read the original at the start of the batch), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
 
 Stale-only flips don't need a forward check — there's no new body to evaluate. For a fold where one observation passes and another fails on the same file, keep the passing edit and skip the failing one; each observation is gated independently.
 
@@ -69,12 +69,19 @@ Stale-only flips don't need a forward check — there's no new body to evaluate.
 - Don't add fields beyond what the template carries. Retrieval surface is `alert_rule_ids` + `entities` + `relevance_criteria` + `subject`; everything else is bookkeeping.
 - Filename matches `name`. For a subject-bearing fact, `name == subject` is the natural shape; you may diverge if a more readable name is warranted.
 
-## Commit
+## Commit (loop-owned — you run no git)
 
-After processing every observation:
+You **never run git**. The loop is the sole committer: it stages `{lessons_dir}`, commits it with the `Generation:` and per-direction model provenance trailers, and pushes. Your job is to leave the corpus in **exactly** the state you want committed — write/fold/flip lesson files with Edit/Write, `rm` the files you are deleting (stale prunes, forward-BAD `new` reverts), and re-Edit any forward-BAD `fold` back to its pre-batch content. Do **not** write `Generation:` or model trailers anywhere — they are the loop's, and a hand-written one would be a duplicate.
 
-1. `git add` each touched file explicitly (new files + status flips + deletes). Never `git add .`.
-2. `git commit -m "{message}" -- {each-touched-path}` — pass the same paths with `--` pathspec to scope the commit to your edits only. Message shape:
+## Final output (last thing you emit)
+
+Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
+
+```
+AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_message": "{message}" or null}
+```
+
+Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` is the message body the loop will commit with — set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD (no lesson edits → no commit). Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender/environment: lesson batch {batch_id}
@@ -89,16 +96,6 @@ Stale-only: {name-6} (subject={subject-2})
 Removed: {name-7}
 ```
 
-Omit any `New: / Folded: / Stale: / Stale-only: / Removed:` line that would be empty. Do **not** add `Generation:` or model trailers yourself. The loop stamps those provenance trailers (including the per-direction model trailer) onto your commit after it verifies it — they are not yours to write, and a hand-written one would be a duplicate.
+Omit any `New: / Folded: / Stale: / Stale-only: / Removed:` line that would be empty.
 
-If there are no committed lesson edits (every observation was skip, stale-only-no-target, or forward-BAD), do **not** create an empty commit. Skip the commit step.
-
-## Final output (last thing you emit)
-
-After committing (or deciding not to), emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
-
-```
-AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_sha": "{sha}" or null}
-```
-
-Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_sha` is the HEAD sha after your commit, or `null` if you skipped the commit step. The orchestrator verifies HEAD touches only `{lessons_dir}*.md` and matches your reported `commit_sha`, then stamps the `Generation:` and model provenance trailers onto it — a bogus sha fails the run and the queue stays intact for retry.
+The orchestrator verifies your working tree touched only `{lessons_dir}*.md` and that the corpus is dirty **iff** you committed anything (`committed` non-empty), then commits it with the provenance trailers — a change outside the corpus, or a `committed`/working-tree mismatch, fails the run and the queue stays intact for retry.

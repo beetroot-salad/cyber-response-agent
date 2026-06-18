@@ -4,17 +4,20 @@
 ``author_actor.py`` (actor tradecraft) and ``author_actor_benign.py`` (the two
 environment-lessons directions) are the same curator: lock the queue, lock the
 repo, clean-scope check, partition the batch, hand the survivors to a ``claude -p``
-curator agent, cross-check what it committed against git, stamp the provenance
-trailers onto that commit, then rotate the queue. Only the corpus directory, queue
+curator agent, cross-check the working tree it left against git, commit that corpus
+with the provenance trailers, then rotate the queue. Only the corpus directory, queue
 paths, outcome policy, commit trailer, generation counter, curator-agent prompt/model,
 and forward-check invocation differ — captured in a ``CuratorConfig``. This module owns
 the envelope; the direction modules own the config + the one genuinely-divergent piece
 (``invoke_agent``).
 
-The ``Generation:`` / ``{trailer_label}:`` provenance trailers are written by this
-module (``stamp_head_trailers``), not the agent: the loop already computes both values,
-so stamping them keeps the recorded provenance from drifting off a hand-typed literal
-in the agent prompt and out of the agent's reach entirely.
+The agent runs **no git**: it authors lesson content + a commit message (returned as
+data) and the loop is the sole committer (``commit_corpus``). The loop owns the
+``Generation:`` / ``{trailer_label}:`` provenance trailers — it already computes both
+values, so the recorded provenance can't drift off a hand-typed literal, and there is no
+commit→stamp split that could leave an un-stamped lesson commit behind (issue #321).
+Confining the agent to no-git is also what lets prod fence its writable set to the corpus
+at the OS layer (``docs/platform-design.md`` §4.7).
 
 The agent owns fold/supersede/new judgment and the forward-check flow; this module
 enforces the transaction envelope (mirrors the prose in ``author.py`` /
@@ -248,9 +251,12 @@ def invoke_curator_agent(
     ``extra_prompt`` carries the direction's forward-check command line(s); it is
     spliced between the standard header and the observations. ``extra_tools`` carries
     the direction's verifier ``Bash(...)`` allowances, spliced into the corpus-scoped
-    git + edit allowlist. The agent is handed neither the generation nor the model: the
-    loop stamps those provenance trailers itself (``stamp_head_trailers``), so the agent
-    only authors lesson content + a plain commit message."""
+    edit allowlist. The agent runs **no git**: it authors lesson content (+ a commit
+    message it returns as data), and the loop is the sole committer (``commit_corpus``)
+    — so the agent is handed neither the generation nor the model, and there is no
+    intermediate un-stamped commit it could leave behind (issue #321). The ``rm`` grant
+    stays for dev iteration; in prod the writable set is confined to the corpus at the OS
+    layer (see ``docs/platform-design.md`` §4.7)."""
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {cfg.corpus_dir_rel}\n"
@@ -261,9 +267,6 @@ def invoke_curator_agent(
     allowed_tools = (
         "Read,Glob,Grep,"
         f"Edit({cfg.corpus_dir_rel}**),Write({cfg.corpus_dir_rel}**),"
-        "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
-        "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
-        "Bash(git log:*),"
         f"{extra_tools}"
         f"Bash(rm {cfg.corpus_dir_rel}*.md),"
         f"Bash(rm {cfg.corpus_dir}/*.md)"
@@ -287,7 +290,7 @@ def invoke_curator_agent(
 
 
 # ---------------------------------------------------------------------------
-# Post-flight — git cross-check
+# Post-flight — working-tree cross-check + loop-owned commit
 # ---------------------------------------------------------------------------
 
 
@@ -299,81 +302,79 @@ def git_head_sha() -> str:
     return proc.stdout.strip()
 
 
-def head_changed_only(corpus_dir_rel: str) -> bool:
+def changes_outside_corpus(corpus_dir_rel: str) -> list[str]:
+    """Repo-wide uncommitted paths that are *not* a corpus ``*.md`` file.
+
+    The agent runs no git, so at verify time its edits sit in the working tree
+    (un-committed); the scope gate runs over ``git status`` instead of a HEAD commit.
+    Covers staged, unstaged, and untracked paths so a stray ``Write`` or improvised shim
+    outside the corpus is caught. ``--untracked-files=all`` lists each untracked file
+    individually rather than collapsing whole untracked directories, so a single stray
+    file is reported as itself (and a fresh corpus file isn't mis-collapsed to its dir).
+    The caller diffs against a pre-agent baseline so unrelated leftovers (lead-author's
+    uncommitted work earlier in the same batch) aren't blamed on the curator agent."""
     proc = subprocess.run(
-        ["git", "show", "--name-only", "--pretty=format:", "HEAD"],
+        ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     )
-    files = [f for f in proc.stdout.splitlines() if f.strip()]
-    if not files:
-        return False
-    for f in files:
-        if not f.startswith(corpus_dir_rel):
-            return False
-        if not f.endswith(".md"):
-            return False
-    return True
+    stray: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:]
+        if " -> " in path:  # rename: XY orig -> new
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if not (path.startswith(corpus_dir_rel) and path.endswith(".md")):
+            stray.append(path)
+    return stray
 
 
-def head_commit_message() -> str:
-    proc = subprocess.run(
-        ["git", "log", "-1", "--pretty=%B", "HEAD"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
-    )
-    return proc.stdout
+def commit_corpus(
+    generation: int, model: str, message: str, cfg: CuratorConfig,
+) -> str | None:
+    """Stage the corpus, commit it with provenance trailers, return the new sha.
 
+    The agent authors lesson content + a commit message but runs no git: the loop is the
+    **sole committer**, which eliminates the #321 commit→stamp non-atomicity window —
+    there is no intermediate un-stamped commit, because the trailers go on at creation
+    time, not via a follow-up ``--amend``. The loop owns the ``Generation:`` /
+    ``{trailer_label}:`` provenance (it already computes both), so the recorded values
+    can't drift from a hand-typed literal, and ``{trailer_label}:`` stays exactly what
+    ``_generation_count`` greps. ``git add`` is path-scoped to the corpus, so nothing the
+    agent left modified *outside* it can ride into the lesson commit. Returns the new
+    sha, or ``None`` when the agent authored nothing (empty index → no commit).
 
-def stamp_head_trailers(generation: int, model: str, cfg: CuratorConfig) -> str:
-    """Append the provenance trailers to HEAD and return the rewritten sha.
-
-    The curator agent commits a plain message; the loop — not the agent — owns the
-    ``Generation:`` / ``{trailer_label}:`` provenance (it already computes both), so the
-    recorded values can't drift from a hand-typed literal in the agent prompt. Amends in
-    place (message-only; the tree is unchanged) under the repo lock the caller already
-    holds. The ``{trailer_label}:`` trailer is exactly what ``_generation_count`` greps
-    to count generations, so stamping keeps that counter correct on the next batch.
-
-    Two guards keep the amend from rewriting provenance the integrity gate already
-    cleared. ``--only`` (with no pathspec) re-uses HEAD's own tree, so a file the agent
-    left staged *outside* the corpus can't ride into the lesson commit — a plain
-    ``--amend`` commits the whole index, which ``verify_agent_state``'s pre-amend
-    scope check (run on the un-amended commit) would never catch. And a pre-amend scan
-    refuses to stamp a commit that already carries the trailers: ``git --trailer``
-    *appends*, so a disobedient agent's hand-written trailer would survive alongside
-    ours and shadow it for first-match readers (``eval_secondary.parse_trailers``)."""
-    if re.search(
-        rf"(?m)^(?:Generation|{re.escape(cfg.trailer_label)}):", head_commit_message()
-    ):
+    A guard refuses a ``commit_message`` that already carries the trailers: ``git
+    --trailer`` *appends*, so a hand-written one would survive alongside ours and shadow
+    it for first-match readers (``eval_secondary.parse_trailers``)."""
+    if re.search(rf"(?m)^(?:Generation|{re.escape(cfg.trailer_label)}):", message):
         raise AuthorError(
-            f"agent commit already carries Generation:/{cfg.trailer_label}: trailers; "
-            "the loop owns provenance and git --trailer would append duplicates — "
-            "refusing to stamp (queue intact for retry)"
+            f"agent commit_message already carries Generation:/{cfg.trailer_label}: "
+            "trailers; the loop owns provenance and git --trailer would append "
+            "duplicates — refusing to commit (queue intact for retry)"
         )
+    subprocess.run(
+        ["git", "add", "--", str(cfg.corpus_dir)],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", str(cfg.corpus_dir)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if staged.returncode == 0:
+        return None  # nothing staged — no commit
     proc = subprocess.run(
-        ["git", "commit", "--amend", "--only", "--no-edit",
+        ["git", "commit", "-F", "-",
          "--trailer", f"Generation: {generation}",
          "--trailer", f"{cfg.trailer_label}: {model}"],
-        cwd=REPO_ROOT, capture_output=True, text=True,
+        cwd=REPO_ROOT, input=message, capture_output=True, text=True,
     )
     if proc.returncode != 0:
         raise AuthorError(
-            f"failed to stamp Generation:/{cfg.trailer_label}: trailers onto HEAD: "
-            f"{proc.stderr.strip()}"
+            f"failed to commit {cfg.corpus_dir_rel} batch: {proc.stderr.strip()}"
         )
     return git_head_sha()
-
-
-def _canonical_sha(sha: str) -> str:
-    proc = subprocess.run(
-        ["git", "rev-parse", "--verify", sha],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        raise AuthorError(
-            f"author claimed commit_sha={sha!r} but git rev-parse rejects it: "
-            f"{proc.stderr.strip()}"
-        )
-    return proc.stdout.strip()
 
 
 def corpus_dir_clean(corpus_dir: Path) -> bool:
@@ -410,6 +411,20 @@ def _result_observation_id(bucket: str, entry: Any) -> str:
     return oid
 
 
+def _commit_message(result: dict) -> str:
+    """The agent-authored commit message the loop passes to ``git commit -F-``.
+
+    Required (and non-empty) whenever the batch committed anything — the loop owns the
+    commit, but the agent still authors the human-readable message body."""
+    msg = result.get("commit_message")
+    if not isinstance(msg, str) or not msg.strip():
+        raise AuthorError(
+            "AUTHOR_RESULT reported committed observations without a non-empty "
+            "commit_message; refusing to commit"
+        )
+    return msg
+
+
 def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None:
     expected = {o["observation_id"] for o in to_author}
     occurrences: dict[str, list[str]] = {}
@@ -438,49 +453,37 @@ def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None
 
 
 def verify_agent_state(
-    result: dict,
-    pre_agent_head: str,
-    cfg: CuratorConfig,
+    result: dict, cfg: CuratorConfig, baseline_stray: list[str],
 ) -> None:
-    """Cross-check the agent's reported state against git before the loop stamps
-    provenance + rotates. On a claimed commit: HEAD matches the reported sha, touches
-    only the corpus, and leaves it clean. On no commit: HEAD is unchanged and the corpus
-    clean. The provenance trailers are written afterward by ``stamp_head_trailers``, not
-    verified here — the loop authors them, so there is nothing to check."""
-    commit_sha = result.get("commit_sha")
-    committed = _result_list(result, "committed")
-    if committed and not commit_sha:
+    """Cross-check the agent's reported state against the working tree before the loop
+    commits + rotates. The agent runs no git, so its edits sit un-committed in the working
+    tree: (1) the agent introduced no *new* change outside ``{corpus}``*.md (scope gate —
+    a plain ``git add {corpus}`` already won't stage strays, but a new one means the agent
+    misbehaved, so fail loud; diffed against ``baseline_stray`` captured before the agent
+    ran so pre-existing leftovers aren't blamed on it); (2) ``committed`` non-empty ⇒ the
+    corpus has edits to commit; (3) ``committed`` empty ⇒ the corpus is clean (an all-skip
+    batch leaves no diff — a forward-BAD revert is re-edited back to its pre-batch bytes).
+    The provenance trailers are added by ``commit_corpus`` afterward, not verified here."""
+    new_stray = sorted(
+        set(changes_outside_corpus(cfg.corpus_dir_rel)) - set(baseline_stray)
+    )
+    if new_stray:
         raise AuthorError(
-            "author reported committed observations without a commit_sha; "
+            f"agent changed files outside {cfg.corpus_dir_rel}*.md: {new_stray}; "
+            "refusing to commit/rotate"
+        )
+    committed = _result_list(result, "committed")
+    corpus_dirty = not corpus_dir_clean(cfg.corpus_dir)
+    if committed and not corpus_dirty:
+        raise AuthorError(
+            f"author reported committed observations but left {cfg.corpus_dir_rel} "
+            "unchanged; refusing to rotate queue"
+        )
+    if not committed and corpus_dirty:
+        raise AuthorError(
+            f"author reported no commits but left edits in {cfg.corpus_dir_rel}; "
             "refusing to rotate queue"
         )
-    if commit_sha:
-        head = git_head_sha()
-        canonical = _canonical_sha(commit_sha)
-        if canonical != head:
-            raise AuthorError(
-                f"author claimed commit_sha={commit_sha} ({canonical}) but HEAD={head}"
-            )
-        if not head_changed_only(cfg.corpus_dir_rel):
-            raise AuthorError(
-                f"HEAD commit touches files outside {cfg.corpus_dir_rel}*.md; "
-                "refusing to rotate queue"
-            )
-        if not corpus_dir_clean(cfg.corpus_dir):
-            raise AuthorError(
-                f"author committed but {cfg.corpus_dir_rel} still has uncommitted edits"
-            )
-    else:
-        head = git_head_sha()
-        if head != pre_agent_head:
-            raise AuthorError(
-                "author skipped commit but HEAD changed "
-                f"from {pre_agent_head} to {head}; refusing to rotate queue"
-            )
-        if not corpus_dir_clean(cfg.corpus_dir):
-            raise AuthorError(
-                f"author skipped commit but {cfg.corpus_dir_rel} has uncommitted edits"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -653,21 +656,23 @@ def _author_to_author(
     Returns (rc, commit_sha, committed, consumed_skip). rc != 0 means a FATAL
     happened and the caller should bail with that code."""
     log = _logger(cfg)
-    pre_agent_head = git_head_sha()
+    baseline_stray = changes_outside_corpus(cfg.corpus_dir_rel)
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
         log(f"FATAL: {e}")
         return 2, None, [], []
     try:
-        verify_agent_state(result, pre_agent_head, cfg)
+        verify_agent_state(result, cfg, baseline_stray)
         validate_agent_result_partition(result, to_author)
-        commit_sha = result.get("commit_sha")
-        if commit_sha:
-            # The loop owns the provenance trailers, not the agent: stamp
-            # Generation:/<model> onto the verified commit and rotate against the
-            # rewritten sha.
-            commit_sha = stamp_head_trailers(generation, cfg.actor_model, cfg)
+        commit_sha: str | None = None
+        if _result_list(result, "committed"):
+            # The agent runs no git; the loop is the sole committer. Commit the
+            # corpus the agent left in the working tree, stamping Generation:/<model>
+            # at creation time (atomic — no un-stamped intermediate, issue #321).
+            commit_sha = commit_corpus(
+                generation, cfg.actor_model, _commit_message(result), cfg,
+            )
     except AuthorError as e:
         log(f"FATAL: {e}")
         return 2, None, [], []

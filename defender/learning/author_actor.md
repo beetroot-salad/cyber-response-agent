@@ -47,8 +47,8 @@ Run the batch driver the orchestrator put in the user prompt under `verify_batch
 - **GOOD** → keep the file as-is.
 - **BAD** → one rewrite attempt allowed. Re-read the observation, sharpen the body, then re-check just that file (the single-file `verify_forward_command:` is fine for a one-off recheck, or re-run `verify_batch_command:` over the rewritten set).
   - If the recheck is GOOD, keep the file.
-  - If still BAD, revert: delete the file (for a `new`) or `git checkout -- {path}` (for a `fold`), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
-- **ERROR** → treat as a non-verdict: re-run that pair once; if it errors again, revert the file and route the observation to `consumed_skip` with reason `forward_check_error:{one-line summary}`.
+  - If still BAD, revert: `rm` the file (for a `new`) or re-Edit it back to its pre-batch content (for a `fold` — you read the original at the start of the batch), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
+- **ERROR** → treat as a non-verdict: re-run that pair once; if it errors again, revert the file (`rm` a `new`, re-Edit a `fold` back) and route the observation to `consumed_skip` with reason `forward_check_error:{one-line summary}`.
 
 Stale-only flips don't need a forward check — there's no new body to evaluate; omit them from the batch.
 
@@ -62,12 +62,19 @@ For folds where one observation produces GOOD and another BAD on the same target
 - Don't add fields beyond what the template carries. Retrieval surface is `relevance_criteria` (+ `techniques` / `alert_rule_ids` / `defender_lead_tags`); everything else is bookkeeping.
 - Filename matches `name`.
 
-## Commit
+## Commit (loop-owned — you run no git)
 
-After processing every observation:
+You **never run git**. The loop is the sole committer: it stages `defender/lessons-actor/`, commits it with the `Generation:` / `Actor-Model:` provenance trailers, and pushes. Your job is to leave the corpus in **exactly** the state you want committed — write/fold/flip lesson files with Edit/Write, `rm` the files you are deleting (stale prunes, forward-BAD `new` reverts), and re-Edit any forward-BAD `fold` back to its pre-batch content. Do **not** write `Generation:` or model trailers anywhere — they are the loop's, and a hand-written one would be a duplicate.
 
-1. `git add` each touched file explicitly (new files + status flips + deletes). Never `git add .`.
-2. `git commit -m "{message}" -- {each-touched-path}` — pass the same paths to `git commit` with `--` pathspec to scope the commit to your edits only. Use this message shape:
+## Final output (last thing you emit)
+
+Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
+
+```
+AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_message": "{message}" or null}
+```
+
+Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_message` is the message body the loop will commit with — set it whenever `committed` is non-empty, or `null` if every observation was skip, stale-only-no-target, or forward-BAD (no lesson edits → no commit). Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender/actor: lesson batch {batch_id}
@@ -85,16 +92,4 @@ Removed: {name-7}
 
 Omit any `New: / Folded: / Decomposed: / Stale: / Stale-only: / Removed:` line if it would be empty.
 
-Do **not** add `Generation:` or model trailers yourself. The loop stamps those provenance trailers onto your commit after it verifies it — they are not yours to write, and a hand-written one would be a duplicate.
-
-If there are no committed lesson edits (every observation was skip, stale-only-no-target, or forward-BAD), do **not** create an empty commit. Skip the commit step.
-
-## Final output (last thing you emit)
-
-After committing (or deciding not to), emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
-
-```
-AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_sha": "{sha}" or null}
-```
-
-Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_sha` is the HEAD sha after your commit, or `null` if you skipped the commit step. The orchestrator verifies HEAD touches only `defender/lessons-actor/*.md` and matches your reported `commit_sha`, then stamps the `Generation:` / `Actor-Model:` provenance trailers onto it — emitting a bogus sha fails the run and the queue stays intact for retry.
+The orchestrator verifies your working tree touched only `defender/lessons-actor/*.md` and that the corpus is dirty **iff** you committed anything (`committed` non-empty), then commits it with the provenance trailers — a change outside the corpus, or a `committed`/working-tree mismatch, fails the run and the queue stays intact for retry.

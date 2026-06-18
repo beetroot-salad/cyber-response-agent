@@ -18,16 +18,18 @@ post-flight**:
     5. Idempotency: skip findings whose finding_id is already cited in
        any existing lesson's source_finding_ids.
 
-  Agent invocation (Claude Code, file-edit + Bash tools):
+  Agent invocation (Claude Code, file-edit tools — no git):
     Hand the remaining findings to the curator agent
     (``author.md``). It enumerates existing lessons, decides
     new/fold/skip per finding, runs ``verify_forward.py`` on each
-    edit, commits, and emits a final ``AUTHOR_RESULT: {...}`` line.
+    edit, leaves ``defender/lessons/`` in its final state, and emits a
+    final ``AUTHOR_RESULT: {...}`` line (with the commit message as data).
 
   Post-flight (Python):
-    6. Parse AUTHOR_RESULT. Cross-check against git: if commit_sha is
-       claimed, HEAD must match and only touch defender/lessons/. If
-       no commit, defender/lessons/ must be clean.
+    6. Parse AUTHOR_RESULT. Cross-check the working tree: nothing
+       changed outside defender/lessons/*.md, and the corpus is dirty
+       iff the agent committed anything. Then the loop — the sole
+       committer — commits the corpus (``commit_lessons``).
     7. Rotate the queue atomically (tmp file + os.replace). Held
        findings stay in findings.jsonl; consumed findings append to
        consumed.jsonl with category + consumed_at + commit_sha.
@@ -226,11 +228,13 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )
+    # The agent runs no git: it authors lesson content (+ a commit message it returns
+    # as data), and the loop is the sole committer (``commit_lessons``). The ``rm`` grant
+    # stays for dev iteration; prod fences the writable set to the corpus at the OS layer
+    # (``docs/platform-design.md`` §4.7).
     allowed_tools = (
         "Read,Glob,Grep,"
         "Edit(defender/lessons/**),Write(defender/lessons/**),"
-        "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
-        "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
         f"Bash({verifier_py} defender/learning/verify_batch.py:*),"
         f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
         "Bash(rm defender/lessons/*.md),"
@@ -270,41 +274,62 @@ def git_head_sha() -> str:
     return proc.stdout.strip()
 
 
-def head_changed_only_lessons() -> bool:
+def changes_outside_lessons() -> list[str]:
+    """Repo-wide uncommitted paths that are *not* a ``defender/lessons/`` ``*.md`` file.
+
+    The agent runs no git, so at verify time its edits sit un-committed in the working
+    tree; the scope gate runs over ``git status`` instead of a HEAD commit. Covers staged,
+    unstaged, and untracked paths so a stray ``Write`` or improvised shim outside the
+    corpus is caught. ``--untracked-files=all`` lists each untracked file individually
+    rather than collapsing whole untracked directories. The caller diffs against a
+    pre-agent baseline so unrelated leftovers aren't blamed on the curator agent."""
     proc = subprocess.run(
-        ["git", "show", "--name-only", "--pretty=format:", "HEAD"],
+        ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
-    files = [f for f in proc.stdout.splitlines() if f.strip()]
-    if not files:
-        return False
-    for f in files:
-        if not f.startswith("defender/lessons/"):
-            return False
-        # Lesson files only — agent improvisations like .py shims would
-        # land in scope but aren't lessons.
-        if not f.endswith(".md"):
-            return False
-    return True
+    stray: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:]
+        if " -> " in path:  # rename: XY orig -> new
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if not (path.startswith("defender/lessons/") and path.endswith(".md")):
+            stray.append(path)
+    return stray
 
 
-def _canonical_sha(sha: str) -> str:
-    """Resolve a (possibly abbreviated) sha to the full commit hash."""
+def commit_lessons(message: str) -> str | None:
+    """Stage ``defender/lessons/``, commit it with the agent's message, return the sha.
+
+    The agent authors lesson content + a commit message but runs no git: the loop is the
+    **sole committer**. ``git add`` is path-scoped to the corpus, so nothing the agent
+    left modified outside it can ride into the lesson commit. No provenance trailers —
+    unlike the actor/env curators, the findings corpus carries none. Returns the new sha,
+    or ``None`` when the agent authored nothing (empty index → no commit)."""
+    subprocess.run(
+        ["git", "add", "--", str(LESSONS_DIR)],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", str(LESSONS_DIR)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if staged.returncode == 0:
+        return None  # nothing staged — no commit
     proc = subprocess.run(
-        ["git", "rev-parse", "--verify", sha],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
+        ["git", "commit", "-F", "-"],
+        cwd=REPO_ROOT, input=message, capture_output=True, text=True,
     )
     if proc.returncode != 0:
         raise AuthorError(
-            f"author claimed commit_sha={sha!r} but git rev-parse rejects it: "
-            f"{proc.stderr.strip()}"
+            f"failed to commit defender/lessons/ batch: {proc.stderr.strip()}"
         )
-    return proc.stdout.strip()
+    return git_head_sha()
 
 
 def lessons_dir_clean() -> bool:
@@ -327,35 +352,47 @@ def _result_list(result: dict, key: str) -> list[Any]:
     return value
 
 
-def verify_agent_state(result: dict) -> None:
-    commit_sha = result.get("commit_sha")
-    committed = _result_list(result, "committed")
-    if committed and not commit_sha:
+def verify_agent_state(result: dict, baseline_stray: list[str]) -> None:
+    """Cross-check the agent's reported state against the working tree before the loop
+    commits + rotates. The agent runs no git, so its edits sit un-committed: (1) the agent
+    introduced no *new* change outside ``defender/lessons/``*.md (scope gate, diffed
+    against ``baseline_stray`` captured before the agent ran so pre-existing leftovers
+    aren't blamed on it); (2) ``committed`` non-empty ⇒ the corpus has edits to commit;
+    (3) ``committed`` empty ⇒ the corpus is clean (an all-skip/all-forward-BAD batch leaves
+    no diff — a forward-BAD fold is re-edited back to its pre-batch bytes). The loop
+    (``commit_lessons``) commits afterward."""
+    new_stray = sorted(set(changes_outside_lessons()) - set(baseline_stray))
+    if new_stray:
         raise AuthorError(
-            "author reported committed findings without a commit_sha; refusing to rotate queue"
+            f"agent changed files outside defender/lessons/*.md: {new_stray}; "
+            "refusing to commit/rotate"
         )
-    if commit_sha:
-        head = git_head_sha()
-        # Agents routinely emit short SHAs ("97f8711"); compare against
-        # canonical form rather than failing on length mismatch.
-        canonical = _canonical_sha(commit_sha)
-        if canonical != head:
-            raise AuthorError(
-                f"author claimed commit_sha={commit_sha} ({canonical}) but HEAD={head}"
-            )
-        if not head_changed_only_lessons():
-            raise AuthorError(
-                "HEAD commit touches files outside defender/lessons/; refusing to rotate queue"
-            )
-        if not lessons_dir_clean():
-            raise AuthorError(
-                "author committed but defender/lessons/ still has uncommitted edits"
-            )
-    else:
-        if not lessons_dir_clean():
-            raise AuthorError(
-                "author skipped commit but defender/lessons/ has uncommitted edits"
-            )
+    committed = _result_list(result, "committed")
+    corpus_dirty = not lessons_dir_clean()
+    if committed and not corpus_dirty:
+        raise AuthorError(
+            "author reported committed findings but left defender/lessons/ unchanged; "
+            "refusing to rotate queue"
+        )
+    if not committed and corpus_dirty:
+        raise AuthorError(
+            "author reported no commits but left edits in defender/lessons/; "
+            "refusing to rotate queue"
+        )
+
+
+def _commit_message(result: dict) -> str:
+    """The agent-authored commit message the loop passes to ``git commit -F-``.
+
+    Required (and non-empty) whenever the batch committed anything — the loop owns the
+    commit, but the agent still authors the human-readable message body."""
+    msg = result.get("commit_message")
+    if not isinstance(msg, str) or not msg.strip():
+        raise AuthorError(
+            "AUTHOR_RESULT reported committed findings without a non-empty "
+            "commit_message; refusing to commit"
+        )
+    return msg
 
 
 def _now_iso() -> str:
@@ -615,18 +652,23 @@ def _author_to_author(
     rc != 0 means a FATAL happened and the caller should bail with that
     code; the queue stays intact via the outer lock/rotate flow.
     """
+    baseline_stray = changes_outside_lessons()
     try:
         result = invoke_agent(to_author, batch_id)
     except AuthorError as e:
         _log(f"FATAL: {e}")
         return 2, None, [], [], []
     try:
-        verify_agent_state(result)
+        verify_agent_state(result, baseline_stray)
         validate_agent_result_partition(result, to_author)
+        commit_sha: str | None = None
+        if _result_list(result, "committed"):
+            # The agent runs no git; the loop is the sole committer. Commit the
+            # lessons the agent left in the working tree (no provenance trailers).
+            commit_sha = commit_lessons(_commit_message(result))
     except AuthorError as e:
         _log(f"FATAL: {e}")
         return 2, None, [], [], []
-    commit_sha = result.get("commit_sha")
     committed: list[dict] = []
     held_forward_bad: list[dict] = []
     consumed_skip: list[dict] = []
