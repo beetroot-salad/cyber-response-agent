@@ -55,13 +55,15 @@ Placeholders in templates use `{…}` — fill them in; never emit literal curly
 
 Lessons are **pitfalls only** in this version: corrective and outcome-neutral. Don't write framing-type lessons ("this configuration is a known good pattern…"). The body teaches the agent what to *check next time*, not what conclusion to reach.
 
+**Benign (FP-direction) lessons route, they don't suppress.** A finding with `direction: benign` came from an over-escalation; its lesson must teach the **authoritative check the defender skipped** — a *path to authority* ("query change-mgmt for an approved window", "ground the service-account authorization via identity") — so the agent re-grounds the disposition freshly next time. It must **never** encode a disposition rule keyed on a recurrence pattern ("don't escalate signature 5710 when the source is `svc.monitoring`"). Frequency or prior is never a ground: "it fired here before" can't justify a call, and a suppress-by-pattern lesson is just encoded alert-fatigue — it teaches the agent to *under*-escalate, the exact failure the FP signal must not breed. History's only legitimate job is to make the authoritative check faster to find (routing). A benign finding that can only become a suppress-by-pattern rule — no routing gap to teach — is **skipped** (reason: `suppress-by-pattern`), not authored.
+
 ## Workflow
 
 For each finding, in order, decide one of:
 
 1. **new** — no existing lesson covers this pitfall pattern. Author a new file `defender/lessons/{slug}.md` with the schema above.
 2. **fold** — an existing lesson already targets this pitfall (or a closely related one). Read the target lesson's body, then **rewrite it holistically** to subsume both the existing teaching and the new finding. Append the new `finding_id` to `source_finding_ids`. Broaden `description` if the scope grew.
-3. **skip** — the finding is already fully covered, low signal, or doesn't generalize. Note the reason in your final report. Do not write a file.
+3. **skip** — the finding is already fully covered, low signal, doesn't generalize, or is a benign suppress-by-pattern rule with no routing gap to teach (reason `suppress-by-pattern`; see §Lesson shape). Note the reason in your final report. Do not write a file.
 
 To decide, two passes — and you **must run both**, because the dimensions alone will not catch every fold:
 
