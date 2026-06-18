@@ -27,6 +27,7 @@ On any failure it returns the original history unchanged (Phase-A fallback)
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,6 +70,75 @@ def detect_loop(investigation_md: str) -> int | None:
         if isinstance(f.get("loop"), int)
     ]
     return max(loops) if loops else None
+
+
+def _lead_resolved(finding: dict[str, Any]) -> bool:
+    """True once a lead has committed results — any `outcome` (observations,
+    attribute updates, authz resolutions) or a resolution row. A planned-but-not-
+    yet-gathered-and-analyzed lead has neither."""
+    if finding.get("resolutions"):
+        return True
+    return bool(finding.get("outcome"))
+
+
+def fold_boundary(investigation_md: str) -> int:
+    """Highest loop safe to fold into the frozen prefix.
+
+    The fix for the N=1 failure: folding on bare `max(:L loop)` (a *plan-time*
+    signal) froze a frontier that still listed the **active** loop's unresolved
+    leads, and the agent re-dispatched them forever. The active loop is the
+    highest planned one; everything strictly below it is settled (the agent has
+    moved on), so it folds regardless of dead-end leads. The active loop itself
+    folds only once it is fully resolved (the investigation is concluding).
+    Combined with `_frontier_through`, this keeps the active loop — plan,
+    in-flight gathers, analysis — entirely in the live tail, out of the frozen
+    snapshot. Returns 0 when there's nothing below an unresolved loop 1, or on
+    parse failure (caller then passes through / reuses — never regresses)."""
+    if not investigation_md or parse_dense_companion is None:
+        return 0
+    try:
+        companion, _warnings = parse_dense_companion(investigation_md)
+    except Exception:
+        return 0
+    by_loop: dict[int, list[bool]] = {}
+    for f in companion.get("findings", []):
+        loop = f.get("loop")
+        if isinstance(loop, int):
+            by_loop.setdefault(loop, []).append(_lead_resolved(f))
+    if not by_loop:
+        return 0
+    active = max(by_loop)
+    if all(by_loop[active]):   # active loop fully resolved → safe to fold it too
+        return active
+    return active - 1          # fold everything strictly below the active loop
+
+
+def _frontier_through(investigation_md: str, fold_through: int) -> str:
+    """`investigation.md` text trimmed to loops 1..`fold_through` — the settled
+    frontier. Cuts at the `:L findings` block that first introduces a lead of a
+    higher loop, so the active loop's plan rows (and anything after) never enter
+    the frozen snapshot; they stay in the live tail. The result is read by the
+    model, not written back, so it needn't be validator-clean — we only re-close a
+    dangling ```invlang fence so it renders."""
+    lines = investigation_md.split("\n")
+    cut: int | None = None
+    last_l_header: int | None = None
+    for i, ln in enumerate(lines):
+        if ln.startswith(":L "):
+            last_l_header = i
+        m = _LEAD_ROW_RE.match(ln)
+        if m and int(m.group(1)) > fold_through:
+            cut = last_l_header if last_l_header is not None else i
+            break
+    if cut is None:
+        return investigation_md.strip()
+    kept = "\n".join(lines[:cut]).rstrip()
+    if kept.count("```") % 2 == 1:  # cut inside a fence → re-close it
+        kept += "\n```"
+    return kept
+
+
+_LEAD_ROW_RE = re.compile(r"l-\S*\|(\d+)\|")
 
 
 # --------------------------------------------------------------------------
@@ -114,31 +184,34 @@ class CompactionStep:
 # --------------------------------------------------------------------------
 
 def render_frontier_message(
-    investigation_md: str, summary_pointers: dict[str, str] | None = None
+    frontier_md: str, summary_pointers: dict[str, str] | None = None
 ) -> Message:
-    """A synthetic user-role ModelRequest carrying the invlang frontier.
+    """A synthetic user-role ModelRequest carrying the settled invlang frontier.
 
-    The frontier (the whole append-only `investigation.md`) is the
-    authoritative carry-over. `summary_pointers` maps a resolved lead id to
-    the on-disk path of its persisted gather summary, so the agent can Read
-    detail the structured frontier dropped instead of re-dispatching gather
-    (design doc §Recovery). Kept deterministic: same inputs → byte-identical
-    message, which is what lets the prefix cache across a loop.
+    `frontier_md` is `investigation.md` already trimmed to the folded (settled)
+    loops by `_frontier_through` — it never contains the active loop's rows, so
+    the message can't advertise an in-flight lead as needing work. The framing is
+    deliberately precise about that: the listed leads are DONE (don't re-dispatch
+    them — that was the N=1 failure), the current loop continues from the messages
+    that follow, and `summary_pointers` (lead id → on-disk gather summary) is the
+    cheap re-read path for dropped detail. Deterministic: same inputs →
+    byte-identical message, so the prefix caches across the loop.
     """
     lines = [
-        "Investigation state so far — the authoritative committed frontier. "
-        "Earlier raw gather summaries have been compacted out; reason from "
-        "this frontier.",
+        "Settled investigation frontier (completed loops). The leads below are "
+        "DONE — their findings are committed here; do NOT re-dispatch any lead "
+        "listed below. Continue the CURRENT loop from the messages that follow "
+        "this one; their full gather summaries were compacted out of context.",
         "",
         "```invlang",
-        investigation_md.strip(),
+        frontier_md.strip(),
         "```",
     ]
     if summary_pointers:
         lines.append("")
         lines.append(
-            "Full gather summaries for resolved leads are persisted on disk "
-            "(Read one only if you need detail this frontier omits):"
+            "Need detail a completed lead's row omits? Read its persisted gather "
+            "summary instead of re-running it:"
         )
         for lead_id in sorted(summary_pointers):
             lines.append(f"- {lead_id} → {summary_pointers[lead_id]}")
@@ -151,6 +224,7 @@ def render_frontier_message(
 def _build_prefix(
     history: list[Message],
     investigation_md: str,
+    fold_through: int,
     orientation_index: int,
     summary_pointers: dict[str, str] | None,
 ) -> tuple[Message, ...]:
@@ -158,10 +232,12 @@ def _build_prefix(
 
     Orientation (real message 0: alert, lessons, workspace map, invlang
     catalog) is byte-stable, so folding it into the 1h-cached prefix is a
-    bonus over its current 5m tail slot.
+    bonus over its current 5m tail slot. The frontier is trimmed to loops
+    1..`fold_through` — the active loop stays in the live tail.
     """
     orientation = history[orientation_index]
-    return (orientation, render_frontier_message(investigation_md, summary_pointers))
+    frontier_md = _frontier_through(investigation_md, fold_through)
+    return (orientation, render_frontier_message(frontier_md, summary_pointers))
 
 
 # --------------------------------------------------------------------------
@@ -182,54 +258,47 @@ def compact(
     `investigation_md` is its committed state at this point; `state` is the
     frozen prefix carried from the previous request (None on the first).
 
-    We fold loops `1..L-1` into the prefix once the agent reaches loop `L`,
-    recomputing only when `L` advances (``froze``); otherwise we reuse the
-    held prefix (``reused``). Loop 1 is never compacted — there is nothing
-    redundant yet (``passthrough``). Any anomaly returns the original history
-    (``fallback``); correctness is preserved, savings forgone.
+    We fold loops `1..R` into the prefix, where `R = resolved_through` (the
+    highest fully-resolved loop), recomputing only when `R` advances (``froze``);
+    otherwise we reuse the held prefix (``reused``). Until loop 1 is fully
+    resolved there is nothing safe to fold (``passthrough``). Folding only
+    resolved loops keeps the active loop entirely in the live tail, so the frozen
+    frontier never lists an unresolved lead. Any anomaly returns the original
+    history (``fallback``); correctness is preserved, savings forgone.
     """
-    current_loop = detect_loop(investigation_md)
-
-    # Loop undetermined: never regress. Reuse a held prefix if we have one,
-    # else pass the full history through (Phase-A behaviour).
-    if current_loop is None:
-        if state is None:
-            return CompactionStep(history, None, "passthrough", None, "loop-undetermined")
-        return _reuse(history, state, state.frozen_through + 1, "loop-undetermined")
-
-    target_fold = current_loop - 1  # loop `current_loop` is active; fold below it
+    current_loop = detect_loop(investigation_md)   # telemetry: highest planned loop
+    fold_target = fold_boundary(investigation_md)
     already = state.frozen_through if state else 0
 
-    if target_fold <= 0:
-        # Still in loop 1 (or earlier) — nothing to fold yet.
-        return CompactionStep(history, state, "passthrough", current_loop)
+    if fold_target <= already:
+        # Nothing newly safe to fold: pre-first-freeze (pass the full history
+        # through, Phase-A behaviour) or still inside the frozen loop / loop
+        # undetermined (keep reusing the held prefix — never regress).
+        if state is None:
+            return CompactionStep(history, None, "passthrough", current_loop)
+        return _reuse(history, state, current_loop, None)
 
-    if target_fold > already:
-        # The investigation advanced into a new loop: (re)freeze the prefix
-        # from the now-larger frontier and absorb everything up to here. The
-        # cut lands just past the current request, so the live tail (which
-        # starts empty and grows with loop `current_loop`) begins on a model
-        # *response* — its tool-calls and their tool-returns both live in the
-        # tail, so no tool_use/tool_return pair is ever orphaned across the
-        # cut. (The folded region is replaced wholesale by the tool-call-free
-        # synthetic prefix, so the dropped side can't orphan a pair either.)
-        try:
-            prefix = _build_prefix(
-                history, investigation_md, orientation_index, summary_pointers
-            )
-        except Exception as exc:  # malformed history / missing orientation
-            return CompactionStep(history, state, "fallback", current_loop, f"prefix-build: {exc}")
-        new_state = FrozenState(
-            prefix=prefix, freeze_index=len(history), frozen_through=target_fold
+    # A loop just became fully resolved → (re)freeze the prefix from the current
+    # (all-resolved-through-R) frontier and absorb everything up to here. The cut
+    # lands just past the current request, so the live tail (empty now, growing
+    # with the active loop) begins on a model *response* — its tool-calls and
+    # tool-returns both live in the tail, so no pair is orphaned across the cut.
+    # The folded region is replaced wholesale by the tool-call-free synthetic
+    # prefix, so the dropped side can't orphan a pair either.
+    try:
+        prefix = _build_prefix(
+            history, investigation_md, fold_target, orientation_index, summary_pointers
         )
-        rewritten = list(prefix)  # tail is empty at the freeze moment
-        if not _smaller(rewritten, history):
-            # Degenerate: the "compacted" prefix isn't actually smaller.
-            return CompactionStep(history, state, "fallback", current_loop, "no-saving")
-        return CompactionStep(rewritten, new_state, "froze", current_loop)
-
-    # Within an already-frozen loop: reuse the held prefix + live tail.
-    return _reuse(history, state, current_loop, None)  # type: ignore[arg-type]
+    except Exception as exc:  # malformed history / missing orientation
+        return CompactionStep(history, state, "fallback", current_loop, f"prefix-build: {exc}")
+    new_state = FrozenState(
+        prefix=prefix, freeze_index=len(history), frozen_through=fold_target
+    )
+    rewritten = list(prefix)  # tail is empty at the freeze moment
+    if not _smaller(rewritten, history):
+        # Degenerate: the "compacted" prefix isn't actually smaller.
+        return CompactionStep(history, state, "fallback", current_loop, "no-saving")
+    return CompactionStep(rewritten, new_state, "froze", current_loop)
 
 
 def _reuse(
