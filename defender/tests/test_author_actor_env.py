@@ -4,6 +4,7 @@ distinct outcome policy + commit trailer + generation counter, but share the
 transaction envelope (issue #298)."""
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 
 from defender.learning import _author_curator as curator
@@ -54,29 +55,38 @@ def test_configs_are_distinct() -> None:
     assert author_actor_env.run_batch.__module__ == "defender.learning.author_actor_env"
 
 
-def test_stamp_head_trailers_uses_per_config_label(tmp_path, monkeypatch) -> None:
-    """The loop stamps the model trailer using the per-direction ``trailer_label``, so
-    each source records its own provenance key (Actor-Env-Model vs Benign-Actor-Model)
-    onto the shared corpus's commits."""
+def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
+    """The loop commits the corpus using the per-direction ``trailer_label``, so each
+    source records its own provenance key (Actor-Env-Model vs Benign-Actor-Model) onto
+    the shared corpus's commits."""
     repo = tmp_path / "repo"
-    repo.mkdir()
+    corpus = repo / "defender" / "lessons-environment"
+    corpus.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "README").write_text("seed\n")
+    subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
     monkeypatch.setattr(curator, "REPO_ROOT", repo)
 
-    def _plain_commit(subject: str) -> None:
-        (repo / "f").write_text(subject)
-        subprocess.run(["git", "-C", str(repo), "add", "f"], check=True)
-        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", subject], check=True)
+    # Both directions share the corpus dir; repoint it at the tmp tree.
+    adv = dataclasses.replace(aenv.ADVERSARIAL_CONFIG, corpus_dir=corpus)
+    ben = dataclasses.replace(aenv.BENIGN_CONFIG, corpus_dir=corpus)
 
-    _plain_commit("adversarial batch")
-    curator.stamp_head_trailers(3, "claude-x", aenv.ADVERSARIAL_CONFIG)
-    msg = curator.head_commit_message()
+    def _head_msg() -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--pretty=%B", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+    (corpus / "a.md").write_text("x\n")  # agent edit, uncommitted
+    curator.commit_corpus(3, "claude-x", "adversarial batch", adv)
+    msg = _head_msg()
     assert "Generation: 3" in msg
     assert "Actor-Env-Model: claude-x" in msg
     assert "Benign-Actor-Model" not in msg
 
-    _plain_commit("benign batch")
-    curator.stamp_head_trailers(2, "claude-y", aenv.BENIGN_CONFIG)
-    assert "Benign-Actor-Model: claude-y" in curator.head_commit_message()
+    (corpus / "b.md").write_text("y\n")
+    curator.commit_corpus(2, "claude-y", "benign batch", ben)
+    assert "Benign-Actor-Model: claude-y" in _head_msg()

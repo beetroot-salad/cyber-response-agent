@@ -89,8 +89,8 @@ def _generation_count(trailer_label: str) -> int:
     miscount corpus-structure/template commits that predate the author flow, and
     no-op author runs produce no commit so they don't advance it. The grep anchors
     on the trailer key with **no** required space after the colon, so a differently-
-    spaced or hand-written trailer still counts — the curator stamps a canonical
-    ``Label: value`` (``_author_curator.stamp_head_trailers``), but a stricter
+    spaced or hand-written trailer still counts — the curator commits a canonical
+    ``Label: value`` (``_author_curator.commit_corpus``), but a stricter
     ``^label: `` would skip a no-space commit, letting two batches assert the same
     generation. Labels are disjoint, so
     a counter never crosses streams (``^Actor-Model:`` cannot match a

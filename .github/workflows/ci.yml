@@ -30,7 +30,11 @@ jobs:
 
       - name: Run unit tests
         working-directory: defender
-        run: uv run pytest tests/ -v -m "not llm and not live"
+        # Collect both the learning-loop invariant suite (tests/) AND the
+        # orchestrator/loop tests co-located under learning/. The latter were
+        # previously dark to CI — only tests/ was collected — so a green run
+        # could hide failures in learning/test_loop.py et al.
+        run: uv run pytest tests/ learning/ -v -m "not llm and not live"
 
   lint:
     runs-on: ubuntu-latest
@@ -77,9 +81,10 @@ jobs:
         run: npm install -g jscpd
 
       # Code-smell signals are reported, not enforced — surface trends in the
-      # job log without blocking PRs. defender/ carries its own [tool.ruff]
-      # config (extend-select bugbear/simplify/complexity/pyupgrade/pytest-style),
-      # so no --config is needed.
+      # job log without blocking PRs — with ONE exception: the Python-duplication
+      # gate at the end of this job is a hard ratchet (see its step). defender/
+      # carries its own [tool.ruff] config (extend-select bugbear/simplify/
+      # complexity/pyupgrade/pytest-style), so no --config is needed.
       - name: Ruff (extended — bugbear, simplify, complexity, pyupgrade, pytest-style)
         run: defender/.venv/bin/ruff check defender --statistics || true
 
@@ -95,8 +100,23 @@ jobs:
       - name: Radon — raw size metrics
         run: defender/.venv/bin/radon raw defender -s || true
 
-      - name: jscpd (copy-paste detection)
-        run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**" || true
+      # `**/*_cli.py` excludes the per-system data-source adapter shims
+      # (scripts/tools/*_cli.py + their test stubs): they share argparse/CLI
+      # scaffolding by design, so their similarity is accepted boilerplate, not
+      # the logic duplication this detector is meant to surface.
+      - name: jscpd (copy-paste detection — all formats, soft report)
+        run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py" || true
+
+      # Hard gate (the one enforced check in this otherwise-soft job): Python
+      # logic duplication. Scoped to --format python so the JSON/markdown
+      # fixtures (legitimately ~40% similar) can't pollute the signal. The
+      # threshold is a ratchet above today's ~1.4% baseline (adapter CLIs
+      # excluded, as in the soft step) — it blocks a PR that meaningfully grows
+      # copy-pasted Python (the #330 class of drift), not the existing
+      # duplication. Runs last so the soft reports above always emit before this
+      # can fail the job.
+      - name: jscpd Python-duplication gate (hard — blocks CI)
+        run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py"
 
       # Defender hygiene + discipline lints (soft — reported, not enforced).
       # Each script is independently inspectable under defender/scripts/lint_*.py;

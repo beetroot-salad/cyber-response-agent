@@ -720,7 +720,7 @@ def test_author_drain_marks_artifact_missing(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
 
-def test_author_drain_triggers_three_curators(tmp_path: Path):
+def test_author_drain_triggers_all_curators(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-c"  # a marker gives the drain work
     run_dir.mkdir(parents=True)
@@ -732,7 +732,10 @@ def test_author_drain_triggers_three_curators(tmp_path: Path):
         trigger_author=lambda pending_file, env, module, label: triggered.append(module),
         branch=_FakeBranch(),
     )
-    assert triggered == ["author", "author_actor", "author_actor_benign"]
+    # The current four-direction set: findings + actor + actor-env + actor-benign.
+    assert triggered == [
+        "author", "author_actor", "author_actor_env", "author_actor_benign",
+    ]
 
 
 def test_author_drain_skips_when_lease_held(tmp_path: Path):
@@ -854,7 +857,9 @@ def test_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     failed = paths.author_queue_dir / "failed" / "case-poison.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
     # the poison run dir didn't starve the accumulated findings/observation queues
-    assert triggered == ["author", "author_actor", "author_actor_benign"]
+    assert triggered == [
+        "author", "author_actor", "author_actor_env", "author_actor_benign",
+    ]
 
 
 # ---------------------------------------------------------------------------

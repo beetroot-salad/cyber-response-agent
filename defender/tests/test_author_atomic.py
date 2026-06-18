@@ -36,7 +36,7 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
         state["calls"] += 1
         if state["calls"] == 1:
             raise a.AuthorError("commit failed")
-        # Second call: succeed.
+        # Second call: succeed. Write the lesson, run NO git (the loop commits).
         body = (
             "---\n"
             "name: lessonR\n"
@@ -47,10 +47,8 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
             "---\n\nb\n"
         )
         (a.LESSONS_DIR / "lessonR.md").write_text(body)
-        tmp_repo.run_git("add", "-A")
-        tmp_repo.run_git("commit", "-q", "-m", "lessonR")
-        sha = tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
-        return {"committed": ["run-R/0"], "held_forward_bad": [], "consumed_skip": [], "commit_sha": sha}
+        return {"committed": ["run-R/0"], "held_forward_bad": [], "consumed_skip": [],
+                "commit_message": "lessonR"}
 
     monkeypatch.setattr(a, "invoke_agent", maybe_fail)
     assert a.run_batch() == 2  # first tick fails
@@ -62,18 +60,16 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
 
 
 def _commit_lesson(tmp_repo, a, *, name: str, fid: str):
-    """Return a fake invoke_agent that commits one lesson citing ``fid``."""
+    """Return a fake invoke_agent that writes one lesson citing ``fid`` — no git
+    (the loop is the sole committer)."""
     def fake(findings, batch_id):
         body = (
             f"---\nname: {name}\ndescription: d\nsource_finding_ids:\n  - {fid}\n"
             "created_at: 2026-05-09T00:00:00+00:00\n---\n\nbody\n"
         )
         (a.LESSONS_DIR / f"{name}.md").write_text(body)
-        tmp_repo.run_git("add", "-A")
-        tmp_repo.run_git("commit", "-q", "-m", name)
-        sha = tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
         return {"committed": [fid], "held_forward_bad": [], "consumed_skip": [],
-                "commit_sha": sha}
+                "commit_message": name}
     return fake
 
 

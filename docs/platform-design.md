@@ -661,6 +661,21 @@ needs live storage virtualization or multi-host mid-run mutation (§6).
   SIEM-free and holds git/PR + LLM creds only (§4.3).
 - **Prompt-injection defenses carry over** — salted-delimiter tagging of untrusted content; the container
   isolates blast radius, it doesn't replace those defenses.
+- **The curator agent is confined to its corpus at the OS layer, not the tool layer.** The lessons-author
+  agent (§4.4) edits — and may delete — files in its corpus; the threat is a rogue/injected agent deleting
+  or rewriting files *outside* it. Claude Code `allowed_tools` patterns (`Bash(rm …)`) and PreToolUse hooks
+  are command-string matching, **not** a security boundary — trivially bypassed via `python -c`,
+  `find -delete`, `sh -c`. The real boundary is kernel-enforced: scope the agent's writable set to the
+  corpus dir — a read-only bind-mount of the repo + a read-write corpus mount (container-native; `unlink`
+  outside returns `EROFS`), or Landlock (path-scoped `REMOVE_FILE`, an unprivileged self-sandbox), backed by
+  a dedicated unprivileged uid (deletion needs write on the *parent* dir).
+- **That confinement forces git out of the agent.** Any corpus-only writable set breaks the agent running
+  `git` directly (it needs `.git/` write, which reopens a worse hole than the deletion it closes —
+  ref/hook/index rewrite). So **the agent does no git**: it edits (and, in dev, `rm`s) only within the
+  corpus, and the loop owns all git (stage → commit → push) *outside* the confinement. This also closes the
+  #321 non-atomicity window — the loop is the sole committer, so the provenance trailers can never split
+  from the commit. Dev runs may grant the agent `rm` within the corpus for iteration ergonomics; prod relies
+  on the mount/Landlock boundary, not on the agent's cooperation.
 - **Auth at the boundary, audit everywhere** — coarse tenant roles (§2.10); every write and artifact read
   is a tenant-scoped audit event.
 
