@@ -90,24 +90,31 @@ def _lead_resolved(finding: dict[str, Any]) -> bool:
 def fold_boundary(investigation_md: str) -> int:
     """Highest loop safe to fold into the frozen prefix.
 
-    Fold only the **contiguous run of fully-resolved loops strictly below the
-    active (highest-numbered) loop**. Two guards, each learned from a live A/B:
+    Fold only the **contiguous run of *executed* loops strictly below the active
+    (highest-numbered) loop**, where a loop counts as executed once it has at
+    least one committed finding. Three properties, each learned from a live A/B:
 
     - *Never fold the active loop.* The agent is still working in its highest
-      loop; folding it dropped the loop the agent was mid-investigation on and
-      it restarted orientation from scratch (the costly 4th-A/B re-orientation).
-    - *Never fold a loop that isn't itself fully resolved.* The agent sometimes
-      drafts a later loop's `:L` plan row while an earlier loop still has no
-      results. The previous "fold everything strictly below active" rule then
-      folded that **unresolved** earlier loop — froze loop 1 with nothing in it
-      and the agent re-did the whole loop (the 4th-A/B root cause, reproduced at
-      request r11). Requiring a settled *contiguous prefix* (loops 1..R all
-      resolved) closes that hole, so the freeze only fires at a genuine
-      boundary: an earlier loop committed, a later loop opened.
+      loop; folding it dropped the loop the agent was mid-investigation on and it
+      restarted orientation from scratch (the costly 4th-A/B re-orientation).
+    - *Never fold a merely-drafted loop.* The agent sometimes writes a later
+      loop's `:L` plan row while an earlier loop still has **no results at all**.
+      The original "fold everything strictly below active" rule then folded that
+      empty earlier loop — froze loop 1 with nothing in it and the agent re-did
+      the whole loop (the 4th-A/B root cause, reproduced live at r11/r19).
+      Requiring ≥1 committed finding per folded loop closes that hole: a bare
+      drafted-ahead plan has zero, so it never folds.
+    - *Tolerate dead-end leads in an executed loop.* A loop the agent worked and
+      moved past is complete by construction (gather is synchronous; the agent
+      analysed and planned the next loop before advancing), so an abandoned lead
+      that never produced an outcome must NOT block folding. Requiring *all*
+      leads resolved was too strict — one dead-end lead blocked the loop forever
+      and the freeze never fired (5th-A/B: loop 1's l-004 dead-ended, fold stayed
+      0 all run). `any` resolved, not `all`, is the executed-vs-drafted line.
 
     Combined with `_frontier_through`, the active loop — plan, in-flight gathers,
     analysis — stays entirely in the live tail. Returns 0 when nothing is safely
-    foldable (no settled loop below the active one) or on parse failure (caller
+    foldable (no executed loop below the active one) or on parse failure (caller
     then passes through / reuses — never regresses)."""
     if not investigation_md or parse_dense_companion is None:
         return 0
@@ -125,7 +132,7 @@ def fold_boundary(investigation_md: str) -> int:
     active = max(by_loop)
     fold = 0
     loop = 1
-    while loop < active and by_loop.get(loop) and all(by_loop[loop]):
+    while loop < active and by_loop.get(loop) and any(by_loop[loop]):
         fold = loop
         loop += 1
     return fold

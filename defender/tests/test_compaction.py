@@ -52,6 +52,16 @@ RESOLVED2_PLAN3 = "\n\n".join([
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w", "", _obs("l-005")),
     _block(_LH, "l-009|3|ti-ip|v-008|h-002|threat-intel|w"),
 ])
+# loop 1 EXECUTED (l-001 resolved) but with a dead-end lead (l-004, no outcome),
+# loop 2 active. The 5th-A/B scenario: a worked loop with an abandoned lead must
+# still fold — requiring ALL leads resolved kept the freeze from ever firing.
+RESOLVED1_DEADEND_PLAN2 = "\n\n".join([
+    _block(_LH,
+           "l-001|1|raw-auth|v-001|h-001|elastic|w",
+           "l-004|1|zeek-out|v-001|h-002|elastic|w",
+           "", _obs("l-001")),
+    _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
+])
 
 # simple frontiers for detect_loop (max :L loop, ignores resolution)
 LOOP1 = _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w")
@@ -109,9 +119,16 @@ def test_fold_boundary_folds_contiguous_resolved_below_active():
 
 def test_fold_boundary_does_not_fold_unresolved_loop_below_drafted_loop():
     # the 4th-A/B regression: loop 2 drafted while loop 1 has no results yet.
-    # "fold everything below active" folded the empty loop 1; the contiguous-
-    # resolved rule must refuse (loop 1 isn't settled → nothing safe to fold).
+    # "fold everything below active" folded the empty loop 1; requiring ≥1
+    # committed finding must refuse (loop 1 has zero → nothing safe to fold).
     assert C.fold_boundary(DRAFT2_OVER_UNRESOLVED1) == 0
+
+
+def test_fold_boundary_tolerates_dead_end_lead_in_executed_loop():
+    # the 5th-A/B regression: loop 1 worked (l-001 resolved) but l-004 dead-ended.
+    # Requiring ALL leads resolved kept fold at 0 the whole run (freeze never
+    # fired); ≥1 committed finding folds the executed loop, dead-end and all.
+    assert C.fold_boundary(RESOLVED1_DEADEND_PLAN2) == 1
 
 
 def test_fold_boundary_empty_is_zero():
