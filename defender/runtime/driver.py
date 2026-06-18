@@ -206,8 +206,12 @@ def _compaction_enabled() -> bool:
 
 
 def _summary_pointers(run_dir: Path) -> dict[str, str]:
-    """{lead_id: path} for persisted gather summaries (tools._persist_gather_summary),
-    so the compacted frontier can point the agent at detail it dropped."""
+    """{lead_id: path} for persisted gather summaries (tools._persist_gather_summary).
+
+    No longer fed into the frontier message — advertising these paths invited the
+    agent to re-read folded context (4th-A/B finding); see `_compact_messages`. The
+    summaries still persist on disk (debug / genuine last resort); this helper maps
+    them for that and is exercised by the test suite."""
     d = run_dir / "gather_summaries"
     if not d.is_dir():
         return {}
@@ -247,11 +251,12 @@ def _compact_messages(messages: list, run_dir: Path) -> list:
         return messages  # nothing settled yet (or undetermined) → never regress
 
     frontier_md = compaction._frontier_through(inv_text, fold)
-    # Only point at summaries for leads actually in the settled frontier, so the
-    # pointer list (and thus the frozen message) stays stable within a loop.
-    pointers = {lid: p for lid, p in _summary_pointers(run_dir).items()
-                if lid in frontier_md}
-    frontier_dict = compaction.render_frontier_message(frontier_md, pointers)
+    # The frontier is a continuation, not a pointer dump: we deliberately do NOT
+    # hand the agent the per-lead on-disk summary paths. Advertising them read as
+    # a to-do list and the agent re-read the folded detail back into context,
+    # undoing the fold (4th-A/B finding). The inlined invlang record is
+    # authoritative; the summaries persist on disk, just unadvertised.
+    frontier_dict = compaction.render_frontier_message(frontier_md)
     frontier_obj = ModelMessagesTypeAdapter.validate_python([frontier_dict])[0]
 
     orientation = messages[0]

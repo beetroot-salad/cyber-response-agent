@@ -90,16 +90,25 @@ def _lead_resolved(finding: dict[str, Any]) -> bool:
 def fold_boundary(investigation_md: str) -> int:
     """Highest loop safe to fold into the frozen prefix.
 
-    The fix for the N=1 failure: folding on bare `max(:L loop)` (a *plan-time*
-    signal) froze a frontier that still listed the **active** loop's unresolved
-    leads, and the agent re-dispatched them forever. The active loop is the
-    highest planned one; everything strictly below it is settled (the agent has
-    moved on), so it folds regardless of dead-end leads. The active loop itself
-    folds only once it is fully resolved (the investigation is concluding).
-    Combined with `_frontier_through`, this keeps the active loop — plan,
-    in-flight gathers, analysis — entirely in the live tail, out of the frozen
-    snapshot. Returns 0 when there's nothing below an unresolved loop 1, or on
-    parse failure (caller then passes through / reuses — never regresses)."""
+    Fold only the **contiguous run of fully-resolved loops strictly below the
+    active (highest-numbered) loop**. Two guards, each learned from a live A/B:
+
+    - *Never fold the active loop.* The agent is still working in its highest
+      loop; folding it dropped the loop the agent was mid-investigation on and
+      it restarted orientation from scratch (the costly 4th-A/B re-orientation).
+    - *Never fold a loop that isn't itself fully resolved.* The agent sometimes
+      drafts a later loop's `:L` plan row while an earlier loop still has no
+      results. The previous "fold everything strictly below active" rule then
+      folded that **unresolved** earlier loop — froze loop 1 with nothing in it
+      and the agent re-did the whole loop (the 4th-A/B root cause, reproduced at
+      request r11). Requiring a settled *contiguous prefix* (loops 1..R all
+      resolved) closes that hole, so the freeze only fires at a genuine
+      boundary: an earlier loop committed, a later loop opened.
+
+    Combined with `_frontier_through`, the active loop — plan, in-flight gathers,
+    analysis — stays entirely in the live tail. Returns 0 when nothing is safely
+    foldable (no settled loop below the active one) or on parse failure (caller
+    then passes through / reuses — never regresses)."""
     if not investigation_md or parse_dense_companion is None:
         return 0
     try:
@@ -114,9 +123,12 @@ def fold_boundary(investigation_md: str) -> int:
     if not by_loop:
         return 0
     active = max(by_loop)
-    if all(by_loop[active]):   # active loop fully resolved → safe to fold it too
-        return active
-    return active - 1          # fold everything strictly below the active loop
+    fold = 0
+    loop = 1
+    while loop < active and by_loop.get(loop) and all(by_loop[loop]):
+        fold = loop
+        loop += 1
+    return fold
 
 
 def _frontier_through(investigation_md: str, fold_through: int) -> str:
@@ -189,42 +201,43 @@ class CompactionStep:
 # Prefix construction
 # --------------------------------------------------------------------------
 
-def render_frontier_message(
-    frontier_md: str, summary_pointers: dict[str, str] | None = None
-) -> Message:
+def render_frontier_message(frontier_md: str) -> Message:
     """A synthetic user-role ModelRequest carrying the settled invlang frontier.
 
-    `frontier_md` is `investigation.md` already trimmed to the folded (settled)
-    loops by `_frontier_through` — it never contains the active loop's rows, so
-    the message can't advertise an in-flight lead as needing work. The framing is
-    deliberately precise about that: the listed leads are DONE (don't re-dispatch
-    them — that was the N=1 failure), the current loop continues from the messages
-    that follow, and `summary_pointers` (lead id → on-disk gather summary) is the
-    cheap re-read path for dropped detail. Deterministic: same inputs →
-    byte-identical message, so the prefix caches across the loop.
+    `frontier_md` is `investigation.md` trimmed to the folded (settled) loops by
+    `_frontier_through` — it never contains the active loop's rows, so the message
+    can't advertise an in-flight lead as needing work. The framing is a
+    **continuation, not a pointer dump** (the 4th-A/B fix): the folded loops are
+    COMPLETE and the inlined invlang is their authoritative committed result, so
+    the agent has no reason to re-dispatch a lead, re-read a gather summary, or
+    re-derive a finding. The earlier version listed each completed lead's on-disk
+    summary path — that read as a to-do list and the agent pulled the folded
+    detail straight back into context, undoing the fold (and a too-thin frontier
+    triggered a full re-orientation). We now state the work is done and inline the
+    record; the persisted summaries still exist on disk, just unadvertised, as a
+    genuine last resort. Deterministic: same input → byte-identical message, so
+    the prefix caches across the loop.
     """
     # `frontier_md` is trimmed investigation.md — already markdown with its own
     # fenced ```invlang blocks + prose, so we present it verbatim (wrapping it in
     # another fence would nest fences and break the markdown).
-    lines = [
-        FRONTIER_SENTINEL + " The leads below are DONE — their findings are "
-        "committed here; do NOT re-dispatch any lead listed below. Continue the "
-        "CURRENT loop from the messages that follow this one; their full gather "
-        "summaries were compacted out of context.",
-        "",
-        frontier_md.strip(),
-    ]
-    if summary_pointers:
-        lines.append("")
-        lines.append(
-            "Need detail a completed lead's row omits? Read its persisted gather "
-            "summary instead of re-running it:"
-        )
-        for lead_id in sorted(summary_pointers):
-            lines.append(f"- {lead_id} → {summary_pointers[lead_id]}")
+    n = detect_loop(frontier_md)
+    if n is None:
+        scope = "The completed loops below are"
+    elif n <= 1:
+        scope = "Loop 1 is"
+    else:
+        scope = f"Loops 1–{n} are"
+    header = (
+        f"{FRONTIER_SENTINEL} {scope} COMPLETE; the invlang record that follows is "
+        "their authoritative, committed result — treat it as ground truth already "
+        "in hand. Do NOT re-dispatch these leads, re-read their gather summaries, "
+        "or re-derive their findings; that work is done and folded in here. Resume "
+        "the CURRENT loop from the messages after this one."
+    )
     return {
         "kind": "request",
-        "parts": [{"part_kind": "user-prompt", "content": "\n".join(lines)}],
+        "parts": [{"part_kind": "user-prompt", "content": header + "\n\n" + frontier_md.strip()}],
     }
 
 
@@ -233,7 +246,6 @@ def _build_prefix(
     investigation_md: str,
     fold_through: int,
     orientation_index: int,
-    summary_pointers: dict[str, str] | None,
 ) -> tuple[Message, ...]:
     """Orientation message (verbatim) + the synthetic frontier message.
 
@@ -244,7 +256,7 @@ def _build_prefix(
     """
     orientation = history[orientation_index]
     frontier_md = _frontier_through(investigation_md, fold_through)
-    return (orientation, render_frontier_message(frontier_md, summary_pointers))
+    return (orientation, render_frontier_message(frontier_md))
 
 
 # --------------------------------------------------------------------------
@@ -257,7 +269,6 @@ def compact(
     state: FrozenState | None,
     *,
     orientation_index: int = 0,
-    summary_pointers: dict[str, str] | None = None,
 ) -> CompactionStep:
     """Decide the history to send for one model request (freeze-per-loop).
 
@@ -265,13 +276,15 @@ def compact(
     `investigation_md` is its committed state at this point; `state` is the
     frozen prefix carried from the previous request (None on the first).
 
-    We fold loops `1..R` into the prefix, where `R = resolved_through` (the
-    highest fully-resolved loop), recomputing only when `R` advances (``froze``);
-    otherwise we reuse the held prefix (``reused``). Until loop 1 is fully
-    resolved there is nothing safe to fold (``passthrough``). Folding only
-    resolved loops keeps the active loop entirely in the live tail, so the frozen
-    frontier never lists an unresolved lead. Any anomaly returns the original
-    history (``fallback``); correctness is preserved, savings forgone.
+    We fold loops `1..R` into the prefix, where `R = fold_boundary` (the highest
+    contiguous fully-resolved loop strictly below the active one), recomputing
+    only when `R` advances (``froze``); otherwise we reuse the held prefix
+    (``reused``). Until an earlier loop is resolved *and* a later loop has opened
+    there is nothing safe to fold (``passthrough``) — folding only settled loops
+    below the active one keeps the active loop entirely in the live tail, so the
+    frozen frontier never lists an unresolved lead and the agent is never asked
+    to continue from a loop that was folded out from under it. Any anomaly returns
+    the original history (``fallback``); correctness is preserved, savings forgone.
     """
     current_loop = detect_loop(investigation_md)   # telemetry: highest planned loop
     fold_target = fold_boundary(investigation_md)
@@ -294,7 +307,7 @@ def compact(
     # prefix, so the dropped side can't orphan a pair either.
     try:
         prefix = _build_prefix(
-            history, investigation_md, fold_target, orientation_index, summary_pointers
+            history, investigation_md, fold_target, orientation_index
         )
     except Exception as exc:  # malformed history / missing orientation
         return CompactionStep(history, state, "fallback", current_loop, f"prefix-build: {exc}")

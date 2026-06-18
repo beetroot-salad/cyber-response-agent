@@ -301,8 +301,46 @@ re-gather, not the old pathological loop).
 tail preserved). The quantitative token-saving and disposition-parity numbers
 require the **scale rung** — either N>1 runs to average out nondeterminism, or
 (cleaner) a deterministic fixture-replay harness that serves recorded gather
-payloads so A and B run the identical trajectory. That's the recommended next
-step for a real measurement.
+payloads so A and B run the identical trajectory.
+
+## Post-mortem on the 4th A/B — the freeze backfired (two fixes)
+
+Reading the recorded trace (`tool_trace.jsonl` + per-request `usage`) instead of
+the headline numbers showed the freeze was **net-negative**, not merely
+unmeasured. The freeze fired once at request **r12** (prompt 32,209 → 12,587),
+and the agent's very next move was to *restart*: it re-read `alert.json` +
+`SKILL.md` (r12), rewrote ORIENT+PLAN from scratch (r15), **re-dispatched the
+already-gathered loop-1 leads l-001–l-004** (r16), then re-read 5 gather
+summaries (r26–r27) and the full `investigation.md` (r32). Prompt climbed to
+**66k by r54** — well above Arm A's 37k peak — plus a cache bust at r39
+(re-created 43k). The agent pulled the folded context straight back in. Two
+distinct defects, each reproduced from the recorded run:
+
+1. **Premature freeze on a transient draft (root cause).** At r11 the agent
+   drafted loop 2's `:L` plan row while loop 1 still had **no results**
+   (`resolved={1: False, 2: False}`). The old `fold_boundary` ("fold everything
+   strictly below the active loop") returned 1 and froze the **empty** loop 1 —
+   so the agent was asked to continue from a loop folded out from under it, and
+   re-did it. **Fix:** fold only the *contiguous run of fully-resolved loops
+   strictly below the active loop*. Now r11–r14 return `fold=0` (verified by
+   replaying the recorded writes); the freeze can only fire once an earlier loop
+   is committed *and* a later one has opened. This also subsumes the old
+   "never fold the sole/active loop" intent.
+
+2. **Frontier was a pointer dump, not a continuation.** The frozen message
+   listed each completed lead's on-disk summary path ("read its summary instead
+   of re-running it") — which read as a to-do list; the agent dutifully re-read
+   them, re-inflating context. **Fix:** reframe as a continuation — the folded
+   loops are COMPLETE, the inlined invlang is authoritative, "do NOT re-dispatch,
+   re-read, or re-derive" — and **stop advertising the disk paths**. The
+   summaries still persist on disk (debug / genuine last resort), just unlinked
+   from the frontier.
+
+Regression tests pin both: `test_fold_boundary_does_not_fold_unresolved_loop_below_drafted_loop`
+(the r11 scenario) and `test_fold_boundary_never_folds_the_active_loop`; the
+refreeze test now requires a *later loop to open*, not merely the current one to
+resolve. Next: a single live A/B to confirm the freeze no longer triggers the
+restart, then the scale rung for real savings numbers.
 
 ## Implementation status
 

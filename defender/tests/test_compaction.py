@@ -34,10 +34,23 @@ RESOLVED1_PLAN2 = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
 ])
-# both loops resolved
+# loop 2's plan row DRAFTED while loop 1 is still unresolved (no observation):
+# the 4th-A/B root cause (reproduced live at request r11). "Fold everything below
+# active" wrongly folded the empty loop 1 → agent restarted the whole loop.
+DRAFT2_OVER_UNRESOLVED1 = "\n\n".join([
+    _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w"),
+    _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
+])
+# both loops resolved (no later loop opened) → active loop is 2, must stay live
 RESOLVED2 = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w", "", _obs("l-005")),
+])
+# loops 1+2 resolved, loop 3 just planned → the contiguous settled prefix is 2
+RESOLVED2_PLAN3 = "\n\n".join([
+    _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
+    _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w", "", _obs("l-005")),
+    _block(_LH, "l-009|3|ti-ip|v-008|h-002|threat-intel|w"),
 ])
 
 # simple frontiers for detect_loop (max :L loop, ignores resolution)
@@ -84,8 +97,21 @@ def test_fold_boundary_folds_below_active_loop():
     assert C.fold_boundary(RESOLVED1_PLAN2) == 1
 
 
-def test_fold_boundary_folds_active_loop_once_resolved():
-    assert C.fold_boundary(RESOLVED2) == 2
+def test_fold_boundary_never_folds_the_active_loop():
+    # both loops resolved but no loop 3 opened → loop 2 is still active, fold only 1
+    assert C.fold_boundary(RESOLVED2) == 1
+
+
+def test_fold_boundary_folds_contiguous_resolved_below_active():
+    # loops 1+2 resolved, loop 3 planned → fold the settled prefix (2)
+    assert C.fold_boundary(RESOLVED2_PLAN3) == 2
+
+
+def test_fold_boundary_does_not_fold_unresolved_loop_below_drafted_loop():
+    # the 4th-A/B regression: loop 2 drafted while loop 1 has no results yet.
+    # "fold everything below active" folded the empty loop 1; the contiguous-
+    # resolved rule must refuse (loop 1 isn't settled → nothing safe to fold).
+    assert C.fold_boundary(DRAFT2_OVER_UNRESOLVED1) == 0
 
 
 def test_fold_boundary_empty_is_zero():
@@ -133,11 +159,14 @@ def test_reuses_within_frozen_loop():
     assert step.history[2]["kind"] == "response"
 
 
-def test_refreezes_when_next_loop_resolves():
+def test_refreezes_when_a_later_loop_opens():
+    # Refreeze fires when loop 2 is settled AND loop 3 has opened — not merely when
+    # loop 2 resolves (loop 2 stays active/live until the agent moves past it).
     history = _history()
     frozen = C.compact(history, RESOLVED1_PLAN2, None).state
     history = history + [_resp(), _req()]
-    step = C.compact(history, RESOLVED2, frozen)  # loop 2 now resolved
+    assert C.compact(history, RESOLVED2, frozen).action == "reused"  # loop 2 still active
+    step = C.compact(history, RESOLVED2_PLAN3, frozen)               # loop 3 opened
     assert step.action == "froze"
     assert step.state.frozen_through == 2
     assert step.state is not frozen
