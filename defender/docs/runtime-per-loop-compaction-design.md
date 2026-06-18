@@ -255,6 +255,23 @@ offline dry-run still assume a growing canonical, which is correct for the
 drivers over the same primitives (`fold_boundary`, `_frontier_through`,
 `render_frontier_message`).
 
+## Status after the stateless redesign (3rd A/B)
+
+The marker-based stateless processor is committed and offline-proven (regression
+test simulates PydanticAI's accumulation and asserts the tail grows; 23 tests).
+Live `ab3-B`: completed `malicious`/high (matches the `ab2-A` baseline), **no
+re-dispatch loop, no crash, and input tokens grow normally** (11442→39262, vs the
+pre-fix flat 14,556) — confirming the accumulation bug is dead and the processor
+is harmless when dormant. **But `ab3-B` was a single-loop run** (concluded after
+loop 1), so `fold_boundary` never crossed a boundary and compaction **did not
+fire** (0 freezes — correct: nothing to fold in a one-loop investigation).
+
+**Remaining validation gap:** a *live multi-loop* run where a freeze actually
+fires AND the run completes with matching disposition + measured token savings.
+Loop count is nondeterministic on this alert (baseline got 4 loops, ab3-B got 1);
+catching a multi-loop trajectory may take a couple of runs, or a fixture that
+reliably needs ≥2 loops. This is the "scale" rung of the ladder.
+
 ## Implementation status
 
 Built and tested (branch `worktree-per-loop-compaction`):
