@@ -339,8 +339,50 @@ distinct defects, each reproduced from the recorded run:
 Regression tests pin both: `test_fold_boundary_does_not_fold_unresolved_loop_below_drafted_loop`
 (the r11 scenario) and `test_fold_boundary_never_folds_the_active_loop`; the
 refreeze test now requires a *later loop to open*, not merely the current one to
-resolve. Next: a single live A/B to confirm the freeze no longer triggers the
-restart, then the scale rung for real savings numbers.
+resolve.
+
+## 5th + 6th A/B — restart fixed; one residual re-orientation (credits ran out)
+
+**5th A/B (`ab5-falco-B`, fixes 1+2):** the restart is gone. Vs the broken 4th
+run: alert/SKILL read only at the open (not mid-run), each lead dispatched once
+(no re-dispatch), **zero** gather-summary re-reads, 26 requests vs 54, correct
+`malicious`/high. At the old bug spot (loop 2 drafted over an unresolved loop 1,
+here r19) `fold_boundary` correctly returned 0. **But the freeze never fired** —
+loop 1's lead l-004 dead-ended, and "fold only when *all* leads resolved" let one
+dead-end block the whole loop, so `fold` stayed 0 all run. Real investigations
+routinely dead-end a lead, so that rule neutered the feature.
+
+**Fix 3 (commit `fa7c078`):** fold a below-active loop once it has **≥1 committed
+finding** (`any`, not `all`) — a bare drafted-ahead plan still has zero (bug stays
+fixed), but a worked loop folds dead-ends and all (the original design's intent).
+
+**6th A/B (`ab6-falco-B`, fixes 1+2+3):** the freeze **fires cleanly**. At the
+loop-1→loop-2 boundary (t13→t14) the prompt dropped 29,328 → 14,118 (−15,210),
+the frontier sentinel is present in the sent request, and the run made forward
+progress — 10 leads across 3 loops, **no** lead re-dispatch, **no** summary
+re-reads. Baseline `ab5-falco-A` (off): `malicious`/high, 30 requests, ~1.20M
+cumulative prompt tokens, 8 leads.
+
+**Residual artifact (not yet fixed):** right after the freeze (t14) the agent
+re-read `alert.json` + the **invlang** `SKILL.md`. Confirmed freeze-caused — the
+baseline reads them only at the open, never again. Root cause: both were loaded
+as *orientation-phase tool-returns* (t01), which the freeze folds; the preserved
+prefix is `[orientation message 0, frontier]`, and neither carries the raw alert
+nor the invlang block spec, so the agent re-fetches them to keep writing invlang.
+Much milder than the old full restart (no re-plan/re-dispatch/re-derive), but it
+partially eats the saving and would recur once per freeze. Candidate fixes:
+(a) embed the invlang spec + raw alert in the persistent context (agent
+`instructions` or orientation message 0) so a fold can't drop them — the proper
+fix; (b) accept it as a cheap one-time re-read per freeze; (c) a frontier nudge
+("alert + invlang spec unchanged; don't re-read") — risky, may suppress a genuine
+need. **Unresolved**: needs a live run to validate, but the first-party API key's
+**credits were exhausted** by these three runs (the 6th crashed mid-investigation
+on `400 credit balance too low`, before REPORT — billing, not a code bug).
+
+**Net:** the restart (the costly failure) is fixed and the freeze now fires at a
+genuine boundary with a clean ~15k dip. One residual mild re-orientation remains,
+and a real token-saving / disposition-parity number still needs the scale rung
+(N>1 or the deterministic fixture-replay harness) — plus a credit top-up.
 
 ## Implementation status
 
