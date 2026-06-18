@@ -354,22 +354,30 @@ def build_judge_invocation(
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
+    *,
+    comparison_dirname: str = "comparison",
+    settings_name: str = "judge-settings.resolved.json",
 ) -> JudgeInvocation:
     """Assemble the grounded judge call: write the per-lead comparison files + the per-run
     read-only settings, and build the context message. The comparison join + synthesis are
     the structural grounding (the judge can't avoid seeing the actuals); jq over the
     add-dir'd ``gather_raw/`` is its discretionary verification surface for absence-checks.
+
+    ``comparison_dirname`` / ``settings_name`` are per-direction so the adversarial and
+    benign legs — which run **concurrently** on an ``inconclusive`` case over a shared
+    ``learning_run_dir`` — write disjoint files: their projections differ, so a single
+    shared ``comparison/{lead_id}.md`` would let one leg clobber the other's grounding.
     """
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
     gather_raw = run_dir / "gather_raw"
-    comparison_dir = learning_run_dir / "comparison"
+    comparison_dir = learning_run_dir / comparison_dirname
 
     companion = parse_investigation_companion(run_dir)
     comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
-    settings_path = learning_run_dir / "judge-settings.resolved.json"
+    settings_path = learning_run_dir / settings_name
     settings_path.write_text(
         json.dumps(judge_settings_dict(gather_raw, comparison_dir), indent=2)
     )
@@ -406,27 +414,52 @@ def build_judge_invocation(
     )
 
 
+@dataclass(frozen=True)
+class _JudgeWiring:
+    """Per-direction judge knobs — the only things that differ between the adversarial
+    and benign grounded-judge calls (the projection itself rides
+    ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
+    the per-direction config lives in one place instead of being threaded as loose kwargs
+    through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
+    direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
+    grounding files (see ``build_judge_invocation``)."""
+
+    prompt_path: Path
+    model: str
+    effort: str
+    trace_name: str
+    label: str
+    comparison_dirname: str
+    settings_name: str
+
+
+_ADVERSARIAL_WIRING = _JudgeWiring(
+    JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+    "comparison", "judge-settings.resolved.json",
+)
+_BENIGN_WIRING = _JudgeWiring(
+    JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
+    "judge_benign_trace.jsonl", "judge-benign",
+    "comparison_benign", "judge-benign-settings.resolved.json",
+)
+
+
 def _invoke_judge_grounded(
     run_dir: Path,
     actor_story_path: Path,
     projected_telemetry_path: Path,
     learning_run_dir: Path,
-    *,
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
+    wiring: _JudgeWiring,
 ) -> str:
     """Shared grounded-judge runner for both directions: write the per-lead comparison
-    files + read-only settings, then score against the actuals (not the narrative). The
-    only per-direction inputs are the prompt/model/effort/trace/label and the
-    direction's ``projected_telemetry_path`` (benign vs adversarial projection)."""
+    files + read-only settings (under the wiring's per-direction names), then score
+    against the actuals (not the narrative)."""
     inv = build_judge_invocation(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir
+        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        comparison_dirname=wiring.comparison_dirname, settings_name=wiring.settings_name,
     )
     return _run_judge_claude(
-        prompt_path, model, effort, trace_name, label,
+        wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
         settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
     )
@@ -438,8 +471,7 @@ def invoke_judge(run_dir, actor_story_path, projected_telemetry_path,
     (per-lead comparison files + jq over ``gather_raw/``), not the narrative."""
     return _invoke_judge_grounded(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-        prompt_path=JUDGE_PROMPT, model=JUDGE_MODEL, effort=JUDGE_EFFORT,
-        trace_name="judge_trace.jsonl", label="judge",
+        _ADVERSARIAL_WIRING,
     )
 
 
@@ -451,9 +483,7 @@ def invoke_judge_benign(run_dir, actor_story_path, projected_telemetry_path,
     environment-observation stream alongside defender findings."""
     return _invoke_judge_grounded(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-        prompt_path=JUDGE_BENIGN_PROMPT, model=BENIGN_JUDGE_MODEL,
-        effort=BENIGN_JUDGE_EFFORT, trace_name="judge_benign_trace.jsonl",
-        label="judge-benign",
+        _BENIGN_WIRING,
     )
 
 

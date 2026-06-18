@@ -171,4 +171,4 @@ Before finalizing, ask yourself how confident you are in the outcome and finding
 
 ---
 
-Be terse and specific. Quote the investigation when you make a claim about what it established. Refer to systems by their `defender/skills/{system}/` directory name. Avoid vendor-specific field names in examples; describe the semantics of the observable instead.
+Be terse and specific. Quote your grounded sources (the comparison files, `synthesis`, `coverage_manifest`, or `report`) when you make a claim about what the encounter established. Refer to systems by their `defender/skills/{system}/` directory name. Avoid vendor-specific field names in examples; describe the semantics of the observable instead.

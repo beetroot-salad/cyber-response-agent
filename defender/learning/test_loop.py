@@ -1506,9 +1506,11 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
 
     assert out.startswith("outcome:")
     # Grounded surface: per-lead comparison file + settings written; actuals add-dir'd.
-    assert (lrd / "comparison" / "l-001.md").is_file()
-    assert captured["settings_path"] == lrd / "judge-settings.resolved.json"
-    assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison"}
+    # Benign uses a per-direction comparison dir + settings name so a concurrent
+    # adversarial leg (inconclusive case, shared learning_run_dir) can't clobber them.
+    assert (lrd / "comparison_benign" / "l-001.md").is_file()
+    assert captured["settings_path"] == lrd / "judge-benign-settings.resolved.json"
+    assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison_benign"}
     # Benign prompt/model/label — not the adversarial ones.
     assert captured["prompt_path"] == subagents.JUDGE_BENIGN_PROMPT
     assert captured["model"] == subagents.BENIGN_JUDGE_MODEL

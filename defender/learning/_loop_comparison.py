@@ -1,11 +1,12 @@
 """The comparison "zipper": ground the judge in actuals, lead by lead.
 
-The adversarial judge used to score an encounter from the defender's *narrative*
+The judge used to score an encounter from the defender's *narrative*
 (`investigation.md`, a lossy summary) plus the oracle projection — it never saw the
-actual query results in `gather_raw/`. This module is the structural fix: a pure join
+actual query results in `gather_raw/`. This module is the structural fix shared by both
+directions (adversarial attack story and benign routine-operation story): a pure join
 that, per lead, places three columns side by side —
 
-  [1] the oracle's projection (what the attack *would* have produced),
+  [1] the oracle's projection (what the actor's story *would* have produced),
   [2] a real sample event from the actual payload (orientation; the judge queries the
       full payload with jq for absence-checks), and
   [3] the defender's own per-lead reasoning from the invlang (`:T resolutions` belief
@@ -202,7 +203,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     ) or "(no queries executed for this lead)"
 
     proj = (
-        _yaml_or(c.projected_events, "(empty projection — the attack does not touch this lead)")
+        _yaml_or(c.projected_events, "(empty projection — the story does not touch this lead)")
         if c.projected_events is not None
         else "(no projection emitted for this lead)"
     )
@@ -213,7 +214,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         f"{head}\n\n"
         "## Queries executed\n"
         f"{q_lines}\n\n"
-        "## [1] Oracle projection — what the attack would have produced if the story were true\n"
+        "## [1] Oracle projection — what the story would have produced if it were true\n"
         f"{proj}\n\n"
         "## [2] Actual evidence — sample event (orientation only)\n"
         f"{c.real_sample}\n\n"
