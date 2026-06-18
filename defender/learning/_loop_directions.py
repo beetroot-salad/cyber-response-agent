@@ -9,13 +9,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from defender.learning._loop_config import LoopPaths
+from defender.learning._loop_config import (
+    BENIGN_JUDGE_EFFORT,
+    BENIGN_JUDGE_MODEL,
+    JUDGE_BENIGN_PROMPT,
+    JUDGE_EFFORT,
+    JUDGE_MODEL,
+    JUDGE_PROMPT,
+    JudgeWiring,
+    LoopPaths,
+)
 from defender.learning._loop_persist import (
     append_actor_environment_observations,
     append_actor_observations,
     append_environment_observations,
 )
 from defender.learning._loop_validate import validate_judge_benign_doc, validate_judge_doc
+
+
+ADVERSARIAL_WIRING = JudgeWiring(
+    JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+    "comparison", "judge-settings.resolved.json",
+)
+BENIGN_WIRING = JudgeWiring(
+    JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
+    "judge_benign_trace.jsonl", "judge-benign",
+    "comparison_benign", "judge-benign-settings.resolved.json",
+)
 
 
 @dataclass(frozen=True)
@@ -32,7 +52,7 @@ class ObsTrigger:
 class Direction:
     name: str
     invoke_actor: Callable        # (agents, run_dir, lrd, alert_rule_key) -> story
-    invoke_judge: Callable        # (agents, run_dir, story_path, telemetry_path, lrd) -> yaml
+    judge_wiring: JudgeWiring     # per-direction judge knobs, passed through agents.judge
     validate: Callable            # (doc) -> doc
     append_observations: Callable  # (doc, run_id, key, lrd, *, paths) -> int
     story_name: str
@@ -52,9 +72,7 @@ class Direction:
 ADVERSARIAL = Direction(
     name="adversarial",
     invoke_actor=lambda agents, run_dir, lrd, key: agents.actor(run_dir, lrd),
-    invoke_judge=lambda agents, run_dir, story_p, tel_p, lrd: agents.judge(
-        run_dir, story_p, tel_p, lrd
-    ),
+    judge_wiring=ADVERSARIAL_WIRING,
     validate=validate_judge_doc,
     append_observations=append_actor_observations,
     story_name="actor_story.md",
@@ -81,9 +99,7 @@ ADVERSARIAL = Direction(
 BENIGN = Direction(
     name="benign",
     invoke_actor=lambda agents, run_dir, lrd, key: agents.actor_benign(run_dir, lrd, key),
-    invoke_judge=lambda agents, run_dir, story_p, tel_p, lrd: agents.judge_benign(
-        run_dir, story_p, tel_p, lrd
-    ),
+    judge_wiring=BENIGN_WIRING,
     validate=validate_judge_benign_doc,
     append_observations=append_environment_observations,
     story_name="actor_benign_story.md",

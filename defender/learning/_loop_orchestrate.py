@@ -158,8 +158,8 @@ def run_direction(
         oracle_raw, learning_run_dir, spec.telemetry_name
     )
 
-    judge_raw = spec.invoke_judge(
-        agents, run_dir, actor_story_path, telemetry_path, learning_run_dir
+    judge_raw = agents.judge(
+        spec.judge_wiring, run_dir, actor_story_path, telemetry_path, learning_run_dir
     )
     judge_doc, judge_stripped = _validate_judge_yaml(
         judge_raw, spec.validate, learning_run_dir / spec.judge_raw_name

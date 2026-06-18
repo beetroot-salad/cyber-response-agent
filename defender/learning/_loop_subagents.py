@@ -54,12 +54,7 @@ from defender.learning._loop_config import (
     BENIGN_ACTOR_EFFORT,
     BENIGN_ACTOR_MODEL,
     BENIGN_ACTOR_SETTINGS,
-    BENIGN_JUDGE_EFFORT,
-    BENIGN_JUDGE_MODEL,
-    JUDGE_BENIGN_PROMPT,
-    JUDGE_EFFORT,
-    JUDGE_MODEL,
-    JUDGE_PROMPT,
+    JudgeWiring,
     LESSONS_ACTOR_DIR,
     LESSONS_ENVIRONMENT_DIR,
     LoopError,
@@ -414,46 +409,14 @@ def build_judge_invocation(
     )
 
 
-@dataclass(frozen=True)
-class _JudgeWiring:
-    """Per-direction judge knobs — the only things that differ between the adversarial
-    and benign grounded-judge calls (the projection itself rides
-    ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
-    the per-direction config lives in one place instead of being threaded as loose kwargs
-    through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
-    direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
-    grounding files (see ``build_judge_invocation``)."""
-
-    prompt_path: Path
-    model: str
-    effort: str
-    trace_name: str
-    label: str
-    comparison_dirname: str
-    settings_name: str
-
-
-_ADVERSARIAL_WIRING = _JudgeWiring(
-    JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-    "comparison", "judge-settings.resolved.json",
-)
-_BENIGN_WIRING = _JudgeWiring(
-    JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
-    "judge_benign_trace.jsonl", "judge-benign",
-    "comparison_benign", "judge-benign-settings.resolved.json",
-)
-
-
-def _invoke_judge_grounded(
-    run_dir: Path,
-    actor_story_path: Path,
-    projected_telemetry_path: Path,
-    learning_run_dir: Path,
-    wiring: _JudgeWiring,
-) -> str:
-    """Shared grounded-judge runner for both directions: write the per-lead comparison
-    files + read-only settings (under the wiring's per-direction names), then score
-    against the actuals (not the narrative)."""
+def invoke_judge(wiring: JudgeWiring, run_dir, actor_story_path,
+                 projected_telemetry_path, learning_run_dir) -> str:
+    """Grounded judge for either direction: write the per-lead comparison files +
+    read-only settings (under the wiring's per-direction names), then score against the
+    actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
+    narrative. The direction rides in ``wiring`` (adversarial vs benign prompt/model/
+    effort + disjoint comparison/settings names); for the benign leg, a routine story
+    that SURVIVES is the FP signal."""
     inv = build_judge_invocation(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         comparison_dirname=wiring.comparison_dirname, settings_name=wiring.settings_name,
@@ -462,28 +425,6 @@ def _invoke_judge_grounded(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
         settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
-    )
-
-
-def invoke_judge(run_dir, actor_story_path, projected_telemetry_path,
-                 learning_run_dir) -> str:
-    """Adversarial judge, grounded: scores the encounter against the actual evidence
-    (per-lead comparison files + jq over ``gather_raw/``), not the narrative."""
-    return _invoke_judge_grounded(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-        _ADVERSARIAL_WIRING,
-    )
-
-
-def invoke_judge_benign(run_dir, actor_story_path, projected_telemetry_path,
-                        learning_run_dir) -> str:
-    """FP-direction judge, grounded: scores the routine-operation story against the
-    actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
-    narrative. A routine story that SURVIVES is the FP signal; emits the
-    environment-observation stream alongside defender findings."""
-    return _invoke_judge_grounded(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-        _BENIGN_WIRING,
     )
 
 
@@ -497,10 +438,8 @@ class Subagents(Protocol):
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str: ...
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str: ...
-    def judge(self, run_dir: Path, actor_story_path: Path,
+    def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
-    def judge_benign(self, run_dir: Path, actor_story_path: Path,
-                     projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
 
 
 class ClaudePrintSubagents:
@@ -523,14 +462,8 @@ class ClaudePrintSubagents:
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
         return invoke_oracle(run_dir, actor_story_path)
 
-    def judge(self, run_dir: Path, actor_story_path: Path,
+    def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
         return invoke_judge(
-            run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-        )
-
-    def judge_benign(self, run_dir: Path, actor_story_path: Path,
-                     projected_telemetry_path: Path, learning_run_dir: Path) -> str:
-        return invoke_judge_benign(
-            run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+            wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         )
