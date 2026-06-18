@@ -319,58 +319,6 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
     assert curator.changes_outside_corpus(cfg.corpus_dir_rel) == []
 
 
-def test_commit_corpus_stages_only_corpus(monkeypatch, tmp_path: Path):
-    """The commit is pathspec-scoped to the corpus, so a file already **staged** outside
-    it (the shared worktree holds a sibling author's ``_draft/`` deposits in the index)
-    can't ride into the lesson commit. This is the case the old ``--amend --only`` guard
-    covered — staging the corpus alone does NOT bound an index-global ``git commit``."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    # A stray file *staged in the index* before the curator commits — not merely
-    # untracked. A bare `git commit` (no pathspec) would sweep this into the commit.
-    (ctx["repo"] / "stray.txt").write_text("stray\n")  # outside the corpus
-    subprocess.run(["git", "-C", str(ctx["repo"]), "add", "stray.txt"], check=True)
-
-    curator.commit_corpus(3, "claude-sonnet-4-6", "defender/actor: batch abc", cfg)
-    files = _head_files(ctx["repo"])
-    assert files == ["defender/lessons-actor/x.md"]
-    assert "stray.txt" not in files
-    # The stray stays staged-but-uncommitted in the index, untouched by the lesson commit.
-    status = subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "status", "--porcelain", "--", "stray.txt"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    assert status.startswith("A  ")  # still staged, never committed
-
-
-def test_commit_corpus_no_op_when_nothing_authored(monkeypatch, tmp_path: Path):
-    """Empty index ⇒ no commit, returns None (the all-skip batch)."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    head_before = curator.git_head_sha()
-    assert curator.commit_corpus(1, "claude-sonnet-4-6", "msg", cfg) is None
-    assert curator.git_head_sha() == head_before
-
-
-def test_commit_corpus_rejects_message_with_trailers(monkeypatch, tmp_path: Path):
-    """If the agent disobeys and puts its own trailers in the commit_message, ``git
-    --trailer`` would *append* a second set — and first-match readers (``eval_secondary``)
-    would pin the agent's value over the loop's. Committing must refuse (queue intact for
-    retry) rather than silently produce duplicate provenance — before staging anything."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    head_before = curator.git_head_sha()
-    with pytest.raises(AuthorError, match="already carries"):
-        curator.commit_corpus(
-            3, "claude-sonnet-4-6",
-            "defender/actor: batch\n\nGeneration: 99\nActor-Model: wrong-model", cfg,
-        )
-    # Refused before committing — HEAD unchanged.
-    assert curator.git_head_sha() == head_before
-
-
 def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
     """End-to-end: the agent leaves a lesson in the working tree (no git); run_batch
     commits it with the provenance trailers and rotates the committed observation out
@@ -409,38 +357,6 @@ def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Pa
     assert by_id["a/0"]["consumed_commit"] == curator.git_head_sha()
     # Queue drained.
     assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
-
-
-def test_verify_rejects_change_outside_corpus(monkeypatch, tmp_path: Path):
-    """Scope gate: a working-tree change outside the corpus (a stray agent Write the
-    path-scoped commit would ignore) fails verification rather than committing silently."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    other = ctx["repo"] / "defender" / "lessons"
-    other.mkdir(parents=True)
-    (other / "y.md").write_text("y\n")  # uncommitted, outside the corpus
-    result = {"committed": [], "consumed_skip": [], "commit_message": None}
-    with pytest.raises(AuthorError, match="outside"):
-        curator.verify_agent_state(result, cfg, [])
-
-
-def test_verify_rejects_no_commit_with_corpus_edits(monkeypatch, tmp_path: Path):
-    """``committed`` empty but the corpus is dirty ⇒ inconsistent; refuse to rotate."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    result = {"committed": [], "consumed_skip": [], "commit_message": None}
-    with pytest.raises(AuthorError, match="left edits"):
-        curator.verify_agent_state(result, cfg, [])
-
-
-def test_verify_rejects_committed_with_clean_corpus(monkeypatch, tmp_path: Path):
-    """``committed`` non-empty but the corpus is clean ⇒ inconsistent; refuse to rotate."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
-    with pytest.raises(AuthorError, match="unchanged"):
-        curator.verify_agent_state(result, cfg, [])
 
 
 def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):

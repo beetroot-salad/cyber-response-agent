@@ -38,7 +38,13 @@ post-flight**:
        surface isn't silent on no-commit runs.
 
 The agent itself owns lesson dedup/fold judgment and the per-edit
-forward gate; this module just enforces the transaction envelope.
+forward gate; this module just enforces the transaction envelope. The
+deterministic git plumbing (stray scope-gate, corpus-clean predicate, the
+loop-owned pathspec-scoped committer, HEAD-sha reader, working-tree
+cross-check) lives once in ``_author_shared``; this module's
+``commit_lessons`` / ``changes_outside_lessons`` / ``lessons_dir_clean`` /
+``verify_agent_state`` are thin adapters that pin the ``defender/lessons/``
+corpus and pass no provenance trailers (issue #330).
 """
 from __future__ import annotations
 
@@ -74,6 +80,7 @@ from defender.learning._loop_persist import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
+LESSONS_DIR_REL = "defender/lessons/"  # the scope-gate prefix for the shared git layer
 # Mutable learning state resolves from DEFAULT_PATHS so it honors
 # DEFENDER_LEARNING_STATE_DIR — the same single location the producer
 # (_loop_persist.append_findings) writes to. Prompts/corpus stay repo-relative.
@@ -93,8 +100,9 @@ AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
 AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
 
 
-class AuthorError(Exception):
-    """Fatal pre/post-flight error — caller should abort, queue stays intact."""
+# Unified with _author_curator via the shared module — all three raise the same
+# class, so the shared git layer (`_author_shared`) can raise it too (issue #330).
+AuthorError = _shared.AuthorError
 
 
 # ---------------------------------------------------------------------------
@@ -264,146 +272,39 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
 
 
 def git_head_sha() -> str:
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return proc.stdout.strip()
+    return _shared.git_head_sha(REPO_ROOT)
 
 
 def changes_outside_lessons() -> list[str]:
-    """Repo-wide uncommitted paths that are *not* a ``defender/lessons/`` ``*.md`` file.
-
-    The agent runs no git, so at verify time its edits sit un-committed in the working
-    tree; the scope gate runs over ``git status`` instead of a HEAD commit. Covers staged,
-    unstaged, and untracked paths so a stray ``Write`` or improvised shim outside the
-    corpus is caught. ``--untracked-files=all`` lists each untracked file individually
-    rather than collapsing whole untracked directories. The caller diffs against a
-    pre-agent baseline so unrelated leftovers aren't blamed on the curator agent."""
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    stray: list[str] = []
-    for line in proc.stdout.splitlines():
-        if not line.strip():
-            continue
-        path = line[3:]
-        if " -> " in path:  # rename: XY orig -> new
-            path = path.split(" -> ", 1)[1]
-        path = path.strip().strip('"')
-        if not (path.startswith("defender/lessons/") and path.endswith(".md")):
-            stray.append(path)
-    return stray
+    """Author adapter over ``_shared.changes_outside`` — scope gate for ``defender/lessons/``."""
+    return _shared.changes_outside(REPO_ROOT, LESSONS_DIR_REL)
 
 
 def commit_lessons(message: str) -> str | None:
-    """Stage ``defender/lessons/``, commit it with the agent's message, return the sha.
-
-    The agent authors lesson content + a commit message but runs no git: the loop is the
-    **sole committer**. The ``git commit`` is **pathspec-scoped** to the corpus
-    (``-- defender/lessons/``): staging alone does not bound a commit — a plain
-    index-global ``git commit`` sweeps in whatever else sits staged in the shared worktree
-    (e.g. a sibling author's ``_draft/`` deposits), so the pathspec is what keeps anything
-    outside the corpus out of the lesson commit. No provenance trailers — unlike the
-    actor/env curators, the findings corpus carries none. Returns the new sha, or ``None``
-    when the agent authored nothing (empty index → no commit)."""
-    add = subprocess.run(
-        ["git", "add", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
-    if add.returncode != 0:
-        raise AuthorError(
-            f"failed to stage defender/lessons/ batch: {add.stderr.strip()}"
-        )
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--quiet", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
-    if staged.returncode == 0:
-        return None  # nothing staged — no commit
-    if staged.returncode != 1:  # 0=no diff, 1=diff, >1=git error (don't commit blind)
-        raise AuthorError(
-            f"git diff --cached failed for defender/lessons/: {staged.stderr.strip()}"
-        )
-    proc = subprocess.run(
-        ["git", "commit", "-F", "-", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT, input=message, capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        raise AuthorError(
-            f"failed to commit defender/lessons/ batch: {proc.stderr.strip()}"
-        )
-    return git_head_sha()
+    """Author adapter over ``_shared.commit_corpus`` — pins ``defender/lessons/`` and passes
+    no provenance trailers (unlike the actor/env curators, the findings corpus carries none)."""
+    return _shared.commit_corpus(REPO_ROOT, LESSONS_DIR, LESSONS_DIR_REL, message)
 
 
 def lessons_dir_clean() -> bool:
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return not proc.stdout.strip()
+    return _shared.corpus_dir_clean(REPO_ROOT, LESSONS_DIR)
 
 
 def _result_list(result: dict, key: str) -> list[Any]:
-    value = result.get(key, [])
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise AuthorError(f"AUTHOR_RESULT field {key!r} must be a list")
-    return value
+    return _shared._result_list(result, key)
 
 
 def verify_agent_state(result: dict, baseline_stray: list[str]) -> None:
-    """Cross-check the agent's reported state against the working tree before the loop
-    commits + rotates. The agent runs no git, so its edits sit un-committed: (1) the agent
-    introduced no *new* change outside ``defender/lessons/``*.md (scope gate, diffed
-    against ``baseline_stray`` captured before the agent ran so pre-existing leftovers
-    aren't blamed on it); (2) ``committed`` non-empty ⇒ the corpus has edits to commit;
-    (3) ``committed`` empty ⇒ the corpus is clean (an all-skip/all-forward-BAD batch leaves
-    no diff — a forward-BAD fold is re-edited back to its pre-batch bytes). The loop
-    (``commit_lessons``) commits afterward."""
-    new_stray = sorted(set(changes_outside_lessons()) - set(baseline_stray))
-    if new_stray:
-        raise AuthorError(
-            f"agent changed files outside defender/lessons/*.md: {new_stray}; "
-            "refusing to commit/rotate"
-        )
-    committed = _result_list(result, "committed")
-    corpus_dirty = not lessons_dir_clean()
-    if committed and not corpus_dirty:
-        raise AuthorError(
-            "author reported committed findings but left defender/lessons/ unchanged; "
-            "refusing to rotate queue"
-        )
-    if not committed and corpus_dirty:
-        raise AuthorError(
-            "author reported no commits but left edits in defender/lessons/; "
-            "refusing to rotate queue"
-        )
+    """Author adapter over ``_shared.verify_agent_state`` — pins ``defender/lessons/`` and the
+    ``findings`` noun for the post-flight working-tree cross-check."""
+    _shared.verify_agent_state(
+        REPO_ROOT, result, LESSONS_DIR, LESSONS_DIR_REL, "findings", baseline_stray,
+    )
 
 
 def _commit_message(result: dict) -> str:
-    """The agent-authored commit message the loop passes to ``git commit -F-``.
-
-    Required (and non-empty) whenever the batch committed anything — the loop owns the
-    commit, but the agent still authors the human-readable message body."""
-    msg = result.get("commit_message")
-    if not isinstance(msg, str) or not msg.strip():
-        raise AuthorError(
-            "AUTHOR_RESULT reported committed findings without a non-empty "
-            "commit_message; refusing to commit"
-        )
-    return msg
+    """Author adapter over ``_shared._commit_message`` (noun: ``findings``)."""
+    return _shared._commit_message(result, "findings")
 
 
 def _now_iso() -> str:
