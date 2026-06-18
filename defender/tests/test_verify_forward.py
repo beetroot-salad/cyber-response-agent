@@ -76,7 +76,13 @@ def test_expected_disposition_direction_aware():
     the recorded disposition. A benign (FP) lesson is authored off a `malicious` source
     it exists to CORRECT toward benign, so the target is `benign` — never the recorded
     `malicious` (which would mark every de-escalation lesson BAD and hold the FP path)."""
+    # Real data flow: the author gate (`_has_confident_ground_truth`) holds any
+    # `inconclusive`-source finding before the forward-check runs, so production only
+    # ever calls this with a `benign`/`malicious` recorded disposition.
     assert vf.expected_disposition("adversarial", "benign") == "benign"
-    assert vf.expected_disposition("adversarial", "inconclusive") == "inconclusive"
     assert vf.expected_disposition("benign", "malicious") == "benign"
+    # The `inconclusive` rows below are defensive domain-completeness checks (the
+    # function is total over the disposition enum), NOT a reachable production path —
+    # they pin that a future change keeps the pure function well-defined, nothing more.
+    assert vf.expected_disposition("adversarial", "inconclusive") == "inconclusive"
     assert vf.expected_disposition("benign", "inconclusive") == "benign"

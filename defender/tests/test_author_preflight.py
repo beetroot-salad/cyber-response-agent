@@ -177,6 +177,18 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     assert [p["finding_id"] for p in pending] == ["run-Bn/0"]
     assert "no_ground_truth" in pending[0]["held_reason"]
 
+    # The malicious-source benign finding rotated OUT to consumed.jsonl as a
+    # consumed_skip — not left in the queue (a skip with no lesson anchor would
+    # otherwise re-author forever). Pins the benign consumed-skip categorization.
+    consumed = [
+        json.loads(line)
+        for line in a.CONSUMED_FILE.read_text().splitlines()
+        if line.strip()
+    ]
+    assert [c["finding_id"] for c in consumed] == ["run-M/0"]
+    assert consumed[0]["consumed_category"] == "consumed_skip"
+    assert "consumed_at" in consumed[0]
+
 
 def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
