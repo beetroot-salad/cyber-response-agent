@@ -272,6 +272,38 @@ Loop count is nondeterministic on this alert (baseline got 4 loops, ab3-B got 1)
 catching a multi-loop trajectory may take a couple of runs, or a fixture that
 reliably needs ≥2 loops. This is the "scale" rung of the ladder.
 
+## Live freeze validated (4th A/B, Falco alert)
+
+Ran the richer `v2-falco-suspicious-network-tool` alert (more likely multi-loop)
+through both arms. **Milestone: compaction fired live AND the run completed
+cleanly** — the first run to do both (prior attempts crashed, looped, or stayed
+dormant). Arm B (on): 3 loops, 54 requests, finished with a coherent
+`inconclusive` report. The input-token trace shows the textbook compaction
+signature — grows, **dips at the freeze** (26,874 → 20,682), then grows again —
+i.e. the fold dropped the settled loop and the tail is preserved. So the
+mechanism works end-to-end.
+
+**But this A/B does NOT measure the payoff** — it's confounded by trajectory
+nondeterminism:
+- Arm A (off): `malicious`/high, 2 loops, 20 requests, 525k prompt tokens.
+- Arm B (on): `inconclusive`/medium, 3 loops, 54 requests, 2.08M prompt tokens.
+
+B used ~4× the tokens because it did ~2.7× more work (deeper investigation), not
+because compaction is inefficient — a single nondeterministic pair can't isolate
+compaction's per-request saving. Disposition also diverged (malicious vs
+inconclusive), but B's inconclusive came from a *deeper* investigation (it found
+the external IP was the sole SSH operator across 38 prior logins, then flagged 3
+verification gaps) — that reads as nondeterministic depth, not compaction-induced
+info loss. Minor yellow flag: leads l-001–l-004 were each dispatched twice (mild
+re-gather, not the old pathological loop).
+
+**Verdict:** the fix is validated at the mechanism level (fires + completes +
+tail preserved). The quantitative token-saving and disposition-parity numbers
+require the **scale rung** — either N>1 runs to average out nondeterminism, or
+(cleaner) a deterministic fixture-replay harness that serves recorded gather
+payloads so A and B run the identical trajectory. That's the recommended next
+step for a real measurement.
+
 ## Implementation status
 
 Built and tested (branch `worktree-per-loop-compaction`):
