@@ -1,22 +1,25 @@
 """Integration tests for the live compaction glue in runtime/driver.py.
 
-Cover the riskiest seam — a compacted history (synthetic frontier + tail)
-surviving the dump → compact → re-validate round-trip as real PydanticAI message
-objects — without a live agent run. The pure freeze/reuse + fold-boundary logic
-is covered in test_compaction.py.
+Cover the riskiest seams without a live agent run: (1) a compacted history
+round-trips to valid PydanticAI message objects, and (2) — the regression for
+the 2nd-A/B bug — the live tail GROWS under PydanticAI's history-processor
+*accumulation* (it feeds our output back, so a stateless marker-based processor
+is required; a stateful index into a growing canonical went flat and looped).
 """
 
 from __future__ import annotations
 
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-from defender.runtime import driver
+from defender.runtime import compaction, driver
 
 
-def _msgs(n: int) -> list:
-    """n alternating request/response ModelMessage objects, large enough to fold."""
+def _msgs(n: int, start: int = 0) -> list:
+    """n alternating request/response ModelMessage objects, large enough to fold.
+    `start` offsets the content so successive batches differ (and never contain
+    the frontier sentinel)."""
     dicts = []
-    for i in range(n):
+    for i in range(start, start + n):
         if i % 2 == 0:
             dicts.append({"kind": "request",
                           "parts": [{"part_kind": "user-prompt", "content": f"u{i} " * 400}]})
@@ -29,10 +32,7 @@ def _msgs(n: int) -> list:
 _LH = ":L findings [id|loop|name|target|tests|system|window]"
 _OBS1 = (":E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
          "e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success")
-
-# loop 1 planned, no results → nothing safe to fold
 UNRESOLVED1 = f"```invlang\n{_LH}\nl-001|1|raw-auth|v-001|h-001|elastic|w\n```\n"
-# loop 1 resolved + loop 2 just planned (active, unresolved) → fold loop 1 only
 RESOLVED1_PLAN2 = (
     f"```invlang\n{_LH}\nl-001|1|raw-auth|v-001|h-001|elastic|w\n\n{_OBS1}\n```\n\n"
     f"```invlang\n{_LH}\nl-005|2|cmdb-ip|v-006|h-002|cmdb|w\n```\n"
@@ -41,27 +41,44 @@ RESOLVED1_PLAN2 = (
 
 def test_freeze_roundtrips_to_valid_messages(tmp_path):
     (tmp_path / "investigation.md").write_text(RESOLVED1_PLAN2)
-    messages = _msgs(5)
-    holder: dict = {"state": None}
-    out = driver._compact_messages(messages, tmp_path, holder)
+    messages = _msgs(6)
+    out = driver._compact_messages(messages, tmp_path)
 
-    assert holder["state"] is not None
-    assert holder["state"].frozen_through == 1
-    assert len(out) < len(messages)
+    assert len(out) < len(messages)          # first freeze: orientation + frontier
     redump = ModelMessagesTypeAdapter.dump_python(out, mode="json")
     assert redump[0]["parts"][0]["part_kind"] == "user-prompt"   # orientation kept
     frontier = redump[1]["parts"][0]["content"]
-    assert "```invlang" in frontier and "l-001" in frontier      # settled loop in
-    assert "l-005" not in frontier                               # active loop OUT
+    assert compaction.FRONTIER_SENTINEL in frontier
+    assert "l-001" in frontier and "l-005" not in frontier        # active loop OUT
 
 
 def test_passthrough_returns_original_objects(tmp_path):
-    (tmp_path / "investigation.md").write_text(UNRESOLVED1)
-    messages = _msgs(5)
-    holder: dict = {"state": None}
-    out = driver._compact_messages(messages, tmp_path, holder)
-    assert out is messages
-    assert holder["state"] is None
+    (tmp_path / "investigation.md").write_text(UNRESOLVED1)  # nothing settled
+    messages = _msgs(6)
+    assert driver._compact_messages(messages, tmp_path) is messages
+
+
+def test_tail_grows_under_pydanticai_accumulation(tmp_path):
+    """Regression for the 2nd-A/B bug. PydanticAI feeds the processor's OUTPUT
+    back plus new turns; simulate that and assert the live tail accumulates
+    instead of staying flat (flat == the agent loses memory and loops)."""
+    (tmp_path / "investigation.md").write_text(RESOLVED1_PLAN2)  # loop 1 settled
+    H = _msgs(6)
+    lengths = []
+    for turn in range(5):
+        out = driver._compact_messages(H, tmp_path)
+        lengths.append(len(out))
+        H = list(out) + _msgs(2, start=100 + turn * 2)  # model appends new turns
+
+    assert lengths[0] == 2                       # first freeze: orientation + frontier
+    assert lengths == sorted(lengths)            # monotonically non-decreasing
+    assert lengths[-1] > lengths[0]              # tail genuinely grows (was flat)
+    # and the frontier's content is byte-stable across the loop (cache-relevant;
+    # the PydanticAI-internal timestamp differs but is never sent to Anthropic).
+    def _frontier_text(h):
+        return ModelMessagesTypeAdapter.dump_python(
+            driver._compact_messages(h, tmp_path), mode="json")[1]["parts"][0]["content"]
+    assert _frontier_text(H) == _frontier_text(H)
 
 
 def test_summary_pointers_lists_persisted_summaries(tmp_path):

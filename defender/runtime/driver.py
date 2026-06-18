@@ -214,39 +214,63 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
     return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
 
 
-def _compact_messages(messages: list, run_dir: Path, holder: dict) -> list:
-    """Dump → compact → re-validate. Returns the message list to send.
+def _frontier_index(messages: list) -> int | None:
+    """Index of the synthetic frontier message we previously injected, else None.
 
-    Returns the original objects untouched on passthrough/fallback (no
-    round-trip, zero risk); only a froze/reused rewrite is re-validated. Factored
-    out of the closure so it's unit-testable without a live agent run."""
+    PydanticAI **accumulates** the history processor's output — each call receives
+    `[what we returned last time] + [turns appended since]`, not the full
+    append-only canonical. So a stateful index into a growing canonical is invalid
+    (it was the 2nd-A/B bug: tail always empty → agent loses memory → loops). We
+    instead find our frontier sentinel in the received history; everything after
+    it is the live tail to preserve."""
+    for i in range(len(messages) - 1, -1, -1):
+        for part in getattr(messages[i], "parts", []):
+            if getattr(part, "part_kind", None) == "user-prompt":
+                content = getattr(part, "content", "")
+                if isinstance(content, str) and compaction.FRONTIER_SENTINEL in content:
+                    return i
+    return None
+
+
+def _compact_messages(messages: list, run_dir: Path) -> list:
+    """Stateless, marker-based per-loop compaction (see `_frontier_index` for why
+    stateless). Each call: re-render the *settled* frontier from investigation.md
+    (loops ≤ `fold_boundary`) and keep the live tail (turns after our last frontier
+    marker). The trimmed frontier is byte-stable while the active loop runs — its
+    growing rows are excluded — so the prefix caches within a loop. Returns the
+    original objects on passthrough; never raises (the caller guards too)."""
     inv = run_dir / "investigation.md"
     inv_text = inv.read_text() if inv.is_file() else ""
-    dict_history = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
-    step = compaction.compact(
-        dict_history, inv_text, holder.get("state"),
-        summary_pointers=_summary_pointers(run_dir),
-    )
-    holder["state"] = step.state
-    if step.action == "fallback":
-        print(f"[run_pai] compaction fallback ({step.reason}); sending full history",
-              file=sys.stderr)
-    if step.action in ("passthrough", "fallback"):
-        return messages
-    return ModelMessagesTypeAdapter.validate_python(step.history)
+    fold = compaction.fold_boundary(inv_text)
+    marker = _frontier_index(messages)
+    if fold <= 0:
+        return messages  # nothing settled yet (or undetermined) → never regress
+
+    frontier_md = compaction._frontier_through(inv_text, fold)
+    # Only point at summaries for leads actually in the settled frontier, so the
+    # pointer list (and thus the frozen message) stays stable within a loop.
+    pointers = {lid: p for lid, p in _summary_pointers(run_dir).items()
+                if lid in frontier_md}
+    frontier_dict = compaction.render_frontier_message(frontier_md, pointers)
+    frontier_obj = ModelMessagesTypeAdapter.validate_python([frontier_dict])[0]
+
+    orientation = messages[0]
+    tail = messages[marker + 1:] if marker is not None else []
+    rewritten = [orientation, frontier_obj] + tail
+    if marker is None and len(rewritten) >= len(messages):
+        return messages  # first freeze wouldn't shrink a tiny history → wait
+    return rewritten
 
 
 def _make_compaction_processor():
-    """A per-run history processor (closure over the frozen-prefix state).
+    """A stateless history processor — robust to PydanticAI's output accumulation.
     Never raises into the run: any failure falls back to the full history."""
-    holder: dict = {"state": None}
-
     # The first param MUST be annotated `RunContext[...]` — pydantic-ai's
     # `takes_run_context` detects the ctx-taking variant by the annotation, not
     # the name; an unannotated `ctx` is silently called as a no-ctx processor.
     async def process(ctx: RunContext[RunDeps], messages: list) -> list:
         try:
-            return _compact_messages(messages, ctx.deps.run_dir, holder)
+            return _compact_messages(messages, ctx.deps.run_dir)
         except Exception as e:  # noqa: BLE001 — compaction must never break the run
             print(f"[run_pai] compaction skipped: {e!r}", file=sys.stderr)
             return messages

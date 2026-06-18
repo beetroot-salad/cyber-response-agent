@@ -41,6 +41,12 @@ except Exception:  # pragma: no cover - import guard; absence → always-fallbac
 
 Message = dict[str, Any]
 
+# Sentinel that marks our synthetic frontier message. The live processor locates
+# it in PydanticAI's accumulated history to find the live tail (everything after
+# it); keep it stable and distinctive, and always emit it verbatim in
+# `render_frontier_message`.
+FRONTIER_SENTINEL = "Settled investigation frontier (completed loops)."
+
 
 # --------------------------------------------------------------------------
 # Loop detection
@@ -197,15 +203,16 @@ def render_frontier_message(
     cheap re-read path for dropped detail. Deterministic: same inputs →
     byte-identical message, so the prefix caches across the loop.
     """
+    # `frontier_md` is trimmed investigation.md — already markdown with its own
+    # fenced ```invlang blocks + prose, so we present it verbatim (wrapping it in
+    # another fence would nest fences and break the markdown).
     lines = [
-        "Settled investigation frontier (completed loops). The leads below are "
-        "DONE — their findings are committed here; do NOT re-dispatch any lead "
-        "listed below. Continue the CURRENT loop from the messages that follow "
-        "this one; their full gather summaries were compacted out of context.",
+        FRONTIER_SENTINEL + " The leads below are DONE — their findings are "
+        "committed here; do NOT re-dispatch any lead listed below. Continue the "
+        "CURRENT loop from the messages that follow this one; their full gather "
+        "summaries were compacted out of context.",
         "",
-        "```invlang",
         frontier_md.strip(),
-        "```",
     ]
     if summary_pointers:
         lines.append("")

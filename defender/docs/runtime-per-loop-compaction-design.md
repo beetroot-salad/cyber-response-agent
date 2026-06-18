@@ -195,12 +195,65 @@ same invocation.
    does the agent start **re-dispatching gather or re-reading persisted
    summaries to recover detail it used to hold in context**, or conclude
    differently? Visible by reading, invisible in the aggregate.
+   **Step-1 result (N=1, ssh-pivot alert, 2026-06-18):** FAILED — compaction
+   induced a fatal trajectory divergence. Phase A (off) completed clean
+   (disposition `malicious`, 7 leads dispatched once each, 21 requests). Phase B
+   (on) froze at the loop-1→2 boundary, then **re-dispatched the active loop-2
+   leads `l-004`/`l-005` 17 times** until the gather tool hit its 10-retry cap
+   and crashed. The agent never used the `gather_summaries/` re-read path (0
+   reads). Diagnosis: the freeze fires on `:L` loop *increment*, i.e. the moment
+   loop 2 is *planned* — while loop 2's leads are still unresolved. The synthetic
+   frontier then advertises `l-004`/`l-005` as planned-with-no-results, and the
+   agent re-gathers them (their fresh summaries were in the live tail) instead of
+   reasoning from the tail or re-reading the persisted summary. Root cause: the
+   design's assumption that "loop N's gathers are resolved when loop N+1 is
+   planned" is false — `max(:L loop)` fires too early, compacting mid-stride.
+   (N=1 caveat: model nondeterminism not fully excluded, but the clean control,
+   the loop localized exactly to the freeze boundary, and the unused recovery
+   path make compaction the clear cause.) Also: disposition drifted vs. the
+   recorded `inconclusive` even on Phase A — stack/model drift since the Jun-15
+   recording, so the recorded runs are not a disposition oracle; Phase A is.
+
 2. **Iterate** the kept/dropped boundary if the read shows over-compaction.
+   **Done (commit cc85516):** `fold_boundary` folds only loops *below* the active
+   (highest-planned) loop — settled regardless of dead-end leads — plus the active
+   loop once itself resolved; `_frontier_through` trims the rendered frontier to
+   the folded loops so the active loop never enters the frozen snapshot; the
+   framing message now says the listed leads are DONE (don't re-dispatch).
+   22 unit tests pass. **Live re-validation PENDING:** the re-run (`ab-sshpivot-B2`)
+   was aborted by the circuit breaker when the playground VPS went unreachable
+   mid-run (`ssh … port 22: Connection timed out`); compaction never engaged
+   (0 freezes — the run never reached a resolved loop), so it's inconclusive.
+   Re-run arm B once the stack is back up.
 3. **Scale** to the fixture set only once N=1 looks directionally right;
    report the A→B token delta and the disposition-parity table. A
    **fixture-replay mode** (serve recorded `gather_raw/` payloads instead of
    hitting the stack) is the clean way to remove drift from the quantitative
    deltas here — deferred to this step, not built up front.
+
+## Live-integration bug (found 2nd A/B, post-fix)
+
+The resolved-boundary fix killed the re-dispatch crash, but the next live arm B
+looped to the 60-request limit with **flat input tokens** (14,556 every request
+after the first freeze) — the agent re-read `alert.json` 45× and re-oriented
+forever. Root cause (proven with a TestModel probe — processor saw message counts
+`[1,3,3,3,3,3,3]`, flat): **PydanticAI's history processor persists/accumulates
+its own output** — each call receives `[previously-returned messages + new
+turns]`, NOT the full append-only canonical the design assumed. So a stateful
+`freeze_index` into the original history is invalid after the first freeze: the
+history collapses to `[orientation, frontier]`, `freeze_index` exceeds its
+length, `tail` is always empty, and every request re-sends just the prefix,
+dropping the agent's new work → infinite re-orientation.
+
+**Fix direction (not yet implemented):** marker-based incremental processing —
+locate the frontier sentinel in the received (accumulated) history, keep
+everything after it as the live tail, and re-render the frontier from
+`investigation.md`. The pure `compaction.py` logic is sound (22 tests); only the
+live wiring's freeze-index model is wrong. `compaction.py`'s `compact()` and the
+offline dry-run still assume a growing canonical, which is correct for the
+*offline* replay but not for the *live* processor — the two need different
+drivers over the same primitives (`fold_boundary`, `_frontier_through`,
+`render_frontier_message`).
 
 ## Implementation status
 
