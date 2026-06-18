@@ -37,7 +37,7 @@ from pathlib import Path
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.learning._prologue import extract_case_entities  # noqa: E402
+from defender.learning._prologue import extract_case_entities
 
 
 HERE = Path(__file__).resolve().parent

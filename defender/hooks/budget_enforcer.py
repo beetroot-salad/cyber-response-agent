@@ -31,7 +31,7 @@ from pathlib import Path
 # is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._run_dir import resolve_run_dir, update_json_locked  # noqa: E402
+from defender.hooks._run_dir import resolve_run_dir, update_json_locked
 
 # Caps are intentionally inline + single-default: the defender has no
 # per-signature permissions.yaml to overlay, so there is nothing to

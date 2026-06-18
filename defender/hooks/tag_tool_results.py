@@ -43,7 +43,7 @@ from pathlib import Path
 # or run directly as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._run_dir import read_meta_salt  # noqa: E402
+from defender.hooks._run_dir import read_meta_salt
 
 # Commands that return raw data-source payloads (mirrors the markers the
 # block_main_loop_raw_access hook keys on).

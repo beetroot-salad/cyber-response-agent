@@ -26,7 +26,7 @@ from pathlib import Path
 # is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._run_dir import resolve_run_dir  # noqa: E402
+from defender.hooks._run_dir import resolve_run_dir
 
 
 def lesson_name(file_path: str) -> str | None:

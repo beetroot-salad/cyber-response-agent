@@ -53,7 +53,7 @@ from pathlib import Path
 # is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._cmd_segments import ADAPTER_CLI_RE, adapter_shims  # noqa: E402
+from defender.hooks._cmd_segments import ADAPTER_CLI_RE, adapter_shims
 
 RAW_MARKER = "gather_raw"
 # `ADAPTER_CLI_RE` (a `scripts/tools/<name>_cli.py` path) is imported from the

@@ -14,8 +14,8 @@ import pytest
 
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
-from defender.scripts.tools.record_query import capture  # noqa: E402
-from defender.hooks.record_lead import claim_lead  # noqa: E402
+from defender.scripts.tools.record_query import capture
+from defender.hooks.record_lead import claim_lead
 
 # A stub adapter named like an adapter CLI so derive_system → "elastic".
 # argv[1] selects the mode (ok / empty / error).

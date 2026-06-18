@@ -50,7 +50,7 @@ from pathlib import Path
 # resolves whether this file is imported or run directly as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._cmd_segments import (  # noqa: E402
+from defender.hooks._cmd_segments import (
     ADAPTER_CLI_RE,
     adapter_shims,
     split_segments,

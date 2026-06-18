@@ -20,9 +20,9 @@ import yaml
 # The curator engine, the lock/generation helpers, and the actor config wrapper.
 # Each resolves to one module instance (the path imports inside the modules use the
 # same names), so patching ``curator.REPO_ROOT`` / ``shared.*`` reaches them.
-from defender.learning import _author_curator as curator  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning import _author_shared as shared  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning import author_actor as aa  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _author_curator as curator  # type: ignore[import-not-found]
+from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
+from defender.learning import author_actor as aa  # type: ignore[import-not-found]
 
 AuthorError = curator.AuthorError
 

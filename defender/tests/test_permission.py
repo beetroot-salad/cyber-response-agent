@@ -12,7 +12,7 @@ import pytest
 
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
-from defender.runtime import permission  # noqa: E402
+from defender.runtime import permission
 
 
 # --- bash, main loop -------------------------------------------------------
