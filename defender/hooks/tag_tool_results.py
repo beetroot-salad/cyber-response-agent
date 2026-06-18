@@ -38,12 +38,12 @@ import re
 import sys
 from pathlib import Path
 
-# Sibling-import the shared run-dir/salt helper. Inserting our own dir
-# covers the importlib-loaded test path; running as a script adds it.
-_HOOK_DIR = Path(__file__).resolve().parent
-if str(_HOOK_DIR) not in sys.path:
-    sys.path.insert(0, str(_HOOK_DIR))
-from _run_dir import read_meta_salt  # noqa: E402
+# Sibling-import the shared run-dir/salt helper. defender/hooks/<this>.py →
+# parents[2] is the repo root, so `defender.hooks.*` resolves whether imported
+# or run directly as a script.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+from defender.hooks._run_dir import read_meta_salt
 
 # Commands that return raw data-source payloads (mirrors the markers the
 # block_main_loop_raw_access hook keys on).

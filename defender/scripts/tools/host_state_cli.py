@@ -32,8 +32,8 @@ import sys
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
-import sys as _sys  # noqa: E402
-from pathlib import Path as _Path  # noqa: E402
+import sys as _sys
+from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 

@@ -15,12 +15,11 @@ from pathlib import Path
 import pytest
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-for _p in (_DEFENDER, _DEFENDER / "scripts" / "tools"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
+# The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
+# `defender.*` namespace imports resolve.
 from defender.scripts.tools import _stub_transport as transport  # noqa: E402
-from runtime import circuit_breaker as cb  # noqa: E402
+from defender.runtime import circuit_breaker as cb  # noqa: E402
 
 # Every data-source adapter; each fails fast at argparse on a bad invocation,
 # before touching docker, so these run with no environment.

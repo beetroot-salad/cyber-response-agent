@@ -17,40 +17,32 @@ free, with no model call.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-# defender/ (parents[1]) and the repo root (parents[2]); mirror the hooks'
-# sys.path bootstrap so `defender.skills.invlang` resolves and the sibling
-# hook/taxonomy modules import.
-_DEFENDER_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = _DEFENDER_DIR.parent
-for _p in (str(_REPO_ROOT), str(_DEFENDER_DIR / "hooks")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from _cmd_segments import (  # noqa: E402  (sys.path set above)
+# Reuse the same hook taxonomy + gate predicates verbatim (`defender.hooks.*`) —
+# these are pure (no stdin/exit), so the in-process gate and the subprocess hooks
+# can never disagree. The workspace root is on sys.path via the entry-point
+# bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+from defender.hooks._cmd_segments import (
     ADAPTER_CLI_RE,
     NON_ADAPTER_SHIMS,
     split_segments,
     unwrap,
 )
-# Reuse the gate predicates verbatim — these are pure (no stdin/exit), so the
-# in-process gate and the subprocess hooks can never disagree on the taxonomy.
-from approve_shim_invocations import (  # noqa: E402
+from defender.hooks.approve_shim_invocations import (
     GATHER_READONLY_TOOLS,
     READONLY_TOOLS,
     _all_segments_safe,
 )
-from block_main_loop_raw_access import (  # noqa: E402
+from defender.hooks.block_main_loop_raw_access import (
     ADAPTER_DENY_REASON,
     RAW_DENY_REASON,
     RAW_MARKER,
     _adapter_shim_re,
 )
-from defender.skills.invlang.validate import validate_companion  # noqa: E402
+from defender.skills.invlang.validate import validate_companion
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
 # so an unrecognized main-loop command fails closed (deny), matching the net

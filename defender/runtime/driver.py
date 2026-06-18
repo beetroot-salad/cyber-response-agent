@@ -29,9 +29,7 @@ from . import orient
 from .circuit_breaker import RunAborted
 from .tools import GatherDeps, RunDeps, register_gather_tool, register_tools
 
-# permission.py put defender/hooks on sys.path on import; reuse the budget logic.
-from . import permission  # noqa: F401  (import for its sys.path bootstrap)
-from budget_enforcer import (  # noqa: E402
+from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     check_budgets,
     update_budget_locked,

@@ -6,16 +6,13 @@ ports, so functionality parity is checked for free.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# The test lives in defender/tests/; put defender/ on the path so `runtime`
-# imports (permission.py then bootstraps hooks/ + repo root itself).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from runtime import permission  # noqa: E402
+# The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
+# `defender.*` namespace imports resolve.
+from defender.runtime import permission
 
 
 # --- bash, main loop -------------------------------------------------------

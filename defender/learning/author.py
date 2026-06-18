@@ -59,10 +59,10 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
-from defender.learning import _author_runner as _runner  # noqa: E402
-from defender.learning import _author_shared as _shared  # noqa: E402
-from defender.learning._loop_config import DEFAULT_PATHS  # noqa: E402
-from defender.learning._loop_persist import (  # noqa: E402
+from defender.learning import _author_runner as _runner
+from defender.learning import _author_shared as _shared
+from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_persist import (
     _flock,
     _read_jsonl_rows,
     rotate_queue_locked,

@@ -38,12 +38,11 @@ import sys
 from pathlib import Path
 
 # Sibling-import the shared command-decomposition + shim-taxonomy helpers.
-# Inserting our own dir covers the importlib-loaded test path; running as a
-# script adds it. Mirrors tag_tool_results.py's _run_dir import.
-_HOOK_DIR = Path(__file__).resolve().parent
-if str(_HOOK_DIR) not in sys.path:
-    sys.path.insert(0, str(_HOOK_DIR))
-from _cmd_segments import (  # noqa: E402
+# defender/hooks/<this>.py → parents[2] is the repo root, so `defender.hooks.*`
+# resolves whether this file is imported or run directly as a script.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+from defender.hooks._cmd_segments import (
     NON_ADAPTER_SHIMS,
     all_defender_shims as _all_defender_shims,
     split_segments as _split_segments,

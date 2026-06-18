@@ -13,20 +13,18 @@ import asyncio
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_DEFENDER))
 
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
-from runtime import driver, observe, tools  # noqa: E402
-from record_lead import claim_lead  # noqa: E402
+from defender.runtime import driver, observe, tools  # noqa: E402
+from defender.hooks.record_lead import claim_lead  # noqa: E402
 
 _GI = _DEFENDER / "tests" / "gather_invocation"
 

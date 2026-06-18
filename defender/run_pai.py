@@ -36,8 +36,13 @@ import argparse  # noqa: E402
 import asyncio  # noqa: E402
 import json  # noqa: E402
 
-import run as _run  # defender/ is sys.path[0] under __main__ → defender/run.py  # noqa: E402
-from runtime import driver  # noqa: E402
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve
+# whether this file is imported or run directly (mirrors run.py).
+if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender import run as _run  # noqa: E402
+from defender.runtime import driver  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 

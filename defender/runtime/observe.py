@@ -34,18 +34,14 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-# scripts/ holds the shared price table; mirror permission.py's path bootstrap
-# (defender/runtime → defender/scripts) rather than couple to an install layout.
-_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-if str(_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS))
-from pricing import usage_cost  # noqa: E402  (sys.path set above)
+# scripts/ holds the shared price table. The workspace root is on sys.path via
+# the entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+from defender.scripts.pricing import usage_cost
 
 
 # --- the single instrumentation point -------------------------------------

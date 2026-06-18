@@ -9,17 +9,13 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 import pytest
 
-_DEFENDER = Path(__file__).resolve().parents[1]
-for _p in (_DEFENDER, _DEFENDER / "hooks", _DEFENDER / "scripts" / "tools"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-from defender.scripts.tools.record_query import capture  # noqa: E402
-from record_lead import claim_lead  # noqa: E402
+# The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
+# `defender.*` namespace imports resolve.
+from defender.scripts.tools.record_query import capture
+from defender.hooks.record_lead import claim_lead
 
 # A stub adapter named like an adapter CLI so derive_system → "elastic".
 # argv[1] selects the mode (ok / empty / error).
