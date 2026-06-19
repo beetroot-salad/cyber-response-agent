@@ -271,6 +271,7 @@ def commit_corpus(
     hand-written one would survive alongside ours and shadow it for first-match readers
     (``eval_secondary.parse_trailers``). ``author.py`` passes no trailers — the findings
     corpus carries none — so neither the guard nor the ``--trailer`` args apply."""
+    trailers = trailers or []  # normalize None→[] once; both the guard and args below
     if trailers:
         keys = "|".join(re.escape(key) for key, _ in trailers)
         if re.search(rf"(?m)^(?:{keys}):", message):
@@ -299,7 +300,7 @@ def commit_corpus(
             f"git diff --cached failed for {corpus_dir_rel}: {staged.stderr.strip()}"
         )
     trailer_args: list[str] = []
-    for key, val in (trailers or []):
+    for key, val in trailers:
         trailer_args += ["--trailer", f"{key}: {val}"]
     proc = subprocess.run(
         ["git", "commit", "-F", "-", *trailer_args, "--", str(corpus_dir)],

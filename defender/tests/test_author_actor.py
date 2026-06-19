@@ -24,7 +24,10 @@ from defender.learning import _author_curator as curator  # type: ignore[import-
 from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
 from defender.learning import author_actor as aa  # type: ignore[import-not-found]
 
-AuthorError = curator.AuthorError
+# Reference ``shared.AuthorError`` live (not a captured module-level alias): the
+# ``tmp_repo`` conftest fixture reloads ``_author_shared``/``_author_curator``, rebinding
+# the class — a captured alias bound at collection time would go stale and stop matching
+# freshly-raised errors when a curator test runs after that fixture.
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +263,7 @@ def test_result_partition_rejects_unknown_observation():
         "consumed_skip": [],
         "commit_message": "m",
     }
-    with pytest.raises(AuthorError, match="unknown observations"):
+    with pytest.raises(shared.AuthorError, match="unknown observations"):
         curator.validate_agent_result_partition(result, to_author)
 
 
@@ -271,14 +274,14 @@ def test_result_partition_rejects_duplicate_across_buckets():
         "consumed_skip": [{"observation_id": "a/0", "reason": "x"}],
         "commit_message": "m",
     }
-    with pytest.raises(AuthorError, match="more than once"):
+    with pytest.raises(shared.AuthorError, match="more than once"):
         curator.validate_agent_result_partition(result, to_author)
 
 
 def test_result_partition_rejects_missing_observation():
     to_author = [_row("a/0", "caught"), _row("b/0", "caught")]
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
-    with pytest.raises(AuthorError, match="missing observations"):
+    with pytest.raises(shared.AuthorError, match="missing observations"):
         curator.validate_agent_result_partition(result, to_author)
 
 
@@ -396,6 +399,20 @@ def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     assert {r["observation_id"] for r in left} == {"a/0"}
     consumed_path = ctx["pending"] / "actor_observations.consumed.jsonl"
     assert not consumed_path.exists() or consumed_path.read_text().strip() == ""
+
+
+def test_verify_adapter_threads_observations_noun(monkeypatch, tmp_path: Path):
+    """The curator ``verify_agent_state`` adapter delegates to the shared layer; this pins
+    that it threads *its* corpus noun (``observations``) and ``cfg`` corpus, not the author
+    side's ``findings``/``defender/lessons/``. ``committed`` non-empty but the corpus clean
+    is the inconsistent state the post-flight gate must reject — and the one branch whose
+    error string carries the noun, so a mis-threaded adapter arg would surface here. The
+    shared-layer branch logic itself is covered corpus-agnostically in test_author_shared."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    cfg = _cfg(ctx, _consume_all)
+    result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
+    with pytest.raises(shared.AuthorError, match="committed observations but left"):
+        curator.verify_agent_state(result, cfg, [])
 
 
 # ---------------------------------------------------------------------------

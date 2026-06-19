@@ -75,10 +75,18 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_git("commit", "-q", "-m", "init")
 
     # Re-import author with REPO_ROOT pointed at the tmp tree.
+    from defender.learning import _author_curator as curator_mod  # type: ignore[import-not-found]
     from defender.learning import _author_shared as shared_mod  # type: ignore[import-not-found]
     from defender.learning import author as author_mod  # type: ignore[import-not-found]
 
+    # Reload shared FIRST (it mints a fresh `AuthorError` class), then every module
+    # that binds `AuthorError = _shared.AuthorError` at import — both `author` and
+    # (since #330) `_author_curator`. If curator is left un-reloaded, its stale alias
+    # (and its `except AuthorError` clauses) point at the pre-reload class, so an error
+    # raised by the reloaded shared git layer escapes `_author_curator.run_batch`
+    # uncaught when a curator test runs after this fixture in the same session.
     importlib.reload(shared_mod)
+    importlib.reload(curator_mod)
     importlib.reload(author_mod)
     monkeypatch.setattr(shared_mod, "REPO_ROOT", repo)
     monkeypatch.setattr(
