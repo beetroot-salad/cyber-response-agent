@@ -90,32 +90,36 @@ def _lead_resolved(finding: dict[str, Any]) -> bool:
 def fold_boundary(investigation_md: str) -> int:
     """Highest loop safe to fold into the frozen prefix.
 
-    Fold only the **contiguous run of *executed* loops strictly below the active
-    (highest-numbered) loop**, where a loop counts as executed once it has at
-    least one committed finding. Three properties, each learned from a live A/B:
+    Fold the **contiguous run of loops 1..L that the agent has explicitly marked
+    closed** (`:T close`, parsed as `companion["closed_loops"]`), gated by two
+    safety conditions that survive from the earlier inferential design:
 
-    - *Never fold the active loop.* The agent is still working in its highest
-      loop; folding it dropped the loop the agent was mid-investigation on and it
-      restarted orientation from scratch (the costly 4th-A/B re-orientation).
-    - *Never fold a merely-drafted loop.* The agent sometimes writes a later
-      loop's `:L` plan row while an earlier loop still has **no results at all**.
-      The original "fold everything strictly below active" rule then folded that
-      empty earlier loop — froze loop 1 with nothing in it and the agent re-did
-      the whole loop (the 4th-A/B root cause, reproduced live at r11/r19).
-      Requiring ≥1 committed finding per folded loop closes that hole: a bare
-      drafted-ahead plan has zero, so it never folds.
-    - *Tolerate dead-end leads in an executed loop.* A loop the agent worked and
-      moved past is complete by construction (gather is synchronous; the agent
-      analysed and planned the next loop before advancing), so an abandoned lead
-      that never produced an outcome must NOT block folding. Requiring *all*
-      leads resolved was too strict — one dead-end lead blocked the loop forever
-      and the freeze never fired (5th-A/B: loop 1's l-004 dead-ended, fold stayed
-      0 all run). `any` resolved, not `all`, is the executed-vs-drafted line.
+    - *The marker is the trigger.* A loop is foldable only once the agent writes
+      `:T close / loop N` — the in-the-moment, validator-guarded "I am leaving
+      this loop" signal. This replaces the old retrospective inference (`fold the
+      executed loops below the active one`), which read a loop's *end* off the
+      *next* loop opening and misfired repeatedly (draft-ahead empty freeze,
+      dead-end block, `max(:L loop)` early-fire — see the design doc's A/B
+      ladder). The final loop loops to REPORT (→ `:T conclude`), not to PLAN, so
+      it never gets a `:T close` and so never folds.
+    - *Data floor (kept as a guard).* A folded loop must still have ≥1 committed
+      finding (`any` lead resolved — observations, attr updates, authz/impact
+      resolutions, or a `:T` transition). The validator already blocks closing an
+      empty loop (rule 6), so this is belt-and-suspenders: even a mis-authored
+      `:T close` on a bare drafted-ahead plan (zero committed findings) cannot
+      fold it. `any`, not `all`, so a dead-end lead in an otherwise-worked loop
+      doesn't block the fold.
+    - *Never fold the active loop.* `< active` (the highest loop carrying any
+      finding) keeps the loop the agent is mid-investigation on in the live tail
+      even if a stray close marker named it.
 
     Combined with `_frontier_through`, the active loop — plan, in-flight gathers,
     analysis — stays entirely in the live tail. Returns 0 when nothing is safely
-    foldable (no executed loop below the active one) or on parse failure (caller
-    then passes through / reuses — never regresses)."""
+    foldable (no closed-and-executed loop below the active one) or on parse
+    failure. **Marker-gated**: with no `:T close` in the file (an old SKILL, or
+    an agent that hasn't emitted one) this returns 0 and the run is byte-identical
+    Phase A — the feature is dormant, never wrong; the caller passes through /
+    reuses and never regresses."""
     if not investigation_md or parse_dense_companion is None:
         return 0
     try:
@@ -129,10 +133,11 @@ def fold_boundary(investigation_md: str) -> int:
             by_loop.setdefault(loop, []).append(_lead_resolved(f))
     if not by_loop:
         return 0
+    closed = {n for n in companion.get("closed_loops", []) if isinstance(n, int)}
     active = max(by_loop)
     fold = 0
     loop = 1
-    while loop < active and by_loop.get(loop) and any(by_loop[loop]):
+    while loop < active and loop in closed and by_loop.get(loop) and any(by_loop[loop]):
         fold = loop
         loop += 1
     return fold
@@ -284,14 +289,15 @@ def compact(
     frozen prefix carried from the previous request (None on the first).
 
     We fold loops `1..R` into the prefix, where `R = fold_boundary` (the highest
-    contiguous fully-resolved loop strictly below the active one), recomputing
-    only when `R` advances (``froze``); otherwise we reuse the held prefix
-    (``reused``). Until an earlier loop is resolved *and* a later loop has opened
-    there is nothing safe to fold (``passthrough``) — folding only settled loops
-    below the active one keeps the active loop entirely in the live tail, so the
-    frozen frontier never lists an unresolved lead and the agent is never asked
-    to continue from a loop that was folded out from under it. Any anomaly returns
-    the original history (``fallback``); correctness is preserved, savings forgone.
+    contiguous run of loops the agent has marked `:T close`, each with ≥1
+    committed finding, strictly below the active loop), recomputing only when `R`
+    advances (``froze``); otherwise we reuse the held prefix (``reused``). Until
+    the agent closes an executed loop *below* the active one there is nothing safe
+    to fold (``passthrough``) — folding only closed loops below the active one
+    keeps the active loop entirely in the live tail, so the frozen frontier never
+    lists an unresolved lead and the agent is never asked to continue from a loop
+    that was folded out from under it. Any anomaly returns the original history
+    (``fallback``); correctness is preserved, savings forgone.
     """
     current_loop = detect_loop(investigation_md)   # telemetry: highest planned loop
     fold_target = fold_boundary(investigation_md)

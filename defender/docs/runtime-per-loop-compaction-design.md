@@ -18,6 +18,52 @@ behind the gather wall, recoverable on demand (see §Recovery).
 the `:L findings [id|loop|...]` column and the `## GATHER (loop N)` /
 `## ANALYZE (loop N)` markdown headers (`skills/invlang/SKILL.md:7-8`).
 
+## The framing: compaction is resume-from-handoff
+
+The model that makes the mechanism coherent — and that the rest of this doc
+now follows — is: **there is no "compaction." There is only resuming an
+investigation from a handoff packet, and every loop is a resume.**
+
+The agent never occupies a special "you have been compacted" state. Each
+turn it is handed *prior context it did not produce this turn* and picks the
+case up. At loop N+1 that prior context is `[alert + settled invlang
+frontier]`; at loop 1 it is `[alert]` alone. Same operation, same prompt
+shape — the prior-investigation section is just empty (only the alert) on
+the first pass. The alert **is** the loop-0 handoff note: the detection
+system's case note, handed to the analyst at shift start. The asymmetry
+between the two (the alert is external input; the frontier is the agent's
+own prior work) is upstream, in *who wrote them* — both are trusted prior
+context the agent *consumes rather than produces* this turn, so for resume
+behaviour they are one thing.
+
+Three consequences shape the design:
+
+1. **The seam is deleted, not hidden.** A self-narrating frontier ("this was
+   folded, do NOT re-read") exists only if compaction is framed as an
+   exceptional event. If resume-from-handoff is the *only* entry mode there
+   is nothing exceptional to narrate — you hand over the case file, not a
+   sticky note about it. This is the through-line for the residual
+   re-orientation artifacts below: each was the agent reacting to a seam that
+   should not have been visible.
+2. **The packet defines what must be persistent.** The design test is one
+   question — *what would a fresh agent need to pick this up cold?* The raw
+   alert, the invlang grammar, and the settled frontier. Those, and only
+   those, belong in the never-folded packet; everything else (gather prose)
+   is foldable scratch. This is the principled form of the 6th-A/B
+   orientation-re-read fix (the alert + invlang spec were *not* in the
+   packet, so the fold dropped them and the agent re-fetched).
+3. **Trust narrows for free.** What the packet carries (alert + committed
+   invlang) is exactly the trusted, validator-guarded surface; what folds
+   away (gather Task-returns) is exactly the untrusted channel. Resume
+   carries validated ground truth and nothing else — compaction is a
+   trust-narrowing operation, not merely a size-reduction one.
+
+invlang was already the handoff language — a dense, validated investigation
+record. Carrying it forward is using invlang for what it is for. The
+`:T close` marker (§Loop-completion marker) is the agent **signing off its
+segment of the running handoff**: "this loop's portion of the case file is
+complete."
+
 ## Mechanism — freeze per loop, not per request
 
 The migration doc says "rewrite before each model request." That's the
@@ -123,13 +169,69 @@ prefix is byte-stable across a loop → cache-creation once at the
 increment, cache-read for every other turn in the loop. Within-loop turns
 append into the 5m tail exactly as in Phase A.
 
-## Loop-change detection
+## Loop-completion marker (`:T close`) — supersedes inferential detection
+
+The original detection (§Loop-change detection, below) *inferred* a loop
+boundary from the shape of the committed data — `max(:L loop)`, then "fold
+the contiguous run of executed loops below the active one." That inference is
+retrospective (a loop's end is read off the *next* loop opening) and it
+misfired repeatedly: the draft-ahead empty freeze, the dead-end-lead block,
+the `max(:L loop)` early-fire — each A/B in the ladder above is one misfire
+and one patch.
+
+The marker replaces the inference with an in-the-moment, agent-emitted signal
+that lives **on the validator-guarded surface** (so it keeps the same trust
+the inference had). Minimal block, scalar form matching its sibling
+`:T conclude`:
+
+```invlang
+:T close
+loop  1
+```
+
+**Semantics:** "Loop 1 is finished — every lead I will gather/analyze in it
+is committed above; I am moving on (next PLAN, or REPORT)." Nothing else
+belongs in it: not a summary (the invlang above *is* the summary), not a
+disposition (that is `:T conclude`). One block per loop; append-only stays
+satisfied (block count only grows; a committed close is never edited).
+
+**Where it fires:** the ANALYZE→PLAN transition — the agent writes it as the
+last act of the loop it is leaving. The *final* loop loops to REPORT, not
+PLAN, so it gets `:T conclude`, never `:T close`. That is why the active
+(highest) loop is never marked closed, and so never folds.
+
+**Detection becomes (the only `fold_boundary` change):** fold the contiguous
+run of loops `1..L` where, for each loop,
+
+```
+loop is < active (the highest loop carrying any finding)   ← belt-and-suspenders
+AND loop has a :T close marker (companion["closed_loops"])  ← the trigger (new)
+AND loop has >=1 committed finding                          ← the data floor (kept)
+```
+
+The data floor is retained as a guard: a bogus/early `:T close` on an empty
+loop cannot fold it — and the validator (rule 6) blocks *writing* one, so the
+draft-ahead empty freeze becomes impossible to author, not merely impossible
+to fold. The `< active` guard means even a mis-emitted close on the working
+loop can't drop it out from under the agent.
+
+**Behaviour change / migration.** Detection is now marker-gated: with no
+`:T close` in `investigation.md` (an old SKILL, or an agent that hasn't
+emitted one) `fold_boundary` returns 0 and the run is byte-identical Phase A —
+the feature is *dormant*, not wrong. It activates only once the SKILL teaches
+the marker (`SKILL.md` §ANALYZE; `skills/invlang/SKILL.md` §`:T close`) and
+the agent emits it. The recorded pre-marker runs therefore no longer compact
+under the offline dry-run — correct, not a regression.
+
+## Loop-change detection (superseded — see §Loop-completion marker)
 
 Signal: parse `investigation.md`, take `max(lead.loop)` over the `:L`
 rows. When it exceeds `_frozen_at_loop`, the loop advanced. Preferred over
 file-mtime or phase-header scraping because it's derived from the
 validator-guarded committed artifact, it's exactly the unit we compact on,
-and it degrades into the §Failure fallback when the parse fails.
+and it degrades into the §Failure fallback when the parse fails. (`detect_loop`
+survives as the frontier-message framing / telemetry signal — "Loops 1–N are
+COMPLETE" — but is no longer the fold *trigger*; `:T close` is.)
 
 Detection fires both the prefix recompute **and** the observe-cursor reset
 (`observe.py:28-30` — the cursors assume append-only history; rewriting it
@@ -391,6 +493,17 @@ Built and tested (branch `worktree-per-loop-compaction`):
 - **Pure core** — `runtime/compaction.py`: `detect_loop`, freeze-per-loop
   `compact()` (passthrough / froze / reused / fallback), size accounting,
   `apply_writes`. Unit tests: `tests/test_compaction.py`.
+- **Loop-completion marker (`:T close`)** — the fold trigger
+  (§Loop-completion marker). Parser projects `companion["closed_loops"]`
+  (`skills/invlang/parser.py`); validator rule 6 blocks closing an empty or
+  already-closed loop (`skills/invlang/validate.py`); `fold_boundary` is
+  marker-gated (`loop in closed`, with the data floor + `< active` retained);
+  both SKILLs teach it (`SKILL.md` §ANALYZE, `skills/invlang/SKILL.md`
+  §`:T close`). Tests: `tests/test_compaction.py` (marker-gating, empty-close
+  floor), `tests/test_invlang_validate.py` (rule 6). **Migration note:**
+  detection is now dormant until the agent emits `:T close`, so pre-marker
+  recorded runs no longer compact under the dry-run — correct, not a
+  regression; the next live A/B exercises the marker path.
 - **Offline harness** — `scripts/compaction_dryrun.py` (validation ladder
   step 0; results above).
 - **Recovery hook** — `tools._persist_gather_summary` writes the wrapped

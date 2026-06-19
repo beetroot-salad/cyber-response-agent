@@ -33,8 +33,10 @@ _LH = ":L findings [id|loop|name|target|tests|system|window]"
 _OBS1 = (":E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
          "e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success")
 UNRESOLVED1 = f"```invlang\n{_LH}\nl-001|1|raw-auth|v-001|h-001|elastic|w\n```\n"
+# loop 1 worked AND closed (:T close — the fold trigger) + loop 2 planned.
 RESOLVED1_PLAN2 = (
     f"```invlang\n{_LH}\nl-001|1|raw-auth|v-001|h-001|elastic|w\n\n{_OBS1}\n```\n\n"
+    f"```invlang\n:T close\nloop 1\n```\n\n"
     f"```invlang\n{_LH}\nl-005|2|cmdb-ip|v-006|h-002|cmdb|w\n```\n"
 )
 

@@ -362,6 +362,14 @@ strongly supports, `+` weakly supports, `-` weakly refutes, `--`
 strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
+**When you loop back to PLAN, close the loop you are leaving** with a
+`:T close` marker (`loop N`), in the same Edit that lands this loop's
+`:R`/`:T resolutions` — it records that the loop's leads are all gathered
+and analyzed (see `skills/invlang/SKILL.md` §`:T close`). Only close a loop
+you have actually worked (≥1 committed finding); a loop you have merely
+planned cannot be closed. The final loop goes to REPORT instead — it gets
+`:T conclude`, not `:T close`.
+
 If a lead resolved a legitimacy contract declared in `:H h-NNN.authz`,
 write the outcome as a `:R authz` row — not as `:R attr_updates`. One
 row per contract closed; the `fulfills` column names the `ac<n>` from

@@ -763,6 +763,29 @@ def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None
         conclude["termination"] = termination
 
 
+def _close_loop(rows: list[str]) -> int | None:
+    """The integer loop number from a `:T close` block's `loop N` scalar row.
+
+    `:T close` is the per-loop completion marker (the loop-boundary signal
+    compaction folds on — see `runtime/compaction.fold_boundary`). Minimal,
+    scalar-shaped like its sibling `:T conclude`:
+
+        :T close
+        loop  1
+
+    Returns None when no parseable `loop N` row is present; the parser stays
+    lenient (records a warning via the caller) and the validator rejects the
+    malformed marker (rule 6) so a bogus close can't reach the fold."""
+    for row in rows:
+        m = re.match(r"^loop\s+(\S+)", row.strip())
+        if m:
+            try:
+                return int(m.group(1))
+            except ValueError:
+                return None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Top-level projection
 # ---------------------------------------------------------------------------
@@ -910,6 +933,20 @@ def _project_t_block(
         # computed from the resolution record. Accept-and-ignore: a stray
         # sub-block is tolerated rather than rejected, so the agent never
         # format-fights an undocumented surface against the validator.
+        return True, current_lead
+    if name == "close":
+        # Per-loop completion marker. Records the closed loop number for
+        # `fold_boundary`; a malformed close (no `loop N`) warns → rule 1
+        # blocks the write rather than silently dropping the marker.
+        loop = _close_loop(block.rows)
+        if loop is None:
+            warnings.append(ParseWarning(
+                block=":T close", row_index=-1,
+                row="\n".join(block.rows)[:200],
+                reason="`:T close` needs a `loop N` (integer) row",
+            ))
+        else:
+            out.setdefault("closed_loops", []).append(loop)
         return True, current_lead
     if name == "resolutions":
         return True, _project_resolutions_block(block, lead_bucket, warnings, current_lead)

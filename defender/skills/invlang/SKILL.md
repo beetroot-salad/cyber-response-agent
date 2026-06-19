@@ -20,7 +20,8 @@ invlang audits the investigation process, not just the final attack graph.
   authz and impact.
 - **Procedure:** `:L` records what the defender chose to run and why.
 - **Results:** `:R` records check results or learned facts; `:T resolutions`
-  records belief movement; `:T conclude` records closure.
+  records belief movement; `:T close` marks one loop complete; `:T conclude`
+  records final closure.
 
 The schema is pragmatic — small closed catalogs at the level the alert
 speaks at, free text at the level above. Pick the abstraction that
@@ -274,6 +275,26 @@ confidence             high
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
 ```
+
+### `:T close` (loop boundary)
+
+When you loop back from ANALYZE to PLAN, close the loop you are leaving:
+
+```invlang
+:T close
+loop  1
+```
+
+It means "loop 1 is done — every lead I will gather/analyze in it is
+committed above; I am moving to the next loop." One scalar `loop N` row,
+nothing else: the invlang above is already the loop's record, so the marker
+carries no summary or disposition. Write one `:T close` per loop, in the same
+Edit that lands the loop's final `:R`/`:T resolutions`. The marker is what the
+runtime folds a completed loop on (see `runtime/compaction.fold_boundary`); it
+is rejected if loop N has no committed finding yet (you cannot close a
+loop you have only *planned*), so only close a loop you have actually worked.
+The **last** loop goes to REPORT, not back to PLAN — it gets `:T conclude`,
+never `:T close`.
 
 ## Discovery hypotheses
 

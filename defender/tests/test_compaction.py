@@ -1,10 +1,11 @@
 """Unit tests for the pure per-loop compaction core (runtime/compaction.py).
 
 Pins the behaviour the offline dry-run and the live hook rely on: loop detection,
-the *resolved* fold boundary (fold only loops below the active one — the N=1 fix),
-the frontier trimming that keeps the active loop out of the frozen snapshot,
-freeze/reuse transitions, the fallbacks, and the size + reconstruction helpers.
-No I/O, no PydanticAI — everything operates on the message-dump dict form.
+the marker-gated fold boundary (`:T close` is the trigger; the data floor + the
+`< active` guard are belt-and-suspenders), the frontier trimming that keeps the
+active loop out of the frozen snapshot, freeze/reuse transitions, the fallbacks,
+and the size + reconstruction helpers. No I/O, no PydanticAI — everything
+operates on the message-dump dict form.
 """
 
 from __future__ import annotations
@@ -27,39 +28,66 @@ def _obs(lead: str) -> str:
             "2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success")
 
 
+def _close(n: int) -> str:
+    """The `:T close` loop-completion marker — the fold trigger."""
+    return _block(":T close", f"loop {n}")
+
+
 # loop 1 planned but no results yet → nothing safe to fold
 UNRESOLVED1 = _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w")
-# loop 1 resolved (has an observation) + loop 2 just planned (unresolved)
+# loop 1 worked (observation) AND CLOSED (:T close) + loop 2 just planned.
+# The close marker is the fold trigger — without it the fold stays dormant
+# (see RESOLVED1_PLAN2_NOCLOSE).
 RESOLVED1_PLAN2 = "\n\n".join([
+    _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
+    _close(1),
+    _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
+])
+# same work, but the agent hasn't emitted :T close yet → marker-gated, nothing
+# folds (byte-identical Phase A until the loop is explicitly closed).
+RESOLVED1_PLAN2_NOCLOSE = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
 ])
-# loop 2's plan row DRAFTED while loop 1 is still unresolved (no observation):
-# the 4th-A/B root cause (reproduced live at request r11). "Fold everything below
-# active" wrongly folded the empty loop 1 → agent restarted the whole loop.
+# loop 2's plan row DRAFTED while loop 1 is still unresolved (no observation),
+# no close marker: the 4th-A/B root cause. The marker gate alone refuses it
+# (no :T close); the data floor refuses it independently (loop 1 has 0 findings).
 DRAFT2_OVER_UNRESOLVED1 = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w"),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
 ])
-# both loops resolved (no later loop opened) → active loop is 2, must stay live
+# the agent (wrongly) wrote :T close over a loop with NO committed finding. The
+# validator blocks authoring this (rule 6); fold_boundary's data floor refuses
+# to fold it independently — belt-and-suspenders.
+CLOSED_EMPTY1_PLAN2 = "\n\n".join([
+    _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w"),
+    _close(1),
+    _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
+])
+# loop 1 worked+closed, loop 2 worked but NOT closed (still active, no loop 3) →
+# fold loop 1 only; the active loop stays live even though it has results.
 RESOLVED2 = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
+    _close(1),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w", "", _obs("l-005")),
 ])
-# loops 1+2 resolved, loop 3 just planned → the contiguous settled prefix is 2
+# loops 1+2 worked+closed, loop 3 just planned → contiguous settled prefix is 2
 RESOLVED2_PLAN3 = "\n\n".join([
     _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w", "", _obs("l-001")),
+    _close(1),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w", "", _obs("l-005")),
+    _close(2),
     _block(_LH, "l-009|3|ti-ip|v-008|h-002|threat-intel|w"),
 ])
-# loop 1 EXECUTED (l-001 resolved) but with a dead-end lead (l-004, no outcome),
-# loop 2 active. The 5th-A/B scenario: a worked loop with an abandoned lead must
-# still fold — requiring ALL leads resolved kept the freeze from ever firing.
+# loop 1 EXECUTED + CLOSED with a dead-end lead (l-004, no outcome), loop 2
+# active. The 5th-A/B scenario: a worked-and-closed loop with an abandoned lead
+# must still fold — `any` committed finding, not `all`, is the executed line.
 RESOLVED1_DEADEND_PLAN2 = "\n\n".join([
     _block(_LH,
            "l-001|1|raw-auth|v-001|h-001|elastic|w",
            "l-004|1|zeek-out|v-001|h-002|elastic|w",
            "", _obs("l-001")),
+    _close(1),
     _block(_LH, "l-005|2|cmdb-ip|v-006|h-002|cmdb|w"),
 ])
 
@@ -96,38 +124,50 @@ def test_detect_loop_empty_is_none():
     assert C.detect_loop("") is None
 
 
-# --- fold_boundary (the resolved-boundary fix) ----------------------------
+# --- fold_boundary (marker-gated: :T close is the trigger) ----------------
 
 def test_fold_boundary_unresolved_loop1_is_zero():
     assert C.fold_boundary(UNRESOLVED1) == 0   # nothing safe to fold yet
 
 
+def test_fold_boundary_requires_close_marker():
+    # The behaviour change: loop 1 is worked, but the agent hasn't emitted
+    # :T close, so nothing folds — dormant, byte-identical Phase A.
+    assert C.fold_boundary(RESOLVED1_PLAN2_NOCLOSE) == 0
+
+
 def test_fold_boundary_folds_below_active_loop():
-    # loop 1 resolved, loop 2 active/unresolved → fold loop 1 only
+    # loop 1 worked+closed, loop 2 active → fold loop 1 only
     assert C.fold_boundary(RESOLVED1_PLAN2) == 1
 
 
 def test_fold_boundary_never_folds_the_active_loop():
-    # both loops resolved but no loop 3 opened → loop 2 is still active, fold only 1
+    # loop 1 closed, loop 2 worked but active (no loop 3, not closed) → fold only 1
     assert C.fold_boundary(RESOLVED2) == 1
 
 
 def test_fold_boundary_folds_contiguous_resolved_below_active():
-    # loops 1+2 resolved, loop 3 planned → fold the settled prefix (2)
+    # loops 1+2 worked+closed, loop 3 planned → fold the settled prefix (2)
     assert C.fold_boundary(RESOLVED2_PLAN3) == 2
 
 
 def test_fold_boundary_does_not_fold_unresolved_loop_below_drafted_loop():
-    # the 4th-A/B regression: loop 2 drafted while loop 1 has no results yet.
-    # "fold everything below active" folded the empty loop 1; requiring ≥1
-    # committed finding must refuse (loop 1 has zero → nothing safe to fold).
+    # the 4th-A/B regression: loop 2 drafted while loop 1 has no results and no
+    # close marker — both the marker gate and the data floor refuse it.
     assert C.fold_boundary(DRAFT2_OVER_UNRESOLVED1) == 0
 
 
+def test_fold_boundary_ignores_close_on_empty_loop():
+    # data floor (belt-and-suspenders): even a (mis-authored) :T close over a
+    # loop with no committed finding must not fold it. The validator also blocks
+    # writing this marker (rule 6); fold_boundary refuses it independently.
+    assert C.fold_boundary(CLOSED_EMPTY1_PLAN2) == 0
+
+
 def test_fold_boundary_tolerates_dead_end_lead_in_executed_loop():
-    # the 5th-A/B regression: loop 1 worked (l-001 resolved) but l-004 dead-ended.
-    # Requiring ALL leads resolved kept fold at 0 the whole run (freeze never
-    # fired); ≥1 committed finding folds the executed loop, dead-end and all.
+    # the 5th-A/B regression: loop 1 worked+closed (l-001 resolved) but l-004
+    # dead-ended. `any` committed finding (not `all`) folds the closed loop,
+    # dead-end and all.
     assert C.fold_boundary(RESOLVED1_DEADEND_PLAN2) == 1
 
 
