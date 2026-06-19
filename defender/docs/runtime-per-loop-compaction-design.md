@@ -477,14 +477,27 @@ partially eats the saving and would recur once per freeze. Candidate fixes:
 `instructions` or orientation message 0) so a fold can't drop them — the proper
 fix; (b) accept it as a cheap one-time re-read per freeze; (c) a frontier nudge
 ("alert + invlang spec unchanged; don't re-read") — risky, may suppress a genuine
-need. **Unresolved**: needs a live run to validate, but the first-party API key's
-**credits were exhausted** by these three runs (the 6th crashed mid-investigation
-on `400 credit balance too low`, before REPORT — billing, not a code bug).
+need.
+
+**FIXED (fix a, landed pre-run):** the raw alert and the invlang grammar SKILL
+are now inlined into the orientation (message 0) in `runtime/orient.py` —
+`_raw_alert` (wrapped in the run's salted untrusted tag, identical to the
+`read_file` path, so injected text stays inert) and `_invlang_grammar`
+(frontmatter stripped). Because `_compact_messages` preserves `messages[0]`
+verbatim across a freeze, neither can be folded away, so the post-freeze
+re-read has no cause. The runtime SKILL §ORIENT now tells the agent both are
+in context and **not** to Read `alert.json` / `skills/invlang/SKILL.md`. Applies
+to BOTH arms (it's orientation, not gated), so the A/B still isolates compaction
+— A and B differ only by the fold, and both shed the redundant ORIENT-time read.
+Still **needs a live run to confirm** the re-read is gone, and a credit top-up
+(the 6th crashed on `400 credit balance too low` before REPORT — billing, not a
+code bug).
 
 **Net:** the restart (the costly failure) is fixed and the freeze now fires at a
-genuine boundary with a clean ~15k dip. One residual mild re-orientation remains,
-and a real token-saving / disposition-parity number still needs the scale rung
-(N>1 or the deterministic fixture-replay harness) — plus a credit top-up.
+genuine boundary with a clean ~15k dip. The residual re-orientation is now
+addressed too (persistent-context fix above) pending a live confirmation. A real
+token-saving / disposition-parity number still needs the scale rung (N>1 or the
+deterministic fixture-replay harness) — plus a credit top-up.
 
 ## Implementation status
 
@@ -506,6 +519,12 @@ Built and tested (branch `worktree-per-loop-compaction`):
   regression; the next live A/B exercises the marker path.
 - **Offline harness** — `scripts/compaction_dryrun.py` (validation ladder
   step 0; results above).
+- **Persistent-context (handoff packet)** — `runtime/orient.py` inlines the
+  raw alert (`_raw_alert`, salted untrusted wrap) and the invlang grammar
+  (`_invlang_grammar`) into the orientation (message 0), which the fold
+  preserves verbatim; `driver._user_prompt` threads the run `salt` through.
+  Kills the 6th-A/B post-freeze re-read. SKILL §ORIENT updated to point at the
+  inlined copies and forbid the redundant Reads.
 - **Recovery hook** — `tools._persist_gather_summary` writes the wrapped
   summary to `{run_dir}/gather_summaries/{lead_id}.md` from `_run_gather`.
   No `permission.py` change needed: `decide_read` blocks only `gather_raw/`,

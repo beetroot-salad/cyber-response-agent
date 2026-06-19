@@ -112,15 +112,17 @@ def _gather_instructions(defender_dir: Path) -> str:
     )
 
 
-def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path) -> str:
+def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
     # Run context + the precomputed ORIENT pack. The procedure — artifacts to
     # write, the stop condition, case_id (= the run-dir basename) — all lives in
     # SKILL.md, the system prompt; don't restate it, and don't say "Read SKILL.md"
     # (it IS the prompt). The orientation block hands the agent the deterministic
     # context it used to spend ~18 round-trips fetching (catalog, system map,
-    # this signature's lessons/corpus) so ORIENT reasons over given material.
+    # this signature's lessons/corpus, plus the raw alert + invlang grammar) so
+    # ORIENT reasons over given material — and, because message 0 survives a
+    # compaction fold verbatim, that material can't be dropped and re-read.
     # Built fail-safe: a degraded pack just means the agent fetches a piece live.
-    orientation = orient.orientation(run_dir, defender_dir, alert_path)
+    orientation = orient.orientation(run_dir, defender_dir, alert_path, salt)
     return (
         "Begin the investigation.\n\n"
         f"run_dir: {run_dir}\n"
@@ -335,7 +337,7 @@ async def run_investigation(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt, is_main_session=True,
     )
-    prompt = _user_prompt(run_dir, alert_path, defender_dir)
+    prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
     # Hitting request_limit is an expected loop terminator, not a crash:
