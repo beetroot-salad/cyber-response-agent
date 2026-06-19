@@ -20,6 +20,7 @@ dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
 
 from defender.learning import _loop_comparison as comparison  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning import _loop_directions as directions  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import _loop_oracle as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import _loop_orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import _loop_persist as persist  # type: ignore[import-not-found]  # noqa: E402
@@ -1507,7 +1508,7 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(subagents, "_run_judge_claude", _fake_run_judge_claude)
 
-    out = subagents.invoke_judge_benign(run, story, proj, lrd)
+    out = subagents.invoke_judge(directions.BENIGN_WIRING, run, story, proj, lrd)
 
     assert out.startswith("outcome:")
     # Grounded surface: per-lead comparison file + settings written; actuals add-dir'd.
@@ -1516,9 +1517,9 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
     assert (lrd / "comparison_benign" / "l-001.md").is_file()
     assert captured["settings_path"] == lrd / "judge-benign-settings.resolved.json"
     assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison_benign"}
-    # Benign prompt/model/label — not the adversarial ones.
-    assert captured["prompt_path"] == subagents.JUDGE_BENIGN_PROMPT
-    assert captured["model"] == subagents.BENIGN_JUDGE_MODEL
+    # Benign prompt/model/label — not the adversarial ones; sourced from the wiring.
+    assert captured["prompt_path"] == directions.BENIGN_WIRING.prompt_path
+    assert captured["model"] == directions.BENIGN_WIRING.model
     assert captured["label"] == "judge-benign"
     # Scores the actuals, not the narrative — the old investigation / lead_sequence
     # sections are gone; report + the comparison manifest are in.

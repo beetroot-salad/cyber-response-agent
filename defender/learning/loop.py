@@ -38,6 +38,10 @@ from defender.learning._loop_config import (  # noqa: E402
     LoopError,
     LoopPaths,
 )
+from defender.learning._loop_directions import (  # noqa: E402
+    ADVERSARIAL_WIRING,
+    BENIGN_WIRING,
+)
 from defender.learning._loop_orchestrate import (  # noqa: E402
     author_drain,
     enqueue_for_learning,
@@ -62,7 +66,6 @@ from defender.learning._loop_subagents import (  # noqa: E402
     invoke_actor,
     invoke_actor_benign,
     invoke_judge,
-    invoke_judge_benign,
     invoke_oracle,
     is_skip_story,
 )
@@ -87,7 +90,8 @@ __all__ = [
     "append_actor_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_oracle",
-    "invoke_judge", "invoke_judge_benign", "is_skip_story", "lead_repository",
+    "invoke_judge", "ADVERSARIAL_WIRING", "BENIGN_WIRING",
+    "is_skip_story", "lead_repository",
     # Underscore names are part of the test-facing surface (loop._outcome_keyword,
     # loop._directions_for, loop._anchor_with_case_key); list them so they read as
     # intentional re-exports, not dead imports.

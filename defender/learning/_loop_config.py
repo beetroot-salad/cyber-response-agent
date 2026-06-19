@@ -236,6 +236,28 @@ BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # Pin a low budget explicitly; override per-direction via env for A/B.
 JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "low")
 BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "low")
+
+
+@dataclass(frozen=True)
+class JudgeWiring:
+    """Per-direction judge knobs — the only things that differ between the adversarial
+    and benign grounded-judge calls (the projection itself rides
+    ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
+    the per-direction config lives in one place instead of being threaded as loose kwargs
+    through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
+    direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
+    grounding files (see ``build_judge_invocation`` in ``_loop_subagents.py``). The two
+    instances live on the ``Direction`` specs in ``_loop_directions.py``."""
+
+    prompt_path: Path
+    model: str
+    effort: str
+    trace_name: str
+    label: str
+    comparison_dirname: str
+    settings_name: str
+
+
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
 # Author merge gating (platform-design §4.4). The serial author always opens a PR
