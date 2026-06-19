@@ -246,8 +246,8 @@ class JudgeWiring:
     the per-direction config lives in one place instead of being threaded as loose kwargs
     through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
     direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
-    grounding files (see ``build_judge_invocation``). The two instances live on the
-    ``Direction`` specs in ``_loop_directions.py``."""
+    grounding files (see ``build_judge_invocation`` in ``_loop_subagents.py``). The two
+    instances live on the ``Direction`` specs in ``_loop_directions.py``."""
 
     prompt_path: Path
     model: str

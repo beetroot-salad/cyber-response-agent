@@ -45,7 +45,9 @@ class FakeSubagents:
     def judge(self, wiring, run_dir, actor_story_path, projected_telemetry_path,
               learning_run_dir):
         # One seam method for both directions; the wiring tells them apart.
-        benign = wiring.comparison_dirname == "comparison_benign"
+        # Compare identity against the real spec, not a magic dirname string, so the
+        # fake can't silently misroute if BENIGN_WIRING's fields are renamed.
+        benign = wiring is loop.BENIGN_WIRING
         self._bump("judge_benign" if benign else "judge")
         return self._judge_benign if benign else self._judge
 

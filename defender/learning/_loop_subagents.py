@@ -409,8 +409,8 @@ def build_judge_invocation(
     )
 
 
-def invoke_judge(wiring: JudgeWiring, run_dir, actor_story_path,
-                 projected_telemetry_path, learning_run_dir) -> str:
+def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
+                 projected_telemetry_path: Path, learning_run_dir: Path) -> str:
     """Grounded judge for either direction: write the per-lead comparison files +
     read-only settings (under the wiring's per-direction names), then score against the
     actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the

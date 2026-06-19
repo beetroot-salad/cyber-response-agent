@@ -52,6 +52,9 @@ class ObsTrigger:
 class Direction:
     name: str
     invoke_actor: Callable        # (agents, run_dir, lrd, alert_rule_key) -> story
+    # Plain data, not a Callable like the other seams: the judge collapsed to a single
+    # agents.judge(wiring, ...) method, so the per-direction variation is pure config.
+    # (actor stays a Callable because actor/actor_benign differ in name and arity.)
     judge_wiring: JudgeWiring     # per-direction judge knobs, passed through agents.judge
     validate: Callable            # (doc) -> doc
     append_observations: Callable  # (doc, run_id, key, lrd, *, paths) -> int
