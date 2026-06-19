@@ -24,7 +24,10 @@ from defender.learning import _author_curator as curator  # type: ignore[import-
 from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
 from defender.learning import author_actor as aa  # type: ignore[import-not-found]
 
-AuthorError = curator.AuthorError
+# Reference ``shared.AuthorError`` live (not a captured module-level alias): the
+# ``tmp_repo`` conftest fixture reloads ``_author_shared``/``_author_curator``, rebinding
+# the class — a captured alias bound at collection time would go stale and stop matching
+# freshly-raised errors when a curator test runs after that fixture.
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +263,7 @@ def test_result_partition_rejects_unknown_observation():
         "consumed_skip": [],
         "commit_message": "m",
     }
-    with pytest.raises(AuthorError, match="unknown observations"):
+    with pytest.raises(shared.AuthorError, match="unknown observations"):
         curator.validate_agent_result_partition(result, to_author)
 
 
@@ -271,14 +274,14 @@ def test_result_partition_rejects_duplicate_across_buckets():
         "consumed_skip": [{"observation_id": "a/0", "reason": "x"}],
         "commit_message": "m",
     }
-    with pytest.raises(AuthorError, match="more than once"):
+    with pytest.raises(shared.AuthorError, match="more than once"):
         curator.validate_agent_result_partition(result, to_author)
 
 
 def test_result_partition_rejects_missing_observation():
     to_author = [_row("a/0", "caught"), _row("b/0", "caught")]
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
-    with pytest.raises(AuthorError, match="missing observations"):
+    with pytest.raises(shared.AuthorError, match="missing observations"):
         curator.validate_agent_result_partition(result, to_author)
 
 
@@ -317,58 +320,6 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
     # The commit touched only the corpus, and the working tree is now clean.
     assert _head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
     assert curator.changes_outside_corpus(cfg.corpus_dir_rel) == []
-
-
-def test_commit_corpus_stages_only_corpus(monkeypatch, tmp_path: Path):
-    """The commit is pathspec-scoped to the corpus, so a file already **staged** outside
-    it (the shared worktree holds a sibling author's ``_draft/`` deposits in the index)
-    can't ride into the lesson commit. This is the case the old ``--amend --only`` guard
-    covered — staging the corpus alone does NOT bound an index-global ``git commit``."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    # A stray file *staged in the index* before the curator commits — not merely
-    # untracked. A bare `git commit` (no pathspec) would sweep this into the commit.
-    (ctx["repo"] / "stray.txt").write_text("stray\n")  # outside the corpus
-    subprocess.run(["git", "-C", str(ctx["repo"]), "add", "stray.txt"], check=True)
-
-    curator.commit_corpus(3, "claude-sonnet-4-6", "defender/actor: batch abc", cfg)
-    files = _head_files(ctx["repo"])
-    assert files == ["defender/lessons-actor/x.md"]
-    assert "stray.txt" not in files
-    # The stray stays staged-but-uncommitted in the index, untouched by the lesson commit.
-    status = subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "status", "--porcelain", "--", "stray.txt"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    assert status.startswith("A  ")  # still staged, never committed
-
-
-def test_commit_corpus_no_op_when_nothing_authored(monkeypatch, tmp_path: Path):
-    """Empty index ⇒ no commit, returns None (the all-skip batch)."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    head_before = curator.git_head_sha()
-    assert curator.commit_corpus(1, "claude-sonnet-4-6", "msg", cfg) is None
-    assert curator.git_head_sha() == head_before
-
-
-def test_commit_corpus_rejects_message_with_trailers(monkeypatch, tmp_path: Path):
-    """If the agent disobeys and puts its own trailers in the commit_message, ``git
-    --trailer`` would *append* a second set — and first-match readers (``eval_secondary``)
-    would pin the agent's value over the loop's. Committing must refuse (queue intact for
-    retry) rather than silently produce duplicate provenance — before staging anything."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    head_before = curator.git_head_sha()
-    with pytest.raises(AuthorError, match="already carries"):
-        curator.commit_corpus(
-            3, "claude-sonnet-4-6",
-            "defender/actor: batch\n\nGeneration: 99\nActor-Model: wrong-model", cfg,
-        )
-    # Refused before committing — HEAD unchanged.
-    assert curator.git_head_sha() == head_before
 
 
 def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
@@ -411,38 +362,6 @@ def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Pa
     assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
 
 
-def test_verify_rejects_change_outside_corpus(monkeypatch, tmp_path: Path):
-    """Scope gate: a working-tree change outside the corpus (a stray agent Write the
-    path-scoped commit would ignore) fails verification rather than committing silently."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    other = ctx["repo"] / "defender" / "lessons"
-    other.mkdir(parents=True)
-    (other / "y.md").write_text("y\n")  # uncommitted, outside the corpus
-    result = {"committed": [], "consumed_skip": [], "commit_message": None}
-    with pytest.raises(AuthorError, match="outside"):
-        curator.verify_agent_state(result, cfg, [])
-
-
-def test_verify_rejects_no_commit_with_corpus_edits(monkeypatch, tmp_path: Path):
-    """``committed`` empty but the corpus is dirty ⇒ inconsistent; refuse to rotate."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    (ctx["lessons"] / "x.md").write_text("hello\n")
-    result = {"committed": [], "consumed_skip": [], "commit_message": None}
-    with pytest.raises(AuthorError, match="left edits"):
-        curator.verify_agent_state(result, cfg, [])
-
-
-def test_verify_rejects_committed_with_clean_corpus(monkeypatch, tmp_path: Path):
-    """``committed`` non-empty but the corpus is clean ⇒ inconsistent; refuse to rotate."""
-    ctx = _isolate(monkeypatch, tmp_path)
-    cfg = _cfg(ctx, _consume_all)
-    result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
-    with pytest.raises(AuthorError, match="unchanged"):
-        curator.verify_agent_state(result, cfg, [])
-
-
 def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     """#321 regression: if the loop's commit fails (here, a rejecting pre-commit hook —
     the issue's exact trigger), no commit lands, there is **no** un-stamped lesson commit
@@ -480,6 +399,20 @@ def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     assert {r["observation_id"] for r in left} == {"a/0"}
     consumed_path = ctx["pending"] / "actor_observations.consumed.jsonl"
     assert not consumed_path.exists() or consumed_path.read_text().strip() == ""
+
+
+def test_verify_adapter_threads_observations_noun(monkeypatch, tmp_path: Path):
+    """The curator ``verify_agent_state`` adapter delegates to the shared layer; this pins
+    that it threads *its* corpus noun (``observations``) and ``cfg`` corpus, not the author
+    side's ``findings``/``defender/lessons/``. ``committed`` non-empty but the corpus clean
+    is the inconsistent state the post-flight gate must reject — and the one branch whose
+    error string carries the noun, so a mis-threaded adapter arg would surface here. The
+    shared-layer branch logic itself is covered corpus-agnostically in test_author_shared."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    cfg = _cfg(ctx, _consume_all)
+    result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
+    with pytest.raises(shared.AuthorError, match="committed observations but left"):
+        curator.verify_agent_state(result, cfg, [])
 
 
 # ---------------------------------------------------------------------------

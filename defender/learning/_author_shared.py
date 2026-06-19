@@ -10,16 +10,26 @@ shared repo lock (``defender/learning/_author.lock``) before launching
 their child agent — and hold both through the entire fold-and-commit
 flow.
 
-This module exposes the shared repo-lock acquire/release pair and the
-actor-generation counter helper. Queue locks remain per-author because
-the queue paths differ. Both ``author.py`` and ``author_actor.py``
-acquire this lock after their queue lock and hold it across the
-child-agent invocation through queue rotation.
+This module exposes the shared repo-lock acquire/release pair, the
+generation counters, and the shared git transaction layer the two
+authors run after their child agent exits: the stray scope-gate
+(``changes_outside``), the corpus-clean predicate (``corpus_dir_clean``),
+the loop-owned committer (``commit_corpus`` — pathspec-scoped, with
+optional provenance trailers), the HEAD-sha reader (``git_head_sha``),
+the working-tree cross-check (``verify_agent_state``), and the shared
+``AuthorError`` they all raise. ``author.py`` (``defender/lessons/``, no
+trailers) and ``_author_curator.py`` (the actor/env corpora, with
+``Generation:``/``{trailer_label}:`` trailers) reach this plumbing through
+thin, corpus-pinning adapters rather than hand-mirroring it. Queue locks
+remain per-author because the queue paths differ. Both ``author.py`` and
+``author_actor.py`` acquire this lock after their queue lock and hold it
+across the child-agent invocation through queue rotation.
 """
 from __future__ import annotations
 
 import fcntl
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -38,6 +48,10 @@ LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
 REPO_LOCK_WAIT_SECONDS = int(
     os.environ.get("LEARNING_REPO_LOCK_WAIT_SECONDS", "1800")
 )
+
+
+class AuthorError(Exception):
+    """Fatal pre/post-flight error — caller should abort, queue stays intact."""
 
 
 def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
@@ -146,3 +160,194 @@ def partition_committed(
     if hold_committed:
         return [without_consumed_category(c) for c in committed], []
     return [], committed
+
+
+# ---------------------------------------------------------------------------
+# Git transaction layer — the loop is the sole committer; the agent runs no
+# git. Both authors reach these through thin, corpus-pinning adapters
+# (``author.py`` / ``_author_curator.py``); the plumbing lives here once so a
+# fix to the porcelain parsing or the commit/no-op contract can't drift between
+# the two corpora (issue #330). ``repo_root`` (the worktree the git commands run
+# in) is passed in, not read from a module global — so the layer is exercised by
+# injection: tests point it at a tmp repo directly, no monkeypatching of module
+# state. The adapters supply their module's ``REPO_ROOT`` as the production root.
+# ---------------------------------------------------------------------------
+
+
+def git_head_sha(repo_root: Path) -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    return proc.stdout.strip()
+
+
+def changes_outside(repo_root: Path, prefix: str) -> list[str]:
+    """Repo-wide uncommitted paths that are *not* a corpus ``*.md`` file under ``prefix``.
+
+    The agent runs no git, so at verify time its edits sit in the working tree
+    (un-committed); the scope gate runs over ``git status`` instead of a HEAD commit.
+    Covers staged, unstaged, and untracked paths so a stray ``Write`` or improvised shim
+    outside the corpus is caught. ``--untracked-files=all`` lists each untracked file
+    individually rather than collapsing whole untracked directories, so a single stray
+    file is reported as itself (and a fresh corpus file isn't mis-collapsed to its dir).
+    The caller diffs against a pre-agent baseline so unrelated leftovers (a sibling
+    author's uncommitted work earlier in the same batch) aren't blamed on the curator
+    agent."""
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    stray: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:]
+        if " -> " in path:  # rename: XY orig -> new
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if not (path.startswith(prefix) and path.endswith(".md")):
+            stray.append(path)
+    return stray
+
+
+def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--", str(corpus_dir)],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    return not proc.stdout.strip()
+
+
+def _result_list(result: dict, key: str) -> list[Any]:
+    value = result.get(key, [])
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AuthorError(f"AUTHOR_RESULT field {key!r} must be a list")
+    return value
+
+
+def _commit_message(result: dict, noun: str) -> str:
+    """The agent-authored commit message the loop passes to ``git commit -F-``.
+
+    Required (and non-empty) whenever the batch committed anything — the loop owns the
+    commit, but the agent still authors the human-readable message body. ``noun`` is the
+    corpus's unit of work (``findings`` / ``observations``) for the error string."""
+    msg = result.get("commit_message")
+    if not isinstance(msg, str) or not msg.strip():
+        raise AuthorError(
+            f"AUTHOR_RESULT reported committed {noun} without a non-empty "
+            "commit_message; refusing to commit"
+        )
+    return msg
+
+
+def commit_corpus(
+    repo_root: Path,
+    corpus_dir: Path,
+    corpus_dir_rel: str,
+    message: str,
+    *,
+    trailers: list[tuple[str, str]] | None = None,
+) -> str | None:
+    """Stage the corpus, commit it pathspec-scoped, return the new sha (or ``None``).
+
+    The agent authors lesson content + a commit message but runs no git: the loop is the
+    **sole committer**. The ``git commit`` is **pathspec-scoped** to the corpus
+    (``-- <corpus_dir>``): staging alone does not bound a commit — a plain index-global
+    ``git commit`` sweeps in whatever else sits staged in the shared worktree (e.g. a
+    sibling author's ``_draft/`` deposits from ``lead_author._stage_pending_drafts``), so
+    the pathspec is what keeps anything *outside* the corpus out of the lesson commit.
+    Returns the new sha, or ``None`` when the agent authored nothing (empty index → no
+    commit).
+
+    When ``trailers`` is given (the actor/env curators pass ``Generation:`` /
+    ``{trailer_label}:``), the loop owns that provenance — it already computes both values,
+    so they can't drift off a hand-typed literal, and the trailers go on at creation time
+    rather than via a follow-up ``--amend`` (no commit→stamp split that could leave an
+    un-stamped lesson commit behind, issue #321). A guard refuses a ``commit_message`` that
+    already carries one of those trailer keys: ``git --trailer`` *appends*, so a
+    hand-written one would survive alongside ours and shadow it for first-match readers
+    (``eval_secondary.parse_trailers``). ``author.py`` passes no trailers — the findings
+    corpus carries none — so neither the guard nor the ``--trailer`` args apply."""
+    trailers = trailers or []  # normalize None→[] once; both the guard and args below
+    if trailers:
+        keys = "|".join(re.escape(key) for key, _ in trailers)
+        if re.search(rf"(?m)^(?:{keys}):", message):
+            labels = "/".join(f"{key}:" for key, _ in trailers)
+            raise AuthorError(
+                f"agent commit_message already carries {labels} "
+                "trailers; the loop owns provenance and git --trailer would append "
+                "duplicates — refusing to commit (queue intact for retry)"
+            )
+    add = subprocess.run(
+        ["git", "add", "--", str(corpus_dir)],
+        cwd=repo_root, capture_output=True, text=True,
+    )
+    if add.returncode != 0:
+        raise AuthorError(
+            f"failed to stage {corpus_dir_rel} batch: {add.stderr.strip()}"
+        )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", str(corpus_dir)],
+        cwd=repo_root, capture_output=True, text=True,
+    )
+    if staged.returncode == 0:
+        return None  # nothing staged — no commit
+    if staged.returncode != 1:  # 0=no diff, 1=diff, >1=git error (don't commit blind)
+        raise AuthorError(
+            f"git diff --cached failed for {corpus_dir_rel}: {staged.stderr.strip()}"
+        )
+    trailer_args: list[str] = []
+    for key, val in trailers:
+        trailer_args += ["--trailer", f"{key}: {val}"]
+    proc = subprocess.run(
+        ["git", "commit", "-F", "-", *trailer_args, "--", str(corpus_dir)],
+        cwd=repo_root, input=message, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise AuthorError(
+            f"failed to commit {corpus_dir_rel} batch: {proc.stderr.strip()}"
+        )
+    return git_head_sha(repo_root)
+
+
+def verify_agent_state(
+    repo_root: Path,
+    result: dict,
+    corpus_dir: Path,
+    corpus_dir_rel: str,
+    noun: str,
+    baseline_stray: list[str],
+) -> None:
+    """Cross-check the agent's reported state against the working tree before the loop
+    commits + rotates. The agent runs no git, so its edits sit un-committed in the working
+    tree: (1) the agent introduced no *new* change outside ``<corpus>``*.md (scope gate —
+    a plain ``git add <corpus>`` already won't stage strays, but a new one means the agent
+    misbehaved, so fail loud; diffed against ``baseline_stray`` captured before the agent
+    ran so pre-existing leftovers aren't blamed on it); (2) ``committed`` non-empty ⇒ the
+    corpus has edits to commit; (3) ``committed`` empty ⇒ the corpus is clean (an all-skip
+    batch leaves no diff — a forward-BAD revert is re-edited back to its pre-batch bytes).
+    Any provenance trailers are added by ``commit_corpus`` afterward, not verified here.
+    ``noun`` is the corpus's unit of work (``findings`` / ``observations``)."""
+    new_stray = sorted(
+        set(changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
+    )
+    if new_stray:
+        raise AuthorError(
+            f"agent changed files outside {corpus_dir_rel}*.md: {new_stray}; "
+            "refusing to commit/rotate"
+        )
+    committed = _result_list(result, "committed")
+    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
+    if committed and not corpus_dirty:
+        raise AuthorError(
+            f"author reported committed {noun} but left {corpus_dir_rel} "
+            "unchanged; refusing to rotate queue"
+        )
+    if not committed and corpus_dirty:
+        raise AuthorError(
+            f"author reported no commits but left edits in {corpus_dir_rel}; "
+            "refusing to rotate queue"
+        )
