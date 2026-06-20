@@ -1,0 +1,139 @@
+"""Unit tests for the case-history mapper (the anti-corruption layer, #317).
+
+Pure layer only — no transport, no network. The mapper's round-trip
+(CaseRecord → close payload → parse_disposition) is the executable spec of the
+de-facto schema the read PR will rely on.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from defender.scripts.tools import case_ticket
+
+
+ALERT = {
+    "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
+    "agent": {"name": "target-endpoint"},
+}
+
+
+def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Routine.",
+               confidence: str = "high", with_alert: bool = True) -> Path:
+    run_dir = tmp_path / "20260620T000000Z-sshd"
+    run_dir.mkdir()
+    run_dir.joinpath("report.md").write_text(
+        f"---\ncase_id: {run_dir.name}\ndisposition: {disposition}\n"
+        f"confidence: {confidence}\n---\n{reason}\n"
+    )
+    if with_alert:
+        run_dir.joinpath("alert.json").write_text(json.dumps(ALERT))
+    return run_dir
+
+
+# ---------------------------------------------------------------------------
+# Enum drift guard — the local copy must track defender.learning._loop_config.
+# (The test may import learning; the production write path must not.)
+# ---------------------------------------------------------------------------
+
+
+def test_disposition_enum_matches_loop_config():
+    from defender.learning._loop_config import DISPOSITION_ENUM as canonical
+
+    assert case_ticket.DISPOSITION_ENUM == canonical
+
+
+# ---------------------------------------------------------------------------
+# read_case_record
+# ---------------------------------------------------------------------------
+
+
+def test_read_case_record_parses_internal_model(tmp_path: Path):
+    run_dir = _write_run(tmp_path, disposition="malicious", reason="Confirmed C2 beacon.")
+    rec = case_ticket.read_case_record(run_dir)
+    assert rec.case_id == run_dir.name
+    assert rec.signature_id == "5710"
+    assert rec.disposition == "malicious"
+    assert rec.confidence == "high"
+    assert rec.reason == "Confirmed C2 beacon."
+
+
+def test_read_case_record_signature_unknown_without_alert(tmp_path: Path):
+    run_dir = _write_run(tmp_path, with_alert=False)
+    rec = case_ticket.read_case_record(run_dir)
+    assert rec.signature_id == "unknown"  # non-fatal: disposition still records
+
+
+def test_read_case_record_missing_report_raises(tmp_path: Path):
+    run_dir = tmp_path / "empty"
+    run_dir.mkdir()
+    with pytest.raises(case_ticket.CaseTicketError):
+        case_ticket.read_case_record(run_dir)
+
+
+def test_read_case_record_bad_disposition_raises(tmp_path: Path):
+    run_dir = _write_run(tmp_path, disposition="totally-not-a-disposition")
+    with pytest.raises(case_ticket.CaseTicketError):
+        case_ticket.read_case_record(run_dir)
+
+
+def test_read_case_record_no_frontmatter_raises(tmp_path: Path):
+    run_dir = tmp_path / "nofm"
+    run_dir.mkdir()
+    run_dir.joinpath("report.md").write_text("just prose, no fence\n")
+    with pytest.raises(case_ticket.CaseTicketError):
+        case_ticket.read_case_record(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# Mapper: open payload
+# ---------------------------------------------------------------------------
+
+
+def test_alert_to_open_payload_shape_and_signature_label():
+    payload = case_ticket.alert_to_open_payload(ALERT, "case-1")
+    assert payload["key"] == "case-1"
+    assert payload["status"] == "open"
+    assert payload["summary"] == ALERT["rule"]["description"]
+    assert "sig:5710" in payload["labels"]
+
+
+def test_alert_to_open_payload_handles_missing_rule():
+    payload = case_ticket.alert_to_open_payload({}, "case-2")
+    assert payload["labels"] == ["sig:unknown"]
+    assert payload["status"] == "open"
+
+
+# ---------------------------------------------------------------------------
+# Mapper: close payload + round-trip (the de-facto schema contract)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("disposition", sorted(case_ticket.DISPOSITION_ENUM))
+def test_close_roundtrip_recovers_disposition(disposition: str):
+    rec = case_ticket.CaseRecord(
+        case_id="c", signature_id="5710", disposition=disposition,
+        confidence="medium", reason="Some reason — with an em dash inside.",
+    )
+    close = case_ticket.case_record_to_close(rec)
+    assert close["status"] == "closed"
+    assert close["resolution"].startswith(disposition)
+    recovered = case_ticket.parse_disposition_from_resolution(close["resolution"])
+    assert recovered == disposition
+
+
+def test_parse_disposition_ignores_foreign_resolution():
+    # A human-edited / non-ours resolution must not be mistaken for a disposition.
+    assert case_ticket.parse_disposition_from_resolution("Closed by analyst.") is None
+    assert case_ticket.parse_disposition_from_resolution("") is None
+    assert case_ticket.parse_disposition_from_resolution(None) is None
+
+
+def test_end_to_end_read_then_map(tmp_path: Path):
+    run_dir = _write_run(tmp_path, disposition="benign", reason="Authorized deploy.")
+    rec = case_ticket.read_case_record(run_dir)
+    close = case_ticket.case_record_to_close(rec)
+    assert case_ticket.parse_disposition_from_resolution(close["resolution"]) == "benign"
+    assert "Authorized deploy." in close["resolution"]
