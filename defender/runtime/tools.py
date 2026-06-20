@@ -496,11 +496,17 @@ async def _run_gather(
     return wrapped
 
 
-def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None:
+def register_gather_tool(
+    main_agent, gather_factory, request_limit: int,
+    *, role: str = "finder", prompt_fn=None,
+) -> None:
     """Register the `gather` dispatch tool on the MAIN agent only (the gather
     subagent must not self-dispatch). `gather_factory(agent_id)` builds a fresh
-    nested gather Agent (Haiku, with the gather SKILL as its instructions) bound
-    to that observability id."""
+    nested gather Agent bound to that observability id.
+
+    `role`/`prompt_fn` pick the engine, threaded into `_run_gather`: default
+    `"finder"` + `_finder_prompt` is the finder/executor split; the lean
+    single-agent path passes `role="executor"` + `_gather_prompt`."""
 
     @main_agent.tool
     async def gather(
@@ -517,6 +523,7 @@ def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None
         return await _run_gather(
             ctx.deps, gather_factory, request_limit,
             lead_id, system, goal, what_to_summarize,
+            role=role, prompt_fn=prompt_fn,
         )
 
 

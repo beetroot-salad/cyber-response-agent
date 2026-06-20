@@ -33,6 +33,7 @@ from .circuit_breaker import RunAborted
 from .tools import (
     GatherDeps,
     RunDeps,
+    _gather_prompt,
     register_assay_tool,
     register_gather_tool,
     register_tools,
@@ -331,6 +332,13 @@ def _compaction_enabled() -> bool:
         "1", "on", "true", "yes")
 
 
+def _lean_gather_enabled() -> bool:
+    """DEFENDER_GATHER_LEAN routes the main agent's `gather` dispatch to the lean
+    single-agent path (issue #340) instead of the finder/executor split."""
+    return os.environ.get("DEFENDER_GATHER_LEAN", "").strip().lower() in (
+        "1", "on", "true", "yes")
+
+
 def _summary_pointers(run_dir: Path) -> dict[str, str]:
     """{lead_id: path} for persisted gather summaries (tools._persist_gather_summary).
 
@@ -432,14 +440,28 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
-    # The gather dispatch tool builds a fresh nested FINDER per lead (the finder
-    # then builds an executor per measurement). The main→gather dispatch interface
-    # is unchanged — the split lives inside the per-lead agent.
-    register_gather_tool(
-        agent,
-        lambda agent_id: build_finder_agent(defender_dir, logger, agent_id),
-        FINDER_REQUEST_LIMIT,
-    )
+    # The gather dispatch tool builds a fresh nested gather agent per lead. The
+    # main→gather dispatch interface is identical either way; only the per-lead
+    # agent shape differs.
+    if _lean_gather_enabled():
+        # Lean single-agent gather (issue #340): one executor-role agent runs
+        # find→execute(ES|QL)→verify; no finder/assay layer.
+        register_gather_tool(
+            agent,
+            lambda agent_id: build_lean_gather_agent(defender_dir, logger, agent_id),
+            GATHER_REQUEST_LIMIT,
+            role="executor", prompt_fn=_gather_prompt,
+        )
+        print("[run_pai] LEAN single-agent gather ENABLED (DEFENDER_GATHER_LEAN)",
+              file=sys.stderr)
+    else:
+        # Finder/executor split: a nested FINDER per lead builds an executor per
+        # measurement (the split lives inside the per-lead agent).
+        register_gather_tool(
+            agent,
+            lambda agent_id: build_finder_agent(defender_dir, logger, agent_id),
+            FINDER_REQUEST_LIMIT,
+        )
     return agent
 
 
