@@ -31,6 +31,17 @@ from typing import Any
 # goal of #317); test_case_ticket asserts the two stay in sync.
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
+# The adversarial-probe outcomes (defender.learning._loop_config.OUTCOME_ENUM) that
+# make a benign-disposed case a SAFE cover-story seed. Polarity is load-bearing: the
+# benign case ran the *adversarial* leg (hunt the missed attack), so `survived` means
+# the attack got through = the defender MISSED it = a poisonous seed → excluded. Only
+# a `caught` (actuals refuted the attack) or `skip-passthrough` (no coherent attack
+# to even try) marks the benign call trustworthy. `undecidable`/`incoherent` do not
+# qualify. This decision is applied once here, at write time, and stored as the
+# {seed_eligible} boolean; the reader never re-derives it. The local copy keeps the
+# write path free of a `defender.learning` import — test_case_ticket guards the subset.
+_SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
+
 _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
 # Fallbacks for internal facts that are absent (not "configuration" — these are how
@@ -113,8 +124,9 @@ def _render(value: Any, ctx: dict[str, str]) -> Any:
 def _ctx(**kw: str) -> dict[str, str]:
     """A template context with every placeholder present (so a template referencing
     a field this call doesn't set renders empty rather than raising KeyError)."""
-    base = {k: "" for k in ("case_id", "signature", "summary",
-                            "disposition", "reason", "confidence")}
+    base = {k: "" for k in ("case_id", "signature", "summary", "disposition",
+                            "reason", "confidence", "outcome", "seed_eligible",
+                            "event_time")}
     base.update(kw)
     return base
 
@@ -151,6 +163,22 @@ def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     # A present-but-empty value (e.g. rule.id == "") is as useless as a missing
     # one, so fall back on any falsy value, not just None.
     return str(val) if val else _SIGNATURE_FALLBACK
+
+
+def _event_time(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
+    """The SIEM event time from the alert (ISO-8601), or "" if absent. Unlike the
+    signature there is no sentinel fallback: a case with no event time simply can't
+    be windowed, so the reader drops it from the seed pool rather than mis-dating it."""
+    path = _dig(mapping, "source.event_time") or "timestamp"
+    val = _dig(alert, str(path))
+    return str(val) if val else ""
+
+
+def alert_event_time(alert: dict[str, Any]) -> str | None:
+    """The alert's SIEM event time (ISO-8601), or None if absent. The seed sampler
+    anchors its recency window on this — the time the activity happened — so a
+    replayed alert windows against its own date, not wall-clock now."""
+    return _event_time(alert, _load_mapping()) or None
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
@@ -213,8 +241,67 @@ def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]
         # Fall back on a present-but-empty description too, so the open ticket
         # never ends up with a blank summary.
         summary=str(summary) if summary else _SUMMARY_FALLBACK,
+        event_time=_event_time(alert, mapping),
     )
-    return _render(mapping.get("open") or {}, ctx)
+    payload = _render(mapping.get("open") or {}, ctx)
+    if isinstance(payload.get("labels"), list):
+        # Drop any convention label whose placeholder rendered empty (e.g. `evt:`
+        # when the alert carries no event time) so no value-less label hits the
+        # store; `sig:` always has a fallback, so only optional stamps are affected.
+        bare = {p for p in _open_label_prefixes(mapping) if p}
+        payload["labels"] = [lbl for lbl in payload["labels"] if lbl not in bare]
+    return payload
+
+
+def _open_label_prefixes(mapping: dict[str, Any]) -> list[str]:
+    """The literal prefix (text before the first ``{``) of every templated
+    `open.labels` entry — used to recognize a label whose placeholder rendered empty
+    (a bare prefix), so the write side can drop it."""
+    out = []
+    for tmpl in _dig(mapping, "open.labels") or []:
+        if isinstance(tmpl, str):
+            i = tmpl.find("{")
+            if i > 0:
+                out.append(tmpl[:i])
+    return out
+
+
+def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
+    """The pure-literal prefix of the `open.labels` entry carrying ``{placeholder}``
+    (e.g. ``sig:`` for ``signature``) — the single source of the marker both the
+    write side renders and a reader matches on. None if no such label, or its prefix
+    is not a pure literal (then it can't identify a label unambiguously)."""
+    ph = "{" + placeholder + "}"
+    for tmpl in _dig(mapping, "open.labels") or []:
+        if not isinstance(tmpl, str):
+            continue
+        i = tmpl.find(ph)
+        if i == -1:
+            continue
+        prefix = tmpl[:i]
+        if "{" in prefix:  # the prefix must be a pure literal to be a marker
+            return None
+        return prefix or None
+    return None
+
+
+def signature_label(alert: dict[str, Any]) -> str | None:
+    """The ticket label that identifies this alert's signature (e.g. ``sig:5710``),
+    rendered from ``mapping.open.labels`` — the SAME label the bridge create stamps,
+    so a reader (the seed sampler) can filter the store to this signature without
+    knowing the label convention. None if no signature label is configured.
+
+    Matched by its ``sig:`` prefix, not by position, so adding other labels (the
+    ``evt:`` event-time stamp) can't shift which one this returns."""
+    mapping = _load_mapping()
+    signature = _signature_id(alert, mapping)
+    labels = _render(_dig(mapping, "open.labels") or [], _ctx(signature=signature))
+    prefix = _open_label_prefix(mapping, "signature")
+    if prefix:
+        for lbl in labels:
+            if isinstance(lbl, str) and lbl.startswith(prefix):
+                return lbl
+    return labels[0] if labels else None
 
 
 def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
@@ -263,3 +350,139 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
         return None
     head = resolution.split(sep, 1)[0].strip()
     return head if head in DISPOSITION_ENUM else None
+
+
+# ---------------------------------------------------------------------------
+# Offline enrichment: adversarial-probe verdict -> seed-eligibility comment
+# ---------------------------------------------------------------------------
+
+
+def enrichment_to_comment(outcome: str) -> dict[str, Any]:
+    """Build the `POST /tickets/{key}/comments` body stamping seed-eligibility.
+
+    `outcome` is the adversarial-probe verdict (an `OUTCOME_ENUM` token). The
+    polarity decision rides `_SEED_ELIGIBLE_OUTCOMES` and is rendered into the
+    {seed_eligible} boolean here, so the reader (`parse_survival_from_comments`)
+    never re-derives it. Shape + conventions come from `mapping.yaml` (`annotate`)."""
+    mapping = _load_mapping()
+    eligible = outcome in _SEED_ELIGIBLE_OUTCOMES
+    ctx = _ctx(outcome=outcome, seed_eligible="true" if eligible else "false")
+    return _render(mapping.get("annotate") or {}, ctx)
+
+
+def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The pure-literal prefix before {seed_eligible} in `annotate.body` (the
+    comment-identity marker) and the literal that follows it (the value separator)
+    — the single source for both encoding (above) and decoding (below)."""
+    tmpl = _dig(mapping, "annotate.body")
+    if not isinstance(tmpl, str):
+        return None, None
+    ph = "{seed_eligible}"
+    i = tmpl.find(ph)
+    if i == -1:
+        return None, None
+    marker = tmpl[:i]
+    if "{" in marker:  # the marker must be a pure literal to identify our comment
+        return None, None
+    rest = tmpl[i + len(ph):]
+    nxt = rest.find("{")
+    sep = rest[:nxt] if nxt != -1 else rest
+    return (marker or None), (sep or None)
+
+
+def parse_survival_from_comments(comments: Any) -> bool | None:
+    """Tri-state read of the seed-eligibility flag from a ticket's `comments`.
+
+    Returns True (a covering benign case — safe seed), False (probed, not eligible),
+    or None (no enrichment comment yet — the runtime close-comment is NOT mistaken
+    for one, since only the `annotate.body` marker matches). The latest matching
+    comment wins, so a re-stamp is read consistently. Inverse of
+    `enrichment_to_comment`; the round-trip is tested."""
+    try:
+        marker, sep = _seed_marker_and_separator(_load_mapping())
+    except CaseTicketError:
+        return None
+    if not marker:
+        return None
+    result: bool | None = None
+    for c in comments or []:
+        body = c.get("body") if isinstance(c, dict) else None
+        if not isinstance(body, str) or not body.startswith(marker):
+            continue
+        tail = body[len(marker):]
+        token = (tail.split(sep, 1)[0] if sep else tail).strip()
+        if token == "true":
+            result = True
+        elif token == "false":
+            result = False
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Thin external-ticket accessors — so learning-side readers (the seed sampler)
+# call these instead of indexing raw ticket dicts (the anti-corruption boundary:
+# ticket field names stay known only here).
+# ---------------------------------------------------------------------------
+
+
+def ticket_key(ticket: Any) -> str | None:
+    return ticket.get("key") if isinstance(ticket, dict) else None
+
+
+def ticket_created(ticket: Any) -> str | None:
+    """The ISO-8601 ticket-creation timestamp, set server-side at the bridge open.
+    This is *materialize* time (when we investigated), which drifts from the alert
+    event time under replay — window on `ticket_event_time`, not this."""
+    return ticket.get("created") if isinstance(ticket, dict) else None
+
+
+def ticket_event_time(ticket: Any) -> str | None:
+    """The alert's SIEM event time (ISO-8601), read back from the `evt:` label the
+    bridge open stamped — the time the activity happened, the key the seed sampler
+    windows on. None if absent (no label / no event time at open)."""
+    if not isinstance(ticket, dict):
+        return None
+    labels = ticket.get("labels")
+    if not isinstance(labels, list):
+        return None
+    try:
+        prefix = _open_label_prefix(_load_mapping(), "event_time")
+    except CaseTicketError:
+        return None
+    if not prefix:
+        return None
+    for lbl in labels:
+        if isinstance(lbl, str) and lbl.startswith(prefix):
+            return lbl[len(prefix):] or None
+    return None
+
+
+def ticket_disposition(ticket: Any) -> str | None:
+    """The disposition decoded from the close `resolution` (None if not ours)."""
+    if not isinstance(ticket, dict):
+        return None
+    return parse_disposition_from_resolution(ticket.get("resolution"))
+
+
+def ticket_reason(ticket: Any) -> str | None:
+    """The free-text reason from the close `resolution` (the text after the
+    disposition separator), or None if the resolution wasn't written by us."""
+    if not isinstance(ticket, dict):
+        return None
+    resolution = ticket.get("resolution")
+    if not isinstance(resolution, str):
+        return None
+    try:
+        sep = _disposition_separator(_load_mapping())
+    except CaseTicketError:
+        return None
+    if not sep or sep not in resolution:
+        return None
+    return resolution.split(sep, 1)[1].strip() or None
+
+
+def ticket_seed_eligible(ticket: Any) -> bool | None:
+    """The seed-eligibility flag decoded from the ticket's enrichment comment."""
+    if not isinstance(ticket, dict):
+        return None
+    return parse_survival_from_comments(ticket.get("comments"))

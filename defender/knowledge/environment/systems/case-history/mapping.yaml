@@ -6,12 +6,18 @@
 # Edit THIS FILE to change the convention; no code change required.
 #
 # Templates use {placeholders}: case_id, signature, summary, disposition, reason,
-# confidence. `source.*` are dotted paths into alert.json.
+# confidence, outcome, seed_eligible, event_time. `source.*` are dotted paths into
+# alert.json.
 
 # Where to read facts from the internal model (alert.json).
 source:
   signature: rule.id
   summary: rule.description
+  # The SIEM event time — when the activity happened, NOT when we investigated it.
+  # Stamped onto the open ticket (the `evt:` label) so the benign seed sampler can
+  # window candidates by alert time; the server-set `created` is materialize time and
+  # drifts from this under replay/backtest.
+  event_time: timestamp
 
 # POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
 # Keys are external ticket fields (TicketCreate); values are rendered templates.
@@ -21,8 +27,13 @@ open:
   description: "Auto-created from alert {case_id} (rule {signature})."
   status: open
   reporter: defender
+  # `sig:` is the signature filter key (the sampler lists by it server-side); `evt:`
+  # carries the alert event time, read back client-side to window candidates. Each
+  # label's literal prefix (text before its {placeholder}) is the reader's marker —
+  # keep it pure-literal so a reader can tell the two apart.
   labels:
     - "sig:{signature}"
+    - "evt:{event_time}"
 
 # POST /tickets/{key}/transitions — the close: the defender's disposition.
 # Keys are external transition fields. `resolution` MUST begin with {disposition};
@@ -33,3 +44,15 @@ close:
   resolution: "{disposition} — {reason}"
   author: defender
   comment: "Disposition: {disposition} (confidence: {confidence})."
+
+# POST /tickets/{key}/comments — offline enrichment stamp (issue #317, read path).
+# The learning loop's adversarial-probe verdict, recorded as a seed-eligibility
+# flag the benign seed sampler reads. The polarity decision (which probe outcomes
+# make a benign case a safe cover-story seed) is made once at WRITE time and stored
+# as the {seed_eligible} boolean — the reader never re-derives it. `body` MUST
+# begin with a pure-literal marker (the text before {seed_eligible}) so the reader
+# tells this comment apart from the runtime close-comment; {seed_eligible} must
+# lead the placeholders, and the decode splits on the literal that follows it.
+annotate:
+  author: learning
+  body: "seed-eligibility: {seed_eligible} (adversarial-probe: {outcome})"

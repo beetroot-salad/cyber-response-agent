@@ -17,6 +17,7 @@ from defender.scripts.case_history import case_ticket
 ALERT = {
     "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
     "agent": {"name": "target-endpoint"},
+    "timestamp": "2026-05-07T07:15:01.561+0000",
 }
 
 
@@ -43,6 +44,107 @@ def test_disposition_enum_matches_loop_config():
     from defender.learning._loop_config import DISPOSITION_ENUM as canonical
 
     assert case_ticket.DISPOSITION_ENUM == canonical
+
+
+def test_seed_eligible_outcomes_subset_of_outcome_enum():
+    # The seed-eligibility polarity is keyed off the adversarial outcome enum;
+    # the local copy must stay a subset of the canonical OUTCOME_ENUM.
+    from defender.learning._loop_config import OUTCOME_ENUM
+
+    assert case_ticket._SEED_ELIGIBLE_OUTCOMES <= OUTCOME_ENUM
+
+
+# ---------------------------------------------------------------------------
+# Offline enrichment: seed-eligibility comment round-trip + polarity (#317 read)
+# ---------------------------------------------------------------------------
+
+
+def _enrichment_comment(outcome: str) -> dict:
+    return {"author": "learning", "body": case_ticket.enrichment_to_comment(outcome)["body"]}
+
+
+@pytest.mark.parametrize(
+    "outcome,eligible",
+    [("caught", True), ("skip-passthrough", True),
+     ("survived", False), ("undecidable", False), ("incoherent", False)],
+)
+def test_enrichment_roundtrip_and_polarity(outcome: str, eligible: bool):
+    # The load-bearing correctness: a `survived` adversarial probe (the defender
+    # MISSED the attack) must NOT mark the benign case seed-eligible.
+    comments = [_enrichment_comment(outcome)]
+    assert case_ticket.parse_survival_from_comments(comments) is eligible
+
+
+def test_parse_survival_absent_is_none_not_false():
+    assert case_ticket.parse_survival_from_comments([]) is None
+    assert case_ticket.parse_survival_from_comments(None) is None
+
+
+def test_parse_survival_ignores_runtime_close_comment():
+    # The runtime close stamps a "Disposition: …" comment — it must never be
+    # mistaken for a seed-eligibility flag (that would seed un-probed cases).
+    close_comment = {"author": "defender", "body": "Disposition: benign (confidence: high)."}
+    assert case_ticket.parse_survival_from_comments([close_comment]) is None
+
+
+def test_parse_survival_latest_flag_wins():
+    comments = [_enrichment_comment("survived"), _enrichment_comment("caught")]
+    assert case_ticket.parse_survival_from_comments(comments) is True
+
+
+def test_parse_survival_tolerates_malformed_comment_entries():
+    assert case_ticket.parse_survival_from_comments(
+        [None, {"no_body": 1}, {"body": 42}, _enrichment_comment("caught")]
+    ) is True
+
+
+# ---------------------------------------------------------------------------
+# Thin external-ticket accessors (the boundary the seed sampler reads through)
+# ---------------------------------------------------------------------------
+
+
+def test_ticket_accessors():
+    ticket = {
+        "key": "case-7",
+        "created": "2026-06-01T00:00:00+00:00",
+        "labels": ["sig:5710", "evt:2026-05-30T09:00:00+00:00"],
+        "resolution": "benign — nightly vuln scan",
+        "comments": [_enrichment_comment("caught")],
+    }
+    assert case_ticket.ticket_key(ticket) == "case-7"
+    assert case_ticket.ticket_created(ticket) == "2026-06-01T00:00:00+00:00"
+    # The window keys on the alert event time (the `evt:` label), not `created`.
+    assert case_ticket.ticket_event_time(ticket) == "2026-05-30T09:00:00+00:00"
+    assert case_ticket.ticket_disposition(ticket) == "benign"
+    assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
+    assert case_ticket.ticket_seed_eligible(ticket) is True
+
+
+def test_ticket_accessors_on_foreign_ticket():
+    # A human-closed ticket (resolution not ours, no enrichment comment): the
+    # decoders return None rather than mis-parsing.
+    ticket = {"key": "h-1", "resolution": "Closed by analyst.", "comments": []}
+    assert case_ticket.ticket_disposition(ticket) is None
+    assert case_ticket.ticket_reason(ticket) is None
+    assert case_ticket.ticket_seed_eligible(ticket) is None
+    assert case_ticket.ticket_event_time(ticket) is None  # no labels → None
+    assert case_ticket.ticket_key("not-a-dict") is None
+
+
+def test_signature_label_matches_open_label():
+    # The sampler filters the store by this label; it must equal the label the
+    # bridge create stamps, and `evt:` must not shift which label is returned.
+    label = case_ticket.signature_label(ALERT)
+    assert label == "sig:5710"
+    assert label in case_ticket.alert_to_open_payload(ALERT, "c")["labels"]
+
+
+def test_open_payload_stamps_alert_event_time_label():
+    # The event-time label round-trips through the event-time accessor — the write
+    # side stamps it, the read side (sampler) decodes it.
+    payload = case_ticket.alert_to_open_payload(ALERT, "c")
+    assert case_ticket.alert_event_time(ALERT) == ALERT["timestamp"]
+    assert case_ticket.ticket_event_time(payload) == ALERT["timestamp"]
 
 
 # ---------------------------------------------------------------------------
