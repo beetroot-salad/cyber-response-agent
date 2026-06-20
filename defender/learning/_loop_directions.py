@@ -35,6 +35,7 @@ BENIGN_WIRING = JudgeWiring(
     JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
     "judge_benign_trace.jsonl", "judge-benign",
     "comparison_benign", "judge-benign-settings.resolved.json",
+    closed_ticket_read=True,  # the benign judge confirms a cited closed case (#338)
 )
 
 

@@ -419,6 +419,71 @@ def parse_survival_from_comments(comments: Any) -> bool | None:
 
 
 # ---------------------------------------------------------------------------
+# Offline enrichment: resolution-method grounded predicates (issue #338)
+# ---------------------------------------------------------------------------
+
+
+def _resolution_method_marker(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The pure-literal prefix before {resolution_method} in
+    `enrich.resolution_method_suffix` (the grounded-segment marker) and the literal
+    that closes it (the segment terminator) — the single source for both the append
+    (encode) and the decode below. Mirrors `_seed_marker_and_separator`."""
+    tmpl = _dig(mapping, "enrich.resolution_method_suffix")
+    if not isinstance(tmpl, str):
+        return None, None
+    ph = "{resolution_method}"
+    i = tmpl.find(ph)
+    if i == -1:
+        return None, None
+    marker = tmpl[:i]
+    if "{" in marker:  # the marker must be a pure literal to identify the segment
+        return None, None
+    rest = tmpl[i + len(ph):]
+    nxt = rest.find("{")
+    sep = rest[:nxt] if nxt != -1 else rest
+    return (marker or None), (sep or None)
+
+
+def append_resolution_method(resolution: str, method: str) -> str:
+    """Append the grounded resolution-method segment to a close `resolution`, rendered
+    from `mapping.enrich.resolution_method_suffix`. Idempotent: returns the resolution
+    unchanged if it already carries a grounded segment (so a re-drained learn never
+    double-stamps) or if no suffix template / method is configured. The leading
+    `{disposition} — {reason}` form is preserved, so the disposition/reason decoders
+    are unaffected."""
+    if not resolution or not method or not method.strip():
+        return resolution
+    mapping = _load_mapping()
+    marker, _sep = _resolution_method_marker(mapping)
+    if not marker or marker in resolution:
+        return resolution
+    # Collapse internal whitespace so the segment stays one clause (the judge reads it
+    # inline; an embedded newline would split the resolution mid-decode).
+    method = " ".join(method.split())
+    suffix = _render(
+        _dig(mapping, "enrich.resolution_method_suffix") or "",
+        _ctx(resolution_method=method),
+    )
+    return resolution + suffix
+
+
+def resolution_method_from_resolution(resolution: str | None) -> str | None:
+    """The grounded resolution-method segment decoded from a close `resolution`, or
+    None if absent / not written by us. Inverse of `append_resolution_method`."""
+    if not resolution:
+        return None
+    try:
+        marker, sep = _resolution_method_marker(_load_mapping())
+    except CaseTicketError:
+        return None
+    if not marker or marker not in resolution:
+        return None
+    tail = resolution.split(marker, 1)[1]
+    seg = tail.rsplit(sep, 1)[0] if sep and sep in tail else tail
+    return seg.strip() or None
+
+
+# ---------------------------------------------------------------------------
 # Thin external-ticket accessors — so learning-side readers (the seed sampler)
 # call these instead of indexing raw ticket dicts (the anti-corruption boundary:
 # ticket field names stay known only here).
@@ -466,19 +531,36 @@ def ticket_disposition(ticket: Any) -> str | None:
 
 def ticket_reason(ticket: Any) -> str | None:
     """The free-text reason from the close `resolution` (the text after the
-    disposition separator), or None if the resolution wasn't written by us."""
+    disposition separator), or None if the resolution wasn't written by us. Any
+    appended grounded resolution-method segment (#338) is stripped, so the reason
+    stays the analyst's clean justification — the grounded conditions are read via
+    `ticket_resolution_method`, not folded into the seed-menu reason line."""
     if not isinstance(ticket, dict):
         return None
     resolution = ticket.get("resolution")
     if not isinstance(resolution, str):
         return None
     try:
-        sep = _disposition_separator(_load_mapping())
+        mapping = _load_mapping()
+        sep = _disposition_separator(mapping)
     except CaseTicketError:
         return None
     if not sep or sep not in resolution:
         return None
-    return resolution.split(sep, 1)[1].strip() or None
+    tail = resolution.split(sep, 1)[1]
+    marker, _ = _resolution_method_marker(mapping)
+    if marker and marker in tail:
+        tail = tail.split(marker, 1)[0]
+    return tail.strip() or None
+
+
+def ticket_resolution_method(ticket: Any) -> str | None:
+    """The grounded resolution-method segment decoded from the close `resolution`
+    (None if absent / not ours) — the policy *conditions* (grounded predicates +
+    policy/authority) the benign judge confirms a cited case against (#338)."""
+    if not isinstance(ticket, dict):
+        return None
+    return resolution_method_from_resolution(ticket.get("resolution"))
 
 
 def ticket_seed_eligible(ticket: Any) -> bool | None:

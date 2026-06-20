@@ -56,3 +56,18 @@ close:
 annotate:
   author: learning
   body: "seed-eligibility: {seed_eligible} (adversarial-probe: {outcome})"
+
+# Resolution-method enrichment (issue #338, scope 5 second half). After a benign
+# case's adversarial leg settles, the learning loop lifts the *resolution method*
+# the judge confirmed (the grounded predicates + policy/authority that made the
+# disposition stick) and stamps it INSIDE the existing `resolution` — no new field.
+# It is APPENDED to the runtime close-resolution as a pure-literal-marked suffix, so
+# the benign judge later reads a cited closed case's grounded conditions and the
+# disposition/reason decoders are unaffected: `resolution` still begins with the
+# `close.resolution` form. The literal text before {resolution_method} is the marker
+# the reader matches on (it must be a pure literal and lead the placeholder, and the
+# decode splits on the literal that closes it) — keep it distinct from any text the
+# free-form {reason} can contain. Re-stamp is idempotent: the writer skips when the
+# marker is already present.
+enrich:
+  resolution_method_suffix: " [grounded: {resolution_method}]"

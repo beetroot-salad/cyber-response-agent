@@ -63,6 +63,19 @@ def cmd_list_tickets(args, config):
 
 def cmd_get_ticket(args, config):
     payload = transport.http_get(config, f"/tickets/{args.key}")
+    # `--require-closed` is a structural closed-only guard for the offline benign
+    # judge's scoped read (issue #338): it confirms a *cited* closed case, never the
+    # in-flight (open) ticket for the alert under judgment. Refusing a non-closed
+    # ticket here means the read scope can't reach the in-flight ticket even by key.
+    if getattr(args, "require_closed", False):
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status != "closed":
+            print(
+                f"ticket_cli: {args.key} is status={status!r}, not 'closed' "
+                "(--require-closed)",
+                file=_sys.stderr,
+            )
+            _sys.exit(1)
     if args.raw:
         print(json.dumps(payload))
         return
@@ -107,6 +120,10 @@ def build_parser():
     gt = sub.add_parser("get-ticket", help="Full ticket record incl. comments.")
     gt.add_argument("key")
     gt.add_argument("--raw", action="store_true")
+    gt.add_argument(
+        "--require-closed", action="store_true",
+        help="Exit non-zero unless the ticket is closed (scoped closed-only read).",
+    )
 
     return p
 

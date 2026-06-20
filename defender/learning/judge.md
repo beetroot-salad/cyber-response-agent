@@ -74,9 +74,13 @@ environment_observations:
       - source: comparison | synthesis | coverage_manifest | report | actor | alert
         quote: |
           {only the load-bearing span}
+resolution_method: {BENIGN dispositions only — see §Likelihood-ratio check. One plain
+  line naming the grounded predicates that made the benign call stick, each tied to the
+  lead that established it, plus the governing policy + named authority WHEN the
+  investigation grounds them. Omit the key entirely otherwise.}
 ```
 
-Placeholders in the skeleton above use `{…}` to flag content you must fill in — they are notational, never emit literal curly braces in your output. `actor_observations` and `environment_observations` are each optional — omit the key entirely if nothing load-bearing surfaced (do not emit `[]` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
+Placeholders in the skeleton above use `{…}` to flag content you must fill in — they are notational, never emit literal curly braces in your output. `actor_observations`, `environment_observations`, and `resolution_method` are each optional — omit the key entirely if nothing load-bearing surfaced (do not emit `[]` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
 
 **The verdict reasoning, the lead-by-lead walk, and your confidence self-check are internal thinking — work through them (see §Reasoning) but do not emit them as output sections.** Everything you reason through lands in the `finding` / `observation` text and the `outcome` enum; there is no separate rationale, encounter-analysis, or confidence field. This keeps the output compact without losing the analysis — a finding that names the gap, grounds it in a quoted span, and generalizes in one line carries the same teaching as a multi-paragraph walk, at a fraction of the length.
 
@@ -131,6 +135,18 @@ Then synthesize across leads: which projected events were refuted, which survive
 When `report.md` records a **benign** disposition, run one extra step before findings — separate from the refute walk above. For each observable the defender leaned on to *justify* benign (its column-[3] `:T resolutions` reasoning / the `synthesis`), ask: **are these same actuals also consistent with a malicious mechanism?** A benign read that survives *only because its supporting evidence is equally consistent with an attack* is an untested false-negative, not a clean disposition. The classic case: the defender treats a signature — scripted cadence, an internal source IP, an expected service account, a same-host origin — as positive evidence *for* benign, when that signature is exactly what the malicious mechanism would *also* produce (it has near-unit likelihood under both, so it discriminates nothing).
 
 If you find one, emit it as an `analyze-discipline` finding anchored on the lead whose resolution carried the under-justified inference. Name the dual-consistent observable and the malicious mechanism it fails to rule out, and target the **defender's supporting evidence and the weight it placed on it**. This is *not* a refutation — you are not claiming the actuals contradict the disposition — and it does **not** change `outcome`; it is a reasoning-quality finding about the disposition logic. Do not force it: if the benign-supporting evidence genuinely discriminates (the malicious twin would have produced a *distinguishable* event the actuals lack), say so and emit nothing here.
+
+##### `resolution_method` — the grounded form a future benign judge confirms (#338)
+
+On a **benign** disposition, also emit a top-level `resolution_method` line: the *resolution method* that grounded the benign call — the same grounds you just walked, lifted into the compact, citable form a **future** benign judge reads back when *this* case is cited as a covering policy. This is the offline-enrichment input that lands inside the case-history ticket's `resolution`; without it there is nothing structured for that judge to confirm.
+
+Write it as one line of grounded predicates, each tied to the lead that established it, plus the governing policy and named authority **when the investigation grounds them**:
+
+```
+resolution_method: identity-confirmed (l-002) + no-egress (l-005); policy: change-mgmt CR-1182; authority: CISO + dev-lead
+```
+
+Discipline: it is **evidence-only**, the same bar as a finding's citation. Each predicate must be one a lead's actual result / the defender's grounded `:R authz` established (cite it by lead id); **never** invent a policy or authority the investigation does not name — drop the `policy:` / `authority:` clause when it is ungrounded rather than guessing. State predicates positively (what the actuals established: `identity-confirmed`, `read-only`, `no-egress`, `approved-window`), not as the negation of an attack. This is not a verdict and does not change `outcome`. Omit the key entirely on a non-benign disposition, or when the benign call rests on nothing a lead actually grounded (then the encounter's teaching is a missing-grounding finding, not a resolution method).
 
 #### Attribution check (gather vs. defender) {#attribution}
 

@@ -192,6 +192,13 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
             raise LoopError("judge `environment_observations` is not a list")
         for i, o in enumerate(obs):
             _validate_environment_observation(i, o)
+    # `resolution_method` is the grounded form offline enrichment stamps inside the
+    # case-history ticket's `resolution` (issue #338) — emitted only on a benign
+    # disposition, so optional here; when present it must be a non-empty scalar line.
+    if "resolution_method" in doc:
+        rm = doc["resolution_method"]
+        if not isinstance(rm, str) or not rm.strip():
+            raise LoopError("judge `resolution_method` must be a non-empty string")
     return doc
 
 

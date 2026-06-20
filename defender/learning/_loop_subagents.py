@@ -19,6 +19,7 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from typing import Protocol
 from defender.learning import lead_repository
 from defender.learning import mitre_corpus
 from defender.learning import ticket_seeds
+from defender.scripts.case_history import case_ticket
 from defender.learning._loop_comparison import (
     build_comparison,
     judge_settings_dict,
@@ -362,6 +364,47 @@ class JudgeInvocation:
     comparison_paths: list
 
 
+def _ticket_cli_path() -> Path:
+    """The read-only ticket adapter path (mirrors ``ticket_seeds._TICKET_CLI``)."""
+    return REPO_ROOT / "defender" / "scripts" / "tools" / "ticket_cli.py"
+
+
+def _cited_policy_read_section(
+    run_dir: Path, learning_run_dir: Path, py: str, ticket_cli: Path
+) -> str:
+    """The benign judge's scoped closed-ticket read instructions (issue #338): the
+    exact closed-only commands, the in-flight key it must never read, and the seed menu
+    of candidate closed cases the actor was offered (its citations should be among them).
+    Best-effort: a thin alert / absent menu degrades the hint, never the section."""
+    inflight_key = learning_run_dir.name
+    try:
+        alert = json.loads((run_dir / "alert.json").read_text())
+        sig_label = case_ticket.signature_label(alert) or "<sig:RULE_ID>"
+    except Exception:  # noqa: BLE001 — the label is a convenience hint only
+        sig_label = "<sig:RULE_ID>"
+    menu_path = learning_run_dir / "past_tickets.txt"
+    seed_menu = menu_path.read_text().strip() if menu_path.is_file() else ""
+    body = (
+        "Confirm a CITED past case against the case-history store with a scoped, "
+        "CLOSED-ONLY read — closed cases only, never the in-flight ticket. Use exactly:\n"
+        f"  {py} {ticket_cli} list-tickets --status closed --label {sig_label} --raw\n"
+        f"  {py} {ticket_cli} get-ticket <case-id> --require-closed --raw\n"
+        f"The in-flight ticket for the alert you are scoring is `{inflight_key}` — never "
+        "read it (it is open; --require-closed refuses it). A cited seed the store can't "
+        "confirm, or whose grounded conditions these actuals contradict, does not survive "
+        "on that basis."
+    )
+    if seed_menu:
+        body += (
+            "\n\nCandidate closed cases the actor was offered as covering-policy seeds "
+            "(its citations should be among these):\n" + seed_menu
+        )
+    return _section(
+        "cited_policy_read", body,
+        "scoped closed-ticket read — confirm a cited closed case's policy here",
+    )
+
+
 def build_judge_invocation(
     run_dir: Path,
     actor_story_path: Path,
@@ -370,6 +413,7 @@ def build_judge_invocation(
     *,
     comparison_dirname: str = "comparison",
     settings_name: str = "judge-settings.resolved.json",
+    closed_ticket_read: bool = False,
 ) -> JudgeInvocation:
     """Assemble the grounded judge call: write the per-lead comparison files + the per-run
     read-only settings, and build the context message. The comparison join + synthesis are
@@ -380,6 +424,10 @@ def build_judge_invocation(
     benign legs — which run **concurrently** on an ``inconclusive`` case over a shared
     ``learning_run_dir`` — write disjoint files: their projections differ, so a single
     shared ``comparison/{lead_id}.md`` would let one leg clobber the other's grounding.
+
+    ``closed_ticket_read`` (benign only, #338) grants the scoped closed-only case-history
+    read and injects the policy-confirm instructions, so the judge can confirm a cited
+    closed case exists + its grounded conditions hold before letting it carry a survive.
     """
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
@@ -390,9 +438,16 @@ def build_judge_invocation(
     comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
+    py, ticket_cli = sys.executable, _ticket_cli_path()
     settings_path = learning_run_dir / settings_name
     settings_path.write_text(
-        json.dumps(judge_settings_dict(gather_raw, comparison_dir), indent=2)
+        json.dumps(
+            judge_settings_dict(
+                gather_raw, comparison_dir,
+                closed_ticket_read=(py, ticket_cli) if closed_ticket_read else None,
+            ),
+            indent=2,
+        )
     )
     add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
 
@@ -421,6 +476,8 @@ def build_judge_invocation(
             "absence (the refute primitive), never inferring it from the sample",
         )
     )
+    if closed_ticket_read:
+        user += _cited_policy_read_section(run_dir, learning_run_dir, py, ticket_cli)
     return JudgeInvocation(
         user_text=user, add_dirs=add_dirs, settings_path=settings_path,
         comparison_paths=comparison_paths,
@@ -433,11 +490,12 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
     read-only settings (under the wiring's per-direction names), then score against the
     actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
     narrative. The direction rides in ``wiring`` (adversarial vs benign prompt/model/
-    effort + disjoint comparison/settings names); for the benign leg, a routine story
-    that SURVIVES is the FP signal."""
+    effort + disjoint comparison/settings names + the benign-only closed-ticket read);
+    for the benign leg, a routine story that SURVIVES is the FP signal."""
     inv = build_judge_invocation(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         comparison_dirname=wiring.comparison_dirname, settings_name=wiring.settings_name,
+        closed_ticket_read=wiring.closed_ticket_read,
     )
     return _run_judge_claude(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
