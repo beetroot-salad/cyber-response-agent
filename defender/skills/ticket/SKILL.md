@@ -75,7 +75,7 @@ the defender, the author skill, and the actor-reviewer judge.
 - **Not for ticket creation.** This adapter is read-only by design.
   Case-history tickets are written *outside* this read path — by the
   `run.py` / `run_pai.py` `--update-ticket` post-step
-  (`scripts/tools/ticket_writer.py`), which opens a ticket when the alert
+  (`scripts/case_history/ticket_writer.py`), which opens a ticket when the alert
   is raised and closes it with the disposition. That writer is a learning
   post-step, not an investigation surface; do not call it from a run.
 - **Not for change-window context.** Use the change-mgmt stub for

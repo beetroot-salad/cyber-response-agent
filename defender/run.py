@@ -273,7 +273,7 @@ def main(argv: list[str]) -> int:
     # in the post-steps below. Opt-in (default off); a no-op WARN if misconfigured.
     ticket_writer = None
     if ns.update_ticket:
-        from defender.scripts.tools import ticket_writer
+        from defender.scripts.case_history import ticket_writer
         ticket_writer.open_case_ticket(run_dir)
 
     settings_path = build_settings_file()

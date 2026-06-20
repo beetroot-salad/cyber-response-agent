@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts.tools import case_ticket
+from defender.scripts.case_history import case_ticket
 
 
 ALERT = {

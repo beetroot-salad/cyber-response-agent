@@ -146,7 +146,7 @@ def main(argv: list[str]) -> int:
     # below (engine-agnostic helper, shared with run.py). Opt-in; non-fatal.
     ticket_writer = None
     if ns.update_ticket:
-        from defender.scripts.tools import ticket_writer
+        from defender.scripts.case_history import ticket_writer
         ticket_writer.open_case_ticket(run_dir)
 
     salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")

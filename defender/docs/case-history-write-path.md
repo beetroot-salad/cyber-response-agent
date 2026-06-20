@@ -27,7 +27,7 @@ what manufactures the read PR's fixtures.
 
 - **Anti-corruption boundary — internal model ≠ external model.** `report.md`
   (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
-  model. `scripts/tools/case_ticket.py` is the **only** code that knows both: it
+  model. `scripts/case_history/case_ticket.py` is the **only** code that knows both: it
   parses the internal artifacts into a `CaseRecord` and maps that to/from ticket
   payloads. The drivers, the report schema, and (PR 2) the learning reader never bind
   to ticket field names. When the store changes (e.g. Elastic Cases), only the mapper,
@@ -75,12 +75,12 @@ what manufactures the read PR's fixtures.
 
 ## Shape
 
-- `scripts/tools/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the mapper
-  (`alert_to_open_payload`, `case_record_to_close`, `parse_disposition_from_resolution`),
+- `scripts/case_history/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
+  mapper (`alert_to_open_payload`, `case_record_to_close`, `parse_disposition_from_resolution`),
   rendering from the mapping config.
 - `knowledge/environment/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions), editable without touching code.
-- `scripts/tools/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
+- `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `close_case_ticket` (+ `ticket_write.json` receipt), non-fatal.
 - `run.py` / `run_pai.py` — `--update-ticket`: open after materialize, close after
   `cross_check_tables`.
