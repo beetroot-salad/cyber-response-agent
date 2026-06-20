@@ -70,6 +70,13 @@ on an existing system is a deliberate update — branch
 `connect/{system}-update` first so the diff stays clean. If this is a
 fresh deployment, expect these to be empty; that's normal.
 
+Also note whether *other* systems are already connected. If they are,
+you're extending a populated deployment: there's an established shared
+adapter module and house conventions (config keys, transport, output
+shape) to **conform to**, not duplicate — see `cli-adapter.md` → "The
+shape to copy". If `scripts/tools/` is empty, you're greenfield and the
+bundled example is your seed.
+
 ### 2. Interview
 
 Ask one question at a time, conversationally. You need enough to build a
@@ -99,8 +106,9 @@ Pick the path with the maintainer and follow its doc end-to-end:
 
 - **MCP** → `mcp.md`.
 - **CLI adapter** → `cli-adapter.md` (it installs the shared `_adapter.py`,
-  writes `scripts/tools/{system}_cli.py`, registers the `bin/` shim, and
-  runs the Haiku alignment loop).
+  writes `scripts/tools/{system}_cli.py`, registers the `bin/` shim, runs
+  the Haiku alignment loop, and **pauses at a human review checkpoint**
+  before the live test — generated code is read by a human before it runs).
 
 Come back here for the common steps below once the integration exists.
 
@@ -143,6 +151,10 @@ runs.
 
 ### 5. Test
 
+For the CLI path, the human review checkpoint in `cli-adapter.md` must be
+cleared first — running the adapter here executes generated code against
+the live system.
+
 - **Health check.** Confirm the system is reachable and authed (CLI: run
   the adapter's `health-check`; MCP: call the status tool). A red health
   check stops you here — diagnose (refused/DNS → network; 401 →
@@ -156,11 +168,13 @@ runs.
 ### 6. Validate and commit
 
 ```bash
-python3 defender/skills/connect/connect_check.py {system}
+python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
 Fix every FAIL. Then walk `${CLAUDE_SKILL_DIR}/checklist.md` for the
-judgment items the script can't check. Then:
+judgment items the script can't check. Then, in a git repo (the normal
+case), branch and stage — if the tree isn't under version control, skip
+the branch and just leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}

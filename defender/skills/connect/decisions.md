@@ -30,6 +30,14 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   immediately. A template library is also CI, version pinning, and a
   per-vendor PR queue for a marginal speedup.
 
+- **The bundled example is a greenfield seed, not a mandate to duplicate.**
+  On a fresh tree connect installs `_adapter.py` and copies the example; on
+  a populated tree it conforms to the shared module and conventions the
+  existing adapters already use — one shared module per tree, never two. A
+  second parallel pattern (duplicate transport/config schemes) is exactly
+  the drift per-system consistency exists to avoid, and it fragments the
+  prior the gather subagent relies on.
+
 - **The query catalog grows post-merge; connect seeds only a couple
   templates.** Which measurements characterize real alerts isn't knowable
   from API docs at connect time — it's exactly what the offline

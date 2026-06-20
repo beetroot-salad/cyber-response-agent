@@ -9,7 +9,18 @@ adapter.
 
 ## The shape to copy
 
-Two files ship with this skill:
+**First, check what's already there.** If `scripts/tools/` already holds
+sibling adapters, you are extending a populated deployment, not seeding a
+fresh one — **conform to the established pattern rather than introducing a
+second one.** Read the closest sibling adapter and the shared module it
+imports; reuse *that* module, its config-key scheme, and its transport
+convention. The files this skill ships are the **greenfield seed** for a
+tree with no adapters yet — do not install them alongside an existing
+shared module and create two parallel conventions. If the siblings' shared
+module is missing a piece you need, extend it in place rather than forking
+a new one.
+
+On a greenfield tree, two files ship with this skill:
 
 - `examples/_adapter.py` — the shared support module. It owns argument
   parsing, non-secret config loading, the exit codes, and credential
@@ -18,13 +29,16 @@ Two files ship with this skill:
   built on `_adapter.py`. It is the shape you copy into
   `defender/scripts/tools/{system}_cli.py`.
 
-Read both before you write anything. Then:
+Read both (and the closest sibling, if any) before you write anything.
+Then:
 
-1. **Install the shared module** (idempotent): if
-   `defender/scripts/tools/_adapter.py` does not already exist, copy
-   `examples/_adapter.py` to it. If it exists, leave it — every adapter
-   shares the one copy.
-2. **Copy the example** to `defender/scripts/tools/{system}_cli.py`,
+1. **Reuse or install the shared module** (idempotent): if a shared
+   adapter module already exists — the bundled `_adapter.py`, or whatever
+   module the siblings import — import *that*. Only when none exists, copy
+   `examples/_adapter.py` to `defender/scripts/tools/_adapter.py`. One
+   shared module per tree, never two.
+2. **Copy the closest example** to `defender/scripts/tools/{system}_cli.py`
+   — a sibling adapter if one exists, else `examples/example_cli.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
    API. Keep the contract below intact.
 
@@ -41,9 +55,10 @@ its parts.
   `EXIT_CONN_ERROR` (2, unreachable / unauthed / misconfigured),
   `EXIT_USAGE` (64, bad invocation — emitted automatically by the parser).
 - **Config.** `load_config(system)` reads
-  `knowledge/environment/systems/{system}/config.env` (non-secret; an env
-  var of the same name overrides a declared key). Use
-  `die(EXIT_CONN_ERROR, hint)` for a missing key.
+  `knowledge/environment/systems/{system}/config.env` (non-secret; a
+  `{SYSTEM}_`-prefixed env var — e.g. `ASSETDB_URL_BASE` — overrides a
+  declared key, scoped per system so overrides can't collide across
+  adapters). Use `die(EXIT_CONN_ERROR, hint)` for a missing key.
 - **`--raw`.** `print_raw(system, endpoint, args, result)` emits the
   stable JSON envelope the gather capture persists by-ref. Keep the
   envelope stable across adapters — drift breaks replay.
@@ -79,10 +94,44 @@ one, stop and remind them it belongs in an env var.
 
 The example's `_request` does HTTP via `urllib` with the resolved auth
 headers and the configured timeout. Swap that one method for whatever the
-environment needs — direct HTTP, SSH, an existing CLI you shell out to
-and parse, or (on the v2 playground) `docker exec`. The rest of the
-adapter — parsing, config, exit codes, auth, the `--raw` envelope — does
-not change with transport.
+environment needs — direct HTTP, SSH, an existing CLI you shell out to and
+parse, or (on the v2 playground) `docker exec … curl` into a bastion that
+can reach the service. The rest of the adapter — parsing, config, exit
+codes, auth, the `--raw` envelope — does not change with transport.
+
+One thing *does* need care when you leave urllib: **the exit-code
+contract.** The urllib example gets the HTTP-status → exit-code mapping for
+free from `urllib.error.HTTPError.code`. A `docker exec … curl`, SSH, or
+wrapped-CLI transport has no such exception, so reconstruct the status and
+route it through the shared mapping (`die_for_http_status`) instead of
+hand-rolling the 401/403-vs-4xx branches:
+
+```python
+# docker-exec transport: capture body AND status, then map via _adapter.
+proc = subprocess.run(
+    ["docker", "--context", ctx, "exec", bastion,
+     "curl", "-sS", "-w", "\n%{http_code}", "--max-time", str(timeout),
+     *header_args, url],
+    capture_output=True, text=True, timeout=timeout + 15,
+)
+if proc.returncode != 0 and not proc.stdout:
+    die(EXIT_CONN_ERROR, f"{SYSTEM}: docker exec failed: {proc.stderr.strip()}")
+body, _, code = proc.stdout.rpartition("\n")
+die_for_http_status(SYSTEM, int(code or 0), body)   # exits on failure
+return json.loads(body)
+```
+
+Two traps when the transport shells out:
+
+- **`die()` and the parser raise `SystemExit`.** Keep them *outside* any
+  broad `except Exception` — a `try/except Exception` around
+  `subprocess.run` will swallow the exit and mask the failure. Catch only
+  the specific transport errors (`subprocess.TimeoutExpired`,
+  `FileNotFoundError`).
+- **Inspect a real response before writing the formatter.** Shapes vary —
+  a `/roles` endpoint may return a dict keyed by name, not a list. Run the
+  real call once, look at the JSON, then format; don't assume the
+  example's shape.
 
 ## Conform the CLI to the client — the alignment loop
 
@@ -96,7 +145,11 @@ afterthought:
 1. Spawn a fresh-context **Haiku** subagent (it must match the runtime
    gather model). Hand it only the adapter's `--help` output and a
    realistic task (*"find the 5 most recent failed SSH logins on host
-   `web-1` in the last hour — what exact command would you run?"*).
+   `web-1` in the last hour — what exact command would you run?"*). If you
+   can't pin a subagent to Haiku (a headless or unattended run), fall back
+   to modeling the verbs and flags on the closest sibling adapter plus your
+   own read of `--help` — the goal is unchanged: a CLI the gather subagent
+   would have guessed.
 2. Compare what it emits to your CLI. For each divergence, ask: **is this
    a correctness/vendor constraint, or a cosmetic choice I happened to
    make first?**
@@ -150,13 +203,37 @@ settings and prompts interactively, because an LLM fetching
 attacker-controlled content is a prompt-injection vector. Say which URL
 and why, in one line, so the approval is a one-second decision.
 
-## Before you hand off
+## Run the scaffold validator
 
-Run the validator on the system you just built:
+Run it on the system you just built:
 
 ```bash
-python3 defender/skills/connect/connect_check.py {system}
+python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
-Fix any FAIL before returning to `SKILL.md` for the test and commit
-phases.
+Fix any FAIL before going further.
+
+## Human review checkpoint
+
+Stop here and put a human in the loop **before the adapter runs against
+the live system or anything is committed** — not only at the final diff.
+This is generated code that resolves real credentials and will query the
+maintainer's systems, so it gets read before it executes.
+
+Present the generated `{system}_cli.py` and its shim to the maintainer and
+ask them to review it. Call out anything you're unsure about by name — an
+auth scheme you improvised beyond `resolve_auth`, a transport quirk, a
+field or enum you guessed at, any departure from the example's shape. Do
+**not** run the live health-check / sample query (`SKILL.md` Phase 5)
+until they approve. If they want changes, make them, then re-run the
+validator and the alignment probe before asking again.
+
+In an **unattended run** with no human to ask, this checkpoint is a hard
+stop, not a skip: do not run the live test or commit. Leave the generated
+`{system}_cli.py` and shim in place and report that they await review.
+("You test integrations directly" in `SKILL.md` means *you*, in a normal
+session, run the tests after approval — not that an unattended run may
+self-approve.)
+
+Only after explicit approval do you return to `SKILL.md` for the test and
+commit phases.

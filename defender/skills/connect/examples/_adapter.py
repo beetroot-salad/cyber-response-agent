@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 # Exit codes — the adapter contract. Identical across every adapter so the
-# gather subagent (and connect_check.py) can rely on them.
+# gather subagent (and validate_scaffold.py) can rely on them.
 EXIT_OK = 0           # success, including a connected-but-empty result
 EXIT_QUERY_ERROR = 1  # the query/lookup reached the system but was rejected
 EXIT_CONN_ERROR = 2   # could not reach or authenticate to the system, or
@@ -73,10 +73,13 @@ def load_config(system: str) -> dict[str, str]:
     `{DEFENDER_DIR}/knowledge/environment/systems/{system}/config.env`.
 
     Shell-style `KEY=value` lines; `#` comments and blank lines ignored;
-    surrounding quotes stripped. An environment variable of the same name
-    overrides a value declared in the file — that's how CI and per-run
-    overrides of a declared key work (a key absent from the file is not
-    introduced from the environment here).
+    surrounding quotes stripped. An environment variable named
+    `{SYSTEM}_{KEY}` (e.g. `ASSETDB_URL_BASE` for system `assetdb`, key
+    `URL_BASE`) overrides the file value — that's how CI and per-run
+    overrides work. The `{SYSTEM}_` prefix is deliberate: a bare `URL_BASE`
+    in the environment must not silently bleed across every adapter, so
+    overrides are scoped per system. A key absent from the file is not
+    introduced from the environment here.
 
     This file never holds secrets (see the module docstring); it holds the
     *names* of the env vars that do.
@@ -93,9 +96,11 @@ def load_config(system: str) -> dict[str, str]:
                 continue
             key, _, val = line.partition("=")
             config[key.strip()] = val.strip().strip('"').strip("'")
+    prefix = system.upper().replace("-", "_") + "_"
     for key in list(config):
-        if key in os.environ:
-            config[key] = os.environ[key]
+        override = os.environ.get(prefix + key)
+        if override is not None:
+            config[key] = override
     return config
 
 
@@ -167,6 +172,39 @@ def resolve_auth(system: str, config: dict[str, str]) -> dict[str, str]:
         f"bearer, basic, header. For anything else, implement it in the "
         f"adapter and document it in execution.md.",
     )
+
+
+def die_for_http_status(system: str, status: int, body: str = "") -> None:
+    """Map an HTTP status onto the adapter exit-code contract: exit on
+    failure, return on success (2xx/3xx).
+
+    The urllib example gets this mapping for free from
+    `urllib.error.HTTPError.code`. A transport that does NOT raise a
+    status-bearing exception — `docker exec … curl`, an SSH command, a
+    wrapped vendor CLI — should reconstruct the status (e.g. curl's
+    `-w '%{http_code}'`) and call this, so the 0/1/2 contract matches the
+    example instead of being reinvented per adapter.
+
+        status == 0   no HTTP response reached us (refused / DNS / timeout)
+                      → EXIT_CONN_ERROR
+        401 / 403     auth failure → EXIT_CONN_ERROR
+        >= 400        reached but rejected (404, 400, 5xx) → EXIT_QUERY_ERROR
+        otherwise     success → return
+    """
+    if status == 0:
+        die(EXIT_CONN_ERROR,
+            f"{system}: no HTTP response (connection refused, DNS, or "
+            f"timeout). A data-source outage, not a query problem — do not "
+            f"retry-probe.")
+    if status in (401, 403):
+        die(EXIT_CONN_ERROR,
+            f"{system}: authentication failed (HTTP {status}). Check "
+            f"AUTH_TYPE and the secret env var it names.")
+    if status >= 400:
+        detail = body.strip()
+        die(EXIT_QUERY_ERROR,
+            f"{system}: query rejected (HTTP {status})"
+            + (f": {detail}" if detail else "."))
 
 
 def print_raw(system: str, endpoint: str, args: dict[str, Any], result: Any) -> None:

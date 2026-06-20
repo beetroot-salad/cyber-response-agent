@@ -3,7 +3,7 @@
 The mechanical bar is automated. Run:
 
 ```bash
-python3 defender/skills/connect/connect_check.py {system}
+python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
 and fix every FAIL before going further. It verifies the structural
@@ -20,7 +20,7 @@ contract a script can check:
   `## Execution` pointer, and `execution.md` exists;
 - any seed templates have valid `id: {system}.<name>` frontmatter.
 
-(For the MCP path there is no adapter/shim to check — `connect_check.py`
+(For the MCP path there is no adapter/shim to check — `validate_scaffold.py`
 is CLI-specific. Run the judgment list below either way.)
 
 This file covers the rest — the calls a script can't make.
@@ -52,6 +52,9 @@ This file covers the rest — the calls a script can't make.
       flow (odd upstream, unusual access topology, a vendor auth scheme
       `_adapter.py` doesn't cover) is called out in the summary for human
       review — not silently patched, not blocked.
+- [ ] **Human review checkpoint cleared (CLI path).** The maintainer read
+      the generated adapter and approved it *before* it ran against the
+      live system — not only at the final diff (`cli-adapter.md`).
 - [ ] **Nothing merged or pushed** without explicit direction. The human
       review gate is non-negotiable. (`/ship` opens the PR.)
 

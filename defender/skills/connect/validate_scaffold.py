@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Static contract check for a connected system — the mechanical half of
-`checklist.md`.
+"""Validate a connected system's onboarding scaffold against the connect
+contract — the mechanical half of `checklist.md`. This is NOT a
+connectivity probe: it checks the files `/connect` generated (adapter,
+shim, per-system skill, config, templates), not whether the live system
+is reachable.
 
-    python3 defender/skills/connect/connect_check.py <system>
+    python3 defender/skills/connect/validate_scaffold.py <system>
 
 Verifies the structural bar `/connect` aims for without needing the live
 system: the adapter and shared module are in place, the CLI honours the
@@ -72,10 +75,22 @@ def check_adapter(report: Report, defender: Path, system: str, python: str) -> P
         return None
     report.add(PASS, f"adapter {cli.relative_to(defender)} exists")
 
-    shared = defender / "scripts" / "tools" / "_adapter.py"
-    report.add(PASS if shared.exists() else FAIL,
-               f"shared module scripts/tools/_adapter.py "
-               f"{'installed' if shared.exists() else 'is missing (copy it from the connect skill)'}")
+    # Reuse a shared module (the bundled _adapter.py, or whatever module the
+    # siblings import — e.g. _stub_transport.py) rather than re-implementing
+    # the parser/config/exit-codes/auth inline. Don't hard-require _adapter
+    # specifically: a populated tree may standardize on a different module.
+    src = cli.read_text()
+    tools = defender / "scripts" / "tools"
+    present = {p.stem for p in tools.glob("_*.py")}
+    referenced = {m for m in present
+                  if re.search(rf"(?:import|from)\s+\.?{re.escape(m)}\b", src)}
+    if referenced:
+        report.add(PASS, f"adapter reuses shared module(s): {', '.join(sorted(referenced))}")
+    elif re.search(r"(?:^import|from)\s+_\w+", src, re.M):
+        report.add(FAIL, "adapter imports a shared module that isn't present in scripts/tools/")
+    else:
+        report.add(WARN, "adapter imports no shared module — it may be re-implementing "
+                         "the contract (parser/config/exit-codes/auth) inline")
 
     help_run = _run([python, str(cli), "--help"])
     if help_run.returncode == 0 and "health-check" in help_run.stdout:
@@ -182,7 +197,7 @@ def main() -> None:
     os.environ.setdefault("DEFENDER_DIR", str(defender))
     python = _venv_python(defender)
 
-    print(f"connect_check: {system}\n")
+    print(f"validate_scaffold: {system}\n")
     report = Report()
     check_adapter(report, defender, system, python)
     check_shim(report, defender, system)
