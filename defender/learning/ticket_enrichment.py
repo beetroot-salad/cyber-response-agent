@@ -42,7 +42,11 @@ def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:
         return None
     try:
         doc = yaml.safe_load(verdict.read_text())
-        return _outcome_keyword((doc or {}).get("outcome"))
+        if not isinstance(doc, dict):
+            _log(f"adversarial verdict is not a mapping ({type(doc).__name__}); "
+                 "skipping enrichment")
+            return None
+        return _outcome_keyword(doc.get("outcome"))
     except (yaml.YAMLError, OSError, LoopError) as e:
         _log(f"unusable adversarial verdict ({e}); skipping enrichment")
         return None

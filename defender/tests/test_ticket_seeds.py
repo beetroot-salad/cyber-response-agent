@@ -110,3 +110,34 @@ def test_reason_excerpt_truncated():
     seed = ticket_seeds._to_seed(_ticket("c", reason=long))
     assert len(seed.reason) <= ticket_seeds._REASON_EXCERPT_MAX
     assert seed.reason.endswith("…")
+
+
+def test_multiline_reason_collapsed_to_one_line(stub_store):
+    # A multi-line close reason (report.md body wraps) must not forge extra menu
+    # lines: _to_seed collapses internal whitespace so format_seeds stays 1:1.
+    seed = ticket_seeds._to_seed(_ticket("c", reason="patch window\napproved by ops"))
+    assert "\n" not in seed.reason
+    assert seed.reason == "patch window approved by ops"
+    stub_store([_ticket("c", reason="line one\n\nline two")])
+    menu = ticket_seeds.format_seeds(_sample())
+    assert len(menu.splitlines()) == 1
+
+
+def test_draw_is_order_independent(stub_store, monkeypatch):
+    # Same run_id must draw the same menu regardless of the store's list order
+    # (random.sample is order-sensitive; sample_seeds sorts by key first).
+    pool = [_ticket(f"t{i}") for i in range(20)]
+    stub_store(pool)
+    first = [s.case_id for s in _sample(run_id="run-xyz")]
+    monkeypatch.setattr(ticket_seeds, "_list_closed", lambda label: list(reversed(pool)))
+    assert [s.case_id for s in _sample(run_id="run-xyz")] == first
+
+
+def test_non_fatal_when_signature_label_raises(monkeypatch):
+    # The module promises "non-fatal by construction": a raising mapping/accessor
+    # degrades to an empty pool, never escaping into the benign actor leg.
+    def boom(_alert):
+        raise case_ticket.CaseTicketError("mapping.yaml missing")
+
+    monkeypatch.setattr(case_ticket, "signature_label", boom)
+    assert ticket_seeds.sample_seeds(ALERT, "self", "run-abc", now=NOW) == []

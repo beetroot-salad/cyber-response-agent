@@ -46,6 +46,14 @@ def test_read_outcome_malformed_is_none(tmp_path: Path):
     assert ticket_enrichment._read_adversarial_outcome(tmp_path) is None
 
 
+@pytest.mark.parametrize("body", ["just a string\n", "- a\n- b\n", "42\n"])
+def test_read_outcome_non_mapping_is_none(tmp_path: Path, body: str):
+    # A verdict that parses to a non-dict (scalar/list) must be a WARN+None, not an
+    # uncaught AttributeError on .get() that would crash run_one before enqueue.
+    tmp_path.joinpath("judge_findings.yaml").write_text(body)
+    assert ticket_enrichment._read_adversarial_outcome(tmp_path) is None
+
+
 def test_enrich_skips_when_no_verdict(tmp_path: Path, monkeypatch):
     calls = []
     monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",

@@ -119,6 +119,10 @@ def _is_eligible(ticket, self_case_id: str, lo: datetime, hi: datetime) -> bool:
 
 def _to_seed(ticket) -> Seed:
     reason = case_ticket.ticket_reason(ticket) or "(no reason recorded)"
+    # Collapse internal whitespace (incl. newlines) so each seed stays one line: the
+    # close reason is report.md's body paragraph and can wrap, and `format_seeds`
+    # joins on "\n" — an embedded newline would forge an extra, caseless menu line.
+    reason = " ".join(reason.split())
     if len(reason) > _REASON_EXCERPT_MAX:
         reason = reason[: _REASON_EXCERPT_MAX - 1].rstrip() + "…"
     return Seed(case_id=case_ticket.ticket_key(ticket) or "?",
@@ -132,18 +136,29 @@ def sample_seeds(
 
     Uniform draw from the full eligible pool, seeded by `run_id` (reproducible). Empty
     list on cold-start / any failure. `now` is injectable for tests."""
-    label = case_ticket.signature_label(alert)
-    if not label:
+    try:
+        label = case_ticket.signature_label(alert)
+        if not label:
+            return []
+        now = now or datetime.now(timezone.utc)
+        lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
+        eligible = [
+            t for t in _list_closed(label) if _is_eligible(t, self_case_id, lo, hi)
+        ]
+        if not eligible:
+            return []
+        # Sort by ticket key so the draw is reproducible from `run_id` alone: the
+        # store's list order (server insertion order) is not a stable input, and
+        # `random.sample` is order-sensitive — without this, the same run could draw a
+        # different menu after a store re-seed.
+        eligible.sort(key=lambda t: case_ticket.ticket_key(t) or "")
+        rng = random.Random(_seed_int(run_id))
+        count = rng.randint(SEED_COUNT_MIN, SEED_COUNT_MAX)
+        chosen = eligible if len(eligible) <= count else rng.sample(eligible, count)
+        return [_to_seed(t) for t in chosen]
+    except Exception as e:  # noqa: BLE001 — variance injection must never break the learn
+        _log(f"seed sampling failed ({e!r}); empty pool")
         return []
-    now = now or datetime.now(timezone.utc)
-    lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
-    eligible = [t for t in _list_closed(label) if _is_eligible(t, self_case_id, lo, hi)]
-    if not eligible:
-        return []
-    rng = random.Random(_seed_int(run_id))
-    count = rng.randint(SEED_COUNT_MIN, SEED_COUNT_MAX)
-    chosen = eligible if len(eligible) <= count else rng.sample(eligible, count)
-    return [_to_seed(t) for t in chosen]
 
 
 def format_seeds(seeds: list[Seed]) -> str:

@@ -258,17 +258,16 @@ def invoke_actor_benign(
     offline and non-fatal: an empty pool (cold start / store unreachable) yields no
     section and the actor grounds off the systems-of-record exactly as before.
     """
+    alert_text = alert_path.read_text()
     user = (
-        _section("alert", alert_path.read_text())
+        _section("alert", alert_text)
         + _section("alert_rule_id", alert_rule_key)
         + _section("case_entities", case_entities)
     )
     # case_id == the runtime run-dir basename == the learning run dir name == the
     # ticket key, so it's both the self-exclusion key and the reproducible sample seed.
     case_id = learning_run_dir.name
-    seeds = ticket_seeds.sample_seeds(
-        json.loads(alert_path.read_text()), case_id, case_id
-    )
+    seeds = ticket_seeds.sample_seeds(json.loads(alert_text), case_id, case_id)
     if seeds:
         menu_text = ticket_seeds.format_seeds(seeds)
         (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n")
