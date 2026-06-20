@@ -34,4 +34,4 @@ data_stream.dataset: "system.auth" AND host.name: "${host}" AND source.ip: "${sr
 ## Common pitfalls
 
 - **Co-dispatch with `sshd-auth-sequence-v2`.** The baseline query and the alert-window query use the same filter expression; only `start`/`end` differ. Dispatch both in the same lead to avoid a round-trip.
-- **Large baseline payloads when the source IP has frequent legitimate auth.** A source with regular automated SSH activity (e.g., monitoring agents) will return a high event count. Focus the summary on the count and auth method distribution rather than individual events.
+- **Large baseline payloads when the source IP has frequent legitimate auth.** A source with regular automated SSH activity (e.g., monitoring agents) returns hundreds of full event docs (multiple MB). Take the **counts from the `--raw` envelope's `total`** — run the Accepted-filtered and Failed-filtered queries with a small `--limit` and read each `total`, rather than pulling event bodies and counting them. Pull hit bodies only for the auth-method distribution.

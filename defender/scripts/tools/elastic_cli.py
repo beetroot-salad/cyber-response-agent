@@ -70,8 +70,18 @@ DOCKER_CONTEXT = transport.DOCKER_CONTEXT
 ES_CONTAINER = os.environ.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch")
 KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 
-DEFAULT_LIMIT = 500
-MAX_LIMIT = 10000
+# Non-overridable returned-doc cap. ES computes `hits.total` independently of
+# `size` (track_total_hits below), so we ship at most this many _source docs
+# while the envelope's `total` stays the EXACT server-side count. The payload is
+# therefore a small bounded SAMPLE the agent reads field-shape from; exact
+# magnitudes come from `total` (and from re-querying with a narrowing filter and
+# reading its `total`), never from pulling-and-counting. The cap is a mechanism,
+# not a default: a larger `--limit` is clamped to it (widening is futile by
+# construction) — which is why an earlier small *default* backfired (the agent
+# just widened past it). A 500-doc pull of full _source was multiple MB that
+# gather re-jq'd turn after turn — the dominant cost and the >200K context crash.
+RETURNED_DOC_CAP = 20
+DEFAULT_LIMIT = RETURNED_DOC_CAP
 REQUEST_TIMEOUT_SEC = 30
 RAW_SAMPLE_COUNT = 3
 
@@ -214,7 +224,10 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit):
         must = [{"match_all": {}}]
 
     return {
-        "size": min(limit, MAX_LIMIT),
+        # Hard cap, non-overridable: the agent may pass any --limit but never
+        # receives more than RETURNED_DOC_CAP docs. track_total_hits keeps the
+        # envelope `total` exact regardless, so counts are unaffected.
+        "size": min(limit, RETURNED_DOC_CAP),
         "sort": [{time_field: {"order": "desc"}}],
         "query": {"bool": {"must": must, "filter": filters}},
         "track_total_hits": True,
@@ -425,7 +438,12 @@ def build_parser():
         parser.add_argument("--end", help="End time (ISO 8601 UTC).")
         parser.add_argument(
             "--limit", type=int, default=DEFAULT_LIMIT,
-            help=f"Max hits to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).",
+            help=(
+                f"Docs returned (default {DEFAULT_LIMIT}); hard-capped at "
+                f"{RETURNED_DOC_CAP} regardless of the value passed — widening is "
+                f"futile by construction. The envelope `total` is the exact count; "
+                f"read it for magnitudes instead of pulling more docs."
+            ),
         )
         parser.add_argument(
             "--raw", action="store_true",

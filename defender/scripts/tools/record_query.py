@@ -233,22 +233,58 @@ def _is_event_payload(stdout: str) -> bool:
     return False
 
 
+def _envelope_total(stdout: str) -> int | None:
+    """Exact server-side match count from an adapter's --raw envelope
+    (`{total, returned, truncated, hits:[…]}`) — independent of how many docs were
+    actually returned. None when the payload has no such field (a plain list, or an
+    adapter that doesn't report a total): then the returned-record count is all
+    there is. Keys on the field-name convention like `_RECORD_KEYS` — no per-system
+    table, so an adapter adopting the envelope is covered with no edit here."""
+    try:
+        obj = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(obj, dict) and isinstance(obj.get("total"), int) and not isinstance(
+        obj.get("total"), bool
+    ):
+        return obj["total"]
+    return None
+
+
 def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
     """Reduce the in-context pass-through to a *field-shape sample*, not the full
     dump. A record-list payload becomes a count + the first few records (so the
     agent sees the field shape to write its filters) + a pointer to the persisted
-    file; a non-list blob is char-truncated. Either way the value is computed over
-    the on-disk payload (gather SKILL §4), never read off this view."""
+    file; a non-list blob is char-truncated. The value is computed over the on-disk
+    payload (gather SKILL §4), never read off this view.
+
+    When the payload carries an exact envelope `total` greater than the returned
+    set (an adapter with a non-overridable returned-doc cap, e.g. elastic), the
+    on-disk file is a *bounded sample*, not the full data: counts come from `total`,
+    never from counting the sample — so the message says so, and the agent doesn't
+    jq-length a capped array and report the cap as the count."""
     size = len(stdout)
     records = _find_records(stdout)
+    total = _envelope_total(stdout)
+    sampled = records is not None and total is not None and total > len(records)
     lines: list[str] = []
     if records is not None:
         shown = min(len(records), PASSTHROUGH_SAMPLE_COUNT)
-        lines.append(
-            f"[record_query] {len(records)} records, {size} bytes — showing the first "
-            f"{shown} as a FIELD-SHAPE sample (to write your filters). Do NOT count "
-            f"these or read values off them; compute over the full payload on disk."
-        )
+        if sampled:
+            lines.append(
+                f"[record_query] {total} total matches (EXACT, from the envelope). "
+                f"This payload is a {len(records)}-doc SAMPLE (returned-doc cap), "
+                f"{size} bytes — showing the first {shown} for field shape. COUNTS "
+                f"come from `total` (to count a subset, re-query with the narrowing "
+                f"filter and read its `total`); NEVER count the sample — its length "
+                f"is the cap, not a count."
+            )
+        else:
+            lines.append(
+                f"[record_query] {len(records)} records, {size} bytes — showing the "
+                f"first {shown} as a FIELD-SHAPE sample (to write your filters). Do NOT "
+                f"count these or read values off them; compute over the full payload on disk."
+            )
         for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
             sample = json.dumps(rec, default=str)
             if len(sample) > _SAMPLE_MAX_CHARS:
@@ -259,12 +295,21 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
         lines.append(stdout[:_SAMPLE_MAX_CHARS * PASSTHROUGH_SAMPLE_COUNT] + "…")
     if payload_rel:
         abs_payload = run_dir / payload_rel
-        lines.append(f"full payload: {abs_payload}")
-        lines.append(
-            "→ compute every value over the full payload on disk (jq, grep, the Grep "
-            "tool); never count or read answers off the samples above, e.g.:\n"
-            f"  jq '[.hits[] | select(.message | test(\"<substr>\"))] | length' {abs_payload}"
-        )
+        if sampled:
+            lines.append(f"sample payload (≤ cap, field shape only): {abs_payload}")
+            lines.append(
+                "→ COUNTS come from a query envelope's `total`, not this file: to count "
+                "a subset, re-query with the narrowing filter and read its `total`. Use "
+                "the on-disk sample only to read field shape, e.g.:\n"
+                f"  jq '.hits[0]' {abs_payload}"
+            )
+        else:
+            lines.append(f"full payload: {abs_payload}")
+            lines.append(
+                "→ compute every value over the full payload on disk (jq, grep, the Grep "
+                "tool); never count or read answers off the samples above, e.g.:\n"
+                f"  jq '[.hits[] | select(.message | test(\"<substr>\"))] | length' {abs_payload}"
+            )
     return "\n".join(lines) + "\n"
 
 

@@ -165,6 +165,17 @@ def test_gate_paths_ignores_nonfile_pathish_tokens(tmp_path):
     assert rs.gate_paths([["jq", '.path | split("/")', "gather_raw/l-001/0.json"]], run_dir) == 0
 
 
+def test_gate_paths_tolerates_overlong_jq_object(tmp_path):
+    # A multi-dimension `--batch` jq object exceeds NAME_MAX (255 bytes). The
+    # filesystem existence check used to raise an uncaught ENAMETOOLONG OSError,
+    # crashing every realistic batch call (and forcing gather back to per-dim).
+    # It must be treated as a non-file token, with the real payload still found.
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    big_obj = "{" + ", ".join(f"dim{i}: (.[{i}] | length)" for i in range(40)) + "}"
+    assert len(big_obj) > 255
+    assert rs.gate_paths([["jq", big_obj, "gather_raw/l-001/0.json"]], run_dir) == 0
+
+
 # --- main(): end-to-end over real tools, value-is-output ------------------
 
 

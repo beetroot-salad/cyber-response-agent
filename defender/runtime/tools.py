@@ -94,9 +94,20 @@ class RunDeps:
 class GatherDeps(RunDeps):
     """Gather subagent deps: RunDeps + the lead being gathered. The harness reads
     `lead_id` here to attribute captured queries (it is never model-supplied to
-    the capture path). Always constructed with `is_main_session=False`."""
+    the capture path). Always constructed with `is_main_session=False`.
+
+    `role` distinguishes the two subagents of the finder/executor split:
+    `"finder"` plans + delegates and has NO adapter access (its bash gate denies
+    them); `"executor"` (the default — also the legacy single-agent gather) runs
+    queries and auto-captures them. `query_id` is the capture id the executor
+    stamps on its queries (the finder-bound template id / coined name), so the
+    queries table keeps the `(query_id, params)` join the offline author relies on
+    instead of the bare `{system}.{verb}` default."""
 
     lead_id: str = ""
+    role: str = "executor"
+    query_id: str | None = None
+    system: str | None = None
 
 
 def _record_lesson_load(deps: RunDeps, path: Path) -> None:
@@ -139,17 +150,38 @@ def register_tools(agent, *, writers: bool = True) -> None:
         """Run a shell command. Use the `defender-*` shims (defender-invlang,
         defender-lessons, …) for first-party tooling. Data-source adapters are
         not runnable from the main loop — dispatch gather instead."""
+        is_finder = getattr(ctx.deps, "role", None) == "finder"
+        assay_system = getattr(ctx.deps, "system", None)
         decision = permission.decide_bash(
-            command, is_main_session=ctx.deps.is_main_session
+            command, is_main_session=ctx.deps.is_main_session, is_finder=is_finder,
+            executor_system=assay_system,
         )
         if not decision.allow:
             raise ModelRetry(decision.reason)
-        # Gather: a standalone adapter call is captured transparently (the queries
-        # table + payload are written by the harness), so the model never wraps it
-        # in record-query — it just runs the adapter.
-        if not ctx.deps.is_main_session:
+        # Executor (a gather subagent that is NOT the finder): a standalone adapter
+        # call is captured transparently (the queries table + payload are written by
+        # the harness), so the model never wraps it in record-query — it just runs
+        # the adapter. The finder has no adapter access (gate denies above), so it
+        # never reaches this path.
+        if not ctx.deps.is_main_session and not is_finder:
             argv = permission.adapter_argv(command)
             if argv is not None:
+                system = _derive_system(argv)
+                # Executor scope: an assay characterizes ONE system's query. A call
+                # to a DIFFERENT system is out of scope — cross-system enrichment is
+                # the defender's job, not an assay's — so refuse it before capture,
+                # keeping the executor on its assigned query instead of roaming
+                # (measured: it ran 26 cmdb calls under an elastic assay). Scoped
+                # only when `system` is set on deps (the finder/executor split's
+                # executor); the legacy single-agent gather leaves it None and roams.
+                if assay_system and system and system != assay_system:
+                    raise ModelRetry(
+                        f"This assay is scoped to system '{assay_system}'. You called "
+                        f"a '{system}' adapter — out of scope. Characterize your "
+                        f"assigned '{assay_system}' query only; cross-system "
+                        "enrichment is the defender's job, not an assay's. If a "
+                        "dimension needs another system, report it as not-measured."
+                    )
                 # Circuit-breaker in-gather gate: refuse a call to a system already
                 # tripped this run before it runs again, so one dispatch can't keep
                 # hammering a dead source. RETURN the down-message (don't raise
@@ -158,7 +190,6 @@ def register_tools(agent, *, writers: bool = True) -> None:
                 # would burn the bash tool's retry budget into an UnexpectedModel-
                 # Behavior that crashes the run instead of writing a partial trace.
                 # Returning mirrors the dispatch gate in _run_gather.
-                system = _derive_system(argv)
                 if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
                     return circuit_breaker.down_message(ctx.deps.run_dir, system)
                 return _capture_adapter(ctx.deps, argv)
@@ -176,7 +207,8 @@ def register_tools(agent, *, writers: bool = True) -> None:
     async def read_file(ctx: RunContext[RunDeps], path: str) -> str:
         """Read a file's contents (e.g. alert.json, a SKILL, a lesson)."""
         decision = permission.decide_read(
-            Path(path), is_main_session=ctx.deps.is_main_session
+            Path(path), is_main_session=ctx.deps.is_main_session,
+            is_finder=getattr(ctx.deps, "role", None) == "finder",
         )
         if not decision.allow:
             raise ModelRetry(decision.reason)
@@ -254,7 +286,8 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     from deps — the harness owns capture; the model never supplies it."""
     try:
         passthrough, stderr, record = _capture(
-            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps)
+            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps),
+            query_id=deps.query_id,
         )
     except ValueError as e:
         raise ModelRetry(str(e))
@@ -307,6 +340,47 @@ def _gather_prompt(
             f"`{deps.defender_dir}/skills/{system}/SKILL.md` (and execution.md if "
             "present) ONLY on demand, when you need field vocab or CLI specifics the "
             "descriptor lacks; not on every dispatch.\n\n"
+            f"{catalog}\n"
+        )
+    return block
+
+
+def _finder_prompt(
+    deps: RunDeps, lead_id: str, system: str, goal: str,
+    what_to_summarize: list[str], catalog: str | None,
+) -> str:
+    """The finder subagent's user prompt. Unlike the legacy gather dispatch
+    (`_gather_prompt`: "Begin gathering this lead" + a flat dim checklist, which
+    biased the finder to one-assay-per-dimension — measured 13 assays), this frames
+    the task as the finder's: pick ONE query and assay it once, covering ALL dims.
+    The grouping cue lives in the data — the dims are labeled "one assay should
+    cover all of these" — and the verb is "find and assay," not "gather"."""
+    dims = "\n".join(f"  - {d}" for d in what_to_summarize) or "  - (unspecified)"
+    block = (
+        "Find and assay the measurement for this lead.\n\n"
+        "You are the finder: pick the ONE query that answers this lead — a catalog "
+        "template, or coin one — bind it, and `assay` it. The assay runs that query "
+        "and characterizes ALL the dimensions below from its results, so they belong "
+        "in a SINGLE assay's `dim_hints`. Most leads need exactly one assay; assay "
+        "again only for a genuinely different query (a filter/window/index the first "
+        "cannot cover).\n\n"
+        "## Lead\n```yaml\n"
+        f"defender_dir: {deps.defender_dir}\n"
+        f"run_dir: {deps.run_dir}\n"
+        f"lead_id: {lead_id}\n"
+        f"system: {system}\n"
+        f"goal: {goal}\n"
+        f"dimensions (one assay should cover all of these):\n{dims}\n"
+        "```\n"
+    )
+    if catalog:
+        block += (
+            f"\n## Systems of record (descriptor index — frontmatter only). Confirm "
+            f"your target is `system: {system}`; pick a template or coin the query "
+            "from these descriptions. Read the target's full "
+            f"`{deps.defender_dir}/skills/{system}/SKILL.md` ONLY on demand, for the "
+            "field vocab the descriptor lacks. You never run queries or read "
+            "execution.md — the executor owns query syntax.\n\n"
             f"{catalog}\n"
         )
     return block
@@ -375,17 +449,18 @@ async def _run_gather(
     # Reads that system's full SKILL.md + execution.md on demand.
     catalog = _descriptor_catalog()
 
-    # 3. Run the nested gather agent. It gets its OWN usage object: sharing the
+    # 3. Run the nested finder agent. It gets its OWN usage object: sharing the
     # main run's usage would make request_limit (a cumulative check) abort gather
     # the moment the main loop has already issued `request_limit` requests, so the
     # per-lead cap would not bound gather's own requests. Cost still folds in — the
     # request log (observe.write_trace) sums every instance's usage independently.
-    gagent = gather_factory(f"gather:{lead_id}")
+    gagent = gather_factory(f"finder:{lead_id}")
     gdeps = GatherDeps(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         run_id=deps.run_id, salt=deps.salt, is_main_session=False, lead_id=lead_id,
+        role="finder",
     )
-    prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
+    prompt = _finder_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
     try:
         result = await gagent.run(
             prompt, deps=gdeps,
@@ -433,4 +508,163 @@ def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None
         return await _run_gather(
             ctx.deps, gather_factory, request_limit,
             lead_id, system, goal, what_to_summarize,
+        )
+
+
+# --- assay dispatch (Part B): finder → nested executor subagent ----------------
+
+def _assay_prompt(
+    deps: GatherDeps, system: str, verb: str, template_id: str | None,
+    coined_query: str | None, query_id: str, params: dict, dim_hints: list[str],
+) -> str:
+    """The executor subagent's user prompt: the assay spec, plus the target system's
+    `execution.md` (CLI surface + query syntax). No descriptor catalog, no
+    orientation — the executor works from this spec, the template it names (if any),
+    the injected execution surface, and the ≤20-doc sample the query returns.
+    lead_id is echoed for context; the harness owns capture (and stamps `query_id`).
+
+    `execution.md` is injected (≈1K tokens, cached) so the executor writes
+    syntactically valid queries from the start instead of discovering the syntax by
+    trial and error — far cheaper than the wasted flail queries that costs."""
+    lines = [
+        "Run this assay and return a tight ## Summary.",
+        "",
+        "## Assay",
+        "```yaml",
+        f"defender_dir: {deps.defender_dir}",
+        f"run_dir: {deps.run_dir}",
+        f"lead_id: {deps.lead_id}",
+        f"system: {system}",
+        f"verb: {verb}",
+        f"query_id: {query_id}",
+    ]
+    if template_id:
+        lines.append(f"template_id: {template_id}")
+    if coined_query:
+        lines.append(f"coined_query: {coined_query}")
+    if params:
+        lines.append("params:")
+        lines += [f"  {k}: {v}" for k, v in params.items()]
+    else:
+        lines.append("params: {}")
+    lines.append("dim_hints:")
+    lines += [f"  - {d}" for d in (dim_hints or ["(none specified — characterize the result)"])]
+    lines.append("```")
+    block = "\n".join(lines) + "\n"
+
+    exec_md = deps.defender_dir / "skills" / system / "execution.md"
+    if exec_md.is_file():
+        block += (
+            f"\n## {system} execution surface (CLI + query syntax — your authority "
+            "for HOW to query; do not read the adapter source)\n\n"
+            + exec_md.read_text() + "\n"
+        )
+    return block
+
+
+async def _run_assay(
+    deps: GatherDeps, executor_factory, request_limit: int,
+    system: str, verb: str, template_id: str | None, coined_query: str | None,
+    query_id: str, params: dict, dim_hints: list[str],
+) -> str:
+    """The `assay` tool body: spawn a per-assay executor in a fresh, minimal context,
+    run the spec with its OWN usage limit, return its summary to the finder.
+
+    The executor inherits the finder's `lead_id` (so its captured queries keep the
+    queries-table FK) and is handed `query_id` via deps (so the capture stamps the
+    finder-bound template/coined id, not the bare `{system}.{verb}` default — the
+    `(query_id, params)` join the offline author relies on). Own usage object, same
+    reason `_run_gather` gives one to the finder: the per-assay cap must bound the
+    executor, not fold into the finder's request count. The return is NOT re-wrapped
+    — it crosses no trust boundary (executor → finder, same lead, both Haiku); the
+    wrap happens once at the finder → main boundary in `_run_gather`."""
+    if bool(template_id) == bool(coined_query):
+        raise ModelRetry(
+            "assay needs exactly one of `template_id` (a catalog template to read — "
+            "it carries the query) or `coined_query` (KQL to run directly)."
+        )
+    # Don't spawn against a system already tripped this run — return the down
+    # message so the finder reasons from it (mirrors _run_gather's dispatch gate).
+    if circuit_breaker.is_tripped(deps.run_dir, system):
+        return circuit_breaker.down_message(deps.run_dir, system)
+
+    # Route the executor model by template-vs-coined: a coined (no-template) assay
+    # is the unfamiliar case Haiku flails, so the factory gives it Sonnet; a
+    # templated assay stays Haiku. (The factory owns the model→agent mapping.)
+    eagent = executor_factory(f"exec:{deps.lead_id}", coined_query is not None)
+    edeps = GatherDeps(
+        run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        run_id=deps.run_id, salt=deps.salt, is_main_session=False,
+        lead_id=deps.lead_id, role="executor", query_id=query_id, system=system,
+    )
+    prompt = _assay_prompt(
+        deps, system, verb, template_id, coined_query, query_id, params, dim_hints
+    )
+    try:
+        result = await eagent.run(
+            prompt, deps=edeps, usage_limits=UsageLimits(request_limit=request_limit),
+        )
+        return str(result.output or "")
+    except UsageLimitExceeded as e:
+        return (
+            f"assay {query_id!r} hit its request limit ({e}) before finishing; any "
+            "queries it ran are captured. Report the dimensions it completed and "
+            "mark the rest incomplete — do not silently drop them."
+        )
+
+
+def register_assay_tool(
+    finder_agent, executor_factory, request_limit: int, max_assays: int = 3,
+) -> None:
+    """Register the `assay` tool on the FINDER agent only. The finder has no direct
+    data-source access (its bash gate denies adapters); this is its sole path to
+    data. `executor_factory(agent_id, coined)` builds a fresh nested executor agent
+    (executor SKILL) per assay, bound to that observability id; `coined` (no
+    template) routes it to the stronger model.
+
+    `max_assays` is a STRUCTURAL per-lead cap (the finder agent is built per lead,
+    so this closure counter is per-lead): a backstop against the finder
+    over-decomposing into one-assay-per-dimension (measured: Haiku spawned 13 on the
+    baseline lead). Past the cap the tool refuses and tells the finder to synthesize
+    from what it has — prose 'assay few' didn't hold, so this makes it impossible."""
+    issued = {"n": 0}
+
+    @finder_agent.tool
+    async def assay(
+        ctx: RunContext[GatherDeps], system: str, verb: str,
+        query_id: str, params: dict[str, str], dim_hints: list[str],
+        template_id: str | None = None, coined_query: str | None = None,
+    ) -> str:
+        """Assay one query in a clean executor context and return its characterization.
+
+        An assay is a full sub-agent pass — a thorough workup of ONE query: it runs
+        the query capped, then characterizes its results across every dimension in
+        `dim_hints` (exact counts from `total`, shape from the ≤20-doc sample). It is
+        the costly operation — find the right query and assay it ONCE, covering all
+        the dimensions that query answers; only assay again for a genuinely different
+        query.
+
+        Pass exactly one of `template_id` (a catalog template to read — it carries
+        the query, dims, and pitfalls) or `coined_query` (a complete, valid query in
+        the system's syntax). `verb` is the adapter subcommand (e.g. "query",
+        "alerts"). `query_id` is the queries-table id (the template id, or your
+        coined descriptive name). `params` binds the template's `${...}` placeholders
+        plus `start`/`end`/`index`/`limit`. `dim_hints` lists what to characterize —
+        the executor decides exact-vs-shape and the recipe from the live sample.
+        Returns a tight `## Summary`, each value tagged exact|sample; the query +
+        payload are captured automatically. Issue independent assays in one turn to
+        run them in parallel."""
+        if issued["n"] >= max_assays:
+            raise ModelRetry(
+                f"Assay budget reached ({max_assays} per lead) — you have results "
+                f"from {issued['n']} assays. Synthesize the lead's ## Summary now "
+                "from what they returned; do NOT assay again. If a dimension is "
+                "genuinely uncovered, report it as not-measured. (Each assay is a "
+                "full sub-agent pass — most leads need one query covering all dims, "
+                "not one assay per dimension.)"
+            )
+        issued["n"] += 1
+        return await _run_assay(
+            ctx.deps, executor_factory, request_limit,
+            system, verb, template_id, coined_query, query_id, params, dim_hints,
         )

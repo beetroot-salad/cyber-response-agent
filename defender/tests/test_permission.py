@@ -233,3 +233,32 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
     d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir)
     assert not d.allow
     assert "invlang validation" in d.reason
+
+
+# --- finder/executor split: executor scope (find-ban + per-system) ---
+
+def test_scoped_executor_denied_find():
+    # The finder/executor split's executor (executor_system set) gets no `find`
+    # (no filesystem crawl) — measured: it ran 14 `find`s wandering the repo.
+    assert not permission.decide_bash(
+        "find /workspace -type d -name gather", is_main_session=False,
+        executor_system="elastic",
+    ).allow
+
+
+def test_legacy_gather_keeps_find():
+    # The legacy single-agent gather (no executor_system) keeps the looser surface.
+    assert permission.decide_bash(
+        "find /workspace -type d -name gather", is_main_session=False,
+        executor_system=None,
+    ).allow
+
+
+def test_scoped_executor_keeps_compute_and_in_scope_adapter():
+    for cmd in ("jq '.hits|length' /tmp/p.json",
+                "datamash mean 1",
+                "defender-record-summary --lead l-001 --batch -- jq . f",
+                "defender-elastic query 'x' --raw"):
+        assert permission.decide_bash(
+            cmd, is_main_session=False, executor_system="elastic",
+        ).allow, cmd
