@@ -19,15 +19,17 @@ ALERT = {"rule": {"id": "5710", "description": "sshd brute force"}}
 
 
 def _ticket(key, *, disposition="benign", outcome="caught",
-            created=NOW - timedelta(days=10), reason="nightly vuln scan"):
-    """A store ticket as `list-tickets --raw` would return it."""
+            event_time=NOW - timedelta(days=10), reason="nightly vuln scan"):
+    """A store ticket as `list-tickets --raw` would return it. The window keys on the
+    `evt:` label (alert event time), not the server-set `created`."""
     comments = []
     if outcome is not None:
         comments = [{"author": "learning",
                      "body": case_ticket.enrichment_to_comment(outcome)["body"]}]
-    iso = created.isoformat() if hasattr(created, "isoformat") else created
+    iso = event_time.isoformat() if hasattr(event_time, "isoformat") else event_time
     return {"key": key, "resolution": f"{disposition} — {reason}",
-            "created": iso, "comments": comments}
+            "created": NOW.isoformat(), "labels": ["sig:5710", f"evt:{iso}"],
+            "comments": comments}
 
 
 @pytest.fixture
@@ -49,25 +51,25 @@ def test_keeps_only_benign_survived_in_window(stub_store):
         _ticket("mal", disposition="malicious"),           # excluded: disposition
         _ticket("noflag", outcome=None),                   # excluded: no flag
         _ticket("survived", outcome="survived"),           # excluded: flag=false
-        _ticket("recent", created=NOW - timedelta(hours=1)),   # excluded: <24h
-        _ticket("old", created=NOW - timedelta(days=120)),     # excluded: >90d
-        _ticket("badts", created="not-a-date"),            # dropped: bad timestamp
+        _ticket("recent", event_time=NOW - timedelta(hours=1)),   # excluded: <24h
+        _ticket("old", event_time=NOW - timedelta(days=120)),     # excluded: >90d
+        _ticket("badts", event_time="not-a-date"),            # dropped: bad timestamp
     ])
     assert sorted(s.case_id for s in _sample()) == ["ok1", "ok2"]
 
 
 def test_window_boundaries_inclusive(stub_store):
     stub_store([
-        _ticket("edge_recent", created=NOW - timedelta(hours=24)),  # exactly -24h: in
-        _ticket("edge_old", created=NOW - timedelta(days=90)),      # exactly -90d: in
-        _ticket("just_too_recent", created=NOW - timedelta(hours=23, minutes=59)),
-        _ticket("just_too_old", created=NOW - timedelta(days=90, seconds=1)),
+        _ticket("edge_recent", event_time=NOW - timedelta(hours=24)),  # exactly -24h: in
+        _ticket("edge_old", event_time=NOW - timedelta(days=90)),      # exactly -90d: in
+        _ticket("just_too_recent", event_time=NOW - timedelta(hours=23, minutes=59)),
+        _ticket("just_too_old", event_time=NOW - timedelta(days=90, seconds=1)),
     ])
     assert sorted(s.case_id for s in _sample()) == ["edge_old", "edge_recent"]
 
 
 def test_bad_timestamp_drops_one_not_pool(stub_store):
-    stub_store([_ticket("good"), _ticket("bad", created="garbage")])
+    stub_store([_ticket("good"), _ticket("bad", event_time="garbage")])
     assert [s.case_id for s in _sample()] == ["good"]
 
 
@@ -103,13 +105,13 @@ def test_format_seeds_one_line_each():
     assert out.splitlines() == ["- c1: benign — scan", "- c2: benign — deploy"]
 
 
-def test_reason_excerpt_truncated():
-    long = "x" * 500
-    stub = case_ticket.ticket_reason  # ensure accessor path is what builds the seed
-    assert stub is not None
+def test_reason_not_truncated():
+    # The reason is the analyst's actual justification — the actor's grounding — so
+    # it is carried in full (only internal whitespace is collapsed, never cut).
+    long = "x " * 500
     seed = ticket_seeds._to_seed(_ticket("c", reason=long))
-    assert len(seed.reason) <= ticket_seeds._REASON_EXCERPT_MAX
-    assert seed.reason.endswith("…")
+    assert seed.reason == ("x " * 500).strip()
+    assert "…" not in seed.reason
 
 
 def test_multiline_reason_collapsed_to_one_line(stub_store):
@@ -131,6 +133,20 @@ def test_draw_is_order_independent(stub_store, monkeypatch):
     first = [s.case_id for s in _sample(run_id="run-xyz")]
     monkeypatch.setattr(ticket_seeds, "_list_closed", lambda label: list(reversed(pool)))
     assert [s.case_id for s in _sample(run_id="run-xyz")] == first
+
+
+def test_window_anchors_on_alert_event_time_not_wallclock(stub_store, monkeypatch):
+    # With no `now` override, the window anchors on the CURRENT alert's event time,
+    # not wall-clock now: a replayed alert from months ago must still find cases that
+    # are in-window relative to *its* date.
+    replay_alert = {"rule": {"id": "5710"}, "timestamp": "2026-01-15T00:00:00+00:00"}
+    anchor = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    stub_store([
+        _ticket("in_window", event_time=anchor - timedelta(days=10)),   # 10d before alert
+        _ticket("after_alert", event_time=anchor + timedelta(days=5)),  # post-dates alert: out
+    ])
+    seeds = ticket_seeds.sample_seeds(replay_alert, "self", "run-abc")  # no now=
+    assert [s.case_id for s in seeds] == ["in_window"]
 
 
 def test_non_fatal_when_signature_label_raises(monkeypatch):

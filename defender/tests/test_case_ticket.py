@@ -17,6 +17,7 @@ from defender.scripts.case_history import case_ticket
 ALERT = {
     "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
     "agent": {"name": "target-endpoint"},
+    "timestamp": "2026-05-07T07:15:01.561+0000",
 }
 
 
@@ -106,11 +107,14 @@ def test_ticket_accessors():
     ticket = {
         "key": "case-7",
         "created": "2026-06-01T00:00:00+00:00",
+        "labels": ["sig:5710", "evt:2026-05-30T09:00:00+00:00"],
         "resolution": "benign — nightly vuln scan",
         "comments": [_enrichment_comment("caught")],
     }
     assert case_ticket.ticket_key(ticket) == "case-7"
     assert case_ticket.ticket_created(ticket) == "2026-06-01T00:00:00+00:00"
+    # The window keys on the alert event time (the `evt:` label), not `created`.
+    assert case_ticket.ticket_event_time(ticket) == "2026-05-30T09:00:00+00:00"
     assert case_ticket.ticket_disposition(ticket) == "benign"
     assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
     assert case_ticket.ticket_seed_eligible(ticket) is True
@@ -123,15 +127,24 @@ def test_ticket_accessors_on_foreign_ticket():
     assert case_ticket.ticket_disposition(ticket) is None
     assert case_ticket.ticket_reason(ticket) is None
     assert case_ticket.ticket_seed_eligible(ticket) is None
+    assert case_ticket.ticket_event_time(ticket) is None  # no labels → None
     assert case_ticket.ticket_key("not-a-dict") is None
 
 
 def test_signature_label_matches_open_label():
     # The sampler filters the store by this label; it must equal the label the
-    # bridge create stamps.
+    # bridge create stamps, and `evt:` must not shift which label is returned.
     label = case_ticket.signature_label(ALERT)
     assert label == "sig:5710"
     assert label in case_ticket.alert_to_open_payload(ALERT, "c")["labels"]
+
+
+def test_open_payload_stamps_alert_event_time_label():
+    # The event-time label round-trips through the event-time accessor — the write
+    # side stamps it, the read side (sampler) decodes it.
+    payload = case_ticket.alert_to_open_payload(ALERT, "c")
+    assert case_ticket.alert_event_time(ALERT) == ALERT["timestamp"]
+    assert case_ticket.ticket_event_time(payload) == ALERT["timestamp"]
 
 
 # ---------------------------------------------------------------------------

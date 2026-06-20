@@ -32,7 +32,10 @@ _TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "tools" / "ticket_cli.py"
 _LIST_TIMEOUT_SEC = 15
 
 # The recency window: closed cases older than 24h (decorrelate from the current burst)
-# and within ~3 months (current effective policy). Keyed on `created` ≈ alert time.
+# and within ~3 months (current effective policy). Keyed on the alert *event time*
+# (`ticket_event_time`, the `evt:` stamp), and anchored on the current alert's event
+# time — NOT wall-clock now and NOT the ticket's `created` (materialize time), so a
+# replayed alert windows against its own date instead of when it happened to be run.
 WINDOW_RECENT = timedelta(hours=24)
 WINDOW_MAX = timedelta(days=90)
 
@@ -40,8 +43,6 @@ WINDOW_MAX = timedelta(days=90)
 # top-K cutoff). A thin pool returns whole; an empty pool returns nothing.
 SEED_COUNT_MIN = 3
 SEED_COUNT_MAX = 5
-
-_REASON_EXCERPT_MAX = 220
 
 
 @dataclass(frozen=True)
@@ -113,8 +114,8 @@ def _is_eligible(ticket, self_case_id: str, lo: datetime, hi: datetime) -> bool:
         return False
     if case_ticket.ticket_seed_eligible(ticket) is not True:
         return False
-    created = _parse_iso(case_ticket.ticket_created(ticket))
-    return created is not None and lo <= created <= hi
+    event_time = _parse_iso(case_ticket.ticket_event_time(ticket))
+    return event_time is not None and lo <= event_time <= hi
 
 
 def _to_seed(ticket) -> Seed:
@@ -122,9 +123,9 @@ def _to_seed(ticket) -> Seed:
     # Collapse internal whitespace (incl. newlines) so each seed stays one line: the
     # close reason is report.md's body paragraph and can wrap, and `format_seeds`
     # joins on "\n" — an embedded newline would forge an extra, caseless menu line.
+    # The reason is NOT truncated: it is the analyst's actual justification, the
+    # grounding the benign actor needs to judge whether a seed genuinely fits.
     reason = " ".join(reason.split())
-    if len(reason) > _REASON_EXCERPT_MAX:
-        reason = reason[: _REASON_EXCERPT_MAX - 1].rstrip() + "…"
     return Seed(case_id=case_ticket.ticket_key(ticket) or "?",
                 disposition="benign", reason=reason)
 
@@ -135,12 +136,15 @@ def sample_seeds(
     """Sample 3–5 prior benign-and-survived closed cases for the alert's signature.
 
     Uniform draw from the full eligible pool, seeded by `run_id` (reproducible). Empty
-    list on cold-start / any failure. `now` is injectable for tests."""
+    list on cold-start / any failure. The window is anchored on the current alert's
+    event time (falling back to wall-clock now only if the alert carries none); `now`
+    overrides the anchor for tests."""
     try:
         label = case_ticket.signature_label(alert)
         if not label:
             return []
-        now = now or datetime.now(timezone.utc)
+        if now is None:
+            now = _parse_iso(case_ticket.alert_event_time(alert)) or datetime.now(timezone.utc)
         lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
         eligible = [
             t for t in _list_closed(label) if _is_eligible(t, self_case_id, lo, hi)

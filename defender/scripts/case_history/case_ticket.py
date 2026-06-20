@@ -125,7 +125,8 @@ def _ctx(**kw: str) -> dict[str, str]:
     """A template context with every placeholder present (so a template referencing
     a field this call doesn't set renders empty rather than raising KeyError)."""
     base = {k: "" for k in ("case_id", "signature", "summary", "disposition",
-                            "reason", "confidence", "outcome", "seed_eligible")}
+                            "reason", "confidence", "outcome", "seed_eligible",
+                            "event_time")}
     base.update(kw)
     return base
 
@@ -162,6 +163,22 @@ def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     # A present-but-empty value (e.g. rule.id == "") is as useless as a missing
     # one, so fall back on any falsy value, not just None.
     return str(val) if val else _SIGNATURE_FALLBACK
+
+
+def _event_time(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
+    """The SIEM event time from the alert (ISO-8601), or "" if absent. Unlike the
+    signature there is no sentinel fallback: a case with no event time simply can't
+    be windowed, so the reader drops it from the seed pool rather than mis-dating it."""
+    path = _dig(mapping, "source.event_time") or "timestamp"
+    val = _dig(alert, str(path))
+    return str(val) if val else ""
+
+
+def alert_event_time(alert: dict[str, Any]) -> str | None:
+    """The alert's SIEM event time (ISO-8601), or None if absent. The seed sampler
+    anchors its recency window on this — the time the activity happened — so a
+    replayed alert windows against its own date, not wall-clock now."""
+    return _event_time(alert, _load_mapping()) or None
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
@@ -224,18 +241,66 @@ def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]
         # Fall back on a present-but-empty description too, so the open ticket
         # never ends up with a blank summary.
         summary=str(summary) if summary else _SUMMARY_FALLBACK,
+        event_time=_event_time(alert, mapping),
     )
-    return _render(mapping.get("open") or {}, ctx)
+    payload = _render(mapping.get("open") or {}, ctx)
+    if isinstance(payload.get("labels"), list):
+        # Drop any convention label whose placeholder rendered empty (e.g. `evt:`
+        # when the alert carries no event time) so no value-less label hits the
+        # store; `sig:` always has a fallback, so only optional stamps are affected.
+        bare = {p for p in _open_label_prefixes(mapping) if p}
+        payload["labels"] = [l for l in payload["labels"] if l not in bare]
+    return payload
+
+
+def _open_label_prefixes(mapping: dict[str, Any]) -> list[str]:
+    """The literal prefix (text before the first ``{``) of every templated
+    `open.labels` entry — used to recognize a label whose placeholder rendered empty
+    (a bare prefix), so the write side can drop it."""
+    out = []
+    for tmpl in _dig(mapping, "open.labels") or []:
+        if isinstance(tmpl, str):
+            i = tmpl.find("{")
+            if i > 0:
+                out.append(tmpl[:i])
+    return out
+
+
+def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
+    """The pure-literal prefix of the `open.labels` entry carrying ``{placeholder}``
+    (e.g. ``sig:`` for ``signature``) — the single source of the marker both the
+    write side renders and a reader matches on. None if no such label, or its prefix
+    is not a pure literal (then it can't identify a label unambiguously)."""
+    ph = "{" + placeholder + "}"
+    for tmpl in _dig(mapping, "open.labels") or []:
+        if not isinstance(tmpl, str):
+            continue
+        i = tmpl.find(ph)
+        if i == -1:
+            continue
+        prefix = tmpl[:i]
+        if "{" in prefix:  # the prefix must be a pure literal to be a marker
+            return None
+        return prefix or None
+    return None
 
 
 def signature_label(alert: dict[str, Any]) -> str | None:
     """The ticket label that identifies this alert's signature (e.g. ``sig:5710``),
     rendered from ``mapping.open.labels`` — the SAME label the bridge create stamps,
     so a reader (the seed sampler) can filter the store to this signature without
-    knowing the label convention. None if no label is configured."""
+    knowing the label convention. None if no signature label is configured.
+
+    Matched by its ``sig:`` prefix, not by position, so adding other labels (the
+    ``evt:`` event-time stamp) can't shift which one this returns."""
     mapping = _load_mapping()
     signature = _signature_id(alert, mapping)
     labels = _render(_dig(mapping, "open.labels") or [], _ctx(signature=signature))
+    prefix = _open_label_prefix(mapping, "signature")
+    if prefix:
+        for lbl in labels:
+            if isinstance(lbl, str) and lbl.startswith(prefix):
+                return lbl
     return labels[0] if labels else None
 
 
@@ -365,8 +430,31 @@ def ticket_key(ticket: Any) -> str | None:
 
 
 def ticket_created(ticket: Any) -> str | None:
-    """The ISO-8601 creation timestamp (~alert time; set at the bridge open)."""
+    """The ISO-8601 ticket-creation timestamp, set server-side at the bridge open.
+    This is *materialize* time (when we investigated), which drifts from the alert
+    event time under replay — window on `ticket_event_time`, not this."""
     return ticket.get("created") if isinstance(ticket, dict) else None
+
+
+def ticket_event_time(ticket: Any) -> str | None:
+    """The alert's SIEM event time (ISO-8601), read back from the `evt:` label the
+    bridge open stamped — the time the activity happened, the key the seed sampler
+    windows on. None if absent (no label / no event time at open)."""
+    if not isinstance(ticket, dict):
+        return None
+    labels = ticket.get("labels")
+    if not isinstance(labels, list):
+        return None
+    try:
+        prefix = _open_label_prefix(_load_mapping(), "event_time")
+    except CaseTicketError:
+        return None
+    if not prefix:
+        return None
+    for lbl in labels:
+        if isinstance(lbl, str) and lbl.startswith(prefix):
+            return lbl[len(prefix):] or None
+    return None
 
 
 def ticket_disposition(ticket: Any) -> str | None:
