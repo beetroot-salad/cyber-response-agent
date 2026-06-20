@@ -21,11 +21,9 @@ description looks relevant to the alert. Per-system SKILLs use the
 | `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its CLI is dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (injected by the system-skill hook) |
 | `skills/connect/` | Maintainer onboarding skill: interview → route (MCP or generated CLI adapter) → scaffold per-system knowledge → test → review branch, one system per run | A maintainer, out-of-band — **not** loaded during an alert run (see §Adding a new system) |
 
-Per-system references currently in the tree include `elastic`, `cmdb`,
-`identity`, `ticket`, `change-mgmt`, `threat-intel`, and `host-state`, plus
-the cross-cutting `advisory` and `data-source-debug` helpers. The set is
-environment-dependent — enumerate the directory rather than assuming a fixed
-list.
+The per-system set is environment-dependent — enumerate
+`defender/skills/*/SKILL.md` rather than assuming a fixed list. Alongside
+them sit the cross-cutting `advisory` and `data-source-debug` helpers.
 
 ## Why per-system SKILLs are split
 
@@ -44,40 +42,17 @@ itself. The single source of truth stays the file on disk
 
 ## Adding a new system
 
-Onboarding a system of record is what the **`/connect` skill**
-(`skills/connect/`) does. It is a **maintainer** skill run in a normal
-session (not inside a `run.py` loop): it interviews the maintainer, routes
-to either a maintained **MCP** server or a generated **CLI adapter**,
-scaffolds the per-system knowledge below, tests the integration, and opens a
-review branch — **one system per invocation**, and it never merges or
-pushes. The rationale lives in `skills/connect/decisions.md`; the build
-paths in `skills/connect/cli-adapter.md` / `mcp.md`.
+Onboarding a system of record is the **`/connect` skill**'s job
+(`skills/connect/`) — a maintainer runs it to interview, route to an MCP
+server or a generated CLI adapter, scaffold the per-system knowledge, test
+the integration, and open a review branch, one system per invocation. For
+how it works, read that skill (`skills/connect/SKILL.md`, rationale in
+`decisions.md`); the handbook doesn't restate it.
 
-What it produces is the whole onboarding surface:
-
-1. `defender/skills/{system}/SKILL.md` (+ `execution.md`) — the
-   visibility/execution split, `name: defender-{system}`, and a
-   `description:` that says what the system can and can't answer.
-2. For the CLI path, an adapter at `defender/scripts/tools/{system}_cli.py`
-   (built on the tree's shared adapter module — `_stub_transport.py` in this
-   deployment) and a `defender-{system}` shim in `defender/bin/`. Dropping
-   the shim **auto-gates** it as a data-source adapter via the
-   `Bash(defender-* *)` rule and the `NON_ADAPTER_SHIMS` taxonomy — **no
-   per-adapter `run-settings.json` edit** (`content/runtime-loop.md` §Hooks,
-   `defender/bin/README.md`). The MCP path writes no adapter; it records the
-   server and tool names in `execution.md`.
-3. A couple of seed query templates under
-   `defender/skills/gather/queries/{system}/` — the offline lead-author
-   grows the catalog from real runs (`content/run-artifacts.md`).
-
-Because a system is just files dropped into these locations, adding one
-needs no edit to the loop, the gather subagent, or any shared file. On a
-populated tree `/connect` **conforms to the established adapter conventions**
-(shared module, transport, auth posture) rather than introducing a second
-pattern — those conventions are documented in
-`defender/scripts/tools/README.md`. There is no signature catalog,
-permissions-per-signature, or archetype directory to fill in (those are
-`soc-agent/` concepts; see `content/design.md`).
+Adding a system needs no edit to the loop, the gather subagent, or any
+shared file — it's just files dropped into the per-system locations. There
+is no signature catalog, permissions-per-signature, or archetype directory
+to fill in (those are `soc-agent/` concepts; see `content/design.md`).
 
 ## Lessons
 
