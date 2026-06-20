@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""Case-history ticket mapper — the anti-corruption layer (issue #317, write path).
+
+The defender's *internal* model of a case is `report.md` (+ `alert.json`); the
+*external* model is the ticket-server's frozen v1 schema. These are two separate
+models, and this module is the **only** code that knows both: it parses the internal
+artifacts into a `CaseRecord` and maps that to/from external ticket payloads.
+
+The mapping itself — which internal facts land in which ticket fields, the label and
+resolution conventions — is **configuration, not code**: it lives in
+`knowledge/environment/systems/case-history/mapping.yaml` and is rendered here.
+Change the convention by editing that file; no code change required. Keeping the
+translation in one module + one config means the drivers, the report schema, and
+(PR 2) the learning reader never bind to ticket field names — when the store changes
+(e.g. Elastic Cases), only this module, the transport, and the mapping move.
+
+Pure by construction: no network, no transport import. `read_case_record` /
+`_load_mapping` do file reads only. The I/O — posting payloads, the run-dir
+receipt — lives in `ticket_writer.py`, which imports this module.
+"""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+# Mirrors defender.learning._loop_config.DISPOSITION_ENUM. Defined locally so the
+# write path carries no `defender.learning` import (the runtime/learning decoupling
+# goal of #317); test_case_ticket asserts the two stay in sync.
+DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
+
+_MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
+
+# Fallbacks for internal facts that are absent (not "configuration" — these are how
+# the code behaves when an artifact is thin, which the mapping templates don't cover).
+_SIGNATURE_FALLBACK = "unknown"
+_SUMMARY_FALLBACK = "(no rule description)"
+_CONFIDENCE_FALLBACK = "n/a"
+
+
+class CaseTicketError(Exception):
+    """The internal artifacts (report.md / alert.json) or the mapping config are
+    missing or malformed. Raised here; `ticket_writer` catches it and downgrades to
+    a non-fatal WARN (a crashed run with no report.md leaves the ticket open)."""
+
+
+@dataclass(frozen=True)
+class CaseRecord:
+    """The internal model of a finished case — parsed from `report.md` + `alert.json`.
+
+    Deliberately thin (#317 scope 4): the offline loop (PR 2) enriches the stored
+    resolution with grounded predicates + the survival flag; the runtime writes
+    only what it knows at disposition time."""
+
+    case_id: str
+    signature_id: str
+    disposition: str
+    confidence: str
+    reason: str
+
+
+# ---------------------------------------------------------------------------
+# Mapping config (the de-facto schema) — read from a file, not hardcoded
+# ---------------------------------------------------------------------------
+
+
+def _mapping_path() -> Path:
+    """Resolve mapping.yaml. Honors $DEFENDER_DIR (mirrors `_stub_transport`), else
+    resolves relative to this file so it's found regardless of cwd."""
+    base = os.environ.get("DEFENDER_DIR")
+    root = Path(base) if base else Path(__file__).resolve().parents[2]
+    return root / _MAPPING_RELPATH
+
+
+def _load_mapping() -> dict[str, Any]:
+    path = _mapping_path()
+    if not path.is_file():
+        raise CaseTicketError(f"case-history mapping not found: {path}")
+    import yaml  # the defender venv's one runtime dep
+
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
+    if not isinstance(data, dict):
+        raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
+    return data
+
+
+def _dig(obj: Any, dotted: str) -> Any:
+    """Follow a dotted path into a nested mapping; None if any hop is absent."""
+    cur = obj
+    for key in dotted.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def _render(value: Any, ctx: dict[str, str]) -> Any:
+    """Recursively render template strings (and lists/dicts of them) against ctx."""
+    if isinstance(value, str):
+        return value.format_map(ctx)
+    if isinstance(value, list):
+        return [_render(v, ctx) for v in value]
+    if isinstance(value, dict):
+        return {k: _render(v, ctx) for k, v in value.items()}
+    return value
+
+
+def _ctx(**kw: str) -> dict[str, str]:
+    """A template context with every placeholder present (so a template referencing
+    a field this call doesn't set renders empty rather than raising KeyError)."""
+    base = {k: "" for k in ("case_id", "signature", "summary",
+                            "disposition", "reason", "confidence")}
+    base.update(kw)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Internal model: report.md (+ alert.json) -> CaseRecord
+# ---------------------------------------------------------------------------
+
+
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Return (frontmatter mapping, body). Mirrors _loop_validate._parse_frontmatter
+    but also hands back the body paragraph and stays out of defender.learning."""
+    if not text.startswith("---\n"):
+        raise CaseTicketError("report.md missing leading '---' frontmatter fence")
+    end = text.find("\n---", 4)
+    if end == -1:
+        raise CaseTicketError("report.md missing closing '---' frontmatter fence")
+    import yaml
+
+    try:
+        fm = yaml.safe_load(text[4:end])
+    except yaml.YAMLError as e:
+        raise CaseTicketError(f"report.md frontmatter is not valid YAML: {e}") from e
+    if not isinstance(fm, dict):
+        raise CaseTicketError("report.md frontmatter is not a YAML mapping")
+    nl = text.find("\n", end + 1)
+    body = text[nl + 1:].strip() if nl != -1 else ""
+    return fm, body
+
+
+def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
+    path = _dig(mapping, "source.signature") or "rule.id"
+    val = _dig(alert, str(path))
+    # A present-but-empty value (e.g. rule.id == "") is as useless as a missing
+    # one, so fall back on any falsy value, not just None.
+    return str(val) if val else _SIGNATURE_FALLBACK
+
+
+def read_case_record(run_dir: Path) -> CaseRecord:
+    """Parse the run dir's `report.md` + `alert.json` into a `CaseRecord`.
+
+    Raises `CaseTicketError` if `report.md` is absent/malformed or the disposition
+    is out of enum — the caller (ticket_writer) treats that as "leave it open"."""
+    report = run_dir / "report.md"
+    if not report.is_file():
+        raise CaseTicketError(f"report.md not found: {report}")
+    fm, body = _parse_frontmatter(report.read_text())
+
+    disposition = fm.get("disposition")
+    if disposition not in DISPOSITION_ENUM:
+        raise CaseTicketError(
+            f"report.md disposition={disposition!r} not in {sorted(DISPOSITION_ENUM)}"
+        )
+    # The ticket key is the run-dir basename — the identity open_case_ticket
+    # keyed the create under. open runs at materialize (before report.md
+    # exists), so run_dir.name is the only id it has; close MUST target that
+    # same key. Derive it from the run dir, not the LLM-authored `case_id:`
+    # frontmatter: a divergent value there would transition a key that was
+    # never created (404 → the opened ticket is silently left open forever).
+    case_id = run_dir.name
+    confidence = str(fm.get("confidence") or "")
+
+    mapping = _load_mapping()
+    signature_id = _SIGNATURE_FALLBACK
+    alert_path = run_dir / "alert.json"
+    if alert_path.is_file():
+        try:
+            signature_id = _signature_id(json.loads(alert_path.read_text()), mapping)
+        except (json.JSONDecodeError, OSError):
+            pass  # signature stays fallback; non-fatal, the disposition still records
+
+    return CaseRecord(
+        case_id=case_id,
+        signature_id=signature_id,
+        disposition=disposition,
+        confidence=confidence,
+        reason=body,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mapper: internal <-> external ticket payloads (rendered from mapping.yaml)
+# ---------------------------------------------------------------------------
+
+
+def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]:
+    """Build the `POST /tickets` body for the bridge create (an OPEN ticket).
+
+    Shape and conventions come from `mapping.yaml` (`open` section + `source.*`)."""
+    mapping = _load_mapping()
+    signature = _signature_id(alert, mapping)
+    summary = _dig(alert, str(_dig(mapping, "source.summary") or "rule.description"))
+    ctx = _ctx(
+        case_id=case_id,
+        signature=signature,
+        # Fall back on a present-but-empty description too, so the open ticket
+        # never ends up with a blank summary.
+        summary=str(summary) if summary else _SUMMARY_FALLBACK,
+    )
+    return _render(mapping.get("open") or {}, ctx)
+
+
+def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
+    """Build the `POST /tickets/{key}/transitions` body for the close.
+
+    Shape and conventions come from `mapping.yaml` (`close` section)."""
+    mapping = _load_mapping()
+    ctx = _ctx(
+        case_id=rec.case_id,
+        signature=rec.signature_id,
+        disposition=rec.disposition,
+        reason=rec.reason,
+        confidence=rec.confidence or _CONFIDENCE_FALLBACK,
+    )
+    return _render(mapping.get("close") or {}, ctx)
+
+
+def _disposition_separator(mapping: dict[str, Any]) -> str | None:
+    """The literal text that follows {disposition} in the `close.resolution` template
+    — the single source for both encoding (above) and decoding (below)."""
+    tmpl = _dig(mapping, "close.resolution")
+    if not isinstance(tmpl, str):
+        return None
+    marker = "{disposition}"
+    i = tmpl.find(marker)
+    if i != 0:  # disposition must lead for the decode to be unambiguous
+        return None
+    rest = tmpl[len(marker):]
+    nxt = rest.find("{")
+    sep = rest[:nxt] if nxt != -1 else rest
+    return sep or None
+
+
+def parse_disposition_from_resolution(resolution: str | None) -> str | None:
+    """Inverse of the disposition encoding in `case_record_to_close`.
+
+    Returns the disposition token, or None if the resolution wasn't written by us
+    (e.g. a human-edited close). Seeds PR 2's reader; the round-trip is tested."""
+    if not resolution:
+        return None
+    try:
+        sep = _disposition_separator(_load_mapping())
+    except CaseTicketError:
+        return None
+    if not sep:
+        return None
+    head = resolution.split(sep, 1)[0].strip()
+    return head if head in DISPOSITION_ENUM else None

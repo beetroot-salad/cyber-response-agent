@@ -112,6 +112,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "commits reference it) instead of the auto timestamp id; a "
                         "collision with an existing run dir is rejected by materialize_run_dir")
     p.add_argument("--no-learn", action="store_true", help="Skip enqueuing for learning")
+    p.add_argument("--update-ticket", action="store_true",
+                   help="Write/close a case-history ticket for this alert (default off)")
     p.add_argument("--model", default=None, help="model id (overrides $DEFENDER_MODEL)")
     return p.parse_args(argv)
 
@@ -139,6 +141,14 @@ def main(argv: list[str]) -> int:
 
     alert = ns.alert.resolve()
     run_dir = _run.materialize_run_dir(alert, ns.run_id)
+
+    # Case-history bridge — create the OPEN ticket now; closed in the post-steps
+    # below (engine-agnostic helper, shared with run.py). Opt-in; non-fatal.
+    ticket_writer = None
+    if ns.update_ticket:
+        from defender.scripts.case_history import ticket_writer
+        ticket_writer.open_case_ticket(run_dir)
+
     salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
     model = ns.model or os.environ.get("DEFENDER_MODEL") or driver.DEFAULT_MODEL
     print(f"[run_pai] run_dir={run_dir} model={model}", file=sys.stderr)
@@ -162,6 +172,10 @@ def main(argv: list[str]) -> int:
     # Loud structural-integrity signal on the two live tables (no-op for a
     # no-gather run — slice 1).
     _run.cross_check_tables(run_dir)
+
+    # Close the case-history ticket with the disposition (the defender's response).
+    if ticket_writer is not None:
+        ticket_writer.close_case_ticket(run_dir)
 
     if ns.no_learn:
         print("[run_pai] --no-learn set; not enqueuing for learning", file=sys.stderr)

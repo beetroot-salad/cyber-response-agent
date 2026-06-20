@@ -1,0 +1,35 @@
+# Case-history field mapping (issue #317).
+#
+# How the defender's INTERNAL case model (alert.json + report.md) maps onto the
+# EXTERNAL ticket schema — the "de-facto schema". The frozen v1 ticket has no
+# disposition or signature field, so they ride existing fields by convention.
+# Edit THIS FILE to change the convention; no code change required.
+#
+# Templates use {placeholders}: case_id, signature, summary, disposition, reason,
+# confidence. `source.*` are dotted paths into alert.json.
+
+# Where to read facts from the internal model (alert.json).
+source:
+  signature: rule.id
+  summary: rule.description
+
+# POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
+# Keys are external ticket fields (TicketCreate); values are rendered templates.
+open:
+  key: "{case_id}"
+  summary: "{summary}"
+  description: "Auto-created from alert {case_id} (rule {signature})."
+  status: open
+  reporter: defender
+  labels:
+    - "sig:{signature}"
+
+# POST /tickets/{key}/transitions — the close: the defender's disposition.
+# Keys are external transition fields. `resolution` MUST begin with {disposition};
+# the disposition is recovered by splitting on the literal text that immediately
+# follows {disposition} in this template (so encode + decode stay single-sourced).
+close:
+  status: closed
+  resolution: "{disposition} — {reason}"
+  author: defender
+  comment: "Disposition: {disposition} (confidence: {confidence})."

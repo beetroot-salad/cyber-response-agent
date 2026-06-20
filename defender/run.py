@@ -72,6 +72,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("alert", type=Path, help="Path to alert.json fixture")
     p.add_argument("--run-id", default=None, help="Override auto-generated run id")
     p.add_argument("--no-learn", action="store_true", help="Skip the learning loop")
+    p.add_argument("--update-ticket", action="store_true",
+                   help="Write/close a case-history ticket for this alert (default off)")
     p.add_argument("--model", default=None, help="claude --model (overrides $DEFENDER_MODEL)")
     p.add_argument("--effort", default=None, help="claude --effort (overrides $DEFENDER_EFFORT)")
     return p.parse_args(argv)
@@ -266,6 +268,14 @@ def main(argv: list[str]) -> int:
     alert = ns.alert.resolve()
     run_dir = materialize_run_dir(alert, ns.run_id)
 
+    # Case-history bridge: a ticket pre-exists when the alert is raised (the
+    # realistic lifecycle), so create the OPEN ticket now; the defender closes it
+    # in the post-steps below. Opt-in (default off); a no-op WARN if misconfigured.
+    ticket_writer = None
+    if ns.update_ticket:
+        from defender.scripts.case_history import ticket_writer
+        ticket_writer.open_case_ticket(run_dir)
+
     settings_path = build_settings_file()
     model = ns.model or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
     effort = ns.effort or os.environ.get("DEFENDER_EFFORT") or None
@@ -288,6 +298,10 @@ def main(argv: list[str]) -> int:
 
     # Loud structural-integrity signal (replaces the deleted projection halt).
     cross_check_tables(run_dir)
+
+    # Close the case-history ticket with the disposition (the defender's response).
+    if ticket_writer is not None:
+        ticket_writer.close_case_ticket(run_dir)
 
     if ns.no_learn:
         print("[run.py] --no-learn set; not enqueuing for learning", file=sys.stderr)
