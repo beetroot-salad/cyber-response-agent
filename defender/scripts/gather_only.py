@@ -117,7 +117,7 @@ async def main() -> int:
     # DEFENDER_GATHER_LEAN selects the issue #340 lean single-agent path
     # (SKILL.lean.md, one ES|QL aggregation, no finder/executor split) over the
     # split. Same lead dispatch + capture hooks, so the two are A/B-comparable.
-    lean = bool(os.environ.get("DEFENDER_GATHER_LEAN"))
+    lean = driver._lean_gather_enabled()
     if lean:
         def factory(agent_id: str):
             return driver.build_lean_gather_agent(DEFENDER_DIR, logger, agent_id)

@@ -65,3 +65,7 @@ FROM logs-falco.alerts-*
 - **High-volume rules.** "Redirect STDOUT/STDIN…" and "Unexpected UDP Traffic"
   run to hundreds of thousands of events cluster-wide — always aggregate
   (`STATS`), never pull docs.
+- **Wide `BY` truncates at 1000 rows.** `BY rule, proc, parent, container` is
+  high-cardinality; ES|QL returns at most 1000 grouping rows by default and
+  silently drops the rest (the `SORT events DESC` keeps the top groups). If
+  `row_count` is 1000, drop a `BY` key or tighten the `WHERE` and re-run.

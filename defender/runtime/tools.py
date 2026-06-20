@@ -297,9 +297,15 @@ def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--query-id" and i + 1 < len(argv):
-            qid = argv[i + 1]
-            i += 2
+        if a == "--query-id":
+            # `--query-id <id>` consumes its value; a trailing `--query-id` with
+            # no value is still consumed (dropped), never passed through — the
+            # adapter's argparse would reject the unknown flag and fail the query.
+            if i + 1 < len(argv):
+                qid = argv[i + 1]
+                i += 2
+            else:
+                i += 1
             continue
         if a.startswith("--query-id="):
             qid = a.split("=", 1)[1]

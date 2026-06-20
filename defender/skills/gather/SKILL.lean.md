@@ -60,6 +60,13 @@ redirect it**:
 defender-elastic esql '<ES|QL query>' --query-id <id>
 ```
 
+- **Put the whole ES|QL query on ONE line inside the quotes.** The catalog
+  templates print the pipe across several lines for readability — flatten it
+  before you run it: the `|` stage separators stay *inside* the quoted string, but
+  a literal newline in the quoted argument is read as a shell command boundary and
+  the call is **rejected** (`gather may only run a data-source adapter …`). One
+  line, single-quoted, no trailing `\` continuations.
+
 - **Tag every call with `--query-id`** — the `id:` of the template you bound in
   step 2 (e.g. `elastic.sshd-auth-history`), or a coined `elastic.<descriptive-kebab>`
   when none fit. The harness strips this flag (the adapter never sees it) and
@@ -72,8 +79,13 @@ defender-elastic esql '<ES|QL query>' --query-id <id>
   result automatically (queries table + by-ref payload) — you do not wrap it,
   name files, or record anything.
 - The aggregation result — the `{columns, row_count, values}` table — **is your
-  summary**. It is exact (computed over the full match server-side) and small.
-  Report those values.
+  summary**. The aggregation is computed over the full match server-side (the
+  `COUNT`/`SUM`/`MIN`/`MAX` scalars are exact), and the table is small. Report
+  those values. **Caveat: ES|QL caps the returned grouping rows at 1000 by
+  default** — a high-cardinality `BY` (many groups) is silently truncated, so if
+  `row_count` is 1000 the grouping was cut: narrow the `BY` / tighten the `WHERE`,
+  or add an explicit `LIMIT` and treat the `SORT`ed top-N as partial. (Note too
+  that `COUNT_DISTINCT` is approximate — HyperLogLog++, not an exact unique count.)
 - Express the whole measurement *in the query*: counts via `COUNT(*) WHERE ...`,
   distributions via `STATS ... BY ...`, cardinality via `COUNT_DISTINCT`, timing
   via `MIN`/`MAX`/`DATE_TRUNC`. If a dimension needs a field that lives in text

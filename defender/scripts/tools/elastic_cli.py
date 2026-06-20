@@ -486,20 +486,21 @@ def build_parser():
 
     e = sub.add_parser(
         "esql",
-        help="Run an ES|QL pipe; server-side aggregation, exact, returned as a table.",
+        help="Run an ES|QL pipe; server-side aggregation returned as a table.",
         description=(
             "Run an ES|QL query (`FROM ... | WHERE ... | STATS ...`) against the "
             "playground Elasticsearch and return the result table.\n\n"
-            "The aggregation runs server-side and is EXACT — the result rows ARE the "
-            "answer; do not pull docs and reduce them yourself. The whole query "
-            "(index, filter, time window, aggregation) lives in the pipe; there are "
-            "no --index/--start/--end/--limit flags.\n\n"
-            "Examples:\n"
-            "  elastic_cli.py esql 'FROM logs-system.auth-* \\\n"
-            "      | WHERE source.ip == \"172.18.0.14\" AND host.name == \"db-1\" \\\n"
-            "              AND event.outcome IS NOT NULL \\\n"
-            "      | STATS accepted = COUNT(*) WHERE event.outcome == \"success\", \\\n"
-            "              failed = COUNT(*) WHERE event.outcome == \"failure\"'\n"
+            "The aggregation runs server-side — the result rows ARE the answer; do "
+            "not pull docs and reduce them yourself. The whole query (index, filter, "
+            "time window, aggregation) lives in the pipe; there are no "
+            "--index/--start/--end/--limit flags. Pass the whole pipe on ONE line "
+            "(the `|` separators stay inside the quotes); ES|QL caps returned rows at "
+            "1000 by default, so a wide `BY` is truncated unless you narrow it.\n\n"
+            "Examples (one line each):\n"
+            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE source.ip == \"172.18.0.14\" "
+            "AND host.name == \"db-1\" AND event.outcome IS NOT NULL | STATS "
+            "accepted = COUNT(*) WHERE event.outcome == \"success\", "
+            "failed = COUNT(*) WHERE event.outcome == \"failure\"'\n"
             "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE user.name == \"dev.dana\" "
             "| LIMIT 10'   # field-shape probe"
         ),
