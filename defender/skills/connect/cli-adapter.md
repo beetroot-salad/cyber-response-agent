@@ -93,29 +93,31 @@ one, stop and remind them it belongs in an env var.
 ## Transport
 
 The example's `_request` does HTTP via `urllib` with the resolved auth
-headers and the configured timeout. Swap that one method for whatever the
-environment needs — direct HTTP, SSH, an existing CLI you shell out to and
-parse, or (on the v2 playground) `docker exec … curl` into a bastion that
-can reach the service. The rest of the adapter — parsing, config, exit
-codes, auth, the `--raw` envelope — does not change with transport.
+headers and the configured timeout. Swap that one method for whatever your
+environment needs — direct HTTP, a shell-out (curl, an SSH command, an
+existing CLI you wrap and parse), or a vendor SDK call. The right transport
+is a property of *your* deployment, not of this skill; the rest of the
+adapter — parsing, config, exit codes, auth, the `--raw` envelope — does
+not change with it.
 
 One thing *does* need care when you leave urllib: **the exit-code
 contract.** The urllib example gets the HTTP-status → exit-code mapping for
-free from `urllib.error.HTTPError.code`. A `docker exec … curl`, SSH, or
-wrapped-CLI transport has no such exception, so reconstruct the status and
-route it through the shared mapping (`die_for_http_status`) instead of
-hand-rolling the 401/403-vs-4xx branches:
+free from `urllib.error.HTTPError.code`. A shell-out transport has no such
+exception, so reconstruct the status and route it through the shared
+mapping (`die_for_http_status`) instead of hand-rolling the
+401/403-vs-4xx branches:
 
 ```python
-# docker-exec transport: capture body AND status, then map via _adapter.
+# Shell-out transport: capture the body AND the HTTP status, then map via
+# _adapter. Wrap the same curl in `ssh <host> …` or `docker exec <name> …`
+# when the service is only reachable through a jump host or a container.
 proc = subprocess.run(
-    ["docker", "--context", ctx, "exec", bastion,
-     "curl", "-sS", "-w", "\n%{http_code}", "--max-time", str(timeout),
+    ["curl", "-sS", "-w", "\n%{http_code}", "--max-time", str(timeout),
      *header_args, url],
-    capture_output=True, text=True, timeout=timeout + 15,
+    capture_output=True, text=True, timeout=timeout + 5,
 )
 if proc.returncode != 0 and not proc.stdout:
-    die(EXIT_CONN_ERROR, f"{SYSTEM}: docker exec failed: {proc.stderr.strip()}")
+    die(EXIT_CONN_ERROR, f"{SYSTEM}: transport failed: {proc.stderr.strip()}")
 body, _, code = proc.stdout.rpartition("\n")
 die_for_http_status(SYSTEM, int(code or 0), body)   # exits on failure
 return json.loads(body)
@@ -145,7 +147,7 @@ afterthought:
 1. Spawn a fresh-context **Haiku** subagent (it must match the runtime
    gather model). Hand it only the adapter's `--help` output and a
    realistic task (*"find the 5 most recent failed SSH logins on host
-   `web-1` in the last hour — what exact command would you run?"*). If you
+   `host-01` in the last hour — what exact command would you run?"*). If you
    can't pin a subagent to Haiku (a headless or unattended run), fall back
    to modeling the verbs and flags on the closest sibling adapter plus your
    own read of `--help` — the goal is unchanged: a CLI the gather subagent
