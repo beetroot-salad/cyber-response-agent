@@ -60,6 +60,21 @@ def test_read_case_record_parses_internal_model(tmp_path: Path):
     assert rec.reason == "Confirmed C2 beacon."
 
 
+def test_read_case_record_case_id_is_run_dir_not_frontmatter(tmp_path: Path):
+    # open_case_ticket keys the create on run_dir.name (the only id it has at
+    # materialize time); close must target that same key. A report.md whose
+    # `case_id:` frontmatter diverges must NOT be honored, or the close would
+    # transition a key that was never created (404, ticket left open).
+    run_dir = tmp_path / "20260620T000000Z-sshd"
+    run_dir.mkdir()
+    run_dir.joinpath("report.md").write_text(
+        "---\ncase_id: SOMETHING-ELSE\ndisposition: benign\n"
+        "confidence: high\n---\nRoutine.\n"
+    )
+    rec = case_ticket.read_case_record(run_dir)
+    assert rec.case_id == run_dir.name  # not "SOMETHING-ELSE"
+
+
 def test_read_case_record_signature_unknown_without_alert(tmp_path: Path):
     run_dir = _write_run(tmp_path, with_alert=False)
     rec = case_ticket.read_case_record(run_dir)
@@ -104,6 +119,15 @@ def test_alert_to_open_payload_handles_missing_rule():
     payload = case_ticket.alert_to_open_payload({}, "case-2")
     assert payload["labels"] == ["sig:unknown"]
     assert payload["status"] == "open"
+
+
+def test_alert_to_open_payload_falls_back_on_empty_strings():
+    # A present-but-empty rule.id / rule.description is as useless as a missing
+    # one — the fallbacks must still apply (not a blank summary / "sig:" label).
+    alert = {"rule": {"id": "", "description": ""}}
+    payload = case_ticket.alert_to_open_payload(alert, "case-3")
+    assert payload["labels"] == ["sig:unknown"]
+    assert payload["summary"] == "(no rule description)"
 
 
 # ---------------------------------------------------------------------------

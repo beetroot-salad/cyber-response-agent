@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 from defender.scripts.case_history import case_ticket
@@ -61,6 +62,13 @@ def _load_config() -> dict[str, str] | None:
     missing = [k for k in _CONFIG_KEYS if not cfg.get(k)]
     if missing:
         _warn(f"missing config keys {[f'{PREFIX}_{k}' for k in missing]} in {path}; skipping")
+        return None
+    # Validate TIMEOUT_SEC here, where we can say *which* key is wrong. Otherwise
+    # a typo'd value (e.g. "10s") only surfaces as a ValueError from int() deep in
+    # _post, which the post-step's broad except swallows into a generic WARN.
+    if not cfg["TIMEOUT_SEC"].isdigit():
+        _warn(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
+              f"integer in {path}; skipping")
         return None
     return cfg
 
@@ -130,7 +138,11 @@ def close_case_ticket(run_dir: Path) -> None:
             _warn(f"no usable report.md; leaving ticket open: {e}")
             return
         payload = case_ticket.case_record_to_close(rec)
-        status, body = _post(config, f"/tickets/{rec.case_id}/transitions", payload)
+        # Percent-encode the key for the path: run_dir.name carries the alert
+        # filename stem, which can hold spaces / other reserved chars that would
+        # otherwise produce a URL that doesn't match the stored key.
+        key = urllib.parse.quote(rec.case_id, safe="")
+        status, body = _post(config, f"/tickets/{key}/transitions", payload)
         ok = status is not None and status.startswith("2")
         if not ok:
             _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")

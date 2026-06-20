@@ -148,7 +148,9 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     path = _dig(mapping, "source.signature") or "rule.id"
     val = _dig(alert, str(path))
-    return str(val) if val is not None else _SIGNATURE_FALLBACK
+    # A present-but-empty value (e.g. rule.id == "") is as useless as a missing
+    # one, so fall back on any falsy value, not just None.
+    return str(val) if val else _SIGNATURE_FALLBACK
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
@@ -166,7 +168,13 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         raise CaseTicketError(
             f"report.md disposition={disposition!r} not in {sorted(DISPOSITION_ENUM)}"
         )
-    case_id = str(fm.get("case_id") or run_dir.name)
+    # The ticket key is the run-dir basename — the identity open_case_ticket
+    # keyed the create under. open runs at materialize (before report.md
+    # exists), so run_dir.name is the only id it has; close MUST target that
+    # same key. Derive it from the run dir, not the LLM-authored `case_id:`
+    # frontmatter: a divergent value there would transition a key that was
+    # never created (404 → the opened ticket is silently left open forever).
+    case_id = run_dir.name
     confidence = str(fm.get("confidence") or "")
 
     mapping = _load_mapping()
@@ -202,7 +210,9 @@ def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]
     ctx = _ctx(
         case_id=case_id,
         signature=signature,
-        summary=str(summary) if summary is not None else _SUMMARY_FALLBACK,
+        # Fall back on a present-but-empty description too, so the open ticket
+        # never ends up with a blank summary.
+        summary=str(summary) if summary else _SUMMARY_FALLBACK,
     )
     return _render(mapping.get("open") or {}, ctx)
 
