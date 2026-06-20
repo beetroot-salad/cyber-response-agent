@@ -12,9 +12,12 @@ adapter.
 **First, check what's already there.** If `scripts/tools/` already holds
 sibling adapters, you are extending a populated deployment, not seeding a
 fresh one — **conform to the established pattern rather than introducing a
-second one.** Read the closest sibling adapter and the shared module it
-imports; reuse *that* module, its config-key scheme, and its transport
-convention. The files this skill ships are the **greenfield seed** for a
+second one.** If the tree documents its adapter conventions
+(`scripts/tools/README.md`), read that first: it names the shared module
+and the recurring transport / auth / config choices you're conforming to,
+so you don't reverse-engineer them from the source. Then read the closest
+sibling adapter and the shared module it imports; reuse *that* module, its
+config-key scheme, and its transport convention. The files this skill ships are the **greenfield seed** for a
 tree with no adapters yet — do not install them alongside an existing
 shared module and create two parallel conventions. If the siblings' shared
 module is missing a piece you need, extend it in place rather than forking

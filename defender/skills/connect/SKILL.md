@@ -72,15 +72,26 @@ fresh deployment, expect these to be empty; that's normal.
 
 Also note whether *other* systems are already connected. If they are,
 you're extending a populated deployment: there's an established shared
-adapter module and house conventions (config keys, transport, output
-shape) to **conform to**, not duplicate — see `cli-adapter.md` → "The
-shape to copy". If `scripts/tools/` is empty, you're greenfield and the
-bundled example is your seed.
+adapter module and house conventions (config keys, transport, auth
+posture, output shape) to **conform to**, not duplicate. Before the
+interview, read the deployment's adapter-conventions note if it has one
+(`scripts/tools/README.md`) and the closest sibling adapter — between them
+they settle the recurring answers (which shared module, transport, auth
+posture, config scheme), so you **confirm** those instead of asking cold
+(see `cli-adapter.md` → "The shape to copy"). If `scripts/tools/` is empty,
+you're greenfield and the bundled example is your seed.
 
 ### 2. Interview
 
 Ask one question at a time, conversationally. You need enough to build a
 working integration and no more.
+
+On a populated tree, the conventions note and sibling adapters you read in
+Orient have likely already settled the recurring answers — transport (2)
+and auth posture (4). Don't re-ask those cold: state what the house
+convention is and ask the maintainer to confirm or flag an exception.
+Spend the interview on what's genuinely system-specific (1 and 3). On a
+greenfield tree there's nothing cached yet, so ask all four.
 
 1. **What system are you connecting?** A well-known name gives you the API
    shape from training; verify it against the real docs during the build.
@@ -167,12 +178,16 @@ the live system.
 
 ### 6. Validate and commit
 
+For a **CLI** integration, run the scaffold validator and fix every FAIL:
+
 ```bash
 python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
-Fix every FAIL. Then walk `${CLAUDE_SKILL_DIR}/checklist.md` for the
-judgment items the script can't check. Then, in a git repo (the normal
+Skip it on the **MCP** path — it checks the adapter and shim files an MCP
+system doesn't have, so it would FAIL on things that aren't yours to fix.
+Either way, walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items
+the script can't check. Then, in a git repo (the normal
 case), branch and stage — if the tree isn't under version control, skip
 the branch and just leave the files in place for review:
 
