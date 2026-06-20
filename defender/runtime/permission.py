@@ -67,29 +67,6 @@ GATHER_FALLTHROUGH_DENY_REASON = (
 )
 
 # The finder finds the query and delegates execution to the assay tool — it has
-# NO direct data-source access (the hard boundary that makes the finder/executor
-# split worth its cost: the iterating executor carries a tiny context, the finder
-# never runs a query). Adapters are denied here (pointed at assay); only read-only
-# viewers/find are allowed, for scanning templates during orientation.
-FINDER_NO_ADAPTER_REASON = (
-    "Blocked: the finder has no direct data-source access. Call "
-    "assay(system, verb, template_id|coined_query, query_id, params, dim_hints) to "
-    "run a query — the executor runs it in a clean context and returns the computed "
-    "characterization. Only read-only viewers (grep/ls/cat/jq/find) are available "
-    "here, for scanning templates during orientation."
-)
-
-# The finder must reason from the executor's returned ## Summary, never from the
-# raw payloads the executor persists — reading those dumps re-floods the finder's
-# context (the cost problem the split exists to kill) and undoes the boundary. The
-# finder has no gather_raw access at all (unlike the executor, which jq-summarizes
-# its own payload).
-FINDER_RAW_REASON = (
-    "Blocked: the finder reasons from the executor's returned ## Summary, not from "
-    "raw payloads — it has no gather_raw access. If an assay's summary is too thin, "
-    "run another assay with tighter dim_hints; never read the dump."
-)
-
 # Gather may run a data-source adapter directly — it's captured transparently —
 # but only as a standalone command (a pipeline/compound makes "the payload"
 # ambiguous). Run it solo, then filter the persisted payload file.
@@ -139,15 +116,6 @@ def _safe_gather_tokens() -> frozenset:
     return frozenset(_safe_main_tokens() | GATHER_READONLY_TOOLS)
 
 
-@lru_cache(maxsize=1)
-def _safe_finder_tokens() -> frozenset:
-    # The finder gets ONLY read-only viewers + find (to scan templates) — not the
-    # non-adapter shims (record-query/data-source-debug), because those would let
-    # it capture a query and circumvent the assay boundary, and never an
-    # adapter. Its only data path is the assay tool.
-    return frozenset(set(READONLY_TOOLS) | set(GATHER_READONLY_TOOLS))
-
-
 def _segment_is_adapter(toks: list[str]) -> bool:
     """True iff the segment's COMMAND (first token) is a data-source adapter — a
     `defender-<system>` shim or a `<system>_cli.py` script. `toks` is one command's
@@ -186,40 +154,17 @@ def adapter_argv(command: str) -> list[str] | None:
     return segs[0]  # the command's token list IS the argv (shlex-resolved)
 
 
-def decide_bash(command: str, *, is_main_session: bool, is_finder: bool = False,
-                executor_system: str | None = None) -> Decision:
+def decide_bash(command: str, *, is_main_session: bool) -> Decision:
     """Allow/deny a Bash command, porting the three Bash gate hooks.
 
     `is_main_session=True` → the orchestrator (slice 1 is always this): no
     adapter calls, no gather_raw reads, only safe shims/viewers.
-    `is_main_session=False` → a gather subagent (slice 2). `is_finder=True` is the
-    finder: read-only viewers/find only, NO adapter access (data goes through the
-    assay tool). `is_finder=False` is the executor: adapters allowed and
-    captured transparently. `executor_system` set marks the finder/executor split's
-    executor: it gets NO `find` (no filesystem crawl — it works from its query's
-    payload). Cross-system adapter scope is enforced in the bash tool (which has the
-    canonical system deriver + the assay's system). `executor_system=None` is the
-    legacy single-agent gather, which keeps the looser surface.
+    `is_main_session=False` → the lean gather subagent (slice 2): it may run a
+    data-source adapter directly (captured transparently) plus read-only
+    viewers/find; arbitrary shell fails closed.
     """
     cmd = command.strip()
     if not cmd:
-        return Decision(True)
-
-    if is_finder:
-        # Finder: finds + delegates. assay is its only path to data.
-        # Allow read-only viewers + find for orientation; deny adapters (point at
-        # assay), gather_raw reads (reason from the summary), and
-        # arbitrary shell, fail-closed.
-        if RAW_MARKER in cmd:
-            return Decision(False, FINDER_RAW_REASON)
-        inner = unwrap(cmd)
-        if inner is None:
-            return Decision(False, FINDER_NO_ADAPTER_REASON)
-        segs = [s for s in split_segments(inner) if s]
-        if any(_segment_is_adapter(s) for s in segs):
-            return Decision(False, FINDER_NO_ADAPTER_REASON)
-        if not _all_segments_safe(inner, _safe_finder_tokens()):
-            return Decision(False, FINDER_NO_ADAPTER_REASON)
         return Decision(True)
 
     if not is_main_session:
@@ -238,11 +183,7 @@ def decide_bash(command: str, *, is_main_session: bool, is_finder: bool = False,
             if len(segs) != 1:
                 return Decision(False, ADAPTER_STANDALONE_REASON)
             return Decision(True)
-        # The scoped executor (executor_system set) gets the main safe set — no
-        # `find` (no filesystem crawl; it works from its query's payload). The
-        # legacy single-agent gather (executor_system=None) keeps `find`.
-        toks = _safe_main_tokens() if executor_system else _safe_gather_tokens()
-        if not _all_segments_safe(inner, toks):
+        if not _all_segments_safe(inner, _safe_gather_tokens()):
             return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
         return Decision(True)
 
@@ -272,12 +213,11 @@ _READ_DENY_SUBSTR = (".env", "credentials", "ground_truth", "ground-truth", "cas
 _READ_DENY_DIR = ".ssh"
 
 
-def decide_read(path: Path, *, is_main_session: bool, is_finder: bool = False) -> Decision:
+def decide_read(path: Path, *, is_main_session: bool) -> Decision:
     """Allow/deny a file read, porting the Read deny rules + the gather_raw clamp
-    (`block_main_loop_raw_access` on Read). The clamp applies to the main loop AND
-    the finder (`is_finder`): both consume the summary, never the raw payload. Only
-    the executor (is_main_session=False, is_finder=False) reads gather_raw, to
-    jq-summarize its own payload."""
+    (`block_main_loop_raw_access` on Read). The clamp applies to the main loop:
+    it consumes the gather summary, never the raw payload. The lean gather subagent
+    (is_main_session=False) reads its own gather_raw to verify its query result."""
     p = Path(path)
     name = p.name
     parts = set(p.parts)
@@ -286,13 +226,10 @@ def decide_read(path: Path, *, is_main_session: bool, is_finder: bool = False) -
     # No gather-payload-tool exemption here: that exemption is about a Bash
     # *command* invoking record-query/data-source-debug (which legitimately name
     # gather_raw paths). block_main_loop_raw_access never applies it to a Read
-    # (its `cmd` is "" for non-Bash), so a main-loop / finder read of any gather_raw
-    # path is unconditionally clamped.
-    if RAW_MARKER in str(p):
-        if is_main_session:
-            return Decision(False, RAW_DENY_REASON)
-        if is_finder:
-            return Decision(False, FINDER_RAW_REASON)
+    # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path is
+    # unconditionally clamped.
+    if RAW_MARKER in str(p) and is_main_session:
+        return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 
 

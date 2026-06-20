@@ -91,26 +91,54 @@ defender-elastic esql '<ES|QL query>' --query-id <id>
   via `MIN`/`MAX`/`DATE_TRUNC`. If a dimension needs a field that lives in text
   (e.g. OpenSSH auth method in `message`), derive it in-query (`CASE(message LIKE
   ...)`, `GROK`), not in a post-hoc pass.
+- **Check each bound value against its field's type before you run.** Typed fields
+  (`ip`, `date`, `long`) silently return **zero matches** on a type mismatch —
+  there is no error, just a confidently-wrong `0`. A malformed IP literal, a
+  non-ISO timestamp, or a string where a number is expected yields a fake absence.
+  If a binding can't be shaped to the field's type, the lead is unrunnable — say so
+  and stop, don't report the zero.
+
+If the lead is a **composition** ("was X followed by Y", "who was logged in when
+Z happened") that no single query can answer — especially across two *systems* —
+run each side with its own query and **summarize the join in your return**. Do not
+coin a "bridge" query that pretends the correlation is one measurement.
 
 ### 4. VERIFY — live, stage-on-suspicion
 
 The result is your evidence; an unchecked zero or a null column poisons the
-defender's ANALYZE. Look at what came back:
+defender's ANALYZE. **Branch on the adapter's exit code first**, then on the
+result content:
 
-- **Sane** — `STATS` columns resolved to real values, volume plausible →
-  summarize.
-- **Empty / all-zero** — the `WHERE` matched nothing: a *filtering* mistake or a
-  genuine absence. Re-run the same query with the suspect predicate dropped, or
-  `... | WHERE <one live filter> | LIMIT 1`, to tell "nothing there" from "wrong
-  filter." Report the verified result ("0 accepted, verified: src has 0 events to
-  this host in window; src is live elsewhere").
-- **Null / garbage columns** — a `STATS ... BY <field>` grouped on a wrong or
-  renamed field: read the current field shape with the same query truncated
-  before the aggregation — `FROM ... | WHERE <filters> | LIMIT 10` — fix the
-  field name, re-run.
+- **exit 2 — connectivity / auth / config:** the source is **unreachable**.
+  Escalate immediately with the adapter's error and stop. Do **not** probe the
+  connection or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not**
+  hunt `.env`/credentials, do **not** re-run "to confirm" — a `2` is a data-source
+  outage for a human to resolve, not something you can fix.
+- **exit 64 — usage error:** *you* invoked the adapter wrong. Read the `usage:`
+  line in stderr, fix the invocation, re-run. Not an outage; don't escalate.
+- **exit 1 — query error / not-found:** fix the query and re-run, or treat a clean
+  not-found as the genuine absence case (verify it as below).
+- **exit 0 — the source answered:** check the result content:
 
-If one re-query doesn't resolve it, say so plainly and stop (escalate the
-data-source-quirk); don't flail. Never report a raw unchecked zero or a null.
+  - **Sane** — `STATS` columns resolved to real values, volume plausible →
+    summarize.
+  - **Empty / all-zero** — the `WHERE` matched nothing: a *filtering* mistake, a
+    genuine absence, or a silently-broken adapter. Re-run with the suspect
+    predicate dropped (or `... | WHERE <one live filter> | LIMIT 1`) to tell
+    "nothing there" from "wrong filter"; if even a **must-return positive control**
+    (a query you know should match — the alerting entity, a broad `FROM ... | LIMIT
+    1`) comes back empty, that's a **tool fault**, not a real zero — escalate it
+    like an exit 2, citing the control. Report the verified result ("0 accepted,
+    verified: src has 0 events to this host in window; src is live elsewhere").
+  - **Null / garbage columns** — a `STATS ... BY <field>` grouped on a wrong or
+    renamed field: check the system SKILL's data-source quirks, then read the
+    current field shape with the same query truncated before the aggregation —
+    `FROM ... | WHERE <filters> | LIMIT 10` — fix the field name and re-run. Don't
+    silently swap in a field you "know" without confirming it against the live shape.
+
+The bound: a positive control plus one narrowing/shape step. If that can't settle
+it, stop and report the data-source quirk plainly in your summary (so the offline
+lead-author picks it up); don't flail. Never report a raw unchecked zero or a null.
 
 ### 5. RETURN
 
