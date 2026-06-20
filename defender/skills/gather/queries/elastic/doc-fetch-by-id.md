@@ -26,5 +26,8 @@ For multiple IDs: `_id: ("${id1}" OR "${id2}")`. Scope to the specific data stre
 
 ## Common pitfalls
 
+- **Use `defender-elastic query`, NOT `esql`.** This is a raw-document fetch — you
+  want the complete `_source` of a specific record, not a server-side aggregation.
+  The KQL `query` verb returns the doc; `esql` is for counts/distributions.
 - **`_id:` prefix required**: The document-level filter is `_id:`, not a regular field match. Passing the ID as a bare term against a non-existent field like `document.id` returns all documents. Always use the `_id:` KQL syntax.
 - **Index scope narrows precision**: A wildcard index (`logs-*`) may surface the document if the ID exists in any stream, but risks false positives from ID reuse across data streams. Prefer the specific data stream from alert metadata.
