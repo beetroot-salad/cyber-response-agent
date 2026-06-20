@@ -18,12 +18,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.usage import UsageLimits
 
+from . import compaction
 from . import observe
 from . import orient
 from .circuit_breaker import RunAborted
@@ -109,15 +112,17 @@ def _gather_instructions(defender_dir: Path) -> str:
     )
 
 
-def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path) -> str:
+def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
     # Run context + the precomputed ORIENT pack. The procedure — artifacts to
     # write, the stop condition, case_id (= the run-dir basename) — all lives in
     # SKILL.md, the system prompt; don't restate it, and don't say "Read SKILL.md"
     # (it IS the prompt). The orientation block hands the agent the deterministic
     # context it used to spend ~18 round-trips fetching (catalog, system map,
-    # this signature's lessons/corpus) so ORIENT reasons over given material.
+    # this signature's lessons/corpus, plus the raw alert + invlang grammar) so
+    # ORIENT reasons over given material — and, because message 0 survives a
+    # compaction fold verbatim, that material can't be dropped and re-read.
     # Built fail-safe: a degraded pack just means the agent fetches a piece live.
-    orientation = orient.orientation(run_dir, defender_dir, alert_path)
+    orientation = orient.orientation(run_dir, defender_dir, alert_path, salt)
     return (
         "Begin the investigation.\n\n"
         f"run_dir: {run_dir}\n"
@@ -186,12 +191,113 @@ def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
     return agent
 
 
+# --- Phase B: per-loop, invlang-based compaction --------------------------
+# The live adapter for the pure rewrite in `compaction.py`. It plugs into the
+# `agent.iter()` seam via PydanticAI's `ProcessHistory` capability (a
+# `before_model_request` history rewrite) — added to the MAIN agent only, and
+# only when `DEFENDER_COMPACTION` is enabled, so Phase A stays byte-identical
+# when off (this is the A/B toggle). Design: docs/runtime-per-loop-compaction-
+# design.md. The processor sees PydanticAI's canonical (append-only) history
+# each request; it dumps to the dict form `compaction` operates on, and
+# re-validates a rewritten result back to message objects.
+
+
+def _compaction_enabled() -> bool:
+    return os.environ.get("DEFENDER_COMPACTION", "").strip().lower() in (
+        "1", "on", "true", "yes")
+
+
+def _summary_pointers(run_dir: Path) -> dict[str, str]:
+    """{lead_id: path} for persisted gather summaries (tools._persist_gather_summary).
+
+    No longer fed into the frontier message — advertising these paths invited the
+    agent to re-read folded context (4th-A/B finding); see `_compact_messages`. The
+    summaries still persist on disk (debug / genuine last resort); this helper maps
+    them for that and is exercised by the test suite."""
+    d = run_dir / "gather_summaries"
+    if not d.is_dir():
+        return {}
+    return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
+
+
+def _frontier_index(messages: list) -> int | None:
+    """Index of the synthetic frontier message we previously injected, else None.
+
+    PydanticAI **accumulates** the history processor's output — each call receives
+    `[what we returned last time] + [turns appended since]`, not the full
+    append-only canonical. So a stateful index into a growing canonical is invalid
+    (it was the 2nd-A/B bug: tail always empty → agent loses memory → loops). We
+    instead find our frontier sentinel in the received history; everything after
+    it is the live tail to preserve."""
+    for i in range(len(messages) - 1, -1, -1):
+        for part in getattr(messages[i], "parts", []):
+            if getattr(part, "part_kind", None) == "user-prompt":
+                content = getattr(part, "content", "")
+                if isinstance(content, str) and compaction.FRONTIER_SENTINEL in content:
+                    return i
+    return None
+
+
+def _compact_messages(messages: list, run_dir: Path) -> list:
+    """Stateless, marker-based per-loop compaction (see `_frontier_index` for why
+    stateless). Each call: re-render the *settled* frontier from investigation.md
+    (loops ≤ `fold_boundary`) and keep the live tail (turns after our last frontier
+    marker). The trimmed frontier is byte-stable while the active loop runs — its
+    growing rows are excluded — so the prefix caches within a loop. Returns the
+    original objects on passthrough; never raises (the caller guards too)."""
+    inv = run_dir / "investigation.md"
+    inv_text = inv.read_text() if inv.is_file() else ""
+    fold = compaction.fold_boundary(inv_text)
+    marker = _frontier_index(messages)
+    if fold <= 0:
+        return messages  # nothing settled yet (or undetermined) → never regress
+
+    frontier_md = compaction._frontier_through(inv_text, fold)
+    # The frontier is a continuation, not a pointer dump: we deliberately do NOT
+    # hand the agent the per-lead on-disk summary paths. Advertising them read as
+    # a to-do list and the agent re-read the folded detail back into context,
+    # undoing the fold (4th-A/B finding). The inlined invlang record is
+    # authoritative; the summaries persist on disk, just unadvertised.
+    frontier_dict = compaction.render_frontier_message(frontier_md)
+    frontier_obj = ModelMessagesTypeAdapter.validate_python([frontier_dict])[0]
+
+    orientation = messages[0]
+    tail = messages[marker + 1:] if marker is not None else []
+    rewritten = [orientation, frontier_obj] + tail
+    if marker is None and len(rewritten) >= len(messages):
+        return messages  # first freeze wouldn't shrink a tiny history → wait
+    return rewritten
+
+
+def _make_compaction_processor():
+    """A stateless history processor — robust to PydanticAI's output accumulation.
+    Never raises into the run: any failure falls back to the full history."""
+    # The first param MUST be annotated `RunContext[...]` — pydantic-ai's
+    # `takes_run_context` detects the ctx-taking variant by the annotation, not
+    # the name; an unannotated `ctx` is silently called as a no-ctx processor.
+    async def process(ctx: RunContext[RunDeps], messages: list) -> list:
+        try:
+            return _compact_messages(messages, ctx.deps.run_dir)
+        except Exception as e:  # noqa: BLE001 — compaction must never break the run
+            print(f"[run_pai] compaction skipped: {e!r}", file=sys.stderr)
+            return messages
+
+    return process
+
+
 def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
+    capabilities = [_make_hooks(logger, "main")]
+    if _compaction_enabled():
+        # Main agent only — gather sub-runs are short single leads, nothing to
+        # compact. Listed after the hooks so observability wraps the rewritten
+        # request (the recorded usage then reflects the compacted token cost).
+        capabilities.append(ProcessHistory(_make_compaction_processor()))
+        print("[run_pai] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
     agent = Agent(
         AnthropicModel(model_name),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
-        capabilities=[_make_hooks(logger, "main")],
+        capabilities=capabilities,
         model_settings=_CACHE_SETTINGS,
         retries=DEFAULT_TOOL_RETRIES,
     )
@@ -231,7 +337,7 @@ async def run_investigation(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt, is_main_session=True,
     )
-    prompt = _user_prompt(run_dir, alert_path, defender_dir)
+    prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
     # Hitting request_limit is an expected loop terminator, not a crash:

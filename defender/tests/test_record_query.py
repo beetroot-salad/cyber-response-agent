@@ -293,26 +293,29 @@ def test_build_truncated_view_non_json_falls_back_to_chars(tmp_path):
     assert "sample[" not in view
 
 
-def test_main_truncates_oversized_passthrough_but_persists_full(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 500)
+def test_main_samples_record_list_and_persists_full(tmp_path, capsys):
+    # A record-list payload is ALWAYS reduced to a field-shape sample (count +
+    # first few records + disk pointer), regardless of size — the full dump never
+    # enters the passthrough. The full payload is still persisted on disk.
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     big = _big_hits_payload(100)
-    assert len(big) > 500
     cli = _fake_cli(tmp_path, "elastic_cli.py", big)
     rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
                   "--system", "elastic", "--query-id", "elastic.q", "--",
                   sys.executable, str(cli), "query", "--raw"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "pass-through truncated" in out
-    assert "100 records" in out
-    # Full payload is persisted on disk regardless of the capped view.
+    assert "FIELD-SHAPE sample" in out and "100 records" in out
+    assert "sample[0]" in out and out.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
+    assert big not in out                          # the full dump never passes through
     persisted = (run_dir / "gather_raw" / "l-001" / "0.json").read_text()
     assert persisted == big
 
 
-def test_main_passes_small_payload_through_verbatim(tmp_path, capsys, monkeypatch):
+def test_main_small_record_list_is_still_sampled(tmp_path, capsys, monkeypatch):
+    # Even a tiny record-list is sampled, not dumped verbatim — so a re-sent
+    # context never carries the raw events (the cache-read tax this closes).
     monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 65536)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -322,8 +325,23 @@ def test_main_passes_small_payload_through_verbatim(tmp_path, capsys, monkeypatc
                   sys.executable, str(cli), "query", "--raw"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "pass-through truncated" not in out
-    assert '{"hits":[{"i":1}]}' in out
+    assert "FIELD-SHAPE sample" in out and "1 records" in out
+
+
+def test_main_non_list_object_passes_through_verbatim(tmp_path, capsys, monkeypatch):
+    # A single object (not a record list) IS the answer and is small — it passes
+    # through whole; there is nothing to "sample".
+    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 65536)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    cli = _fake_cli(tmp_path, "identity_cli.py", '{"user":"dev.dana","authorized_hosts":["jump-box-1"]}')
+    rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
+                  "--system", "identity", "--query-id", "identity.profile", "--",
+                  sys.executable, str(cli), "profile", "dev.dana"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "FIELD-SHAPE sample" not in out
+    assert '{"user":"dev.dana","authorized_hosts":["jump-box-1"]}' in out
 
 
 # --- --lead validation (mirrors record_lead's claim-side guard) ---

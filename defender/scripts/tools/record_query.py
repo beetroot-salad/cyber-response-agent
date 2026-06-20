@@ -212,14 +212,43 @@ def _find_records(stdout: str):
     return None
 
 
+def _is_event_payload(stdout: str) -> bool:
+    """True iff stdout is an event/record *collection* — a top-level JSON array,
+    or a dict carrying a recognized records key (`hits`/`results`/`events`/…).
+
+    Stricter than ``_find_records`` on purpose: it does NOT use the "any list
+    value" fallback, so a single object that merely *contains* a list field (an
+    identity profile's ``authorized_hosts``, a host's ``ips``) is NOT flagged as
+    an event stream — that object is the answer and passes through whole. This is
+    the predicate that decides "always sample"; ``_find_records`` only decides
+    what to sample once we're capping."""
+    try:
+        obj = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if isinstance(obj, list):
+        return True
+    if isinstance(obj, dict):
+        return any(isinstance(obj.get(k), list) for k in _RECORD_KEYS)
+    return False
+
+
 def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
-    """Replace an oversized pass-through with count + samples + a nudge to
-    filter the persisted payload with code."""
+    """Reduce the in-context pass-through to a *field-shape sample*, not the full
+    dump. A record-list payload becomes a count + the first few records (so the
+    agent sees the field shape to write its filters) + a pointer to the persisted
+    file; a non-list blob is char-truncated. Either way the value is computed over
+    the on-disk payload (gather SKILL §4), never read off this view."""
     size = len(stdout)
     records = _find_records(stdout)
     lines: list[str] = []
     if records is not None:
-        lines.append(f"[record_query] {len(records)} records, {size} bytes — pass-through truncated")
+        shown = min(len(records), PASSTHROUGH_SAMPLE_COUNT)
+        lines.append(
+            f"[record_query] {len(records)} records, {size} bytes — showing the first "
+            f"{shown} as a FIELD-SHAPE sample (to write your filters). Do NOT count "
+            f"these or read values off them; compute over the full payload on disk."
+        )
         for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
             sample = json.dumps(rec, default=str)
             if len(sample) > _SAMPLE_MAX_CHARS:
@@ -232,8 +261,8 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
         abs_payload = run_dir / payload_rel
         lines.append(f"full payload: {abs_payload}")
         lines.append(
-            "→ payload is large; do not rely on this truncated view or count the "
-            "samples. Filter the full payload on disk (jq, grep, the Grep tool), e.g.:\n"
+            "→ compute every value over the full payload on disk (jq, grep, the Grep "
+            "tool); never count or read answers off the samples above, e.g.:\n"
             f"  jq '[.hits[] | select(.message | test(\"<substr>\"))] | length' {abs_payload}"
         )
     return "\n".join(lines) + "\n"
@@ -360,10 +389,16 @@ def capture(
     except OSError as e:
         print(f"record_query: could not append record: {e}", file=sys.stderr)
 
-    # Cap the in-context view: an oversized payload is replaced by count +
-    # samples + a nudge to filter the persisted file with code (the full payload
-    # is always on disk at payload_path).
-    if rc == 0 and len(out) > PASSTHROUGH_MAX_BYTES:
+    # In-context view = field shape, not the full dump. A record-list payload
+    # (events/hits/results/…) is ALWAYS reduced to a count + a few sample records
+    # + a disk pointer, regardless of size: the agent writes its filters from the
+    # shape and computes values over the persisted file (gather SKILL §4), never
+    # by eyeballing the passthrough — and the reduced view stops the raw dump from
+    # re-entering the subagent's context on every subsequent request. A non-list
+    # payload (a single object/scalar — an identity profile, a host lookup) IS the
+    # answer and is small, so it passes through whole, capped only if it somehow
+    # exceeds the byte ceiling. The full payload is always on disk at payload_path.
+    if rc == 0 and (_is_event_payload(out) or len(out) > PASSTHROUGH_MAX_BYTES):
         passthrough = build_truncated_view(out, payload_rel, run_dir)
     else:
         passthrough = out

@@ -287,3 +287,96 @@ def test_main_errors_when_no_run_dir(tmp_path, monkeypatch, capsys):
     rc = rs.main(["--lead", "l-001", "--label", "n", "--", "jq", "length", "x.json"])
     assert rc == 2
     assert "DEFENDER_RUN_DIR is unset" in capsys.readouterr().err
+
+
+# --- --batch: one model call → one row per dimension ----------------------
+
+_BATCH_JQ = ('{total: length, '
+             'distinct_srcusers: ([.[].data.srcuser] | unique | length), '
+             'distinct_srcips: ([.[].data.srcip] | unique | length)}')
+
+
+def test_main_batch_records_one_row_per_key(tmp_path, capsys):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rc = rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+                  "jq", _BATCH_JQ, "gather_raw/l-001/0.json"])
+    assert rc == 0
+    rows = [json.loads(ln) for ln in (run_dir / "summaries.jsonl").read_text().splitlines()]
+    assert len(rows) == 3
+    by_label = {r["label"]: r for r in rows}
+    assert set(by_label) == {"total", "distinct-srcusers", "distinct-srcips"}
+    assert by_label["total"]["output"] == "4"
+    assert by_label["distinct-srcusers"]["output"] == "3"
+    assert by_label["distinct-srcips"]["output"] == "2"
+    # batch_key ties each row to its jq object key (for replay); payload FK kept
+    assert by_label["distinct-srcusers"]["batch_key"] == "distinct_srcusers"
+    assert all(r["payload_seq"] == 0 for r in rows)
+    assert all(r["output_status"] == "ok" for r in rows)
+    # the whole object is printed back to the agent in one round-trip
+    assert '"total":4' in capsys.readouterr().out.replace(" ", "")
+
+
+def test_main_batch_summary_seqs_are_consecutive(tmp_path):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+             "jq", _BATCH_JQ, "gather_raw/l-001/0.json"])
+    rows = [json.loads(ln) for ln in (run_dir / "summaries.jsonl").read_text().splitlines()]
+    assert [r["summary_seq"] for r in rows] == [0, 1, 2]
+
+
+def test_main_batch_then_single_keeps_seq_monotonic(tmp_path):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+             "jq", _BATCH_JQ, "gather_raw/l-001/0.json"])
+    rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--label", "extra", "--",
+             "jq", "length", "gather_raw/l-001/0.json"])
+    rows = [json.loads(ln) for ln in (run_dir / "summaries.jsonl").read_text().splitlines()]
+    assert [r["summary_seq"] for r in rows] == [0, 1, 2, 3]
+    assert rows[3]["label"] == "extra" and "batch_key" not in rows[3]
+
+
+def test_main_batch_null_value_marked_empty(tmp_path):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+             "jq", '{present: length, missing: null}', "gather_raw/l-001/0.json"])
+    rows = {r["label"]: r for r in
+            (json.loads(ln) for ln in (run_dir / "summaries.jsonl").read_text().splitlines())}
+    assert rows["present"]["output_status"] == "ok" and rows["present"]["output"] == "4"
+    assert rows["missing"]["output_status"] == "empty"
+
+
+def test_main_batch_non_object_output_records_one_fallback_row(tmp_path):
+    # a snippet that yields a scalar (not an object) → one 'batch' row, value kept
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rc = rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+                  "jq", "length", "gather_raw/l-001/0.json"])
+    assert rc == 0
+    rows = [json.loads(ln) for ln in (run_dir / "summaries.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["label"] == "batch"
+    assert rows[0]["output"].strip() == "4"
+
+
+def test_main_batch_rejects_unclean_object_key(tmp_path, capsys):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rc = rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--batch", "--",
+                  "jq", '{"Bad Key": length}', "gather_raw/l-001/0.json"])
+    assert rc == 2
+    assert "not a clean dimension name" in capsys.readouterr().err
+    assert not (run_dir / "summaries.jsonl").exists()
+
+
+def test_main_rejects_both_label_and_batch(tmp_path, capsys):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rc = rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--label", "x", "--batch", "--",
+                  "jq", _BATCH_JQ, "gather_raw/l-001/0.json"])
+    assert rc == 2
+    assert "exactly one of --label" in capsys.readouterr().err
+    assert not (run_dir / "summaries.jsonl").exists()
+
+
+def test_main_rejects_neither_label_nor_batch(tmp_path, capsys):
+    run_dir = _run_with_payload(tmp_path, _SAMPLE)
+    rc = rs.main(["--run-dir", str(run_dir), "--lead", "l-001", "--",
+                  "jq", "length", "gather_raw/l-001/0.json"])
+    assert rc == 2
+    assert "exactly one of --label" in capsys.readouterr().err

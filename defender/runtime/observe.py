@@ -25,9 +25,11 @@ Everything else is a **projection** of those messages — same data, re-tagged:
 To add another view (a tool-only audit, a cost-by-phase rollup), write another
 projection over `RequestLogger.messages` — don't add another logging site.
 
-Note (Phase A): the streaming cursor assumes the per-agent message history is
-append-only (it is — the driver passes history through unmodified). Phase B
-message-level compaction would rewrite history and must reset the cursors.
+Note: the streaming cursor assumes the per-agent message history is append-only,
+which holds within a loop. Phase B per-loop compaction rewrites (shrinks) the
+history at a loop boundary; `log` detects that (the cursor exceeds the new
+length) and re-baselines, so the rewrite is recorded rather than corrupting the
+stream. The recorded per-response usage reflects the compacted prompt either way.
 """
 
 from __future__ import annotations
@@ -144,6 +146,14 @@ class RequestLogger:
         # the +1 below, so this is the new request message(s), typically the
         # tool-returns). Dump only the slice, never the whole history.
         seen = self._seen.get(agent_id, 0)
+        if seen > len(request_messages):
+            # Phase B: per-loop compaction froze the prefix, so this request's
+            # (compacted) history is shorter than what we've already emitted —
+            # the append-only delta assumption no longer holds. Re-baseline: emit
+            # this compacted request from the top. Rare (once per loop boundary),
+            # so the log stays O(n·loops), and the synthetic frontier message
+            # then appears in the stream where the rewrite happened.
+            seen = 0
         for dumped in ModelMessagesTypeAdapter.dump_python(
             request_messages[seen:], mode="json"
         ):

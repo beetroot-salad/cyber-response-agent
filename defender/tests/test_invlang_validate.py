@@ -342,6 +342,45 @@ def test_skill_worked_examples_all_pass():
     assert not failures, "\n".join(failures)
 
 
+# Rule 6 — loop-close integrity (`:T close`) -------------------------------
+
+_L1_PLANNED = """
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|h-001|wazuh|90d
+"""
+_L1_OBS = """
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-010|attempted_auth|v-003|v-001|2026-05-05T03:47:12Z|siem-event:wazuh|outcome=success
+"""
+
+
+def test_loop_close_accepted_for_worked_loop():
+    # loop 1 has a committed observation → :T close is valid.
+    text = fence(_L1_PLANNED, _L1_OBS, ":T close\nloop 1")
+    assert validate_companion(text, None) == []
+
+
+def test_loop_close_blocked_on_empty_loop():
+    # the draft-ahead guard at write time: closing a loop with no committed
+    # finding is rejected, so the compaction fold can never freeze an empty loop.
+    text = fence(_L1_PLANNED, ":T close\nloop 1")
+    errs = validate_companion(text, None)
+    assert any("no committed finding" in e for e in errs), errs
+
+
+def test_loop_close_blocked_when_closed_twice():
+    text = fence(_L1_PLANNED, _L1_OBS, ":T close\nloop 1", ":T close\nloop 1")
+    errs = validate_companion(text, None)
+    assert any("closed more than once" in e for e in errs), errs
+
+
+def test_loop_close_malformed_loop_is_parse_error():
+    # a `:T close` with no integer `loop N` row warns at parse → blocking (rule 1).
+    text = fence(":T close\nfoo bar")
+    errs = validate_companion(text, None)
+    assert any("loop N" in e for e in errs), errs
+
+
 def test_current_grammar_variety_passes():
     # `??`, per-slot `{a,b}`, full-triple enumeration, `unclassified-*`,
     # process basename, and a discovery fork on `unclassified-process` are

@@ -321,6 +321,64 @@ def _output_status(exit_code: int, stdout: str) -> str:
     return "ok"
 
 
+def _snippet_text(inner: list[str]) -> str:
+    """The snippet, verbatim and replayable: a quoted pipeline arrives as one
+    element (record it as-is, not re-quoted by shlex.join); a bare command arrives
+    pre-tokenized (join it back into a readable line)."""
+    return inner[0] if len(inner) == 1 else shlex.join(inner)
+
+
+def _summary_row(
+    lead: str, payload_seq: int | None, seq: int, label: str, tools: list[str],
+    snippet: str, raw_output: str, rc: int, *, status: str | None = None,
+    batch_key: str | None = None,
+) -> dict:
+    """One ``summaries.jsonl`` row. ``output`` is defensively capped (the recorded
+    copy only). ``status`` overrides the structural floor for a batch row (whose
+    value, not the whole stdout, decides empty/ok); ``batch_key`` ties a batch row
+    back to its jq object key for replay (`<snippet> | jq '.<batch_key>'`)."""
+    recorded = raw_output if len(raw_output) <= _OUTPUT_RECORD_MAX else (
+        raw_output[:_OUTPUT_RECORD_MAX] + f"\n…[truncated {len(raw_output) - _OUTPUT_RECORD_MAX} chars]"
+    )
+    row = {
+        "lead_id": lead,
+        "payload_seq": payload_seq,
+        "summary_seq": seq,
+        "label": label,
+        "tools": tools,
+        "snippet": snippet,
+        "output": recorded,
+        "exit_code": rc,
+        "output_status": status if status is not None else _output_status(rc, raw_output),
+    }
+    if batch_key is not None:
+        row["batch_key"] = batch_key
+    return row
+
+
+def _append_rows(run_dir: Path, records: list[dict]) -> None:
+    try:
+        log = run_dir / "summaries.jsonl"
+        with log.open("a") as fh:  # append is atomic for one short line
+            for rec in records:
+                fh.write(json.dumps(rec) + "\n")
+    except OSError as e:
+        print(f"record_summary: could not append record(s): {e}", file=sys.stderr)
+
+
+def _batch_label(key: str) -> str:
+    """Normalize a jq object key to a kebab summaries label (`failed_count` →
+    `failed-count`). Raises GateError if it can't be a clean dimension name — the
+    same discipline `--label` enforces, applied per object key."""
+    label = str(key).strip().lower().replace("_", "-")
+    if not LABEL_RE.match(label):
+        raise GateError(
+            f"batch object key {key!r} is not a clean dimension name (normalized "
+            f"{label!r}); use snake_case / kebab identifiers as the jq object keys"
+        )
+    return label
+
+
 def capture(
     run_dir: Path, lead: str, label: str, inner: list[str],
     *, timeout: int = _SUMMARY_TIMEOUT_S,
@@ -342,31 +400,66 @@ def capture(
 
     rc, out, err = run_pipeline(segments, run_dir, timeout=timeout)
 
-    seq = _next_seq(run_dir, lead)
-    recorded_output = out if len(out) <= _OUTPUT_RECORD_MAX else (
-        out[:_OUTPUT_RECORD_MAX] + f"\n…[truncated {len(out) - _OUTPUT_RECORD_MAX} chars]"
+    tools = sorted({Path(a[0]).name for a in segments if a})
+    record = _summary_row(
+        lead, payload_seq, _next_seq(run_dir, lead), label, tools,
+        _snippet_text(inner), out, rc,
     )
-    record = {
-        "lead_id": lead,
-        "payload_seq": payload_seq,
-        "summary_seq": seq,
-        "label": label,
-        "tools": sorted({Path(a[0]).name for a in segments if a}),
-        # The snippet, verbatim and replayable: a quoted pipeline arrives as one
-        # element (record it as-is, not re-quoted by shlex.join); a bare command
-        # arrives pre-tokenized (join it back into a readable line).
-        "snippet": inner[0] if len(inner) == 1 else shlex.join(inner),
-        "output": recorded_output,
-        "exit_code": rc,
-        "output_status": _output_status(rc, out),
-    }
-    try:
-        log = run_dir / "summaries.jsonl"
-        with log.open("a") as fh:  # append is atomic for one short line
-            fh.write(json.dumps(record) + "\n")
-    except OSError as e:
-        print(f"record_summary: could not append record: {e}", file=sys.stderr)
+    _append_rows(run_dir, [record])
     return out, err, record
+
+
+def capture_batch(
+    run_dir: Path, lead: str, inner: list[str], *, timeout: int = _SUMMARY_TIMEOUT_S,
+) -> tuple[str, str, list[dict]]:
+    """Gate + run ONE summary snippet whose stdout is a JSON object
+    ``{dimension: value}``, recording **one row per top-level key** — the batched
+    form of ``capture``. Collapses N per-dimension model round-trips into one
+    while preserving the one-row-per-dimension table contract: each row keeps its
+    own label/output/status, and ``batch_key`` ties it to the jq object key.
+
+    Returns ``(stdout, stderr, records)``. Raises GateError on a bad lead, a gate
+    violation, or a non-kebab object key. If the snippet doesn't yield a JSON
+    object (error / empty / scalar), one fallback row labelled ``batch`` carries
+    the raw stdout — the value is never silently dropped."""
+    if not LEAD_ID_RE.match(lead):
+        raise GateError(f"invalid lead id {lead!r} (expected an `l-` row id)")
+
+    segments = parse_inner(inner)
+    gate_tools(segments)
+    payload_seq = gate_paths(segments, run_dir)
+
+    rc, out, err = run_pipeline(segments, run_dir, timeout=timeout)
+    snippet = _snippet_text(inner)
+    tools = sorted({Path(a[0]).name for a in segments if a})
+
+    obj: dict | None = None
+    if rc == 0 and out.strip():
+        try:
+            parsed = json.loads(out)
+            obj = parsed if isinstance(parsed, dict) and parsed else None
+        except (json.JSONDecodeError, ValueError):
+            obj = None
+
+    base = _next_seq(run_dir, lead)
+    records: list[dict] = []
+    if obj is not None:
+        for i, (key, value) in enumerate(obj.items()):
+            label = _batch_label(key)  # may raise GateError → nothing recorded yet
+            empty = value in (None, "", [], {})
+            value_str = "" if value is None else (
+                value if isinstance(value, str) else json.dumps(value, default=str))
+            status = "error" if rc else ("empty" if empty else "ok")
+            records.append(_summary_row(
+                lead, payload_seq, base + i, label, tools, snippet, value_str, rc,
+                status=status, batch_key=key))
+    else:
+        # Not a JSON object (error / empty / scalar) — don't drop the value.
+        records.append(_summary_row(
+            lead, payload_seq, base, "batch", tools, snippet, out, rc))
+
+    _append_rows(run_dir, records)
+    return out, err, records
 
 
 def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -381,13 +474,23 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="record_summary.py")
     parser.add_argument("--run-dir")
     parser.add_argument("--lead", required=True)
-    parser.add_argument("--label", required=True)
+    parser.add_argument("--label", help="single-dimension label (kebab)")
+    parser.add_argument(
+        "--batch", action="store_true",
+        help="the inner snippet outputs a JSON object {dimension: value}; record "
+             "one summaries row per key in this single call (collapses the "
+             "per-dimension round-trips). Mutually exclusive with --label.",
+    )
     try:
         ns = parser.parse_args(wrapper_argv)
     except SystemExit:
         return 2
     if not inner:
         print("record_summary.py: nothing after `--` to execute", file=sys.stderr)
+        return 2
+    if ns.batch == bool(ns.label):
+        print("record_summary.py: pass exactly one of --label (single dimension) "
+              "or --batch (a {dimension: value} object)", file=sys.stderr)
         return 2
 
     run_dir_arg = ns.run_dir or os.environ.get("DEFENDER_RUN_DIR")
@@ -399,19 +502,25 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        out, err, record = capture(Path(run_dir_arg), ns.lead, ns.label, inner)
+        if ns.batch:
+            out, err, records = capture_batch(Path(run_dir_arg), ns.lead, inner)
+        else:
+            out, err, record = capture(Path(run_dir_arg), ns.lead, ns.label, inner)
+            records = [record]
     except GateError as e:
         print(f"record_summary.py: {e}", file=sys.stderr)
         return 2
 
     sys.stdout.write(out)
     sys.stderr.write(err)
+    labels = ", ".join(r["label"] for r in records)
     print(
-        f"[record_summary] {record['label']} → summaries.jsonl "
-        f"(seq {record['summary_seq']}, status {record['output_status']})",
+        f"[record_summary] {labels} → summaries.jsonl "
+        f"({len(records)} row(s) from seq {records[0]['summary_seq']}, "
+        f"status {records[0]['output_status']})",
         file=sys.stderr,
     )
-    return record["exit_code"]
+    return records[0]["exit_code"]
 
 
 if __name__ == "__main__":

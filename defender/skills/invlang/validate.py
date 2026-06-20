@@ -45,6 +45,11 @@ Rules (all blocking):
                      ``authorized``. Survival is computed from the
                      resolution record (``:T conclude`` carries no
                      sub-tables).
+6. loop-close      — a ``:T close loop=N`` (the per-loop compaction
+                     boundary marker) requires loop N to carry ≥1 committed
+                     finding, and a loop may not be closed twice. Blocks
+                     authoring a close over a bare drafted loop, so the
+                     compaction fold can never freeze an empty loop.
 
 Deferred (tracked as follow-ups, intentionally NOT enforced here):
 per-type class-slot grammar vocab (the slot enums behind ``compute`` etc.)
@@ -445,6 +450,47 @@ def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Rule 6 — loop-close integrity
+# ---------------------------------------------------------------------------
+
+
+def _check_loop_close(companion: dict[str, Any]) -> list[str]:
+    """A `:T close loop=N` marks loop N complete (the per-loop compaction
+    boundary). Block writing one that the fold must never honor:
+
+    - *No empty close.* Loop N must already carry ≥1 committed finding (any
+      lead with an `outcome` or a `:T resolutions` entry). This moves the
+      draft-ahead guard to write time — the agent cannot author a close over a
+      bare planned loop, so `fold_boundary` can never freeze an empty loop.
+    - *No double close.* A loop closes once; a second `:T close` for the same
+      loop is a mistake (append-only would otherwise let two accumulate).
+
+    Mirrors `runtime/compaction._lead_resolved`'s notion of "committed" without
+    importing runtime code (the invlang layer stays below the runtime)."""
+    closed = companion.get("closed_loops") or []
+    if not closed:
+        return []
+    resolved_by_loop: dict[int, bool] = {}
+    for f in companion.get("findings", []):
+        loop = f.get("loop")
+        if isinstance(loop, int):
+            committed = bool(f.get("resolutions")) or bool(f.get("outcome"))
+            resolved_by_loop[loop] = resolved_by_loop.get(loop, False) or committed
+    errors: list[str] = []
+    seen: set[int] = set()
+    for n in closed:
+        if n in seen:
+            errors.append(f":T close blocked: loop {n} closed more than once")
+        seen.add(n)
+        if not resolved_by_loop.get(n, False):
+            errors.append(
+                f":T close blocked: loop {n} has no committed finding "
+                f"— cannot close an empty/drafted loop"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -485,4 +531,5 @@ def validate_companion(
     errors.extend(_check_edge_authority(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))
+    errors.extend(_check_loop_close(companion))
     return errors
