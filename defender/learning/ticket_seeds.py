@@ -23,7 +23,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from defender.learning._loop_config import REPO_ROOT
 from defender.scripts.case_history import case_ticket

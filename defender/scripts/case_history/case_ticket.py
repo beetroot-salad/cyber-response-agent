@@ -249,7 +249,7 @@ def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]
         # when the alert carries no event time) so no value-less label hits the
         # store; `sig:` always has a fallback, so only optional stamps are affected.
         bare = {p for p in _open_label_prefixes(mapping) if p}
-        payload["labels"] = [l for l in payload["labels"] if l not in bare]
+        payload["labels"] = [lbl for lbl in payload["labels"] if lbl not in bare]
     return payload
 
 

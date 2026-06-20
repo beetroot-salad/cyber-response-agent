@@ -63,7 +63,8 @@ def test_enrich_skips_when_no_verdict(tmp_path: Path, monkeypatch):
 
 
 def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path, monkeypatch):
-    lrd = tmp_path / "learn"; lrd.mkdir()
+    lrd = tmp_path / "learn"
+    lrd.mkdir()
     _write_verdict(lrd, "survived")
     calls = []
     monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
