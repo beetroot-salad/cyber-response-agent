@@ -137,3 +137,38 @@ def test_end_to_end_read_then_map(tmp_path: Path):
     close = case_ticket.case_record_to_close(rec)
     assert case_ticket.parse_disposition_from_resolution(close["resolution"]) == "benign"
     assert "Authorized deploy." in close["resolution"]
+
+
+# ---------------------------------------------------------------------------
+# The mapping is file-driven — changing the convention needs no code change.
+# ---------------------------------------------------------------------------
+
+
+def test_mapping_is_file_driven(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Point $DEFENDER_DIR at a tree with a custom mapping.yaml and confirm the
+    output (label prefix, resolution separator, source path) follows the file."""
+    mapping_dir = tmp_path / "knowledge" / "environment" / "systems" / "case-history"
+    mapping_dir.mkdir(parents=True)
+    (mapping_dir / "mapping.yaml").write_text(
+        "source:\n"
+        "  signature: detection.ruleId\n"          # different source path
+        "  summary: detection.name\n"
+        "open:\n"
+        "  key: '{case_id}'\n"
+        "  status: open\n"
+        "  labels: ['rule/{signature}']\n"          # different label convention
+        "close:\n"
+        "  status: closed\n"
+        "  resolution: '{disposition} :: {reason}'\n"  # different separator
+    )
+    monkeypatch.setenv("DEFENDER_DIR", str(tmp_path))
+
+    alert = {"detection": {"ruleId": "R-99", "name": "Custom rule"}}
+    payload = case_ticket.alert_to_open_payload(alert, "c")
+    assert payload["labels"] == ["rule/R-99"]  # honored custom source path + label
+
+    rec = case_ticket.CaseRecord("c", "R-99", "malicious", "low", "why")
+    close = case_ticket.case_record_to_close(rec)
+    assert close["resolution"] == "malicious :: why"
+    # decode tracks the custom separator from the same file
+    assert case_ticket.parse_disposition_from_resolution(close["resolution"]) == "malicious"

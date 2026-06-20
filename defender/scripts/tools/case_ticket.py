@@ -3,28 +3,25 @@
 
 The defender's *internal* model of a case is `report.md` (+ `alert.json`); the
 *external* model is the ticket-server's frozen v1 schema. These are two separate
-models, and this module is the **only** place that knows both: it parses the
-internal artifacts into a `CaseRecord` and maps that to/from external ticket
-payloads. Keeping the translation here means the runtime drivers, the report
-schema, and (in PR 2) the learning-loop reader never bind to ticket field names —
-when the store changes (e.g. Elastic Cases), only this module and the transport move.
+models, and this module is the **only** code that knows both: it parses the internal
+artifacts into a `CaseRecord` and maps that to/from external ticket payloads.
 
-Pure by construction: no network, no transport import. `read_case_record` does
-run-dir file reads only. The I/O — posting payloads, the run-dir receipt — lives in
-`ticket_writer.py`, which imports this module.
+The mapping itself — which internal facts land in which ticket fields, the label and
+resolution conventions — is **configuration, not code**: it lives in
+`knowledge/environment/systems/case-history/mapping.yaml` and is rendered here.
+Change the convention by editing that file; no code change required. Keeping the
+translation in one module + one config means the drivers, the report schema, and
+(PR 2) the learning reader never bind to ticket field names — when the store changes
+(e.g. Elastic Cases), only this module, the transport, and the mapping move.
 
-De-facto schema convention (the frozen v1 ticket has no disposition or signature
-field, so they ride existing fields):
-
-- ``key``          ← case_id (the run-dir basename)
-- ``labels``       ← ``["sig:<rule_id>"]`` (signature, set at create)
-- ``summary``      ← the alert rule description (set at create)
-- ``resolution``   ← ``"<disposition> — <reason>"`` (set at close; disposition
-                     parses back out via ``parse_disposition_from_resolution``)
+Pure by construction: no network, no transport import. `read_case_record` /
+`_load_mapping` do file reads only. The I/O — posting payloads, the run-dir
+receipt — lives in `ticket_writer.py`, which imports this module.
 """
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,18 +31,19 @@ from typing import Any
 # goal of #317); test_case_ticket asserts the two stay in sync.
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
-# Convention markers owned by this layer (see module docstring).
-SIGNATURE_LABEL_PREFIX = "sig:"
-RESOLUTION_SEP = " — "
+_MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
-CLOSE_AUTHOR = "defender"
+# Fallbacks for internal facts that are absent (not "configuration" — these are how
+# the code behaves when an artifact is thin, which the mapping templates don't cover).
+_SIGNATURE_FALLBACK = "unknown"
+_SUMMARY_FALLBACK = "(no rule description)"
+_CONFIDENCE_FALLBACK = "n/a"
 
 
 class CaseTicketError(Exception):
-    """The internal artifacts (report.md / alert.json) are missing or malformed.
-
-    Raised by `read_case_record`; `ticket_writer` catches it and downgrades to a
-    non-fatal WARN (a crashed run with no report.md leaves the ticket open)."""
+    """The internal artifacts (report.md / alert.json) or the mapping config are
+    missing or malformed. Raised here; `ticket_writer` catches it and downgrades to
+    a non-fatal WARN (a crashed run with no report.md leaves the ticket open)."""
 
 
 @dataclass(frozen=True)
@@ -64,6 +62,64 @@ class CaseRecord:
 
 
 # ---------------------------------------------------------------------------
+# Mapping config (the de-facto schema) — read from a file, not hardcoded
+# ---------------------------------------------------------------------------
+
+
+def _mapping_path() -> Path:
+    """Resolve mapping.yaml. Honors $DEFENDER_DIR (mirrors `_stub_transport`), else
+    resolves relative to this file so it's found regardless of cwd."""
+    base = os.environ.get("DEFENDER_DIR")
+    root = Path(base) if base else Path(__file__).resolve().parents[2]
+    return root / _MAPPING_RELPATH
+
+
+def _load_mapping() -> dict[str, Any]:
+    path = _mapping_path()
+    if not path.is_file():
+        raise CaseTicketError(f"case-history mapping not found: {path}")
+    import yaml  # the defender venv's one runtime dep
+
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
+    if not isinstance(data, dict):
+        raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
+    return data
+
+
+def _dig(obj: Any, dotted: str) -> Any:
+    """Follow a dotted path into a nested mapping; None if any hop is absent."""
+    cur = obj
+    for key in dotted.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def _render(value: Any, ctx: dict[str, str]) -> Any:
+    """Recursively render template strings (and lists/dicts of them) against ctx."""
+    if isinstance(value, str):
+        return value.format_map(ctx)
+    if isinstance(value, list):
+        return [_render(v, ctx) for v in value]
+    if isinstance(value, dict):
+        return {k: _render(v, ctx) for k, v in value.items()}
+    return value
+
+
+def _ctx(**kw: str) -> dict[str, str]:
+    """A template context with every placeholder present (so a template referencing
+    a field this call doesn't set renders empty rather than raising KeyError)."""
+    base = {k: "" for k in ("case_id", "signature", "summary",
+                            "disposition", "reason", "confidence")}
+    base.update(kw)
+    return base
+
+
+# ---------------------------------------------------------------------------
 # Internal model: report.md (+ alert.json) -> CaseRecord
 # ---------------------------------------------------------------------------
 
@@ -76,7 +132,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     end = text.find("\n---", 4)
     if end == -1:
         raise CaseTicketError("report.md missing closing '---' frontmatter fence")
-    import yaml  # local import: yaml is the defender venv's one runtime dep
+    import yaml
 
     try:
         fm = yaml.safe_load(text[4:end])
@@ -84,10 +140,15 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         raise CaseTicketError(f"report.md frontmatter is not valid YAML: {e}") from e
     if not isinstance(fm, dict):
         raise CaseTicketError("report.md frontmatter is not a YAML mapping")
-    # Body is everything after the closing fence line.
     nl = text.find("\n", end + 1)
     body = text[nl + 1:].strip() if nl != -1 else ""
     return fm, body
+
+
+def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
+    path = _dig(mapping, "source.signature") or "rule.id"
+    val = _dig(alert, str(path))
+    return str(val) if val is not None else _SIGNATURE_FALLBACK
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
@@ -108,14 +169,14 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     case_id = str(fm.get("case_id") or run_dir.name)
     confidence = str(fm.get("confidence") or "")
 
-    signature_id = "unknown"
+    mapping = _load_mapping()
+    signature_id = _SIGNATURE_FALLBACK
     alert_path = run_dir / "alert.json"
     if alert_path.is_file():
         try:
-            alert = json.loads(alert_path.read_text())
-            signature_id = _signature_id(alert)
+            signature_id = _signature_id(json.loads(alert_path.read_text()), mapping)
         except (json.JSONDecodeError, OSError):
-            pass  # signature stays "unknown"; non-fatal, the disposition still records
+            pass  # signature stays fallback; non-fatal, the disposition still records
 
     return CaseRecord(
         case_id=case_id,
@@ -126,46 +187,55 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     )
 
 
-def _signature_id(alert: dict[str, Any]) -> str:
-    rule = alert.get("rule") or {}
-    return str(rule.get("id") or "unknown")
-
-
 # ---------------------------------------------------------------------------
-# Mapper: internal <-> external ticket payloads (pure dict in/out)
+# Mapper: internal <-> external ticket payloads (rendered from mapping.yaml)
 # ---------------------------------------------------------------------------
 
 
 def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]:
     """Build the `POST /tickets` body for the bridge create (an OPEN ticket).
 
-    Matches the ticket-server `TicketCreate` shape. The signature rides a label so
-    the read PR can sample per-signature (`list-tickets --label sig:<id>`)."""
-    rule = alert.get("rule") or {}
-    rule_id = _signature_id(alert)
-    summary = str(rule.get("description") or "(no rule description)")
-    return {
-        "key": case_id,
-        "summary": summary,
-        "description": f"Auto-created from alert {case_id} (rule {rule_id}).",
-        "status": "open",
-        "reporter": CLOSE_AUTHOR,
-        "labels": [f"{SIGNATURE_LABEL_PREFIX}{rule_id}"],
-    }
+    Shape and conventions come from `mapping.yaml` (`open` section + `source.*`)."""
+    mapping = _load_mapping()
+    signature = _signature_id(alert, mapping)
+    summary = _dig(alert, str(_dig(mapping, "source.summary") or "rule.description"))
+    ctx = _ctx(
+        case_id=case_id,
+        signature=signature,
+        summary=str(summary) if summary is not None else _SUMMARY_FALLBACK,
+    )
+    return _render(mapping.get("open") or {}, ctx)
 
 
 def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
     """Build the `POST /tickets/{key}/transitions` body for the close.
 
-    Matches the ticket-server `Transition` shape. Disposition rides the resolution
-    prefix (the frozen schema has no disposition field); recoverable via
-    `parse_disposition_from_resolution`."""
-    return {
-        "status": "closed",
-        "resolution": f"{rec.disposition}{RESOLUTION_SEP}{rec.reason}".strip(),
-        "author": CLOSE_AUTHOR,
-        "comment": f"Disposition: {rec.disposition} (confidence: {rec.confidence or 'n/a'}).",
-    }
+    Shape and conventions come from `mapping.yaml` (`close` section)."""
+    mapping = _load_mapping()
+    ctx = _ctx(
+        case_id=rec.case_id,
+        signature=rec.signature_id,
+        disposition=rec.disposition,
+        reason=rec.reason,
+        confidence=rec.confidence or _CONFIDENCE_FALLBACK,
+    )
+    return _render(mapping.get("close") or {}, ctx)
+
+
+def _disposition_separator(mapping: dict[str, Any]) -> str | None:
+    """The literal text that follows {disposition} in the `close.resolution` template
+    — the single source for both encoding (above) and decoding (below)."""
+    tmpl = _dig(mapping, "close.resolution")
+    if not isinstance(tmpl, str):
+        return None
+    marker = "{disposition}"
+    i = tmpl.find(marker)
+    if i != 0:  # disposition must lead for the decode to be unambiguous
+        return None
+    rest = tmpl[len(marker):]
+    nxt = rest.find("{")
+    sep = rest[:nxt] if nxt != -1 else rest
+    return sep or None
 
 
 def parse_disposition_from_resolution(resolution: str | None) -> str | None:
@@ -175,5 +245,11 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     (e.g. a human-edited close). Seeds PR 2's reader; the round-trip is tested."""
     if not resolution:
         return None
-    head = resolution.split(RESOLUTION_SEP, 1)[0].strip()
+    try:
+        sep = _disposition_separator(_load_mapping())
+    except CaseTicketError:
+        return None
+    if not sep:
+        return None
+    head = resolution.split(sep, 1)[0].strip()
     return head if head in DISPOSITION_ENUM else None

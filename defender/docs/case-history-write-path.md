@@ -29,10 +29,18 @@ what manufactures the read PR's fixtures.
   (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
   model. `scripts/tools/case_ticket.py` is the **only** code that knows both: it
   parses the internal artifacts into a `CaseRecord` and maps that to/from ticket
-  payloads (the "de-facto schema" — disposition+reason ride `resolution`, signature
-  rides a `sig:` label, since the frozen v1 ticket has no such fields). The drivers,
-  the report schema, and (PR 2) the learning reader never bind to ticket field names.
-  When the store changes (e.g. Elastic Cases), only the mapper + transport move.
+  payloads. The drivers, the report schema, and (PR 2) the learning reader never bind
+  to ticket field names. When the store changes (e.g. Elastic Cases), only the mapper,
+  the transport, and the mapping config move.
+
+- **The mapping is configuration, not code.** The de-facto schema — which internal
+  facts land in which ticket fields, the `sig:` label and `<disposition> — <reason>`
+  resolution conventions, and the dotted `source.*` paths into `alert.json` — lives
+  in `knowledge/environment/systems/case-history/mapping.yaml` and is *rendered* by
+  the mapper. Changing the convention (label prefix, resolution format, which alert
+  field is the signature) is a config edit, no code change. `close.resolution` must
+  lead with `{disposition}`; the decode derives its separator from that same template,
+  so encode and decode stay single-sourced.
 
 - **Decoupled stores / config.** The case-history store has its own config
   (`systems/case-history/config.env`, `CASE_HISTORY_*`), distinct from the read-side
@@ -68,7 +76,10 @@ what manufactures the read PR's fixtures.
 ## Shape
 
 - `scripts/tools/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the mapper
-  (`alert_to_open_payload`, `case_record_to_close`, `parse_disposition_from_resolution`).
+  (`alert_to_open_payload`, `case_record_to_close`, `parse_disposition_from_resolution`),
+  rendering from the mapping config.
+- `knowledge/environment/systems/case-history/mapping.yaml` — the de-facto schema
+  (field mapping + conventions), editable without touching code.
 - `scripts/tools/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `close_case_ticket` (+ `ticket_write.json` receipt), non-fatal.
 - `run.py` / `run_pai.py` — `--update-ticket`: open after materialize, close after
