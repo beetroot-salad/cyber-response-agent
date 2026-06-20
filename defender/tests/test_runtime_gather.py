@@ -146,7 +146,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     rows = [json.loads(x) for x in (run_dir / "executed_queries.jsonl").read_text().splitlines() if x.strip()]
     assert rows and rows[0]["lead_id"] == lead_id
     assert rows[0]["query_id"].startswith(f"{system}.")
-    # The lean gather logs under a single gather: instance, on Haiku.
+    # The lean gather logs under a single gather: instance (Sonnet by default).
     recs = [json.loads(x) for x in (run_dir / "llm_requests.jsonl").read_text().splitlines() if x.strip()]
     aids = {r["agent_id"] for r in recs}
     assert aids and all(a.startswith("gather:") for a in aids)

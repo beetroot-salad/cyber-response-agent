@@ -120,7 +120,7 @@ async def main() -> int:
         return driver.build_lean_gather_agent(DEFENDER_DIR, logger, agent_id)
 
     print(f"[gather_only] engine=LEAN run_dir={run_dir} "
-          f"gather_model={driver._gather_model()}", file=sys.stderr)
+          f"gather_model={driver._lean_gather_model()}", file=sys.stderr)
     try:
         out = await _run_gather(deps, factory, driver.GATHER_REQUEST_LIMIT,
                                 "l-001", lead["system"], lead["goal"],

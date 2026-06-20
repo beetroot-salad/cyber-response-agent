@@ -179,14 +179,19 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
 
 
 def _gather_model() -> str:
-    """The gather subagent model — Haiku by default; `DEFENDER_GATHER_MODEL`
-    overrides it. The override exists for the instruction-following A/B: Haiku
-    under-adopts the §4 `--batch` form and flails the on-disk filter loop into the
-    request cap, so a Sonnet gather is worth testing. It's affordable *because* the
-    always-sampled passthrough (record_query) keeps the multi-MB raw dump out of
-    gather's context — a pricier gather pays only for the small sampled context +
-    summaries, not the dump it re-sends every request."""
+    """The LEGACY single-agent gather model (`build_gather_agent`, the `claude -p`
+    engine + hermetic tests) — Haiku by default; `DEFENDER_GATHER_MODEL` overrides.
+    The lean production gather uses `_lean_gather_model` (Sonnet)."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or GATHER_MODEL
+
+
+def _lean_gather_model() -> str:
+    """The lean production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
+    overrides. Validated (#340) as the right tier for the lean single agent: the
+    pinned context is tiny (the lean SKILL is ~1K words vs the split's ~6K), so
+    Sonnet's per-token rate is fully offset by ~half the turns / a third fewer
+    queries / no KQL↔ES|QL confusion — same cost as Haiku-lean, fewer failures."""
+    return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
 def _build_subagent(
@@ -231,11 +236,11 @@ def build_lean_gather_agent(defender_dir: Path, logger: observe.RequestLogger, a
     """The lean single-agent gather (#340) — the production gather for the
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
-    split). Loads `skills/gather/SKILL.lean.md`. Model is `_gather_model()` (Haiku;
-    `DEFENDER_GATHER_MODEL` overrides to A/B at Sonnet)."""
+    split). Loads `skills/gather/SKILL.lean.md`. Model is `_lean_gather_model()`
+    (Sonnet; `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _lean_gather_instructions(defender_dir),
-        _gather_model(),
+        _lean_gather_model(),
     )
 
 
@@ -341,7 +346,7 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         # request (the recorded usage then reflects the compacted token cost).
         capabilities.append(ProcessHistory(_make_compaction_processor()))
         print("[run_pai] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
-    print(f"[run_pai] gather model: {_gather_model()}", file=sys.stderr)
+    print(f"[run_pai] gather model: {_lean_gather_model()}", file=sys.stderr)
     if os.environ.get("DEFENDER_GATHER_MODEL"):
         print(f"[run_pai] gather model OVERRIDE: {_gather_model()} "
               "(DEFENDER_GATHER_MODEL)", file=sys.stderr)
