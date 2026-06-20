@@ -44,11 +44,9 @@ LEADS = {
             "any failures or novel destinations in the 7d window",
         ],
     ),
-    # Elastic, WITH a template — a src_ip -> host pair baseline maps 1:1 to the
-    # sshd-baseline-7d template's measurement (${src_ip}, ${host}), so the finder
-    # binds the template rather than coining. (The user-scoped baseline-7d lead
-    # above does NOT match it — the template is IP->host-pair scoped — so the
-    # finder coins there; that is correct behavior, not a template-path test.)
+    # Elastic, WITH a template — a src_ip -> host pair baseline is one narrowing of
+    # the wide ES|QL `sshd-auth-history` template (user/src/dst/window axes), so the
+    # lean agent binds + narrows it rather than coining. The templated-path A/B cell.
     "ip-host-baseline": dict(
         system="elastic",
         goal=("Establish the 7-day pre-alert sshd authentication baseline for source IP "
@@ -61,9 +59,10 @@ LEADS = {
             "whether 172.18.0.14 has any prior auth history to db-1 (zero-vs-nonzero baseline)",
         ],
     ),
-    # Elastic, NO template — host-level process execution has no catalog
-    # template (container-process-ancestry is falco/container-scoped), so the
-    # finder must coin the query → Sonnet executor (the ad-hoc path).
+    # Elastic, coined path — host-level process execution maps to the wide
+    # `falco-alerts` template (execve / container.id / proc-ancestry), but the
+    # lead is phrased around host db-1 not a container.id, so the agent must
+    # reason from alert→container and coin the falco ES|QL. The ad-hoc A/B cell.
     "process-db1": dict(
         system="elastic",
         goal=("Characterize the process-execution events on prod host db-1 during the "

@@ -34,6 +34,6 @@ Use `logs-*` as the index. A limit of 10–20 is sufficient; agent metadata repe
 ## Common pitfalls
 
 - **NAT / VIP addresses**: If the IP is a shared gateway or virtual IP, multiple distinct hosts may report the same `host.ip`. Check the count of distinct `host.name` values before concluding the IP resolves to a single machine.
-- **Agents that do not run Elastic Agent**: Hosts shipping logs via syslog or Beats without Elastic Agent metadata enrichment do not populate `host.ip`. In that case fall back to `sshd-source-ip-activity` or `ip-to-host-search`.
+- **Agents that do not run Elastic Agent**: Hosts shipping logs via syslog or Beats without Elastic Agent metadata enrichment do not populate `host.ip`. In that case fall back to `sshd-auth-history` or `ip-to-host-search`.
 - **`search` is not a valid subcommand.** The CLI accepts `health-check`, `query`, and `alerts`; passing `search` returns `exit=2: invalid choice: 'search'`. Use `query`.
 - **Pass the index as a named param, not as a positional argument.** When specifying a non-default index, pass it as the named `index` param with the filter expression as the first positional (`arg0`). Reversing the order — index as `arg0`, filter as `arg1` — returns `exit=2: unrecognized arguments: <filter>`.

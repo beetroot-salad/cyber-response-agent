@@ -43,4 +43,4 @@ message: *"${ip}"*
   hosts. Use the full dotted-decimal IP string.
 - **SSHD auth events are in a different stream.** `sshd` "Accepted"/"Failed" lines
   appear in `logs-system.auth-*`, not syslog. For SSH-specific IP lookups, also query
-  `logs-system.auth-*` via `elastic.sshd-source-ip-activity`.
+  `logs-system.auth-*` via `elastic.sshd-auth-history`.
