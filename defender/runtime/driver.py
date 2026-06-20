@@ -264,6 +264,23 @@ def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
     )
 
 
+def _lean_gather_instructions(defender_dir: Path) -> str:
+    return (defender_dir / "skills" / "gather" / "SKILL.lean.md").read_text()
+
+
+def build_lean_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
+    """The LEAN single-agent gather (issue #340 direction test): one agent runs
+    find→execute(one server-side ES|QL aggregation)→verify, no finder/executor
+    split. Loads `skills/gather/SKILL.lean.md`; behaves as an executor (runs
+    queries, auto-captures) under executor-role deps. Model is `_gather_model()`
+    (Haiku, `DEFENDER_GATHER_MODEL` overrides) so the lean path can be A/B'd at
+    both Haiku and Sonnet against the split."""
+    return _build_subagent(
+        defender_dir, logger, agent_id, _lean_gather_instructions(defender_dir),
+        _gather_model(),
+    )
+
+
 def build_executor_agent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     model_name: str | None = None,

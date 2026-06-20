@@ -413,10 +413,17 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 async def _run_gather(
     deps: RunDeps, gather_factory, request_limit: int,
     lead_id: str, system: str, goal: str, what_to_summarize: list[str],
+    *, role: str = "finder", prompt_fn=None,
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
     without the main model: claim the lead → inject the system description → run
-    the nested gather agent → wrap the summary."""
+    the nested gather agent → wrap the summary.
+
+    `role`/`prompt_fn` select the engine: the default `"finder"` + `_finder_prompt`
+    is the finder/executor split (the main agent's `gather` tool). The lean
+    single-agent direction test (issue #340) passes `role="executor"` +
+    `_gather_prompt` — an executor-role agent auto-captures its own adapter calls
+    and gets the plain dispatch block, with no `assay` delegation layer."""
     # 0. Fail fast on a malformed lead_id. claim_lead treats a bad id as a benign
     # skip (returns 0, no sidecar), which would otherwise half-dispatch the lead
     # (nested agent spawned, no leads-table row) until capture() later rejects the
@@ -454,13 +461,15 @@ async def _run_gather(
     # the moment the main loop has already issued `request_limit` requests, so the
     # per-lead cap would not bound gather's own requests. Cost still folds in — the
     # request log (observe.write_trace) sums every instance's usage independently.
-    gagent = gather_factory(f"finder:{lead_id}")
+    gagent = gather_factory(f"{role}:{lead_id}")
     gdeps = GatherDeps(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         run_id=deps.run_id, salt=deps.salt, is_main_session=False, lead_id=lead_id,
-        role="finder",
+        role=role,
     )
-    prompt = _finder_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
+    prompt = (prompt_fn or _finder_prompt)(
+        deps, lead_id, system, goal, what_to_summarize, catalog
+    )
     try:
         result = await gagent.run(
             prompt, deps=gdeps,

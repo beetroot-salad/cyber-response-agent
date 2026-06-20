@@ -8,9 +8,18 @@ surface. It carries the CLI surface, query syntax, and index scoping.
 
 ```bash
 defender-elastic health-check
-defender-elastic query '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
+defender-elastic query  '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
 defender-elastic alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
+defender-elastic esql   '<ES|QL pipe>'
 ```
+
+`esql` runs a server-side **ES|QL** aggregation and returns the result table
+(`{columns, row_count, values}`) — the rows ARE the answer, computed exactly over
+the full match, so you never pull docs and reduce them. The whole query (index via
+`FROM`, filter via `WHERE`, window via `@timestamp` comparison, aggregation via
+`STATS`) lives in the pipe; `esql` takes no `--index/--start/--end/--limit`.
+Prefer it for any count / distribution / cardinality / timing dimension; use
+`query` (KQL search) only when you need raw event documents themselves.
 
 **Do not Read `elastic_cli.py` source to discover flags.** This doc
 plus `defender-elastic {subcommand} --help` is the authoritative

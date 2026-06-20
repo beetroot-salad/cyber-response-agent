@@ -484,6 +484,29 @@ def build_parser():
     a.add_argument("native_query", help="Lucene / KQL query string against the alerts index.")
     _add_common_flags(a)
 
+    e = sub.add_parser(
+        "esql",
+        help="Run an ES|QL pipe; server-side aggregation, exact, returned as a table.",
+        description=(
+            "Run an ES|QL query (`FROM ... | WHERE ... | STATS ...`) against the "
+            "playground Elasticsearch and return the result table.\n\n"
+            "The aggregation runs server-side and is EXACT — the result rows ARE the "
+            "answer; do not pull docs and reduce them yourself. The whole query "
+            "(index, filter, time window, aggregation) lives in the pipe; there are "
+            "no --index/--start/--end/--limit flags.\n\n"
+            "Examples:\n"
+            "  elastic_cli.py esql 'FROM logs-system.auth-* \\\n"
+            "      | WHERE source.ip == \"172.18.0.14\" AND host.name == \"db-1\" \\\n"
+            "              AND event.outcome IS NOT NULL \\\n"
+            "      | STATS accepted = COUNT(*) WHERE event.outcome == \"success\", \\\n"
+            "              failed = COUNT(*) WHERE event.outcome == \"failure\"'\n"
+            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE user.name == \"dev.dana\" "
+            "| LIMIT 10'   # field-shape probe"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    e.add_argument("query", help="ES|QL query string (FROM ... | WHERE ... | STATS ...).")
+
     return p
 
 
@@ -527,6 +550,48 @@ def cmd_alerts(args, config):
         ))
 
 
+def run_esql(config, query):
+    """Execute an ES|QL query via the `_query` endpoint. Returns
+    (columns, values) where columns is [{name,type},...] and values is the
+    columnar row list [[...],...]. Exit-code contract mirrors `search()`:
+    2 = unreachable/auth (5xx, 401/403), 1 = query error (a malformed pipe is a
+    400 the model fixes and re-runs)."""
+    url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
+    try:
+        status, resp = _http_json("POST", url, config, body={"query": query})
+    except TransportError as e:
+        _exit_unreachable("Elasticsearch", url, e)
+
+    if status != 200:
+        err = resp.get("error", resp)
+        msg = err.get("reason") if isinstance(err, dict) else str(err)
+        if status in (401, 403):
+            print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
+        if status >= 500:
+            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
+        print(f"error: ES|QL query failed (HTTP {status}): {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    return resp.get("columns", []), resp.get("values", [])
+
+
+def cmd_esql(args, config):
+    columns, values = run_esql(config, args.query)
+    names = [c.get("name") for c in columns]
+    # Named-dict rows so the agent reads the table directly; this is the answer,
+    # not a doc sample. The key is `values` (not in record_query's record-key set),
+    # so a small aggregation passes through whole instead of being doc-sampled.
+    rows = [dict(zip(names, row)) for row in values]
+    print(json.dumps({
+        "query": args.query,
+        "columns": columns,
+        "row_count": len(rows),
+        "values": rows,
+    }, default=str, indent=2))
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -537,6 +602,8 @@ def main():
         cmd_query(args, config)
     elif args.subcommand == "alerts":
         cmd_alerts(args, config)
+    elif args.subcommand == "esql":
+        cmd_esql(args, config)
     else:
         parser.error(f"unknown subcommand: {args.subcommand}")
 
