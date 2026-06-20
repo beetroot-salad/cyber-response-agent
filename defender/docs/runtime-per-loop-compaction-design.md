@@ -489,15 +489,74 @@ re-read has no cause. The runtime SKILL §ORIENT now tells the agent both are
 in context and **not** to Read `alert.json` / `skills/invlang/SKILL.md`. Applies
 to BOTH arms (it's orientation, not gated), so the A/B still isolates compaction
 — A and B differ only by the fold, and both shed the redundant ORIENT-time read.
-Still **needs a live run to confirm** the re-read is gone, and a credit top-up
-(the 6th crashed on `400 credit balance too low` before REPORT — billing, not a
-code bug).
+**Confirmed live (7th A/B, below): zero post-freeze re-reads across all 6 runs**
+— the residual is dead.
 
 **Net:** the restart (the costly failure) is fixed and the freeze now fires at a
 genuine boundary with a clean ~15k dip. The residual re-orientation is now
 addressed too (persistent-context fix above) pending a live confirmation. A real
 token-saving / disposition-parity number still needs the scale rung (N>1 or the
 deterministic fixture-replay harness) — plus a credit top-up.
+
+## 7th A/B — N=3 reproducibility, live (`v2-cross-tier-ssh-pivot`, 2026-06-20)
+
+First run with **both** the `:T close` marker and the persistent-context fix in
+place. Three A/B pairs (ab7/ab8/ab9), same alert, live stack, `DEFENDER_COMPACTION`
+off vs on. Results by run:
+
+| Flag | Run | Disposition | Loops | Freeze | Per-request dip |
+|---|---|---|---|---|---|
+| off | ab7-A | malicious/high | 2 | — | — |
+| off | ab8-A | malicious/high | 2 | — | — |
+| off | ab9-A | malicious/high | 2 | — | — |
+| on  | ab7-B | **malicious/high** | 2 | **fired** | 31,197 → 21,387 (−31%) |
+| on  | ab8-B | inconclusive/med | 1 | dormant | — |
+| on  | ab9-B | **malicious/high** | 2 | **fired** | 32,443 → 20,935 (−35%) |
+
+**Quality — reproduces, no regression.** Arm A is **3/3 malicious/high**, so the
+*shared* changes (persistent-context inlining + the `:T close` SKILL instruction,
+present in both arms) don't degrade quality. Compaction **materially fired in 2
+runs (ab7-B, ab9-B) — both malicious/high**, and ab9-B was the single deepest
+investigation of all six (it traced the root cause: a compromised container on
+office-ws-1 running `sshpass → ssh dev.dana@localhost`, then probing db-1 *and*
+brute-forcing Keycloak). The one `inconclusive` (ab8-B) was a **single-loop,
+dormant** run — the freeze never fired, so it is byte-identical Phase A; its
+disposition is trajectory luck, not a compaction effect. A run where the fold
+doesn't execute cannot be a compaction regression.
+
+**Mechanism — reproduces.** `:T close` emitted in every B run; the freeze fired
+in both multi-loop B runs and stayed dormant in the single-loop one (correct).
+The **per-request main-loop dip reproduces tightly: −31% then −35%** — the clean,
+robust compaction signal. **Zero post-freeze re-reads of `alert.json` /
+`skills/invlang/SKILL.md` across all 6 runs** → the persistent-context fix
+(fix a) is confirmed; the 6th-A/B residual is gone.
+
+**Payoff — the confound is now *proven*, not just suspected.** The cumulative
+token delta **flipped sign between pairs**: ab7-B was −30% (arm A happened to go
+deeper — 30 main requests vs 24), ab9-B was +8% (arm B went deeper — 29 vs 16).
+The cumulative number tracks *which arm investigated deeper*, not the flag;
+latency is worse-confounded still (also distorted by 4 concurrent runs). So a
+live A/B **cannot** isolate the net payoff — trajectory-depth variance swamps the
+per-request saving, in both directions. Loop count is also too variable for live
+testing to reliably exercise the fold (compaction *engaged* in only 2 of 3 B
+runs). The only clean, reproducible payoff signal is the ~31–35% per-request
+main-loop reduction at the freeze.
+
+**Verdict.** Quality and mechanism are validated to the limit of what live runs
+can show: no regression (N=3), the marker→freeze path is reliable on multi-loop
+trajectories, and the residual re-read is gone. The **net token/latency number
+requires the deterministic fixture-replay harness** (serve recorded `gather_raw/`
+payloads so A and B run the identical trajectory) — these runs are the empirical
+proof of *why* it's needed, not just a modeling assumption. The flag stays **off**
+pending that number.
+
+**Aside (gather dominates cost).** Across these runs gather was ~80–85% of total
+tokens (cache-read-bound; each gather request re-sends the lead's growing
+context), and compaction is main-agent-only. A separate analysis found ~66% of
+gather requests are the per-dimension verifiable-summary protocol (SKILL §4), not
+queries — so a request-count cut there (batch per-dimension summaries; drop the
+mandatory self-test rerun) is a larger absolute lever than the main-loop fold.
+Tracked separately; orthogonal to this design.
 
 ## Implementation status
 
