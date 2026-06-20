@@ -6,7 +6,7 @@
 # Edit THIS FILE to change the convention; no code change required.
 #
 # Templates use {placeholders}: case_id, signature, summary, disposition, reason,
-# confidence. `source.*` are dotted paths into alert.json.
+# confidence, outcome, seed_eligible. `source.*` are dotted paths into alert.json.
 
 # Where to read facts from the internal model (alert.json).
 source:
@@ -33,3 +33,15 @@ close:
   resolution: "{disposition} — {reason}"
   author: defender
   comment: "Disposition: {disposition} (confidence: {confidence})."
+
+# POST /tickets/{key}/comments — offline enrichment stamp (issue #317, read path).
+# The learning loop's adversarial-probe verdict, recorded as a seed-eligibility
+# flag the benign seed sampler reads. The polarity decision (which probe outcomes
+# make a benign case a safe cover-story seed) is made once at WRITE time and stored
+# as the {seed_eligible} boolean — the reader never re-derives it. `body` MUST
+# begin with a pure-literal marker (the text before {seed_eligible}) so the reader
+# tells this comment apart from the runtime close-comment; {seed_eligible} must
+# lead the placeholders, and the decode splits on the literal that follows it.
+annotate:
+  author: learning
+  body: "seed-eligibility: {seed_eligible} (adversarial-probe: {outcome})"

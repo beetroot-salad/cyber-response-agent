@@ -15,6 +15,7 @@ You see:
 1. **alert** — the alert as the SIEM produced it. Match your story to its specifics: source, identity, command, target, timing.
 2. **alert_rule_id** — the canonical rule key for this alert. Pass it **verbatim** as `--alert-rule-ids` when you retrieve environment lessons (see Tools); do not re-derive a rule id from the alert.
 3. **case_entities** — the alert's entities classified in invlang `type:class` form. Used only to retrieve the environment lessons relevant to this case (see Tools).
+4. **past_tickets** *(optional, not always present)* — a short menu of prior **closed** cases your team handled on this signature and dispositioned benign. Each is a candidate covering operation you may **propose** as the story — an operation like a case your org has already accepted is a credible one. It is a seed, never a warrant: the judge re-confirms any case you lean on against this alert's actuals, so propose one only when it genuinely fits, and ground it the same as any other story. Cold-start (no menu) is normal — ground off the alert and your environment lessons as usual.
 
 Your accumulated **environment lessons** — what prior encounters taught you about this deployment's routine activity, identities, baselines, and standing processes — are retrieved via Tools. On a deployment you have not yet learned, reason from the alert and general operations knowledge; lean toward SKIP when you genuinely cannot ground the story.
 
@@ -37,7 +38,7 @@ Otherwise, two sections, in order:
 - **Purpose & impact** — the legitimate function it serves; its impact is bounded and aligned with that function (e.g. read-only, touches no data, scoped to its declared job).
 - **Authorization** — the identity/role is permitted to do this, where authorization is the question at issue.
 - **Integrity** — the operation does only what it declares; no tampering, no state change beyond its stated function.
-- **Policy / change compliance** — it conforms to standing policy or falls inside an approved change window.
+- **Policy / change compliance** — it conforms to standing policy or falls inside an approved change window. A prior closed case from **past_tickets** can evidence that such a policy exists, but cite it for the *covering policy* it carries, never for the bare fact that it fired before — frequency is not a ground. Name the policy and the conditions this activity satisfies (the same checkable facts the other axes use); the judge confirms the case exists and that those conditions hold here.
 
 Name only the axes that bear on this alert and ground each one; omit axes that don't apply and do not pad with grounds you cannot back.
 

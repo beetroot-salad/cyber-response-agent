@@ -35,6 +35,7 @@ from defender.learning._loop_config import (
 from defender.learning._loop_directions import BY_NAME, Direction
 from defender.learning.author_branch import AuthorBranch, BranchError
 from defender.learning._loop_persist import append_findings, derive_alert_rule_key, persist_run
+from defender.learning.ticket_enrichment import enrich_case_ticket
 from defender.learning._loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from defender.learning._loop_validate import (
     normalize_disposition,
@@ -347,6 +348,18 @@ def run_one(
                 fut.result()
             except Exception as e:  # re-raised after all legs settle (fail loud)
                 errors.append((name, e))
+
+    # Stamp the case-history ticket's seed-eligibility flag from the adversarial
+    # verdict (issue #317 read path). Benign-disposed cases only — they are the
+    # benign seed sampler's only candidates — and only when the adversarial leg
+    # actually produced a verdict (it always runs for `benign`). Non-fatal: the
+    # enricher swallows its own failures, never converting a clean learn into a
+    # failed one. Runs once per case (the legs have all settled here).
+    adversarial_ok = "adversarial" in directions and not any(
+        name == "adversarial" for name, _ in errors
+    )
+    if disposition == "benign" and adversarial_ok:
+        enrich_case_ticket(run_dir, learning_run_dir)
 
     # Hand the run to the serial author-drainer regardless of leg outcome —
     # lead-author refines the query catalog (independent of the legs) and any

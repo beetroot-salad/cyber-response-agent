@@ -73,8 +73,10 @@ def _load_config() -> dict[str, str] | None:
     return cfg
 
 
-def _post(config: dict[str, str], path: str, body: dict) -> tuple[str | None, str]:
-    """POST to the stub via the docker-exec transport, non-fatally.
+def _request(
+    config: dict[str, str], method: str, path: str, body: dict | None = None
+) -> tuple[str | None, str]:
+    """Call the stub via the docker-exec transport, non-fatally.
 
     Returns (http_status, body_text); http_status is None on a transport-level
     failure (docker missing / timeout / no response)."""
@@ -83,7 +85,7 @@ def _post(config: dict[str, str], path: str, body: dict) -> tuple[str | None, st
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     try:
         rc, stdout, stderr = transport.docker_exec_curl(
-            bastion, url, method="POST", body=body, timeout_sec=timeout
+            bastion, url, method=method, body=body, timeout_sec=timeout
         )
     except transport.TransportError as e:
         return None, f"transport error: {e}"
@@ -91,6 +93,10 @@ def _post(config: dict[str, str], path: str, body: dict) -> tuple[str | None, st
     if not status:
         return None, f"no/malformed response (rc={rc}, stderr={stderr.strip()!r})"
     return status, body_text
+
+
+def _post(config: dict[str, str], path: str, body: dict) -> tuple[str | None, str]:
+    return _request(config, "POST", path, body)
 
 
 def open_case_ticket(run_dir: Path) -> None:
@@ -151,6 +157,49 @@ def close_case_ticket(run_dir: Path) -> None:
         _write_receipt(run_dir, config, rec.case_id, ok)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _warn(f"close raised, ignored: {e!r}")
+
+
+def annotate_case_ticket(case_id: str, outcome: str) -> None:
+    """Stamp the seed-eligibility flag onto a closed case-history ticket (issue
+    #317, offline enrichment). `outcome` is the adversarial-probe verdict; the
+    polarity (which outcomes seed) is decided by the mapper.
+
+    Idempotent at this boundary (mirrors `open_case_ticket`'s 409 handling): GET
+    the ticket, and if a seed-eligibility comment is already present, skip the POST
+    — the store is the source of truth, so a re-drained learn never double-stamps.
+    Non-fatal: every failure (config absent, unreachable, 404, HTTP error) is a WARN
+    and a return. Never raises."""
+    try:
+        config = _load_config()
+        if config is None:
+            return
+        key = urllib.parse.quote(case_id, safe="")
+        status, body = _request(config, "GET", f"/tickets/{key}")
+        if status is None:
+            _warn(f"annotate {case_id}: {body}")
+            return
+        if status == "404":
+            _warn(f"annotate {case_id}: ticket not found (404); skipping")
+            return
+        if not status.startswith("2"):
+            _warn(f"annotate {case_id}: GET HTTP {status}: {body}")
+            return
+        try:
+            ticket = json.loads(body)
+        except json.JSONDecodeError as e:
+            _warn(f"annotate {case_id}: unparseable ticket: {e}")
+            return
+        if case_ticket.parse_survival_from_comments(ticket.get("comments")) is not None:
+            _log(f"annotate {case_id}: already flagged — skipping")
+            return
+        payload = case_ticket.enrichment_to_comment(outcome)
+        status, body = _post(config, f"/tickets/{key}/comments", payload)
+        if status is None or not status.startswith("2"):
+            _warn(f"annotate {case_id}: POST {status or 'transport error'}: {body}")
+        else:
+            _log(f"annotate {case_id}: seed-eligibility from {outcome} ({status})")
+    except Exception as e:  # noqa: BLE001 — an offline post-step must never break the learn
+        _warn(f"annotate raised, ignored: {e!r}")
 
 
 def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool) -> None:
