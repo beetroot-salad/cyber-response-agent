@@ -62,7 +62,11 @@ def test_capture_ok_writes_row_and_payload(tmp_path, stub):
     assert json.loads(payload) == {"hits": [{"id": 1}, {"id": 2}]}
     rows = (tmp_path / "executed_queries.jsonl").read_text().splitlines()
     assert len(rows) == 1 and json.loads(rows[0])["seq"] == 0
-    assert passthrough == payload  # small payload → passthrough is verbatim
+    # The in-context passthrough is a field-shape SAMPLE of the record list (so
+    # the raw dump never re-enters the subagent's context); the full payload is
+    # persisted verbatim on disk (asserted above).
+    assert "FIELD-SHAPE sample" in passthrough and "2 records" in passthrough
+    assert "sample[0]" in passthrough and payload not in passthrough
 
 
 def test_capture_seq_is_monotonic_per_lead(tmp_path, stub):

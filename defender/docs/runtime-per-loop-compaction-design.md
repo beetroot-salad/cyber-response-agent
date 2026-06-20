@@ -554,9 +554,14 @@ pending that number.
 tokens (cache-read-bound; each gather request re-sends the lead's growing
 context), and compaction is main-agent-only. A separate analysis found ~66% of
 gather requests are the per-dimension verifiable-summary protocol (SKILL §4), not
-queries — so a request-count cut there (batch per-dimension summaries; drop the
-mandatory self-test rerun) is a larger absolute lever than the main-loop fold.
-Tracked separately; orthogonal to this design.
+queries — so a request-count cut there is a larger absolute lever than the
+main-loop fold. **Two such cuts landed in this PR** (orthogonal to compaction,
+co-located for convenience): `record_query` now always reduces a record-list
+payload to a field-shape *sample* (the raw dump never re-enters gather's context
+on later requests — a cache-read cut), and `record_summary --batch` records all
+of a payload's computable dimensions from one `jq` object in a single call
+(collapsing the per-dimension round-trips), with the gather SKILL §3/§4 teaching
+both. Net effect to be measured on the next gather run.
 
 ## Implementation status
 

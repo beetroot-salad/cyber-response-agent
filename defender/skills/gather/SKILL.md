@@ -128,15 +128,15 @@ before reporting a Counter over the returned hits. If the run is
 truncated, widen `--limit` (up to the CLI's `MAX_LIMIT`) and re-run,
 or report the partial result with `payload_status: partial`.
 
-**Large payloads: filter the file, never hand-count.** When a query
-over-returns (server-side filter didn't bind, broad window,
-high-cardinality index), the harness caps what the capture passes back:
-above its byte ceiling you get a `[record_query] N records … pass-through
-truncated` line, a few `sample[i]` records, and the on-disk payload
-path — not the full dump. **That truncated view is not a countable
-sample.** Do not eyeball it or estimate from the samples. Filter the
-persisted payload on disk with jq, grep, or the Grep tool — the samples
-show the field shape you need to write the filter:
+**Event payloads are always a field-shape sample, never the full dump.**
+For any record-list result (a `hits`/`events`/`results` collection or a
+top-level array), the capture passes back a `[record_query] N records …
+FIELD-SHAPE sample` line, a few `sample[i]` records, and the on-disk payload
+path — *never the whole dump, regardless of size*. (A single non-list object —
+an identity profile, a host lookup — IS the answer and passes through whole.)
+**That sample is only for reading the field shape to write your filters; it is
+not a countable sample.** Do not eyeball it or estimate from it — compute every
+value over the persisted payload on disk with jq, grep, or the Grep tool:
 
 ```bash
 jq '[.hits[] | select(.message | test("Failed password") and test("::1"))] | length' \
@@ -281,21 +281,26 @@ number; an asserted number over data the defender can never see is exactly
 the failure this loop is closing. The samples show you the *field shape* to
 write the filter — never the *answer*.
 
-The capture wrapper records each computation to the summaries table and
-prints its output back to you:
+The capture wrapper records the computation to the summaries table and prints
+its output back to you. **Compute all of a payload's computable dimensions in
+ONE call** — a single `jq` object keyed by dimension, recorded with `--batch`:
 
 ```bash
-defender-record-summary --lead {lead_id} --label {kebab-dimension} -- \
-    jq '<expression>' {raw-payload-path}
+defender-record-summary --lead {lead_id} --batch -- \
+    jq '{failed-count: ([.hits[] | select(.outcome=="failure")] | length),
+         distinct-srcips: ([.hits[].srcip] | unique | length),
+         first-ts: ([.hits[].ts] | min)}' {raw-payload-path}
 ```
 
-- It runs the snippet, appends a `{label, snippet, output}` row to
-  `{run_dir}/summaries.jsonl`, and passes the output straight through to you.
-  The value it prints is what you report for that dimension — never retype a
-  value you didn't compute.
-- `{raw-payload-path}` is the path the §3 capture reported back on stderr
-  (`[record_query] raw payload: …`). `{label}` is a kebab name for the
-  dimension (`distinct-srcips`, `session-duration`, `failed-count`).
+- `--batch` runs the snippet once, writes **one `{label, snippet, output}` row
+  per object key** (the key is the dimension label), and prints the whole object
+  back. The values it prints are what you report — never retype a value you
+  didn't compute. **One round-trip for the whole payload, not one per dimension.**
+- Use object keys that are clean dimension names (`failed-count` / `failed_count`
+  both work — the wrapper kebab-normalizes them into the table labels).
+- `{raw-payload-path}` is the path §3 reported on stderr (`[record_query] raw
+  payload: …`). For a single lone dimension, the `--label {kebab} -- jq '<expr>'`
+  form records one row directly.
 - **Tool suite (pure transforms only).** `jq` reshapes and filters JSON and
   covers most dimensions. For real statistics (median, percentile, stddev,
   grouped aggregates) and columnar/set work, pipe into **`datamash`** and the
@@ -313,14 +318,13 @@ defender-record-summary --lead {lead_id} --label {kebab-dimension} -- \
   (`python3`, `awk`, `sqlite3`, …) is denied; ask for that dimension to be
   computed differently, or report it as not-computable.
 
-**Self-test the snippet before the full run.** You write correct code when you
-check it: first run the bare tool (a plain `jq`/`sort`/…, not the wrapper) over
-~5 sample records — `jq '.[0:5] | <expression>' {raw-payload-path}`, or the
-`sample[i]` records from the §3 passthrough — to confirm your field paths and
-filter logic produce the shape you expect. Only then run the validated snippet
-via `defender-record-summary` over the **whole** payload. The self-test catches
-wrong field paths (`source.ip` vs `client.ip`) and broken filters; the full run
-produces the value.
+**Self-test once, then run the batch.** Field paths are easy to get wrong
+(`source.ip` vs `client.ip`), so before recording, sanity-check your `jq` object
+on a slice — `jq '.[0:5] | {…}' {raw-payload-path}`, or just read the field shape
+off the §3 `sample[i]` records — to confirm the keys resolve. Then run the *same
+object* over the **whole** payload via `--batch`. One self-test for the whole
+object, not one per dimension; a batched object also fails loudly (a `null` field
+flags a wrong path), so it's cheap to spot and re-run.
 
 **Interpretive bullets stay a narrow claim — anchored to the numbers above
 them.** A bullet that asks for meaning rather than a value ("is this cadence
