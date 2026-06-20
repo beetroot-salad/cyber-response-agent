@@ -57,9 +57,15 @@ Run the adapter standalone via `Bash` — **never pipe, chain (`&&`/`;`), or
 redirect it**:
 
 ```bash
-defender-elastic esql '<ES|QL query>'
+defender-elastic esql '<ES|QL query>' --query-id <id>
 ```
 
+- **Tag every call with `--query-id`** — the `id:` of the template you bound in
+  step 2 (e.g. `elastic.sshd-auth-history`), or a coined `elastic.<descriptive-kebab>`
+  when none fit. The harness strips this flag (the adapter never sees it) and
+  records it as the query's catalog binding — it's how the offline lead-author
+  tracks which template answered which lead, so set it per query (one lead may run
+  several with different bindings). Omitting it still works but records a generic id.
 - **This shim form is the only sanctioned invocation** — never the path form,
   `python -m`, or an env-prefixed variant. Vary the *query*, never the tooling.
   The harness recognizes the adapter call and captures the executed query + its

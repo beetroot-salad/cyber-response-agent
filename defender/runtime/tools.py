@@ -280,14 +280,48 @@ def register_tools(agent, *, writers: bool = True) -> None:
 
 # --- gather dispatch (slice 2): main agent → nested Haiku gather agent --------
 
+def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
+    """Pull a model-supplied ``--query-id <id>`` (or ``--query-id=<id>``) off an
+    adapter argv, returning (cleaned argv the adapter actually runs, the id).
+
+    The lean single-agent gather annotates each bare adapter call with the catalog
+    id it bound (e.g. ``elastic.sshd-auth-history``) or a coined id, because one
+    lead can run several queries with different bindings and a single
+    ``deps.query_id`` can't carry them. The harness strips the flag so the adapter
+    never sees it; capture records it as the queries-table ``query_id`` (the
+    ``(query_id, params)`` join the offline lead-author relies on). Position-
+    independent; absent → None, and capture falls back to ``deps.query_id`` then
+    record_query's ``{system}.{verb}`` default."""
+    out: list[str] = []
+    qid: str | None = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--query-id" and i + 1 < len(argv):
+            qid = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("--query-id="):
+            qid = a.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return out, qid
+
+
 def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     """Run a standalone adapter command through the transparent capture (queries
     table + payload), returning the same shape the bash tool would. lead_id comes
-    from deps — the harness owns capture; the model never supplies it."""
+    from deps — the harness owns capture; the model never supplies it. The model
+    MAY tag the call with ``--query-id <id>`` (stripped here) to bind the query to
+    a catalog id; otherwise ``deps.query_id`` (the finder/executor split's bound
+    id) or record_query's default applies."""
+    argv, model_query_id = _extract_query_id(argv)
     try:
         passthrough, stderr, record = _capture(
             deps.run_dir, deps.lead_id, argv, env=_bash_env(deps),
-            query_id=deps.query_id,
+            query_id=model_query_id or deps.query_id,
         )
     except ValueError as e:
         raise ModelRetry(str(e))
