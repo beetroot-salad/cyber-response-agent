@@ -25,6 +25,7 @@ import yaml
 from defender.learning._loop_directions import ADVERSARIAL
 from defender.learning._loop_config import LoopError
 from defender.learning._loop_validate import _outcome_keyword
+from defender.scripts.case_history import case_ticket
 from defender.scripts.case_history.ticket_writer import (
     annotate_case_ticket,
     enrich_case_resolution,
@@ -87,13 +88,15 @@ def enrich_case_ticket(run_dir: Path, learning_run_dir: Path) -> None:
     (`open_case_ticket`).
 
     Two stamps, both idempotent and non-fatal: the seed-eligibility flag from the
-    `outcome` (#317), and — when the judge emitted one — the grounded resolution-method
-    inside the existing `resolution` (#338), the policy conditions a future benign judge
-    confirms a cited case against."""
+    `outcome` (#317), and — when the judge emitted one AND the outcome is seed-eligible
+    — the grounded resolution-method inside the existing `resolution` (#338), the policy
+    conditions a future benign judge confirms a cited case against. The resolution-method
+    rides the SAME polarity as the seed flag, so the store never carries a covering
+    policy on a case the probe did not confirm benign (e.g. a `survived` flagged FN)."""
     outcome = _read_adversarial_outcome(learning_run_dir)
     if outcome is None:
         return
     annotate_case_ticket(run_dir.name, outcome)
     method = _read_resolution_method(learning_run_dir)
-    if method:
+    if method and case_ticket.outcome_seeds_eligible(outcome):
         enrich_case_resolution(run_dir.name, method)

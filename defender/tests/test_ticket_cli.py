@@ -41,3 +41,35 @@ def test_no_flag_allows_any_status(monkeypatch, capsys):
                         lambda c, p, params=None: {"key": "c", "status": "open"})
     ticket_cli.cmd_get_ticket(_args(require_closed=False), config={})
     assert '"status": "open"' in capsys.readouterr().out
+
+
+def _list_args(**kw):
+    base = dict(status=None, label=None, q=None, limit=50, require_closed=False, raw=True)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_list_require_closed_pins_status_over_widening(monkeypatch):
+    # --require-closed forces status=closed even when a (last-wins) --status open tries
+    # to widen the list — the scoped read can't reach the in-flight OPEN ticket.
+    seen = {}
+
+    def fake_get(c, p, params=None):
+        seen["params"] = params
+        return {"tickets": [], "total": 0}
+
+    monkeypatch.setattr(transport, "http_get", fake_get)
+    ticket_cli.cmd_list_tickets(_list_args(status="open", require_closed=True), config={})
+    assert seen["params"]["status"] == "closed"
+
+
+def test_list_no_flag_passes_status_through(monkeypatch):
+    seen = {}
+
+    def fake_get(c, p, params=None):
+        seen["params"] = params
+        return {"tickets": [], "total": 0}
+
+    monkeypatch.setattr(transport, "http_get", fake_get)
+    ticket_cli.cmd_list_tickets(_list_args(status="open", require_closed=False), config={})
+    assert seen["params"]["status"] == "open"

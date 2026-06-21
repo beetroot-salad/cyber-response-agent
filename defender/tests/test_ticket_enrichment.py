@@ -205,6 +205,22 @@ def test_enrich_skips_resolution_method_when_absent(tmp_path: Path, monkeypatch)
     assert seen == ["annotate"]
 
 
+def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path: Path, monkeypatch):
+    # A method present but a non-seed-eligible outcome (`survived` = flagged FN) must NOT
+    # stamp a covering policy: the resolution-method rides the seed-eligibility polarity,
+    # so the store never carries a benign covering policy on a case the probe contested.
+    lrd = tmp_path / "learn"
+    lrd.mkdir()
+    _write_verdict_with_method(lrd, "survived", "no-egress (l-005)")
+    seen = []
+    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
+                        lambda key, outcome: seen.append("annotate"))
+    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
+                        lambda key, method: pytest.fail("stamped a policy on a survived case"))
+    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    assert seen == ["annotate"]
+
+
 # ---------------------------------------------------------------------------
 # Writer: enrich_case_resolution — GET-then-append transition, idempotent
 # ---------------------------------------------------------------------------

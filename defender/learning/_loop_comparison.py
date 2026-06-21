@@ -327,14 +327,21 @@ def render_synthesis(companion: dict) -> str:
 def closed_ticket_read_allow(py: Path | str, ticket_cli: Path | str) -> list[str]:
     """The allow-globs granting the benign judge a *scoped, closed-only* read of the
     case-history store (issue #338): list closed tickets by signature, and fetch a cited
-    one only via `--require-closed`. The `get-ticket` glob carries the literal
-    `--require-closed` so an unflagged fetch (which could reach the in-flight OPEN
-    ticket for the alert under judgment) is not allow-listed — it is denied, not silently
-    permitted. Pinned to the resolved interpreter + cli path so no broader `python *`
-    surface is opened."""
+    one only via `--require-closed`. Both globs carry the literal `--require-closed` so an
+    unflagged read (which could reach the in-flight OPEN ticket for the alert under
+    judgment) is not allow-listed — it is denied, not silently permitted. On the list
+    glob `--require-closed` sits immediately after `--status closed`, so the trailing `*`
+    cannot admit a second `--status open` between them (argparse keeps the last `--status`
+    — the CLI also pins status=closed under `--require-closed`, belt and suspenders).
+    The get-ticket glob wildcards on BOTH sides of the literal `--require-closed`
+    (`get-ticket *--require-closed*`) so it matches regardless of where the model places
+    the key vs. the flag (`get-ticket KEY --require-closed` and `get-ticket
+    --require-closed KEY` both allow) — the flag must still be present, so the open
+    in-flight ticket stays unreachable. Pinned to the resolved interpreter + cli path so
+    no broader `python *` surface is opened."""
     return [
-        f"Bash({py} {ticket_cli} list-tickets --status closed *)",
-        f"Bash({py} {ticket_cli} get-ticket * --require-closed*)",
+        f"Bash({py} {ticket_cli} list-tickets --status closed --require-closed*)",
+        f"Bash({py} {ticket_cli} get-ticket *--require-closed*)",
     ]
 
 

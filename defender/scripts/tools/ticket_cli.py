@@ -40,6 +40,13 @@ def cmd_list_tickets(args, config):
     params: dict[str, str] = {}
     if args.status:
         params["status"] = args.status
+    # `--require-closed` is the structural closed-only guard for the offline benign
+    # judge's scoped list (issue #338): it pins status=closed regardless of any
+    # `--status` value, so a stray/duplicate `--status open` (argparse keeps the last,
+    # and the allow-glob's trailing `*` would otherwise admit it) cannot widen the read
+    # to the in-flight OPEN ticket.
+    if getattr(args, "require_closed", False):
+        params["status"] = "closed"
     if args.label:
         params["label"] = args.label
     if args.q:
@@ -114,6 +121,10 @@ def build_parser():
     lt.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
         help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}).",
+    )
+    lt.add_argument(
+        "--require-closed", action="store_true",
+        help="Pin status=closed (scoped closed-only list); overrides any other --status.",
     )
     lt.add_argument("--raw", action="store_true")
 

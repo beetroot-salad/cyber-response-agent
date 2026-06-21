@@ -356,3 +356,27 @@ def test_ticket_reason_unaffected_when_no_grounded_segment():
     ticket = {"key": "c", "resolution": "benign — nightly vuln scan", "comments": []}
     assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
     assert case_ticket.ticket_resolution_method(ticket) is None
+
+
+def test_resolution_method_decodes_last_marker_not_reason_marker():
+    # A free-text reason that itself contains the marker must not shadow our appended
+    # segment — decode anchors on the LAST marker (our suffix), not the first.
+    res = "benign — see [grounded: prior note] context [grounded: identity-confirmed (l-002)]"
+    assert case_ticket.resolution_method_from_resolution(res) == "identity-confirmed (l-002)"
+    # ticket_reason strips only our suffix, preserving the earlier marker in the reason.
+    assert case_ticket.ticket_reason({"resolution": res}) == "see [grounded: prior note] context"
+
+
+def test_marker_in_reason_without_appended_segment_is_not_decoded():
+    # An analyst/LLM reason that contains the marker literal but NO trailing segment
+    # terminator is incidental text — not our suffix. It must NOT be truncated, NOT be
+    # mis-decoded as a grounded method, and must NOT block a real stamp (our suffix is
+    # always the trailing `… ]`, so we anchor on the terminator, not the bare marker).
+    res = "benign — see [grounded: prior approval] note"
+    assert case_ticket.ticket_reason({"resolution": res}) == "see [grounded: prior approval] note"
+    assert case_ticket.resolution_method_from_resolution(res) is None
+    # A real method still stamps onto such a reason, and round-trips off the LAST marker.
+    grounded = case_ticket.append_resolution_method(res, "identity-confirmed (l-002)")
+    assert grounded != res
+    assert case_ticket.resolution_method_from_resolution(grounded) == "identity-confirmed (l-002)"
+    assert case_ticket.ticket_reason({"resolution": grounded}) == "see [grounded: prior approval] note"

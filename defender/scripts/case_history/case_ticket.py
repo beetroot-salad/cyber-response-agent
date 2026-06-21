@@ -357,6 +357,15 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def outcome_seeds_eligible(outcome: str) -> bool:
+    """Whether an adversarial-probe `outcome` makes the closed case a covering-policy
+    seed — the single source of the polarity `enrichment_to_comment` stamps. The
+    resolution-method enrichment (#338) gates on this too, so the store never carries a
+    grounded covering policy on a case the probe did not confirm benign (e.g. a
+    `survived` flagged-FN case)."""
+    return outcome in _SEED_ELIGIBLE_OUTCOMES
+
+
 def enrichment_to_comment(outcome: str) -> dict[str, Any]:
     """Build the `POST /tickets/{key}/comments` body stamping seed-eligibility.
 
@@ -365,7 +374,7 @@ def enrichment_to_comment(outcome: str) -> dict[str, Any]:
     {seed_eligible} boolean here, so the reader (`parse_survival_from_comments`)
     never re-derives it. Shape + conventions come from `mapping.yaml` (`annotate`)."""
     mapping = _load_mapping()
-    eligible = outcome in _SEED_ELIGIBLE_OUTCOMES
+    eligible = outcome_seeds_eligible(outcome)
     ctx = _ctx(outcome=outcome, seed_eligible="true" if eligible else "false")
     return _render(mapping.get("annotate") or {}, ctx)
 
@@ -453,18 +462,21 @@ def append_resolution_method(resolution: str, method: str) -> str:
     are unaffected."""
     if not resolution or not method or not method.strip():
         return resolution
-    mapping = _load_mapping()
-    marker, _sep = _resolution_method_marker(mapping)
-    if not marker or marker in resolution:
+    try:
+        marker, sep = _resolution_method_marker(_load_mapping())
+    except CaseTicketError:
+        return resolution  # no usable mapping ⇒ nothing to stamp (mirrors the decoders)
+    # Idempotent on whether a real grounded SUFFIX is already present (decode-based),
+    # not on a bare `marker in resolution` — an incidental marker in the free-text
+    # reason must not block stamping the real method.
+    if not marker or resolution_method_from_resolution(resolution) is not None:
         return resolution
     # Collapse internal whitespace so the segment stays one clause (the judge reads it
     # inline; an embedded newline would split the resolution mid-decode).
     method = " ".join(method.split())
-    suffix = _render(
-        _dig(mapping, "enrich.resolution_method_suffix") or "",
-        _ctx(resolution_method=method),
-    )
-    return resolution + suffix
+    # The suffix is exactly the rendered template (marker + {resolution_method} + sep),
+    # so build it from the parts already decoded rather than re-_dig/_render the template.
+    return f"{resolution}{marker}{method}{sep or ''}"
 
 
 def resolution_method_from_resolution(resolution: str | None) -> str | None:
@@ -478,7 +490,14 @@ def resolution_method_from_resolution(resolution: str | None) -> str | None:
         return None
     if not marker or marker not in resolution:
         return None
-    tail = resolution.split(marker, 1)[1]
+    # Our segment is always the appended SUFFIX (`marker + method + sep`), so it must
+    # be the trailing run ending in `sep`. A free-text reason that merely *contains*
+    # the marker but has no trailing terminator is incidental text, not our segment.
+    if sep and not resolution.endswith(sep):
+        return None
+    # Anchor on the LAST marker — a free-text reason that itself contains the marker
+    # must not shadow our segment.
+    tail = resolution.rsplit(marker, 1)[1]
     seg = tail.rsplit(sep, 1)[0] if sep and sep in tail else tail
     return seg.strip() or None
 
@@ -548,9 +567,12 @@ def ticket_reason(ticket: Any) -> str | None:
     if not sep or sep not in resolution:
         return None
     tail = resolution.split(sep, 1)[1]
-    marker, _ = _resolution_method_marker(mapping)
-    if marker and marker in tail:
-        tail = tail.split(marker, 1)[0]
+    marker, msep = _resolution_method_marker(mapping)
+    # Strip only our appended suffix: the LAST marker, and only when the resolution
+    # actually ends with the segment terminator. A free-text reason that merely
+    # contains the marker (no trailing terminator) is kept verbatim.
+    if marker and marker in tail and (not msep or resolution.endswith(msep)):
+        tail = tail.rsplit(marker, 1)[0]
     return tail.strip() or None
 
 

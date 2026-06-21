@@ -572,8 +572,11 @@ def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: 
     granted = lc.judge_settings_dict(
         gather_raw, comp, closed_ticket_read=("/py", "/cli/ticket_cli.py")
     )["permissions"]["allow"]
-    # Two scoped entries: closed-only list + a get-ticket gated on --require-closed.
-    assert any("list-tickets --status closed" in a for a in granted)
+    # Two scoped entries, both gated on --require-closed: the list glob pins
+    # `--status closed --require-closed` adjacently so a trailing `--status open` can't
+    # slip in, and get-ticket carries the flag too.
+    listline = [a for a in granted if "list-tickets" in a]
+    assert listline and "list-tickets --status closed --require-closed" in listline[0]
     getline = [a for a in granted if "get-ticket" in a]
     assert getline and "--require-closed" in getline[0]
 
