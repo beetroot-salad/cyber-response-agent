@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import sys
@@ -50,6 +51,20 @@ EXIT_INPUT_ERROR = 2  # no stdin, unparseable payload, or duckdb missing
 _MAX_OBJECT_SIZE = 1 << 30
 
 
+def _json_safe(value):
+    """Map non-finite floats (NaN/±Infinity — e.g. a divide-by-zero ratio or a
+    single-row stddev) to null, recursing through DuckDB structs/lists. Those
+    are not valid JSON (RFC 8259); without this a strict downstream parser (JS
+    `JSON.parse`, Go) rejects the whole output. Mirrors `JSON.stringify`."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def _run(sql: str) -> int:
     try:
         import duckdb
@@ -61,7 +76,12 @@ def _run(sql: str) -> int:
         )
         return EXIT_INPUT_ERROR
 
-    raw = sys.stdin.read()
+    # Read as bytes, not text: the payload is untrusted source data and may
+    # carry non-UTF-8 (or, under a C/POSIX locale, any non-ASCII) bytes. A
+    # text-mode read+write would raise an uncaught UnicodeError instead of a
+    # clean exit; let DuckDB's read_json_auto do the decoding and report
+    # malformed input as a normal EXIT_INPUT_ERROR below.
+    raw = sys.stdin.buffer.read()
     if not raw.strip():
         print("defender-sql: no input on stdin (pipe an adapter's --raw output in).",
               file=sys.stderr)
@@ -70,18 +90,21 @@ def _run(sql: str) -> int:
     scratch = tempfile.mkdtemp(prefix="defender-sql-")
     try:
         payload_path = os.path.join(scratch, "data.json")
-        with open(payload_path, "w") as handle:
+        with open(payload_path, "wb") as handle:
             handle.write(raw)
 
         con = duckdb.connect(":memory:")
-        # Materialize the payload while file access is still on. The path is
-        # shim-controlled (mkdtemp) and no caller SQL has run yet, so this read
-        # is safe; the caller never sees the path.
+        # Materialize the payload while file access is still on; no caller SQL
+        # has run yet, so this read is safe and the caller never sees the path.
+        # Bind the path as a parameter rather than interpolate it — mkdtemp
+        # honors $TMPDIR, so a TMPDIR containing a quote would otherwise break
+        # the string literal (every call fails) and run the broken-out text as
+        # SQL before the seal below. `maximum_object_size` is a constant int.
         try:
             con.execute(
-                f"CREATE TABLE data AS "
-                f"SELECT * FROM read_json_auto('{payload_path}', "
-                f"maximum_object_size={_MAX_OBJECT_SIZE})"
+                "CREATE TABLE data AS SELECT * FROM "
+                f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
+                [payload_path],
             )
         except duckdb.Error as exc:
             print(f"defender-sql: stdin is not valid JSON or NDJSON: {exc}",
@@ -100,8 +123,11 @@ def _run(sql: str) -> int:
             return EXIT_QUERY_ERROR
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
-        rows = [dict(zip(columns, record)) for record in cursor.fetchall()]
-        json.dump(rows, sys.stdout, default=str)
+        rows = [_json_safe(dict(zip(columns, record, strict=True)))
+                for record in cursor.fetchall()]
+        # allow_nan=False guarantees strict JSON; _json_safe has already mapped
+        # any non-finite float to null, so this never actually rejects a row.
+        json.dump(rows, sys.stdout, default=str, allow_nan=False)
         sys.stdout.write("\n")
         return EXIT_OK
     finally:

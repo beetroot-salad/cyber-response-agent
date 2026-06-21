@@ -16,7 +16,7 @@ dependencies = [
 runtime = [
     "pydantic-ai-slim[anthropic,mcp]>=1.107",
     # duckdb — the engine behind the `defender-sql` shim
-    # (scripts/tools/sql_cli.py), the gather subagent's aggregation
+    # (scripts/tools/sql.py), the gather subagent's aggregation
     # fallback for filter-only sources (no server-side aggregation of their
     # own): it pipes an adapter's `--raw` rows through SQL the model already
     # knows, instead of a bespoke reducer (see skills/connect/cli-adapter.md
