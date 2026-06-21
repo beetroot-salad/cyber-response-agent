@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender.learning._loop_config import (
     ACTOR_OBSERVATION_TYPES,
     ALL_FINDING_TYPES,
@@ -28,30 +29,15 @@ from defender.learning._loop_config import (
 # ---------------------------------------------------------------------------
 
 
-def _parse_frontmatter(text: str) -> dict[str, Any]:
-    if not text.startswith("---\n"):
-        raise LoopError("report.md missing leading '---' frontmatter fence")
-    end = text.find("\n---", 4)
-    if end == -1:
-        raise LoopError("report.md missing closing '---' frontmatter fence")
-    try:
-        data = yaml.safe_load(text[4:end])
-    except yaml.YAMLError as e:
-        raise LoopError(f"report.md frontmatter is not valid YAML: {e}") from e
-    if not isinstance(data, dict):
-        raise LoopError("report.md frontmatter is not a YAML mapping")
-    return data
-
-
 def normalize_disposition(report_path: Path) -> str:
     if not report_path.is_file():
         raise LoopError(f"report.md not found: {report_path}")
     text = report_path.read_text()
     try:
-        fm = _parse_frontmatter(text)
-    except LoopError as e:
+        fm, _ = parse_frontmatter(text)
+    except FrontmatterError as e:
         head = "\n".join(text.splitlines()[:30])
-        raise LoopError(f"{e}\n--- {report_path} (head) ---\n{head}") from e
+        raise LoopError(f"report.md {e}\n--- {report_path} (head) ---\n{head}") from e
     disp = fm.get("disposition")
     if disp not in DISPOSITION_ENUM:
         raise LoopError(

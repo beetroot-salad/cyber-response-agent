@@ -58,7 +58,13 @@ def _reexec_into_venv() -> None:
 if __name__ == "__main__":
     _reexec_into_venv()
 
-import yaml
+# Put the workspace root on sys.path so the `defender.*` namespace import below
+# resolves whether this file is imported or run directly (after the venv re-exec
+# above, sys.path[0] is this script's dir, not the workspace root).
+if (_root := str(REPO_ROOT)) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._frontmatter import FrontmatterError, parse_frontmatter
 
 
 def _json_safe(obj):
@@ -85,25 +91,15 @@ def _json_safe(obj):
 def _read_lesson(path: Path) -> tuple[dict, str]:
     """Return (frontmatter dict, markdown body) for a lesson file — one read.
 
-    Mirrors the ``_parse_frontmatter`` boundary the indexers use
-    (``---\\n`` … ``\\n---``), plus the body split they don't need.
-    Newlines are normalized so CRLF-saved lessons parse identically.
+    A tolerant wrapper over the shared ``parse_frontmatter``: a file with no
+    parseable frontmatter yields ``({}, whole-body)`` rather than raising, so a
+    malformed lesson is surfaced/skipped upstream instead of crashing the build.
     """
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    if not text.startswith("---\n"):
-        return {}, text.strip()
-    end = text.find("\n---", 4)
-    if end == -1:
-        return {}, text.strip()
+    text = path.read_text(encoding="utf-8")
     try:
-        fm = yaml.safe_load(text[4:end]) or {}
-    except yaml.YAMLError:
-        fm = {}
-    if not isinstance(fm, dict):
-        fm = {}
-    nl = text.find("\n", end + 1)  # newline ending the closing '---' line
-    body = text[nl + 1 :] if nl != -1 else ""
-    return fm, body.strip()
+        return parse_frontmatter(text)
+    except FrontmatterError:
+        return {}, text.strip()
 
 
 def _iter_corpus(corpus: Path):

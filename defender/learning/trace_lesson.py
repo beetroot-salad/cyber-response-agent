@@ -27,18 +27,16 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import yaml
-
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._frontmatter import parse_frontmatter_or_none
 from defender.learning._loop_config import DEFAULT_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
-_FRONTMATTER_END = "\n---"
 
 
 def _default_runs_dir() -> Path:
@@ -47,19 +45,6 @@ def _default_runs_dir() -> Path:
     the trace. ``--no-learn`` runs (dev-only, never persisted) are out of scope by
     default; pass ``--runs-dir`` to scan the ephemeral base directly."""
     return DEFAULT_PATHS.runs_dir
-
-
-def _parse_frontmatter(text: str) -> dict:
-    if not text.startswith("---"):
-        return {}
-    end = text.find(_FRONTMATTER_END, 3)
-    if end == -1:
-        return {}
-    try:
-        doc = yaml.safe_load(text[3:end])
-    except yaml.YAMLError:
-        return {}
-    return doc if isinstance(doc, dict) else {}
 
 
 def _parse_dt(raw) -> datetime | None:
@@ -96,7 +81,7 @@ def lesson_meta(path: Path) -> LessonMeta:
     writes into ``lessons_loaded.jsonl`` and what ``trace_lesson <name>`` /
     ``revert_lesson <name>`` take. Matching on the frontmatter ``name`` (which
     nothing forces to equal the stem) would silently miss every recorded load."""
-    fm = _parse_frontmatter(path.read_text())
+    fm = parse_frontmatter_or_none(path.read_text()) or {}
     return LessonMeta(
         name=path.stem,
         description=str(fm.get("description") or ""),
@@ -112,7 +97,7 @@ class CaseHit:
 
 
 def _report_disposition(run_dir: Path) -> str:
-    fm = _parse_frontmatter((run_dir / "report.md").read_text()) if (run_dir / "report.md").is_file() else {}
+    fm = parse_frontmatter_or_none((run_dir / "report.md").read_text()) or {} if (run_dir / "report.md").is_file() else {}
     return str(fm.get("disposition") or "?")
 
 
