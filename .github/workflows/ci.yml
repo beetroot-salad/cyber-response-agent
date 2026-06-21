@@ -118,6 +118,16 @@ jobs:
       - name: jscpd Python-duplication gate (hard — blocks CI)
         run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py"
 
+      # Duplicate-helper lint — the small-helper complement to the jscpd gate
+      # above: jscpd catches large copy-paste blocks (>=60 tokens) but is blind
+      # to 1-5 line helpers copied across modules and to divergent same-named
+      # copies (#357/#358/#359/#360). Ratcheted against a checked-in baseline
+      # (scripts/lint/lint_duplicate_helpers_baseline.txt) so only NEW dup names
+      # surface. Soft for now; promote to a hard gate once the baseline is drawn
+      # down, mirroring how the jscpd gate was introduced.
+      - name: Duplicate-helper lint (cross-module dup names — soft report)
+        run: python scripts/lint/lint_duplicate_helpers.py || true
+
       # Defender hygiene + discipline lints (soft — reported, not enforced).
       # Each script is independently inspectable under scripts/lint/lint_*.py;
       # source PRs that prompted each check are cited in the module docstrings.
