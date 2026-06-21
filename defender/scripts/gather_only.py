@@ -1,15 +1,29 @@
 #!/usr/bin/env python3
-"""Gather-only harness: dispatch ONE gather lead in isolation (no main loop).
+"""Gather-only harness — a TESTING / EVALUATION tool, NOT part of any production
+run path (nothing in production imports or calls it).
 
-Mirrors the live dispatch exactly — same 40-request cap, same adapter-capture
-hooks, same descriptor catalog + dispatch prompt — via tools._run_gather, the
-seam already factored out "so it's testable without the main model". Used to
-A/B the gather SKILL deterministically on a single lead, off the loop-count
-nondeterminism of a full run.
+It dispatches ONE canned gather lead in isolation — no main agent, no ANALYZE —
+so you can iterate on the gather SKILL / query templates and A/B the model +
+prompt deterministically on a single lead, off the loop-count nondeterminism of a
+full `run_pai` investigation. It mirrors the live dispatch exactly (the same
+`tools._run_gather` seam, the same per-lead request cap, the same
+adapter-capture hooks + descriptor catalog), so what it measures matches
+production gather.
 
+Usage:
     python3 scripts/gather_only.py <run_id> [lead_key]
 
-lead_key selects a canned lead (default: baseline-7d, the one that crashed Haiku).
+- <run_id>    names the run dir at /tmp/defender-runs/<run_id>.
+- [lead_key]  picks a canned lead from LEADS below (default: baseline-7d).
+              Representative A/B cells: `ip-host-baseline` (templated, one-shot)
+              and `process-db1` (coined).
+- Runs the LEAN gather (SKILL.lean.md) on `_lean_gather_model()` (Sonnet);
+  set DEFENDER_GATHER_MODEL to A/B a different model.
+
+Requirements (this is a LIVE, BILLED call against real infrastructure — run it
+deliberately, never in CI): a first-party ANTHROPIC_API_KEY (PydanticAI-engine
+billing) and a reachable data source (the soc-playground Elasticsearch for the
+elastic leads).
 """
 from __future__ import annotations
 import asyncio
