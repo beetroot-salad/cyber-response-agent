@@ -13,10 +13,19 @@ from defender.learning import lead_author
 from defender.learning import lead_neighbors
 
 
-def _lead(query_id: str, params: dict | None = None) -> "lead_author.ExecutedLead":
+def _lead(
+    query_id: str, params: dict | None = None, raw_command: str = "",
+    system: str | None = None,
+) -> "lead_author.ExecutedLead":
+    # The queries table records ``system`` independently; default it to the
+    # query_id's namespace (how record_query builds the id) so callers only
+    # set it explicitly when exercising a system/id-prefix mismatch.
+    if system is None:
+        system = query_id.split(".", 1)[0] if "." in query_id else ""
     return lead_author.ExecutedLead(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, params=params or {}, goal_text="probe the thing",
+        query_id=query_id, system=system, params=params or {}, raw_command=raw_command,
+        goal_text="probe the thing",
         what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
         payload_status="ok", payload_digest="2 bytes, 1 line(s)",
     )
@@ -66,3 +75,96 @@ def test_idempotent(tmp_path, monkeypatch):
     assert first
     second = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})])
     assert second == []
+
+
+# ---------------------------------------------------------------------------
+# Lean / ES|QL skeleton shape (#340 / #343 migration)
+# ---------------------------------------------------------------------------
+
+_ESQL_PIPE = (
+    'FROM logs-system.auth-*\n'
+    '| WHERE host.name == "db-1" AND event.outcome == "failure"\n'
+    '| STATS failed = COUNT(*) BY source.ip'
+)
+
+
+def test_esql_draft_carries_literal_query_not_placeholder(tmp_path, monkeypatch):
+    """An elastic draft's ## Query is the exact pipe that ran, engine-tagged —
+    no KQL 'fill in the invocation' placeholder, no ## What to summarize."""
+    cat = _catalog(tmp_path, monkeypatch)
+    lead_author.synthesize_drafts([
+        _lead("elastic.sshd-failed-by-srcip", {"arg0": _ESQL_PIPE},
+              raw_command=f"esql {_ESQL_PIPE!r}"),
+    ])
+    text = (cat / "elastic" / "_draft" / "sshd-failed-by-srcip.md").read_text()
+    assert "engine: esql" in text
+    assert "```esql" in text
+    assert "STATS failed = COUNT(*) BY source.ip" in text   # the literal pipe
+    assert "Fill in the real" not in text                   # old placeholder gone
+    assert "## What to summarize" not in text
+    assert "## Pitfalls" in text
+
+
+def test_arg0_preferred_over_raw_command_for_query_body(tmp_path, monkeypatch):
+    """_executed_query prefers the bare pipe (arg0) to the full shim invocation
+    for elastic (where arg0 IS the ES|QL query), but uses raw_command for other
+    systems (where arg0 is a bare positional value, not the query)."""
+    lead = _lead("elastic.x", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}")
+    assert lead_author._executed_query(lead) == _ESQL_PIPE
+    # No arg0 (flag-shaped adapter) → fall back to raw_command.
+    flag_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, raw_command="host-lookup --host db-1")
+    assert lead_author._executed_query(flag_lead) == "host-lookup --host db-1"
+    # Positional NON-elastic adapter (cmdb.hostname-by-ip ${ip}): arg0 is the bare
+    # value '10.0.0.5', not a query — the canonical record is the full raw_command.
+    pos_lead = _lead("cmdb.hostname-by-ip", {"arg0": "10.0.0.5"},
+                     raw_command="hostname-by-ip 10.0.0.5")
+    assert lead_author._executed_query(pos_lead) == "hostname-by-ip 10.0.0.5"
+
+
+def test_executed_query_keys_on_recorded_system_not_id_prefix(tmp_path, monkeypatch):
+    """The engine decision reads the queries-table `system`, not the query_id
+    prefix — a tagged query whose id namespace differs from the adapter that
+    actually ran is still classified by the real engine."""
+    pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
+    # ES|QL adapter (system=elastic) even though the tagged id namespace differs.
+    el = _lead("custom.tagged", {"arg0": pipe}, raw_command=f"esql {pipe!r}", system="elastic")
+    assert lead_author._executed_query(el) == pipe                    # the arg0 pipe
+    # Non-ES|QL adapter (system=cmdb) even though the id prefix says elastic.
+    non = _lead("elastic.weird", {"arg0": "10.0.0.5"},
+                raw_command="hostname-by-ip 10.0.0.5", system="cmdb")
+    assert lead_author._executed_query(non) == "hostname-by-ip 10.0.0.5"
+
+
+def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path, monkeypatch):
+    """A query_id with an empty system (`.verb`) or empty verb (`system.`) must
+    not mint a draft off the `{system}/_draft/{kebab}` surface (the empty-system
+    case would land at the catalog root `_draft/` and brick the post-flight)."""
+    cat = _catalog(tmp_path, monkeypatch)
+    created = lead_author.synthesize_drafts([
+        _lead(".verb", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+        _lead("elastic.", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+    ])
+    assert created == []
+    assert not (cat / "_draft").exists()              # no catalog-root draft dir
+    assert not (cat / "elastic" / "_draft" / ".md").exists()
+
+
+def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path, monkeypatch):
+    """A query body with ES|QL GROK braces (%{WORD:f}) must not break rendering."""
+    cat = _catalog(tmp_path, monkeypatch)
+    grok_pipe = 'FROM logs-* | GROK message "%{IP:src} %{WORD:action}" | STATS c = COUNT(*) BY action'
+    created = lead_author.synthesize_drafts([
+        _lead("elastic.grok-probe", {"arg0": grok_pipe}, raw_command=f"esql {grok_pipe!r}"),
+    ])
+    assert created
+    assert "%{IP:src}" in (cat / "elastic" / "_draft" / "grok-probe.md").read_text()
+
+
+def test_untagged_esql_verb_not_drafted(tmp_path, monkeypatch):
+    """A bare `{system}.esql` id (no --query-id tag) is a non-candidate — an
+    untagged ES|QL call must not mint a junk catch-all draft."""
+    cat = _catalog(tmp_path, monkeypatch)
+    assert lead_author.synthesize_drafts([
+        _lead("elastic.esql", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+    ]) == []
+    assert not (cat / "elastic" / "_draft" / "esql.md").exists()

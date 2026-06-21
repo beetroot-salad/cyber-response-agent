@@ -223,6 +223,18 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
     assert "${host_clause}" in inv["rendered_query"]
 
 
+def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path):
+    """For an ES|QL invocation the bindings live inside arg0, not as named
+    params — so the handoff carries the literal pipe as `executed_query`
+    (the canonical record), not a `${param}` re-render that drops the values."""
+    pipe = 'FROM logs-system.auth-* | WHERE host.name == "db-1" | STATS c = COUNT(*)'
+    _write_lead_meta(run_dir, "l-001", "x")
+    _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"arg0": pipe})
+    leads = lead_author.extract(run_dir)
+    inv = lead_author.build_handoff(run_dir, leads)[0]["invocations"][0]
+    assert inv["executed_query"] == pipe
+
+
 def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     """Unresolved query_id ⇒ skip with a corpus-health warning, don't crash."""
     _write_lead_meta(run_dir, "l-001", "novel")
