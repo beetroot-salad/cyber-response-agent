@@ -251,7 +251,7 @@ def test_newly_onboarded_adapter_auto_gates_in_main_loop(monkeypatch, capsys):
     # Patch the canonical module the hook resolves (`defender.hooks._cmd_segments`).
     from defender.hooks import _cmd_segments
     monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
-        "defender-record-query", "defender-invlang", "defender-data-source-debug",
+        "defender-record-query", "defender-invlang",
         "defender-elastic", "defender-foo",  # 'foo' is the freshly onboarded adapter
     })
     rc = _run(mod, monkeypatch, {
@@ -309,25 +309,6 @@ def test_allows_subagent_running_adapter_shim(monkeypatch):
         **SUBAGENT,
     })
     assert rc == 0
-
-
-# --- gather payload tools may name gather_raw paths even at REPO_ROOT --------
-# data-source-debug receives a gather_raw payload path as input (reading it IS
-# its job); the RAW_MARKER clamp must not deny it just because "gather_raw"
-# appears in the command.
-
-def test_allows_data_source_debug_with_gather_raw_payload_in_main(monkeypatch):
-    mod = _load(monkeypatch)
-    for cmd in (
-        "defender-data-source-debug --defender-dir /d --system elastic "
-        "--payload /tmp/defender-runs-v2/r/gather_raw/l-004/0.json --question 'why empty'",
-        "python3 defender/scripts/tools/data_source_debug.py "
-        "--payload /tmp/r/gather_raw/l-004/0.json",
-    ):
-        rc = _run(mod, monkeypatch, {
-            "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": MAIN_CWD,
-        })
-        assert rc == 0, cmd
 
 
 def test_still_denies_main_loop_reading_gather_raw_directly(monkeypatch):

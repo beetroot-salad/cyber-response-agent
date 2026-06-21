@@ -55,6 +55,13 @@ Each system's Visibility surface section uses the same four fields:
   `{run_dir}/gather_raw/`).
 - Pointers to template authoring resources
   (`defender/skills/gather/queries/{system}/`).
+- For a **filter-only** source (one with no server-side aggregation),
+  the concrete `defender-sql`-over-`--raw` aggregation recipe for the
+  adapter's row shape — the path into the `--raw` envelope and the columns
+  to group on. This is a dispatch-time property of driving the adapter,
+  not a fact about the system's answers, so it lives here rather than in
+  `read_guidance`. A source with a native aggregating query language
+  needs no such recipe.
 
 If a fact is true regardless of the adapter (e.g., "Wazuh only indexes
 events from enrolled agents"), it belongs under Visibility surface, not

@@ -41,7 +41,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 # Shared locked-JSON helper. The workspace root is on sys.path via the
-# entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+# entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks._run_dir import update_json_locked
 
 # A system trips after this many connectivity/auth failures; the run aborts after

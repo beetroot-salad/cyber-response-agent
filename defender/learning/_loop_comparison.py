@@ -379,11 +379,10 @@ def judge_settings_dict(
                 "Bash(grep *)",
                 "Bash(cat *)",
                 "Bash(ls *)",
-                # Replay surface for gather's recorded summary snippets (#311):
-                # each pipe segment's head is gated independently, so the judge
-                # needs the full pure-transform suite (== record_summary's
-                # ANALYSIS_TOOLS) to re-run a `jq … | sort | uniq -c`-style
-                # snippet and reconstruct gather's value rather than trust it.
+                # The judge queries the full payloads (per source 2) with jq
+                # pipelines; each pipe segment's head is gated independently, so
+                # give it the pure-transform filter suite to run a
+                # `jq … | sort | uniq -c`-style analysis over a payload.
                 "Bash(datamash *)",
                 "Bash(sort *)",
                 "Bash(uniq *)",

@@ -118,7 +118,7 @@ it would be — §Failure).
 Dropped (absorbed, not re-emitted): resolved-loop gather Task-return
 summaries and superseded predict/analyze turns. The invlang validator
 enforces **append-only** on `investigation.md`
-(`hooks/invlang_validate.py`), so the file at loop N already contains the
+(`runtime/permission.py` via `validate_companion`), so the file at loop N already contains the
 full accumulated frontier of loops 1..N — committed vertices, edges,
 hypothesis transitions (`:T`), authz verdicts. We re-read the whole file;
 no per-loop stitching, and committed state can never be lost across loops.
@@ -266,7 +266,7 @@ climb a cost-ordered ladder — cheapest, most diagnostic step first.
 `/tmp/defender-runs/` carry full `llm_requests.jsonl` + `tool_trace.jsonl`
 (best: `opt-verify-xtier-6f2d77e`, 344 request lines). They ran against the
 **live** playground-v2 stack, so they are a *reference*, not a drift-free
-A-leg. No fixture-replay mode exists; `run_pai.py` (the PydanticAI driver)
+A-leg. No fixture-replay mode exists; `run.py` (the PydanticAI driver)
 hits the stack live. Toggle is `DEFENDER_COMPACTION=off|on`, same alert,
 same invocation.
 
@@ -289,7 +289,7 @@ same invocation.
    2-boundary run (−55% history) shows. The recorded input is ~90% cache_read,
    so *billed* savings concentrate on cache-creation + a longer-lived cache,
    not the raw token delta — but the context-window headroom is the full delta.
-1. **N=1 live, read the transcript.** Run one alert through `run_pai.py`
+1. **N=1 live, read the transcript.** Run one alert through `run.py`
    twice back-to-back, `DEFENDER_COMPACTION` off then on (both fresh, so
    the A and B legs see the same current stack — don't use the older
    recorded runs as the A-leg). Don't trust a single disposition/token
@@ -552,16 +552,13 @@ pending that number.
 
 **Aside (gather dominates cost).** Across these runs gather was ~80–85% of total
 tokens (cache-read-bound; each gather request re-sends the lead's growing
-context), and compaction is main-agent-only. A separate analysis found ~66% of
-gather requests are the per-dimension verifiable-summary protocol (SKILL §4), not
-queries — so a request-count cut there is a larger absolute lever than the
-main-loop fold. **Two such cuts landed in this PR** (orthogonal to compaction,
-co-located for convenience): `record_query` now always reduces a record-list
-payload to a field-shape *sample* (the raw dump never re-enters gather's context
-on later requests — a cache-read cut), and `record_summary --batch` records all
-of a payload's computable dimensions from one `jq` object in a single call
-(collapsing the per-dimension round-trips), with the gather SKILL §3/§4 teaching
-both. Net effect to be measured on the next gather run.
+context), and compaction is main-agent-only — so a per-request cut in gather is a
+larger absolute lever than the main-loop fold. The `record_query` cut that landed
+here still applies: it reduces a record-list payload to a field-shape *sample*
+(the raw dump never re-enters gather's context on later requests — a cache-read
+cut). (The contemporaneous per-dimension verifiable-summary protocol referenced
+in earlier revisions of this aside was later retired: the single-agent ES|QL
+gather computes the answer server-side, so the aggregation result IS the summary.)
 
 ## Implementation status
 
@@ -577,7 +574,7 @@ Built and tested (branch `worktree-per-loop-compaction`):
   marker-gated (`loop in closed`, with the data floor + `< active` retained);
   both SKILLs teach it (`SKILL.md` §ANALYZE, `skills/invlang/SKILL.md`
   §`:T close`). Tests: `tests/test_compaction.py` (marker-gating, empty-close
-  floor), `tests/test_invlang_validate.py` (rule 6). **Migration note:**
+  floor); the append-only rule (rule 6) lives in `skills/invlang/validate.py`. **Migration note:**
   detection is now dormant until the agent emits `:T close`, so pre-marker
   recorded runs no longer compact under the dry-run — correct, not a
   regression; the next live A/B exercises the marker path.

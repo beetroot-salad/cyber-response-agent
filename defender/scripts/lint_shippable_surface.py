@@ -52,14 +52,12 @@ EXCLUDED_PREFIXES = (
 
 EXCLUDED_FILES = {
     "defender/CLAUDE.md",              # internal structure doc
-    "defender/run-settings.json",      # deliberately names per-vendor CLIs
-    "defender/learning/actor-settings.json",  # same — settings file
+    "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",
     "defender/pyproject.toml",         # may name vendor-specific deps
     "defender/scripts/lint_shippable_surface.py",  # self
     "defender/scripts/lint_ci_hygiene.py",
     "defender/scripts/lint_ground_truth_leak.py",
-    "defender/scripts/lint_static_smoke.py",
     "defender/scripts/lint_stale_refs.py",
 }
 

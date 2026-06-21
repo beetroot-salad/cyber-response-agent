@@ -5,9 +5,10 @@ status: surface-declaration
 
 # `defender/skills/cmdb/_draft/`
 
-Runtime draft surface for system-wide CMDB quirks. The data-source-debug
-subagent writes here when it identifies a structural gap or data-model
+Draft surface for system-wide CMDB quirks — a structural gap or data-model
 limitation that applies across multiple queries touching the CMDB surface.
+Curated by the offline lead-author from the execution record (the runtime
+data-source-debug writer that once deposited here was retired).
 
 ## Two `_draft/` surfaces, two scopes
 

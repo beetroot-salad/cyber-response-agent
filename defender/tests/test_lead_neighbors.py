@@ -43,6 +43,15 @@ def test_tokenize_query_empty_input_yields_empty_set():
     assert ln.tokenize_query("") == frozenset()
 
 
+def test_tokenize_query_preserves_hyphenated_index_name():
+    """ES|QL data-stream names survive as one token (the strongest 'same data'
+    signal); trailing glob/hyphen punctuation is normalized off."""
+    toks = ln.tokenize_query('FROM logs-system.auth-* | STATS c = COUNT(*)')
+    assert "logs-system.auth" in toks
+    assert "logs" not in toks  # not shattered onto the common bare token
+    assert "count" in toks
+
+
 # ---------------------------------------------------------------------------
 # Regression-pin fixture — exact-order top-3 per case
 # ---------------------------------------------------------------------------
@@ -194,3 +203,42 @@ def test_load_catalog_defaults_missing_status_to_established(tmp_path):
     cat = ln.load_catalog(catalog_dir)
     assert len(cat) == 1
     assert cat[0].status == "established"
+
+
+# ---------------------------------------------------------------------------
+# ES|QL fence extraction (#340 / #343 migration)
+# ---------------------------------------------------------------------------
+
+
+_ESQL_SECTION = """\
+ES|QL. Server-side aggregation — zzzproseword the result rows ARE the answer.
+
+```esql
+FROM logs-system.auth-*
+| WHERE event.outcome IS NOT NULL AND user.name == "${user}"
+| STATS accepted = COUNT(*) BY source.ip
+```
+
+**Narrowing examples** (each is the query above with axes removed):
+
+- *User baseline*: keep user.name, drop the otherprosenarrowing predicate.
+"""
+
+
+def test_query_variants_extracts_esql_fence_not_prose():
+    """An ```esql fence must be tokenized, not the surrounding prose.
+
+    Before the fix, ``_query_variants`` only recognized bash/json/unlabeled
+    fences, so an ES|QL section fell through to tokenizing the whole body —
+    pulling in prose ("zzzproseword") and the narrowing-example commentary,
+    which swamps the actual query tokens.
+    """
+    variants = ln._query_variants(_ESQL_SECTION)
+    toks = set().union(*variants)
+    # Query-body tokens are present...
+    assert "user.name" in toks
+    assert "source.ip" in toks
+    assert "event.outcome" in toks
+    # ...and prose / narrowing-example tokens outside the fence are not.
+    assert "zzzproseword" not in toks
+    assert "otherprosenarrowing" not in toks

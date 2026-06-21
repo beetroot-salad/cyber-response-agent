@@ -1,5 +1,0 @@
-{
-  "wrapper_invoked": false,
-  "wrapper_call_count": 0,
-  "rationale": "3 sshd auth events for svc_backup over 90 days — sparse, but every declared field (count, source IPs, outcome, cadence) is concrete and resolvable from the rows. §3.5 gates on sentinel-or-absent declared fields, not on count anomalies. Volume-anomaly handling is the smell-test's domain (and pending template-band mechanism — V3). Gather should summarize as-is without invoking the wrapper."
-}

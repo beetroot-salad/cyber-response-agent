@@ -1,0 +1,7 @@
+{
+  "goal": "Which source IPs are failing ssh authentication against db-1, and how many times each?",
+  "what_to_summarize": [
+    "failed ssh auth count per source IP against db-1",
+    "the top offending source IPs"
+  ]
+}

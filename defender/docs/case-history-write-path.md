@@ -82,7 +82,7 @@ what manufactures the read PR's fixtures.
   (field mapping + conventions), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `close_case_ticket` (+ `ticket_write.json` receipt), non-fatal.
-- `run.py` / `run_pai.py` — `--update-ticket`: open after materialize, close after
+- `run.py` / `run.py` — `--update-ticket`: open after materialize, close after
   `cross_check_tables`.
 - `knowledge/environment/systems/case-history/config.env` — `CASE_HISTORY_*`.
 

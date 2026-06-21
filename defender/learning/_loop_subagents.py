@@ -79,7 +79,7 @@ from defender.learning._loop_config import (
 def _subscription_env() -> dict[str, str]:
     """Env for the ``claude -p`` subagent: strip ``ANTHROPIC_API_KEY`` so the
     call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run_pai.py)."""
+    (reserved for the PydanticAI engine — see defender/run.py)."""
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)
     return env

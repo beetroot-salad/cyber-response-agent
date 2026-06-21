@@ -76,7 +76,7 @@ def render_user_prompt(lesson_text: str, observation_text: str, story_text: str)
 def _subscription_env() -> dict[str, str]:
     """Env for the ``claude -p`` verifier: strip ``ANTHROPIC_API_KEY`` so the
     call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run_pai.py)."""
+    (reserved for the PydanticAI engine — see defender/run.py)."""
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)
     return env

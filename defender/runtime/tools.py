@@ -27,7 +27,7 @@ from . import permission
 
 # Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
 # PreToolUse hooks + the gather capture core). The workspace root is on sys.path
-# via the entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+# via the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks.tag_tool_results import wrap as _wrap
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
@@ -94,9 +94,15 @@ class RunDeps:
 class GatherDeps(RunDeps):
     """Gather subagent deps: RunDeps + the lead being gathered. The harness reads
     `lead_id` here to attribute captured queries (it is never model-supplied to
-    the capture path). Always constructed with `is_main_session=False`."""
+    the capture path). Always constructed with `is_main_session=False`.
+
+    `query_id` is a fallback capture id stamped on the lead's queries when the
+    model doesn't tag a call with `--query-id`; the gather leaves it unset
+    (None) and tags per query, so capture falls back to record_query's
+    `{system}.{verb}` default."""
 
     lead_id: str = ""
+    query_id: str | None = None
 
 
 def _record_lesson_load(deps: RunDeps, path: Path) -> None:
@@ -117,10 +123,9 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
 
 
 def _bash_env(deps: RunDeps) -> dict[str, str]:
-    """The runtime agent's shell environment — defined once in run.py and shared
-    with the `claude -p` engine."""
-    from defender import run
-    return run.run_env(deps.defender_dir, deps.run_dir)
+    """The runtime agent's shell environment — defined once in run_common.py."""
+    from defender import run_common
+    return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
 def register_tools(agent, *, writers: bool = True) -> None:
@@ -140,16 +145,18 @@ def register_tools(agent, *, writers: bool = True) -> None:
         defender-lessons, …) for first-party tooling. Data-source adapters are
         not runnable from the main loop — dispatch gather instead."""
         decision = permission.decide_bash(
-            command, is_main_session=ctx.deps.is_main_session
+            command, is_main_session=ctx.deps.is_main_session,
         )
         if not decision.allow:
             raise ModelRetry(decision.reason)
-        # Gather: a standalone adapter call is captured transparently (the queries
-        # table + payload are written by the harness), so the model never wraps it
-        # in record-query — it just runs the adapter.
+        # Gather subagent (not the main session): a standalone adapter call is
+        # captured transparently (the queries table + payload are written by the
+        # harness), so the model never wraps it in record-query — it just runs the
+        # adapter.
         if not ctx.deps.is_main_session:
             argv = permission.adapter_argv(command)
             if argv is not None:
+                system = _derive_system(argv)
                 # Circuit-breaker in-gather gate: refuse a call to a system already
                 # tripped this run before it runs again, so one dispatch can't keep
                 # hammering a dead source. RETURN the down-message (don't raise
@@ -158,7 +165,6 @@ def register_tools(agent, *, writers: bool = True) -> None:
                 # would burn the bash tool's retry budget into an UnexpectedModel-
                 # Behavior that crashes the run instead of writing a partial trace.
                 # Returning mirrors the dispatch gate in _run_gather.
-                system = _derive_system(argv)
                 if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
                     return circuit_breaker.down_message(ctx.deps.run_dir, system)
                 return _capture_adapter(ctx.deps, argv)
@@ -176,7 +182,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
     async def read_file(ctx: RunContext[RunDeps], path: str) -> str:
         """Read a file's contents (e.g. alert.json, a SKILL, a lesson)."""
         decision = permission.decide_read(
-            Path(path), is_main_session=ctx.deps.is_main_session
+            Path(path), is_main_session=ctx.deps.is_main_session,
         )
         if not decision.allow:
             raise ModelRetry(decision.reason)
@@ -248,13 +254,54 @@ def register_tools(agent, *, writers: bool = True) -> None:
 
 # --- gather dispatch (slice 2): main agent → nested Haiku gather agent --------
 
+def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
+    """Pull a model-supplied ``--query-id <id>`` (or ``--query-id=<id>``) off an
+    adapter argv, returning (cleaned argv the adapter actually runs, the id).
+
+    The single-agent gather annotates each bare adapter call with the catalog
+    id it bound (e.g. ``elastic.sshd-auth-history``) or a coined id, because one
+    lead can run several queries with different bindings and a single
+    ``deps.query_id`` can't carry them. The harness strips the flag so the adapter
+    never sees it; capture records it as the queries-table ``query_id`` (the
+    ``(query_id, params)`` join the offline lead-author relies on). Position-
+    independent; absent → None, and capture falls back to ``deps.query_id`` then
+    record_query's ``{system}.{verb}`` default."""
+    out: list[str] = []
+    qid: str | None = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--query-id":
+            # `--query-id <id>` consumes its value; a trailing `--query-id` with
+            # no value is still consumed (dropped), never passed through — the
+            # adapter's argparse would reject the unknown flag and fail the query.
+            if i + 1 < len(argv):
+                qid = argv[i + 1]
+                i += 2
+            else:
+                i += 1
+            continue
+        if a.startswith("--query-id="):
+            qid = a.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return out, qid
+
+
 def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     """Run a standalone adapter command through the transparent capture (queries
     table + payload), returning the same shape the bash tool would. lead_id comes
-    from deps — the harness owns capture; the model never supplies it."""
+    from deps — the harness owns capture; the model never supplies it. The model
+    MAY tag the call with ``--query-id <id>`` (stripped here) to bind the query to
+    a catalog id; otherwise ``deps.query_id`` (the finder/executor split's bound
+    id) or record_query's default applies."""
+    argv, model_query_id = _extract_query_id(argv)
     try:
         passthrough, stderr, record = _capture(
-            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps)
+            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps),
+            query_id=model_query_id or deps.query_id,
         )
     except ValueError as e:
         raise ModelRetry(str(e))
@@ -332,7 +379,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{lead_id}.md").write_text(wrapped)
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
-        print(f"[run_pai] gather-summary persist skipped for {lead_id}: {e!r}",
+        print(f"[run.py] gather-summary persist skipped for {lead_id}: {e!r}",
               file=sys.stderr)
 
 
@@ -341,8 +388,9 @@ async def _run_gather(
     lead_id: str, system: str, goal: str, what_to_summarize: list[str],
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
-    without the main model: claim the lead → inject the system description → run
-    the nested gather agent → wrap the summary."""
+    without the main model: claim the lead → inject the descriptor catalog → run
+    the nested gather agent → wrap the summary. The single-agent gather
+    (#340) auto-captures its own adapter calls; there is no finder/assay layer."""
     # 0. Fail fast on a malformed lead_id. claim_lead treats a bad id as a benign
     # skip (returns 0, no sidecar), which would otherwise half-dispatch the lead
     # (nested agent spawned, no leads-table row) until capture() later rejects the
@@ -412,11 +460,12 @@ async def _run_gather(
     return wrapped
 
 
-def register_gather_tool(main_agent, gather_factory, request_limit: int) -> None:
+def register_gather_tool(
+    main_agent, gather_factory, request_limit: int,
+) -> None:
     """Register the `gather` dispatch tool on the MAIN agent only (the gather
     subagent must not self-dispatch). `gather_factory(agent_id)` builds a fresh
-    nested gather Agent (Haiku, with the gather SKILL as its instructions) bound
-    to that observability id."""
+    nested gather Agent bound to that observability id."""
 
     @main_agent.tool
     async def gather(

@@ -29,49 +29,52 @@ single template can carry several optional filter knobs.
 
 ```markdown
 ---
-id: {system}.auth-events
+id: {system}.sshd-auth-history
+status: established        # or `draft` while under curation
+engine: esql              # for elastic; omit for shell/SQL-shaped systems
 ---
 
 ## Goal
 
-What this query measures, in one or two sentences. **Write for keyword
+What this query measures, in one or two sentences, **plus an explicit note
+that it is a wide/superset query you narrow** (see below). **Write for keyword
 recall** — name the concrete artifacts a future analyst would type when
-searching: daemon names (sshd, sudo), file paths (/etc/passwd), log fields,
-syscalls. Gather greps `## Goal` body across the catalog when the dispatch
-needs to find the right template at scale.
-
-## What to summarize
-
-- <measurement: what to count / which field to surface / which distribution>
-- <measurement: ...>
-
-Each bullet names a measurement primitive — a count, a cardinality,
-a distribution, a ratio, or a field to surface. Every item is
-reported, even if "not observed"; omission is ambiguous to the
-parent. The defender weighs what the values mean in ANALYZE.
+searching: daemon names (sshd, sudo), file paths (/etc/passwd), log fields
+(`source.ip`, `user.name`), syscalls. Gather greps `## Goal` across the catalog
+to find the right template at scale, so a wide template's recall keywords are
+what keep a future narrowing from re-coining a sibling.
 
 ## Query
 
-The query body the system of record executes, with `${param}` placeholders.
-This is system-native — a search DSL for a SIEM, a shell pipeline for a
-host-state agent, SQL for a relational store, etc. The system's CLI client
-is a thin dispatcher; it does not interpret a query DSL of its own. Gather
-substitutes the bound params and hands the body to the client.
+The query body the system of record executes, fenced and language-tagged
+(```` ```esql ````, ```` ```sql ````, ```` ```bash ````). For elastic this is a
+server-side **ES|QL** aggregation against `logs-*`; the result rows ARE the
+answer. Bindings use `${param}` placeholders (`${start}`, `${user}`, `${src}`)
+where a template parameterizes them; an ES|QL pipe may also inline literals that
+gather rewrites per lead.
 
-Parameters are discovered automatically from the `${param}` placeholders;
-there is no separate `params:` declaration to keep in sync.
+This is a **wide/superset** query — carry every filter axis (`user`, `src`,
+`dst`, window) and a broad aggregation. **Gather narrows it to the lead**: drops
+the predicates the lead doesn't constrain and the `BY` keys it doesn't ask for.
+Fork to a new template only for a different *measurement*, never a different
+parameter.
 
-## Common pitfalls
+**Narrowing examples** — list 2-3 concrete narrowings (each the query above with
+axes removed), so the next analyst sees the capability covers their case:
 
-- <pitfall 1: e.g. NAT collapse, time-window edge cases>
+- *<one narrowing>*: keep <axes>, drop <axes>.
 
-## Baseline (when applicable)
+## Pitfalls
 
-If the template's measurement only makes sense relative to a normal
-pattern, describe how gather constructs a baseline / shift-window
-companion query. Omit this section entirely when the measurement is
-self-contained.
+- <pitfall 1: e.g. a null-heavy field that needs an `IS NOT NULL` guard, a
+  message-only field that needs `GROK`/`CASE`, NAT collapse, window edge cases>
 ```
+
+Older templates carried `## What to summarize` and `## Baseline (when
+applicable)` sections; the ES|QL migration folded both into `## Query` (the
+aggregation *is* the summary; a baseline is the same wide query over a second
+window, a narrowing — not a separate section). New and promoted templates use
+the shape above.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
@@ -97,7 +100,8 @@ When a lead asks for "X correlated with Y at time T" (e.g. *who was logged
 in when /etc/passwd changed?*), the right move is: run the two primitives
 that already exist, summarize the join in the gather return. **Do not
 mint a "bridge" template** — it bloats the catalog with one-offs that
-won't be reused. See `defender/skills/gather/SKILL.md` §Composition leads.
+won't be reused. A lead may run several queries — see
+`defender/skills/gather/SKILL.md` §2 (FIND a template, or coin a query).
 
 ## Naming a new measurement
 

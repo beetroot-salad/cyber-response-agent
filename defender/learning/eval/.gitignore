@@ -1,0 +1,5 @@
+# Harness scratch + result dirs (materialized temp trees, agent logs).
+_tmp/
+_tmp_lead/
+results/
+results_lead/

@@ -1,5 +1,0 @@
-{
-  "wrapper_invoked": false,
-  "wrapper_call_count": 0,
-  "rationale": "The payload carries sentinels for container.name and user.name, but neither is declared in what_to_summarize. §3.5 gates only on declared fields, so the wrapper should not fire. All declared fields (proc.name, proc.pname, proc.cmdline, @timestamp) are concrete."
-}

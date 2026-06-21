@@ -1,37 +1,52 @@
 ---
 id: elastic.zeek-outbound-by-source
 status: established
-filter_keys:
-  index: logs-zeek.connection-*
-  predicates:
-    - {event_attr: source_ip, op: eq, param: source_ip}
+engine: esql
 ---
 
 ## Goal
 
-Zeek network connection log entries (`zeek.connection`) originating from a specific source IP within a time window. Use after a successful SSH login to a host to enumerate outbound connections the host initiated — useful for detecting lateral movement, C2 beaconing, data exfiltration, or unexpected external connections following a session start. Complements `elastic.ip-to-host-search` (which resolves an IP to a hostname) by answering "what did this host reach out to" rather than "who is this IP".
+Zeek network-connection records (`logs-zeek.connection-*`) for a source IP over a
+window — connection count, distinct destinations, ports, and bytes moved. Use to
+characterize a host's outbound network behavior: fan-out, beaconing, bulk
+transfer, port scanning. Keyword recall: zeek, conn.log, connection, outbound,
+source.ip, destination.ip, destination.port, beaconing, exfil, bytes.
 
-## What to summarize
-
-- count of outbound connection events in the window
-- distinct destination IPs (`destination.ip`) and ports (`destination.port`)
-- any destination IPs outside the internal address space (potential exfiltration or C2)
-- distinct protocols or services observed (`network.transport`, port patterns)
-- presence of long-duration or high-volume connections
-
-## Filter binding
-
-- `${source_ip}` — IP address of the host to track outbound connections from
-- `${start}`, `${end}` — time window bounds (e.g., post-login period)
-- `${limit}` — row cap; 100 covers most 30-minute windows
+**Wide/superset** — narrow by dropping the predicates/`BY` keys the lead doesn't
+need (e.g. add `destination.port == ...` to scope a port; drop `BY` for a bare
+count).
 
 ## Query
 
-```
-data_stream.dataset: "zeek.connection" AND source.ip: "${source_ip}"
+```esql
+FROM logs-zeek.connection-*
+| WHERE @timestamp >= "${start}" AND @timestamp < "${end}"
+        AND source.ip == "${source_ip}"
+| STATS conns      = COUNT(*),
+        bytes_out  = SUM(source.bytes),
+        bytes_in   = SUM(destination.bytes),
+        dest_ips   = COUNT_DISTINCT(destination.ip),
+        first_seen = MIN(@timestamp),
+        last_seen  = MAX(@timestamp)
+        BY destination.ip, destination.port
+| SORT conns DESC
 ```
 
-## Common pitfalls
+- *Fan-out / scan check*: drop the `BY` and read `dest_ips` + `conns` — a high
+  `dest_ips` or many distinct `destination.port` is the scan signal.
+- *Beaconing*: add `BY bucket = DATE_TRUNC(1 minute, @timestamp)` to see cadence.
 
-- **Bind the host's IP, not its hostname.** This template uses `source.ip`, not `host.name`. Resolve the host's current IP from Elastic Agent telemetry (`elastic.host-agent-by-ip`) before binding `${source_ip}`.
-- **Internal traffic dominates.** Bulk of results in a monitored network are internal connections (health checks, metrics, DB replication). Focus on destinations outside the internal subnet when investigating exfiltration.
+## Pitfalls
+
+- **Zeek records carry no `host.name`** — the connection is described by
+  `source.ip`/`destination.ip`, not a reporting host. Resolve IPs to hosts via
+  `ip-to-host-search` / cmdb if the lead needs names.
+- **Direction.** `source.bytes` is bytes the source sent (outbound), `destination.bytes`
+  is bytes it received. A NAT/proxy hop can collapse the apparent source IP — confirm
+  the source is the real origin, not a gateway, before attributing volume.
+- **Wide `BY` truncates at 1000 rows.** `BY destination.ip, destination.port` on a
+  fan-out / scanning source can exceed ES|QL's default 1000-row return cap and be
+  silently cut (the `SORT conns DESC` keeps the top groups, hiding the loss). If
+  `row_count` is 1000, narrow the window/port range or read `dest_ips`/`conns` from
+  the no-`BY` form. Note `COUNT_DISTINCT` is **approximate** (HyperLogLog++), good
+  for fan-out magnitude but not an exact unique count.

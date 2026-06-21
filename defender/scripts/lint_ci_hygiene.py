@@ -38,12 +38,10 @@ DEFENDER = REPO_ROOT / "defender"
 # Files where these patterns are deliberate; do not flag.
 PATH_ALLOWLIST = {
     "defender/CLAUDE.md",
-    "defender/run-settings.json",
     "defender/learning/actor-settings.json",
     "defender/scripts/lint_ci_hygiene.py",
     "defender/scripts/lint_ground_truth_leak.py",
     "defender/scripts/lint_shippable_surface.py",
-    "defender/scripts/lint_static_smoke.py",
     "defender/scripts/lint_stale_refs.py",
 }
 

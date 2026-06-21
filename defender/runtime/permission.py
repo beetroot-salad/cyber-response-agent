@@ -24,7 +24,7 @@ from pathlib import Path
 # Reuse the same hook taxonomy + gate predicates verbatim (`defender.hooks.*`) —
 # these are pure (no stdin/exit), so the in-process gate and the subprocess hooks
 # can never disagree. The workspace root is on sys.path via the entry-point
-# bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+# bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks._cmd_segments import (
     ADAPTER_CLI_RE,
     NON_ADAPTER_SHIMS,
@@ -66,6 +66,7 @@ GATHER_FALLTHROUGH_DENY_REASON = (
     "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
 )
 
+# The finder finds the query and delegates execution to the assay tool — it has
 # Gather may run a data-source adapter directly — it's captured transparently —
 # but only as a standalone command (a pipeline/compound makes "the payload"
 # ambiguous). Run it solo, then filter the persisted payload file.
@@ -75,11 +76,10 @@ ADAPTER_STANDALONE_REASON = (
     "with jq/grep/Read. Don't pipe or chain the adapter call."
 )
 
-# The gather-payload tools legitimately name `gather_raw` paths on the command
-# line (data-source-debug reads one, record-query writes one) — exempt them from
-# the raw clamp. Mirrors block_main_loop_raw_access.main's exemption.
+# The gather-payload capture wrapper legitimately names `gather_raw` paths on the
+# command line (record-query writes one) — exempt it from the raw clamp. Mirrors
+# block_main_loop_raw_access.main's exemption.
 _GATHER_PAYLOAD_TOKENS = (
-    "data_source_debug", "defender-data-source-debug",
     "record_query", "defender-record-query",
 )
 
@@ -158,8 +158,9 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
 
     `is_main_session=True` → the orchestrator (slice 1 is always this): no
     adapter calls, no gather_raw reads, only safe shims/viewers.
-    `is_main_session=False` → the gather subagent (slice 2): adapters allowed but
-    only through the `defender-record-query` capture wrapper.
+    `is_main_session=False` → the gather subagent (slice 2): it may run a
+    data-source adapter directly (captured transparently) plus read-only
+    viewers/find; arbitrary shell fails closed.
     """
     cmd = command.strip()
     if not cmd:
@@ -205,26 +206,28 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
     return Decision(True)
 
 
-# Read denylist — mirrors run-settings.json `permissions.deny` (creds, ssh,
-# ground truth, the held-out manifest). Matched on any path component / suffix.
+# Read denylist (creds, ssh, ground truth, the held-out manifest) — enforced
+# in-process here. Matched on any path component / suffix.
 _READ_DENY_SUBSTR = (".env", "credentials", "ground_truth", "ground-truth", "cases.json")
 _READ_DENY_DIR = ".ssh"
 
 
 def decide_read(path: Path, *, is_main_session: bool) -> Decision:
-    """Allow/deny a file read, porting the Read deny rules + the main-loop
-    gather_raw clamp (`block_main_loop_raw_access` on Read)."""
+    """Allow/deny a file read, porting the Read deny rules + the gather_raw clamp
+    (`block_main_loop_raw_access` on Read). The clamp applies to the main loop:
+    it consumes the gather summary, never the raw payload. The gather subagent
+    (is_main_session=False) reads its own gather_raw to verify its query result."""
     p = Path(path)
     name = p.name
     parts = set(p.parts)
     if _READ_DENY_DIR in parts or any(s in name for s in _READ_DENY_SUBSTR):
         return Decision(False, f"Blocked: {name} is a denied read (secrets / ground truth).")
     # No gather-payload-tool exemption here: that exemption is about a Bash
-    # *command* invoking record-query/data-source-debug (which legitimately name
-    # gather_raw paths). block_main_loop_raw_access never applies it to a Read
-    # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path
-    # is unconditionally clamped.
-    if is_main_session and RAW_MARKER in str(p):
+    # *command* invoking record-query (which legitimately names a gather_raw
+    # path). block_main_loop_raw_access never applies it to a Read
+    # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path is
+    # unconditionally clamped.
+    if RAW_MARKER in str(p) and is_main_session:
         return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 

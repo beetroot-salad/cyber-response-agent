@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Case-history ticket writer — the run.py/run_pai.py post-step (issue #317, write path).
+"""Case-history ticket writer — the run.py post-step (issue #317, write path).
 
 Turns the (empty) ticket store into the accruing case-history store: a thin **bridge**
 creates an OPEN ticket when the run materializes, and a post-run step **closes** it

@@ -30,7 +30,7 @@ def _load(monkeypatch):
     spec.loader.exec_module(mod)
     # Deterministic shim roster (don't depend on the real bin/ dir contents).
     monkeypatch.setattr(mod, "_all_defender_shims", lambda: {
-        "defender-invlang", "defender-record-query", "defender-data-source-debug",
+        "defender-invlang", "defender-record-query",
         "defender-elastic", "defender-cmdb", "defender-identity", "defender-host-state",
         "defender-threat-intel", "defender-change-mgmt", "defender-ticket",
     })
@@ -68,7 +68,6 @@ def _decide(mod, monkeypatch, capsys, command: str, cwd: str | None) -> str:
     "bash -c 'defender-invlang enum types'",
     "timeout 5 bash -c 'defender-elastic query foo --raw'",
     "defender-record-query --run-dir /r --lead l-1 --system elastic --query-id elastic.q -- defender-elastic query foo --raw",
-    "defender-record-summary --lead l-1 --label distinct-users -- jq '[.[].data.srcuser]|unique|length' /r/gather_raw/l-1/0.json",
     "tail -1 /r/executed_queries.jsonl | jq .",
     "cat /r/gather_raw/0/0.json | jq '.hits | length'",
     "jq -r '.[].data.srcip' /r/gather_raw/l-1/0.json | sort | uniq -c | sort -rn",  # self-test pipeline

@@ -69,5 +69,5 @@ scans for drafts on every tick and, once the queue depth crosses
 content into `defender/skills/elastic/SKILL.md` (action: **lift**)
 or removes the draft (action: **discard**). The decision procedure
 lives in `defender/learning/lead_author.md` §"Pending system-skill
-drafts". The runtime writer (data-source-debug subagent) is described
-in `defender/skills/gather/SKILL.md` §3.5.
+drafts". (The runtime data-source-debug writer that once deposited here
+was retired; drafts are now curated offline from the execution record.)

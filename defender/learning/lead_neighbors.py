@@ -87,9 +87,15 @@ def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
     a JSON+aggs one) inside a single ``## Query`` section. Per-variant
     tokenization + per-pair max preserves the strength of each variant
     rather than diluting it across the average.
+
+    The fence label is matched generically (``esql``, ``sql``, ``bash``,
+    ``json``, or none): the ES|QL migration tags query bodies ```` ```esql ````,
+    and a label-specific allowlist would silently fall through to tokenizing
+    the *whole section* — prose, narrowing examples, and all — diluting the
+    similarity signal the curator relies on to spot near-duplicates.
     """
     variants: list[frozenset[str]] = []
-    for m in re.finditer(r"```(?:bash|json)?\n(.*?)```", query_section, re.DOTALL):
+    for m in re.finditer(r"```[\w.+-]*\n(.*?)```", query_section, re.DOTALL):
         body = m.group(1)
         variants.append(tokenize_query(body))
     if not variants:
@@ -100,18 +106,28 @@ def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
 def tokenize_query(text: str) -> frozenset[str]:
     """Argument-side tokenizer for query-body scoring.
 
-    Splits on non-identifier/dot characters, drops pure-numeric tokens
-    and ``PLUMBING_TOKENS``, lowercases. Dotted field references
-    (``rule.id``, ``data.srcip``) are preserved as single tokens so a
-    template scoring on ``data.srcip`` matches another using the same
-    field — not just one that happens to mention ``data``.
+    Splits on punctuation, drops pure-numeric tokens and
+    ``PLUMBING_TOKENS``, lowercases. Two identifier shapes are preserved
+    as single tokens rather than shattered, because each is a strong
+    "same data" signal the scorer would otherwise lose:
+
+    - **Dotted field references** (``rule.id``, ``source.ip``) — so a
+      template scoring on ``source.ip`` matches another using the same
+      field, not just one that happens to mention ``source``.
+    - **Hyphenated index / data-stream names** (``logs-system.auth-*``,
+      ``logs-zeek.conn``) — for ES|QL the data stream a query hits is the
+      single strongest discriminator between measurements; splitting on
+      ``-`` would collapse every ``logs-*`` query onto the common ``logs``
+      token. Trailing glob/hyphen punctuation is normalized off so
+      ``logs-system.auth-*`` and ``logs-system.auth`` are one token.
     """
-    raw = re.split(r"[^\w.]+", text.lower())
+    raw = re.split(r"[^\w.\-*]+", text.lower())
     toks: list[str] = []
     for tok in raw:
+        tok = tok.strip(".-*")
         if not tok:
             continue
-        stripped = tok.replace(".", "")
+        stripped = tok.replace(".", "").replace("-", "")
         if stripped.isdigit():
             continue
         if tok in PLUMBING_TOKENS:
