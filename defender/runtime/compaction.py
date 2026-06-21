@@ -6,7 +6,7 @@ This module is the engine-agnostic heart of Phase B compaction. It operates
 on the **PydanticAI message-dump dict** form (what `ModelMessagesTypeAdapter.
 dump_python` produces and what `runtime/observe.py` writes to
 `llm_requests.jsonl`), so the same code drives both the offline dry-run
-harness (`scripts/compaction_dryrun.py`, over recorded runs) and — later —
+harness (`scripts/testing/compaction_dryrun.py`, over recorded runs) and — later —
 the live `before_model_request` hook in `driver.py` (which adapts between
 PydanticAI message objects and this dict form via the type adapter).
 

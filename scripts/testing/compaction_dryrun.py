@@ -12,8 +12,8 @@ differently once it sees compacted context). That needs a live A/B run — this
 only measures the rewrite applied to the history the agent actually produced.
 
 Usage:
-    python3 defender/scripts/compaction_dryrun.py <run_dir|llm_requests.jsonl>
-    python3 defender/scripts/compaction_dryrun.py /tmp/defender-runs/<id> --json
+    python3 scripts/testing/compaction_dryrun.py <run_dir|llm_requests.jsonl>
+    python3 scripts/testing/compaction_dryrun.py /tmp/defender-runs/<id> --json
 
 Token figures are estimates: char-counted payload converted with a
 chars-per-token ratio calibrated from this run's own generated output (printed

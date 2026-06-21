@@ -276,7 +276,7 @@ same invocation.
    Validates the mechanism on real histories and yields a first *mechanical*
    savings number at zero cost. It cannot show trajectory divergence (the
    agent may behave differently with compacted context) — that's step 1.
-   Implemented: `scripts/compaction_dryrun.py` over `runtime/compaction.py`.
+   Implemented: `scripts/testing/compaction_dryrun.py` over `runtime/compaction.py`.
 
    **Step-0 result (5 recorded Phase-A runs, each 1–2 loop boundaries):**
    message-history payload **−35% to −55%**; estimated total prompt tokens
@@ -578,7 +578,7 @@ Built and tested (branch `worktree-per-loop-compaction`):
   detection is now dormant until the agent emits `:T close`, so pre-marker
   recorded runs no longer compact under the dry-run — correct, not a
   regression; the next live A/B exercises the marker path.
-- **Offline harness** — `scripts/compaction_dryrun.py` (validation ladder
+- **Offline harness** — `scripts/testing/compaction_dryrun.py` (validation ladder
   step 0; results above).
 - **Persistent-context (handoff packet)** — `runtime/orient.py` inlines the
   raw alert (`_raw_alert`, salted untrusted wrap) and the invlang grammar
