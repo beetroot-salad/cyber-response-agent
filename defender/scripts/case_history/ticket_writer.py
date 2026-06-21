@@ -202,6 +202,65 @@ def annotate_case_ticket(case_id: str, outcome: str) -> None:
         _warn(f"annotate raised, ignored: {e!r}")
 
 
+def enrich_case_resolution(case_id: str, method: str) -> None:
+    """Stamp the grounded resolution-method onto a closed case-history ticket (issue
+    #338, offline enrichment). `method` is the resolution method the adversarial judge
+    confirmed (grounded predicates + policy/authority); it rides INSIDE the existing
+    `resolution` as a pure-literal-marked suffix — no new field — so the benign judge
+    later reads a cited closed case's grounded conditions.
+
+    Re-uses the close transition (`POST /tickets/{key}/transitions` with `status:
+    closed`, which overwrites `resolution`) — the store exposes no resolution PATCH.
+    Idempotent at this boundary (mirrors `annotate_case_ticket`): GET the ticket, and
+    if a grounded segment is already present, skip the write — the store is the source
+    of truth, so a re-drained learn never double-stamps. Non-fatal: every failure
+    (config absent, unreachable, 404, HTTP error, unwritten/foreign resolution) is a
+    WARN and a return. Never raises."""
+    try:
+        if not method or not method.strip():
+            return
+        config = _load_config()
+        if config is None:
+            return
+        key = urllib.parse.quote(case_id, safe="")
+        status, body = _request(config, "GET", f"/tickets/{key}")
+        if status is None:
+            _warn(f"enrich-resolution {case_id}: {body}")
+            return
+        if status == "404":
+            _warn(f"enrich-resolution {case_id}: ticket not found (404); skipping")
+            return
+        if not status.startswith("2"):
+            _warn(f"enrich-resolution {case_id}: GET HTTP {status}: {body}")
+            return
+        try:
+            ticket = json.loads(body)
+        except json.JSONDecodeError as e:
+            _warn(f"enrich-resolution {case_id}: unparseable ticket: {e}")
+            return
+        if case_ticket.ticket_resolution_method(ticket) is not None:
+            _log(f"enrich-resolution {case_id}: already grounded — skipping")
+            return
+        resolution = ticket.get("resolution")
+        # Only stamp a close-resolution we wrote (disposition decodes) — a missing or
+        # human-edited resolution is left untouched (append would corrupt it / be
+        # un-decodable downstream).
+        if not isinstance(resolution, str) or case_ticket.ticket_disposition(ticket) is None:
+            _warn(f"enrich-resolution {case_id}: no decodable close resolution; skipping")
+            return
+        new_resolution = case_ticket.append_resolution_method(resolution, method)
+        if new_resolution == resolution:  # nothing to add (no template / already marked)
+            return
+        payload = {"status": "closed", "resolution": new_resolution, "author": "learning"}
+        status, body = _post(config, f"/tickets/{key}/transitions", payload)
+        if status is None or not status.startswith("2"):
+            _warn(f"enrich-resolution {case_id}: POST {status or 'transport error'}: {body}")
+        else:
+            _log(f"enrich-resolution {case_id}: grounded resolution-method ({status})")
+    except Exception as e:  # noqa: BLE001 — an offline post-step must never break the learn
+        _warn(f"enrich-resolution raised, ignored: {e!r}")
+
+
 def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool) -> None:
     receipt = {
         "key": case_id,

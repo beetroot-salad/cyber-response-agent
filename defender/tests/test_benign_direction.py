@@ -518,3 +518,113 @@ def test_verify_env_bad_when_rule_anchor_missing_canonical_key(tmp_path: Path) -
         "entities:\n  - {type: process, class: nc}",
     )
     assert _run_verify_env(lesson, "case-1/0", corpus, pending) == "BAD"
+
+
+# --------------------------------------------------------------------------
+# resolution_method (#338): adversarial judge doc validation
+# --------------------------------------------------------------------------
+
+
+def test_validate_judge_doc_accepts_resolution_method() -> None:
+    doc = _valid_adversarial_doc_with_env()
+    doc["resolution_method"] = "identity-confirmed (l-002) + no-egress (l-005); authority: CISO"
+    assert loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_optional_resolution_method() -> None:
+    # Absent key is fine (emitted only on benign dispositions).
+    doc = _valid_adversarial_doc_with_env()
+    doc.pop("resolution_method", None)
+    assert loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_empty_resolution_method() -> None:
+    doc = _valid_adversarial_doc_with_env()
+    doc["resolution_method"] = "   "
+    with pytest.raises(loop.LoopError, match="resolution_method"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_non_string_resolution_method() -> None:
+    doc = _valid_adversarial_doc_with_env()
+    doc["resolution_method"] = ["a", "b"]
+    with pytest.raises(loop.LoopError, match="resolution_method"):
+        loop.validate_judge_doc(doc)
+
+
+# --------------------------------------------------------------------------
+# Benign judge scoped closed-ticket read (#338): settings surface + injection
+# --------------------------------------------------------------------------
+
+
+def test_wiring_closed_ticket_read_flag() -> None:
+    from defender.learning._loop_directions import ADVERSARIAL, BENIGN
+    assert BENIGN.judge_wiring.closed_ticket_read is True
+    assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
+
+
+def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: Path) -> None:
+    from defender.learning import _loop_comparison as lc
+    gather_raw, comp = tmp_path / "gather_raw", tmp_path / "comparison_benign"
+    base = lc.judge_settings_dict(gather_raw, comp)
+    allow_base = base["permissions"]["allow"]
+    assert not any("ticket_cli" in a for a in allow_base)
+    granted = lc.judge_settings_dict(
+        gather_raw, comp, closed_ticket_read=("/py", "/cli/ticket_cli.py")
+    )["permissions"]["allow"]
+    # Two scoped entries, both gated on --require-closed: the list glob pins
+    # `--status closed --require-closed` adjacently so a trailing `--status open` can't
+    # slip in, and get-ticket carries the flag too.
+    listline = [a for a in granted if "list-tickets" in a]
+    assert listline and "list-tickets --status closed --require-closed" in listline[0]
+    getline = [a for a in granted if "get-ticket" in a]
+    assert getline and "--require-closed" in getline[0]
+
+
+def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> None:
+    from defender.learning import _loop_subagents as su
+    run_dir = tmp_path / "20260620T0000Z-sshd"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    (run_dir / "alert.json").write_text(
+        json.dumps({"rule": {"id": "5710", "description": "x"}, "timestamp": "2026-06-01T00:00:00+00:00"})
+    )
+    story = run_dir / "actor_benign_story.md"
+    story.write_text("1. Routine story\nciting case-OLD as covering policy\n")
+    telem = run_dir / "projected_telemetry_benign.yaml"
+    telem.write_text("projections: []\n")
+    lrd = tmp_path / "learn" / run_dir.name
+    lrd.mkdir(parents=True)
+    (lrd / "past_tickets.txt").write_text("- case-OLD: benign — nightly scan\n")
+
+    inv = su.build_judge_invocation(
+        run_dir, story, telem, lrd,
+        comparison_dirname="comparison_benign",
+        settings_name="judge-benign-settings.resolved.json",
+        closed_ticket_read=True,
+    )
+    # The injected section names the closed-only read, the in-flight key, and the menu.
+    assert "<cited_policy_read>" in inv.user_text
+    assert "--require-closed" in inv.user_text
+    assert run_dir.name in inv.user_text          # the in-flight key it must never read
+    assert "case-OLD" in inv.user_text            # candidate closed case from the menu
+    # The resolved settings file carries the scoped ticket-read allow entries.
+    settings = json.loads(inv.settings_path.read_text())
+    assert any("get-ticket" in a for a in settings["permissions"]["allow"])
+
+
+def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -> None:
+    from defender.learning import _loop_subagents as su
+    run_dir = tmp_path / "case-adv"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
+    story = run_dir / "actor_story.md"
+    story.write_text("Attack story\n")
+    telem = run_dir / "projected_telemetry.yaml"
+    telem.write_text("projections: []\n")
+    lrd = tmp_path / "learn2" / run_dir.name
+    lrd.mkdir(parents=True)
+
+    inv = su.build_judge_invocation(run_dir, story, telem, lrd)  # defaults: adversarial
+    assert "cited_policy_read" not in inv.user_text
+    settings = json.loads(inv.settings_path.read_text())
+    assert not any("ticket_cli" in a for a in settings["permissions"]["allow"])

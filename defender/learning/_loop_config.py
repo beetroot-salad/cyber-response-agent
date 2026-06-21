@@ -254,6 +254,10 @@ class JudgeWiring:
     label: str
     comparison_dirname: str
     settings_name: str
+    # When True, the judge's settings surface grants a scoped, closed-only ticket read
+    # (issue #338) so it can confirm a cited closed case from the case-history store —
+    # the benign (FP) direction only; the adversarial judge never reads the store.
+    closed_ticket_read: bool = False
 
 
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))

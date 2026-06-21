@@ -25,7 +25,11 @@ import yaml
 from defender.learning._loop_directions import ADVERSARIAL
 from defender.learning._loop_config import LoopError
 from defender.learning._loop_validate import _outcome_keyword
-from defender.scripts.case_history.ticket_writer import annotate_case_ticket
+from defender.scripts.case_history import case_ticket
+from defender.scripts.case_history.ticket_writer import (
+    annotate_case_ticket,
+    enrich_case_resolution,
+)
 
 
 def _log(msg: str) -> None:
@@ -52,13 +56,47 @@ def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:
         return None
 
 
+def _read_resolution_method(learning_run_dir: Path) -> str | None:
+    """The adversarial judge's `resolution_method` for this benign case, or None if
+    absent / unusable (issue #338). Optional field — the judge emits it only on a
+    benign disposition, where it lifts the grounded predicates + policy/authority that
+    made the disposition stick — so absence is normal and quiet (not a WARN)."""
+    verdict = learning_run_dir / ADVERSARIAL.judge_name
+    if not verdict.is_file():
+        return None
+    try:
+        doc = yaml.safe_load(verdict.read_text())
+    except (yaml.YAMLError, OSError) as e:
+        _log(f"unusable adversarial verdict for resolution-method ({e}); skipping")
+        return None
+    if not isinstance(doc, dict):
+        return None
+    method = doc.get("resolution_method")
+    if isinstance(method, str) and method.strip():
+        return method.strip()
+    if method is not None:
+        _log(f"resolution_method is not a non-empty string ({type(method).__name__}); "
+             "skipping resolution-method enrichment")
+    return None
+
+
 def enrich_case_ticket(run_dir: Path, learning_run_dir: Path) -> None:
-    """Stamp the case-history ticket's seed-eligibility flag from the adversarial
-    verdict. Caller gates on a benign disposition + a successful adversarial leg; this
-    reads the verdict and delegates the (idempotent, non-fatal) write to the writer.
-    The ticket key is the run-dir basename — the identity the runtime keyed the
-    create under (`open_case_ticket`)."""
+    """Stamp the case-history ticket from the adversarial verdict (issue #317 + #338).
+    Caller gates on a benign disposition + a successful adversarial leg; this reads the
+    verdict and delegates the (idempotent, non-fatal) writes to the writer. The ticket
+    key is the run-dir basename — the identity the runtime keyed the create under
+    (`open_case_ticket`).
+
+    Two stamps, both idempotent and non-fatal: the seed-eligibility flag from the
+    `outcome` (#317), and — when the judge emitted one AND the outcome is seed-eligible
+    — the grounded resolution-method inside the existing `resolution` (#338), the policy
+    conditions a future benign judge confirms a cited case against. The resolution-method
+    rides the SAME polarity as the seed flag, so the store never carries a covering
+    policy on a case the probe did not confirm benign (e.g. a `survived` flagged FN)."""
     outcome = _read_adversarial_outcome(learning_run_dir)
     if outcome is None:
         return
     annotate_case_ticket(run_dir.name, outcome)
+    method = _read_resolution_method(learning_run_dir)
+    if method and case_ticket.outcome_seeds_eligible(outcome):
+        enrich_case_resolution(run_dir.name, method)

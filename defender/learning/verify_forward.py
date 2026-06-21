@@ -22,6 +22,7 @@ per-edit gating (see ``experiments/defender-author-verification/results/final.md
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -46,6 +47,14 @@ PROMPT_PATH = HERE / "verify_forward.md"
 
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
 VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
+
+# Scoped, closed-only read of the cited covering policy for a benign forward-check
+# (issue #338) — same read-only adapter the seed sampler uses, kept pyyaml-free.
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "tools" / "ticket_cli.py"
+_POLICY_FETCH_TIMEOUT = 15
+_NO_CITED_POLICY = (
+    "(no cited covering policy — none was offered, or the store is unreachable)"
+)
 
 
 def load_run_context(run_id: str) -> tuple[str, str]:
@@ -97,13 +106,79 @@ def expected_disposition(direction: str, recorded: str) -> str:
     return recorded
 
 
-def render_user_prompt(lesson_text: str, transcript: str, disposition: str) -> str:
+def _cited_case_ids(run_id: str) -> list[str]:
+    """Case ids the benign actor was offered as covering-policy seeds, read from the
+    source run's persisted `past_tickets.txt` menu (one `- {case_id}: …` line each).
+    Empty when no menu was written (cold-start / no seeds offered)."""
+    menu = RUNS_DIR / run_id / "past_tickets.txt"
+    if not menu.is_file():
+        return []
+    ids: list[str] = []
+    for line in menu.read_text().splitlines():
+        s = line.strip()
+        if not s.startswith("- "):
+            continue
+        head = s[2:].split(":", 1)[0].strip()
+        if head:
+            ids.append(head)
+    return ids
+
+
+def _fetch_closed_resolution(case_id: str) -> str | None:
+    """A cited closed case's full `resolution` (incl. the grounded `[grounded: …]`
+    conditions), via the read-only ticket CLI scoped to closed. None on any failure —
+    the policy load is best-effort and must never break the forward-check."""
+    cmd = [
+        sys.executable, str(_TICKET_CLI), "get-ticket", case_id,
+        "--require-closed", "--raw",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=_POLICY_FETCH_TIMEOUT, cwd=str(REPO_ROOT),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        ticket = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    res = ticket.get("resolution") if isinstance(ticket, dict) else None
+    return res if isinstance(res, str) and res.strip() else None
+
+
+def load_cited_policy(run_id: str) -> str:
+    """The cited covering policies (closed cases) for a benign forward-check, rendered
+    for the verifier prompt. The benign actor cites a past closed case as a covering
+    policy; loading its grounded resolution lets the verifier reproduce the close using
+    the policy the lesson routes to. Returns a neutral placeholder when no seed was
+    cited / the store is unreachable (the check then runs on lesson + transcript alone —
+    non-fatal)."""
+    lines = [
+        f"- {case_id}: {res}"
+        for case_id in _cited_case_ids(run_id)
+        if (res := _fetch_closed_resolution(case_id))
+    ]
+    if not lines:
+        return _NO_CITED_POLICY
+    return (
+        "Cited covering policies (closed cases; grounded conditions ride in the "
+        "resolution):\n" + "\n".join(lines)
+    )
+
+
+def render_user_prompt(
+    lesson_text: str, transcript: str, disposition: str, cited_policy: str = _NO_CITED_POLICY
+) -> str:
     template = PROMPT_PATH.read_text()
     return (
         template
         .replace("{transcript}", transcript)
         .replace("{lesson}", lesson_text)
         .replace("{disposition}", disposition)
+        .replace("{cited_policy}", cited_policy)
     )
 
 
@@ -177,7 +252,14 @@ def main(argv: list[str]) -> int:
         return 1
     transcript, recorded = load_run_context(run_id)
     disposition = expected_disposition(ns.direction, recorded)
-    user_prompt = render_user_prompt(lesson_path.read_text(), transcript, disposition)
+    # A benign lesson routes to a cited covering policy; load it so the verifier can
+    # reproduce the close using that policy. Adversarial lessons cite no policy.
+    cited_policy = (
+        load_cited_policy(run_id) if ns.direction == "benign" else _NO_CITED_POLICY
+    )
+    user_prompt = render_user_prompt(
+        lesson_path.read_text(), transcript, disposition, cited_policy
+    )
     import time as _time
     t0 = _time.monotonic()
     output = call_haiku(user_prompt)

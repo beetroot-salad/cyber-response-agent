@@ -142,3 +142,134 @@ def test_annotate_no_config_is_noop(monkeypatch):
     monkeypatch.setattr(ticket_writer, "_request",
                         lambda *a, **k: pytest.fail("called transport without config"))
     ticket_writer.annotate_case_ticket("c", "caught")
+
+
+# ---------------------------------------------------------------------------
+# Driver: read resolution_method + delegate (issue #338)
+# ---------------------------------------------------------------------------
+
+
+def _write_verdict_with_method(lrd: Path, outcome: str, method: str) -> None:
+    lrd.joinpath("judge_findings.yaml").write_text(
+        f"outcome: {outcome}\ndefender_findings: []\nresolution_method: {method}\n"
+    )
+
+
+def test_read_resolution_method_valid(tmp_path: Path):
+    _write_verdict_with_method(tmp_path, "caught", "identity-confirmed (l-002)")
+    assert ticket_enrichment._read_resolution_method(tmp_path) == "identity-confirmed (l-002)"
+
+
+def test_read_resolution_method_absent_is_none(tmp_path: Path):
+    _write_verdict(tmp_path, "caught")  # no resolution_method key
+    assert ticket_enrichment._read_resolution_method(tmp_path) is None
+
+
+def test_read_resolution_method_missing_file_is_none(tmp_path: Path):
+    assert ticket_enrichment._read_resolution_method(tmp_path) is None
+
+
+def test_read_resolution_method_non_string_is_none(tmp_path: Path):
+    tmp_path.joinpath("judge_findings.yaml").write_text(
+        "outcome: caught\ndefender_findings: []\nresolution_method:\n  - a\n  - b\n"
+    )
+    assert ticket_enrichment._read_resolution_method(tmp_path) is None
+
+
+def test_enrich_delegates_resolution_method_when_present(tmp_path: Path, monkeypatch):
+    lrd = tmp_path / "learn"
+    lrd.mkdir()
+    _write_verdict_with_method(lrd, "caught", "no-egress (l-005)")
+    seen = []
+    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
+                        lambda key, outcome: seen.append(("annotate", key, outcome)))
+    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
+                        lambda key, method: seen.append(("resolution", key, method)))
+    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    assert seen == [
+        ("annotate", "case-9", "caught"),
+        ("resolution", "case-9", "no-egress (l-005)"),
+    ]
+
+
+def test_enrich_skips_resolution_method_when_absent(tmp_path: Path, monkeypatch):
+    lrd = tmp_path / "learn"
+    lrd.mkdir()
+    _write_verdict(lrd, "caught")  # outcome only, no resolution_method
+    seen = []
+    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
+                        lambda key, outcome: seen.append("annotate"))
+    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
+                        lambda key, method: pytest.fail("called without a method"))
+    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    assert seen == ["annotate"]
+
+
+def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path: Path, monkeypatch):
+    # A method present but a non-seed-eligible outcome (`survived` = flagged FN) must NOT
+    # stamp a covering policy: the resolution-method rides the seed-eligibility polarity,
+    # so the store never carries a benign covering policy on a case the probe contested.
+    lrd = tmp_path / "learn"
+    lrd.mkdir()
+    _write_verdict_with_method(lrd, "survived", "no-egress (l-005)")
+    seen = []
+    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
+                        lambda key, outcome: seen.append("annotate"))
+    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
+                        lambda key, method: pytest.fail("stamped a policy on a survived case"))
+    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    assert seen == ["annotate"]
+
+
+# ---------------------------------------------------------------------------
+# Writer: enrich_case_resolution — GET-then-append transition, idempotent
+# ---------------------------------------------------------------------------
+
+
+_GROUNDED_METHOD = "identity-confirmed (l-002) + no-egress (l-005)"
+
+
+def test_enrich_resolution_posts_transition_on_ungrounded(stub_transport):
+    stub_transport["ticket"] = {"key": "c", "resolution": "benign — routine", "comments": []}
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)
+    assert len(stub_transport["posts"]) == 1
+    path, body = stub_transport["posts"][0]
+    assert path.endswith("/transitions")
+    assert body["status"] == "closed"
+    # The new resolution preserves disposition/reason and carries the grounded method.
+    assert case_ticket.ticket_disposition({"resolution": body["resolution"]}) == "benign"
+    assert case_ticket.resolution_method_from_resolution(body["resolution"]) == _GROUNDED_METHOD
+
+
+def test_enrich_resolution_idempotent_when_already_grounded(stub_transport):
+    grounded = case_ticket.append_resolution_method("benign — routine", _GROUNDED_METHOD)
+    stub_transport["ticket"] = {"key": "c", "resolution": grounded, "comments": []}
+    ticket_writer.enrich_case_resolution("c", "different (l-009)")
+    assert stub_transport["posts"] == []  # already grounded → no write
+
+
+def test_enrich_resolution_skips_foreign_resolution(stub_transport):
+    stub_transport["ticket"] = {"key": "c", "resolution": "Closed by analyst.", "comments": []}
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)
+    assert stub_transport["posts"] == []  # not our close resolution → untouched
+
+
+def test_enrich_resolution_noop_on_empty_method(stub_transport):
+    ticket_writer.enrich_case_resolution("c", "")
+    assert stub_transport["posts"] == []
+
+
+def test_enrich_resolution_non_fatal_on_404(monkeypatch):
+    monkeypatch.setattr(ticket_writer, "_load_config", lambda: dict(_CONFIG))
+    monkeypatch.setattr(ticket_writer, "_request",
+                        lambda c, m, p, body=None: ("404", "not found"))
+    monkeypatch.setattr(ticket_writer, "_post",
+                        lambda c, p, b: pytest.fail("posted after 404"))
+    ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD)  # must not raise
+
+
+def test_enrich_resolution_no_config_is_noop(monkeypatch):
+    monkeypatch.setattr(ticket_writer, "_load_config", lambda: None)
+    monkeypatch.setattr(ticket_writer, "_request",
+                        lambda *a, **k: pytest.fail("transport without config"))
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)

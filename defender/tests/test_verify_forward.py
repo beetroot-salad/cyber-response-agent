@@ -86,3 +86,66 @@ def test_expected_disposition_direction_aware():
     # they pin that a future change keeps the pure function well-defined, nothing more.
     assert vf.expected_disposition("adversarial", "inconclusive") == "inconclusive"
     assert vf.expected_disposition("benign", "inconclusive") == "benign"
+
+
+# ---------------------------------------------------------------------------
+# Cited covering policy loading (#338, benign forward-check)
+# ---------------------------------------------------------------------------
+
+
+def test_cited_case_ids_parses_menu(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    (runs / "run-B").mkdir(parents=True)
+    (runs / "run-B" / "past_tickets.txt").write_text(
+        "- case-OLD1: benign — nightly scan\n- case-OLD2: benign — maintenance\n\n"
+    )
+    monkeypatch.setattr(vf, "RUNS_DIR", runs)
+    assert vf._cited_case_ids("run-B") == ["case-OLD1", "case-OLD2"]
+
+
+def test_cited_case_ids_empty_when_no_menu(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    (runs / "run-B").mkdir(parents=True)
+    monkeypatch.setattr(vf, "RUNS_DIR", runs)
+    assert vf._cited_case_ids("run-B") == []
+
+
+def test_load_cited_policy_renders_grounded_resolutions(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    (runs / "run-B").mkdir(parents=True)
+    (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
+    monkeypatch.setattr(vf, "RUNS_DIR", runs)
+    monkeypatch.setattr(
+        vf, "_fetch_closed_resolution",
+        lambda cid: "benign — scan [grounded: identity-confirmed (l-002)]",
+    )
+    out = vf.load_cited_policy("run-B")
+    assert "case-OLD1" in out
+    assert "grounded: identity-confirmed (l-002)" in out
+
+
+def test_load_cited_policy_neutral_when_unreachable(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    (runs / "run-B").mkdir(parents=True)
+    (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
+    monkeypatch.setattr(vf, "RUNS_DIR", runs)
+    monkeypatch.setattr(vf, "_fetch_closed_resolution", lambda cid: None)  # store down
+    assert vf.load_cited_policy("run-B") == vf._NO_CITED_POLICY
+
+
+def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    (runs / "run-B").mkdir(parents=True)
+    monkeypatch.setattr(vf, "RUNS_DIR", runs)
+    assert vf.load_cited_policy("run-B") == vf._NO_CITED_POLICY
+
+
+def test_render_user_prompt_substitutes_cited_policy(monkeypatch, tmp_path):
+    prompt = tmp_path / "vf.md"
+    prompt.write_text("D={disposition} P={cited_policy}")
+    monkeypatch.setattr(vf, "PROMPT_PATH", prompt)
+    out = vf.render_user_prompt("L", "T", "benign", "the policy block")
+    assert "P=the policy block" in out
+    # default keeps the prompt valid for the adversarial path (no cited policy)
+    out2 = vf.render_user_prompt("L", "T", "benign")
+    assert vf._NO_CITED_POLICY in out2

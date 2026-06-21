@@ -298,3 +298,85 @@ def test_mapping_is_file_driven(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert close["resolution"] == "malicious :: why"
     # decode tracks the custom separator from the same file
     assert case_ticket.parse_disposition_from_resolution(close["resolution"]) == "malicious"
+
+
+# ---------------------------------------------------------------------------
+# Resolution-method grounded predicates (#338) — append / decode / strip
+# ---------------------------------------------------------------------------
+
+
+_METHOD = "identity-confirmed (l-002) + no-egress (l-005); policy: CR-1182; authority: CISO"
+
+
+def test_append_resolution_method_preserves_disposition_and_reason():
+    base = "benign — nightly vuln scan"
+    grounded = case_ticket.append_resolution_method(base, _METHOD)
+    assert grounded.startswith("benign — nightly vuln scan ")
+    # The leading {disposition} — {reason} form is intact, so the existing decoders work.
+    assert case_ticket.parse_disposition_from_resolution(grounded) == "benign"
+    ticket = {"key": "c", "resolution": grounded, "comments": []}
+    assert case_ticket.ticket_disposition(ticket) == "benign"
+    # reason strips the appended grounded segment; method decodes separately.
+    assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
+    assert case_ticket.ticket_resolution_method(ticket) == _METHOD
+
+
+def test_append_resolution_method_idempotent():
+    base = "benign — routine"
+    once = case_ticket.append_resolution_method(base, _METHOD)
+    twice = case_ticket.append_resolution_method(once, "different-method (l-009)")
+    assert twice == once  # already grounded → no second suffix
+
+
+def test_append_resolution_method_noops_on_empty_method():
+    base = "benign — routine"
+    assert case_ticket.append_resolution_method(base, "") == base
+    assert case_ticket.append_resolution_method(base, "   ") == base
+
+
+def test_append_resolution_method_collapses_internal_whitespace():
+    grounded = case_ticket.append_resolution_method(
+        "benign — r", "identity-confirmed (l-002)\n  + no-egress (l-005)"
+    )
+    assert case_ticket.resolution_method_from_resolution(grounded) == (
+        "identity-confirmed (l-002) + no-egress (l-005)"
+    )
+
+
+def test_resolution_method_absent_or_foreign_is_none():
+    # A plain (un-grounded) close resolution, a foreign one, and empties decode to None.
+    assert case_ticket.resolution_method_from_resolution("benign — routine") is None
+    assert case_ticket.resolution_method_from_resolution("Closed by analyst.") is None
+    assert case_ticket.resolution_method_from_resolution("") is None
+    assert case_ticket.resolution_method_from_resolution(None) is None
+    assert case_ticket.ticket_resolution_method({"resolution": "benign — r"}) is None
+
+
+def test_ticket_reason_unaffected_when_no_grounded_segment():
+    ticket = {"key": "c", "resolution": "benign — nightly vuln scan", "comments": []}
+    assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
+    assert case_ticket.ticket_resolution_method(ticket) is None
+
+
+def test_resolution_method_decodes_last_marker_not_reason_marker():
+    # A free-text reason that itself contains the marker must not shadow our appended
+    # segment — decode anchors on the LAST marker (our suffix), not the first.
+    res = "benign — see [grounded: prior note] context [grounded: identity-confirmed (l-002)]"
+    assert case_ticket.resolution_method_from_resolution(res) == "identity-confirmed (l-002)"
+    # ticket_reason strips only our suffix, preserving the earlier marker in the reason.
+    assert case_ticket.ticket_reason({"resolution": res}) == "see [grounded: prior note] context"
+
+
+def test_marker_in_reason_without_appended_segment_is_not_decoded():
+    # An analyst/LLM reason that contains the marker literal but NO trailing segment
+    # terminator is incidental text — not our suffix. It must NOT be truncated, NOT be
+    # mis-decoded as a grounded method, and must NOT block a real stamp (our suffix is
+    # always the trailing `… ]`, so we anchor on the terminator, not the bare marker).
+    res = "benign — see [grounded: prior approval] note"
+    assert case_ticket.ticket_reason({"resolution": res}) == "see [grounded: prior approval] note"
+    assert case_ticket.resolution_method_from_resolution(res) is None
+    # A real method still stamps onto such a reason, and round-trips off the LAST marker.
+    grounded = case_ticket.append_resolution_method(res, "identity-confirmed (l-002)")
+    assert grounded != res
+    assert case_ticket.resolution_method_from_resolution(grounded) == "identity-confirmed (l-002)"
+    assert case_ticket.ticket_reason({"resolution": grounded}) == "see [grounded: prior approval] note"

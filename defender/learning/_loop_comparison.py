@@ -324,14 +324,47 @@ def render_synthesis(companion: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def judge_settings_dict(gather_raw: Path, comparison_dir: Path) -> dict:
+def closed_ticket_read_allow(py: Path | str, ticket_cli: Path | str) -> list[str]:
+    """The allow-globs granting the benign judge a *scoped, closed-only* read of the
+    case-history store (issue #338): list closed tickets by signature, and fetch a cited
+    one only via `--require-closed`. Both globs carry the literal `--require-closed` so an
+    unflagged read (which could reach the in-flight OPEN ticket for the alert under
+    judgment) is not allow-listed — it is denied, not silently permitted. On the list
+    glob `--require-closed` sits immediately after `--status closed`, so the trailing `*`
+    cannot admit a second `--status open` between them (argparse keeps the last `--status`
+    — the CLI also pins status=closed under `--require-closed`, belt and suspenders).
+    The get-ticket glob wildcards on BOTH sides of the literal `--require-closed`
+    (`get-ticket *--require-closed*`) so it matches regardless of where the model places
+    the key vs. the flag (`get-ticket KEY --require-closed` and `get-ticket
+    --require-closed KEY` both allow) — the flag must still be present, so the open
+    in-flight ticket stays unreachable. Pinned to the resolved interpreter + cli path so
+    no broader `python *` surface is opened."""
+    return [
+        f"Bash({py} {ticket_cli} list-tickets --status closed --require-closed*)",
+        f"Bash({py} {ticket_cli} get-ticket *--require-closed*)",
+    ]
+
+
+def judge_settings_dict(
+    gather_raw: Path,
+    comparison_dir: Path,
+    *,
+    closed_ticket_read: tuple[Path | str, Path | str] | None = None,
+) -> dict:
     """Read-only tool scope for the judge, rendered with the two concrete absolute
     paths it is granted (`--add-dir` is the real access boundary; the allow-globs just
     have to match). No `hooks` key — the runtime `block_main_loop_raw_access` gate must
     NOT apply, so the judge (the scorer) can freely jq the actuals the defender cannot.
+
+    `closed_ticket_read` — when set to `(py, ticket_cli)`, also grants the scoped
+    closed-only case-history read the benign judge confirms a cited policy with (#338);
+    None (the adversarial default) leaves the store off the surface entirely.
     """
     gather_raw = Path(gather_raw)
     comparison_dir = Path(comparison_dir)
+    ticket_allow = (
+        closed_ticket_read_allow(*closed_ticket_read) if closed_ticket_read else []
+    )
     return {
         "permissions": {
             "allow": [
@@ -341,6 +374,7 @@ def judge_settings_dict(gather_raw: Path, comparison_dir: Path) -> dict:
                 f"Read({comparison_dir}/**)",
                 f"Grep({comparison_dir}/**)",
                 f"Glob({comparison_dir}/**)",
+                *ticket_allow,
                 "Bash(jq *)",
                 "Bash(grep *)",
                 "Bash(cat *)",
