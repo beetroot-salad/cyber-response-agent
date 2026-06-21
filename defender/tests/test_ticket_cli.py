@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from defender.scripts.tools import ticket_cli
-from defender.scripts.tools import _stub_transport as transport
+from defender.scripts.adapters import ticket_cli
+from defender.scripts.adapters import _stub_transport as transport
 
 
 def _args(**kw):

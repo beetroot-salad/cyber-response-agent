@@ -50,7 +50,7 @@ VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"
 
 # Scoped, closed-only read of the cited covering policy for a benign forward-check
 # (issue #338) — same read-only adapter the seed sampler uses, kept pyyaml-free.
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "tools" / "ticket_cli.py"
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
 _POLICY_FETCH_TIMEOUT = 15
 _NO_CITED_POLICY = (
     "(no cited covering policy — none was offered, or the store is unreachable)"
