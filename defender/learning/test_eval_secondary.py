@@ -437,6 +437,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             pass
 
         lead_repository = _FakeLR
+        ADVERSARIAL_WIRING = object()  # opaque — invoke_judge stub ignores it
 
         @staticmethod
         def is_skip_story(text):

@@ -33,8 +33,6 @@ from .circuit_breaker import RunAborted
 from .tools import (
     GatherDeps,
     RunDeps,
-    _gather_prompt,
-    register_assay_tool,
     register_gather_tool,
     register_tools,
 )
@@ -48,22 +46,10 @@ from defender.hooks.budget_enforcer import (
 DEFAULT_MODEL = "claude-sonnet-4-6"
 GATHER_MODEL = "claude-haiku-4-5"
 DEFAULT_REQUEST_LIMIT = 60
-GATHER_REQUEST_LIMIT = 40  # gather's per-lead loop; large multi-dimension leads
-# need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
-# Part B (finder/executor split) replaces that single budget with two: the finder
-# only orients + finds + delegates + synthesizes (few turns), and each executor
-# runs ONE assay in a tiny context (the cap bounds the payload, and execution.md is
-# injected so it doesn't flail discovering query syntax — so it should need ~5–10,
-# not 40). The assay cap is a backstop: a flailing executor cap-stubs cheap instead
-# of running 18 queries. Tune from the benchmark.
-FINDER_REQUEST_LIMIT = 20
-ASSAY_REQUEST_LIMIT = 25  # one assay characterizes ALL of a lead's dims, so the
-# executor needs room: ~7 dims × (narrow-query + jq + record) lands ~15-20 turns
-# (measured: 15 was too tight → executor returned incomplete → finder re-assayed,
-# the cascade that drove cost up). The cap is a backstop, not the budget.
-ASSAY_BUDGET_PER_LEAD = 3  # structural backstop: the assay tool refuses past this,
-# bounding the finder's over-decomposition (measured: Haiku spawned 13 assays, one
-# per dimension) regardless of model — prose "assay few" did not hold.
+GATHER_REQUEST_LIMIT = 40  # the lean gather's per-lead loop; large multi-dimension
+# leads need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
+# (The finder/executor split's two-budget tuning — a finder cap + a per-assay cap —
+# was removed with the split (#339 never merged; the lean gather #340 superseded it).)
 # The permission gate denies disallowed tool calls via ModelRetry — control-flow
 # feedback ("pick another command"), the in-process twin of the claude -p hook's
 # exit-2, not a hard error. pydantic-ai resets a tool's retry counter on success,
@@ -133,14 +119,6 @@ def _gather_instructions(defender_dir: Path) -> str:
     )
 
 
-def _finder_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "finder.md").read_text()
-
-
-def _executor_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "executor.md").read_text()
-
-
 def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
     # Run context + the precomputed ORIENT pack. The procedure — artifacts to
     # write, the stop condition, case_id (= the run-dir basename) — all lives in
@@ -201,34 +179,19 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
 
 
 def _gather_model() -> str:
-    """The gather subagent model — Haiku by default; `DEFENDER_GATHER_MODEL`
-    overrides it. The override exists for the instruction-following A/B: Haiku
-    under-adopts the §4 `--batch` form and flails the on-disk filter loop into the
-    request cap, so a Sonnet gather is worth testing. It's affordable *because* the
-    always-sampled passthrough (record_query) keeps the multi-MB raw dump out of
-    gather's context — a pricier gather pays only for the small sampled context +
-    summaries, not the dump it re-sends every request."""
+    """The LEGACY single-agent gather model (`build_gather_agent`, the `claude -p`
+    engine + hermetic tests) — Haiku by default; `DEFENDER_GATHER_MODEL` overrides.
+    The lean production gather uses `_lean_gather_model` (Sonnet)."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or GATHER_MODEL
 
 
-def _finder_model() -> str:
-    """The finder model — Sonnet by default. The finder makes the judgment calls
-    (pick the one query, group all dims into a single assay); Haiku over-decomposes
-    this, spawning an assay per dimension (measured: 13 on the baseline lead). The
-    executor model is template-dependent (see `_coined_executor_model`).
-    `DEFENDER_FINDER_MODEL` overrides it."""
-    return os.environ.get("DEFENDER_FINDER_MODEL") or DEFAULT_MODEL
-
-
-def _coined_executor_model() -> str:
-    """The executor model for a COINED (no-template) assay — Sonnet by default. A
-    coined query is the unfamiliar/novel case: no curated template to anchor the
-    executor, which is exactly where Haiku gets lost (measured on a fresh full run:
-    39 redundant change-mgmt calls + filesystem crawling). Routing the no-template
-    case to Sonnet is the ad-hoc path's purpose. A TEMPLATED assay stays Haiku
-    (`_gather_model` — mechanical, the template anchors it).
-    `DEFENDER_COINED_EXECUTOR_MODEL` overrides."""
-    return os.environ.get("DEFENDER_COINED_EXECUTOR_MODEL") or DEFAULT_MODEL
+def _lean_gather_model() -> str:
+    """The lean production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
+    overrides. Validated (#340) as the right tier for the lean single agent: the
+    pinned context is tiny (the lean SKILL is ~1K words vs the split's ~6K), so
+    Sonnet's per-token rate is fully offset by ~half the turns / a third fewer
+    queries / no KQL↔ES|QL confusion — same cost as Haiku-lean, fewer failures."""
+    return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
 def _build_subagent(
@@ -270,50 +233,15 @@ def _lean_gather_instructions(defender_dir: Path) -> str:
 
 
 def build_lean_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
-    """The LEAN single-agent gather (issue #340 direction test): one agent runs
-    find→execute(one server-side ES|QL aggregation)→verify, no finder/executor
-    split. Loads `skills/gather/SKILL.lean.md`; behaves as an executor (runs
-    queries, auto-captures) under executor-role deps. Model is `_gather_model()`
-    (Haiku, `DEFENDER_GATHER_MODEL` overrides) so the lean path can be A/B'd at
-    both Haiku and Sonnet against the split."""
+    """The lean single-agent gather (#340) — the production gather for the
+    PydanticAI engine. One agent runs find→execute(one server-side ES|QL
+    aggregation)→verify and auto-captures its own adapter calls (no finder/executor
+    split). Loads `skills/gather/SKILL.lean.md`. Model is `_lean_gather_model()`
+    (Sonnet; `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _lean_gather_instructions(defender_dir),
-        _gather_model(),
+        _lean_gather_model(),
     )
-
-
-def build_executor_agent(
-    defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
-    model_name: str | None = None,
-) -> Agent:
-    """The executor: runs ONE assay (executor SKILL) in a clean, tiny context —
-    capped query → sample-first dims → recorded summary. Model is template-dependent
-    (Haiku for a templated assay, Sonnet for a coined one — see
-    `_coined_executor_model`); defaults to Haiku. Spawned per assay by the `assay`
-    tool with executor-role deps (auto-captures)."""
-    return _build_subagent(
-        defender_dir, logger, agent_id, _executor_instructions(defender_dir),
-        model_name or _gather_model(),
-    )
-
-
-def build_finder_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
-    """The finder: orients, finds/binds a template (or coins one), and delegates
-    execution to the `assay` tool (its only data path — finder-role deps deny it
-    adapter access). Sonnet by default (judgment); `DEFENDER_FINDER_MODEL` overrides.
-    One per lead; it builds a fresh executor per assay (Haiku when the assay names a
-    template, Sonnet when the query is coined — the no-template case Haiku flails),
-    capped at ASSAY_BUDGET_PER_LEAD assays."""
-    agent = _build_subagent(
-        defender_dir, logger, agent_id, _finder_instructions(defender_dir), _finder_model()
-    )
-
-    def executor_factory(eid: str, coined: bool) -> Agent:
-        model = _coined_executor_model() if coined else _gather_model()
-        return build_executor_agent(defender_dir, logger, eid, model_name=model)
-
-    register_assay_tool(agent, executor_factory, ASSAY_REQUEST_LIMIT, ASSAY_BUDGET_PER_LEAD)
-    return agent
 
 
 # --- Phase B: per-loop, invlang-based compaction --------------------------
@@ -329,13 +257,6 @@ def build_finder_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
 
 def _compaction_enabled() -> bool:
     return os.environ.get("DEFENDER_COMPACTION", "").strip().lower() in (
-        "1", "on", "true", "yes")
-
-
-def _lean_gather_enabled() -> bool:
-    """DEFENDER_GATHER_LEAN routes the main agent's `gather` dispatch to the lean
-    single-agent path (issue #340) instead of the finder/executor split."""
-    return os.environ.get("DEFENDER_GATHER_LEAN", "").strip().lower() in (
         "1", "on", "true", "yes")
 
 
@@ -425,11 +346,9 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         # request (the recorded usage then reflects the compacted token cost).
         capabilities.append(ProcessHistory(_make_compaction_processor()))
         print("[run_pai] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
-    print(f"[run_pai] finder model: {_finder_model()} | executor model: "
-          f"{_gather_model()} (templated) / {_coined_executor_model()} (coined)",
-          file=sys.stderr)
+    print(f"[run_pai] gather model: {_lean_gather_model()}", file=sys.stderr)
     if os.environ.get("DEFENDER_GATHER_MODEL"):
-        print(f"[run_pai] gather/executor model OVERRIDE: {_gather_model()} "
+        print(f"[run_pai] gather model OVERRIDE: {_gather_model()} "
               "(DEFENDER_GATHER_MODEL)", file=sys.stderr)
     agent = Agent(
         AnthropicModel(model_name),
@@ -440,28 +359,15 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
-    # The gather dispatch tool builds a fresh nested gather agent per lead. The
-    # main→gather dispatch interface is identical either way; only the per-lead
-    # agent shape differs.
-    if _lean_gather_enabled():
-        # Lean single-agent gather (issue #340): one executor-role agent runs
-        # find→execute(ES|QL)→verify; no finder/assay layer.
-        register_gather_tool(
-            agent,
-            lambda agent_id: build_lean_gather_agent(defender_dir, logger, agent_id),
-            GATHER_REQUEST_LIMIT,
-            role="executor", prompt_fn=_gather_prompt,
-        )
-        print("[run_pai] LEAN single-agent gather ENABLED (DEFENDER_GATHER_LEAN)",
-              file=sys.stderr)
-    else:
-        # Finder/executor split: a nested FINDER per lead builds an executor per
-        # measurement (the split lives inside the per-lead agent).
-        register_gather_tool(
-            agent,
-            lambda agent_id: build_finder_agent(defender_dir, logger, agent_id),
-            FINDER_REQUEST_LIMIT,
-        )
+    # The gather dispatch tool builds a fresh nested LEAN gather agent per lead
+    # (#340): one agent runs find→execute(one server-side ES|QL aggregation)→verify
+    # and auto-captures its own adapter calls. The finder/executor split (#339) was
+    # superseded by this before it ever merged.
+    register_gather_tool(
+        agent,
+        lambda agent_id: build_lean_gather_agent(defender_dir, logger, agent_id),
+        GATHER_REQUEST_LIMIT,
+    )
     return agent
 
 

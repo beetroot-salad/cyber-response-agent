@@ -35,14 +35,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `defender-lessons` is read-only corpus tooling (frontmatter grep / tag
 # enumeration); it queries no data source, so it stays a non-adapter and
 # remains allowed in the main loop.
+# `defender-sql` aggregates a payload piped into it on stdin (the tier-2
+# fallback for a source with no native aggregation); it queries no source and
+# is self-sandboxed (no file/network access), so it is a non-adapter too.
 NON_ADAPTER_SHIMS = frozenset(
     {"defender-invlang", "defender-record-query", "defender-record-summary",
-     "defender-data-source-debug", "defender-lessons"}
+     "defender-data-source-debug", "defender-lessons", "defender-sql"}
 )
 
 # A raw adapter-CLI path form (`scripts/tools/<name>_cli.py`), i.e. the shim's
 # underlying script invoked directly rather than via its `defender-*` token.
-# `record_query.py` / `data_source_debug.py` are NOT `_cli.py` and don't match.
+# The `_cli.py` suffix IS the structural marker for an adapter: every
+# non-adapter script deliberately avoids it (`record_query.py`,
+# `data_source_debug.py`, `sql.py`) so it can't be misread as an adapter here.
 # Kept in sync with block_main_loop_raw_access.ADAPTER_CLI_RE.
 ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
 

@@ -51,3 +51,6 @@ FROM .internal.alerts-security.alerts-default-*
   rule fires on a correlation, not a single host, so those rows group under a null
   `host.name`. The `kibana.alert.rule.name` + count is the finding; read the alert
   doc (via the `alerts` subcommand) for per-alert host detail when needed.
+- **Wide `BY` truncates at 1000 rows.** Grouping by `rule, rule_id, severity,
+  host.name` over a busy window can exceed ES|QL's default 1000-row return cap and
+  be silently cut. If `row_count` is 1000, narrow the window or drop a `BY` key.

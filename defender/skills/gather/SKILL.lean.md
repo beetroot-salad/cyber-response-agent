@@ -60,6 +60,13 @@ redirect it**:
 defender-elastic esql '<ES|QL query>' --query-id <id>
 ```
 
+- **Put the whole ES|QL query on ONE line inside the quotes.** The catalog
+  templates print the pipe across several lines for readability — flatten it
+  before you run it: the `|` stage separators stay *inside* the quoted string, but
+  a literal newline in the quoted argument is read as a shell command boundary and
+  the call is **rejected** (`gather may only run a data-source adapter …`). One
+  line, single-quoted, no trailing `\` continuations.
+
 - **Tag every call with `--query-id`** — the `id:` of the template you bound in
   step 2 (e.g. `elastic.sshd-auth-history`), or a coined `elastic.<descriptive-kebab>`
   when none fit. The harness strips this flag (the adapter never sees it) and
@@ -72,33 +79,43 @@ defender-elastic esql '<ES|QL query>' --query-id <id>
   result automatically (queries table + by-ref payload) — you do not wrap it,
   name files, or record anything.
 - The aggregation result — the `{columns, row_count, values}` table — **is your
-  summary**. It is exact (computed over the full match server-side) and small.
-  Report those values.
+  summary**: computed over the full match server-side (the `COUNT`/`SUM`/`MIN`/`MAX`
+  scalars are exact), small — report those values. (A `row_count` of exactly 1000
+  means ES|QL clipped a high-cardinality `BY`; `COUNT_DISTINCT` is approximate —
+  both covered in `failure-modes.md`.)
 - Express the whole measurement *in the query*: counts via `COUNT(*) WHERE ...`,
   distributions via `STATS ... BY ...`, cardinality via `COUNT_DISTINCT`, timing
   via `MIN`/`MAX`/`DATE_TRUNC`. If a dimension needs a field that lives in text
   (e.g. OpenSSH auth method in `message`), derive it in-query (`CASE(message LIKE
   ...)`, `GROK`), not in a post-hoc pass.
+- **Check each bound value against its field's type before you run.** Typed fields
+  (`ip`, `date`, `long`) silently return **zero matches** on a type mismatch —
+  there is no error, just a confidently-wrong `0`. A malformed IP literal, a
+  non-ISO timestamp, or a string where a number is expected yields a fake absence.
+  If a binding can't be shaped to the field's type, the lead is unrunnable — say so
+  and stop, don't report the zero.
+
+If the lead is a **composition** ("was X followed by Y", "who was logged in when
+Z happened") that no single query can answer — especially across two *systems* —
+run each side with its own query and **summarize the join in your return**. Do not
+coin a "bridge" query that pretends the correlation is one measurement.
 
 ### 4. VERIFY — live, stage-on-suspicion
 
 The result is your evidence; an unchecked zero or a null column poisons the
-defender's ANALYZE. Look at what came back:
+defender's ANALYZE. Check the adapter's **exit code first**, then the content:
 
-- **Sane** — `STATS` columns resolved to real values, volume plausible →
-  summarize.
-- **Empty / all-zero** — the `WHERE` matched nothing: a *filtering* mistake or a
-  genuine absence. Re-run the same query with the suspect predicate dropped, or
-  `... | WHERE <one live filter> | LIMIT 1`, to tell "nothing there" from "wrong
-  filter." Report the verified result ("0 accepted, verified: src has 0 events to
-  this host in window; src is live elsewhere").
-- **Null / garbage columns** — a `STATS ... BY <field>` grouped on a wrong or
-  renamed field: read the current field shape with the same query truncated
-  before the aggregation — `FROM ... | WHERE <filters> | LIMIT 10` — fix the
-  field name, re-run.
+- **exit 0, result sane** — `STATS` columns resolved to real values, volume
+  plausible, `row_count` < 1000 → summarize.
+- **anything else** — a non-zero exit (2 / 64 / 1), or an empty / all-zero /
+  null / garbage / `row_count == 1000` result you can't immediately explain →
+  **STOP and Read `{defender_dir}/skills/gather/failure-modes.md`** before your
+  next query, then follow the matching branch. It carries the exit-code branch
+  (including: an exit 2 is an outage you must NOT probe / cred-hunt / re-run), the
+  positive-control tool-fault test, and field-drift recovery.
 
-If one re-query doesn't resolve it, say so plainly and stop (escalate the
-data-source-quirk); don't flail. Never report a raw unchecked zero or a null.
+Never report a raw unchecked zero or a null. The bound is a positive control plus
+one narrowing/shape step; past that, stop and report the quirk plainly.
 
 ### 5. RETURN
 

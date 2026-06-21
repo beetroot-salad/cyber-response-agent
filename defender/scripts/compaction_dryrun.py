@@ -197,7 +197,7 @@ def main() -> int:
         return 0
 
     print(f"compaction dry-run — agent={args.agent!r}, {len(metrics)} model requests")
-    print(f"  actions: " + ", ".join(f"{a}={n}" for a, n in sorted(actions.items())))
+    print("  actions: " + ", ".join(f"{a}={n}" for a, n in sorted(actions.items())))
     print()
     print("  history-payload chars (tokenizer-free, exact):")
     print(f"    full       {total_full:>12,}")
@@ -208,7 +208,7 @@ def main() -> int:
     print(f"  prompt-token estimate (regressed on recorded tokens; "
           f"~{_k} chars/token, system+tools≈{overhead:,} tok):"
           if overhead is not None else
-          f"  prompt-token estimate (insufficient data to calibrate):")
+          "  prompt-token estimate (insufficient data to calibrate):")
     print(f"    recorded total prompt tokens   {total_prompt_tokens:>12,}")
     if total_prompt_tokens and tpc:
         print(f"    estimated tokens dropped       {round(est_dropped_tokens):>12,}   "

@@ -44,3 +44,7 @@ FROM logs-*
 - **`host.ip` is multi-valued and shared.** In this env many hosts report the same
   docker-bridge address in `host.ip`, so a `host.ip` match can return several
   hosts — prefer the `source.ip`/`client.ip` peer evidence for attribution.
+- **Wide `BY` over `logs-*` truncates at 1000 rows.** `BY host.name,
+  data_stream.dataset` across every stream can exceed ES|QL's default 1000-row
+  return cap and be silently cut. If `row_count` is 1000, narrow the `FROM` to the
+  relevant streams or tighten the window before trusting the host list as complete.

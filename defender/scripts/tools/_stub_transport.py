@@ -9,6 +9,11 @@ adapters thin (just verb-to-endpoint mapping + output formatting).
 
 Host-state has a different shape (docker exec → command output, no HTTP)
 and uses host_state_cli.py's own transport, not this module.
+
+This is the established shared module for the tree: `/connect` conforms a
+new adapter to it rather than installing its own seed. The house
+conventions (transport, auth posture, config keys, exit codes) are written
+up in `README.md` in this directory.
 """
 
 from __future__ import annotations

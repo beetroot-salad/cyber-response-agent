@@ -44,3 +44,9 @@ FROM logs-zeek.connection-*
 - **Direction.** `source.bytes` is bytes the source sent (outbound), `destination.bytes`
   is bytes it received. A NAT/proxy hop can collapse the apparent source IP — confirm
   the source is the real origin, not a gateway, before attributing volume.
+- **Wide `BY` truncates at 1000 rows.** `BY destination.ip, destination.port` on a
+  fan-out / scanning source can exceed ES|QL's default 1000-row return cap and be
+  silently cut (the `SORT conns DESC` keeps the top groups, hiding the loss). If
+  `row_count` is 1000, narrow the window/port range or read `dest_ips`/`conns` from
+  the no-`BY` form. Note `COUNT_DISTINCT` is **approximate** (HyperLogLog++), good
+  for fan-out magnitude but not an exact unique count.

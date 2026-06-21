@@ -1,15 +1,29 @@
 #!/usr/bin/env python3
-"""Gather-only harness: dispatch ONE gather lead in isolation (no main loop).
+"""Gather-only harness — a TESTING / EVALUATION tool, NOT part of any production
+run path (nothing in production imports or calls it).
 
-Mirrors the live dispatch exactly — same 40-request cap, same adapter-capture
-hooks, same descriptor catalog + dispatch prompt — via tools._run_gather, the
-seam already factored out "so it's testable without the main model". Used to
-A/B the gather SKILL deterministically on a single lead, off the loop-count
-nondeterminism of a full run.
+It dispatches ONE canned gather lead in isolation — no main agent, no ANALYZE —
+so you can iterate on the gather SKILL / query templates and A/B the model +
+prompt deterministically on a single lead, off the loop-count nondeterminism of a
+full `run_pai` investigation. It mirrors the live dispatch exactly (the same
+`tools._run_gather` seam, the same per-lead request cap, the same
+adapter-capture hooks + descriptor catalog), so what it measures matches
+production gather.
 
+Usage:
     python3 scripts/gather_only.py <run_id> [lead_key]
 
-lead_key selects a canned lead (default: baseline-7d, the one that crashed Haiku).
+- <run_id>    names the run dir at /tmp/defender-runs/<run_id>.
+- [lead_key]  picks a canned lead from LEADS below (default: baseline-7d).
+              Representative A/B cells: `ip-host-baseline` (templated, one-shot)
+              and `process-db1` (coined).
+- Runs the LEAN gather (SKILL.lean.md) on `_lean_gather_model()` (Sonnet);
+  set DEFENDER_GATHER_MODEL to A/B a different model.
+
+Requirements (this is a LIVE, BILLED call against real infrastructure — run it
+deliberately, never in CI): a first-party ANTHROPIC_API_KEY (PydanticAI-engine
+billing) and a reachable data source (the soc-playground Elasticsearch for the
+elastic leads).
 """
 from __future__ import annotations
 import asyncio
@@ -23,7 +37,7 @@ sys.path.insert(0, str(DEFENDER_DIR.parent))
 
 from defender import run as _run  # noqa: E402
 from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.tools import RunDeps, _run_gather, _gather_prompt  # noqa: E402
+from defender.runtime.tools import RunDeps, _run_gather  # noqa: E402
 import defender.run_pai as run_pai  # noqa: E402
 
 # Canned leads taken verbatim from the gsplit-haiku-1 crash run's leads table.
@@ -114,31 +128,17 @@ async def main() -> int:
     deps = RunDeps(run_dir=run_dir, defender_dir=DEFENDER_DIR, run_id=run_id,
                    salt=salt, is_main_session=True)
 
-    # DEFENDER_GATHER_LEAN selects the issue #340 lean single-agent path
-    # (SKILL.lean.md, one ES|QL aggregation, no finder/executor split) over the
-    # split. Same lead dispatch + capture hooks, so the two are A/B-comparable.
-    lean = bool(os.environ.get("DEFENDER_GATHER_LEAN"))
-    if lean:
-        def factory(agent_id: str):
-            return driver.build_lean_gather_agent(DEFENDER_DIR, logger, agent_id)
-        engine, request_limit, run_kwargs = (
-            "LEAN", driver.GATHER_REQUEST_LIMIT,
-            dict(role="executor", prompt_fn=_gather_prompt),
-        )
-    else:
-        def factory(agent_id: str):
-            return driver.build_finder_agent(DEFENDER_DIR, logger, agent_id)
-        engine, request_limit, run_kwargs = (
-            "SPLIT", driver.FINDER_REQUEST_LIMIT, {},
-        )
+    # The lean single-agent gather (#340): SKILL.lean.md, one ES|QL aggregation,
+    # auto-capture. Same lead dispatch + capture hooks as a full run.
+    def factory(agent_id: str):
+        return driver.build_lean_gather_agent(DEFENDER_DIR, logger, agent_id)
 
-    print(f"[gather_only] engine={engine} run_dir={run_dir} "
-          f"gather_model={driver._gather_model()} "
-          f"finder_model={driver._finder_model()}", file=sys.stderr)
+    print(f"[gather_only] engine=LEAN run_dir={run_dir} "
+          f"gather_model={driver._lean_gather_model()}", file=sys.stderr)
     try:
-        out = await _run_gather(deps, factory, request_limit,
+        out = await _run_gather(deps, factory, driver.GATHER_REQUEST_LIMIT,
                                 "l-001", lead["system"], lead["goal"],
-                                lead["what_to_summarize"], **run_kwargs)
+                                lead["what_to_summarize"])
         print("=== GATHER SUMMARY (unwrapped head) ===")
         print(out[:1200])
         print("[gather_only] OK", run_id)

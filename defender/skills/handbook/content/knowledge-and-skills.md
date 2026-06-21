@@ -19,11 +19,11 @@ description looks relevant to the alert. Per-system SKILLs use the
 | `skills/invlang/` | The invlang block surface (grammar) + the author-side CLI (`enum`, `advisory`, `hypothesis-shape`, `hypothesis-vocabulary`) | Main loop, when authoring `investigation.md` |
 | `skills/gather/` | The gather subagent body + per-system query templates under `queries/{system}/` and the raw-payload contract | The gather subagent itself, on dispatch — the main loop does **not** load it |
 | `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its CLI is dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (injected by the system-skill hook) |
+| `skills/connect/` | Maintainer onboarding skill: interview → route (MCP or generated CLI adapter) → scaffold per-system knowledge → test → review branch, one system per run | A maintainer, out-of-band — **not** loaded during an alert run (see §Adding a new system) |
 
-Per-system references currently in the tree include `wazuh`, `host-query`,
-`elastic`, `stub-cmdb`, `stub-iam`, plus the cross-cutting `advisory` and
-`data-source-debug` helpers. The set is environment-dependent — enumerate
-the directory rather than assuming a fixed list.
+The per-system set is environment-dependent — enumerate
+`defender/skills/*/SKILL.md` rather than assuming a fixed list. Alongside
+them sit the cross-cutting `advisory` and `data-source-debug` helpers.
 
 ## Why per-system SKILLs are split
 
@@ -42,17 +42,17 @@ itself. The single source of truth stays the file on disk
 
 ## Adding a new system
 
-1. Create `defender/skills/{system}/SKILL.md` with a `defender-{system}`
-   name and a `description:` that says what the system can and can't answer.
-2. Add a CLI adapter under `defender/scripts/tools/` and allow it in
-   `run-settings.json` permissions.
-3. Add query templates under `defender/skills/gather/queries/{system}/` (or
-   let gather coin measurement ids and the offline lead-author curate
-   `_draft/` skeletons later — see `content/run-artifacts.md`).
+Onboarding a system of record is the **`/connect` skill**'s job
+(`skills/connect/`) — a maintainer runs it to interview, route to an MCP
+server or a generated CLI adapter, scaffold the per-system knowledge, test
+the integration, and open a review branch, one system per invocation. For
+how it works, read that skill (`skills/connect/SKILL.md`, rationale in
+`decisions.md`); the handbook doesn't restate it.
 
-That's the whole onboarding surface — there is no signature catalog,
-permissions-per-signature, or archetype directory to fill in (those are
-`soc-agent/` concepts; see `content/design.md`).
+Adding a system needs no edit to the loop, the gather subagent, or any
+shared file — it's just files dropped into the per-system locations. There
+is no signature catalog, permissions-per-signature, or archetype directory
+to fill in (those are `soc-agent/` concepts; see `content/design.md`).
 
 ## Lessons
 

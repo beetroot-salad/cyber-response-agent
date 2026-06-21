@@ -14,12 +14,17 @@ defender-elastic esql   '<ES|QL pipe>'
 ```
 
 `esql` runs a server-side **ES|QL** aggregation and returns the result table
-(`{columns, row_count, values}`) — the rows ARE the answer, computed exactly over
-the full match, so you never pull docs and reduce them. The whole query (index via
-`FROM`, filter via `WHERE`, window via `@timestamp` comparison, aggregation via
-`STATS`) lives in the pipe; `esql` takes no `--index/--start/--end/--limit`.
-Prefer it for any count / distribution / cardinality / timing dimension; use
-`query` (KQL search) only when you need raw event documents themselves.
+(`{columns, row_count, values}`) — the rows ARE the answer, with the aggregation
+scalars computed over the full match, so you never pull docs and reduce them. The
+whole query (index via `FROM`, filter via `WHERE`, window via `@timestamp`
+comparison, aggregation via `STATS`) lives in the pipe; `esql` takes no
+`--index/--start/--end/--limit`. Pass the **whole pipe on one line** (the `|`
+separators stay inside the quotes; a literal newline ends the shell command and is
+rejected). ES|QL caps the returned grouping rows at **1000** by default, so a wide
+`BY` (high-cardinality grouping) is silently truncated — narrow the `BY` or add an
+explicit `LIMIT`. Prefer `esql` for any count / distribution / cardinality /
+timing dimension; use `query` (KQL search) only when you need raw event
+documents themselves.
 
 **Do not Read `elastic_cli.py` source to discover flags.** This doc
 plus `defender-elastic {subcommand} --help` is the authoritative

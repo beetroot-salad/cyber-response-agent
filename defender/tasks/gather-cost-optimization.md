@@ -231,8 +231,10 @@ remain expensive.
 
 ## Reframed levers (what's left)
 
-**→ Approved forward design: `tasks/gather-finder-executor-spec.md`** (sample-first
-payloads via a non-overridable hard cap + a finder/executor split). **Part A
+**→ Forward design (SUPERSEDED): the finder/executor split** (sample-first
+payloads via a non-overridable hard cap + a finder/executor split) — its spec
+(`tasks/gather-finder-executor-spec.md`) was removed when the split was dropped in
+favour of the lean single-agent ES|QL gather (#340 / #342). **Part A
 (cap) is landed + measured (above): crash-safe and correct, but turn-count-bound,
 so the split is now in progress.** The bullets below are superseded by that spec;
 kept for the reasoning trail.

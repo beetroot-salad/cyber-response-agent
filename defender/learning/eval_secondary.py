@@ -494,6 +494,7 @@ def run_head_oracle_and_judge(
 
     try:
         judge_yaml = loop_mod.invoke_judge(
+            loop_mod.ADVERSARIAL_WIRING,
             head_run_dir,
             actor_story_path,
             projected_path,
