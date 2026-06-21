@@ -1,0 +1,44 @@
+# Duplicate-helper baseline — names defined at module level in >=2
+# in-scope defender/ modules as of the last --update-baseline run.
+# The lint fails only on names NOT listed here (newly-introduced drift).
+# Shrink this list as dups are consolidated; never hand-add to silence a
+# new dup — fix it or add an inline `# lint-dup: ok — <reason>` instead.
+_as_list
+_as_str_set
+_author_to_author
+_by_id
+_commit_message
+_csv_set
+_find_venv_py
+_is_main_session
+_json_safe
+_log
+_now_iso
+_parse_frontmatter
+_partition_pre_author
+_reexec_into_venv
+_rel
+_request
+_result_list
+_run
+_run_batch_inner
+_subscription_env
+acquire_queue_lock
+call_haiku
+capture
+commit_corpus
+corpus_dir_clean
+git_head_sha
+init_git
+invoke_agent
+iter_lessons
+load_observation
+materialize
+parse_verdict
+read_batch
+release_queue_lock
+render_user_prompt
+rotate_queue
+run_batch
+validate_agent_result_partition
+verify_agent_state
