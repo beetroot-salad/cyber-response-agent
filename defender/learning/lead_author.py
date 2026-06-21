@@ -104,6 +104,19 @@ def _lift_threshold() -> int:
 _NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
 
 
+# Systems whose query body is a server-side ES|QL pipe — the whole query is one
+# positional (``params["arg0"]``) with the bindings inlined, not flag/positional
+# scalars. The one place the "this system speaks ES|QL" policy lives, so engine
+# shape (which field is the canonical query, draft frontmatter/fence) is decided
+# from the recorded ``system`` rather than re-split out of ``query_id`` or a
+# literal ``"elastic"`` scattered across call sites.
+_ESQL_SYSTEMS = frozenset({"elastic"})
+
+
+def _is_esql(system: str) -> bool:
+    return system in _ESQL_SYSTEMS
+
+
 def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> str:
     """Render a draft skeleton in the lean/ES|QL shape.
 
@@ -117,7 +130,7 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
     queries table), so a promotion is one keyword-recall pass away, not a
     "fill in the invocation" stub.
     """
-    is_esql = system == "elastic"
+    is_esql = _is_esql(system)
     engine_fm = "\nengine: esql" if is_esql else ""
     fence_lang = "esql" if is_esql else ""
     goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
@@ -202,6 +215,7 @@ class ExecutedLead:
     is_multi_query: bool          # parent lead had >1 query
     entry_index: int              # index into the joined-leads list
     query_id: str
+    system: str                   # adapter system (elastic/cmdb/...), from the queries table
     params: dict[str, Any]
     raw_command: str              # verbatim executed command (the literal query)
     goal_text: str
@@ -226,13 +240,13 @@ def _executed_query(lead: "ExecutedLead") -> str:
     ``arg0`` is just a bare positional *value* (an IP for ``cmdb.hostname-by-ip``
     ``${ip}``, a CR id for ``change-mgmt.get-change`` ``${cr_id}``), not the
     query — so the full ``raw_command`` is the faithful record there. Pick by
-    engine, falling back to the other form when the preferred one is absent.
+    the recorded ``system`` (``_is_esql``), falling back to the other form when
+    the preferred one is absent.
     """
-    system = lead.query_id.split(".", 1)[0] if "." in lead.query_id else ""
     arg0 = (lead.params or {}).get("arg0")
     arg0 = arg0 if isinstance(arg0, str) and arg0.strip() else ""
     raw = lead.raw_command or ""
-    return (arg0 or raw) if system == "elastic" else (raw or arg0)
+    return (arg0 or raw) if _is_esql(lead.system) else (raw or arg0)
 
 
 def extract(run_dir: Path) -> list[ExecutedLead]:
@@ -274,6 +288,7 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     is_multi_query=is_multi,
                     entry_index=entry_idx,
                     query_id=q.query_id,
+                    system=q.system,
                     params=dict(q.params),
                     raw_command=q.raw_command,
                     goal_text=goal,

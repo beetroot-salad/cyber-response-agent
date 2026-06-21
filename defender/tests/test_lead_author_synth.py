@@ -15,10 +15,16 @@ from defender.learning import lead_neighbors
 
 def _lead(
     query_id: str, params: dict | None = None, raw_command: str = "",
+    system: str | None = None,
 ) -> "lead_author.ExecutedLead":
+    # The queries table records ``system`` independently; default it to the
+    # query_id's namespace (how record_query builds the id) so callers only
+    # set it explicitly when exercising a system/id-prefix mismatch.
+    if system is None:
+        system = query_id.split(".", 1)[0] if "." in query_id else ""
     return lead_author.ExecutedLead(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, params=params or {}, raw_command=raw_command,
+        query_id=query_id, system=system, params=params or {}, raw_command=raw_command,
         goal_text="probe the thing",
         what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
         payload_status="ok", payload_digest="2 bytes, 1 line(s)",
@@ -113,6 +119,20 @@ def test_arg0_preferred_over_raw_command_for_query_body(tmp_path, monkeypatch):
     pos_lead = _lead("cmdb.hostname-by-ip", {"arg0": "10.0.0.5"},
                      raw_command="hostname-by-ip 10.0.0.5")
     assert lead_author._executed_query(pos_lead) == "hostname-by-ip 10.0.0.5"
+
+
+def test_executed_query_keys_on_recorded_system_not_id_prefix(tmp_path, monkeypatch):
+    """The engine decision reads the queries-table `system`, not the query_id
+    prefix — a tagged query whose id namespace differs from the adapter that
+    actually ran is still classified by the real engine."""
+    pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
+    # ES|QL adapter (system=elastic) even though the tagged id namespace differs.
+    el = _lead("custom.tagged", {"arg0": pipe}, raw_command=f"esql {pipe!r}", system="elastic")
+    assert lead_author._executed_query(el) == pipe                    # the arg0 pipe
+    # Non-ES|QL adapter (system=cmdb) even though the id prefix says elastic.
+    non = _lead("elastic.weird", {"arg0": "10.0.0.5"},
+                raw_command="hostname-by-ip 10.0.0.5", system="cmdb")
+    assert lead_author._executed_query(non) == "hostname-by-ip 10.0.0.5"
 
 
 def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path, monkeypatch):
