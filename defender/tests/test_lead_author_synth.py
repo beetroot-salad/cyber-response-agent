@@ -100,12 +100,33 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path, monkeypatch)
 
 
 def test_arg0_preferred_over_raw_command_for_query_body(tmp_path, monkeypatch):
-    """_executed_query prefers the bare pipe (arg0) to the full shim invocation."""
+    """_executed_query prefers the bare pipe (arg0) to the full shim invocation
+    for elastic (where arg0 IS the ES|QL query), but uses raw_command for other
+    systems (where arg0 is a bare positional value, not the query)."""
     lead = _lead("elastic.x", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}")
     assert lead_author._executed_query(lead) == _ESQL_PIPE
     # No arg0 (flag-shaped adapter) → fall back to raw_command.
     flag_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, raw_command="host-lookup --host db-1")
     assert lead_author._executed_query(flag_lead) == "host-lookup --host db-1"
+    # Positional NON-elastic adapter (cmdb.hostname-by-ip ${ip}): arg0 is the bare
+    # value '10.0.0.5', not a query — the canonical record is the full raw_command.
+    pos_lead = _lead("cmdb.hostname-by-ip", {"arg0": "10.0.0.5"},
+                     raw_command="hostname-by-ip 10.0.0.5")
+    assert lead_author._executed_query(pos_lead) == "hostname-by-ip 10.0.0.5"
+
+
+def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path, monkeypatch):
+    """A query_id with an empty system (`.verb`) or empty verb (`system.`) must
+    not mint a draft off the `{system}/_draft/{kebab}` surface (the empty-system
+    case would land at the catalog root `_draft/` and brick the post-flight)."""
+    cat = _catalog(tmp_path, monkeypatch)
+    created = lead_author.synthesize_drafts([
+        _lead(".verb", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+        _lead("elastic.", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+    ])
+    assert created == []
+    assert not (cat / "_draft").exists()              # no catalog-root draft dir
+    assert not (cat / "elastic" / "_draft" / ".md").exists()
 
 
 def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path, monkeypatch):

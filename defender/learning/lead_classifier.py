@@ -23,6 +23,7 @@ not capture.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -32,23 +33,65 @@ CompositeKind = str  # "atomic" | "sweep" | "join" | "baseline_shift" | "drill_d
 
 _WINDOW_KEYS = frozenset({"window", "shift", "start", "end", "window_start", "window_end"})
 
+# ISO-8601 timestamp literal as bound into an ES|QL pipe, e.g.
+# "2026-05-25T13:38:00Z" / "...T13:38:00.000Z" / "... 13:38:00+02:00".
+# Under ES|QL the time window is not a named param — the whole query is one
+# positional (``arg0``) with the window inlined as these literals — so the
+# baseline_shift signal (same query shape, different window) is only legible
+# after masking them out of the shape and into the window signature.
+_TS_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+
 
 def _system_of(query_id: str) -> str:
     return query_id.split(".", 1)[0] if "." in query_id else query_id
 
 
+def _shape_and_window(
+    params: dict[str, Any],
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Split params into a window-invariant **shape** key and a **window** signature.
+
+    Two volatile-window sources are normalized out of the shape:
+
+    - **named window params** (``start``/``end``/``window``/...) — the original
+      pre-ES|QL form, removed wholesale;
+    - **inlined ISO timestamp literals** inside a query-string value (``arg0``
+      under ES|QL) — masked to ``<TS>`` in the shape, with the literals carried
+      into the window. Only timestamps are masked: entity bindings (user, src,
+      host) stay in the shape, so two queries that differ by *who* — not *when* —
+      are correctly NOT a baseline_shift.
+
+    Returns ``(shape, window)`` — both sorted tuples of ``(key, value)`` pairs.
+    """
+    shape: list[tuple[str, str]] = []
+    window: list[tuple[str, str]] = []
+    for k, v in params.items():
+        if k in _WINDOW_KEYS:
+            window.append((k, str(v)))
+            continue
+        sv = str(v)
+        if isinstance(v, str) and (found := _TS_RE.findall(v)):
+            shape.append((k, _TS_RE.sub("<TS>", sv)))
+            window.extend((k, ts) for ts in found)
+        else:
+            shape.append((k, sv))
+    return tuple(sorted(shape)), tuple(sorted(window))
+
+
 def _params_without_window(params: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        sorted((k, str(v)) for k, v in params.items() if k not in _WINDOW_KEYS)
-    )
+    """The window-invariant shape key for ``params`` (see ``_shape_and_window``)."""
+    return _shape_and_window(params)[0]
 
 
 def _baseline_shift_ids(entries: list[dict[str, Any]]) -> set[tuple[str, tuple]]:
-    """Collect (query_id, params-modulo-window) keys that appear in ≥2 entries.
+    """Collect (query_id, shape) keys that appear with ≥2 distinct windows.
 
-    Each such key indicates the same template was dispatched twice with
-    different time-window bindings — the textbook ``baseline_shift``
-    signature.
+    Each such key indicates the same query *shape* was dispatched twice over
+    different time windows — the textbook ``baseline_shift`` signature. The
+    window is masked out of the shape both for named params and for ES|QL
+    timestamp literals inlined in the query string (see ``_shape_and_window``).
     """
     seen: dict[tuple[str, tuple], set[tuple]] = defaultdict(set)
     for entry in entries:
@@ -58,16 +101,8 @@ def _baseline_shift_ids(entries: list[dict[str, Any]]) -> set[tuple[str, tuple]]
             qid = q.get("id") or ""
             if not qid:
                 continue
-            params = q.get("params") or {}
-            base = _params_without_window(params)
-            window = tuple(
-                sorted(
-                    (k, str(v))
-                    for k, v in params.items()
-                    if k in _WINDOW_KEYS
-                )
-            )
-            seen[(qid, base)].add(window)
+            shape, window = _shape_and_window(q.get("params") or {})
+            seen[(qid, shape)].add(window)
     return {key for key, windows in seen.items() if len(windows) >= 2}
 
 

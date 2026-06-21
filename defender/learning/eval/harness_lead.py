@@ -130,7 +130,9 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     # Keep the lead-author's mutable queue/lock state out of the repo tree so
     # the post-flight clean-tree check isn't tripped by lock files.
     env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
-    env.setdefault("LEAD_AUTHOR_MODEL", os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6"))
+    # Pin the validated model unless the caller overrode it in the environment
+    # (env already carries any inherited LEAD_AUTHOR_MODEL via the copy above).
+    env.setdefault("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
     return _run(
         [str(venv_py), str(tmp / "defender" / "learning" / "lead_author.py"), str(run_dir)],
         cwd=tmp, env=env, check=False,
@@ -172,9 +174,19 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
     # 3) Did the agent widen the preferred wide template? (informational.)
     widened = expect.get("prefer_widened")
     if widened:
-        diff = _run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], cwd=tmp, check=False)
-        touched = widened in diff.stdout
-        notes.append(f"prefer_widened {'TOUCHED' if touched else 'untouched'}: {widened}")
+        # Only meaningful when the agent actually committed: a no-edit/skip run
+        # leaves HEAD at the baseline, so HEAD~1 doesn't exist (git errors, empty
+        # stdout) and we'd mislabel it "untouched". Gate on a second commit, and
+        # match the path exactly against the name-only lines (not a substring,
+        # which a longer sibling path would spuriously satisfy).
+        count = _run(["git", "rev-list", "--count", "HEAD"], cwd=tmp, check=False)
+        ncommits = int(count.stdout.strip()) if count.stdout.strip().isdigit() else 0
+        if ncommits >= 2:
+            diff = _run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], cwd=tmp, check=False)
+            touched = widened in diff.stdout.split()
+            notes.append(f"prefer_widened {'TOUCHED' if touched else 'untouched'}: {widened}")
+        else:
+            notes.append(f"prefer_widened untouched (no agent commit): {widened}")
 
     return ("PASS" if draft_gone else "WEAK-PASS"), notes
 
@@ -183,7 +195,10 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
             verdict: str, notes: list[str]) -> Path:
     ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = RESULTS_DIR / f"{ts}-{scenario_name}"
-    out.mkdir(parents=True)
+    # exist_ok: re-running the same scenario inside one wall-clock second (the
+    # README invites "re-run for confidence", and a skip run returns sub-second)
+    # collides on the second-resolution timestamp dir — don't lose the result.
+    out.mkdir(parents=True, exist_ok=True)
     (out / "lead_author.stdout").write_text(proc.stdout)
     (out / "lead_author.stderr").write_text(proc.stderr)
     (out / "rc.txt").write_text(str(proc.returncode))

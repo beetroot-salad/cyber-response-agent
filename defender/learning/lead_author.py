@@ -97,10 +97,11 @@ def _lift_threshold() -> int:
 
 
 # Ids gather coins for one-off, no-template probes — never catalog candidates.
-# The bare ``{system}.esql`` / ``{system}.ad-hoc`` verbs are what an *untagged*
-# adapter call collapses to (no ``--query-id``); drafting them would mint a junk
+# An *untagged* adapter call (no ``--query-id``) collapses to ``{system}.{verb}``
+# where ``{verb}`` is the adapter subcommand (elastic exposes ``esql`` / ``query``)
+# or ``ad-hoc`` for a flags-only call; drafting any of those would mint a junk
 # catch-all template, so they are filtered alongside prefix-less ids.
-_NON_CANDIDATE_VERBS = frozenset({"esql", "ad-hoc", "query", "run"})
+_NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
 
 
 def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> str:
@@ -116,8 +117,9 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
     queries table), so a promotion is one keyword-recall pass away, not a
     "fill in the invocation" stub.
     """
-    engine_fm = "\nengine: esql" if system == "elastic" else ""
-    fence_lang = "esql" if system == "elastic" else ""
+    is_esql = system == "elastic"
+    engine_fm = "\nengine: esql" if is_esql else ""
+    fence_lang = "esql" if is_esql else ""
     goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
     return (
         f"---\nid: {query_id}\nstatus: draft{engine_fm}\n---\n\n"
@@ -165,7 +167,12 @@ def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
         if not qid or "." not in qid or qid in by_id:
             continue
         system, verb = qid.split(".", 1)
-        if verb in _NON_CANDIDATE_VERBS:
+        # A malformed id with an empty system (``.verb``) or empty verb
+        # (``system.``) would write off the documented ``{system}/_draft/{kebab}``
+        # surface — ``.verb`` lands a draft at the catalog root ``_draft/`` (which
+        # then trips the dirty-protected preflight and bricks the tick), ``system.``
+        # mints a hidden ``_draft/.md`` dotfile. Drop both alongside reserved verbs.
+        if not system or not verb or verb in _NON_CANDIDATE_VERBS:
             continue
         draft = CATALOG_DIR / system / "_draft" / f"{verb}.md"
         if draft.exists() or draft in created:
@@ -212,17 +219,20 @@ _VALID_PAYLOAD_STATUSES = frozenset(
 def _executed_query(lead: "ExecutedLead") -> str:
     """The literal query that ran, as the canonical record.
 
-    Under ES|QL the whole pipe is a single positional, captured as
-    ``params["arg0"]``; the named bindings (`user`, `src`, window) live
-    *inside* the string, not as separate params — so the executed command,
-    not a ``${param}`` re-render, is what a consumer should read. Prefer
-    ``arg0`` (the bare query body) and fall back to ``raw_command`` (the
-    full shim invocation) for flag-shaped adapters that have no positional.
+    Under ES|QL the whole pipe is a single positional captured as
+    ``params["arg0"]`` — the named bindings (`user`, `src`, window) live
+    *inside* the string, not as separate params — so the ``arg0`` body, not
+    a ``${param}`` re-render, is the canonical query. For other systems
+    ``arg0`` is just a bare positional *value* (an IP for ``cmdb.hostname-by-ip``
+    ``${ip}``, a CR id for ``change-mgmt.get-change`` ``${cr_id}``), not the
+    query — so the full ``raw_command`` is the faithful record there. Pick by
+    engine, falling back to the other form when the preferred one is absent.
     """
+    system = lead.query_id.split(".", 1)[0] if "." in lead.query_id else ""
     arg0 = (lead.params or {}).get("arg0")
-    if isinstance(arg0, str) and arg0.strip():
-        return arg0
-    return lead.raw_command or ""
+    arg0 = arg0 if isinstance(arg0, str) and arg0.strip() else ""
+    raw = lead.raw_command or ""
+    return (arg0 or raw) if system == "elastic" else (raw or arg0)
 
 
 def extract(run_dir: Path) -> list[ExecutedLead]:
