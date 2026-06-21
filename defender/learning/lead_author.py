@@ -96,30 +96,46 @@ def _lift_threshold() -> int:
     return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
 
 
-_DRAFT_SKELETON = """\
----
-id: {query_id}
-status: draft
----
+# Ids gather coins for one-off, no-template probes — never catalog candidates.
+# The bare ``{system}.esql`` / ``{system}.ad-hoc`` verbs are what an *untagged*
+# adapter call collapses to (no ``--query-id``); drafting them would mint a junk
+# catch-all template, so they are filtered alongside prefix-less ids.
+_NON_CANDIDATE_VERBS = frozenset({"esql", "ad-hoc", "query", "run"})
 
-## Goal
 
-`{query_id}` lookup. Auto-drafted from an executed gather query that matched
-no catalog template (bound params: {params}). The defender's lead goal was:
-"{goal}". Refine this Goal for keyword recall, or discard if it duplicates an
-established template.
+def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> str:
+    """Render a draft skeleton in the lean/ES|QL shape.
 
-## What to summarize
+    Built by concatenation rather than ``str.format`` because ``query_body``
+    is the literal executed query and may itself contain ``{`` / ``}`` (ES|QL
+    ``GROK`` patterns use ``%{WORD:field}``), which a format call would choke on.
 
-- (fill in the measurement primitives this lookup surfaces)
-
-## Query
-
-```
-# Fill in the real `{system}` CLI invocation (see defender/skills/{system}/SKILL.md).
-# This query ran with bound params: {param_hint}
-```
-"""
+    Shape mirrors the migrated catalog (``## Goal`` / ``## Query`` / ``## Pitfalls``
+    + narrowing note) — no ``## What to summarize`` / ``## Baseline`` / KQL
+    placeholder. The ``## Query`` body is the *exact* query that ran (from the
+    queries table), so a promotion is one keyword-recall pass away, not a
+    "fill in the invocation" stub.
+    """
+    engine_fm = "\nengine: esql" if system == "elastic" else ""
+    fence_lang = "esql" if system == "elastic" else ""
+    goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
+    return (
+        f"---\nid: {query_id}\nstatus: draft{engine_fm}\n---\n\n"
+        "## Goal\n\n"
+        f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
+        f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
+        "**Before promoting**, check the handoff `neighbors`: if this is a "
+        "*narrowing*\nof an existing wide template (same measurement, fewer "
+        "filter/`BY` axes), discard\nthis draft and widen that template's `## Goal` "
+        "for keyword recall instead of\nminting a sibling. Promote only when this "
+        "names a genuinely new measurement.\n\n"
+        "## Query\n\n"
+        "The exact query that ran (narrow/widen on promote):\n\n"
+        f"```{fence_lang}\n{query_body}\n```\n\n"
+        "## Pitfalls\n\n"
+        "- (fill in any data-source quirk this query exposed — null-heavy field,\n"
+        "  renamed column, case-sensitive match — grounded in the executed payload)\n"
+    )
 
 
 def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
@@ -132,9 +148,15 @@ def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
     deterministically draft it and let the lead-author's existing
     promote/discard/skip machinery curate it. ``query_id`` comes from the
     dispatch contract via the wrapper (``--query-id``); ad-hoc leads
-    (``query_id`` with no ``{system}.`` prefix) are skipped — they are not
-    catalog candidates. Idempotent — skips drafts that already exist on disk
-    or were minted earlier in this call.
+    (``query_id`` with no ``{system}.`` prefix) and bare untagged verbs
+    (``{system}.esql`` / ``{system}.ad-hoc`` — what a call with no ``--query-id``
+    collapses to) are skipped: they are not catalog candidates. Idempotent —
+    skips drafts that already exist on disk or were minted earlier in this call.
+
+    The drafted ``## Query`` is the literal query that ran: under ES|QL the
+    bindings live inside the pipe (``params`` is just ``{"arg0": "<the pipe>"}``),
+    so the captured command — not a ``${param}`` re-render — is the canonical
+    record (see ``_executed_query``).
     """
     by_id = {t.id for t in lead_neighbors.load_catalog()}
     created: list[Path] = []
@@ -143,19 +165,16 @@ def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
         if not qid or "." not in qid or qid in by_id:
             continue
         system, verb = qid.split(".", 1)
+        if verb in _NON_CANDIDATE_VERBS:
+            continue
         draft = CATALOG_DIR / system / "_draft" / f"{verb}.md"
         if draft.exists() or draft in created:
             continue
-        param_hint = " ".join(str(v) for v in (lead.params or {}).values())
+        query_body = _executed_query(lead) or "# (no command captured for this query)"
         try:
             draft.parent.mkdir(parents=True, exist_ok=True)
             draft.write_text(
-                _DRAFT_SKELETON.format(
-                    query_id=qid, system=system, verb=verb,
-                    params=dict(lead.params or {}),
-                    goal=(lead.goal_text or "").replace("\n", " ").strip(),
-                    param_hint=param_hint,
-                )
+                _draft_skeleton(qid, system, lead.goal_text, query_body)
             )
             created.append(draft)
             by_id.add(qid)
@@ -177,6 +196,7 @@ class ExecutedLead:
     entry_index: int              # index into the joined-leads list
     query_id: str
     params: dict[str, Any]
+    raw_command: str              # verbatim executed command (the literal query)
     goal_text: str
     what_to_summarize: tuple[str, ...]
     raw_ref: Path | None          # this query's payload, by-ref
@@ -187,6 +207,22 @@ class ExecutedLead:
 _VALID_PAYLOAD_STATUSES = frozenset(
     {"ok", "empty", "suspect_empty", "error", "partial"}
 )
+
+
+def _executed_query(lead: "ExecutedLead") -> str:
+    """The literal query that ran, as the canonical record.
+
+    Under ES|QL the whole pipe is a single positional, captured as
+    ``params["arg0"]``; the named bindings (`user`, `src`, window) live
+    *inside* the string, not as separate params — so the executed command,
+    not a ``${param}`` re-render, is what a consumer should read. Prefer
+    ``arg0`` (the bare query body) and fall back to ``raw_command`` (the
+    full shim invocation) for flag-shaped adapters that have no positional.
+    """
+    arg0 = (lead.params or {}).get("arg0")
+    if isinstance(arg0, str) and arg0.strip():
+        return arg0
+    return lead.raw_command or ""
 
 
 def extract(run_dir: Path) -> list[ExecutedLead]:
@@ -229,6 +265,7 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     entry_index=entry_idx,
                     query_id=q.query_id,
                     params=dict(q.params),
+                    raw_command=q.raw_command,
                     goal_text=goal,
                     what_to_summarize=wtc,
                     raw_ref=q.raw_ref,
@@ -541,6 +578,7 @@ def build_handoff(
                     "goal_text": lead.goal_text,
                     "what_to_summarize": list(lead.what_to_summarize),
                     "params": dict(lead.params),
+                    "executed_query": _executed_query(lead),
                     "rendered_query": rendered_query,
                     "payload_status": lead.payload_status,
                     "payload_digest": lead.payload_digest,
