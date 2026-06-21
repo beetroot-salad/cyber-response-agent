@@ -32,11 +32,13 @@ in `run-settings.json`). `run.py` puts this dir first on `PATH` and exports
   must be **wrapped** in `defender-record-query` — `hooks/block_unwrapped_adapter_calls.py`
   denies a bare adapter call there so every query lands in the queries table.
   The non-adapter shims (`defender-invlang`, `defender-record-query`,
-  `defender-record-summary`, `defender-data-source-debug`, `defender-lessons`)
-  stay allowed in the main loop. (`defender-record-summary` runs a recorded
-  pure-transform computation — jq/datamash/coreutils — over an already-persisted
-  payload; it queries no source, so it is a non-adapter. See
-  `docs/gather-verifiable-summary.md`.) The adapter vs.
+  `defender-record-summary`, `defender-data-source-debug`, `defender-lessons`,
+  `defender-sql`) stay allowed in the main loop. (`defender-record-summary` runs
+  a recorded pure-transform computation — jq/datamash/coreutils — over an
+  already-persisted payload; it queries no source, so it is a non-adapter. See
+  `docs/gather-verifiable-summary.md`. `defender-sql` runs sandboxed SQL over a
+  payload piped into it — the tier-2 aggregation fallback for a source with no
+  native aggregation; it too queries no source.) The adapter vs.
   non-adapter split is defined once in `hooks/_cmd_segments.py`
   (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`) and is read by
   all three gate hooks (`approve_shim_invocations.py`,

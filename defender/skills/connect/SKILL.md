@@ -226,8 +226,9 @@ Then stop. `/ship` can open the PR.
 
 ### Defaults (right for most connections, overrideable with cause)
 
-- **Native queries pass through unmodified** (or key on an identifier for
-  a lookup source).
+- **Native queries pass through unmodified, and aggregate in the source
+  where the source can** (or key on an identifier for a lookup source).
+  See `cli-adapter.md` -> "Prefer native aggregation."
 - **One system per invocation.** Note any others and suggest re-running.
 - **Generate fresh; don't ship a vendor template library, and don't
   pre-build the query catalog.**

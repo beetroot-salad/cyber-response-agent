@@ -16,6 +16,17 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   translation layer — the agent already knows these languages, and a
   translator is permanent bug surface and lost expressivity.
 
+- **Native, server-side aggregation is the default; download-and-reduce
+  is a fallback.** When a source has a query language that aggregates
+  server-side (ES|QL/SPL/KQL/SQL), the adapter exposes it and returns the
+  computed answer. The gather redesign showed that downloading payloads
+  and reducing them adapter- or agent-side was the dominant cost, and
+  aggregating server-side in a language the model already knows removed
+  it. A filter-only source falls back to native-filter passthrough plus
+  `defender-sql` (sandboxed SQL the model drives) over the `--raw` output;
+  we don't write a bespoke reducer. The ladder is in `cli-adapter.md`
+  ("Prefer native aggregation").
+
 - **The CLI conforms to the gather subagent, not the reverse.** The
   gather subagent (Haiku) is the adapter's client. On any cosmetic choice
   — flag names, verb names, ordering — the adapter matches what a

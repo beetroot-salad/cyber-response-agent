@@ -65,12 +65,51 @@ its parts.
 - **`--raw`.** `print_raw(system, endpoint, args, result)` emits the
   stable JSON envelope the gather capture persists by-ref. Keep the
   envelope stable across adapters — drift breaks replay.
-- **Native query pass-through.** A query source takes its native language
-  (Lucene/KQL/SPL/SQL) unmodified; a lookup source keys on an identifier.
-  No translation, no field renaming.
+- **Native query pass-through, native aggregation first.** A query source
+  takes its native language unmodified; a lookup source keys on an
+  identifier. No translation, no field renaming. When the source can
+  aggregate server-side, expose *that* interface — see "Prefer native
+  aggregation" below.
 
 What you write: the verbs and the **transport** (the `_request` body in
 the example). That's the part that legitimately differs per system.
+
+## Prefer native aggregation
+
+Before choosing verbs, place the source on this ladder — it decides the
+adapter's shape:
+
+1. **Native aggregating query language** (ES|QL, SPL, KQL, SQL) — expose
+   it and let the model write it. The aggregation runs in the source,
+   exact; the adapter returns the answer, not a payload. This is the
+   default for any source rich enough to support it. Exemplar:
+   `elastic_cli.py esql` (`POST /_query` -> `{columns, row_count, values}`)
+   — not a Lucene filter that returns documents.
+2. **Filter-only source** — expose the native filter passthrough and
+   return the rows; the model aggregates them downstream with
+   `defender-sql` over the `--raw` output, which keeps it in SQL — a
+   language it knows. `defender-sql` exposes the piped payload as a table
+   named `data` (`read_json_auto` inference, so structs/lists work) and
+   runs the SQL in a sealed sandbox (no file/network access):
+
+   ```bash
+   defender-{system} query '<native filter>' --raw \
+     | defender-sql "SELECT h.user AS user, count(*) c \
+         FROM (SELECT unnest(result.hits) h FROM data) \
+         GROUP BY user ORDER BY c DESC"
+   ```
+
+   This downloads before it reduces, so it's the fallback, not the goal —
+   reach for it only when the source genuinely can't aggregate. When a
+   source lands here, record the concrete `defender-sql` recipe for *its*
+   row shape (the path into the `--raw` envelope, the columns) in that
+   system's `execution.md`, where gather reads it at dispatch — not in the
+   credential-free `SKILL.md`.
+3. **No query language** (pure REST / lookup) — key on an identifier and
+   return the record.
+
+A hand-rolled filter DSL or an adapter-side reducer is the anti-pattern
+the gather redesign removed — never the recommended shape.
 
 ## Credentials
 

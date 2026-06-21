@@ -38,6 +38,12 @@ This file covers the rest — the calls a script can't make.
       teaching Haiku your aesthetics.
 - [ ] **Native query passes through unmodified** (or the source keys on an
       identifier) — no translation, no field renaming.
+- [ ] **Aggregation happens in the source where it can.** If the source
+      has a query language that aggregates server-side, the adapter
+      exposes it and returns the answer — not a payload the agent must
+      reduce. The download-and-reduce fallback (native filter +
+      `defender-sql`, recipe in `execution.md`) was used only because the
+      source can't aggregate.
 - [ ] **The scaffold is lean, not a catalog.** A couple of seed templates
       you're sure of, not a speculative set mined from API docs.
 - [ ] **Credential boundary held by eye, too.** No tokens, passwords, or
