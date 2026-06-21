@@ -35,7 +35,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
         "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
         "payload_digest": "847 events; 12 distinct user.name; ...",
         "result_refs": ["gather_raw/l-001/0.json"],
-        "composite_kind": "atomic"          // atomic|sweep|join|baseline_shift|drill_down
+        "composite_kind": "atomic"          // atomic|sweep|join|baseline_shift
       }
     ]
   }
@@ -72,7 +72,7 @@ Process the handoffs **in order**. For each, read `executed_template_path` plus 
 - **Union of `goal_text` + `executed_query`** — does `## Goal` cover the keywords a future analyst would type for the measurement this run actually ran?
 - **Narrowing check (the load-bearing one)** — is `executed_query` a *subset* of a high-scoring neighbor's `## Query` (same index, same core aggregation, fewer filters / `BY` keys)? If so this is a narrowing, not a new capability — fold toward the wide neighbor (see below), don't keep a sibling.
 - **`payload_status` distribution** — are there `error` or `suspect_empty` invocations? (Strongest fold signal — a quirk for `## Pitfalls`.)
-- **`composite_kind` distribution** — was this template used in a `baseline_shift` pattern? That means the *same wide template* ran over two windows — evidence it's already serving as a capability, not that you need a "baseline" sibling.
+- **`composite_kind` distribution** — `baseline_shift` (the *same wide template* run over two windows), `sweep` (one axis swept across values), and `join` (co-dispatched with a sibling) all show the template already serving inside a multi-query pattern: evidence it's a wide capability, not a cue to mint a per-pattern sibling. `atomic` is the single-shot case.
 
 Then pick one action.
 
