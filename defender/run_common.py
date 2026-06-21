@@ -26,7 +26,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 # (the learning modules are imported lazily below); see tests/conftest.py.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize_run.py"
+VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
 

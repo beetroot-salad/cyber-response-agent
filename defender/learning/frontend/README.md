@@ -42,7 +42,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
   generically without knowing any corpus's schema. A real HTTP api could
   serve this same contract to the identical frontend.
 - **`build.py`** + its inline template is the view. It reuses the run
-  visualizer's visual language (`scripts/visualize_run.py` CSS tokens) so
+  visualizer's visual language (`scripts/visualize/visualize_run.py` CSS tokens) so
   the page matches the transcript/runtime views: defender=blue,
   actor=red, environment=amber. Group order/identity come from the
   contract, so adding a corpus is a `serialize.GROUPS` edit alone.

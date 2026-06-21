@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover — yaml is in defender deps
     yaml = None  # type: ignore[assignment]
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The two-table read/join surface lives in defender/learning/ — reached via the
 # `defender.learning` namespace package (callers put the repo root on sys.path).

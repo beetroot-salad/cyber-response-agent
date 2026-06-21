@@ -578,7 +578,7 @@ def _render_transcript(run_dir: Path) -> None:
     process — no per-run interpreter spawn, and a render error surfaces as a
     catchable exception. Any failure propagates to ``learn_drain``, which logs it
     and drains on (the render is best-effort, never fatal)."""
-    from defender.scripts.visualize_run import render_and_mirror
+    from defender.scripts.visualize.visualize_run import render_and_mirror
 
     render_and_mirror(run_dir)
 

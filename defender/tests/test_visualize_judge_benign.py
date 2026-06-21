@@ -11,9 +11,10 @@ import importlib.util
 import sys
 from pathlib import Path
 
-_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-# visualize_judge does sibling imports (`from visualize_primitives import ...`),
-# so the scripts dir must be importable.
+_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts" / "visualize"
+# visualize_judge imports siblings via the `defender.scripts.visualize.*`
+# namespace, resolved by the repo root on sys.path (pytest pythonpath); keep
+# the package dir importable too for the by-path module loads below.
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
