@@ -707,15 +707,6 @@ _ALLOWLIST = (
 )
 
 
-def _subscription_env() -> dict[str, str]:
-    """Env for the ``claude -p`` lead-author: strip ``ANTHROPIC_API_KEY`` so the
-    call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run.py)."""
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
-    return env
-
-
 def invoke_agent(
     run_dir: Path,
     handoffs: list[dict],
@@ -749,7 +740,7 @@ def invoke_agent(
             capture_output=True,
             text=True,
             timeout=LEAD_AUTHOR_TIMEOUT,
-            env=_subscription_env(),
+            env=_loop_config.subscription_env(),
         )
     except subprocess.TimeoutExpired as e:
         with RUN_LOG_FILE.open("a") as f:

@@ -28,6 +28,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+# Put the workspace root on sys.path so `defender.*` namespace imports
+# resolve whether this file is imported or run directly (it has a __main__
+# block — the author drives it as a `claude -p` Bash subprocess).
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from defender.learning._loop_config import subscription_env  # noqa: E402
+
 PENDING_FILE = HERE / "_pending" / "actor_observations.jsonl"
 PROMPT_PATH = HERE / "verify_forward_actor.md"
 
@@ -73,15 +80,6 @@ def render_user_prompt(lesson_text: str, observation_text: str, story_text: str)
     )
 
 
-def _subscription_env() -> dict[str, str]:
-    """Env for the ``claude -p`` verifier: strip ``ANTHROPIC_API_KEY`` so the
-    call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run.py)."""
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
-    return env
-
-
 def call_haiku(user_prompt: str) -> str:
     cmd = [
         "claude",
@@ -97,7 +95,7 @@ def call_haiku(user_prompt: str) -> str:
         capture_output=True,
         text=True,
         timeout=VERIFIER_TIMEOUT,
-        env=_subscription_env(),
+        env=subscription_env(),
     )
     if proc.returncode != 0:
         raise SystemExit(
