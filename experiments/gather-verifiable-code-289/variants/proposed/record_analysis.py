@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gather ANALYSIS capture wrapper (prototype, #289).
 
-Sibling of ``scripts/tools/record_query.py`` for the *analysis* step: where
+Sibling of ``scripts/gather_tools/record_query.py`` for the *analysis* step: where
 record-query captures an adapter call against a live source, record-analysis
 captures a deterministic computation over an **already-persisted, read-only**
 payload. The wrapper runs the inner snippet (jq for the MVP; ``python3`` later),

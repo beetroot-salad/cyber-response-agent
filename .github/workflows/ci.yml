@@ -119,21 +119,21 @@ jobs:
         run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py"
 
       # Defender hygiene + discipline lints (soft — reported, not enforced).
-      # Each script is independently inspectable under defender/scripts/lint_*.py;
+      # Each script is independently inspectable under scripts/lint/lint_*.py;
       # source PRs that prompted each check are cited in the module docstrings.
       - name: Fetch base ref (for stale-ref diff)
         run: git fetch origin main:refs/remotes/origin/main --depth=50 || true
 
       - name: Hygiene lint (paths, interpreter, hook matchers)
-        run: python defender/scripts/lint_ci_hygiene.py || true
+        run: python scripts/lint/lint_ci_hygiene.py || true
 
       - name: Shippable-surface lint (env-agnostic discipline)
-        run: python defender/scripts/lint_shippable_surface.py || true
+        run: python scripts/lint/lint_shippable_surface.py || true
 
       - name: Ground-truth-leak scan
-        run: python defender/scripts/lint_ground_truth_leak.py || true
+        run: python scripts/lint/lint_ground_truth_leak.py || true
 
       - name: Stale-reference scan (vs origin/main)
         env:
           STALE_REF_BASE: origin/main
-        run: python defender/scripts/lint_stale_refs.py || true
+        run: python scripts/lint/lint_stale_refs.py || true

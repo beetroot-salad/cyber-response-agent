@@ -13,7 +13,7 @@ identifier, since `{system}.{template-name}` is the protocol surface.
 This lint surfaces references so they can be triaged — suppress
 intentional ones with `# lint-shippable: ok — <reason>` on the line.
 
-Run from repo root:  python defender/scripts/lint_shippable_surface.py
+Run from repo root:  python scripts/lint/lint_shippable_surface.py
 """
 from __future__ import annotations
 
@@ -55,10 +55,8 @@ EXCLUDED_FILES = {
     "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",
     "defender/pyproject.toml",         # may name vendor-specific deps
-    "defender/scripts/lint_shippable_surface.py",  # self
-    "defender/scripts/lint_ci_hygiene.py",
-    "defender/scripts/lint_ground_truth_leak.py",
-    "defender/scripts/lint_stale_refs.py",
+    # The lint scripts themselves live at repo-root scripts/lint/, outside the
+    # scanned defender/ surface, so they need no exclusion here.
 }
 
 # Suffixes considered text.
