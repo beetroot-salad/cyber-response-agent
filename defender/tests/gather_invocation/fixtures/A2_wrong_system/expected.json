@@ -1,5 +1,0 @@
-{
-  "wrapper_invoked": false,
-  "wrapper_call_count": 0,
-  "rationale": "Dispatch says system=cmdb but the lead asks for auth events with count + source IPs + outcome — clearly an event-store lead. The injected cmdb SKILL description names cmdb as the policy/asset view, not an event store, and explicitly redirects event leads to elastic. Gather should refuse the dispatch as 'unrunnable: wrong system' (or re-route, but not silently run cmdb queries). Wrapper does not fire — this is upstream of §3.5."
-}

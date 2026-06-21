@@ -1,5 +1,0 @@
-{
-  "wrapper_invoked": true,
-  "wrapper_call_count": 1,
-  "rationale": "`source.host` is declared in what_to_summarize but the nginx access log payload does not carry that field — nginx access logs index source.ip / source.address only, not a resolved hostname. §3.5's widened trigger covers absent declared fields, so the wrapper must fire to deposit the gotcha ('nginx access logs don't resolve source host'). Other declared fields are concrete."
-}
