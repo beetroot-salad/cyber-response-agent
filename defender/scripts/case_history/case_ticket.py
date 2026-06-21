@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from defender._frontmatter import FrontmatterError, parse_frontmatter
+
 # Mirrors defender.learning._loop_config.DISPOSITION_ENUM. Defined locally so the
 # write path carries no `defender.learning` import (the runtime/learning decoupling
 # goal of #317); test_case_ticket asserts the two stay in sync.
@@ -137,24 +139,12 @@ def _ctx(**kw: str) -> dict[str, str]:
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Return (frontmatter mapping, body). Mirrors _loop_validate._parse_frontmatter
-    but also hands back the body paragraph and stays out of defender.learning."""
-    if not text.startswith("---\n"):
-        raise CaseTicketError("report.md missing leading '---' frontmatter fence")
-    end = text.find("\n---", 4)
-    if end == -1:
-        raise CaseTicketError("report.md missing closing '---' frontmatter fence")
-    import yaml
-
+    """Return (frontmatter mapping, body), converting the shared parser's
+    FrontmatterError to this layer's CaseTicketError."""
     try:
-        fm = yaml.safe_load(text[4:end])
-    except yaml.YAMLError as e:
-        raise CaseTicketError(f"report.md frontmatter is not valid YAML: {e}") from e
-    if not isinstance(fm, dict):
-        raise CaseTicketError("report.md frontmatter is not a YAML mapping")
-    nl = text.find("\n", end + 1)
-    body = text[nl + 1:].strip() if nl != -1 else ""
-    return fm, body
+        return parse_frontmatter(text)
+    except FrontmatterError as e:
+        raise CaseTicketError(f"report.md {e}") from e
 
 
 def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:

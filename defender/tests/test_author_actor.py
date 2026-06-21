@@ -552,12 +552,18 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
             "source_observation_ids": ["r0/0"],
         },
     )
-    script = Path(__file__).resolve().parents[1] / "scripts" / "lessons" / "lessons_actor_index.py"
+    defender_src = Path(__file__).resolve().parents[1]
+    script = defender_src / "scripts" / "lessons" / "lessons_actor_index.py"
     # Mirror the real scripts/lessons/ depth so the script's REPO_ROOT
     # (parents[3]) resolves to this fake repo, not its parent.
     fake_scripts = ctx["repo"] / "defender" / "scripts" / "lessons"
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
+    # The script imports defender._frontmatter (resolved via its sys.path
+    # bootstrap), so mirror that module into the fake repo too.
+    (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
+        (defender_src / "_frontmatter.py").read_text()
+    )
 
     def _run(extra: list[str]) -> str:
         proc = subprocess.run(

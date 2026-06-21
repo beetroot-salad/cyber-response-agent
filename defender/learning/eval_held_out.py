@@ -24,6 +24,12 @@ from pathlib import Path
 
 import yaml
 
+# Put the workspace root on sys.path so the `defender.*` namespace import below
+# resolves whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._frontmatter import parse_frontmatter_or_none
 
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
@@ -32,17 +38,7 @@ def parse_frontmatter(report_path: Path) -> dict | None:
     """Return the YAML frontmatter as a dict, or None if unparseable/missing."""
     if not report_path.is_file():
         return None
-    text = report_path.read_text()
-    if not text.startswith("---"):
-        return None
-    end = text.find("\n---", 3)
-    if end == -1:
-        return None
-    try:
-        doc = yaml.safe_load(text[3:end])
-    except yaml.YAMLError:
-        return None
-    return doc if isinstance(doc, dict) else None
+    return parse_frontmatter_or_none(report_path.read_text())
 
 
 def predicted_disposition(run_dir: Path) -> str | None:

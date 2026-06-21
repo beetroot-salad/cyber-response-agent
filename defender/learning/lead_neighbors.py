@@ -26,6 +26,12 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+# Put the workspace root on sys.path so the `defender.*` namespace import below
+# resolves whether this file is imported or run directly (see tests/conftest.py).
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._frontmatter import FrontmatterError, parse_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CATALOG_ROOT = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
@@ -37,7 +43,6 @@ PLUMBING_TOKENS = frozenset(
 
 
 _SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
-_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -54,20 +59,6 @@ class Template:
     query_variants: tuple[frozenset[str], ...]
     cli: str
     status: str  # "established" | "draft"
-
-
-def _parse_frontmatter(text: str) -> dict[str, str]:
-    m = _FRONTMATTER_RE.match(text)
-    if not m:
-        return {}
-    out: dict[str, str] = {}
-    for line in m.group(1).splitlines():
-        line = line.strip()
-        if not line or ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        out[key.strip()] = value.strip()
-    return out
 
 
 def _sections(body: str) -> dict[str, str]:
@@ -161,16 +152,14 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
         if "tests" in path.parts:
             continue
         text = path.read_text()
-        fm = _parse_frontmatter(text)
+        try:
+            fm, body = parse_frontmatter(text)
+        except FrontmatterError:
+            fm, body = {}, text
         tid = fm.get("id")
         if not tid:
             continue
         status = fm.get("status") or "established"
-        body = text
-        if body.startswith("---\n"):
-            end = body.find("\n---", 4)
-            if end != -1:
-                body = body[end + 4:].lstrip("\n")
         sections = _sections(body)
         goal = sections.get("Goal", "")
         query = sections.get("Query", "")
