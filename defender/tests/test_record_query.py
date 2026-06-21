@@ -1,4 +1,4 @@
-"""Tests for the gather capture wrapper (defender/scripts/tools/record_query.py).
+"""Tests for the gather capture wrapper (defender/scripts/gather_tools/record_query.py).
 
 Pins the deterministic-capture contract: query_id comes verbatim from the
 dispatch (`--query-id`, the agent's catalog binding) and `system` is taken from
@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-_RQ_PATH = Path(__file__).resolve().parents[1] / "scripts" / "tools" / "record_query.py"
+_RQ_PATH = Path(__file__).resolve().parents[1] / "scripts" / "gather_tools" / "record_query.py"
 _spec = importlib.util.spec_from_file_location("record_query", _RQ_PATH)
 ge = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ge)

@@ -32,7 +32,7 @@ _id: "${event_id}"
 ## CLI invocation
 
 ```bash
-python3 {defender_dir}/scripts/tools/elastic_cli.py query \
+python3 {defender_dir}/scripts/adapters/elastic_cli.py query \
   '_id: "${event_id}"' \
   --index 'logs-falco.alerts-*' \
   --raw

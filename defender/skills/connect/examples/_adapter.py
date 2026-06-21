@@ -1,6 +1,6 @@
 """Shared support for defender data-source adapter CLIs.
 
-`/connect` copies this file to `defender/scripts/tools/_adapter.py` the
+`/connect` copies this file to `defender/scripts/adapters/_adapter.py` the
 first time it onboards a system, and every generated `{system}_cli.py`
 imports it. It owns the three things every adapter does identically —
 argument parsing, non-secret config loading, and the exit codes — and
@@ -61,7 +61,7 @@ def die(code: int, message: str) -> NoReturn:
 def _defender_dir() -> Path:
     """Resolve the defender root. `run.py` exports DEFENDER_DIR; outside
     that, fall back to this file's location
-    (`<defender>/scripts/tools/_adapter.py`)."""
+    (`<defender>/scripts/adapters/_adapter.py`)."""
     env = os.environ.get("DEFENDER_DIR")
     if env:
         return Path(env)

@@ -8,4 +8,4 @@
 # See defender/bin/README.md.
 PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3
-exec "$PY" "${DEFENDER_DIR}/scripts/tools/sql.py" "$@"
+exec "$PY" "${DEFENDER_DIR}/scripts/gather_tools/sql.py" "$@"

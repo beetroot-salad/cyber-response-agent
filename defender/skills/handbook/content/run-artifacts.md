@@ -44,12 +44,12 @@ out of git and the SIEM CLIs have writable scratch space.
   `malicious`); schema lives in `defender/SKILL.md` §REPORT.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
-  run by its own generator (`scripts/tools/record_query.py` and
+  run by its own generator (`scripts/gather_tools/record_query.py` and
   `hooks/record_lead.py`). There is no post-run projection. The single
   read/join surface is `defender/learning/lead_repository.py`. A run that ran no
   queries has neither table — a monitor case, not a break.
 - **`gather_raw/{lead_id}/{seq}.json`** — raw query payload per executed query,
-  written by-ref by the capture wrapper (`scripts/tools/record_query.py`). Each
+  written by-ref by the capture wrapper (`scripts/gather_tools/record_query.py`). Each
   queries-table row carries `payload_status` (`ok` | `empty` | `error`) and a
   ≤200-char `payload_digest` so loud failures reach the offline lead-author
   without forcing payload inspection. The agent works from gather's summary and

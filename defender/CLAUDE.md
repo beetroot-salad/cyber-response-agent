@@ -257,7 +257,7 @@ Contracts:
   no queries has neither table — a monitor case, not a break.
 - **`gather_raw/{lead_id}/{seq}.json`** — raw query payload per executed
   query, written by-ref by the gather capture wrapper
-  (`scripts/tools/record_query.py`). The agent works from gather's
+  (`scripts/gather_tools/record_query.py`). The agent works from gather's
   summary and Reads raw on demand if the summary is too thin.
 
 ## Two-table schema
@@ -271,7 +271,7 @@ re-parse the artifacts.
 | Table | Generator (live) | Key | Carries |
 |---|---|---|---|
 | **leads** | `record_lead.claim_lead` (called in `tools.py`) → `gather_raw/{lead_id}.lead.json` | `lead_id` (the `:L` row id) | `goal`, `what_to_summarize` |
-| **queries** | `scripts/tools/record_query.py` → `executed_queries.jsonl` | `(lead_id, seq)`, FK `lead_id` | `system, verb, query_id, params, raw_command, payload_path, exit_code, payload_status, payload_digest` |
+| **queries** | `scripts/gather_tools/record_query.py` → `executed_queries.jsonl` | `(lead_id, seq)`, FK `lead_id` | `system, verb, query_id, params, raw_command, payload_path, exit_code, payload_status, payload_digest` |
 
 Field contracts:
 

@@ -51,7 +51,7 @@ def test_adapter_cli_bash_is_annotated(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
     out = _run(mod, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/tools/wazuh_cli.py search ..."},
+        "tool_input": {"command": "python3 defender/scripts/adapters/wazuh_cli.py search ..."},
     }, capsys)
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "[UNTRUSTED-cafe1234]" in ctx

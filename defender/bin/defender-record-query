@@ -4,4 +4,4 @@
 # regardless of cwd, venv path, or compound wrapping. See defender/bin/README.md.
 PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3
-exec "$PY" "${DEFENDER_DIR}/scripts/tools/record_query.py" "$@"
+exec "$PY" "${DEFENDER_DIR}/scripts/gather_tools/record_query.py" "$@"

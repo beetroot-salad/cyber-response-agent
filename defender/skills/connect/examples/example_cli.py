@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reference adapter for a generic HTTP read source — the shape `/connect`
-copies into `defender/scripts/tools/{system}_cli.py`.
+copies into `defender/scripts/adapters/{system}_cli.py`.
 
 Pick the query shape before the verbs. Three tiers, best first:
 

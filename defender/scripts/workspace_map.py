@@ -91,9 +91,9 @@ def workspace_map(run_dir: Path) -> str:
     lines.append("")
 
     # Adapter CLIs
-    tools_dir = DEFENDER_DIR / "scripts" / "tools"
-    lines.append(f"## Adapter CLIs — `{_rel(tools_dir)}/`")
-    clis = _list_dir(tools_dir, suffix="_cli.py")
+    adapters_dir = DEFENDER_DIR / "scripts" / "adapters"
+    lines.append(f"## Adapter CLIs — `{_rel(adapters_dir)}/`")
+    clis = _list_dir(adapters_dir, suffix="_cli.py")
     if clis:
         for name in clis:
             lines.append(f"- {name}  (run with `--help`; do not Read the source)")

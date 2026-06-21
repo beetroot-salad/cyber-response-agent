@@ -36,7 +36,7 @@ pytestmark = [
 
 def _build_sandbox(tmp_path: Path, fixture: str) -> tuple[Path, Path, dict, Path]:
     """A defender sandbox whose adapters are the test stubs: bin/ shims (resolved
-    by run_env's PATH) exec `$DEFENDER_DIR/scripts/tools/<sys>_cli.py`, which here
+    by run_env's PATH) exec `$DEFENDER_DIR/scripts/adapters/<sys>_cli.py`, which here
     are the stub CLIs reading STUB_*_PAYLOAD. Mirrors the retained gather_invocation
     fixtures/stubs, plus bin/ (the in-process run_env points PATH at $DEFENDER_DIR/bin)."""
     fx = _GI / "fixtures" / fixture
@@ -45,7 +45,7 @@ def _build_sandbox(tmp_path: Path, fixture: str) -> tuple[Path, Path, dict, Path
     sb = tmp_path / "sandbox"
     (sb / "skills" / "gather").mkdir(parents=True)
     (sb / "skills" / system).mkdir(parents=True)
-    (sb / "scripts" / "tools").mkdir(parents=True)
+    (sb / "scripts" / "adapters").mkdir(parents=True)
     (sb / "bin").mkdir()
     # Copy the gather skill surface (SKILL.md — production — plus
     # failure-modes.md and any on-demand sub-files) so the gather agent resolves
@@ -54,7 +54,7 @@ def _build_sandbox(tmp_path: Path, fixture: str) -> tuple[Path, Path, dict, Path
         shutil.copy(md, sb / "skills" / "gather" / md.name)
     shutil.copy(fx / "system_skill.md", sb / "skills" / system / "SKILL.md")
     for stub in (_GI / "stubs").glob("*.py"):
-        d = sb / "scripts" / "tools" / stub.name
+        d = sb / "scripts" / "adapters" / stub.name
         shutil.copy(stub, d)
         d.chmod(0o755)
     for shim in (_DEFENDER / "bin").glob("defender-*"):

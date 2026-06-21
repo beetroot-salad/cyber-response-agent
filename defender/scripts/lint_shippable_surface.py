@@ -46,8 +46,8 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.
     "defender/docs/",
-    # Per-vendor adapter CLIs live under scripts/tools/ — by design vendor-named.
-    "defender/scripts/tools/",
+    # Per-vendor adapter CLIs live under scripts/adapters/ — by design vendor-named.
+    "defender/scripts/adapters/",
 )
 
 EXCLUDED_FILES = {

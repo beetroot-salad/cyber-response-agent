@@ -66,7 +66,7 @@ For the host-state adapter, the same primitive is the entire transport:
 
 ## Adapter CLI shape — mirror `elastic_cli.py`
 
-Each adapter is `defender/scripts/tools/{system}_cli.py`. Conventions
+Each adapter is `defender/scripts/adapters/{system}_cli.py`. Conventions
 that need to match `elastic_cli.py`:
 
 - `argparse` with one subcommand per query verb plus `health-check`.
@@ -120,7 +120,7 @@ adapter.
 
 The in-process gate (`runtime/permission.py`) recognizes adapters by
 convention: a `defender-<system>` shim token, or a raw
-`scripts/tools/<name>_cli.py` path (the `ADAPTER_CLI_RE` in
+`scripts/adapters/<name>_cli.py` path (the `ADAPTER_CLI_RE` in
 `hooks/_cmd_segments.py`). A new adapter that follows the shim + `*_cli.py`
 naming auto-gates with no per-CLI permission entry — the gather subagent may
 run it standalone (captured transparently), and the main loop is clamped out.
@@ -142,7 +142,7 @@ SKILL handoff context). The audit surface is:
   `--raw` shape for this to be useful — drift breaks replay.
 
 If we ever add per-call audit, the natural shape is a PreToolUse hook
-on `Bash` matching `*/defender/scripts/tools/*` that appends to a
+on `Bash` matching `*/defender/scripts/adapters/*` that appends to a
 `tool_audit.jsonl`. Not in scope for this batch.
 
 ## Per-system SKILL `gaps` to declare upfront

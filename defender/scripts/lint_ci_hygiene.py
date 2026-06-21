@@ -65,7 +65,7 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/host-query/",
     "defender/skills/gather/queries/stub-cmdb/",
     "defender/skills/gather/queries/stub-iam/",
-    "defender/scripts/tools/",                         # per-vendor adapter CLIs
+    "defender/scripts/adapters/",                         # per-vendor adapter CLIs
 )
 
 TEXT_SUFFIXES = {".py", ".md", ".json", ".sh", ".yaml", ".yml", ".toml"}

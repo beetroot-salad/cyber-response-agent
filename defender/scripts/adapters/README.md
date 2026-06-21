@@ -1,4 +1,4 @@
-# `scripts/tools/` — data-source adapters
+# `scripts/adapters/` — data-source adapters
 
 Each connected system has a `{system}_cli.py` adapter here, paired with a
 `defender-{system}` shim in `../bin/`. The gather subagent only ever calls

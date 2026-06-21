@@ -101,7 +101,7 @@ jobs:
         run: defender/.venv/bin/radon raw defender -s || true
 
       # `**/*_cli.py` excludes the per-system data-source adapter shims
-      # (scripts/tools/*_cli.py + their test stubs): they share argparse/CLI
+      # (scripts/adapters/*_cli.py + their test stubs): they share argparse/CLI
       # scaffolding by design, so their similarity is accepted boilerplate, not
       # the logic duplication this detector is meant to surface.
       - name: jscpd (copy-paste detection — all formats, soft report)

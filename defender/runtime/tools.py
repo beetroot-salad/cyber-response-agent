@@ -31,7 +31,7 @@ from . import permission
 from defender.hooks.tag_tool_results import wrap as _wrap
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
-from defender.scripts.tools.record_query import (
+from defender.scripts.gather_tools.record_query import (
     capture as _capture,
     derive_system as _derive_system,
     LEAD_ID_RE as _LEAD_ID_RE,

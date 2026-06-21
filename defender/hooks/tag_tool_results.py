@@ -47,7 +47,7 @@ from defender.hooks._run_dir import read_meta_salt
 
 # Commands that return raw data-source payloads (mirrors the markers the
 # block_main_loop_raw_access hook keys on).
-ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
+ADAPTER_CLI_RE = re.compile(r"scripts/adapters/\w+_cli\.py\b")
 GATHER_EXEC_MARKER = "record_query.py"
 # A gather-subagent dispatch — the Task/Agent prompt points the subagent at
 # the gather skill, whose return summarizes raw data-source output.

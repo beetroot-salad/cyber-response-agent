@@ -5,4 +5,4 @@ description: Elastic Stack — the v2 environment's primary event store. Indexes
 
 # elastic system reference
 
-Query via `python3 {defender_dir}/scripts/tools/elastic_cli.py query '<KQL or EQL>' --start ... --end ... --raw`. Use `--help` for the full surface; do not read source.
+Query via `python3 {defender_dir}/scripts/adapters/elastic_cli.py query '<KQL or EQL>' --start ... --end ... --raw`. Use `--help` for the full surface; do not read source.

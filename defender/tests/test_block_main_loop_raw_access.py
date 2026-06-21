@@ -158,7 +158,7 @@ def test_denies_main_running_adapter_cli(monkeypatch, capsys):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/tools/elastic_cli.py query 'x' --raw"},
+        "tool_input": {"command": "python3 defender/scripts/adapters/elastic_cli.py query 'x' --raw"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -169,7 +169,7 @@ def test_denies_main_adapter_cli_absolute_path(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 /workspace/defender-v2-tree/defender/scripts/tools/identity_cli.py whoami > /run/x.json"},
+        "tool_input": {"command": "python3 /workspace/defender-v2-tree/defender/scripts/adapters/identity_cli.py whoami > /run/x.json"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -180,7 +180,7 @@ def test_allows_subagent_running_adapter_cli(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 .../scripts/tools/elastic_cli.py query 'x' --raw"},
+        "tool_input": {"command": "python3 .../scripts/adapters/elastic_cli.py query 'x' --raw"},
         **SUBAGENT,
     })
     assert rc == 0
@@ -203,7 +203,7 @@ def test_allows_main_running_record_query(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/tools/record_query.py --help"},
+        "tool_input": {"command": "python3 defender/scripts/gather_tools/record_query.py --help"},
         "cwd": MAIN_CWD,
     })
     assert rc == 0
@@ -219,9 +219,9 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
         "tool_input": {"command": (
-            "python3 defender/scripts/tools/record_query.py --run-dir /r --lead l-001 "
+            "python3 defender/scripts/gather_tools/record_query.py --run-dir /r --lead l-001 "
             "--system elastic --query-id elastic.q -- "
-            "python3 defender/scripts/tools/elastic_cli.py query 'x' --raw"
+            "python3 defender/scripts/adapters/elastic_cli.py query 'x' --raw"
         )},
         "cwd": MAIN_CWD,
     })
@@ -229,7 +229,7 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
 
 
 # --- adapter clamp via the `defender-*` invocation shims -------------------
-# The bin/ shims hide the scripts/tools/*_cli.py path behind a bare token, so
+# The bin/ shims hide the scripts/adapters/*_cli.py path behind a bare token, so
 # the clamp must recognise the adapter shim names too.
 
 def test_denies_main_running_adapter_shim(monkeypatch, capsys):

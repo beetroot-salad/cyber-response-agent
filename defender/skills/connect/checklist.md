@@ -9,7 +9,7 @@ python3 defender/skills/connect/validate_scaffold.py {system}
 and fix every FAIL before going further. It verifies the structural
 contract a script can check:
 
-- adapter at `scripts/tools/{system}_cli.py`, with the shared
+- adapter at `scripts/adapters/{system}_cli.py`, with the shared
   `_adapter.py` installed;
 - the CLI `--help` runs and exposes `health-check`, and a bad invocation
   exits `64`;

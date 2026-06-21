@@ -5,4 +5,4 @@
 # venv path. Dropping this in bin/ auto-gates the adapter (see bin/README.md).
 PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3
-exec "$PY" "${DEFENDER_DIR}/scripts/tools/example_cli.py" "$@"
+exec "$PY" "${DEFENDER_DIR}/scripts/adapters/example_cli.py" "$@"
