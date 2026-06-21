@@ -2,9 +2,12 @@
 """Composite-kind inference for the lead-author handoff.
 
 Tags each invocation with one of ``atomic | sweep | join |
-baseline_shift | drill_down`` so the agent knows which template
-section (`## Filter binding` vs `## Baseline` vs `## Common pitfalls`)
-is load-bearing.
+baseline_shift | drill_down`` so the agent knows what usage pattern the
+template served this run and folds accordingly into the migrated
+`## Goal` / `## Query` / `## Pitfalls` shape. ``baseline_shift`` means the
+same wide query ran over two windows — evidence `## Query` is already a
+capability, not a cue to mint a separate ``## Baseline`` section (that
+section is retired; the aggregation in `## Query` covers it).
 
 v1 rules — keep it cheap; ambiguous cases collapse to ``atomic``.
 

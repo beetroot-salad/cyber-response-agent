@@ -41,9 +41,10 @@ need `execution.md` — the executor owns query syntax; you find *what* to query
 
 ### 2. Find the query
 
-This is your real work. A catalog template **carries the query** (plus its
-`## What to summarize` and `## Common pitfalls`), so finding the right one is the
-bulk of the job — you bind, you don't author KQL. A template fits when its
+This is your real work. A catalog template **carries the query** (its `## Query`
+aggregation *is* the measurement; data-source quirks live in `## Pitfalls`), so
+finding the right one is the bulk of the job — you bind, you don't author the
+query. A template fits when its
 `## Goal` describes the same **measurement**, even with different bound params
 (fork on capability, not parameter axis). Reading the dir is fine at small
 scale; **past ~15 templates per system, Grep the `## Goal` bodies** for the
