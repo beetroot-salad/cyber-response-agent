@@ -53,9 +53,8 @@ from defender.hooks._cmd_segments import (
 # viewers/filters over already-materialized files, plus navigation. No `env`,
 # `printenv`, `export`, `python3`, `netstat`, `docker`.
 # The `datamash` + coreutils filters (`cut`/`comm`/`join`/`tr`/`paste`/`nl`) are
-# the pure-transform analysis suite the gather SKILL §4 self-test step runs bare
-# (e.g. `jq -r '…|@tsv' f | sort | datamash …`) before recording the value
-# through `defender-record-summary`; they have no exec/network/write surface.
+# pure-transform analysis tools over already-materialized payload files (e.g.
+# `jq -r '…|@tsv' f | sort | datamash …`); they have no exec/network/write surface.
 READONLY_TOOLS = frozenset(
     {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "sort", "uniq",
      "true", "datamash", "cut", "comm", "join", "tr", "paste", "nl"}

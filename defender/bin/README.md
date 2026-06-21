@@ -34,13 +34,10 @@ shims resolve from any cwd.
   runtime captures it transparently (`tools._capture_adapter` → the queries
   table), so no `defender-record-query` wrapper is needed.
   The non-adapter shims (`defender-invlang`, `defender-record-query`,
-  `defender-record-summary`, `defender-lessons`,
-  `defender-sql`) stay allowed in the main loop. (`defender-record-summary` runs
-  a recorded pure-transform computation — jq/datamash/coreutils — over an
-  already-persisted payload; it queries no source, so it is a non-adapter. See
-  `docs/gather-verifiable-summary.md`. `defender-sql` runs sandboxed SQL over a
-  payload piped into it — the tier-2 aggregation fallback for a source with no
-  native aggregation; it too queries no source.) The adapter vs.
+  `defender-lessons`, `defender-sql`) stay allowed in the main loop.
+  (`defender-sql` runs sandboxed SQL over a payload piped into it — the tier-2
+  aggregation fallback for a source with no native aggregation; it queries no
+  source.) The adapter vs.
   non-adapter split is defined once in `hooks/_cmd_segments.py`
   (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`) and is read by
   the in-process gate (`runtime/permission.py`, via the `approve_shim_invocations`

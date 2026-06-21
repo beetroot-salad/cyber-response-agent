@@ -6,9 +6,9 @@ the shim, never the script directly — see `../../bin/README.md` for the
 shim contract and `../../docs/system-skill-shape.md` for the per-system
 knowledge an adapter is paired with.
 
-(Not every file here is an adapter: `record_query.py` / `record_summary.py`
-are the capture wrappers, `workspace_map.py` / `run_stats.py` /
-`visualize_run.py` are run-dir tooling. Adapters are the `*_cli.py` files.)
+(Not every file here is an adapter: `record_query.py` is the capture wrapper,
+`workspace_map.py` / `run_stats.py` / `visualize_run.py` are run-dir tooling.
+Adapters are the `*_cli.py` files.)
 
 ## House conventions — what `/connect` conforms to
 

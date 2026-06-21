@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # fallback for a source with no native aggregation); it queries no source and
 # is self-sandboxed (no file/network access), so it is a non-adapter too.
 NON_ADAPTER_SHIMS = frozenset(
-    {"defender-invlang", "defender-record-query", "defender-record-summary",
+    {"defender-invlang", "defender-record-query",
      "defender-lessons", "defender-sql"}
 )
 

@@ -100,10 +100,6 @@ def test_adapter_argv_none_for_non_standalone_adapter(cmd):
     # plain jq with comparisons (single-quoted filter, double-quoted literals)
     '''jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' f.json''',
     '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
-    # record-summary with the jq payload single-quoted ...
-    '''defender-record-summary --lead l-1 --label x -- 'jq "[.h[] | select(.n > 0)]" f.json' ''',
-    # ... and double-quoted with escaped inner quotes (the form gather emits)
-    '''defender-record-summary --lead l-1 --label x -- "jq '[.hits[] | select(.\\"@timestamp\\" >= \\"2026-05-25T12:53:35Z\\")]' f.json"''',
 ])
 def test_gather_allows_quoted_jq_comparisons(cmd):
     assert permission.decide_bash(cmd, is_main_session=False).allow
@@ -248,7 +244,6 @@ def test_gather_keeps_find():
 def test_gather_keeps_compute_and_adapter():
     for cmd in ("jq '.hits|length' /tmp/p.json",
                 "datamash mean 1",
-                "defender-record-summary --lead l-001 --batch -- jq . f",
                 "defender-elastic query 'x' --raw"):
         assert permission.decide_bash(
             cmd, is_main_session=False,
