@@ -10,10 +10,8 @@ _by_id
 _commit_message
 _csv_set
 _find_venv_py
-_git
 _is_main_session
 _json_safe
-_load
 _log
 _now_iso
 _parse_frontmatter

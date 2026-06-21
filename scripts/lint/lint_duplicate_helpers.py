@@ -31,18 +31,20 @@ so it blocks growth without forcing a big-bang cleanup of the existing set.
 Regenerate the baseline after a deliberate change with `--update-baseline`.
 
 Scope: `defender/` only, module-level defs only (nested defs and methods are
-not counted). Excluded, matching the jscpd gate's accepted-boilerplate policy:
-`.venv`, `tests/` (fixture helpers), `**/*_cli.py` (per-system adapter shims
-share argparse scaffolding by design), and `skills/connect/examples/` (adapter
-scaffold templates meant to be copied). A few legitimately-polymorphic names
-(entry points) are allowlisted below.
+not counted). Excluded as the jscpd gate's `--ignore` does: `.venv`, the
+transient run-output dirs (`runs/`, `run-visualizations/`), and `**/*_cli.py`
+(per-system adapter shims share argparse scaffolding by design). Excluded
+additionally (fixture/scaffold code that re-implements helpers by design):
+test modules — a `tests/` dir or a flat `test_*.py` / `*_test.py` file — and
+`skills/connect/examples/` (adapter scaffold templates meant to be copied). A
+few legitimately-polymorphic names (entry points) are allowlisted below.
 
 Limitation: name-based, so a dup split across *different* names (e.g. #360's
 `acquire_queue_lock` vs `acquire_lock`) is only partially surfaced — the
 same-named copies fire, the renamed sibling does not. Block-level dup is jscpd's
 job; this is the small-helper complement.
 
-Run from repo root:  python defender/scripts/lint_duplicate_helpers.py
+Run from repo root:  python scripts/lint/lint_duplicate_helpers.py
 Exit 0 = clean (no new dup names), 1 = new dup names. Soft under code-smells.
 """
 from __future__ import annotations
@@ -57,9 +59,11 @@ DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.txt")
 
 # Directory names (any path segment, relative to defender/) excluded from scope.
-EXCLUDED_DIRS = (".venv", "tests")
+# `.venv` + the transient run-output dirs mirror the jscpd gate's --ignore;
+# `tests` drops fixture-helper modules (flat test_*.py files handled below).
+EXCLUDED_DIRS = (".venv", "tests", "runs", "run-visualizations")
 
-# Path-substring excludes, matching the jscpd gate's accepted-boilerplate policy:
+# Accepted-boilerplate excludes (by filename suffix / path substring):
 #   *_cli.py            — per-system adapter shims share argparse scaffolding by
 #                         design (jscpd ignores `**/*_cli.py` for the same reason)
 #   connect/examples/   — adapter scaffold templates, meant to be copied
@@ -82,6 +86,10 @@ SUPPRESS = "lint-dup: ok"
 def _in_scope(path: Path) -> bool:
     rel = path.relative_to(DEFENDER)
     if any(part in EXCLUDED_DIRS for part in rel.parts):
+        return False
+    # Flat pytest modules (test_*.py / *_test.py) outside a tests/ dir are
+    # fixture helpers too — exclude them for the same reason a tests/ dir is.
+    if path.name.startswith("test_") or path.name.endswith("_test.py"):
         return False
     if path.name.endswith(EXCLUDED_SUFFIXES):
         return False
@@ -108,6 +116,18 @@ def _body_fingerprint(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return "".join(ast.dump(node) for node in _strip_docstring(fn.body))
 
 
+def _suppressed(fn: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> bool:
+    """True if the inline SUPPRESS marker sits anywhere in the def's header — any
+    decorator line through the last line of a (possibly multi-line) signature —
+    so the marker is honored wherever in the header it is placed, not only on a
+    bare single-line `def`."""
+    start = fn.decorator_list[0].lineno if fn.decorator_list else fn.lineno
+    end = max(fn.lineno, fn.body[0].lineno - 1) if fn.body else fn.lineno
+    return any(
+        SUPPRESS in lines[i - 1] for i in range(start, end + 1) if 0 < i <= len(lines)
+    )
+
+
 def _collect() -> dict[str, list[tuple[str, int, str]]]:
     """name -> list of (rel_path, lineno, body_fingerprint) for every
     module-level def across in-scope defender/ source."""
@@ -127,8 +147,7 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
                 continue
             if node.name in ALLOWLIST_NAMES:
                 continue
-            def_line = lines[node.lineno - 1] if node.lineno - 1 < len(lines) else ""
-            if SUPPRESS in def_line:
+            if _suppressed(node, lines):
                 continue
             table[node.name].append((rel, node.lineno, _body_fingerprint(node)))
     return table
