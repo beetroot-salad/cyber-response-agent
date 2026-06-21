@@ -36,7 +36,7 @@ The runtime is `defender/`: a single root `defender/SKILL.md` drives the ORIENT�
 
 ### Examples & claims
 
-10. **No misleading root examples.** If a warning block compensates for a pitfall in an example, fix the example structurally (rename, drop asymmetry) instead of layering warning text.
+10. **Examples must be real and self-flagged.** An example may carry a deployment-specific value — a real system tag, field name, or query language — and often should, to stay concrete. Two conditions: (a) it names something that exists in *this* deployment — a stale or phantom vendor (e.g. `wazuh` where the stack runs `elastic`) is a misleading example; rename it and unify with the real tags used elsewhere (rule 9); (b) it is flagged as illustrative (`e.g.`, `// example values throughout`, a `{placeholder}`) so a reader can't mistake it for the general rule. A vendor mechanism written as the bare rule in a system-generic prompt (e.g. "Under ES|QL the query is one positional" in the cross-system lead-author) reads as universal — state the general shape, then demote the vendor to a flagged `e.g.`. And if a warning block exists only to compensate for a pitfall in an example, fix the example structurally (rename, drop the asymmetry) instead of layering warning text.
 11. **Don't oversell design mechanisms.** Separate load-bearing mechanisms from speculative ones. Don't stack unverified claims to pad a pitch.
 12. **No legacy-compat shims for unshipped code.** If the only consumer is in this repo, rewrite the old shape — don't design dual interfaces. (A deliberately A/B-tested path behind a flag, like lean vs split gather under `DEFENDER_GATHER_LEAN`, is an experiment, not a shim — don't flag it.)
 
