@@ -1,7 +1,7 @@
 # Lessons success scoring — design draft (2026-05-30)
 
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
-`defender/scripts/lessons_env_retrieve.py` / `lessons_actor_index.py`,
+`defender/scripts/lessons/lessons_env_retrieve.py` / `lessons_actor_index.py`,
 and the task `tasks/benign-actor-success-retrieval.md`. Captures the
 design discussion behind adding a success/usefulness signal to the
 actor-retrieved lesson corpora. The benign (FP) direction —

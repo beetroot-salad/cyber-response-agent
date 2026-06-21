@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "lessons_fm.py"
+_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "lessons" / "lessons_fm.py"
 
 
 def _load(tmp_lessons: Path):

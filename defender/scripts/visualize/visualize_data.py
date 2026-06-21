@@ -34,7 +34,7 @@ import re
 from pathlib import Path
 
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
-from defender.scripts.visualize_primitives import slugify
+from defender.scripts.visualize.visualize_primitives import slugify
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +533,7 @@ def extract_main_subagents(events: list[dict]) -> list[dict]:
     renders, which pairs each call with its lead's ``gather_raw/{lead_id}/``
     payloads.
     """
-    from defender.scripts.visualize_primitives import flatten_tool_result_content
+    from defender.scripts.visualize.visualize_primitives import flatten_tool_result_content
 
     calls: dict[str, dict] = {}
     order: list[str] = []

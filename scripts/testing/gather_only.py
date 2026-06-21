@@ -11,7 +11,7 @@ adapter-capture hooks + descriptor catalog), so what it measures matches
 production gather.
 
 Usage:
-    python3 scripts/gather_only.py <run_id> [lead_key]
+    python3 scripts/testing/gather_only.py <run_id> [lead_key]
 
 - <run_id>    names the run dir at /tmp/defender-runs/<run_id>.
 - [lead_key]  picks a canned lead from LEADS below (default: baseline-7d).
@@ -32,7 +32,7 @@ import os
 import sys
 from pathlib import Path
 
-DEFENDER_DIR = Path(__file__).resolve().parent.parent
+DEFENDER_DIR = Path(__file__).resolve().parents[2] / "defender"
 sys.path.insert(0, str(DEFENDER_DIR.parent))
 
 from defender import run_common as _run  # noqa: E402

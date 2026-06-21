@@ -129,7 +129,7 @@ known inventory are currently running under the docker context.
 
 This adapter has **no `config.env`**. The docker context name
 (`soc-playground`) is hardcoded in
-`defender/scripts/tools/_stub_transport.py`, and the per-verb timeout
+`defender/scripts/adapters/_stub_transport.py`, and the per-verb timeout
 default lives in `host_state_cli.py`. There is nothing else to
 configure; if a knob is needed in the future (e.g. a non-default
 docker context), promote `DOCKER_CONTEXT` to an env var before adding

@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from defender.learning._loop_config import REPO_ROOT
 from defender.scripts.case_history import case_ticket
 
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "tools" / "ticket_cli.py"
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
 _LIST_TIMEOUT_SEC = 15
 
 # The recency window: closed cases older than 24h (decorrelate from the current burst)

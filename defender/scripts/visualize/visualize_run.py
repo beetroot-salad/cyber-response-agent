@@ -34,7 +34,7 @@ Python prepending the script's directory to sys.path):
     visualize_runtime.py    — runtime view sections + TOC + footer
 
 Usage:
-    python3 defender/scripts/visualize_run.py <run_dir>
+    python3 defender/scripts/visualize/visualize_run.py <run_dir>
 """
 from __future__ import annotations
 
@@ -44,10 +44,10 @@ from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
-if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.scripts.visualize_data import (
+from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
     phase_attribution,
     phase_color,
@@ -57,7 +57,7 @@ from defender.scripts.visualize_data import (
     split_investigation_phases,
     tag_events_by_phase,
 )
-from defender.scripts.visualize_judge import (
+from defender.scripts.visualize.visualize_judge import (
     render_judge_actor_benign_section,
     render_judge_actor_section,
     render_judge_benign_section,
@@ -68,7 +68,7 @@ from defender.scripts.visualize_judge import (
     render_judge_raw_bundle,
     render_judge_toc,
 )
-from defender.scripts.visualize_primitives import (
+from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
     load_jsonl,
@@ -77,7 +77,7 @@ from defender.scripts.visualize_primitives import (
     parse_report,
     render_alert_block,
 )
-from defender.scripts.visualize_runtime import (
+from defender.scripts.visualize.visualize_runtime import (
     render_footer,
     render_phase_inner_events,
     render_runtime_gather,
@@ -92,7 +92,7 @@ from defender.scripts.visualize_runtime import (
 JUDGE_FILENAME = "transcript.html"
 RUNTIME_FILENAME = "runtime.html"
 
-_DEFENDER_DIR = Path(__file__).resolve().parents[1]
+_DEFENDER_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _DEFENDER_DIR.parent
 
 

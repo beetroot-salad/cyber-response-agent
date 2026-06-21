@@ -388,7 +388,7 @@ def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
 
 import subprocess  # noqa: E402
 
-RETRIEVE = REAL_REPO / "defender" / "scripts" / "lessons_env_retrieve.py"
+RETRIEVE = REAL_REPO / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
 VERIFY_ENV = LEARNING_SRC / "verify_forward_env.py"
 VENV_PY = REAL_REPO / "defender" / ".venv" / "bin" / "python3"
 _PY = str(VENV_PY) if VENV_PY.is_file() else sys.executable

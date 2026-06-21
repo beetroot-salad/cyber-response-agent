@@ -43,13 +43,13 @@ NON_ADAPTER_SHIMS = frozenset(
      "defender-lessons", "defender-sql"}
 )
 
-# A raw adapter-CLI path form (`scripts/tools/<name>_cli.py`), i.e. the shim's
-# underlying script invoked directly rather than via its `defender-*` token.
-# The `_cli.py` suffix IS the structural marker for an adapter: every
+# A raw adapter-CLI path form (`scripts/adapters/<name>_cli.py`), i.e. the
+# shim's underlying script invoked directly rather than via its `defender-*`
+# token. The `_cli.py` suffix IS the structural marker for an adapter: every
 # non-adapter script deliberately avoids it (`record_query.py`, `sql.py`) so it
 # can't be misread as an adapter here.
 # Kept in sync with block_main_loop_raw_access.ADAPTER_CLI_RE.
-ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
+ADAPTER_CLI_RE = re.compile(r"scripts/adapters/\w+_cli\.py\b")
 
 
 def all_defender_shims() -> set[str]:

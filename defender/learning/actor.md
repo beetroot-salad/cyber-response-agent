@@ -53,7 +53,7 @@ Two retrievals, both **silent investigation steps** — like checking the runboo
 Your accumulated **environment facts** — what prior encounters established about this deployment's real identities, hosts, IP-to-role mappings, trust paths, baselines, and standing processes — are retrieved with `lessons_env_retrieve.py`. This is how you assert true facts instead of guessing (see *Fact fidelity*). Pass `alert_rule_id` verbatim as the anchor; pass the entities visible in the alert / `actor_input` as `--entities`. See `--help` for flags:
 
 ```
-python3 defender/scripts/lessons_env_retrieve.py --alert-rule-ids <alert_rule_id> --entities <type:class,...>
+python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids <alert_rule_id> --entities <type:class,...>
 ```
 
 On a deployment you have not yet learned, this returns little — reason from the alert + the defender's queries (both name real entities) and general operations knowledge, and lean toward SKIP if the load-bearing entities cannot be grounded.
@@ -65,7 +65,7 @@ The actor lessons corpus (`defender/lessons-actor/*.md`) holds prior findings ab
 Index CLI — all filters optional, AND across keys, OR within:
 
 ```
-python3 defender/scripts/lessons_actor_index.py \
+python3 defender/scripts/lessons/lessons_actor_index.py \
   --alert-rule-ids <ids,...> \
   --defender-lead-tags <tags,...> \
   --techniques <T-IDs,...> \

@@ -101,11 +101,14 @@ defender/
     advisory/           # cross-system runtime skill
     # per-system references (v2 environment) — visibility surface + execution:
     elastic/  identity/  cmdb/  ticket/  change-mgmt/  threat-intel/  host-state/
-  scripts/
-    tools/record_query.py      # gather capture: executes a query, writes the queries table (executed_queries.jsonl + by-ref payload); called in-process by tools._capture_adapter
-    workspace_map.py           # on-disk orientation injected by runtime/orient.py (message 0)
-    run_stats.py
-    visualize_run.py           # post-run transcript renderer
+  scripts/                # each dir = one concern (dev/CI/test/analytics tooling lives at repo-root scripts/, not here)
+    adapters/             # data-source adapter CLIs: {system}_cli.py + the shared _stub_transport.py (THE adapter surface — gated by ADAPTER_CLI_RE)
+    gather_tools/         # gather-time pipe tools: record_query.py (capture → queries table, called in-process by tools._capture_adapter) + sql.py (defender-sql aggregation fallback)
+    visualize/            # post-run transcript renderers (visualize_run.py + data/judge/primitives/runtime); imported in-process by the learning loop
+    lessons/              # lessons toolchain: lessons_fm.py (defender-lessons grep), lessons_actor_index.py, lessons_env_retrieve.py
+    case_history/         # case-ticket write path (case_ticket.py, ticket_writer.py)
+    pricing.py            # model cost table — read live by runtime/observe.py for cost attribution (runtime dep, not analytics)
+    workspace_map.py      # on-disk orientation injected by runtime/orient.py (message 0)
   learning/             # offline learning loop — see §Learning loop below
     lead_repository.py  # the single read/join surface over the two tables (leads + queries)
     loop.py             # orchestrator CLI: <run_dir> (LEARN one) / --learn-drain (off-process worker) / --author-drain (serial commit)
@@ -257,7 +260,7 @@ Contracts:
   no queries has neither table — a monitor case, not a break.
 - **`gather_raw/{lead_id}/{seq}.json`** — raw query payload per executed
   query, written by-ref by the gather capture wrapper
-  (`scripts/tools/record_query.py`). The agent works from gather's
+  (`scripts/gather_tools/record_query.py`). The agent works from gather's
   summary and Reads raw on demand if the summary is too thin.
 
 ## Two-table schema
@@ -271,7 +274,7 @@ re-parse the artifacts.
 | Table | Generator (live) | Key | Carries |
 |---|---|---|---|
 | **leads** | `record_lead.claim_lead` (called in `tools.py`) → `gather_raw/{lead_id}.lead.json` | `lead_id` (the `:L` row id) | `goal`, `what_to_summarize` |
-| **queries** | `scripts/tools/record_query.py` → `executed_queries.jsonl` | `(lead_id, seq)`, FK `lead_id` | `system, verb, query_id, params, raw_command, payload_path, exit_code, payload_status, payload_digest` |
+| **queries** | `scripts/gather_tools/record_query.py` → `executed_queries.jsonl` | `(lead_id, seq)`, FK `lead_id` | `system, verb, query_id, params, raw_command, payload_path, exit_code, payload_status, payload_digest` |
 
 Field contracts:
 

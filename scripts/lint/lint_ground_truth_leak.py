@@ -18,7 +18,7 @@ What this check does:
 Filename-only matching keeps this fast (no per-file content scan).
 False positives are intentionally tolerated under code-smells.
 
-Run from repo root:  python defender/scripts/lint_ground_truth_leak.py
+Run from repo root:  python scripts/lint/lint_ground_truth_leak.py
 """
 from __future__ import annotations
 

@@ -15,7 +15,8 @@ their own `model` + `usage` (so cost is exact and per-model).
 
 Everything else is a **projection** of those messages — same data, re-tagged:
 
-  - `tool_trace.jsonl` — the consumer contract `run_stats.py` / `visualize_run.py`
+  - `tool_trace.jsonl` — the consumer contract `scripts/analytics/run_stats.py`
+    / `scripts/visualize/visualize_run.py`
     read (`assistant`/`user`/`result` events). Built post-mortem by replaying the
     main instance's messages; the trailing `result` event's `total_cost_usd` is
     summed **per response message at its own model's rate** via `scripts/pricing.py`
@@ -224,8 +225,8 @@ def _assistant_event(rec: dict) -> dict:
 
 def _user_event(rec: dict) -> dict | None:
     """A `request` message record → a `user` trace event carrying its tool_results,
-    or None if it has none. The tool-return timestamp anchors visualize_run.py's
-    per-phase wall-time bars."""
+    or None if it has none. The tool-return timestamp anchors
+    scripts/visualize/visualize_run.py's per-phase wall-time bars."""
     msg = rec.get("message") or {}
     returns = [p for p in msg.get("parts", []) if p.get("part_kind") == "tool-return"]
     if not returns:

@@ -269,7 +269,7 @@ listing to decide whether to Read the full file.
 
 **Environment channel.** Cache-style; assertions about the
 deployment. Discovered on the same path as tradecraft: the actor
-runs `defender/scripts/lessons_actor_index.py --channel environment
+runs `defender/scripts/lessons/lessons_actor_index.py --channel environment
 --actor-type <archetype>` to scan `relevance_criteria` lines and
 Reads files whose criteria look pertinent. No preload.
 
@@ -354,7 +354,7 @@ Two-phase within the single actor call:
    `lead_sequence.yaml`, archetype, MITRE menu — drafts the Section 0
    technique table. Same as today.
 2. **Discover + read lessons.** Actor runs
-   `defender/scripts/lessons_actor_index.py` once per channel —
+   `defender/scripts/lessons/lessons_actor_index.py` once per channel —
    `--channel tradecraft --techniques <T-IDs> --actor-type <archetype>`
    and `--channel environment --actor-type <archetype>` — to list
    `<path>\t<relevance_criteria>` candidates, then Reads the files
@@ -388,7 +388,7 @@ tool trace today. The actor-grep PR adds:
 - `claude -p --output-format stream-json` on the actor stage to
   capture per-tool-call events,
 - a per-case `actor_trace.jsonl` artifact in the run dir,
-- `defender/scripts/lessons_actor_index.py` — a description-listing
+- `defender/scripts/lessons/lessons_actor_index.py` — a description-listing
   CLI (one `<path>\t<relevance_criteria>` line per match, filterable
   by channel + techniques + actor_type) so the actor scans
   descriptions before deciding which files to Read.
@@ -785,7 +785,7 @@ Land in this order, each as its own PR:
    tradecraft and environment), introduce stage-specific model env
    vars (`ACTOR_MODEL`, `ORACLE_MODEL`, `JUDGE_MODEL`) with one
    default per stage, and ship the description-listing CLI
-   `defender/scripts/lessons_actor_index.py`. No standalone audit
+   `defender/scripts/lessons/lessons_actor_index.py`. No standalone audit
    script — analytics on the trace are ad-hoc.
 5. **Actor author** — `author_actor.py` + `author_actor.md`.
    Per-case input bundle: `outcome`, `actor_observations` (if

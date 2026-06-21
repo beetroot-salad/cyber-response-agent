@@ -9,11 +9,11 @@ adapter.
 
 ## The shape to copy
 
-**First, check what's already there.** If `scripts/tools/` already holds
+**First, check what's already there.** If `scripts/adapters/` already holds
 sibling adapters, you are extending a populated deployment, not seeding a
 fresh one — **conform to the established pattern rather than introducing a
 second one.** If the tree documents its adapter conventions
-(`scripts/tools/README.md`), read that first: it names the shared module
+(`scripts/adapters/README.md`), read that first: it names the shared module
 and the recurring transport / auth / config choices you're conforming to,
 so you don't reverse-engineer them from the source. Then read the closest
 sibling adapter and the shared module it imports; reuse *that* module, its
@@ -30,7 +30,7 @@ On a greenfield tree, two files ship with this skill:
   resolution. You do not rewrite it; you install it and import it.
 - `examples/example_cli.py` — one complete, environment-agnostic adapter
   built on `_adapter.py`. It is the shape you copy into
-  `defender/scripts/tools/{system}_cli.py`.
+  `defender/scripts/adapters/{system}_cli.py`.
 
 Read both (and the closest sibling, if any) before you write anything.
 Then:
@@ -38,9 +38,9 @@ Then:
 1. **Reuse or install the shared module** (idempotent): if a shared
    adapter module already exists — the bundled `_adapter.py`, or whatever
    module the siblings import — import *that*. Only when none exists, copy
-   `examples/_adapter.py` to `defender/scripts/tools/_adapter.py`. One
+   `examples/_adapter.py` to `defender/scripts/adapters/_adapter.py`. One
    shared module per tree, never two.
-2. **Copy the closest example** to `defender/scripts/tools/{system}_cli.py`
+2. **Copy the closest example** to `defender/scripts/adapters/{system}_cli.py`
    — a sibling adapter if one exists, else `examples/example_cli.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
    API. Keep the contract below intact.

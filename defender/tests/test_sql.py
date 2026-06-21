@@ -1,4 +1,4 @@
-"""Tests for the defender-sql aggregation shim (scripts/tools/sql.py).
+"""Tests for the defender-sql aggregation shim (scripts/gather_tools/sql.py).
 
 Pins two contracts:
 
@@ -26,7 +26,7 @@ import pytest
 
 pytest.importorskip("duckdb")
 
-_SQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "tools" / "sql.py"
+_SQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "gather_tools" / "sql.py"
 _spec = importlib.util.spec_from_file_location("defender_sql", _SQL_PATH)
 defender_sql = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(defender_sql)

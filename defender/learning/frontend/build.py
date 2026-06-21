@@ -8,7 +8,7 @@ inline into ``lessons.html`` so the page opens in a browser with no server
 contract — it is the only coupling point to the backend.
 
 Visual language is reused from the run visualizer
-(``defender/scripts/visualize_run.py`` CSS tokens); HTML escaping +
+(``defender/scripts/visualize/visualize_run.py`` CSS tokens); HTML escaping +
 markdown rendering happen client-side in the injected template.
 
 Usage:
@@ -47,7 +47,7 @@ if str(DEFENDER.parent) not in sys.path:
     sys.path.insert(0, str(DEFENDER.parent))
 
 from defender.learning.frontend import serialize  # noqa: E402
-from defender.scripts.visualize_run import CSS as RUN_CSS  # noqa: E402
+from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402
 
 # Each group's left-accent reuses the run visualizer's stage palette:
 # defender=blue, actor=red, environment=amber (oracle).

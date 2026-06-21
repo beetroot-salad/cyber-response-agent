@@ -8,7 +8,7 @@ blocking two equivalent main-loop moves:
 
   1. Reading `gather_raw/` (Bash/Read/Grep/Glob) — spot-checking or
      re-deriving fields gather already summarized.
-  2. Running an adapter CLI directly (`scripts/tools/*_cli.py` via Bash)
+  2. Running an adapter CLI directly (`scripts/adapters/*_cli.py` via Bash)
      — querying a data source itself instead of dispatching gather, then
      reading its own dump. Same violation, renamed, and it escapes the
      executed_queries audit trail.
@@ -56,9 +56,9 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.hooks._cmd_segments import ADAPTER_CLI_RE, adapter_shims
 
 RAW_MARKER = "gather_raw"
-# `ADAPTER_CLI_RE` (a `scripts/tools/<name>_cli.py` path) is imported from the
+# `ADAPTER_CLI_RE` (a `scripts/adapters/<name>_cli.py` path) is imported from the
 # shared taxonomy. `record_query.py` is NOT `_cli.py`, and the invlang CLI has
-# no `scripts/tools/` path, so both stay allowed.
+# no `scripts/adapters/` path, so both stay allowed.
 
 
 def _adapter_shim_re() -> re.Pattern | None:

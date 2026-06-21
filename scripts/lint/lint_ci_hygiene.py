@@ -22,7 +22,7 @@ Three sub-checks, all soft (intended for the code-smells report job):
                          as both; missing one means the hook silently
                          never fires (bug class from b7901f1).
 
-Run from repo root:  python defender/scripts/lint_ci_hygiene.py
+Run from repo root:  python scripts/lint/lint_ci_hygiene.py
 Exit 0 = clean, 1 = findings. Always informational under code-smells.
 """
 from __future__ import annotations
@@ -39,10 +39,8 @@ DEFENDER = REPO_ROOT / "defender"
 PATH_ALLOWLIST = {
     "defender/CLAUDE.md",
     "defender/learning/actor-settings.json",
-    "defender/scripts/lint_ci_hygiene.py",
-    "defender/scripts/lint_ground_truth_leak.py",
-    "defender/scripts/lint_shippable_surface.py",
-    "defender/scripts/lint_stale_refs.py",
+    # The lint scripts live at repo-root scripts/lint/, outside the scanned
+    # defender/ tree, so they need no allowlist entry here.
 }
 
 # Directories under defender/ that are either out-of-scope or are
@@ -65,7 +63,7 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/host-query/",
     "defender/skills/gather/queries/stub-cmdb/",
     "defender/skills/gather/queries/stub-iam/",
-    "defender/scripts/tools/",                         # per-vendor adapter CLIs
+    "defender/scripts/adapters/",                         # per-vendor adapter CLIs
 )
 
 TEXT_SUFFIXES = {".py", ".md", ".json", ".sh", ".yaml", ".yml", ".toml"}

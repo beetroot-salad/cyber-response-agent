@@ -18,7 +18,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
-from defender.scripts.tools import _stub_transport as transport  # noqa: E402
+from defender.scripts.adapters import _stub_transport as transport  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 
 # Every data-source adapter; each fails fast at argparse on a bad invocation,
@@ -27,7 +27,7 @@ _ADAPTERS = [
     "elastic_cli.py", "host_state_cli.py", "cmdb_cli.py", "identity_cli.py",
     "change_mgmt_cli.py", "threat_intel_cli.py", "ticket_cli.py",
 ]
-_TOOLS = _DEFENDER / "scripts" / "tools"
+_ADAPTERS_DIR = _DEFENDER / "scripts" / "adapters"
 
 
 def test_usage_exit_code_is_reserved():
@@ -56,7 +56,7 @@ def test_adapter_usage_errors_exit_64(adapter, badargs):
     """A bad flag, unknown subcommand, or missing-required subcommand all exit 64
     (not argparse's default 2), so the breaker never counts them."""
     proc = subprocess.run(
-        [sys.executable, str(_TOOLS / adapter), *badargs],
+        [sys.executable, str(_ADAPTERS_DIR / adapter), *badargs],
         capture_output=True, text=True,
     )
     assert proc.returncode == 64, f"{adapter} {badargs}: rc={proc.returncode}\n{proc.stderr}"

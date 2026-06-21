@@ -37,7 +37,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender.scripts.tools import _stub_transport as transport
+from defender.scripts.adapters import _stub_transport as transport
 
 SYSTEM = "host-state"
 # Hosts addressable via the soc-playground docker context. The list is

@@ -59,7 +59,7 @@ For each **computable** dimension, gather:
    the snippet produced directly above it.
 
 Minimal build needed before validation: the `defender-record-analysis` wrapper
-(thin sibling of `scripts/tools/record_query.py`), a `defender-record-analysis`
+(thin sibling of `scripts/gather_tools/record_query.py`), a `defender-record-analysis`
 shim, an `analyses.jsonl` writer + a `lead_repository` read accessor, and the
 SKILL §4 rewrite. The main-loop raw-access block and gather's no-raw-path return
 rule are unchanged (analysis runs over already-persisted, read-only payloads).

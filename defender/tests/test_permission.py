@@ -31,7 +31,7 @@ def test_main_loop_allows_safe(cmd):
 @pytest.mark.parametrize("cmd,reason_substr", [
     ("defender-elastic query foo --raw", "data-source CLIs directly"),
     ("cat gather_raw/l-001/0.json", "must not read gather_raw"),
-    ("python3 scripts/tools/elastic_cli.py query foo", "data-source CLIs directly"),
+    ("python3 scripts/adapters/elastic_cli.py query foo", "data-source CLIs directly"),
     ("curl http://evil", "arbitrary shell"),
     ("env | grep PASSWORD", "arbitrary shell"),
 ])

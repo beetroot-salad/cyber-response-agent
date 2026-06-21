@@ -69,7 +69,7 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def check_adapter(report: Report, defender: Path, system: str, python: str) -> Path | None:
-    cli = defender / "scripts" / "tools" / f"{system}_cli.py"
+    cli = defender / "scripts" / "adapters" / f"{system}_cli.py"
     if not cli.exists():
         report.add(FAIL, f"adapter {cli.relative_to(defender)} is missing")
         return None
@@ -80,14 +80,14 @@ def check_adapter(report: Report, defender: Path, system: str, python: str) -> P
     # the parser/config/exit-codes/auth inline. Don't hard-require _adapter
     # specifically: a populated tree may standardize on a different module.
     src = cli.read_text()
-    tools = defender / "scripts" / "tools"
-    present = {p.stem for p in tools.glob("_*.py")}
+    adapters = defender / "scripts" / "adapters"
+    present = {p.stem for p in adapters.glob("_*.py")}
     referenced = {m for m in present
                   if re.search(rf"(?:import|from)\s+\.?{re.escape(m)}\b", src)}
     if referenced:
         report.add(PASS, f"adapter reuses shared module(s): {', '.join(sorted(referenced))}")
     elif re.search(r"(?:^import|from)\s+_\w+", src, re.M):
-        report.add(FAIL, "adapter imports a shared module that isn't present in scripts/tools/")
+        report.add(FAIL, "adapter imports a shared module that isn't present in scripts/adapters/")
     else:
         report.add(WARN, "adapter imports no shared module — it may be re-implementing "
                          "the contract (parser/config/exit-codes/auth) inline")

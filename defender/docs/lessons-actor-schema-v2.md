@@ -177,7 +177,7 @@ Deletion of stale lessons follows v1's rule: only stale, only when authoring thi
 
 ## Retrieval keys and composition
 
-The index CLI (`defender/scripts/lessons_actor_index.py`) is extended:
+The index CLI (`defender/scripts/lessons/lessons_actor_index.py`) is extended:
 
 - **Drops `--channel`** (no channels).
 - **Accepts** any subset of `--techniques`, `--alert-rule-ids`, `--defender-lead-tags`, `--subject`. AND across keys, OR within a key. Unfiltered call returns the whole corpus.
@@ -217,7 +217,7 @@ These are listed for completeness but are step-by-step work, not part of this sp
 
 - **`defender/learning/author_actor.md`**: rewrite Channels + Workflow sections to describe decomposition + corpus-wide folding. Drop the "split into one lesson per channel when both signals are present" rule (replaced with default decomposition). Drop directory-aware enumeration (one corpus, one Glob).
 - **`defender/learning/actor.md`**: minimal change. Index CLI invocation drops `--channel`, may add `--alert-rule-ids` / `--defender-lead-tags` filters when relevant. Three-stage retrieval pattern unchanged.
-- **`defender/scripts/lessons_actor_index.py`**: drop `--channel`, add multi-key filters, drop `actor_type` gating. Backwards-compat for v1 callers is unnecessary (the corpus migrates atomically; no outside consumers).
+- **`defender/scripts/lessons/lessons_actor_index.py`**: drop `--channel`, add multi-key filters, drop `actor_type` gating. Backwards-compat for v1 callers is unnecessary (the corpus migrates atomically; no outside consumers).
 - **`defender/tests/`**: add a v2 schema validator test (frontmatter-required-keys, subject-equivalence-uniqueness for live lessons, `applies_to` resolves to a real subject in the corpus).
 
 ## Open questions

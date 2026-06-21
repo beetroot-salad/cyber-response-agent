@@ -43,7 +43,7 @@ import yaml
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = DEFENDER_DIR / "skills"
-TOOLS_DIR = DEFENDER_DIR / "scripts" / "tools"
+ADAPTERS_DIR = DEFENDER_DIR / "scripts" / "adapters"
 
 FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
 SYSTEM_KEY_RE = re.compile(r"^system:\s*([A-Za-z0-9_.-]+)\s*$", re.MULTILINE)
@@ -99,7 +99,7 @@ def read_description(system: str) -> str | None:
 def descriptor_catalog() -> str | None:
     """The progressive-disclosure index for the gather subagent: every data-source
     system + its one-line SKILL `description:`. Scoped to systems that have an
-    adapter CLI (`scripts/tools/<system>_cli.py`) — the things gather can actually
+    adapter CLI (`scripts/adapters/<system>_cli.py`) — the things gather can actually
     query — so meta-skills (gather/invlang/handbook/advisory) are excluded with no
     hardcoded roster. Gather scans this to confirm its target, then Reads that
     system's full SKILL.md + execution.md on demand (the skills model — descriptors
@@ -107,7 +107,7 @@ def descriptor_catalog() -> str | None:
     suffix = "_cli.py"
     systems = sorted(
         p.name[: -len(suffix)].replace("_", "-")
-        for p in TOOLS_DIR.glob("*" + suffix)
+        for p in ADAPTERS_DIR.glob("*" + suffix)
     )
     lines = []
     for system in systems:

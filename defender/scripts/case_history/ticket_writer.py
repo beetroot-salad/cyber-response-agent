@@ -27,7 +27,7 @@ import urllib.parse
 from pathlib import Path
 
 from defender.scripts.case_history import case_ticket
-from defender.scripts.tools import _stub_transport as transport  # shared transport (adapter family)
+from defender.scripts.adapters import _stub_transport as transport  # shared transport (adapter family)
 
 SYSTEM = "case-history"
 PREFIX = "CASE_HISTORY"

@@ -6,7 +6,7 @@ A defender run produces two canonical, append-only tables, each written
 
   leads    gather_raw/{lead_id}.lead.json   (hooks/record_lead.py)
            {goal, what_to_summarize}, keyed on the :L row id (`l-001`).
-  queries  executed_queries.jsonl           (scripts/tools/record_query.py)
+  queries  executed_queries.jsonl           (scripts/gather_tools/record_query.py)
            one row per executed query, FK `lead_id`, payloads by-ref at
            gather_raw/{lead_id}/{seq}.json.
 

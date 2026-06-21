@@ -45,7 +45,7 @@ from pathlib import Path
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 
 # A lead_id is the `:L` row id: `l-` + alphanumerics. Grammar mirrors the
-# invlang parser's lead-id grammar and scripts/tools/record_query.py's --lead
+# invlang parser's lead-id grammar and scripts/gather_tools/record_query.py's --lead
 # guard — keep in sync. Used verbatim as a path segment and FK.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 

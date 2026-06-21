@@ -61,7 +61,7 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ### 1. Orient
 
 ```bash
-ls defender/scripts/tools/ defender/bin/ defender/skills/
+ls defender/scripts/adapters/ defender/bin/ defender/skills/
 ```
 
 If the system already has an adapter, shim, and `skills/{system}/` dir,
@@ -75,10 +75,10 @@ you're extending a populated deployment: there's an established shared
 adapter module and house conventions (config keys, transport, auth
 posture, output shape) to **conform to**, not duplicate. Before the
 interview, read the deployment's adapter-conventions note if it has one
-(`scripts/tools/README.md`) and the closest sibling adapter — between them
+(`scripts/adapters/README.md`) and the closest sibling adapter — between them
 they settle the recurring answers (which shared module, transport, auth
 posture, config scheme), so you **confirm** those instead of asking cold
-(see `cli-adapter.md` → "The shape to copy"). If `scripts/tools/` is empty,
+(see `cli-adapter.md` → "The shape to copy"). If `scripts/adapters/` is empty,
 you're greenfield and the bundled example is your seed.
 
 ### 2. Interview
@@ -117,7 +117,7 @@ Pick the path with the maintainer and follow its doc end-to-end:
 
 - **MCP** → `mcp.md`.
 - **CLI adapter** → `cli-adapter.md` (it installs the shared `_adapter.py`,
-  writes `scripts/tools/{system}_cli.py`, registers the `bin/` shim, runs
+  writes `scripts/adapters/{system}_cli.py`, registers the `bin/` shim, runs
   the Haiku alignment loop, and **pauses at a human review checkpoint**
   before the live test — generated code is read by a human before it runs).
 
@@ -193,7 +193,7 @@ the branch and just leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
-git add defender/scripts/tools/ defender/bin/defender-{system} \
+git add defender/scripts/adapters/ defender/bin/defender-{system} \
         defender/skills/{system}/ \
         defender/knowledge/environment/systems/{system}/config.env \
         defender/skills/gather/queries/{system}/
