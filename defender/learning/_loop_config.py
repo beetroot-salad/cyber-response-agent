@@ -279,3 +279,12 @@ class LoopError(Exception):
 
 def _log(msg: str) -> None:
     print(f"[loop] {msg}", file=sys.stderr)
+
+
+def subscription_env() -> dict[str, str]:
+    """Env for a ``claude -p`` call: strip ``ANTHROPIC_API_KEY`` so the call
+    bills against the subscription, never the metered first-party key
+    (reserved for the PydanticAI engine — see defender/run.py)."""
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    return env

@@ -41,7 +41,7 @@ REPO_ROOT = HERE.parents[1]
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from defender.learning._loop_config import DEFAULT_PATHS  # noqa: E402
+from defender.learning._loop_config import DEFAULT_PATHS, subscription_env  # noqa: E402
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "verify_forward.md"
 
@@ -182,15 +182,6 @@ def render_user_prompt(
     )
 
 
-def _subscription_env() -> dict[str, str]:
-    """Env for the ``claude -p`` verifier: strip ``ANTHROPIC_API_KEY`` so the
-    call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run.py)."""
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
-    return env
-
-
 def call_haiku(user_prompt: str) -> str:
     cmd = [
         "claude",
@@ -206,7 +197,7 @@ def call_haiku(user_prompt: str) -> str:
         capture_output=True,
         text=True,
         timeout=VERIFIER_TIMEOUT,
-        env=_subscription_env(),
+        env=subscription_env(),
     )
     if proc.returncode != 0:
         raise SystemExit(
