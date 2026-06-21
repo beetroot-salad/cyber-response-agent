@@ -1,30 +1,50 @@
 ---
 id: elastic.ip-to-host-search
 status: established
-filter_keys:
-  index: logs-*
-  predicates:
-    - {event_attr: source_ip, op: eq, param: ip}
+engine: esql
 ---
 
 ## Goal
 
-Reverse-lookup an IP address across Elasticsearch event streams via `source.ip` or `client.ip` structured fields. Returns events where the given IP appears as a source or client address — useful for identifying which host or user account was associated with that IP. Applicable to streams that carry structured IP fields: Zeek connection logs (`logs-zeek.*`), Squid access logs (`logs-squid.access-*`), nginx access logs (`logs-nginx.access-*`).
+Resolve an IP address to host(s) and the data sources that saw it — across all
+event streams (`logs-*`) via the structured `source.ip` / `client.ip` (the IP as
+a connection peer) and `host.ip` (the IP as a reporting agent's own address). Use
+to attribute an unknown IP to a host/account and see which datasets observed it.
+Keyword recall: ip to host, reverse lookup, attribution, source.ip, client.ip,
+host.ip, which host, who is this IP. Subsumes the former `host-agent-by-ip`.
 
-## What to summarize
-
-- Count of matching events across returned data streams
-- Distinct `host.name` values where the IP appeared (which hosts logged events involving this IP)
-- Distinct `data_stream.dataset` values in results (which data sources saw the IP)
-- Time range of matching events (`@timestamp` min and max)
+**Wide/superset** — narrow by restricting the index (`FROM logs-zeek.*`) or
+dropping a predicate to one role of the IP.
 
 ## Query
 
-```
-source.ip: "${ip}" OR client.ip: "${ip}"
+```esql
+FROM logs-*
+| WHERE @timestamp >= "${start}" AND @timestamp < "${end}"
+        AND (source.ip == "${ip}" OR client.ip == "${ip}" OR host.ip == "${ip}")
+| STATS events     = COUNT(*),
+        first_seen = MIN(@timestamp),
+        last_seen  = MAX(@timestamp)
+        BY host.name, data_stream.dataset
+| SORT events DESC
 ```
 
-## Common pitfalls
+- *Self-identification* ("which host *is* this IP"): narrow to `host.ip == "${ip}"`
+  and read `BY host.name` — but see the pitfall (shared bridge IPs make `host.ip`
+  noisy here; the `source.ip`/`client.ip` peer view is usually more decisive).
+- *Peer view* ("which hosts talked to this IP"): drop `host.ip`, keep
+  `source.ip`/`client.ip`.
 
-- **`query` subcommand, not `search`.** The elastic CLI accepts `health-check`, `query`, and `alerts` as subcommands. Passing `search` returns exit=2 with "invalid choice: 'search'". Always use the `query` subcommand.
-- **Filter is the sole positional argument.** Passing the index pattern (e.g. `logs-*`) as an extra positional argument before the filter causes exit=2 with "unrecognized arguments: <filter-text>". The `query` subcommand accepts only the filter expression as its positional argument; the index is not a separate positional arg.
+## Pitfalls
+
+- **Some streams carry no `host.name`** — Zeek (`zeek.connection`/`zeek.ssl`)
+  describes a flow by IPs only, so those rows group under a null `host.name`; the
+  `data_stream.dataset` column still tells you the IP was seen there. Cross-resolve
+  via cmdb / the agent-tagged streams (`system.auth`, `nginx.access`).
+- **`host.ip` is multi-valued and shared.** In this env many hosts report the same
+  docker-bridge address in `host.ip`, so a `host.ip` match can return several
+  hosts — prefer the `source.ip`/`client.ip` peer evidence for attribution.
+- **Wide `BY` over `logs-*` truncates at 1000 rows.** `BY host.name,
+  data_stream.dataset` across every stream can exceed ES|QL's default 1000-row
+  return cap and be silently cut. If `row_count` is 1000, narrow the `FROM` to the
+  relevant streams or tighten the window before trusting the host list as complete.

@@ -293,6 +293,34 @@ def test_build_truncated_view_non_json_falls_back_to_chars(tmp_path):
     assert "sample[" not in view
 
 
+def test_build_truncated_view_capped_envelope_points_counts_at_total(tmp_path):
+    # A capped --raw envelope (`total` >> returned): the on-disk payload is a
+    # SAMPLE, so the view reports the exact `total`, frames the file as a sample,
+    # and must NOT tell the agent to jq-`length` it (that would report the cap as
+    # the count — the meaning-flip the returned-doc cap introduces).
+    payload = json.dumps({
+        "index": "logs-*", "total": 2471, "returned": 20, "truncated": True,
+        "hits": [{"i": i, "message": f"event {i}"} for i in range(20)],
+    })
+    view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
+    assert "2471 total matches (EXACT" in view
+    assert "20-doc SAMPLE" in view
+    assert "| length" not in view                  # never count the sample
+    assert view.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
+
+
+def test_build_truncated_view_complete_envelope_is_not_flagged_sampled(tmp_path):
+    # total == returned (the result set is complete, not capped) → the ordinary
+    # "compute over the payload" framing, not the sample/`total` framing.
+    payload = json.dumps({
+        "total": 3, "returned": 3, "truncated": False,
+        "hits": [{"i": i} for i in range(3)],
+    })
+    view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
+    assert "FIELD-SHAPE sample" in view
+    assert "total matches (EXACT" not in view
+
+
 def test_main_samples_record_list_and_persists_full(tmp_path, capsys):
     # A record-list payload is ALWAYS reduced to a field-shape sample (count +
     # first few records + disk pointer), regardless of size — the full dump never

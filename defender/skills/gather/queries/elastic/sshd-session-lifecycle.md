@@ -1,33 +1,41 @@
 ---
 id: elastic.sshd-session-lifecycle
 status: established
+engine: esql
 ---
 
 ## Goal
 
-Retrieve PAM sshd session open and close events from `system.auth` for a specific user on a specific host, using message-text wildcard search for `pam_unix(sshd:session): session` and username mentions. Use to determine whether the SSH session was opened and subsequently closed, how long it lasted, and whether PAM clean-up completed — a complement to `sshd-auth-sequence-v2` which covers pre-session authentication events.
+PAM sshd **session** open/close events (`logs-system.auth-*`) over a window —
+how many sessions opened vs closed on a host, and the session span. Use to
+measure interactive-login duration and concurrency, distinct from the
+auth-decision counts in `sshd-auth-history`. Keyword recall: pam_unix, sshd,
+session opened, session closed, session duration, interactive login.
 
-## What to summarize
-
-- Session opened and closed event timestamps; derived session duration in seconds
-- Presence or absence of `pam_unix(sshd:session): session opened` and `session closed` records
-- PTY allocation indicator if visible in PAM session records
-- Any other system.auth messages mentioning the user in the window
-
-## Filter binding
-
-- `${host}` — destination hostname; matched via `host.name`
-- `${user}` — username; matched via wildcard in `message` field
-- `start`, `end` — optional time bounds (ISO-8601); recommend post-login window
-- `index` — `logs-system.auth-*`
+**Wide/superset** — narrow by dropping the predicates the lead doesn't need.
 
 ## Query
 
-```
-data_stream.dataset:"system.auth" AND host.name:"${host}" AND (message:*"pam_unix(sshd:session): session"* OR message:*"${user}"*)
+```esql
+FROM logs-system.auth-*
+| WHERE @timestamp >= "${start}" AND @timestamp < "${end}"
+        AND host.name == "${host}"
+        AND (message LIKE "*session opened*" OR message LIKE "*session closed*")
+| STATS opened     = COUNT(*) WHERE message LIKE "*session opened*",
+        closed     = COUNT(*) WHERE message LIKE "*session closed*",
+        first_seen = MIN(@timestamp),
+        last_seen  = MAX(@timestamp)
+        BY host.name
 ```
 
-## Common pitfalls
+- *Per-user*: PAM session lines carry the user in the message text (`session
+  opened for user dev.dana`), not always in `user.name` — add `AND message LIKE
+  "*for user ${user}*"` rather than a `user.name` predicate.
 
-- **Message wildcard is expensive on large indexes.** The `message:*"..."*` wildcard pattern scans all tokens — narrow `start`/`end` to the post-login window to avoid timeouts on high-volume auth indexes.
-- **Co-dispatch with `sshd-auth-sequence-v2`.** Auth events (failures, the Accepted record) land in `sshd-auth-sequence-v2`; this template covers the PAM session lifecycle after auth. Dispatch both in the same lead for a complete sshd session picture.
+## Pitfalls
+
+- **`first_seen`/`last_seen`, not `first`/`last`** — `FIRST`/`LAST` are reserved
+  ES|QL keywords and a `first =` alias is a parse error.
+- **Session ≠ auth-decision.** These are `pam_unix(sshd:session)` open/close
+  lines, separate from `Accepted`/`Failed` auth events (`sshd-auth-history`).
+  `event.outcome` is null on session lines, so filter by the message substring.

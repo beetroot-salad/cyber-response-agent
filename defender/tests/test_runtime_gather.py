@@ -50,7 +50,11 @@ def _build_sandbox(tmp_path: Path, fixture: str) -> tuple[Path, Path, dict, Path
     (sb / "skills" / system).mkdir(parents=True)
     (sb / "scripts" / "tools").mkdir(parents=True)
     (sb / "bin").mkdir()
-    shutil.copy(_DEFENDER / "skills" / "gather" / "SKILL.md", sb / "skills" / "gather" / "SKILL.md")
+    # Copy the whole gather skill surface (SKILL.lean.md — production — and the
+    # legacy SKILL.md + on-demand sub-files) so the gather agent resolves its
+    # instructions in the sandbox.
+    for md in (_DEFENDER / "skills" / "gather").glob("*.md"):
+        shutil.copy(md, sb / "skills" / "gather" / md.name)
     shutil.copy(fx / "system_skill.md", sb / "skills" / system / "SKILL.md")
     for stub in (_GI / "stubs").glob("*.py"):
         d = sb / "scripts" / "tools" / stub.name
@@ -113,10 +117,11 @@ def test_gather_in_process(tmp_path, monkeypatch):
 
 
 def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
-    """The full dispatch composition (`_run_gather`, the body of the `gather`
-    tool): claim the lead → run the nested gather agent → capture → untrusted-wrap
-    → reuse rejection. Drives it directly so it always dispatches (no dependence
-    on the main model choosing to gather)."""
+    """The full dispatch composition (`_run_gather`, the body of the `gather` tool)
+    over the lean single-agent gather (#340): claim the lead → run the nested lean
+    gather agent → it runs the adapter (captured under its lead_id) →
+    untrusted-wrap → reuse rejection. Drives it directly so it always dispatches
+    (no dependence on the main model gathering)."""
     from pydantic_ai.exceptions import ModelRetry
 
     sb, run_dir, params, fx = _build_sandbox(tmp_path, "V2_sparse_in_band")
@@ -126,7 +131,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     deps = tools.RunDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt", is_main_session=True)
 
     def factory(agent_id):
-        return driver.build_gather_agent(sb, logger, agent_id)
+        return driver.build_lean_gather_agent(sb, logger, agent_id)
 
     out = asyncio.run(tools._run_gather(
         deps, factory, driver.GATHER_REQUEST_LIMIT,
@@ -134,10 +139,17 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     ))
     logger.close()
 
-    # Claim wrote the leads table; the nested agent's adapter call was captured.
+    # Claim wrote the leads table; the lean agent's adapter call was captured under
+    # its lead_id, with a query_id (the model's --query-id tag, or the
+    # {system}.{verb} default — either way the queries-table row is keyed to it).
     assert (run_dir / "gather_raw" / f"{lead_id}.lead.json").is_file()
     rows = [json.loads(x) for x in (run_dir / "executed_queries.jsonl").read_text().splitlines() if x.strip()]
     assert rows and rows[0]["lead_id"] == lead_id
+    assert rows[0]["query_id"].startswith(f"{system}.")
+    # The lean gather logs under a single gather: instance (Sonnet by default).
+    recs = [json.loads(x) for x in (run_dir / "llm_requests.jsonl").read_text().splitlines() if x.strip()]
+    aids = {r["agent_id"] for r in recs}
+    assert aids and all(a.startswith("gather:") for a in aids)
     # Return is untrusted-wrapped (salted tag) with no raw-path leak.
     assert "untrusted" in out and "sALt" in out and "gather_raw" not in out
 

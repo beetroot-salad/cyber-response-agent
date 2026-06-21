@@ -233,3 +233,23 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
     d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir)
     assert not d.allow
     assert "invlang validation" in d.reason
+
+
+# --- lean gather subagent: compute + adapter surface ---
+
+def test_gather_keeps_find():
+    # The lean gather subagent keeps the looser read-only surface, incl. `find`
+    # (template scanning during orientation).
+    assert permission.decide_bash(
+        "find /workspace -type d -name gather", is_main_session=False,
+    ).allow
+
+
+def test_gather_keeps_compute_and_adapter():
+    for cmd in ("jq '.hits|length' /tmp/p.json",
+                "datamash mean 1",
+                "defender-record-summary --lead l-001 --batch -- jq . f",
+                "defender-elastic query 'x' --raw"):
+        assert permission.decide_bash(
+            cmd, is_main_session=False,
+        ).allow, cmd

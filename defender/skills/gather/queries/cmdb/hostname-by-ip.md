@@ -22,4 +22,4 @@ ${ip}
 
 ## Common pitfalls
 
-- **HTTP 404 = IP not registered in CMDB.** The CMDB indexes hosts by hostname, not IP. A 404 response (`HTTP 404: host {ip} not found`) means the IP is undocumented or uses a dynamic address with no CMDB record. Fall back to `elastic.host-agent-by-ip` to resolve the hostname from Elastic Agent telemetry, then re-query CMDB by hostname via `cmdb.host-trust-edges`.
+- **HTTP 404 = IP not registered in CMDB.** The CMDB indexes hosts by hostname, not IP. A 404 response (`HTTP 404: host {ip} not found`) means the IP is undocumented or uses a dynamic address with no CMDB record. Fall back to `elastic.ip-to-host-search` to resolve the hostname from event telemetry, then re-query CMDB by hostname via `cmdb.host-trust-edges`.

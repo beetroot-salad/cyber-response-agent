@@ -1,29 +1,42 @@
 ---
 id: elastic.postgresql-activity
 status: established
-filter_keys:
-  index: logs-postgresql-*
+engine: esql
 ---
 
 ## Goal
 
-PostgreSQL log entries (`postgresql.log`) within a time window. Use to surface database activity on a host after an SSH login event — queries executed, connections opened, authentication events, errors, and anomalous commands. Complements `system.auth` logs when investigating whether a logged-in user interacted with a database service.
+PostgreSQL log activity (`logs-postgresql.log-*`) on a host over a window —
+volume, and the connection / authentication / error / query mix. Use to surface
+auth failures, connection spikes, or error bursts around an incident. Keyword
+recall: postgresql, postgres, pg_log, authentication failed, FATAL, connection
+received, db-1.
 
-## What to summarize
-
-- total event count in the window
-- distinct log severity levels present (LOG, ERROR, FATAL, WARNING; from `message` field prefix)
-- any ERROR or FATAL entries and their full messages (connection failures, auth errors, query errors)
-- timestamp of the first and last events (confirms database was active during the window)
+**Wide/superset** — narrow by adding a `message LIKE` predicate to scope a
+category, or drop `BY` for a bare count.
 
 ## Query
 
-```
-data_stream.dataset: "postgresql.log"
+```esql
+FROM logs-postgresql.log-*
+| WHERE @timestamp >= "${start}" AND @timestamp < "${end}"
+        AND host.name == "${host}"
+| STATS total       = COUNT(*),
+        auth_fail   = COUNT(*) WHERE message LIKE "*authentication failed*",
+        fatal       = COUNT(*) WHERE message LIKE "*FATAL*",
+        connections = COUNT(*) WHERE message LIKE "*connection*",
+        first_seen  = MIN(@timestamp),
+        last_seen   = MAX(@timestamp)
+        BY host.name
 ```
 
-## Common pitfalls
+- *Scope a category*: add e.g. `AND message LIKE "*authentication failed*"` and
+  `STATS n=COUNT(*) BY user.name` (or GROK the user out of the message).
 
-- **No host filter on the dataset.** The `postgresql.log` dataset is typically scoped to one database host per deployment. If multiple database hosts ship logs to the same cluster, add `host.name: "${host}"` to scope results to the target host.
-- **High event volume.** Active PostgreSQL instances emit many log lines per minute (statement logging, checkpoints, autovacuum). Use explicit `--start` and `--end` bounds and a `limit` of 100–200 for a 30-minute window to avoid truncating important tail events.
-- **Statements not logged by default.** PostgreSQL only emits individual query statements when `log_statement` is set to `all` or `ddl`. Absence of statement lines does not mean no queries ran.
+## Pitfalls
+
+- **The structured payload is thin — most detail is in `message` text.** Query
+  category, user, db, and error code via `message LIKE`/`GROK`, not structured
+  fields. `logs-postgresql.log-*` is very high volume (millions of rows on a busy
+  db host), so **always aggregate**; a window without a category filter still
+  returns a count, not docs.

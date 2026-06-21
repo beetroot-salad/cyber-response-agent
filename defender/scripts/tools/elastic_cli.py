@@ -70,8 +70,18 @@ DOCKER_CONTEXT = transport.DOCKER_CONTEXT
 ES_CONTAINER = os.environ.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch")
 KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 
-DEFAULT_LIMIT = 500
-MAX_LIMIT = 10000
+# Non-overridable returned-doc cap. ES computes `hits.total` independently of
+# `size` (track_total_hits below), so we ship at most this many _source docs
+# while the envelope's `total` stays the EXACT server-side count. The payload is
+# therefore a small bounded SAMPLE the agent reads field-shape from; exact
+# magnitudes come from `total` (and from re-querying with a narrowing filter and
+# reading its `total`), never from pulling-and-counting. The cap is a mechanism,
+# not a default: a larger `--limit` is clamped to it (widening is futile by
+# construction) — which is why an earlier small *default* backfired (the agent
+# just widened past it). A 500-doc pull of full _source was multiple MB that
+# gather re-jq'd turn after turn — the dominant cost and the >200K context crash.
+RETURNED_DOC_CAP = 20
+DEFAULT_LIMIT = RETURNED_DOC_CAP
 REQUEST_TIMEOUT_SEC = 30
 RAW_SAMPLE_COUNT = 3
 
@@ -214,7 +224,10 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit):
         must = [{"match_all": {}}]
 
     return {
-        "size": min(limit, MAX_LIMIT),
+        # Hard cap, non-overridable: the agent may pass any --limit but never
+        # receives more than RETURNED_DOC_CAP docs. track_total_hits keeps the
+        # envelope `total` exact regardless, so counts are unaffected.
+        "size": min(limit, RETURNED_DOC_CAP),
         "sort": [{time_field: {"order": "desc"}}],
         "query": {"bool": {"must": must, "filter": filters}},
         "track_total_hits": True,
@@ -425,7 +438,12 @@ def build_parser():
         parser.add_argument("--end", help="End time (ISO 8601 UTC).")
         parser.add_argument(
             "--limit", type=int, default=DEFAULT_LIMIT,
-            help=f"Max hits to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).",
+            help=(
+                f"Docs returned (default {DEFAULT_LIMIT}); hard-capped at "
+                f"{RETURNED_DOC_CAP} regardless of the value passed — widening is "
+                f"futile by construction. The envelope `total` is the exact count; "
+                f"read it for magnitudes instead of pulling more docs."
+            ),
         )
         parser.add_argument(
             "--raw", action="store_true",
@@ -465,6 +483,30 @@ def build_parser():
     )
     a.add_argument("native_query", help="Lucene / KQL query string against the alerts index.")
     _add_common_flags(a)
+
+    e = sub.add_parser(
+        "esql",
+        help="Run an ES|QL pipe; server-side aggregation returned as a table.",
+        description=(
+            "Run an ES|QL query (`FROM ... | WHERE ... | STATS ...`) against the "
+            "playground Elasticsearch and return the result table.\n\n"
+            "The aggregation runs server-side — the result rows ARE the answer; do "
+            "not pull docs and reduce them yourself. The whole query (index, filter, "
+            "time window, aggregation) lives in the pipe; there are no "
+            "--index/--start/--end/--limit flags. Pass the whole pipe on ONE line "
+            "(the `|` separators stay inside the quotes); ES|QL caps returned rows at "
+            "1000 by default, so a wide `BY` is truncated unless you narrow it.\n\n"
+            "Examples (one line each):\n"
+            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE source.ip == \"172.18.0.14\" "
+            "AND host.name == \"db-1\" AND event.outcome IS NOT NULL | STATS "
+            "accepted = COUNT(*) WHERE event.outcome == \"success\", "
+            "failed = COUNT(*) WHERE event.outcome == \"failure\"'\n"
+            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE user.name == \"dev.dana\" "
+            "| LIMIT 10'   # field-shape probe"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    e.add_argument("query", help="ES|QL query string (FROM ... | WHERE ... | STATS ...).")
 
     return p
 
@@ -509,6 +551,48 @@ def cmd_alerts(args, config):
         ))
 
 
+def run_esql(config, query):
+    """Execute an ES|QL query via the `_query` endpoint. Returns
+    (columns, values) where columns is [{name,type},...] and values is the
+    columnar row list [[...],...]. Exit-code contract mirrors `search()`:
+    2 = unreachable/auth (5xx, 401/403), 1 = query error (a malformed pipe is a
+    400 the model fixes and re-runs)."""
+    url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
+    try:
+        status, resp = _http_json("POST", url, config, body={"query": query})
+    except TransportError as e:
+        _exit_unreachable("Elasticsearch", url, e)
+
+    if status != 200:
+        err = resp.get("error", resp)
+        msg = err.get("reason") if isinstance(err, dict) else str(err)
+        if status in (401, 403):
+            print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
+        if status >= 500:
+            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
+            sys.exit(2)
+        print(f"error: ES|QL query failed (HTTP {status}): {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    return resp.get("columns", []), resp.get("values", [])
+
+
+def cmd_esql(args, config):
+    columns, values = run_esql(config, args.query)
+    names = [c.get("name") for c in columns]
+    # Named-dict rows so the agent reads the table directly; this is the answer,
+    # not a doc sample. The key is `values` (not in record_query's record-key set),
+    # so a small aggregation passes through whole instead of being doc-sampled.
+    rows = [dict(zip(names, row)) for row in values]
+    print(json.dumps({
+        "query": args.query,
+        "columns": columns,
+        "row_count": len(rows),
+        "values": rows,
+    }, default=str, indent=2))
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -519,6 +603,8 @@ def main():
         cmd_query(args, config)
     elif args.subcommand == "alerts":
         cmd_alerts(args, config)
+    elif args.subcommand == "esql":
+        cmd_esql(args, config)
     else:
         parser.error(f"unknown subcommand: {args.subcommand}")
 

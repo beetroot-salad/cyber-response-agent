@@ -188,9 +188,15 @@ def gate_paths(segments: list[list[str]], run_dir: Path) -> int | None:
             candidate = base if base.is_absolute() else (run_dir / base)
             try:
                 real = candidate.resolve()
+                if not real.exists() or real.is_dir():
+                    continue
             except OSError:
-                continue
-            if not real.exists() or real.is_dir():
+                # A token that can't be stat'd points at no file and can leak
+                # nothing. The load-bearing case: a multi-dimension batch jq
+                # object (`{...}`, >255 bytes) overflows NAME_MAX and raises
+                # ENAMETOOLONG from exists()/is_dir() — that crash is exactly why
+                # every realistic `--batch` call died. Treat any unstattable
+                # token as a non-path and move on.
                 continue
             if gather_root not in real.parents and real != gather_root:
                 raise GateError(
