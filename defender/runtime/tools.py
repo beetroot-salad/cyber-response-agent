@@ -27,7 +27,7 @@ from . import permission
 
 # Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
 # PreToolUse hooks + the gather capture core). The workspace root is on sys.path
-# via the entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+# via the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks.tag_tool_results import wrap as _wrap
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
@@ -97,7 +97,7 @@ class GatherDeps(RunDeps):
     the capture path). Always constructed with `is_main_session=False`.
 
     `query_id` is a fallback capture id stamped on the lead's queries when the
-    model doesn't tag a call with `--query-id`; the lean gather leaves it unset
+    model doesn't tag a call with `--query-id`; the gather leaves it unset
     (None) and tags per query, so capture falls back to record_query's
     `{system}.{verb}` default."""
 
@@ -123,10 +123,9 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
 
 
 def _bash_env(deps: RunDeps) -> dict[str, str]:
-    """The runtime agent's shell environment — defined once in run.py and shared
-    with the `claude -p` engine."""
-    from defender import run
-    return run.run_env(deps.defender_dir, deps.run_dir)
+    """The runtime agent's shell environment — defined once in run_common.py."""
+    from defender import run_common
+    return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
 def register_tools(agent, *, writers: bool = True) -> None:
@@ -259,7 +258,7 @@ def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
     """Pull a model-supplied ``--query-id <id>`` (or ``--query-id=<id>``) off an
     adapter argv, returning (cleaned argv the adapter actually runs, the id).
 
-    The lean single-agent gather annotates each bare adapter call with the catalog
+    The single-agent gather annotates each bare adapter call with the catalog
     id it bound (e.g. ``elastic.sshd-auth-history``) or a coined id, because one
     lead can run several queries with different bindings and a single
     ``deps.query_id`` can't carry them. The harness strips the flag so the adapter
@@ -380,7 +379,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{lead_id}.md").write_text(wrapped)
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
-        print(f"[run_pai] gather-summary persist skipped for {lead_id}: {e!r}",
+        print(f"[run.py] gather-summary persist skipped for {lead_id}: {e!r}",
               file=sys.stderr)
 
 
@@ -390,7 +389,7 @@ async def _run_gather(
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
     without the main model: claim the lead → inject the descriptor catalog → run
-    the nested lean gather agent → wrap the summary. The lean single-agent gather
+    the nested gather agent → wrap the summary. The single-agent gather
     (#340) auto-captures its own adapter calls; there is no finder/assay layer."""
     # 0. Fail fast on a malformed lead_id. claim_lead treats a bad id as a benign
     # skip (returns 0, no sidecar), which would otherwise half-dispatch the lead
@@ -424,7 +423,7 @@ async def _run_gather(
     # Reads that system's full SKILL.md + execution.md on demand.
     catalog = _descriptor_catalog()
 
-    # 3. Run the nested lean gather agent. It gets its OWN usage object: sharing the
+    # 3. Run the nested gather agent. It gets its OWN usage object: sharing the
     # main run's usage would make request_limit (a cumulative check) abort gather
     # the moment the main loop has already issued `request_limit` requests, so the
     # per-lead cap would not bound gather's own requests. Cost still folds in — the
@@ -466,7 +465,7 @@ def register_gather_tool(
 ) -> None:
     """Register the `gather` dispatch tool on the MAIN agent only (the gather
     subagent must not self-dispatch). `gather_factory(agent_id)` builds a fresh
-    nested lean gather Agent bound to that observability id."""
+    nested gather Agent bound to that observability id."""
 
     @main_agent.tool
     async def gather(

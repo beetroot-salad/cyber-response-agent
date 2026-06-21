@@ -184,8 +184,8 @@ def test_derive_system_ignores_stray_tokens_before_shim():
 
 
 def test_derive_system_skips_non_adapter_and_unknown():
-    # record-query/data-source-debug/invlang are not lead systems.
-    assert ge.derive_system(["defender-data-source-debug", "--payload", "p"]) is None
+    # record-query/invlang are not lead systems.
+    assert ge.derive_system(["defender-invlang", "--tags"]) is None
     assert ge.derive_system(["echo", "hi"]) is None
 
 

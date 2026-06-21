@@ -30,7 +30,7 @@ def _load(monkeypatch):
     spec.loader.exec_module(mod)
     # Deterministic shim roster (don't depend on the real bin/ dir contents).
     monkeypatch.setattr(mod, "_all_defender_shims", lambda: {
-        "defender-invlang", "defender-record-query", "defender-data-source-debug",
+        "defender-invlang", "defender-record-query",
         "defender-elastic", "defender-cmdb", "defender-identity", "defender-host-state",
         "defender-threat-intel", "defender-change-mgmt", "defender-ticket",
     })

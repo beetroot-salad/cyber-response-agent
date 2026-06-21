@@ -12,7 +12,6 @@ slice passes history through unmodified).
 from __future__ import annotations
 
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -44,12 +43,11 @@ from defender.hooks.budget_enforcer import (
 )
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
-GATHER_MODEL = "claude-haiku-4-5"
 DEFAULT_REQUEST_LIMIT = 60
-GATHER_REQUEST_LIMIT = 40  # the lean gather's per-lead loop; large multi-dimension
+GATHER_REQUEST_LIMIT = 40  # the gather's per-lead loop; large multi-dimension
 # leads need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
 # (The finder/executor split's two-budget tuning — a finder cap + a per-assay cap —
-# was removed with the split (#339 never merged; the lean gather #340 superseded it).)
+# was removed with the split (#339 never merged; the gather #340 superseded it).)
 # The permission gate denies disallowed tool calls via ModelRetry — control-flow
 # feedback ("pick another command"), the in-process twin of the claude -p hook's
 # exit-2, not a hard error. pydantic-ai resets a tool's retry counter on success,
@@ -80,43 +78,6 @@ _CACHE_SETTINGS = AnthropicModelSettings(
 
 def _main_instructions(defender_dir: Path) -> str:
     return (defender_dir / "SKILL.md").read_text()
-
-
-# --- TEMPORARY gather engine seam (remove when the engines stop sharing one SKILL) ---
-# defender/skills/gather/SKILL.md is the gather subagent's instructions for BOTH
-# runtime engines: run.py's `claude -p` (via dispatch.py, which points the
-# subagent at the file) and this PydanticAI driver (which loads it as the agent's
-# system prompt). A span there tells gather to Read the full {system}/SKILL.md +
-# execution.md up front on every dispatch. This engine instead injects the target
-# system's FRONTMATTER (the descriptor catalog — progressive disclosure) and lets
-# gather pull the body on demand, so that unconditional double-read is pure
-# redundancy here (measured: the same system SKILL re-read once per sibling lead).
-# The SKILL marks such spans with GATHER-PAI-TRIM:BEGIN/END comments; we strip
-# them for this engine and leave them intact for `claude -p`, which still needs
-# them. This is TEMPORARY: once the engines no longer share one SKILL, delete this
-# seam and the markers, and the trim becomes a plain SKILL edit.
-_PAI_TRIM_RE = re.compile(
-    r"[ \t]*<!--\s*GATHER-PAI-TRIM:BEGIN.*?GATHER-PAI-TRIM:END\s*-->\n?",
-    re.DOTALL,
-)
-
-
-def _strip_temporary_pai_trims(skill_text: str) -> str:
-    """Strip GATHER-PAI-TRIM spans from the gather SKILL for this engine (see the
-    banner above). Fail-safe: with no markers present the text passes through
-    unchanged, and we log a one-line note so a SKILL refactor that drops the
-    markers is noticed rather than silently reinstating the redundant read."""
-    out, n = _PAI_TRIM_RE.subn("", skill_text)
-    if n == 0:
-        print("[run_pai] note: gather SKILL carries no GATHER-PAI-TRIM markers; "
-              "progressive-disclosure trim seam was a no-op", file=sys.stderr)
-    return out
-
-
-def _gather_instructions(defender_dir: Path) -> str:
-    return _strip_temporary_pai_trims(
-        (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
-    )
 
 
 def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
@@ -151,9 +112,9 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
             deps: RunDeps = ctx.deps
             state = update_budget_locked(deps.run_dir, deps.run_id, call.tool_name)
             for w in check_budgets(state, DEFAULT_LIMITS):
-                print(f"[run_pai] {w}", file=sys.stderr)
+                print(f"[run.py] {w}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001 — budget must never break the run
-            print(f"[run_pai] budget accounting skipped: {e!r}", file=sys.stderr)
+            print(f"[run.py] budget accounting skipped: {e!r}", file=sys.stderr)
         return result
 
     @hooks.on.model_request  # the wrap-style model-request hook
@@ -172,25 +133,18 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
                 agent_id=agent_id,
             )
         except Exception as e:  # noqa: BLE001
-            print(f"[run_pai] request logging skipped: {e!r}", file=sys.stderr)
+            print(f"[run.py] request logging skipped: {e!r}", file=sys.stderr)
         return resp
 
     return hooks
 
 
 def _gather_model() -> str:
-    """The LEGACY single-agent gather model (`build_gather_agent`, the `claude -p`
-    engine + hermetic tests) — Haiku by default; `DEFENDER_GATHER_MODEL` overrides.
-    The lean production gather uses `_lean_gather_model` (Sonnet)."""
-    return os.environ.get("DEFENDER_GATHER_MODEL") or GATHER_MODEL
-
-
-def _lean_gather_model() -> str:
-    """The lean production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
-    overrides. Validated (#340) as the right tier for the lean single agent: the
-    pinned context is tiny (the lean SKILL is ~1K words vs the split's ~6K), so
+    """The production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
+    overrides. Validated (#340) as the right tier for the single agent: the
+    pinned context is tiny (the gather SKILL is ~1K words vs the split's ~6K), so
     Sonnet's per-token rate is fully offset by ~half the turns / a third fewer
-    queries / no KQL↔ES|QL confusion — same cost as Haiku-lean, fewer failures."""
+    queries / no KQL↔ES|QL confusion — same cost as Haiku, fewer failures."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
@@ -199,13 +153,12 @@ def _build_subagent(
     instructions: str, model_name: str,
 ) -> Agent:
     """A nested subagent with the read-only slice of the generic tools (bash +
-    read_file; the bash tool auto-captures adapter calls for an executor under
-    `is_main_session=False`, and denies them for a finder via the role gate).
-    `writers=False`: these subagents measure and return a summary — they never
-    author investigation.md/report.md, so denying them write_file/edit_file keeps
-    them in lane. One per dispatch so `agent_id` binds to the lead/measurement. The
-    system prompt (`instructions`) + `model_name` specialize the instance into the
-    legacy gather, the finder (Sonnet), or the executor (Haiku)."""
+    read_file; the bash tool auto-captures the gather's adapter calls under
+    `is_main_session=False`). `writers=False`: this subagent measures and returns a
+    summary — it never authors investigation.md/report.md, so denying it
+    write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
+    the lead/measurement. The system prompt (`instructions`) + `model_name`
+    specialize the instance into the gather (Sonnet)."""
     agent = Agent(
         AnthropicModel(model_name),
         deps_type=GatherDeps,
@@ -218,29 +171,19 @@ def _build_subagent(
     return agent
 
 
+def _gather_instructions(defender_dir: Path) -> str:
+    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
+
+
 def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
-    """The LEGACY single-agent gather (shared `skills/gather/SKILL.md`). Kept for the
-    `claude -p` engine + the hermetic llm tests; the PydanticAI runtime uses the
-    finder/executor pair below. Behaves as an executor (runs queries, auto-captures)
-    when given executor-role deps. Haiku."""
-    return _build_subagent(
-        defender_dir, logger, agent_id, _gather_instructions(defender_dir), _gather_model()
-    )
-
-
-def _lean_gather_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "SKILL.lean.md").read_text()
-
-
-def build_lean_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
-    """The lean single-agent gather (#340) — the production gather for the
+    """The single-agent gather (#340) — the production gather for the
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
-    split). Loads `skills/gather/SKILL.lean.md`. Model is `_lean_gather_model()`
+    split). Loads `skills/gather/SKILL.md`. Model is `_gather_model()`
     (Sonnet; `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
-        defender_dir, logger, agent_id, _lean_gather_instructions(defender_dir),
-        _lean_gather_model(),
+        defender_dir, logger, agent_id, _gather_instructions(defender_dir),
+        _gather_model(),
     )
 
 
@@ -332,7 +275,7 @@ def _make_compaction_processor():
         try:
             return _compact_messages(messages, ctx.deps.run_dir)
         except Exception as e:  # noqa: BLE001 — compaction must never break the run
-            print(f"[run_pai] compaction skipped: {e!r}", file=sys.stderr)
+            print(f"[run.py] compaction skipped: {e!r}", file=sys.stderr)
             return messages
 
     return process
@@ -345,11 +288,9 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         # compact. Listed after the hooks so observability wraps the rewritten
         # request (the recorded usage then reflects the compacted token cost).
         capabilities.append(ProcessHistory(_make_compaction_processor()))
-        print("[run_pai] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
-    print(f"[run_pai] gather model: {_lean_gather_model()}", file=sys.stderr)
-    if os.environ.get("DEFENDER_GATHER_MODEL"):
-        print(f"[run_pai] gather model OVERRIDE: {_gather_model()} "
-              "(DEFENDER_GATHER_MODEL)", file=sys.stderr)
+        print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
+    _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
+    print(f"[run.py] gather model: {_gather_model()}{_override}", file=sys.stderr)
     agent = Agent(
         AnthropicModel(model_name),
         deps_type=RunDeps,
@@ -359,13 +300,13 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
-    # The gather dispatch tool builds a fresh nested LEAN gather agent per lead
+    # The gather dispatch tool builds a fresh nested gather agent per lead
     # (#340): one agent runs find→execute(one server-side ES|QL aggregation)→verify
     # and auto-captures its own adapter calls. The finder/executor split (#339) was
     # superseded by this before it ever merged.
     register_gather_tool(
         agent,
-        lambda agent_id: build_lean_gather_agent(defender_dir, logger, agent_id),
+        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id),
         GATHER_REQUEST_LIMIT,
     )
     return agent
@@ -373,11 +314,11 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
 
 def _log_node(node: Any) -> None:
     if Agent.is_model_request_node(node):
-        print("[run_pai] · model request", file=sys.stderr)
+        print("[run.py] · model request", file=sys.stderr)
     elif Agent.is_call_tools_node(node):
-        print("[run_pai] · tool calls", file=sys.stderr)
+        print("[run.py] · tool calls", file=sys.stderr)
     elif Agent.is_end_node(node):
-        print("[run_pai] · end", file=sys.stderr)
+        print("[run.py] · end", file=sys.stderr)
 
 
 async def run_investigation(
@@ -412,13 +353,13 @@ async def run_investigation(
             async for node in run:
                 _log_node(node)
     except UsageLimitExceeded as e:
-        print(f"[run_pai] request limit reached ({e}); writing partial trace",
+        print(f"[run.py] request limit reached ({e}); writing partial trace",
               file=sys.stderr)
     except RunAborted as e:
         # Run-wide circuit breaker: the environment is broadly unreachable. Stop
         # the loop and write the partial trace, same as the request-limit path —
         # every request up to here is already in the live request log.
-        print(f"[run_pai] {e}; writing partial trace", file=sys.stderr)
+        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
     wall_ms = (time.time() - t0) * 1000.0
 
     # result is None when the run ends without an End node (e.g. the request-limit

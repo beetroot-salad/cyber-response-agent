@@ -77,16 +77,17 @@ This is the load-bearing rule of the runtime loop:
 See `defender/skills/gather/SKILL.md` for the subagent's own contract and
 `content/run-artifacts.md` for the two-table + by-ref payload shapes.
 
-## Hooks
+## Reliability gates
 
-The defender has **three plumbing hooks** (registered in
-`run-settings.json`), all PreToolUse:
+The runtime is the in-process PydanticAI driver, so these run **in-process**
+(the `hooks/` modules supply the logic as libraries — they are no longer wired
+as Claude Code PreToolUse hooks):
 
-| Hook | Matcher | Purpose |
+| Gate | Where | Purpose |
 |---|---|---|
-| `record_lead.py` | `Task\|Agent` | Parses the gather dispatch YAML and writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id fails the create and the hook exits 2 (an integrity gate, not just a shim) |
-| `inject_system_skill_description.py` | `Task\|Agent` | Looks up the dispatch's `system` and appends that per-system SKILL's frontmatter `description:` to the subagent prompt, so gather confirms relevance then reads the full SKILL |
-| `block_main_loop_raw_access.py` | `Bash\|Read\|Grep\|Glob` | Enforces the gather-dispatch discipline above — blocks the main loop from running the system CLIs directly or reading `gather_raw` to re-derive fields |
+| `record_lead.claim_lead` | called in `runtime/tools.py` on gather dispatch | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim) |
+| `inject_system_skill_description.descriptor_catalog` | `runtime/tools.py` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
+| `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (using the `block_main_loop_raw_access` predicates); raises `ModelRetry` on a deny |
 
 If a write or read is blocked, the fix is to dispatch gather — never to find
 another path to the bytes.
@@ -100,5 +101,5 @@ indeterminate-authz forcing a second loop) and
 `example-c-cumulative-escalation.md` (competing hypotheses where none
 reaches `++` but the cumulative pattern justifies escalation).
 
-Sources: `defender/SKILL.md`, `defender/run-settings.json`,
+Sources: `defender/SKILL.md`, `defender/runtime/` (driver, tools, permission),
 `defender/hooks/`.

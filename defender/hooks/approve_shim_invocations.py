@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: auto-approve safe shim + read-only Bash invocations.
+"""Safe-shim + read-only Bash allowlist predicates.
 
-The `defender/bin/defender-*` shims give the agent one stable token per
-first-party tool, allowlisted in run-settings.json as `Bash(defender-* *)`.
-But the static allowlist matches on the command's first token, so it can't
-express two shapes the agent reaches for naturally in an unattended run:
+Imported as a library by `runtime/permission.py` (the in-process gate);
+formerly a `claude -p` PreToolUse hook. The `defender/bin/defender-*` shims
+give the agent one stable token per first-party tool. But a first-token-only
+allowlist can't express two shapes the agent reaches for naturally:
 
   1. `bash -c '<shim invocation>'` — the command's first token is `bash`,
      not `defender-*`, and a settings glob can't anchor inside the quoted

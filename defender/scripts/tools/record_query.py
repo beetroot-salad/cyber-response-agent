@@ -72,7 +72,7 @@ LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 _CLI_RE = re.compile(r"(?:^|/)(\w+)_cli\.py$")
 # Non-adapter `defender-*` shims — never a lead system. Mirrors
 # hooks/_cmd_segments.NON_ADAPTER_SHIMS.
-_NON_ADAPTER = frozenset({"record-query", "data-source-debug", "invlang"})
+_NON_ADAPTER = frozenset({"record-query", "invlang"})
 
 # Size safety: a query that over-returns (server-side filter didn't bind,
 # broad window, high-cardinality index) would otherwise dump its whole

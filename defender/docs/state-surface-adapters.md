@@ -118,24 +118,16 @@ adapter.
 
 ## Permissions
 
-`defender/run-settings.json` already has a wildcard
-`Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/*.py *)`
-that covers any new adapter. Still add the explicit per-CLI entries as
-a fallback (some Bash matchers expand the wildcard inconsistently, and
-the explicit list doubles as discoverable documentation of what ships):
+The in-process gate (`runtime/permission.py`) recognizes adapters by
+convention: a `defender-<system>` shim token, or a raw
+`scripts/tools/<name>_cli.py` path (the `ADAPTER_CLI_RE` in
+`hooks/_cmd_segments.py`). A new adapter that follows the shim + `*_cli.py`
+naming auto-gates with no per-CLI permission entry — the gather subagent may
+run it standalone (captured transparently), and the main loop is clamped out.
 
-```
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/cmdb_cli.py *)",
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/identity_cli.py *)",
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/change_mgmt_cli.py *)",
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/threat_intel_cli.py *)",
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/ticket_cli.py *)",
-"Bash(python3 /workspace/defender-v2-tree/defender/scripts/tools/host_state_cli.py *)",
-```
-
-The `docker --context soc-playground exec *` permission is **already
-covered transitively** through these — the adapter shells out, but the
-agent only ever invokes the python CLI directly.
+The adapter shells out to `docker --context soc-playground exec *` internally,
+but the agent only ever invokes the python CLI / `defender-*` shim directly, so
+that command never reaches the gate.
 
 ## Audit
 

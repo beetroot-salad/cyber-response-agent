@@ -130,9 +130,6 @@ jobs:
       - name: Shippable-surface lint (env-agnostic discipline)
         run: python defender/scripts/lint_shippable_surface.py || true
 
-      - name: Static permission smoke (Bash invocations vs run-settings allowlist)
-        run: python defender/scripts/lint_static_smoke.py || true
-
       - name: Ground-truth-leak scan
         run: python defender/scripts/lint_ground_truth_leak.py || true
 

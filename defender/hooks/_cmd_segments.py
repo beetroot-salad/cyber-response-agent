@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Shared Bash-command decomposition + `defender-*` shim taxonomy.
 
-Two PreToolUse hooks reason about the same things — how a Bash command
+The in-process gate reasons about the same things — how a Bash command
 decomposes into shell segments, and which `defender-*` shims are
-data-source *adapters* (must be routed through the capture wrapper) vs.
+data-source *adapters* (captured transparently by the gather bash tool) vs.
 *non-adapter* tooling. Keeping that logic in one place means a newly
-onboarded adapter shim auto-gates everywhere with no per-hook edit.
+onboarded adapter shim auto-gates everywhere with no per-site edit.
 
-Consumers:
-  - ``approve_shim_invocations.py`` — auto-approve safe shim / read-only
+Consumers (all via `runtime/permission.py`, which imports these predicates):
+  - ``approve_shim_invocations`` — auto-approve safe shim / read-only
     compositions.
-  - ``block_unwrapped_adapter_calls.py`` — deny an adapter call inside the
-    gather subagent unless it's wrapped in ``defender-record-query``.
+  - ``block_main_loop_raw_access`` — clamp adapters / `gather_raw` out of
+    the main loop.
 
 This module is pure (parsing + a cheap ``bin/`` dir read); no IO beyond
 listing ``defender/bin``.
@@ -29,9 +29,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Non-adapter shims: corpus query + gather's own wrappers. Everything else
 # under defender/bin/ that starts with `defender-` is a data-source adapter.
-# This is the single source of truth for the split — all three gate hooks
-# (approve_shim_invocations, block_unwrapped_adapter_calls,
-# block_main_loop_raw_access) derive their adapter set from here.
+# This is the single source of truth for the split — the in-process gate
+# (runtime/permission.py, via the approve_shim_invocations +
+# block_main_loop_raw_access predicates) derives its adapter set from here.
 # `defender-lessons` is read-only corpus tooling (frontmatter grep / tag
 # enumeration); it queries no data source, so it stays a non-adapter and
 # remains allowed in the main loop.
@@ -40,14 +40,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # is self-sandboxed (no file/network access), so it is a non-adapter too.
 NON_ADAPTER_SHIMS = frozenset(
     {"defender-invlang", "defender-record-query", "defender-record-summary",
-     "defender-data-source-debug", "defender-lessons", "defender-sql"}
+     "defender-lessons", "defender-sql"}
 )
 
 # A raw adapter-CLI path form (`scripts/tools/<name>_cli.py`), i.e. the shim's
 # underlying script invoked directly rather than via its `defender-*` token.
 # The `_cli.py` suffix IS the structural marker for an adapter: every
-# non-adapter script deliberately avoids it (`record_query.py`,
-# `data_source_debug.py`, `sql.py`) so it can't be misread as an adapter here.
+# non-adapter script deliberately avoids it (`record_query.py`, `sql.py`) so it
+# can't be misread as an adapter here.
 # Kept in sync with block_main_loop_raw_access.ADAPTER_CLI_RE.
 ADAPTER_CLI_RE = re.compile(r"scripts/tools/\w+_cli\.py\b")
 

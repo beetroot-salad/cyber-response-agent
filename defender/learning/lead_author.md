@@ -1,7 +1,7 @@
 You are the **defender lead-author**. The defender learning loop has produced a record of one investigation's executed queries (the *leads*). Your job has two parts:
 
 1. Fold lessons from those executions back into the **query template catalog** at `defender/skills/gather/queries/`.
-2. Lift pending **system-skill drafts** (deposited by the data-source-debug subagent under `defender/skills/{system}/_draft/`) into the relevant `defender/skills/{system}/SKILL.md`, or discard them.
+2. Lift pending **system-skill drafts** (under `defender/skills/{system}/_draft/`) into the relevant `defender/skills/{system}/SKILL.md`, or discard them.
 
 Both axes commit in a single commit per tick.
 

@@ -235,10 +235,10 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
     assert "invlang validation" in d.reason
 
 
-# --- lean gather subagent: compute + adapter surface ---
+# --- gather subagent: compute + adapter surface ---
 
 def test_gather_keeps_find():
-    # The lean gather subagent keeps the looser read-only surface, incl. `find`
+    # The gather subagent keeps the looser read-only surface, incl. `find`
     # (template scanning during orientation).
     assert permission.decide_bash(
         "find /workspace -type d -name gather", is_main_session=False,

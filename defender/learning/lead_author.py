@@ -502,8 +502,8 @@ def _stage_pending_drafts() -> list[str]:
     files — git refuses both on an untracked source.
 
     Covers both catalog drafts (gather-authored mid-run or auto-synthesized
-    by ``synthesize_drafts``) and system-skill drafts (data-source-debug
-    deposits). Called *before* the baseline snapshot so the staged drafts
+    by ``synthesize_drafts``) and any pending system-skill drafts under
+    ``_draft/``. Called *before* the baseline snapshot so the staged drafts
     are recorded as expected queue content, not flagged as post-flight dirt.
     """
     proc = _git("ls-files", "--others", "--exclude-standard", "-z")
@@ -710,7 +710,7 @@ _ALLOWLIST = (
 def _subscription_env() -> dict[str, str]:
     """Env for the ``claude -p`` lead-author: strip ``ANTHROPIC_API_KEY`` so the
     call bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run_pai.py)."""
+    (reserved for the PydanticAI engine — see defender/run.py)."""
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)
     return env
