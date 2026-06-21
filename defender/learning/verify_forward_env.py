@@ -42,7 +42,7 @@ from defender.learning._prologue import extract_case_entities
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
-RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons_env_retrieve.py"
+RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
 DEFAULT_PENDING = HERE / "_pending" / "environment_observations.jsonl"
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
 

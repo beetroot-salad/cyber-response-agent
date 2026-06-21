@@ -4,7 +4,7 @@
       "Read(defender/lessons-environment/**)",
       "Grep(defender/lessons-environment/**)",
       "Glob(defender/lessons-environment/**)",
-      "Bash(python3 defender/scripts/lessons_env_retrieve.py *)"
+      "Bash(python3 defender/scripts/lessons/lessons_env_retrieve.py *)"
     ]
   }
 }

@@ -17,7 +17,7 @@ from pathlib import Path
 # the caller invoked us with (the actor's Bash tool uses system python3).
 # Gated on __main__ so importing this module as a library never os.execv's
 # the importing process away.
-_VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
+_VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
@@ -26,7 +26,7 @@ import argparse
 import yaml
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
 
 

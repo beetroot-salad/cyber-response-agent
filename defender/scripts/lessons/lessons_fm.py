@@ -41,9 +41,9 @@ from pathlib import Path
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
 # caller used (the bin/ shim already points here; this covers a direct
-# ``python3 defender/scripts/lessons_fm.py`` run). Gated on __main__ so import
+# ``python3 defender/scripts/lessons/lessons_fm.py`` run). Gated on __main__ so import
 # as a library never os.execv's the importing process away.
-_VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
+_VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
@@ -53,7 +53,7 @@ import re
 import yaml
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 # The list-valued retrieval dimensions, in display order.

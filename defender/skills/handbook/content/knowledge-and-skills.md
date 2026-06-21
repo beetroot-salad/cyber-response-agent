@@ -73,7 +73,7 @@ runtime agent reads** — the two ends of the feedback loop.
 
 There are companion corpora — `defender/lessons-actor/` and
 `defender/lessons-environment/` — that hold direction-specific material;
-`defender/scripts/lessons_*` index/retrieve over them.
+`defender/scripts/lessons/lessons_*` index/retrieve over them.
 
 Sources: `defender/CLAUDE.md`, `defender/SKILL.md` §Skills,
 `defender/docs/system-skill-shape.md`.
