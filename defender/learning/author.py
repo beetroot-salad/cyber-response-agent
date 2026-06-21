@@ -49,7 +49,6 @@ corpus and pass no provenance trailers (issue #330).
 from __future__ import annotations
 
 import datetime as _dt
-import fcntl
 import json
 import os
 import re
@@ -111,23 +110,11 @@ AuthorError = _shared.AuthorError
 
 
 def acquire_lock() -> Any:
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    fh = LOCK_FILE.open("a+")
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
-        return None
-    return fh
+    return _shared.acquire_flock(LOCK_FILE)
 
 
 def release_lock(fh: Any) -> None:
-    if fh is None:
-        return
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
-        fh.close()
+    _shared.release_flock(fh)
 
 
 def assert_clean_lessons_dir() -> None:

@@ -30,7 +30,6 @@ trailers; the ``commit_corpus`` / ``changes_outside_corpus`` / ``corpus_dir_clea
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import re
 import subprocess
@@ -124,23 +123,11 @@ def _by_id(rows: list[dict]) -> dict[str, dict]:
 
 
 def acquire_queue_lock(cfg: CuratorConfig) -> Any:
-    cfg.lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fh = cfg.lock_file.open("a+")
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
-        return None
-    return fh
+    return _shared.acquire_flock(cfg.lock_file)
 
 
 def release_queue_lock(fh: Any) -> None:
-    if fh is None:
-        return
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
-        fh.close()
+    _shared.release_flock(fh)
 
 
 def assert_clean_corpus_dir(cfg: CuratorConfig) -> None:

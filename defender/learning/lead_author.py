@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import fcntl
 import json
 import os
 import subprocess
@@ -324,13 +323,9 @@ def acquire_queue_lock() -> Any:
     Returns the open file handle on success, ``None`` if another tick
     holds it.
     """
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
     _log(f"acquire queue-lock={QUEUE_LOCK_FILE}")
-    fh = QUEUE_LOCK_FILE.open("a+")
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
+    fh = _author_shared.acquire_flock(QUEUE_LOCK_FILE)
+    if fh is None:
         _log("queue-lock held by another tick — skipping")
         return None
     _log("queue-lock acquired")
@@ -340,10 +335,7 @@ def acquire_queue_lock() -> Any:
 def release_queue_lock(fh: Any) -> None:
     if fh is None:
         return
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
-        fh.close()
+    _author_shared.release_flock(fh)
     _log("release queue-lock")
 
 
