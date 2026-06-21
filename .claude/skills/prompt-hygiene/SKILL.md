@@ -36,7 +36,7 @@ The runtime is `defender/`: a single root `defender/SKILL.md` drives the ORIENT�
 
 ### Examples & claims
 
-10. **No misleading root examples.** If a warning block compensates for a pitfall in an example, fix the example structurally (rename, drop asymmetry) instead of layering warning text.
+10. **Keep prompts deployment-agnostic; vendor specifics are conditional illustrations.** State the rule in general terms — the shape that holds across systems — and never let one deployment's mechanism stand in as the universal rule. A vendor mechanism written as the bare rule in a system-generic prompt (e.g. "Under ES|QL the query is one positional" in the cross-system lead-author) reads as if it always applies. State the general shape, then attach the vendor as a conditional, flagged example: *"some systems inline the whole query as one positional — e.g. if the SIEM is Elastic, the whole ES|QL pipe lives in `arg0`."* Conditions on any vendor value used this way: (a) it names a system that actually exists in *this* deployment — a stale or phantom tag (e.g. `wazuh` where the stack runs `elastic`) is a misleading example; rename it and unify with the real tags used elsewhere (rule 9); (b) it is visibly an illustration (`e.g.`, `if the SIEM is …`, `// example values`, a `{placeholder}`), never the bare rule. And if a warning block exists only to compensate for a pitfall in an example, fix the example structurally (rename, drop the asymmetry) instead of layering warning text.
 11. **Don't oversell design mechanisms.** Separate load-bearing mechanisms from speculative ones. Don't stack unverified claims to pad a pitch.
 12. **No legacy-compat shims for unshipped code.** If the only consumer is in this repo, rewrite the old shape — don't design dual interfaces. (A deliberately A/B-tested path behind a flag, like lean vs split gather under `DEFENDER_GATHER_LEAN`, is an experiment, not a shim — don't flag it.)
 
@@ -46,6 +46,17 @@ The runtime is `defender/`: a single root `defender/SKILL.md` drives the ORIENT�
 14. **Closed vocabularies have one source.** Slot vocabularies (anchor kinds, etc.) live in `skills/invlang/vocab.py` and are reached via `defender-invlang enum {slot}`. Don't restate or fork a vocab list inline in a prompt; reference the enum.
 15. **Empty / suspect results resolve in `gather/validate.md`, then escalate to data-source-debug.** Gather resolves a suspect empty inline (positive control, clause narrowing); only an unresolved, source-healthy quirk hands off to the `defender-data-source-debug` subagent (fresh `claude -p` context). There is no separate "composite" gather path — don't reference one.
 16. **Load structured artifacts on demand, don't preload.** Conditionally-load-bearing material gets pulled when needed — the per-system `SKILL.md`/`execution.md` for the system being queried, handbook content by topic — not dumped into the base prompt.
+
+## Verify cleanups against history
+
+A hygiene pass removes redundancy, parentheticals, and framing — but some repetition, framing, and structure is *intentional*. Before finalizing edits that delete or restructure content, diff the target against the commits that last touched it (`git log -p -- <file>`, focus on recent feature/fix commits) and confirm each removal doesn't contradict deliberate intent:
+
+- **Repetition** — a rule restated in a "Hard rules" / summary section is often deliberate emphasis, not an accidental duplicate. Keep one canonical statement, but don't silently drop an intentional reinforcement — replace it with a cross-reference.
+- **Framing** — wording a recent commit chose on purpose (a reframed bullet, a renamed concept, a flagged example) is signal. Don't revert it to the older phrasing in the name of polish.
+- **Structure** — section order and headers a commit established carry intent. Don't collapse them without cause.
+- **Grounding** — content you keep must still match the code: an enum value, field, or mechanism the prompt documents must still be produced/consumed by its paired driver (check it). A value the code no longer emits is the thing to cut, not the prose around it.
+
+Report any removal that touches recently-added content explicitly, so the user can confirm the intent before it ships.
 
 ## Output format
 
