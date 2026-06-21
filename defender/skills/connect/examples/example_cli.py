@@ -2,11 +2,39 @@
 """Reference adapter for a generic HTTP read source — the shape `/connect`
 copies into `defender/scripts/tools/{system}_cli.py`.
 
-It is deliberately environment-agnostic: it talks to whatever
-`{EXAMPLE_}URL_BASE` points at and authenticates with whatever
-`AUTH_TYPE` config.env declares. Replace `example` with the real system
-name, adjust the verbs and the response parsing to the real API, and
-keep the contract below intact.
+Pick the query shape before the verbs. Three tiers, best first:
+
+  1. The source has a native query language that AGGREGATES server-side
+     (ES|QL, SPL, KQL, SQL). Expose THAT and let the model write it: the
+     aggregation runs in the source, exact, and the result is the answer —
+     nothing to download and reduce. Always first choice. We prefer native
+     aggregation for two compounding reasons: simplicity (the source
+     computes it; there is no payload to reduce) and priors (these query
+     languages are one family the gather model already knows from training,
+     so the instruction surface stays near zero). For an Elasticsearch-class
+     deployment — a rich query language — that means the `esql` verb
+     (`POST /_query` -> {columns, row_count, values}; see `elastic_cli.py`),
+     NOT a Lucene filter that returns raw documents.
+
+  2. The source only FILTERS and returns rows (what this example shows).
+     Expose the native filter passthrough and return the rows; the model
+     aggregates them downstream with `defender-sql` over the `--raw`
+     output — still SQL, a language it knows. This downloads before it
+     reduces, so it is the fallback, not the goal. Document the concrete
+     recipe for the source's row shape in that system's `execution.md`
+     (see `cli-adapter.md` -> "Prefer native aggregation").
+
+  3. The source has NO query language (pure REST / lookup). Key on an
+     identifier and return the record.
+
+Never hand-roll a filter DSL or a bespoke adapter-side reducer — that is
+the pattern the gather redesign removed.
+
+This example sits at tier 2 and is deliberately environment-agnostic: it
+talks to whatever `{EXAMPLE_}URL_BASE` points at and authenticates with
+whatever `AUTH_TYPE` config.env declares. Replace `example` with the real
+system name, adjust the verbs and the response parsing to the real API,
+and keep the contract below intact.
 
 The contract every adapter implements (see `_adapter.py`):
 
