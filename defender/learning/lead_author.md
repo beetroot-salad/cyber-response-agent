@@ -10,15 +10,15 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 ## What you receive
 
 - **`run_dir`** — absolute path of the defender run that triggered this tick. Read-only.
-- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `wazuh/auth-events.md`). Established templates live at `{system}/{id}.md`; drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Drafts are auto-synthesized (skeletons) from the run's executed-query record when gather ran a `{system}.{verb}` id with no matching template — gather no longer authors them mid-run. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
+- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `elastic/auth-events.md`). Established templates live at `{system}/{id}.md`; drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Drafts are auto-synthesized (skeletons) from the run's executed-query record when gather ran a `{system}.{verb}` id with no matching template — gather no longer authors them mid-run. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
 - **`skills_dir`** — `defender/skills/`. System-skill SKILL.md bodies (e.g. `elastic/SKILL.md`) live one level under here, each with an optional sibling `_draft/` that holds pending lifts.
 - **`executed_template_handoffs`** — a JSON array, one entry per *executed template* (not per invocation). When the same template was dispatched multiple times in this run, those invocations collapse to one handoff so you make one decision per file. Schema:
 
   ```jsonc
   {
-    "executed_template_path":
-      "defender/skills/gather/queries/wazuh/auth-events.md",
-    "query_id": "wazuh.auth-events",
+    "executed_template_path":                // example values throughout
+      "defender/skills/gather/queries/elastic/auth-events.md",
+    "query_id": "elastic.auth-events",
     "status": "established",                // or "draft"
     "neighbors": [                          // top-3 catalog siblings (same CLI)
       {"template_path": "...", "score": 0.41},
@@ -33,7 +33,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
         "params": {"host": "...", "window": "1h"},
         "executed_query": "<the EXACT query that ran — canonical>",
         "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
-        "payload_digest": "847 events; 12 distinct dstuser; ...",
+        "payload_digest": "847 events; 12 distinct user.name; ...",
         "result_refs": ["gather_raw/l-001/0.json"],
         "composite_kind": "atomic"          // atomic|sweep|join|baseline_shift|drill_down
       }
@@ -43,7 +43,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 
   `executed_template_path`, `neighbors`, `executed_query`, `payload_status`, `payload_digest`, and `composite_kind` are pre-computed by the driver (see Hard rules). Read the payload at `result_refs` only when the digest leaves a question it can't answer.
 
-  **`executed_query` is the verbatim query that ran — the canonical record.** Under ES|QL the entire query is one positional and the bindings (`user`, `src`, time window) live *inside* the pipe, so `params` shows an unbound `${user}`; read `executed_query`, not `params`.
+  **`executed_query` is the verbatim query that ran — the canonical record.** Some systems inline the whole query as a single positional — e.g. Elastic's ES|QL puts the entire pipe in `params.arg0` with the bindings (user, source, time window) inside it — so `params` carries only that raw positional, not the named filters; read `executed_query`, not `params`.
 
 - **`pending_system_drafts`** — a JSON array, one entry per pending draft file under `defender/skills/{system}/_draft/`. The driver scans the directory on every tick; the list is empty when the queue is below the lift threshold (env `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`, default 5). Schema:
 
