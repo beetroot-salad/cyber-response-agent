@@ -35,9 +35,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `defender-lessons` is read-only corpus tooling (frontmatter grep / tag
 # enumeration); it queries no data source, so it stays a non-adapter and
 # remains allowed in the main loop.
+# `defender-sql` aggregates a payload piped into it on stdin (the tier-2
+# fallback for a source with no native aggregation); it queries no source and
+# is self-sandboxed (no file/network access), so it is a non-adapter too.
 NON_ADAPTER_SHIMS = frozenset(
     {"defender-invlang", "defender-record-query", "defender-record-summary",
-     "defender-data-source-debug", "defender-lessons"}
+     "defender-data-source-debug", "defender-lessons", "defender-sql"}
 )
 
 # A raw adapter-CLI path form (`scripts/tools/<name>_cli.py`), i.e. the shim's

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Auto-stable invocation shim for sql_cli.py. The agent calls
+# `defender-sql '<SQL>'` (piped after an adapter's --raw output) instead of a
+# path/module form so the allowlist matches one stable token regardless of cwd,
+# venv path, or compound wrapping. See defender/bin/README.md.
+PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+exec "$PY" "${DEFENDER_DIR}/scripts/tools/sql_cli.py" "$@"
