@@ -88,8 +88,8 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
 - `executed_queries.jsonl` flags whether each query came back `ok`, `empty`,
   `error`, etc. (the `payload_status` field) — the fastest read on "did the
   data actually arrive?"
-- `python3 defender/scripts/run_stats.py` and the `visualize_*.py` scripts
-  under `defender/scripts/` render aggregate + per-run views.
+- `python3 scripts/analytics/run_stats.py` and the `visualize_*.py` scripts
+  under `defender/scripts/visualize/` render aggregate + per-run views.
 
 Sources: `defender/CLAUDE.md` §Run dir layout / §Two-table schema,
 `defender/learning/lead_repository.py`, `defender/run.py`.

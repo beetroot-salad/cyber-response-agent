@@ -2,7 +2,7 @@
 """Print wall-time and cost for one or more defender runs.
 
 Usage:
-    python3 defender/scripts/run_stats.py <run_dir> [<run_dir> ...]
+    python3 scripts/analytics/run_stats.py <run_dir> [<run_dir> ...]
 
 Reads each run's `tool_trace.jsonl` and pulls the trailing
 `type:"result"` event, which carries `duration_ms`, `duration_api_ms`,
