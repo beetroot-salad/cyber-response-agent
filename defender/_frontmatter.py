@@ -1,6 +1,6 @@
 """Single canonical YAML-frontmatter parser shared by learning/ and scripts/.
 
-One contract for "parse the YAML frontmatter out of a markdown doc", so the six
+One contract for "parse the YAML frontmatter out of a markdown doc", so the
 former copies can't drift apart again. ``parse_frontmatter`` is strict and
 returns ``(frontmatter, body)``; callers that only want the dict take ``[0]``,
 and callers that want ``None`` on absence use ``parse_frontmatter_or_none``.
