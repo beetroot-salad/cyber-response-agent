@@ -191,9 +191,7 @@ QUEUEABLE_FINDING_TYPES = {
 # queued as lessons (filtered in ``_loop_persist.append_findings``), so the
 # author / lesson schema / verify_forward need not route them.
 #   detection-confirmed — a justified detection worth preserving.
-#   gather-fidelity (#311) — gather misreported a computed value (no backing
-#     summary row, or a snippet that is wrong code for its label).
-ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed", "gather-fidelity"}
+ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
 # Benign defender findings share the queueable types; ``disposition-confirmed``
 # is the FP-direction audit-only type (the adversarial ``detection-confirmed``

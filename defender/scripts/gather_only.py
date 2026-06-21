@@ -5,7 +5,7 @@ run path (nothing in production imports or calls it).
 It dispatches ONE canned gather lead in isolation — no main agent, no ANALYZE —
 so you can iterate on the gather SKILL / query templates and A/B the model +
 prompt deterministically on a single lead, off the loop-count nondeterminism of a
-full `run_pai` investigation. It mirrors the live dispatch exactly (the same
+full `run.py` investigation. It mirrors the live dispatch exactly (the same
 `tools._run_gather` seam, the same per-lead request cap, the same
 adapter-capture hooks + descriptor catalog), so what it measures matches
 production gather.
@@ -17,7 +17,7 @@ Usage:
 - [lead_key]  picks a canned lead from LEADS below (default: baseline-7d).
               Representative A/B cells: `ip-host-baseline` (templated, one-shot)
               and `process-db1` (coined).
-- Runs the LEAN gather (SKILL.lean.md) on `_lean_gather_model()` (Sonnet);
+- Runs the gather (SKILL.md) on `_gather_model()` (Sonnet);
   set DEFENDER_GATHER_MODEL to A/B a different model.
 
 Requirements (this is a LIVE, BILLED call against real infrastructure — run it
@@ -35,10 +35,10 @@ from pathlib import Path
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(DEFENDER_DIR.parent))
 
-from defender import run as _run  # noqa: E402
+from defender import run_common as _run  # noqa: E402
 from defender.runtime import driver, observe  # noqa: E402
 from defender.runtime.tools import RunDeps, _run_gather  # noqa: E402
-import defender.run_pai as run_pai  # noqa: E402
+from defender import run as _entry  # noqa: E402
 
 # Canned leads taken verbatim from the gsplit-haiku-1 crash run's leads table.
 LEADS = {
@@ -60,7 +60,7 @@ LEADS = {
     ),
     # Elastic, WITH a template — a src_ip -> host pair baseline is one narrowing of
     # the wide ES|QL `sshd-auth-history` template (user/src/dst/window axes), so the
-    # lean agent binds + narrows it rather than coining. The templated-path A/B cell.
+    # gather agent binds + narrows it rather than coining. The templated-path A/B cell.
     "ip-host-baseline": dict(
         system="elastic",
         goal=("Establish the 7-day pre-alert sshd authentication baseline for source IP "
@@ -115,7 +115,7 @@ async def main() -> int:
     run_id = sys.argv[1]
     lead = LEADS[sys.argv[2] if len(sys.argv) > 2 else "baseline-7d"]
 
-    key, src = run_pai.resolve_first_party_key(DEFENDER_DIR)
+    key, src = _entry.resolve_first_party_key(DEFENDER_DIR)
     if not key:
         print("[gather_only] no first-party key", file=sys.stderr)
         return 2
@@ -128,13 +128,13 @@ async def main() -> int:
     deps = RunDeps(run_dir=run_dir, defender_dir=DEFENDER_DIR, run_id=run_id,
                    salt=salt, is_main_session=True)
 
-    # The lean single-agent gather (#340): SKILL.lean.md, one ES|QL aggregation,
+    # The single-agent gather (#340): SKILL.md, one ES|QL aggregation,
     # auto-capture. Same lead dispatch + capture hooks as a full run.
     def factory(agent_id: str):
-        return driver.build_lean_gather_agent(DEFENDER_DIR, logger, agent_id)
+        return driver.build_gather_agent(DEFENDER_DIR, logger, agent_id)
 
-    print(f"[gather_only] engine=LEAN run_dir={run_dir} "
-          f"gather_model={driver._lean_gather_model()}", file=sys.stderr)
+    print(f"[gather_only] engine=gather run_dir={run_dir} "
+          f"gather_model={driver._gather_model()}", file=sys.stderr)
     try:
         out = await _run_gather(deps, factory, driver.GATHER_REQUEST_LIMIT,
                                 "l-001", lead["system"], lead["goal"],

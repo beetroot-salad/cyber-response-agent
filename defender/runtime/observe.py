@@ -42,7 +42,7 @@ from typing import Any
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 # scripts/ holds the shared price table. The workspace root is on sys.path via
-# the entry-point bootstrap (run_pai.py) / pytest's `pythonpath = [".."]`.
+# the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.scripts.pricing import usage_cost
 
 

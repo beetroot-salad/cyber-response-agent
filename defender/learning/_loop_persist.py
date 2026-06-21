@@ -322,8 +322,8 @@ def append_findings(
     """Append queueable defender findings to the shared pending queue.
 
     Both directions feed ``_pending/findings.jsonl`` → ``defender/lessons/``. The
-    audit-only finding types are filtered out (``detection-confirmed`` +
-    ``gather-fidelity`` adversarially, ``disposition-confirmed`` benignly). Each
+    audit-only finding types are filtered out (``detection-confirmed``
+    adversarially, ``disposition-confirmed`` benignly). Each
     row is tagged with ``direction`` so the shared curator applies the right
     ground-truth gate; benign ids live in a ``benign/`` namespace so the two
     directions never collide on a ``run_id``.

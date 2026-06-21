@@ -1,9 +1,9 @@
 """Structural validator for defender ```invlang investigation blocks.
 
-Importable rule engine; the PreToolUse hook
-(`defender/hooks/invlang_validate.py`) is a thin stdin→validate→exit
-shim over `validate_companion`. Tests import this module directly so
-the rule surface is exercised without spawning a subprocess.
+Importable rule engine. The runtime invokes `validate_companion` in-process
+from `runtime/permission.py` before an `investigation.md` write commits
+(raising `ModelRetry` with the errors on a violation); the learning loop and
+corpus queries import the same rules. Tests import this module directly.
 
 This is the defender analogue of soc-agent's `invlang_validate.py` +
 `invlang_checks_*` family, adapted to the *defender* invlang schema

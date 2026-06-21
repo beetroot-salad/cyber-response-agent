@@ -1,31 +1,19 @@
 #!/usr/bin/env python3
 """Defender entrypoint — investigate one alert end-to-end.
 
+The investigation is driven by the in-process PydanticAI driver
+(`runtime/driver.py`): materialize the run dir → run → cross-check the two live
+tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
+via `run_common.py`.
+
 Usage:
-    python3 defender/run.py <alert.json> [options]
+    python3 defender/run.py <alert.json> [--run-id ID] [--no-learn] [--model M]
 
-Options:
-    --run-id ID         Override the auto-generated run id.
-    --no-learn          Skip the learning-loop step.
-    --model MODEL       Override $DEFENDER_MODEL (default: claude-sonnet-4-6).
-    --effort EFFORT     Pass --effort to claude.
-
-Pipeline:
-    1. Materialize {run_dir}/ with alert.json and an empty gather_raw/.
-    2. Spawn `claude -p` against defender/SKILL.md with the prepared
-       run_settings.json (permissions + the record_lead hook). The two
-       lead/query tables are written live during the run by record_lead.py
-       + record_query.py. stream-json events go to {run_dir}/tool_trace.jsonl.
-    3. Unless --no-learn, drop a learn-queue marker for the off-process
-       LEARN worker (defender.learning.loop --learn-drain) — run.py does
-       not run learning itself, so its exit no longer waits on it.
-    4. Render the transcript (runtime view; the worker re-renders the
-       judge page after it learns).
-
-Steps 3–4 used to live in run.sh + the SKILL prompt; consolidating
-them here means the agent stops carrying the projection responsibility
-and broken runs (where the agent forgot or crashed) still produce
-whatever artifacts the agent did manage to write.
+Billing / credentials: the engine calls the first-party Anthropic REST API, so
+it needs a real billable API key. Inside a Claude Code session the *ambient*
+ANTHROPIC_API_KEY is the subscription credential (it 401s against the REST API),
+so we source our own billable key from a `.env` file (`resolve_first_party_key`),
+which takes precedence over the ambient value.
 """
 
 from __future__ import annotations
@@ -34,270 +22,153 @@ import os
 import sys
 from pathlib import Path
 
-# Re-exec into defender/.venv if launched against a different interpreter,
-# so callers don't have to remember to invoke the venv python. Bootstrap
-# instructions live in defender/CLAUDE.md §Python environment.
+# Re-exec into defender/.venv (which has pydantic-ai) if launched under a
+# different interpreter. Gated on __main__ so importing this module never execvs.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-# Compare unresolved paths — the venv python is typically a symlink to the
-# system interpreter, so .resolve() would collapse both sides and skip the
-# re-exec even when site-packages differ. Gated on __main__: importing run.py
-# (e.g. test_run_settings) must never os.execv the importing process away.
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
-import argparse
-import datetime as _dt
-import json
-import secrets
-import shutil
-import subprocess
-import tempfile
+import argparse  # noqa: E402
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve
+# whether this file is imported or run directly.
+if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender import run_common as _run  # noqa: E402
+from defender.runtime import driver  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
-REPO_ROOT = DEFENDER_DIR.parent
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve
-# (the learning modules are imported lazily below); see tests/conftest.py.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-SETTINGS_TEMPLATE = DEFENDER_DIR / "run-settings.json"
-VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize_run.py"
 
-DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
-DEFAULT_MODEL = "claude-sonnet-4-6"
+
+def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
+    """Extract a single var from a `.env` file. Deliberately *not* a full dotenv
+    load — we only want the API key, not to clobber adapter config (elastic creds,
+    docker-context vars) that also live in these files. Returns the value or None."""
+    try:
+        text = env_file.read_text()
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        k, sep, v = line.partition("=")
+        if sep and k.strip() == var:
+            return v.strip().strip('"').strip("'") or None
+    return None
+
+
+def resolve_first_party_key(defender_dir: Path) -> tuple[str | None, Path | None]:
+    """The billable first-party API key for the PydanticAI engine, sourced from a
+    `.env` file rather than the ambient ANTHROPIC_API_KEY.
+
+    Inside a Claude Code session the ambient key is the *subscription* credential
+    (the session's nested `claude -p` rides it; it 401s against the first-party
+    REST API this engine calls), so the `.env` key takes precedence. First existing
+    file with an ANTHROPIC_API_KEY wins:
+
+      1. ``$DEFENDER_ENV_FILE``  — explicit override
+      2. ``<repo_root>/.env``
+      3. ``/workspace/.env``     — canonical host location (repo_root differs under a git worktree)
+      4. ``<defender_dir>/../.env``
+
+    Returns ``(key, source_path)`` or ``(None, None)``.
+    """
+    candidates: list[Path] = []
+    explicit = os.environ.get("DEFENDER_ENV_FILE")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates += [
+        _run.REPO_ROOT / ".env",
+        Path("/workspace/.env"),
+        defender_dir.parent / ".env",
+    ]
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.is_file():
+            key = _read_env_key(path)
+            if key:
+                return key, path
+    return None, None
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, help="Path to alert.json fixture")
-    p.add_argument("--run-id", default=None, help="Override auto-generated run id")
-    p.add_argument("--no-learn", action="store_true", help="Skip the learning loop")
+    p.add_argument("--run-id", default=None,
+                   help="Pin the run id for a named A/B or live run (learning-loop "
+                        "commits reference it) instead of the auto timestamp id; a "
+                        "collision with an existing run dir is rejected by materialize_run_dir")
+    p.add_argument("--no-learn", action="store_true", help="Skip enqueuing for learning")
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
-    p.add_argument("--model", default=None, help="claude --model (overrides $DEFENDER_MODEL)")
-    p.add_argument("--effort", default=None, help="claude --effort (overrides $DEFENDER_EFFORT)")
+    p.add_argument("--model", default=None, help="model id (overrides $DEFENDER_MODEL)")
     return p.parse_args(argv)
-
-
-def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
-    if not alert.is_file():
-        sys.exit(f"alert not found: {alert}")
-    runs_base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
-    if run_id is None:
-        ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-        run_id = f"{ts}-{alert.stem}"
-    run_dir = runs_base / run_id
-    if run_dir.exists():
-        sys.exit(f"run dir already exists: {run_dir}")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    shutil.copy(alert, run_dir / "alert.json")
-    # Per-run salt consumed by the tag_tool_results hook to wrap untrusted
-    # data-source output in unguessable delimiters. Stable across the run,
-    # regenerated per run.
-    (run_dir / "meta.json").write_text(
-        json.dumps({"run_id": run_dir.name, "salt": secrets.token_hex(8)}, indent=2)
-        + "\n"
-    )
-    # Propagate a sibling ground_truth.yaml into the run dir so the learning
-    # loop's persist stage can recognise held-out cases and suppress
-    # queue appends. Fixture layout: {fixture-dir}/{alert.json,ground_truth.yaml}.
-    gt = alert.parent / "ground_truth.yaml"
-    if gt.is_file():
-        shutil.copy(gt, run_dir / "ground_truth.yaml")
-    return run_dir
-
-
-def build_settings_file() -> Path:
-    """Materialize a tempfile settings.json with $DEFENDER_DIR substituted.
-
-    Claude Code executes hook `command` strings via shell, so the
-    `${DEFENDER_DIR}` placeholder in run-settings.json would expand at
-    hook-fire time too — but writing it out resolved removes the
-    dependency on the env var being set in the hook subshell, and
-    keeps the on-disk template diff-friendly.
-    """
-    template = SETTINGS_TEMPLATE.read_text()
-    resolved = (
-        template
-        .replace("${DEFENDER_DIR}", str(DEFENDER_DIR))
-        .replace("${PYTHON}", sys.executable)
-    )
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".settings.json", delete=False, prefix="defender-"
-    ) as fh:
-        fh.write(resolved)
-        return Path(fh.name)
-
-
-def build_prompt(run_id: str, run_dir: Path) -> str:
-    # Inline workspace orientation so the agent doesn't burn turns on
-    # ls/find/grep across skills, tools, and env files. Failure here is
-    # non-fatal — the prompt still works without the map; we just lose
-    # the discovery-thrash savings.
-    ws_proc = subprocess.run(
-        [sys.executable, str(DEFENDER_DIR / "scripts" / "workspace_map.py"), str(run_dir)],
-        capture_output=True, text=True,
-    )
-    ws_map = ws_proc.stdout if ws_proc.returncode == 0 else f"<workspace map unavailable: {ws_proc.stderr.strip()}>\n"
-    return (
-        "Read defender/SKILL.md and follow it end-to-end.\n\n"
-        "## Run context\n"
-        f"case_id: {run_id}\n"
-        f"run_dir: {run_dir}\n"
-        f"alert: {run_dir / 'alert.json'}\n\n"
-        "The run dir already exists with alert.json copied in and an empty\n"
-        "gather_raw/ subdirectory. It lives under /tmp — write all run\n"
-        "artifacts (investigation.md, report.md, gather_raw/*) there, not\n"
-        "under the repo. Work through ORIENT → PLAN → GATHER →\n"
-        "ANALYZE → REPORT, dispatching gather subagents per\n"
-        "defender/SKILL.md §GATHER. Stop when investigation.md and\n"
-        "report.md both exist; the lead/query tables are written live as you\n"
-        "dispatch gather, and transcript.html is rendered after you exit.\n\n"
-        f"{ws_map}"
-    )
-
-
-def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
-    """The runtime agent's shell environment — shared by both engines (this
-    `claude -p` spawn and the PydanticAI tools' bash). `bin/` goes first on PATH
-    so the `defender-*` shims resolve by a single stable token regardless of cwd,
-    venv path, or compound wrapping; the run-dir anchors the budget/tag hooks and
-    the invlang corpus root (`DEFENDER_RUNS_BASE == run_dir.parent`).
-
-    `ANTHROPIC_API_KEY` is stripped: the `claude -p` spawn and any bash tool
-    that shells out to `claude` must bill against the subscription, never the
-    metered first-party key. The key is reserved for the PydanticAI engine,
-    which authenticates in-process from `os.environ` (untouched here) — see
-    `run_pai.py`."""
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
-    env["DEFENDER_DIR"] = str(defender_dir)
-    env["DEFENDER_RUN_DIR"] = str(run_dir)
-    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
-    env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    return env
-
-
-def spawn_claude(prompt: str, run_dir: Path, settings_path: Path, model: str, effort: str | None) -> int:
-    trace = run_dir / "tool_trace.jsonl"
-    # `--add-dir REPO_ROOT` is what lets Task-tool subagents Read paths
-    # under DEFENDER_DIR. Subagents land in a Claude-Code-managed
-    # worktree whose cwd is *not* under REPO_ROOT, so relative paths
-    # resolve into the wrong tree; absolute reads under REPO_ROOT only
-    # work if the directory is on the allowlist.
-    args = [
-        "claude", "-p",
-        "--model", model,
-        "--output-format", "stream-json",
-        "--include-hook-events",
-        "--verbose",
-        "--permission-mode", "acceptEdits",
-        "--settings", str(settings_path),
-        "--add-dir", str(run_dir),
-        "--add-dir", str(REPO_ROOT),
-    ]
-    if effort:
-        args.extend(["--effort", effort])
-    print(f"[run.py] run_dir={run_dir} model={model}" + (f" effort={effort}" if effort else ""), file=sys.stderr)
-    env = run_env(DEFENDER_DIR, run_dir)
-    with trace.open("w") as out:
-        proc = subprocess.run(args, input=prompt, text=True, stdout=out, env=env, cwd=str(REPO_ROOT))
-    return proc.returncode
-
-
-def visualize(run_dir: Path) -> None:
-    # visualize_run.py renders the judge + runtime pages AND mirrors them into
-    # defender/run-visualizations/<run_id>/ (so reviews aren't gated on /tmp
-    # surviving). Pre-learn the judge page renders empty (no judge artifacts yet);
-    # the off-process learn worker re-renders + re-mirrors the same way once they
-    # exist, so the runtime view is the only useful part of this pass.
-    proc = subprocess.run(
-        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True,
-    )
-    sys.stderr.write(proc.stdout)
-    if proc.returncode != 0:
-        sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
-
-
-def cross_check_tables(run_dir: Path) -> None:
-    """Loud structural-integrity check on the two live tables.
-
-    Restores the signal the deleted projection-failure halt used to provide:
-    cross-check the leads/queries tables against the `:L` row ids in
-    investigation.md. Orphan query rows or a lead the narration forgot are a
-    WARN — a structurally degraded run that would otherwise flow silently into
-    the oracle/judge; leads with no queries are an informational MONITOR note.
-    Never raises — a diagnostic must not abort the post-steps.
-    """
-    if not (run_dir / "investigation.md").is_file():
-        return
-    try:
-        from defender.learning import lead_repository
-
-        xcheck = lead_repository.narration_crosscheck_from_run(run_dir)
-    except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
-        print(f"[run.py] narration cross-check skipped: {e!r}", file=sys.stderr)
-        return
-    if not xcheck["ok"]:
-        print(
-            "[run.py] WARN narration cross-check FAILED — the live tables "
-            "disagree with investigation.md's :L rows:",
-            file=sys.stderr,
-        )
-        if xcheck["missing_from_narration"]:
-            print(f"[run.py]   table lead_ids with no :L row: {xcheck['missing_from_narration']}", file=sys.stderr)
-        if xcheck["queries_without_lead"]:
-            print(f"[run.py]   query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}", file=sys.stderr)
-    if xcheck["leads_without_queries"]:
-        print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
-
-
-def enqueue_learning(run_dir: Path) -> None:
-    """Hand the finished run to the off-process LEARN worker by dropping a
-    learn-queue marker. run.py holds SIEM creds; learning is SIEM-free and runs
-    in a separate process (loop.py --learn-drain), so the investigation's exit
-    no longer waits on — or is rolled back by — the learning chain."""
-    from defender.learning import loop as _loop
-
-    _loop.enqueue_for_learning(run_dir)
 
 
 def main(argv: list[str]) -> int:
     ns = parse_args(argv)
-    alert = ns.alert.resolve()
-    run_dir = materialize_run_dir(alert, ns.run_id)
 
-    # Case-history bridge: a ticket pre-exists when the alert is raised (the
-    # realistic lifecycle), so create the OPEN ticket now; the defender closes it
-    # in the post-steps below. Opt-in (default off); a no-op WARN if misconfigured.
+    # Source the billable first-party key from .env (overrides the ambient
+    # subscription credential a Claude Code session exports). See module docstring.
+    key, src = resolve_first_party_key(DEFENDER_DIR)
+    if key:
+        os.environ["ANTHROPIC_API_KEY"] = key
+        print(f"[run.py] first-party API key sourced from {src} "
+              "(overrides the ambient subscription credential)", file=sys.stderr)
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        print("[run.py] WARNING: no .env key found; using the ambient "
+              "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
+              "subscription credential and will 401 against the first-party API.",
+              file=sys.stderr)
+    else:
+        print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
+              "/workspace/.env, <repo>/.env, or $DEFENDER_ENV_FILE (the PydanticAI "
+              "engine bills the first-party Anthropic API).", file=sys.stderr)
+        return 2
+
+    alert = ns.alert.resolve()
+    run_dir = _run.materialize_run_dir(alert, ns.run_id)
+
+    # Case-history bridge — create the OPEN ticket now; closed in the post-steps
+    # below (engine-agnostic helper, shared with run.py). Opt-in; non-fatal.
     ticket_writer = None
     if ns.update_ticket:
         from defender.scripts.case_history import ticket_writer
         ticket_writer.open_case_ticket(run_dir)
 
-    settings_path = build_settings_file()
-    model = ns.model or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
-    effort = ns.effort or os.environ.get("DEFENDER_EFFORT") or None
+    salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
+    model = ns.model or os.environ.get("DEFENDER_MODEL") or driver.DEFAULT_MODEL
+    print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
-    prompt = build_prompt(run_dir.name, run_dir)
-    rc = spawn_claude(prompt, run_dir, settings_path, model, effort)
-    if rc != 0:
-        print(f"[run.py] claude exited rc={rc}; continuing post-steps on whatever artifacts exist", file=sys.stderr)
+    summary = asyncio.run(driver.run_investigation(
+        alert_path=run_dir / "alert.json",
+        run_dir=run_dir,
+        run_id=run_dir.name,
+        defender_dir=DEFENDER_DIR,
+        salt=salt,
+        model_name=model,
+    ))
+    out = str(summary.get("output") or "")
+    print(f"[run.py] done ({summary.get('requests')} model requests); "
+          f"output: {out[:200]}", file=sys.stderr)
 
-    # The two lead/query tables are written live during the run (record_lead.py
-    # + record_query.py), so there is no post-run projection step. A run that
-    # produced no queries (no executed_queries.jsonl) is a monitor case, not a
-    # harness break — the learning loop reads whatever the join surface yields.
     print("[run.py] artifacts:", file=sys.stderr)
     for entry in sorted(run_dir.iterdir()):
         sys.stderr.write(f"  {entry.name}\n")
 
-    if not (run_dir / "executed_queries.jsonl").is_file():
-        print("[run.py] note: no executed_queries.jsonl (the run ran no queries)", file=sys.stderr)
-
-    # Loud structural-integrity signal (replaces the deleted projection halt).
-    cross_check_tables(run_dir)
+    # Loud structural-integrity signal on the two live tables (no-op for a
+    # no-gather run — slice 1).
+    _run.cross_check_tables(run_dir)
 
     # Close the case-history ticket with the disposition (the defender's response).
     if ticket_writer is not None:
@@ -306,14 +177,11 @@ def main(argv: list[str]) -> int:
     if ns.no_learn:
         print("[run.py] --no-learn set; not enqueuing for learning", file=sys.stderr)
     else:
-        enqueue_learning(run_dir)
-        print("[run.py] enqueued for off-process learning (loop.py --learn-drain)", file=sys.stderr)
+        _run.enqueue_learning(run_dir)
+        print("[run.py] enqueued for off-process learning", file=sys.stderr)
 
-    # Render now (runtime view only — the judge page is empty until the learn
-    # worker re-renders post-actor/oracle/judge). Learning is off-process, so a
-    # learn failure surfaces via the worker/quarantine path, not run.py's exit.
-    visualize(run_dir)
-    return rc
+    _run.visualize(run_dir)
+    return 0
 
 
 if __name__ == "__main__":

@@ -1,12 +1,15 @@
 # Runtime migration: `claude -p` → PydanticAI
 
-**Status: design draft (2026-06-12). Spike not yet started.**
-
-This is the high-level shape of the runtime change. The decision and its
-cost evidence are recorded in the session memory
-(`project_defender_runtime_pydanticai`); this doc is the engineering plan
-the migration executes against. When this doc and the code disagree once
-the migration lands, the code wins.
+**Status: COMPLETED.** The migration landed and the legacy `claude -p` triage
+runtime is now **retired** — the in-process PydanticAI driver (`runtime/`) is
+the sole runtime. This doc is kept as historical design context; where it and
+the code disagree, the code wins. Note: of the four PreToolUse hooks mapped
+below, `block_unwrapped_adapter_calls` and `invlang_validate` were **retired,
+not ported** — adapter capture is now transparent in-process
+(`tools._capture_adapter`), and invlang validation is invoked directly by
+`runtime/permission.py` (`validate_companion`); the other two
+(`approve_shim_invocations`, `block_main_loop_raw_access`) live on as predicate
+libraries that `permission.py` imports.
 
 ## Why
 

@@ -1,6 +1,6 @@
 ---
 name: defender-gather-failure-modes
-description: Recovery for the lean gather when a query errors or returns an empty / all-zero / null / garbage result — the adapter exit-code branch, the positive-control tool-fault test, and field-drift recovery. Read this on a non-sane result; the happy path never needs it.
+description: Recovery for the gather when a query errors or returns an empty / all-zero / null / garbage result — the adapter exit-code branch, the positive-control tool-fault test, and field-drift recovery. Read this on a non-sane result; the happy path never needs it.
 ---
 
 You are here because a query errored or returned a result you could not

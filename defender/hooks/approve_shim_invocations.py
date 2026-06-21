@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: auto-approve safe shim + read-only Bash invocations.
+"""Safe-shim + read-only Bash allowlist predicates.
 
-The `defender/bin/defender-*` shims give the agent one stable token per
-first-party tool, allowlisted in run-settings.json as `Bash(defender-* *)`.
-But the static allowlist matches on the command's first token, so it can't
-express two shapes the agent reaches for naturally in an unattended run:
+Imported as a library by `runtime/permission.py` (the in-process gate);
+formerly a `claude -p` PreToolUse hook. The `defender/bin/defender-*` shims
+give the agent one stable token per first-party tool. But a first-token-only
+allowlist can't express two shapes the agent reaches for naturally:
 
   1. `bash -c '<shim invocation>'` — the command's first token is `bash`,
      not `defender-*`, and a settings glob can't anchor inside the quoted
@@ -53,9 +53,8 @@ from defender.hooks._cmd_segments import (
 # viewers/filters over already-materialized files, plus navigation. No `env`,
 # `printenv`, `export`, `python3`, `netstat`, `docker`.
 # The `datamash` + coreutils filters (`cut`/`comm`/`join`/`tr`/`paste`/`nl`) are
-# the pure-transform analysis suite the gather SKILL §4 self-test step runs bare
-# (e.g. `jq -r '…|@tsv' f | sort | datamash …`) before recording the value
-# through `defender-record-summary`; they have no exec/network/write surface.
+# pure-transform analysis tools over already-materialized payload files (e.g.
+# `jq -r '…|@tsv' f | sort | datamash …`); they have no exec/network/write surface.
 READONLY_TOOLS = frozenset(
     {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "sort", "uniq",
      "true", "datamash", "cut", "comm", "join", "tr", "paste", "nl"}

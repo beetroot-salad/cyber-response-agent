@@ -57,16 +57,16 @@ from defender.hooks._cmd_segments import ADAPTER_CLI_RE, adapter_shims
 
 RAW_MARKER = "gather_raw"
 # `ADAPTER_CLI_RE` (a `scripts/tools/<name>_cli.py` path) is imported from the
-# shared taxonomy. `record_query.py` / `data_source_debug.py` are NOT `_cli.py`,
-# and the invlang CLI has no `scripts/tools/` path, so both stay allowed.
+# shared taxonomy. `record_query.py` is NOT `_cli.py`, and the invlang CLI has
+# no `scripts/tools/` path, so both stay allowed.
 
 
 def _adapter_shim_re() -> re.Pattern | None:
     """Regex matching a `defender-<system>` ADAPTER shim in command position.
 
     Built per-call from the shared `adapter_shims()` (every `defender-*` shim in
-    defender/bin minus the non-adapter ones: invlang, record-query,
-    data-source-debug), so onboarding an adapter needs no edit here. The
+    defender/bin minus the non-adapter ones: invlang, record-query), so
+    onboarding an adapter needs no edit here. The
     `(?<![-\\w/])` anchor keeps it from false-matching `defender-runs` in a
     runs-base path or `--defender-dir`, and names are enumerated (NOT an open
     `defender-[a-z-]*`) for the same reason. Returns None if no adapters are
@@ -133,18 +133,15 @@ def main() -> int:
     tool_input = hook_data.get("tool_input") or {}
 
     if RAW_MARKER in _read_target(tool_name, tool_input):
-        # Exempt gather's own payload tools. data-source-debug RECEIVES a
-        # gather_raw payload path as input (reading it is its whole job) and
-        # record_query WRITES there; both legitimately name gather_raw paths on
-        # the command line. The clamp targets the main loop spot-checking raw
-        # payloads (Read/Grep/Glob, or bash cat/jq/cp on the file), not these
-        # tools — without this, a `defender-data-source-debug --payload
-        # .../gather_raw/...` call is wrongly denied (surfacing as a confusing
-        # "hook error") whenever the cwd discriminator flags the subagent as the
-        # main session. Mirrors the record_query exemption on the adapter clamp.
+        # Exempt gather's own payload tool. record_query WRITES to gather_raw, so
+        # it legitimately names a gather_raw path on the command line. The clamp
+        # targets the main loop spot-checking raw payloads (Read/Grep/Glob, or
+        # bash cat/jq/cp on the file), not this tool — without this, a
+        # `defender-record-query … .../gather_raw/…` call is wrongly denied
+        # (surfacing as a confusing "hook error") whenever the cwd discriminator
+        # flags the subagent as the main session.
         cmd = str(tool_input.get("command", "")) if tool_name == "Bash" else ""
         gather_payload_tool = any(t in cmd for t in (
-            "data_source_debug", "defender-data-source-debug",
             "record_query", "defender-record-query"))
         if not gather_payload_tool:
             print(RAW_DENY_REASON, file=sys.stderr)

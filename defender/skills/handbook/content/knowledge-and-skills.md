@@ -23,7 +23,7 @@ description looks relevant to the alert. Per-system SKILLs use the
 
 The per-system set is environment-dependent — enumerate
 `defender/skills/*/SKILL.md` rather than assuming a fixed list. Alongside
-them sit the cross-cutting `advisory` and `data-source-debug` helpers.
+them sits the cross-cutting `advisory` helper.
 
 ## Why per-system SKILLs are split
 

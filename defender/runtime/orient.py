@@ -133,8 +133,8 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) 
     # forbids. On failure the shim-backed sections (lessons/corpus) simply omit;
     # the workspace + catalog sections don't need env and still build.
     try:
-        from defender import run
-        env = run.run_env(defender_dir, run_dir)
+        from defender import run_common
+        env = run_common.run_env(defender_dir, run_dir)
     except Exception:  # noqa: BLE001 — orientation must never break the run
         env = {}
     sig = _alert_signature(alert_path)

@@ -13,71 +13,56 @@ invlang on-disk format (`++/+/-/--` assessment vocabulary; see
 
 The learning loop has proven its value end-to-end on real cases, so the
 earlier "runtime reliability gates are out of scope" stance is **lifted**.
-A wave of reliability hooks/validators guards the runtime loop:
+The runtime is the in-process **PydanticAI driver** (`runtime/driver.py`),
+so these gates run **in-process** — not as Claude Code PreToolUse/PostToolUse
+subprocesses. The legacy `claude -p` runtime and its `run-settings.json` hook
+wiring were retired; the gate *logic* lives on, re-hosted in-process (the
+`hooks/` modules below are now imported as plain libraries, not wired as
+hooks). The gates:
 
-- **`hooks/invlang_validate.py`** — PreToolUse on `Write|Edit` of
-  `investigation.md`. Runs the structural validator over the lenient
-  parser's output and **blocks the write (exit 2)** on any violation:
-  non-invlang surface (line endings are normalized first; a `​```yaml`
-  fence is rejected), structural parse failures, append-only violations
-  (block-count drop **or** in-place mutation/removal of a committed
-  vertex/edge), weak edge authority on `++`/`--` resolutions,
-  out-of-catalog type/rel/anchor_kind/auth_kind or `:R attr_updates`
-  key, and unsatisfied `benign` disposition gates (open `??`/`{a,b}`
-  slots, or an unauthorized contract on a *live* — final weight ≠ `--` —
-  hypothesis, computed from the resolution record (`:T conclude` carries
-  no sub-tables). The hook **fails closed**
-  (exit 2) on an internal validator error and scopes to the run's own
-  `investigation.md` via `DEFENDER_RUN_DIR`. Rules live in
-  `skills/invlang/validate.py` (companion walkers shared with the corpus
-  queries via `skills/invlang/_walkers.py`) and target the **current**
-  invlang spec (`skills/invlang/SKILL.md`). Pre-MVP,
-  historical runs written against earlier invlang variants are expected
-  to fail — that's intentional. Tests (`test_skill_worked_examples_all_pass`
-  per-fence + `test_skill_example_a_accumulates_clean` whole-document)
-  guard that the runtime SKILL's own worked examples always validate
-  clean, so the SKILL can't teach invlang the hook blocks. Two further
-  spec rules (per-type class-slot grammar, sibling-fork uniqueness) are
-  *not* yet enforced because the spec's own examples currently contradict
-  them — see `tasks/defender-invlang-enforcement-ramp.md`.
-- **`hooks/block_unwrapped_adapter_calls.py`** — PreToolUse on `Bash`,
-  scoped to the gather subagent (`agent_id` present). Denies (exit 2) a
-  data-source adapter call (`defender-elastic …`, or a raw `*_cli.py`
-  path) unless it is wrapped in `defender-record-query`, so every query
-  is captured into the queries table instead of escaping the audit trail.
-  The main loop is out of scope here — `block_main_loop_raw_access.py`
-  denies adapter calls there outright. The adapter-vs-non-adapter split
-  is shared across all three gate hooks (`approve_shim_invocations.py`,
-  `block_main_loop_raw_access.py`, and this one) via `hooks/_cmd_segments.py`,
-  so onboarding an adapter gates it everywhere with no per-hook edit.
-  This makes the queries table a real integrity gate, matching
-  `record_lead.py`'s `O_EXCL` claim on the leads table.
-- **`hooks/tag_tool_results.py`** — PostToolUse injection-safety tagging:
-  wraps MCP output and annotates the gather subagent's `Task` return (the
-  primary untrusted channel into the main loop) plus adapter-CLI /
-  `alert.json` reads with a per-run salted untrusted-data marker. Shares
-  the run-dir/salt lookup with the budget hook via `hooks/_run_dir.py`.
-- **`hooks/budget_enforcer.py`** — PostToolUse per-run tool-call /
-  subagent-spawn / wall-clock budget tracking (warning-only).
-- **`hooks/record_lesson_load.py`** — PostToolUse on `Read` of
-  `defender/lessons/*.md`, appending `{lesson_name, ts}` to
-  `{run_dir}/lessons_loaded.jsonl`. Feeds the post-merge lesson→outcome
-  traceability surface (`learning/trace_lesson.py`). Records lessons
-  loaded **into context**, not demonstrably *influenced* (a Read can't
-  tell triage from use) — scoped to the runtime corpus only
-  (`lessons-actor/`/`lessons-environment/` are author corpora). Exits 0.
-
-The budget + tag + lesson-load hooks anchor on the `DEFENDER_RUN_DIR`
-env var that run.py exports (one `claude -p` per run, so no session→run
-map is needed).
+- **`runtime/permission.py`** — the single in-process permission/validation
+  gate. It unifies the four old `claude -p` PreToolUse hooks: it imports the
+  same `approve_shim_invocations` / `block_main_loop_raw_access` predicates and
+  `_cmd_segments.py` taxonomy verbatim, and the driver calls it before each
+  tool, raising `ModelRetry` on a deny (the in-process twin of the old exit-2).
+  - **Main-loop raw-access + shim gating** — only the `defender-*` shims and
+    read-only viewers run from the main loop; data-source adapters and
+    `gather_raw/` reads are denied there (the gather subagent is the
+    data-access layer).
+  - **Adapter capture is now transparent** — the gather subagent runs a
+    standalone adapter call directly and `tools._capture_adapter` records it
+    (queries table + by-ref payload) in-process, so the old
+    `block_unwrapped_adapter_calls.py` wrapper-forcing hook is gone (no
+    `defender-record-query` wrapper to require). The queries table is still a
+    real integrity gate.
+  - **invlang validation on `investigation.md` writes** — `permission.py`
+    runs the structural validator (`skills/invlang/validate.py`'s
+    `validate_companion`, the same rules the old `invlang_validate.py` hook
+    used) before the write commits and raises `ModelRetry` with the validator
+    errors on a violation. Fails closed on an internal validator error. The
+    validator library + its `_walkers.py` are also shared with the corpus
+    queries and the learning loop.
+- **budget + observability** — installed as in-process `Hooks` on the agents
+  in `driver.py`: an `after_tool_execute` budget accountant (warning-only
+  per-run tool-call / spawn / wall-clock caps, `hooks/budget_enforcer.py`'s
+  logic) and a `model_request` wrap that logs every API request to
+  `llm_requests.jsonl` (`runtime/observe.py`, which projects `tool_trace.jsonl`).
+- **lead claim + descriptor injection + tagging** — `runtime/tools.py`
+  imports `record_lead.claim_lead` (writes the leads-table row and claims the
+  `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises
+  in-process, bouncing the defender back to PLAN, so it stays a real integrity
+  gate), `inject_system_skill_description.descriptor_catalog` (the
+  progressive-disclosure descriptor catalog), `tag_tool_results.wrap` (salted
+  untrusted-data tagging of adapter/alert reads + the gather return), and
+  `record_lesson_load.lesson_name` (lesson→outcome traceability into
+  `lessons_loaded.jsonl`). These anchor on the run dir from `RunDeps`.
 
 Still out of scope (port later if a case demands it): report-consistency
-judges, the phase state machine, class-slot grammar vocab, and
-sibling-fork topological uniqueness. `hooks/record_lead.py` writes the
-leads-table row from the gather dispatch block AND claims the `lead_id`
-with an atomic `O_CREAT|O_EXCL` create — a reused id fails the create and
-the hook exits 2 (blocking the dispatch), so it is a real integrity gate,
-not just an extraction shim.
+judges, the phase state machine, class-slot grammar vocab, and sibling-fork
+topological uniqueness. Two further invlang spec rules (per-type class-slot
+grammar, sibling-fork uniqueness) are *not* yet enforced because the spec's
+own examples currently contradict them — see
+`tasks/defender-invlang-enforcement-ramp.md`.
 
 **Design rationale lives in `defender/docs/`.** Before changing the
 loop shape, the actor/judge/oracle prompts, or the lessons mechanism,
@@ -93,29 +78,32 @@ session notes), `system-skill-shape.md` (per-system SKILL.md split).
 defender/
   SKILL.md              # the runtime agent's entry point — ORIENT/PLAN/GATHER/ANALYZE/REPORT loop
   CLAUDE.md             # this file
-  run.py                # canonical entrypoint: investigate one alert end-to-end (runtime + post-steps + learning loop)
-  run-settings.json     # claude --settings template (permissions + Pre/PostToolUse hooks)
-  hooks/                # plumbing shims + ported reliability gates
-    record_lead.py                      # PreToolUse on Task|Agent: parses gather dispatch YAML, writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse → exit 2)
-    inject_system_skill_description.py  # PreToolUse on Task|Agent: appends the target system SKILL's frontmatter description: to the dispatch prompt
-    block_main_loop_raw_access.py       # PreToolUse on Bash|Read|Grep|Glob: blocks the main loop from running system CLIs or reading gather_raw/ directly
-    block_unwrapped_adapter_calls.py    # PreToolUse on Bash: in the gather subagent, denies adapter calls not wrapped in defender-record-query (forces queries-table capture)
-    approve_shim_invocations.py         # PreToolUse on Bash|Read|Grep|Glob: auto-approves safe defender-* shim + read-only compounds the static allowlist can't express
-    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy (used by all three gate hooks above)
-    invlang_validate.py                 # PreToolUse on Write|Edit: enforces the invlang schema on investigation.md (skills/invlang/validate.py)
-    tag_tool_results.py                 # PostToolUse: salted untrusted-data tagging of MCP / adapter-CLI / alert.json output
-    budget_enforcer.py                  # PostToolUse on *: per-run tool-call / spawn / wall-clock budget (warning-only)
-    record_lesson_load.py               # PostToolUse on Read of defender/lessons/*.md: records {lesson_name,ts} → {run_dir}/lessons_loaded.jsonl (lesson→outcome traceability)
+  run.py                # canonical entrypoint: investigate one alert end-to-end via the in-process PydanticAI driver + post-steps (enqueues learning)
+  run_common.py         # shared run-dir + post-step helpers (materialize_run_dir, run_env, cross_check_tables, enqueue_learning, visualize)
+  runtime/              # the in-process PydanticAI engine
+    driver.py           # the main-agent loop (agent.iter); installs in-process budget + observability Hooks
+    tools.py            # the four generic tools + gather dispatch; in-process adapter capture; imports claim_lead/descriptor_catalog/tag/lesson-load
+    permission.py       # the single in-process gate (raw-access/shim/adapter + invlang validation) — raises ModelRetry on deny
+    orient.py  observe.py  compaction.py  circuit_breaker.py
+  hooks/                # gate LOGIC, imported as plain libraries by runtime/ (no longer wired as Claude Code hooks)
+    record_lead.py                      # claim_lead: writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse raises)
+    inject_system_skill_description.py  # descriptor_catalog: the progressive-disclosure system descriptor catalog
+    block_main_loop_raw_access.py       # predicates: block the main loop from running system CLIs / reading gather_raw/ (used by permission.py)
+    approve_shim_invocations.py         # predicates: the safe defender-* shim + read-only allowlist (used by permission.py)
+    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy
+    tag_tool_results.py                 # wrap(): salted untrusted-data tagging of adapter-CLI / alert.json output + the gather return
+    budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; driver.py Hook)
+    record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)
-    gather/             # gather subagent (Haiku) + per-system query templates
+    gather/             # gather subagent (single-agent ES|QL, Sonnet) + per-system query templates
     handbook/           # on-demand reference docs
-    advisory/  data-source-debug/   # cross-system runtime skills
+    advisory/           # cross-system runtime skill
     # per-system references (v2 environment) — visibility surface + execution:
     elastic/  identity/  cmdb/  ticket/  change-mgmt/  threat-intel/  host-state/
   scripts/
-    tools/record_query.py      # gather capture wrapper: executes a query, writes the queries table (executed_queries.jsonl + by-ref payload)
-    workspace_map.py           # on-disk orientation injected into run.py:build_prompt (message 0)
+    tools/record_query.py      # gather capture: executes a query, writes the queries table (executed_queries.jsonl + by-ref payload); called in-process by tools._capture_adapter
+    workspace_map.py           # on-disk orientation injected by runtime/orient.py (message 0)
     run_stats.py
     visualize_run.py           # post-run transcript renderer
   learning/             # offline learning loop — see §Learning loop below
@@ -162,12 +150,13 @@ resolves to `defender/.venv` first.
 
 ## Runtime loop (one-line overview)
 
-`python3 defender/run.py <alert.json>` → spawns `claude -p` with
-`defender/SKILL.md` → agent works through ORIENT → PLAN → GATHER →
-ANALYZE → REPORT, dispatching the gather subagent (Haiku) per query →
+`python3 defender/run.py <alert.json>` → runs the in-process **PydanticAI
+driver** (`runtime/driver.py`) with `defender/SKILL.md` as the system prompt →
+the agent works through ORIENT → PLAN → GATHER → ANALYZE → REPORT, dispatching
+the single-agent ES|QL gather subagent (Sonnet) per lead →
 emits `investigation.md`, `report.md`, and the two live tables
 (`executed_queries.jsonl` + `gather_raw/`) into a run dir under
-`/tmp/defender-runs/`. After the agent exits, `run.py` renders
+`/tmp/defender-runs/`. After the run, `run.py` renders
 `transcript.html` and (unless `--no-learn`) drops a **learn-queue marker**
 for the off-process learning worker — it does not run learning itself.
 Pass `--no-learn` to skip enqueuing when iterating on the runtime loop only.
@@ -245,10 +234,11 @@ out of git and SIEM CLIs have writable scratch space.
                           #   (:V/:E/:H/:L/:R/:T blocks per defender/skills/invlang/SKILL.md)
   report.md               # YAML frontmatter (case_id, disposition, confidence) + one paragraph
   executed_queries.jsonl  # the QUERIES table — one row per executed query (FK lead_id)
-  tool_trace.jsonl        # stream-json events captured by run.py
+  llm_requests.jsonl      # every model request, logged live by runtime/observe.py
+  tool_trace.jsonl        # tool/loop trace, projected by runtime/observe.py from llm_requests.jsonl
   transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
-    {lead_id}.lead.json   # the LEADS table — dispatch goal + dimensions, written by record_lead.py
+    {lead_id}.lead.json   # the LEADS table — dispatch goal + dimensions, written via record_lead.claim_lead (in tools.py)
     {lead_id}/{seq}.json  # raw query payloads, by-ref, written by record_query.py
 ```
 
@@ -269,15 +259,6 @@ Contracts:
   query, written by-ref by the gather capture wrapper
   (`scripts/tools/record_query.py`). The agent works from gather's
   summary and Reads raw on demand if the summary is too thin.
-- **`summaries.jsonl`** — the SUMMARIES table (#289), written live by
-  `scripts/tools/record_summary.py` (via the `defender-record-summary`
-  shim). Each *computable* `what_to_summarize` dimension is a recorded
-  pure-transform computation (jq / datamash / coreutils) over a persisted
-  payload whose **stdout is the reported value** — so gather's summary
-  numbers are deterministic and re-runnable, not asserted prose. FK
-  `(lead_id, payload_seq)`. Offline-only: consumed by the #275 judge for
-  fault attribution — **not yet wired into `lead_repository.py`** (a filed
-  follow-up). Rationale: `docs/gather-verifiable-summary.md`.
 
 ## Two-table schema
 
@@ -289,7 +270,7 @@ re-parse the artifacts.
 
 | Table | Generator (live) | Key | Carries |
 |---|---|---|---|
-| **leads** | `hooks/record_lead.py` → `gather_raw/{lead_id}.lead.json` | `lead_id` (the `:L` row id) | `goal`, `what_to_summarize` |
+| **leads** | `record_lead.claim_lead` (called in `tools.py`) → `gather_raw/{lead_id}.lead.json` | `lead_id` (the `:L` row id) | `goal`, `what_to_summarize` |
 | **queries** | `scripts/tools/record_query.py` → `executed_queries.jsonl` | `(lead_id, seq)`, FK `lead_id` | `system, verb, query_id, params, raw_command, payload_path, exit_code, payload_status, payload_digest` |
 
 Field contracts:
@@ -323,7 +304,6 @@ breaking changes through the PoC phase.
 | Runtime loop shape, phase discipline, gather dispatch ergonomics | `defender/SKILL.md` |
 | Per-system reference (what data the system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
 | Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
-| Gather's verifiable summary computations (the suite, the gate) | `defender/scripts/tools/record_summary.py` + `skills/gather/SKILL.md` §4 (rationale: `docs/gather-verifiable-summary.md`) |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` (the single join surface) |
 | Actor / oracle / judge / verify-forward / author prompts | `defender/learning/*.md` (paired with a `.py` driver in the same dir) |
 | Lessons corpus | `defender/lessons/*.md` (authored by the curator; hand-edits fine if they match `author.md`'s schema) |

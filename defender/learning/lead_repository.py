@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -42,7 +42,6 @@ import yaml
 
 GATHER_DIR = "gather_raw"
 QUERIES_LOG = "executed_queries.jsonl"
-SUMMARIES_LOG = "summaries.jsonl"
 _LEAD_SUFFIX = ".lead.json"
 # A `:L` row id: `l-` + alphanumerics. Used to filter the parsed companion's
 # findings down to actual lead rows — the parser also surfaces `:R` resolution
@@ -89,48 +88,14 @@ class QueryRow:
 
 
 @dataclass(frozen=True)
-class SummaryRow:
-    """One recorded-computation row from `summaries.jsonl` (#289).
-
-    Gather's verifiable summary step: `record_summary.py` runs a pure-transform
-    snippet over a persisted payload and *its stdout IS the value*. The row is
-    the audit/replay surface — `snippet` is verbatim and re-runnable, FK'd to a
-    payload by `(lead_id, payload_seq)` (`payload_seq` indexes
-    `gather_raw/{lead_id}/{payload_seq}.json`, the same key as `QueryRow.seq`).
-    `payload_seq` is None when the snippet read no recognizable payload path.
-
-    `output` (the recorded value) is carried here so this stays a *faithful*
-    table reader, but it is the layer the offline judge must NOT trust: the
-    judge re-runs `snippet` to reconstruct the value rather than reading
-    `output` (see `render_joined_yaml`, which deliberately omits it).
-    """
-
-    lead_id: str
-    payload_seq: int | None
-    summary_seq: int
-    label: str
-    tools: list
-    snippet: str
-    output: str
-    exit_code: int
-    output_status: str
-
-
-@dataclass(frozen=True)
 class JoinedLead:
-    """A leads-table row with its queries (and recorded summaries) nested on the FK."""
+    """A leads-table row with its queries nested on the FK."""
 
     lead_id: str
     goal: str | None
     what_to_summarize: list
     queries: list  # list[QueryRow], seq-sorted
     orphan: bool = False  # True when queries reference a lead_id with no sidecar
-    # list[SummaryRow] for this lead, summary_seq-sorted. Carries *actual values
-    # computed from payloads*, so it MUST stay confined to the judge surface:
-    # the oracle (results-blind) and the adversarial actor build their own
-    # prompts and never read this field; `actor_view` is the queries-only
-    # integrity boundary and never calls `load_summaries`.
-    summaries: list = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -227,59 +192,6 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
     return rows
 
 
-def load_summaries(run_dir: Path) -> list[SummaryRow]:
-    """Parse `summaries.jsonl` into `SummaryRow`s, in record (append) order.
-
-    Mirrors `load_queries`: blank / non-JSON / non-dict rows and rows with no
-    `lead_id` are skipped; ints are coerced via `_as_int`; a missing log → `[]`.
-    Never raises on a malformed artifact. `payload_seq` is kept as the recorded
-    value when integer-coercible, else None (the wrapper writes None when the
-    snippet read no recognizable `gather_raw/{lead}/{seq}.json` path).
-
-    The rows carry *actual values computed from payloads* — consume them only on
-    the judge surface (see `JoinedLead.summaries`), never the oracle/actor.
-    """
-    run_dir = Path(run_dir)
-    log = run_dir / SUMMARIES_LOG
-    if not log.is_file():
-        return []
-    try:
-        text = log.read_text()
-    except OSError:
-        return []
-    rows: list[SummaryRow] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(rec, dict):
-            continue
-        lead_id = rec.get("lead_id")
-        if not lead_id:
-            continue
-        raw_seq = rec.get("payload_seq")
-        payload_seq = None if raw_seq is None else _as_int(raw_seq, default=None)
-        tools = rec.get("tools")
-        rows.append(
-            SummaryRow(
-                lead_id=str(lead_id),
-                payload_seq=payload_seq,
-                summary_seq=_as_int(rec.get("summary_seq", 0)),
-                label=str(rec.get("label", "")),
-                tools=[str(t) for t in tools] if isinstance(tools, list) else [],
-                snippet=str(rec.get("snippet", "")),
-                output=str(rec.get("output", "")),
-                exit_code=_as_int(rec.get("exit_code", 0)),
-                output_status=str(rec.get("output_status", "")),
-            )
-        )
-    return rows
-
-
 # --------------------------------------------------------------------------
 # Join surface
 # --------------------------------------------------------------------------
@@ -310,27 +222,13 @@ def joined(run_dir: Path) -> list[JoinedLead]:
         buckets.setdefault(q.lead_id, []).append(q)
         first_seen.setdefault(q.lead_id, idx)
 
-    # Summaries nest on the lead FK here; the payload-level (lead_id, payload_seq)
-    # match is applied at render time (`render_joined_yaml`). A lead with only
-    # summaries and no query/sidecar still surfaces as an orphan, so its rows are
-    # never dropped.
-    summary_buckets: dict[str, list[SummaryRow]] = {}
-    for s in load_summaries(run_dir):
-        summary_buckets.setdefault(s.lead_id, []).append(s)
-
     ran = sorted(
         (lid for lid in buckets if buckets[lid]),
         key=lambda lid: first_seen.get(lid, len(queries)),
     )
     queryless = sorted(lid for lid in leads if not buckets.get(lid))
-    # Orphan = referenced by a query or a summary row but with no `*.lead.json`
-    # sidecar (a summary-only id surfaces here so its rows are never dropped).
-    orphans = sorted(
-        lid for lid in (set(buckets) | set(summary_buckets)) if lid not in leads
-    )
-
-    def _summaries_for(lid: str) -> list:
-        return sorted(summary_buckets.get(lid, []), key=lambda r: r.summary_seq)
+    # Orphan = referenced by a query with no `*.lead.json` sidecar.
+    orphans = sorted(lid for lid in buckets if lid not in leads)
 
     out: list[JoinedLead] = []
     for lid in [*ran, *queryless]:
@@ -344,7 +242,6 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 what_to_summarize=lead.get("what_to_summarize", []),
                 queries=sorted(buckets.get(lid, []), key=lambda r: r.seq),
                 orphan=lid not in leads,
-                summaries=_summaries_for(lid),
             )
         )
     for lid in orphans:
@@ -355,7 +252,6 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 what_to_summarize=[],
                 queries=sorted(buckets.get(lid, []), key=lambda r: r.seq),
                 orphan=True,
-                summaries=_summaries_for(lid),
             )
         )
     return out
@@ -398,17 +294,17 @@ def actor_view(run_dir: Path) -> dict:
 def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
     """Copy the live tables from one run dir into another.
 
-    The queries table (`executed_queries.jsonl`) and the summaries table
-    (`summaries.jsonl`), both flat files, plus the leads table + by-ref payloads
-    (the `gather_raw/` tree). All best-effort: a query-less run has none, which
-    is a monitor case, not an error. This is the single definition of "what
-    files constitute the tables on disk", shared by the learning-loop persist
-    stage and the secondary-eval staging step so the two can't drift.
+    The queries table (`executed_queries.jsonl`), a flat file, plus the leads
+    table + by-ref payloads (the `gather_raw/` tree). All best-effort: a
+    query-less run has none, which is a monitor case, not an error. This is the
+    single definition of "what files constitute the tables on disk", shared by
+    the learning-loop persist stage and the secondary-eval staging step so the
+    two can't drift.
     """
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
-    for flat in (QUERIES_LOG, SUMMARIES_LOG):
+    for flat in (QUERIES_LOG,):
         src = src_run_dir / flat
         if src.is_file():
             shutil.copy2(src, dst_dir / src.name)
@@ -427,37 +323,14 @@ def render_actor_view_yaml(run_dir: Path) -> str:
     return yaml.safe_dump(actor_view(run_dir), sort_keys=False)
 
 
-def _summary_view(s: SummaryRow) -> dict:
-    """Judge-facing projection of a recorded computation: the *code* and its
-    run status, never the recorded value. The judge re-runs `snippet` to obtain
-    the value (it holds the transform suite) rather than trusting `output` — so
-    `output` is deliberately omitted here (#311 / `gather-fidelity`)."""
-    return {"label": s.label, "snippet": s.snippet, "output_status": s.output_status}
-
-
 def render_joined_yaml(run_dir: Path) -> str:
     """YAML text of the joined view — replaces the full `lead_sequence.yaml`
     block the judge consumes. Carries goal + what_to_summarize + the queries and
     their structural status (the authoritative record of what was queried per
-    lead), plus gather's recorded computations (#289) nested on the
-    `(lead_id, payload_seq)` FK under the payload they read.
-
-    Each summary surfaces as `{label, snippet, output_status}` — gather's code
-    and run status, *not* the computed value: the judge replays the snippet to
-    reconstruct the value (see `_summary_view`). A summary whose `payload_seq` is
-    None or matches no query payload is itself a fidelity smell, surfaced under a
-    lead-level `unattached_summaries` so it is never silently dropped."""
+    lead)."""
     run_dir = Path(run_dir)
     leads = []
     for jl in joined(run_dir):
-        query_seqs = {q.seq for q in jl.queries}
-        by_seq: dict[int, list] = {}
-        unattached = []
-        for s in jl.summaries:
-            if s.payload_seq is not None and s.payload_seq in query_seqs:
-                by_seq.setdefault(s.payload_seq, []).append(_summary_view(s))
-            else:
-                unattached.append(_summary_view(s))
         lead = {
             "lead_id": jl.lead_id,
             "goal": jl.goal,
@@ -468,13 +341,10 @@ def render_joined_yaml(run_dir: Path) -> str:
                     "params": q.params,
                     "payload_status": q.payload_status,
                     "payload_digest": q.payload_digest,
-                    **({"summaries": by_seq[q.seq]} if q.seq in by_seq else {}),
                 }
                 for q in jl.queries
             ],
         }
-        if unattached:
-            lead["unattached_summaries"] = unattached
         leads.append(lead)
     doc = {"case_id": run_dir.name, "alert_ref": "alert.json", "leads": leads}
     return yaml.safe_dump(doc, sort_keys=False)

@@ -100,7 +100,8 @@ When a lead asks for "X correlated with Y at time T" (e.g. *who was logged
 in when /etc/passwd changed?*), the right move is: run the two primitives
 that already exist, summarize the join in the gather return. **Do not
 mint a "bridge" template** — it bloats the catalog with one-offs that
-won't be reused. See `defender/skills/gather/SKILL.md` §Composition leads.
+won't be reused. A lead may run several queries — see
+`defender/skills/gather/SKILL.md` §2 (FIND a template, or coin a query).
 
 ## Naming a new measurement
 
