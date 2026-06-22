@@ -241,7 +241,7 @@ def is_untrusted_read(path: Path) -> bool:
 
 def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
     """Allow/deny a write of `proposed_text` to `path`, porting the
-    `Write(/tmp/defender-runs/**)` path allow + `invlang_validate`.
+    `Write(<run_dir>/**)` path allow + `invlang_validate`.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);

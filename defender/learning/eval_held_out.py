@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Primary-metric harness: score defender held-out runs against ground truth.
 
-Walks a runs directory (default ``$DEFENDER_RUNS_BASE`` or
-``/tmp/defender-runs``), keeps only runs whose ``ground_truth.yaml``
-declares ``held_out: true``, and reports defender disposition correctness.
+Walks a runs directory (``$DEFENDER_RUNS_BASE``, or the ``runs_dir``
+argument), keeps only runs whose ``ground_truth.yaml`` declares
+``held_out: true``, and reports defender disposition correctness.
 
 Failure accounting per design doc §Metrics: a run that fails to produce a
 parseable ``report.md`` (missing, frontmatter unparseable, disposition not
