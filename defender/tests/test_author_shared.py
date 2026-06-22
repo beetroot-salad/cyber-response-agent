@@ -328,3 +328,30 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
         with shared.flock_or_skip(lock):
             pass  # never reached — acquire raises before yielding
     assert excinfo.value.errno == errno.ENOLCK
+
+
+def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monkeypatch):
+    """The fail-loud path (e.g. ENOLCK) must still close the lock-file handle:
+    propagating must not leak the fd. The propagating traceback pins
+    ``acquire_flock``'s frame (whose ``fh`` local references the handle), so
+    without an explicit close the fd lingers — the inline dances this replaced
+    closed it in their ``finally``. ``flock_or_skip`` can't recover it either, as
+    ``acquire_flock`` raises before its ``try``/``finally`` is entered."""
+    lock = tmp_path / ".lock"
+    opened: list = []
+    real_open = Path.open
+
+    def _tracking_open(self, *a, **k):
+        fh = real_open(self, *a, **k)
+        opened.append(fh)
+        return fh
+
+    def _no_locks(_fd, _op):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr(Path, "open", _tracking_open)
+    monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
+    with pytest.raises(OSError, match="No locks available"):
+        shared.acquire_flock(lock)
+    assert opened, "acquire_flock never opened the lock file"
+    assert all(fh.closed for fh in opened), "acquire_flock leaked the lock-file handle"
