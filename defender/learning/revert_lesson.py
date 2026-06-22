@@ -13,8 +13,6 @@ Usage:
 """
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import sys
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
@@ -23,6 +21,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender.learning import _author_shared
 from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths
 from defender.learning.author_branch import AuthorBranch, BranchError
 
@@ -41,13 +40,8 @@ def revert(
         branch = AuthorBranch()
     rel = f"{LESSONS_REL}/{lesson_name}.md"
 
-    lock_path = paths.author_drain_lock_file
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_path.open("a+")
-    try:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+    with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
+        if not locked:
             print("[revert_lesson] an author drain is in progress — retry shortly",
                   file=sys.stderr)
             return 3
@@ -58,10 +52,6 @@ def revert(
             return 2
         print(f"opened revert PR: {pr}")
         return 0
-    finally:
-        with contextlib.suppress(OSError):
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        fh.close()
 
 
 def main(argv: list[str]) -> int:
