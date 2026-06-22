@@ -95,6 +95,7 @@ defender/run-transcripts/
 # Ephemeral scratch work happens in git worktrees under .claude/worktrees/,
 # not at the repo root. Kept experiment writeups live in /experiments/ (tracked).
 /.claude/worktrees/
+/.worktrees/
 
 # Long-lived defender v2 worktree (branch defender-v2-env, local-only — see CLAUDE.md)
 /defender-v2-tree/
