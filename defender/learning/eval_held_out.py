@@ -34,7 +34,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
 
-def parse_frontmatter(report_path: Path) -> dict | None:
+def _read_frontmatter(report_path: Path) -> dict | None:
     """Return the YAML frontmatter as a dict, or None if unparseable/missing."""
     if not report_path.is_file():
         return None
@@ -42,7 +42,7 @@ def parse_frontmatter(report_path: Path) -> dict | None:
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
-    fm = parse_frontmatter(run_dir / "report.md")
+    fm = _read_frontmatter(run_dir / "report.md")
     if fm is None:
         return None
     disp = fm.get("disposition")
