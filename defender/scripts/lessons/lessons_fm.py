@@ -35,17 +35,23 @@ text. Exit 0 always (no match = no output); a bad regex exits 2.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
+# Put the workspace root on sys.path so the `defender.*` namespace import below
+# resolves whether this file is imported or run directly (sys.path[0] is this
+# script's dir, not the workspace root). Must precede the shared import.
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender.scripts.lessons._lessons_common import as_list, reexec_into_venv, rel_to_repo
+
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
 # caller used (the bin/ shim already points here; this covers a direct
-# ``python3 defender/scripts/lessons/lessons_fm.py`` run). Gated on __main__ so import
-# as a library never os.execv's the importing process away.
-_VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
-if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
+# ``python3 defender/scripts/lessons/lessons_fm.py`` run). Gated on __main__ so
+# importing this module as a library never execs the importing process away.
+if __name__ == "__main__":
+    reexec_into_venv(__file__)
 
 import argparse
 import re
@@ -90,22 +96,9 @@ def iter_lessons():
         yield path, raw, fm
 
 
-def _rel(path: Path) -> str:
-    try:
-        return str(path.relative_to(REPO_ROOT))
-    except ValueError:
-        return str(path)
-
-
-def _as_list(v) -> list:
-    if v is None:
-        return []
-    return v if isinstance(v, list) else [v]
-
-
 def _emit_match(path: Path, fm: dict) -> None:
     desc = str(fm.get("description") or "").strip().replace("\t", " ").replace("\n", " ")
-    print(f"{_rel(path)}\t{desc}")
+    print(f"{rel_to_repo(path, REPO_ROOT)}\t{desc}")
 
 
 def cmd_grep(patterns: list[str]) -> int:
@@ -128,7 +121,7 @@ def cmd_tags(field: str | None) -> int:
     for f in fields:
         counts: dict[str, int] = {}
         for _path, _raw, fm in iter_lessons():
-            for val in _as_list(fm.get(f)):
+            for val in as_list(fm.get(f)):
                 counts[str(val)] = counts.get(str(val), 0) + 1
         print(f"{f}:")
         for val in sorted(counts):
@@ -151,7 +144,7 @@ def cmd_show(paths: list[str]) -> int:
             print(f"error: {raw_path}: malformed frontmatter", file=sys.stderr)
             rc = 2
             continue
-        print(f"--- {_rel(p)}")
+        print(f"--- {rel_to_repo(p, REPO_ROOT)}")
         print(parsed[0])
     return rc
 

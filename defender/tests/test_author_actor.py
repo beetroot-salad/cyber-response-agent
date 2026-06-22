@@ -559,10 +559,14 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
     fake_scripts = ctx["repo"] / "defender" / "scripts" / "lessons"
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
-    # The script imports defender._frontmatter (resolved via its sys.path
-    # bootstrap), so mirror that module into the fake repo too.
+    # The script imports defender._frontmatter and the shared
+    # scripts.lessons._lessons_common helper (both resolved via its sys.path
+    # bootstrap), so mirror those modules into the fake repo too.
     (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
         (defender_src / "_frontmatter.py").read_text()
+    )
+    (fake_scripts / "_lessons_common.py").write_text(
+        (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()
     )
 
     def _run(extra: list[str]) -> str:

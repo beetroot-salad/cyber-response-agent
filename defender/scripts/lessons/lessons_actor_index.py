@@ -23,23 +23,26 @@ never see stale claims.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which
-# python the caller invoked us with (the actor's Bash tool uses the
-# system ``python3`` on PATH; the defender's venv carries pyyaml).
-_VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
-# Gated on __main__ so importing this module as a library never os.execv's away.
-if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
-
-# Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (after the venv re-exec
-# above, sys.path[0] is this script's dir, not the workspace root).
+# Put the workspace root on sys.path so the `defender.*` namespace imports below
+# resolve whether this file is imported or run directly (sys.path[0] is this
+# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
+
+from defender.scripts.lessons._lessons_common import (
+    as_str_set,
+    csv_set,
+    reexec_into_venv,
+    rel_to_repo,
+)
+
+# Re-exec into defender/.venv so PyYAML resolves regardless of which python the
+# caller used. Gated on __main__ so importing this module never execs away.
+if __name__ == "__main__":
+    reexec_into_venv(__file__)
 
 import argparse
 
@@ -50,18 +53,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_ROOT = REPO_ROOT / "defender" / "lessons-actor"
 
 
-def _as_list(v) -> list:
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return v
-    return [v]
-
-
-def _as_str_set(v) -> set[str]:
-    return {str(x) for x in _as_list(v)}
-
-
 def iter_lessons():
     if not LESSONS_ROOT.is_dir():
         return
@@ -70,15 +61,9 @@ def iter_lessons():
             continue
         fm = parse_frontmatter_or_none(path.read_text())
         if fm is None:
-            print(f"warn: skipping {path.relative_to(REPO_ROOT)} (malformed frontmatter)", file=sys.stderr)
+            print(f"warn: skipping {rel_to_repo(path, REPO_ROOT)} (malformed frontmatter)", file=sys.stderr)
             continue
         yield path, fm
-
-
-def _csv_set(value: str | None) -> set[str]:
-    if not value:
-        return set()
-    return {t.strip() for t in value.split(",") if t.strip()}
 
 
 def main(argv: list[str]) -> int:
@@ -90,9 +75,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only)")
     ns = ap.parse_args(argv[1:])
 
-    want_techniques = _csv_set(ns.techniques)
-    want_rule_ids = _csv_set(ns.alert_rule_ids)
-    want_lead_tags = _csv_set(ns.defender_lead_tags)
+    want_techniques = csv_set(ns.techniques)
+    want_rule_ids = csv_set(ns.alert_rule_ids)
+    want_lead_tags = csv_set(ns.defender_lead_tags)
     want_subject = ns.subject.strip() if ns.subject else None
 
     for path, fm in iter_lessons():
@@ -106,16 +91,16 @@ def main(argv: list[str]) -> int:
             continue
 
         # Multi-key filters: AND across, OR within.
-        if want_techniques and _as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
+        if want_techniques and as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
             continue
-        if want_rule_ids and _as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
+        if want_rule_ids and as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
             continue
-        if want_lead_tags and _as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
+        if want_lead_tags and as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
             continue
 
         criteria = fm.get("relevance_criteria") or ""
         criteria = str(criteria).strip().replace("\t", " ").replace("\n", " ")
-        rel = path.relative_to(REPO_ROOT)
+        rel = rel_to_repo(path, REPO_ROOT)
         print(f"{rel}\t{criteria}")
     return 0
 
