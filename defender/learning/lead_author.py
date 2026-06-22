@@ -44,10 +44,12 @@ Lifecycle, per tick:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -152,7 +154,9 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
     )
 
 
-def synthesize_drafts(executed: list[ExecutedLead]) -> list[Path]:
+def synthesize_drafts(
+    executed: list[ExecutedLead], *, catalog_dir: Path | None = None,
+) -> list[Path]:
     """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
     query_id that resolves to no catalog template.
 
@@ -172,6 +176,7 @@ def synthesize_drafts(executed: list[ExecutedLead]) -> list[Path]:
     so the captured command — not a ``${param}`` re-render — is the canonical
     record (see ``_executed_query``).
     """
+    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
     by_id = {t.id for t in lead_neighbors.load_catalog()}
     created: list[Path] = []
     for lead in executed:
@@ -186,7 +191,7 @@ def synthesize_drafts(executed: list[ExecutedLead]) -> list[Path]:
         # mints a hidden ``_draft/.md`` dotfile. Drop both alongside reserved verbs.
         if not system or not verb or verb in _NON_CANDIDATE_VERBS:
             continue
-        draft = CATALOG_DIR / system / "_draft" / f"{verb}.md"
+        draft = catalog_dir / system / "_draft" / f"{verb}.md"
         if draft.exists() or draft in created:
             continue
         query_body = _executed_query(lead) or "# (no command captured for this query)"
@@ -511,6 +516,7 @@ def _stage_pending_drafts() -> list[str]:
 
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
+    *, repo_root: Path | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
 
@@ -525,6 +531,9 @@ def build_handoff(
     contract violation worth surfacing in the log but not worth taking
     the catalog out for.
     """
+    # None ⇒ resolve the module global at call time (back-compat: a test that
+    # setattrs REPO_ROOT still takes); the deps factory binds the injected paths.
+    repo_root = repo_root if repo_root is not None else REPO_ROOT
     catalog = lead_neighbors.load_catalog()
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
@@ -539,7 +548,7 @@ def build_handoff(
         for jl in joined_leads
     ]
     template_path_by_id = {
-        tid: str(tpl.path.relative_to(REPO_ROOT))
+        tid: str(tpl.path.relative_to(repo_root))
         for tid, tpl in by_id.items()
     }
 
@@ -603,12 +612,12 @@ def build_handoff(
             )
         handoffs.append(
             {
-                "executed_template_path": str(tpl.path.relative_to(REPO_ROOT)),
+                "executed_template_path": str(tpl.path.relative_to(repo_root)),
                 "query_id": tpl.id,
                 "status": tpl.status,
                 "neighbors": [
                     {
-                        "template_path": str(n.template_path.relative_to(REPO_ROOT)),
+                        "template_path": str(n.template_path.relative_to(repo_root)),
                         "score": n.score,
                     }
                     for n in neighbors
@@ -627,7 +636,7 @@ def build_handoff(
 _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
 
 
-def discover_system_drafts() -> list[Path]:
+def discover_system_drafts(*, skills_dir: Path | None = None) -> list[Path]:
     """Pending drafts under ``defender/skills/{system}/_draft/`` (one level).
 
     Excludes the surface-declaration README and any template skeletons.
@@ -635,10 +644,11 @@ def discover_system_drafts() -> list[Path]:
     ``defender/skills/gather/queries/{system}/_draft/`` — those are
     handled by the executed-template handoff stream.
     """
+    skills_dir = skills_dir if skills_dir is not None else SKILLS_DIR
     out: list[Path] = []
-    if not SKILLS_DIR.is_dir():
+    if not skills_dir.is_dir():
         return out
-    for system_dir in sorted(SKILLS_DIR.iterdir()):
+    for system_dir in sorted(skills_dir.iterdir()):
         if not system_dir.is_dir():
             continue
         draft_dir = system_dir / "_draft"
@@ -655,11 +665,14 @@ def discover_system_drafts() -> list[Path]:
     return out
 
 
-def build_system_draft_handoffs(drafts: list[Path]) -> list[dict]:
+def build_system_draft_handoffs(
+    drafts: list[Path], *, repo_root: Path | None = None,
+) -> list[dict]:
     """One handoff per pending draft. ``{draft_path, system, skill_path}`` (repo-relative)."""
+    repo_root = repo_root if repo_root is not None else REPO_ROOT
     out: list[dict] = []
     for draft in drafts:
-        rel = draft.relative_to(REPO_ROOT)
+        rel = draft.relative_to(repo_root)
         # Parent is .../skills/{system}/_draft → grandparent is the system dir.
         system_dir = draft.parent.parent
         system = system_dir.name
@@ -668,7 +681,7 @@ def build_system_draft_handoffs(drafts: list[Path]) -> list[dict]:
             {
                 "draft_path": str(rel),
                 "system": system,
-                "skill_path": str(skill_md.relative_to(REPO_ROOT)),
+                "skill_path": str(skill_md.relative_to(repo_root)),
             }
         )
     return out
@@ -950,12 +963,53 @@ def _write_state(path: Path, content: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run(run_dir: Path) -> int:
+@dataclass(frozen=True)
+class LeadAuthorDeps:
+    """Injected collaborators for ``run`` — the spawn, the leaf I/O helpers, and the
+    queue-lock pair — plus the filesystem ``paths``. Defaults to production via
+    ``build_lead_author_deps``; tests pass fakes (``dataclasses.replace``) instead of
+    monkeypatching lead_author's own functions (the SUT-patching #374 removes)."""
+    paths: _loop_config.LoopPaths
+    invoke_agent: Callable[..., int]
+    extract: Callable[[Path], list[ExecutedLead]]
+    build_handoff: Callable[..., list[dict]]
+    discover_system_drafts: Callable[[], list[Path]]
+    acquire_queue_lock: Callable[[], Any]
+    release_queue_lock: Callable[[Any], None]
+
+
+def build_lead_author_deps(
+    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+) -> LeadAuthorDeps:
+    """Bind the production collaborators, threading ``paths`` into the leaf helpers that
+    resolve repo-relative paths (``build_handoff`` / ``discover_system_drafts``) so a test
+    rooted at a tmp tree drives them with one ``LoopPaths(repo_root=tmp)``."""
+    return LeadAuthorDeps(
+        paths=paths,
+        invoke_agent=invoke_agent,
+        extract=extract,
+        build_handoff=functools.partial(build_handoff, repo_root=paths.repo_root),
+        discover_system_drafts=functools.partial(
+            discover_system_drafts, skills_dir=paths.skills_dir
+        ),
+        acquire_queue_lock=acquire_queue_lock,
+        release_queue_lock=release_queue_lock,
+    )
+
+
+def run(
+    run_dir: Path,
+    *,
+    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    deps: LeadAuthorDeps | None = None,
+) -> int:
     if not run_dir.is_dir():
         _log(f"FATAL: run_dir not found: {run_dir}")
         return 2
 
-    queue_lock = acquire_queue_lock()
+    if deps is None:
+        deps = build_lead_author_deps(paths)
+    queue_lock = deps.acquire_queue_lock()
     if queue_lock is None:
         return 0
     repo_lock = None
@@ -967,14 +1021,14 @@ def run(run_dir: Path) -> int:
             _log(f"repo-lock unavailable: {e}; releasing queue-lock")
             return 0
         _log("repo-lock acquired")
-        return _run_locked(run_dir)
+        return _run_locked(run_dir, deps)
     finally:
         _author_shared.release_repo_lock(repo_lock)
         _log("release repo-lock")
-        release_queue_lock(queue_lock)
+        deps.release_queue_lock(queue_lock)
 
 
-def _run_locked(run_dir: Path) -> int:
+def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     # Preflight brakes — failure first, then done sentinel.
     if _failure_marker(run_dir).is_file():
         _log(f"FATAL preflight: {_failure_marker(run_dir)} present — human cleanup required")
@@ -997,7 +1051,7 @@ def _run_locked(run_dir: Path) -> int:
     # git baseline, so the new {system}/_draft/ files are expected queue
     # content (the dirty-protected preflight ignores _draft/) and the
     # post-flight verifies against a baseline that already includes them.
-    synth = synthesize_drafts(executed)
+    synth = synthesize_drafts(executed, catalog_dir=deps.paths.catalog_dir)
     if synth:
         _log(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
@@ -1023,7 +1077,7 @@ def _run_locked(run_dir: Path) -> int:
         return 2
 
     handoffs, pending_drafts, rc = _prepare_handoffs(
-        run_dir, base_sha, executed, joined_leads
+        run_dir, base_sha, deps, executed, joined_leads
     )
     if rc is not None:
         return rc
@@ -1033,7 +1087,7 @@ def _run_locked(run_dir: Path) -> int:
         f"base_sha={base_sha[:12]}"
     )
 
-    rc = invoke_agent(run_dir, handoffs, pending_drafts)
+    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts)
     if rc != 0:
         _write_state(
             _failure_marker(run_dir),
@@ -1066,7 +1120,7 @@ def _run_locked(run_dir: Path) -> int:
 
 
 def _prepare_handoffs(
-    run_dir: Path, base_sha: str,
+    run_dir: Path, base_sha: str, deps: LeadAuthorDeps,
     executed: list | None = None, joined_leads: list | None = None,
 ) -> tuple[list, list, int | None]:
     """Extract leads + build executed-template + system-draft handoffs.
@@ -1084,7 +1138,7 @@ def _prepare_handoffs(
     Early exit-zero fires only when **both** lists are empty after the
     threshold gate. Failures extracting executed leads return rc=2.
     """
-    pending_drafts_raw = discover_system_drafts()
+    pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
     if len(pending_drafts_raw) < threshold:
         if pending_drafts_raw:
@@ -1095,11 +1149,13 @@ def _prepare_handoffs(
             )
         pending_drafts: list[dict] = []
     else:
-        pending_drafts = build_system_draft_handoffs(pending_drafts_raw)
+        pending_drafts = build_system_draft_handoffs(
+            pending_drafts_raw, repo_root=deps.paths.repo_root
+        )
 
     if executed is None:
         try:
-            executed = extract(run_dir)
+            executed = deps.extract(run_dir)
         except (FileNotFoundError, ValueError) as e:
             _log(f"FATAL: cannot extract leads: {e}")
             return [], [], 2
@@ -1115,7 +1171,7 @@ def _prepare_handoffs(
         return [], pending_drafts, None
 
     try:
-        handoffs = build_handoff(run_dir, executed, joined_leads)
+        handoffs = deps.build_handoff(run_dir, executed, joined_leads)
     except LeadAuthorError as e:
         _log(f"FATAL: cannot build handoffs: {e}")
         return [], [], 2

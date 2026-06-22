@@ -11,12 +11,20 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from defender.learning import lead_author  # type: ignore[import-not-found]
 from defender.learning import lead_neighbors  # type: ignore[import-not-found]
+from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
+
+
+def _deps(tmp_path: Path, **overrides):
+    """Production lead-author deps rooted at a tmp tree, with leaf collaborators
+    overridden by keyword — replaces monkeypatching lead_author's own functions."""
+    return replace(lead_author.build_lead_author_deps(LoopPaths(repo_root=tmp_path)), **overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -285,40 +293,50 @@ def test_run_missing_run_dir(tmp_path: Path):
     assert lead_author.run(tmp_path / "nope") == 2
 
 
-def test_run_held_queue_lock_returns_zero(run_dir: Path, monkeypatch):
-    # Pretend the queue lock is held by faking acquire_queue_lock.
-    monkeypatch.setattr(lead_author, "acquire_queue_lock", lambda: None)
-    monkeypatch.setattr(lead_author, "invoke_agent", _claude_should_not_be_called)
-    assert lead_author.run(run_dir) == 0
+def test_run_held_queue_lock_returns_zero(run_dir: Path):
+    # Pretend the queue lock is held by injecting an acquire that returns None.
+    deps = _deps(
+        run_dir.parent,
+        acquire_queue_lock=lambda: None,
+        invoke_agent=_claude_should_not_be_called,
+    )
+    assert lead_author.run(run_dir, deps=deps) == 0
 
 
 def test_run_failure_marker_brakes_retry(run_dir: Path, monkeypatch):
     state = run_dir / "lead_author"
     state.mkdir()
     (state / "failure.txt").write_text("prior failure")
-    monkeypatch.setattr(lead_author, "invoke_agent", _claude_should_not_be_called)
-    # Stub the lock pair so we don't touch real fcntl state.
-    monkeypatch.setattr(lead_author, "acquire_queue_lock", lambda: object())
-    monkeypatch.setattr(lead_author, "release_queue_lock", lambda fh: None)
+    # The shared repo lock stays a module seam (residual); the queue lock + spawn
+    # are injected via deps instead of patching lead_author's own functions.
     monkeypatch.setattr(lead_author._author_shared, "acquire_repo_lock",
                         lambda timeout_seconds=None: object())
     monkeypatch.setattr(lead_author._author_shared, "release_repo_lock",
                         lambda fh: None)
-    assert lead_author.run(run_dir) == 2
+    deps = _deps(
+        run_dir.parent,
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+        invoke_agent=_claude_should_not_be_called,
+    )
+    assert lead_author.run(run_dir, deps=deps) == 2
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, monkeypatch):
     state = run_dir / "lead_author"
     state.mkdir()
     (state / "done").write_text("ok")
-    monkeypatch.setattr(lead_author, "invoke_agent", _claude_should_not_be_called)
-    monkeypatch.setattr(lead_author, "acquire_queue_lock", lambda: object())
-    monkeypatch.setattr(lead_author, "release_queue_lock", lambda fh: None)
     monkeypatch.setattr(lead_author._author_shared, "acquire_repo_lock",
                         lambda timeout_seconds=None: object())
     monkeypatch.setattr(lead_author._author_shared, "release_repo_lock",
                         lambda fh: None)
-    assert lead_author.run(run_dir) == 0
+    deps = _deps(
+        run_dir.parent,
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+        invoke_agent=_claude_should_not_be_called,
+    )
+    assert lead_author.run(run_dir, deps=deps) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -763,14 +781,14 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
         "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
         "neighbors": [], "invocations": [],
     }]
-    monkeypatch.setattr(lead_author, "extract", lambda rd: fake_executed)
-    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex, jl=None: fake_handoff)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    monkeypatch.setattr(
-        lead_author, "discover_system_drafts",
-        lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
+    deps = _deps(
+        run_dir.parent,
+        extract=lambda rd: fake_executed,
+        build_handoff=lambda rd, ex, jl=None: fake_handoff,
+        discover_system_drafts=lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
     )
-    handoffs, drafts, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    handoffs, drafts, rc = lead_author._prepare_handoffs(run_dir, "BASE", deps)
     assert rc is None
     assert handoffs == fake_handoff
     assert drafts == []
@@ -785,10 +803,8 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
         "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
         "neighbors": [], "invocations": [],
     }]
-    monkeypatch.setattr(lead_author, "extract", lambda rd: [object()])
-    monkeypatch.setattr(lead_author, "build_handoff", lambda rd, ex, jl=None: fake_handoff)
     # Seed two real draft files so build_system_draft_handoffs can compute
-    # repo-relative paths.
+    # repo-relative paths (against deps.paths.repo_root=tmp_path).
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     drafts = [
@@ -797,11 +813,15 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
     ]
     for d in drafts:
         d.write_text("---\nstatus: draft\n---\n")
-    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: drafts)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "2")
+    deps = _deps(
+        tmp_path,
+        extract=lambda rd: [object()],
+        build_handoff=lambda rd, ex, jl=None: fake_handoff,
+        discover_system_drafts=lambda: drafts,
+    )
 
-    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE", deps)
     assert rc is None
     assert handoffs == fake_handoff
     assert len(pending) == 2
@@ -819,20 +839,20 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(
     drafts = [skills / "elastic" / "_draft" / f"d{i}.md" for i in range(2)]
     for d in drafts:
         d.write_text("---\nstatus: draft\n---\n")
-    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: drafts)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
+    # extract stays the real impl (no tables in run_dir → []); only discover is faked.
+    deps = _deps(tmp_path, discover_system_drafts=lambda: drafts)
 
-    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE", deps)
     assert rc is None
     assert handoffs == []
     assert len(pending) == 2
 
 
-def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, monkeypatch):
+def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path):
     """No executed leads AND no pending drafts → early exit 0, no work."""
-    monkeypatch.setattr(lead_author, "discover_system_drafts", lambda: [])
-    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE")
+    deps = _deps(run_dir.parent, discover_system_drafts=lambda: [])
+    handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, "BASE", deps)
     assert rc == 0
     assert handoffs == []
     assert pending == []

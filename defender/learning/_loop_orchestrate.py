@@ -219,10 +219,10 @@ def _directions_for(disposition: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _invoke_lead_author(run_dir: Path) -> None:
+def _invoke_lead_author(run_dir: Path, *, paths: LoopPaths) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge."""
     _log("step=lead-author")
-    rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir))
+    rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
         _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
 
@@ -553,7 +553,7 @@ def author_drain(
             f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
         )
     if run_lead_author is None:
-        run_lead_author = _invoke_lead_author
+        run_lead_author = functools.partial(_invoke_lead_author, paths=paths)
     if trigger_author is None:
         # Bind the drain's paths so the curator builds its config from the same
         # layout; the call sites pass the 4 positional args unchanged.
