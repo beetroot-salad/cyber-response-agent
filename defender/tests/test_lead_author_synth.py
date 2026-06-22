@@ -160,6 +160,26 @@ def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path, monkeypatch):
     assert "%{IP:src}" in (cat / "elastic" / "_draft" / "grok-probe.md").read_text()
 
 
+def test_traversal_query_id_does_not_escape_catalog(tmp_path, monkeypatch):
+    """A query_id whose segments contain `/`, `..`, or a backslash must not write
+    a draft outside the `{system}/_draft/` surface. Defense-in-depth at the sink:
+    record_query rejects these at the boundary, but synthesize_drafts holds the
+    line on its own for any already-persisted/foreign row."""
+    _catalog(tmp_path, monkeypatch)
+    created = lead_author.synthesize_drafts([
+        # `/` + `..` in the verb → would resolve outside the catalog.
+        _lead("elastic.../../../../PWNED", {"arg0": _ESQL_PIPE},
+              raw_command=f"esql {_ESQL_PIPE!r}", system="elastic"),
+        # traversal in the system segment.
+        _lead("../../etc.passwd", {"arg0": _ESQL_PIPE},
+              raw_command=f"esql {_ESQL_PIPE!r}", system="elastic"),
+    ])
+    assert created == []
+    # No file escaped the catalog (or landed anywhere under the temp tree).
+    assert not (tmp_path / "PWNED.md").exists()
+    assert list(tmp_path.rglob("PWNED.md")) == []
+
+
 def test_untagged_esql_verb_not_drafted(tmp_path, monkeypatch):
     """A bare `{system}.esql` id (no --query-id tag) is a non-candidate — an
     untagged ES|QL call must not mint a junk catch-all draft."""
