@@ -9,23 +9,27 @@ revisit (duckdb / a built index) when a per-call directory scan hurts.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which python
-# the caller invoked us with (the actor's Bash tool uses system python3).
-# Gated on __main__ so importing this module as a library never os.execv's
-# the importing process away.
-_VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
-if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
-
-# Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (after the venv re-exec
-# above, sys.path[0] is this script's dir, not the workspace root).
+# Put the workspace root on sys.path so the `defender.*` namespace imports below
+# resolve whether this file is imported or run directly (sys.path[0] is this
+# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
+
+from defender.scripts.lessons._lessons_common import (
+    as_list,
+    as_str_set,
+    csv_set,
+    reexec_into_venv,
+    rel_to_repo,
+)
+
+# Re-exec into defender/.venv so PyYAML resolves regardless of which python the
+# caller used. Gated on __main__ so importing this module never execs away.
+if __name__ == "__main__":
+    reexec_into_venv(__file__)
 
 import argparse
 
@@ -34,16 +38,6 @@ from defender._frontmatter import parse_frontmatter_or_none
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
-
-
-def _as_list(v) -> list:
-    if v is None:
-        return []
-    return v if isinstance(v, list) else [v]
-
-
-def _as_str_set(v) -> set[str]:
-    return {str(x) for x in _as_list(v)}
 
 
 def iter_lessons(corpus: Path):
@@ -57,12 +51,6 @@ def iter_lessons(corpus: Path):
             print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
             continue
         yield path, fm
-
-
-def _csv_set(value: str | None) -> set[str]:
-    if not value:
-        return set()
-    return {t.strip() for t in value.split(",") if t.strip()}
 
 
 def _parse_case_entities(value: str | None) -> list[tuple[str, str]]:
@@ -105,7 +93,7 @@ def _lesson_applies(
     # Entity selectors are enforced only when the caller supplies case
     # entities; otherwise this axis is unfiltered (whole-corpus listing).
     if entities_provided:
-        for selector in _as_list(fm.get("entities")):
+        for selector in as_list(fm.get("entities")):
             if not _selector_satisfied(selector, case_entities):
                 return False
     # Rule-anchored retrieval: a lesson must declare a matching anchor. Every
@@ -115,7 +103,7 @@ def _lesson_applies(
     # otherwise an unanchored lesson would surface for every unrelated alert
     # rule. (Whole-corpus listing passes no rule ids and is unfiltered.)
     if want_rule_ids:
-        lesson_rules = _as_str_set(fm.get("alert_rule_ids"))
+        lesson_rules = as_str_set(fm.get("alert_rule_ids"))
         if not lesson_rules or lesson_rules.isdisjoint(want_rule_ids):
             return False
     return True
@@ -185,7 +173,7 @@ def main(argv: list[str]) -> int:
     corpus = Path(ns.corpus) if ns.corpus else DEFAULT_CORPUS
     case_entities = _parse_case_entities(ns.entities)
     entities_provided = ns.entities is not None
-    want_rule_ids = _csv_set(ns.alert_rule_ids)
+    want_rule_ids = csv_set(ns.alert_rule_ids)
     want_subject = ns.subject.strip() if ns.subject else None
 
     for path, fm in iter_lessons(corpus):
@@ -196,10 +184,7 @@ def main(argv: list[str]) -> int:
         if not _lesson_applies(fm, case_entities, entities_provided, want_rule_ids):
             continue
         criteria = str(fm.get("relevance_criteria") or "").strip().replace("\t", " ").replace("\n", " ")
-        try:
-            rel = path.relative_to(REPO_ROOT)
-        except ValueError:
-            rel = path
+        rel = rel_to_repo(path, REPO_ROOT)
         print(f"{rel}\t{criteria}")
     return 0
 

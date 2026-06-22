@@ -3,12 +3,9 @@
 # The lint fails only on names NOT listed here (newly-introduced drift).
 # Shrink this list as dups are consolidated; never hand-add to silence a
 # new dup — fix it or add an inline `# lint-dup: ok — <reason>` instead.
-_as_list
-_as_str_set
 _author_to_author
 _by_id
 _commit_message
-_csv_set
 _find_venv_py
 _is_main_session
 _json_safe
@@ -17,7 +14,6 @@ _now_iso
 _parse_frontmatter
 _partition_pre_author
 _reexec_into_venv
-_rel
 _request
 _result_list
 _run
