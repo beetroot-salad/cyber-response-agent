@@ -82,6 +82,23 @@ def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path, monkeypa
 _CONFIG = {"URL_BASE": "http://x:8080", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
 
 
+def _deps(request, load_config=None) -> TicketWriterDeps:
+    """Writer deps with a fake transport; config defaults to the canned `_CONFIG`
+    (pass `load_config=lambda: None` to exercise the missing-config path). Mirrors
+    the `_deps(**overrides)` test idiom in test_lead_author.py."""
+    return TicketWriterDeps(
+        load_config=load_config if load_config is not None else (lambda: dict(_CONFIG)),
+        request=request,
+    )
+
+
+def _request_404(c, m, p, body=None):
+    """GET → 404; any POST fails the test (the writer must not write after a 404)."""
+    if m == "POST":
+        pytest.fail("posted after 404")
+    return "404", "not found"
+
+
 @pytest.fixture
 def stub_transport():
     """Build a writer deps whose config + HTTP are faked so annotate/enrich run
@@ -96,7 +113,7 @@ def stub_transport():
         rec["posts"].append((path, body))  # POST (and any non-GET) is a write
         return "201", ""
 
-    rec["deps"] = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
+    rec["deps"] = _deps(fake_request)
     return rec
 
 
@@ -117,24 +134,18 @@ def test_annotate_idempotent_when_already_flagged(stub_transport):
 
 
 def test_annotate_non_fatal_on_404():
-    def fake_request(c, m, p, body=None):
-        if m == "POST":
-            pytest.fail("posted after 404")
-        return "404", "not found"
-    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
-    ticket_writer.annotate_case_ticket("missing", "caught", deps=deps)  # must not raise
+    ticket_writer.annotate_case_ticket("missing", "caught", deps=_deps(_request_404))  # must not raise
 
 
 def test_annotate_non_fatal_on_transport_error():
-    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG),
-                            request=lambda c, m, p, body=None: (None, "transport error: boom"))
+    deps = _deps(lambda c, m, p, body=None: (None, "transport error: boom"))
     ticket_writer.annotate_case_ticket("c", "caught", deps=deps)  # must not raise
 
 
 def test_annotate_no_config_is_noop():
     # request must never be called when config is absent.
-    deps = TicketWriterDeps(load_config=lambda: None,
-                            request=lambda *a, **k: pytest.fail("called transport without config"))
+    deps = _deps(lambda *a, **k: pytest.fail("called transport without config"),
+                 load_config=lambda: None)
     ticket_writer.annotate_case_ticket("c", "caught", deps=deps)
 
 
@@ -254,15 +265,11 @@ def test_enrich_resolution_noop_on_empty_method(stub_transport):
 
 
 def test_enrich_resolution_non_fatal_on_404():
-    def fake_request(c, m, p, body=None):
-        if m == "POST":
-            pytest.fail("posted after 404")
-        return "404", "not found"
-    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
+    deps = _deps(_request_404)
     ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD, deps=deps)  # must not raise
 
 
 def test_enrich_resolution_no_config_is_noop():
-    deps = TicketWriterDeps(load_config=lambda: None,
-                            request=lambda *a, **k: pytest.fail("transport without config"))
+    deps = _deps(lambda *a, **k: pytest.fail("transport without config"),
+                 load_config=lambda: None)
     ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD, deps=deps)
