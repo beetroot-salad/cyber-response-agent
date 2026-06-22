@@ -21,7 +21,9 @@ the working-tree cross-check (``verify_agent_state``), and the shared
 trailers) and ``_author_curator.py`` (the actor/env corpora, with
 ``Generation:``/``{trailer_label}:`` trailers) reach this plumbing through
 thin, corpus-pinning adapters rather than hand-mirroring it. Queue locks
-remain per-author because the queue paths differ. Both ``author.py`` and
+remain per-author because the queue paths differ, but the flock dance itself
+is shared here too (``acquire_flock``/``release_flock``) — each author just
+supplies its own lock-file path. Both ``author.py`` and
 ``author_actor.py`` acquire this lock after their queue lock and hold it
 across the child-agent invocation through queue rotation.
 """
@@ -87,6 +89,36 @@ def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
 
 
 def release_repo_lock(fh: Any) -> None:
+    if fh is None:
+        return
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+def acquire_flock(path: Path) -> Any | None:
+    """Non-blocking exclusive flock on ``path``; the open handle, or ``None`` if contended.
+
+    The per-author queue-lock primitive: where ``acquire_repo_lock`` above is
+    blocking-with-timeout (one shared repo lock every author serializes on),
+    this never waits — a tick that loses the race simply skips its batch. Each
+    author wraps it with its own lock-file path (queue paths differ per author);
+    the flock dance lives here once so it can't drift between the three corpora
+    (issue #360). mkdir's the lock file's parent so callers needn't. Release with
+    ``release_flock``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
+    return fh
+
+
+def release_flock(fh: Any) -> None:
     if fh is None:
         return
     try:
