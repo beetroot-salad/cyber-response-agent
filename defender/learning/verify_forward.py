@@ -42,6 +42,11 @@ REPO_ROOT = HERE.parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning._loop_config import DEFAULT_PATHS, subscription_env  # noqa: E402
+from defender.learning._verify_forward_shared import (  # noqa: E402
+    call_haiku as _call_haiku,
+    parse_verdict as _parse_verdict,
+    render_prompt,
+)
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "verify_forward.md"
 
@@ -169,58 +174,6 @@ def load_cited_policy(run_id: str, runs_dir: Path = RUNS_DIR) -> str:
     )
 
 
-def render_user_prompt(
-    lesson_text: str, transcript: str, disposition: str, cited_policy: str = _NO_CITED_POLICY
-) -> str:
-    template = PROMPT_PATH.read_text()
-    return (
-        template
-        .replace("{transcript}", transcript)
-        .replace("{lesson}", lesson_text)
-        .replace("{disposition}", disposition)
-        .replace("{cited_policy}", cited_policy)
-    )
-
-
-def call_haiku(user_prompt: str) -> str:
-    cmd = [
-        "claude",
-        "-p",
-        "--model",
-        VERIFIER_MODEL,
-        "--output-format",
-        "text",
-    ]
-    proc = subprocess.run(
-        cmd,
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=VERIFIER_TIMEOUT,
-        env=subscription_env(),
-    )
-    if proc.returncode != 0:
-        raise SystemExit(
-            f"verify_forward: claude -p failed (rc={proc.returncode}): "
-            f"{proc.stderr[-2000:]}"
-        )
-    return proc.stdout
-
-
-def parse_verdict(text: str) -> str:
-    for line in reversed(text.strip().splitlines()):
-        s = line.strip()
-        if s.startswith("VERDICT:"):
-            v = s.split(":", 1)[1].strip()
-            if v in ("GOOD", "BAD"):
-                return v
-            raise SystemExit(f"verify_forward: unrecognized verdict {v!r}")
-    raise SystemExit(
-        "verify_forward: no VERDICT line found in Haiku output:\n"
-        + text[-1000:]
-    )
-
-
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="verify_forward.py")
     ap.add_argument(
@@ -248,14 +201,24 @@ def main(argv: list[str]) -> int:
     cited_policy = (
         load_cited_policy(run_id) if ns.direction == "benign" else _NO_CITED_POLICY
     )
-    user_prompt = render_user_prompt(
-        lesson_path.read_text(), transcript, disposition, cited_policy
+    user_prompt = render_prompt(
+        PROMPT_PATH,
+        transcript=transcript,
+        lesson=lesson_path.read_text(),
+        disposition=disposition,
+        cited_policy=cited_policy,
     )
     import time as _time
     t0 = _time.monotonic()
-    output = call_haiku(user_prompt)
+    output = _call_haiku(
+        user_prompt,
+        error_prefix="verify_forward",
+        model=VERIFIER_MODEL,
+        timeout=VERIFIER_TIMEOUT,
+        env_fn=subscription_env,
+    )
     elapsed = _time.monotonic() - t0
-    verdict = parse_verdict(output)
+    verdict = _parse_verdict(output, error_prefix="verify_forward")
     # Append timing for the harness to reconstruct verifier time. The
     # path is opportunistic: if VERIFY_TIMING_LOG is set we use it,
     # else fall back to a sibling file next to the script. Last line

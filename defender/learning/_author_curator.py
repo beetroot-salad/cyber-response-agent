@@ -108,10 +108,6 @@ class CuratorConfig:
         return self.pending_dir / f"{self.log_prefix}_run.jsonl"
 
 
-def _by_id(rows: list[dict]) -> dict[str, dict]:
-    return {r["observation_id"]: r for r in rows}
-
-
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
@@ -447,7 +443,7 @@ def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
     if not batch:
         log("queue empty — nothing to author")
         return 0
-    all_obs = _by_id(batch)
+    all_obs = _shared.by_id(batch, "observation_id")
     held, consumed_pre, to_author = _partition_pre_author(batch, cfg)
 
     batch_id = uuid.uuid4().hex[:12]

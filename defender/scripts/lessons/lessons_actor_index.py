@@ -35,6 +35,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender.scripts.lessons._lessons_common import (
     as_str_set,
     csv_set,
+    iter_lessons,
     reexec_into_venv,
     rel_to_repo,
 )
@@ -46,24 +47,9 @@ if __name__ == "__main__":
 
 import argparse
 
-from defender._frontmatter import parse_frontmatter_or_none
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_ROOT = REPO_ROOT / "defender" / "lessons-actor"
-
-
-def iter_lessons():
-    if not LESSONS_ROOT.is_dir():
-        return
-    for path in sorted(LESSONS_ROOT.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
-        fm = parse_frontmatter_or_none(path.read_text())
-        if fm is None:
-            print(f"warn: skipping {rel_to_repo(path, REPO_ROOT)} (malformed frontmatter)", file=sys.stderr)
-            continue
-        yield path, fm
 
 
 def main(argv: list[str]) -> int:
@@ -80,7 +66,7 @@ def main(argv: list[str]) -> int:
     want_lead_tags = csv_set(ns.defender_lead_tags)
     want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons():
+    for path, fm in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
         # Stale filter (default hide; mutable=false lessons never have
         # status=stale, so they pass through unconditionally).
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":
