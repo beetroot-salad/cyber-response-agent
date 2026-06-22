@@ -8,7 +8,6 @@ instead of monkeypatching module globals.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import importlib
 import json
 import os
@@ -32,6 +31,7 @@ from defender.learning._loop_config import (
     LoopPaths,
     _log,
 )
+from defender.learning import _author_shared
 from defender.learning._loop_directions import BY_NAME, Direction
 from defender.learning.author_branch import AuthorBranch, BranchError
 from defender.learning._loop_persist import append_findings, derive_alert_rule_key, persist_run
@@ -551,20 +551,11 @@ def author_drain(
     if branch is None:
         branch = AuthorBranch()
 
-    lock_path = paths.author_drain_lock_file
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_path.open("a+")
-    try:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+    with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
+        if not locked:
             _log("author_drain: another drainer holds the lock — exiting")
             return 0
         return _author_drain_locked(paths, run_lead_author, trigger_author, branch)
-    finally:
-        with contextlib.suppress(OSError):
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        fh.close()
 
 
 # ---------------------------------------------------------------------------

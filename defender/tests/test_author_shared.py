@@ -15,6 +15,7 @@ tmp repo directly — no monkeypatching of module globals (that was the smell th
 """
 from __future__ import annotations
 
+import errno
 import subprocess
 from pathlib import Path
 
@@ -281,3 +282,49 @@ def test_result_list_normalizes_and_validates():
     assert shared._result_list({"committed": ["a"]}, "committed") == ["a"]
     with pytest.raises(shared.AuthorError, match="must be a list"):
         shared._result_list({"committed": "x"}, "committed")
+
+
+# ---------------------------------------------------------------------------
+# flock_or_skip — the scoped non-blocking flock (author-drain / lesson-revert).
+# ---------------------------------------------------------------------------
+
+
+def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
+    """Yields True when uncontended, mkdir's the parent, and releases on exit."""
+    lock = tmp_path / "sub" / ".lock"
+    with shared.flock_or_skip(lock) as locked:
+        assert locked is True
+        assert lock.parent.is_dir()  # parent created on the way in
+    # released on block exit: a fresh non-blocking acquire now succeeds
+    fh = shared.acquire_flock(lock)
+    assert fh is not None
+    shared.release_flock(fh)
+
+
+def test_flock_or_skip_yields_false_when_held(tmp_path: Path):
+    """A second entrant on a held lock yields False (skip) rather than blocking."""
+    lock = tmp_path / ".lock"
+    holder = shared.acquire_flock(lock)
+    assert holder is not None
+    try:
+        with shared.flock_or_skip(lock) as locked:
+            assert locked is False
+    finally:
+        shared.release_flock(holder)
+
+
+def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeypatch):
+    """A genuine lock-subsystem failure (e.g. ENOLCK) propagates — it is NOT
+    swallowed as contention. This is the contract #367 standardized on: only
+    ``BlockingIOError`` means "someone else holds it"; everything else is a real
+    error the caller should see, not a silent skip."""
+    lock = tmp_path / ".lock"
+
+    def _no_locks(_fd, _op):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
+    with pytest.raises(OSError) as excinfo:
+        with shared.flock_or_skip(lock):
+            pass  # never reached — acquire raises before yielding
+    assert excinfo.value.errno == errno.ENOLCK

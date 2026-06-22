@@ -29,11 +29,13 @@ across the child-agent invocation through queue rotation.
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
 import re
 import subprocess
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +127,33 @@ def release_flock(fh: Any) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
         fh.close()
+
+
+@contextlib.contextmanager
+def flock_or_skip(path: Path) -> Iterator[bool]:
+    """Hold the non-blocking flock on ``path`` for the block; yield whether it was acquired.
+
+    The scoped twin of ``acquire_flock`` (and built on it, so the dance still
+    lives in one place): for call sites that lock → do work → unlock inline
+    rather than handing the handle back. Yields ``True`` when the lock was taken
+    (released on block exit), ``False`` when another holder has it (nothing
+    acquired, nothing to release):
+
+        with flock_or_skip(path) as locked:
+            if not locked:
+                return  # someone else is in here
+            ...
+
+    Like ``acquire_flock``, contention is detected by ``BlockingIOError`` only —
+    a genuine lock-subsystem failure (e.g. ``ENOLCK`` on a filesystem without
+    working locks) propagates rather than masquerading as a busy lock (issue
+    #367). The author-drain and lesson-revert paths route through here.
+    """
+    fh = acquire_flock(path)
+    try:
+        yield fh is not None
+    finally:
+        release_flock(fh)
 
 
 def _generation_count(trailer_label: str) -> int:
