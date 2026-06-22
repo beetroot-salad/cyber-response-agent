@@ -126,3 +126,37 @@ def test_stderr_flood_does_not_deadlock(tmp_repo, shim_claude, monkeypatch):
     # error — but only if the reader completed without deadlock first.
     with pytest.raises(a.AuthorError, match="did not emit AUTHOR_RESULT"):
         a.invoke_agent([{"finding_id": "x"}], batch_id="test", cfg=cfg)
+
+
+def test_runner_spawn_seam_is_honored(tmp_path):
+    """#373: the spawn is injectable via RunnerOptions, so the driver is exercisable
+    in isolation without a real ``claude`` and without monkeypatching a module attr.
+    The runner builds the ``claude`` cmd, hands it to the injected spawn, and drives
+    that process through the same select-loop/raw path lead_author uses."""
+    import subprocess
+    import sys as _sys
+
+    from defender.learning import _author_runner as runner
+
+    seen = {}
+
+    def fake_spawn(cmd, **kwargs):
+        seen["cmd"] = cmd  # the runner-built `claude …` argv
+        script = "import sys; sys.stdin.read()"  # consume prompt, exit 0
+        return subprocess.Popen([_sys.executable, "-c", script], **kwargs)
+
+    options = runner.RunnerOptions(
+        system_prompt_file=tmp_path / "prompt.md",
+        allowed_tools="Read",
+        model="claude-x",
+        effort=None,
+        timeout_seconds=10,
+        cwd=tmp_path,
+        log_path=tmp_path / "run.jsonl",
+        result_marker=None,
+        batch_id="t",
+        spawn=fake_spawn,
+    )
+    rc, _text = runner.invoke_claude_print_raw(options, "the prompt", lambda _m: None)
+    assert rc == 0
+    assert seen["cmd"][0] == "claude" and "--allowed-tools" in seen["cmd"]

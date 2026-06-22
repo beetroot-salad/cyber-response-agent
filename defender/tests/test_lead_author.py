@@ -844,12 +844,15 @@ def test_invoke_agent_includes_pending_drafts_in_prompt(
     """User prompt must carry the new pending_system_drafts section."""
     captured: dict = {}
 
-    def _fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input", "")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+    # invoke_agent routes through the shared runner (#373); capture the prompt at
+    # that seam instead of stubbing subprocess.run, which it no longer calls.
+    def _fake_raw(options, user_prompt, log_fn):
+        captured["input"] = user_prompt
+        return 0, ""
 
-    monkeypatch.setattr(lead_author.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        lead_author._author_runner, "invoke_claude_print_raw", _fake_raw
+    )
     handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
                  "executed_template_path": "defender/skills/gather/queries/wazuh/auth-events.md",
                  "neighbors": [], "invocations": []}]

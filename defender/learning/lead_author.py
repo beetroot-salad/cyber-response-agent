@@ -58,6 +58,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning import (
+    _author_runner,
     _author_shared,
     _loop_config,
     lead_classifier,
@@ -698,7 +699,14 @@ def invoke_agent(
     handoffs: list[dict],
     pending_drafts: list[dict] | None = None,
 ) -> int:
-    """Spawn ``claude -p`` with the lead-author prompt. Returns rc."""
+    """Spawn ``claude -p`` via the shared runner with the lead-author prompt. Returns rc.
+
+    Routed through ``_author_runner.invoke_claude_print_raw`` (issue #373) so the lead
+    author shares the one spawn path — select-loop deadline, stderr drain, non-blocking
+    stdin, event teeing to the run log — instead of its own ``subprocess.run``. It reads
+    its result from the working tree (git is the source of truth), so it uses the raw
+    variant (no ``AUTHOR_RESULT:`` marker) and maps the runner's timeout to rc 124 so the
+    ``_run_locked`` caller writes ``failure.txt`` and refuses retry until a human clears it."""
     pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
@@ -709,40 +717,26 @@ def invoke_agent(
         f"pending_system_drafts ({len(pending_drafts)}):\n"
         f"{json.dumps(pending_drafts, indent=2)}\n"
     )
-    cmd = [
-        "claude",
-        "-p",
-        "--system-prompt-file", str(LEAD_AUTHOR_PROMPT),
-        "--model", LEAD_AUTHOR_MODEL,
-        "--allowed-tools", _ALLOWLIST,
-    ]
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     _log(f"spawn claude (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
+    options = _author_runner.RunnerOptions(
+        system_prompt_file=LEAD_AUTHOR_PROMPT,
+        allowed_tools=_ALLOWLIST,
+        model=LEAD_AUTHOR_MODEL,
+        effort=None,
+        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
+        cwd=REPO_ROOT,
+        log_path=RUN_LOG_FILE,
+        result_marker=None,
+        batch_id=run_dir.name,
+    )
     try:
-        proc = subprocess.run(
-            cmd,
-            input=user_prompt,
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=LEAD_AUTHOR_TIMEOUT,
-            env=_loop_config.subscription_env(),
-        )
-    except subprocess.TimeoutExpired as e:
-        with RUN_LOG_FILE.open("a") as f:
-            f.write(f"[{_loop_config.now_iso()}] TIMEOUT after {LEAD_AUTHOR_TIMEOUT}s\n")
-            f.write(f"stderr-tail: {(e.stderr or '')[-2000:] if isinstance(e.stderr, str) else ''}\n")
-        _log(f"claude timed out after {LEAD_AUTHOR_TIMEOUT}s")
+        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
+    except _author_runner.RunnerError as e:
+        _log(f"claude failed: {e}")
         return 124
-    with RUN_LOG_FILE.open("a") as f:
-        f.write(f"[{_loop_config.now_iso()}] rc={proc.returncode}\n")
-        f.write("---stdout---\n")
-        f.write(proc.stdout)
-        f.write("\n---stderr---\n")
-        f.write(proc.stderr)
-        f.write("\n")
-    _log(f"claude exited rc={proc.returncode}")
-    return proc.returncode
+    _log(f"claude exited rc={rc}")
+    return rc
 
 
 # ---------------------------------------------------------------------------
