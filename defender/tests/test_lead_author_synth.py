@@ -16,7 +16,7 @@ from defender.learning import lead_neighbors
 def _lead(
     query_id: str, params: dict | None = None, raw_command: str = "",
     system: str | None = None,
-) -> "lead_author.ExecutedLead":
+) -> lead_author.ExecutedLead:
     # The queries table records ``system`` independently; default it to the
     # query_id's namespace (how record_query builds the id) so callers only
     # set it explicitly when exercising a system/id-prefix mismatch.

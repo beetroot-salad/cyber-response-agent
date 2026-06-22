@@ -106,7 +106,7 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
     hooks = Hooks()
 
     @hooks.on.after_tool_execute
-    async def _budget(ctx, *, call, tool_def, args, result):  # noqa: ANN001
+    async def _budget(ctx, *, call, result, **_):  # noqa: ANN001 — **_ absorbs the unused tool_def/args framework kwargs
         # Warning-only budget accounting, same caps as the claude -p enforcer.
         try:
             deps: RunDeps = ctx.deps

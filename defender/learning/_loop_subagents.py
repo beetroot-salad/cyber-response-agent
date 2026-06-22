@@ -303,7 +303,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         fut_to_idx = {
             pool.submit(invoke_oracle_lead, jl, story, s): i
-            for i, (jl, s) in enumerate(zip(leads, samples))
+            for i, (jl, s) in enumerate(zip(leads, samples, strict=True))
         }
         try:
             # Surface the first failing lead as soon as it completes (rather than after
@@ -315,7 +315,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
                 f.cancel()
             raise
     projections = [
-        (jl.lead_id, events) for jl, events in zip(leads, events_per_lead)
+        (jl.lead_id, events) for jl, events in zip(leads, events_per_lead, strict=True)
     ]
     return dump_oracle_doc(assemble_oracle_doc(projections))
 

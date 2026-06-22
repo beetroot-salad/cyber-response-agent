@@ -43,7 +43,7 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
 def test_disposition_enum_matches_loop_config():
     from defender.learning._loop_config import DISPOSITION_ENUM as canonical
 
-    assert case_ticket.DISPOSITION_ENUM == canonical
+    assert canonical == case_ticket.DISPOSITION_ENUM
 
 
 def test_seed_eligible_outcomes_subset_of_outcome_enum():

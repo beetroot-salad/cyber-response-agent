@@ -22,7 +22,7 @@ import random
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from defender.learning._loop_config import REPO_ROOT, make_logger
 from defender.scripts.case_history import case_ticket
@@ -99,7 +99,7 @@ def _parse_iso(value) -> datetime | None:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _is_eligible(ticket, self_case_id: str, lo: datetime, hi: datetime) -> bool:
@@ -142,7 +142,7 @@ def sample_seeds(
         if not label:
             return []
         if now is None:
-            now = _parse_iso(case_ticket.alert_event_time(alert)) or datetime.now(timezone.utc)
+            now = _parse_iso(case_ticket.alert_event_time(alert)) or datetime.now(UTC)
         lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
         eligible = [
             t for t in _list_closed(label) if _is_eligible(t, self_case_id, lo, hi)

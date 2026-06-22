@@ -6,7 +6,7 @@ window + not-self), the uniform draw, and cold-start behaviour.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 import pytest
 
@@ -14,7 +14,7 @@ from defender.learning import ticket_seeds
 from defender.scripts.case_history import case_ticket
 
 
-NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
 ALERT = {"rule": {"id": "5710", "description": "sshd brute force"}}
 
 
@@ -140,7 +140,7 @@ def test_window_anchors_on_alert_event_time_not_wallclock(stub_store, monkeypatc
     # not wall-clock now: a replayed alert from months ago must still find cases that
     # are in-window relative to *its* date.
     replay_alert = {"rule": {"id": "5710"}, "timestamp": "2026-01-15T00:00:00+00:00"}
-    anchor = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    anchor = datetime(2026, 1, 15, tzinfo=UTC)
     stub_store([
         _ticket("in_window", event_time=anchor - timedelta(days=10)),   # 10d before alert
         _ticket("after_alert", event_time=anchor + timedelta(days=5)),  # post-dates alert: out

@@ -20,7 +20,7 @@ import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_BRANCH_PREFIX = "lessons/"

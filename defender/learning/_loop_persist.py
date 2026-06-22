@@ -13,7 +13,8 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import yaml
 
@@ -337,27 +338,26 @@ def append_findings(
     src = _source_run_dir(learning_run_dir, paths.repo_root)
     appended = 0
     paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    with _flock(paths.findings_lock_file):
-        with paths.pending_file.open("a") as fh:
-            for n, f in enumerate(judge_doc["defender_findings"]):
-                if f["type"] in audit_only_types:
-                    continue
-                entry = {
-                    "schema_version": 1,
-                    "finding_id": f"{run_id}/{namespace}{n}",
-                    "run_id": run_id,
-                    "alert_rule_key": alert_rule_key,
-                    "direction": direction,
-                    "type": f["type"],
-                    "subject_anchor": f["subject_anchor"],
-                    "subject_topic": f["subject_topic"],
-                    "finding": f["finding"],
-                    "judge_outcome": outcome,
-                    "citations": f["citations"],
-                    "source_run_dir": src,
-                }
-                fh.write(json.dumps(entry) + "\n")
-                appended += 1
+    with _flock(paths.findings_lock_file), paths.pending_file.open("a") as fh:
+        for n, f in enumerate(judge_doc["defender_findings"]):
+            if f["type"] in audit_only_types:
+                continue
+            entry = {
+                "schema_version": 1,
+                "finding_id": f"{run_id}/{namespace}{n}",
+                "run_id": run_id,
+                "alert_rule_key": alert_rule_key,
+                "direction": direction,
+                "type": f["type"],
+                "subject_anchor": f["subject_anchor"],
+                "subject_topic": f["subject_topic"],
+                "finding": f["finding"],
+                "judge_outcome": outcome,
+                "citations": f["citations"],
+                "source_run_dir": src,
+            }
+            fh.write(json.dumps(entry) + "\n")
+            appended += 1
     return appended
 
 

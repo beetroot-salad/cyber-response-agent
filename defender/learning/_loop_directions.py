@@ -7,7 +7,7 @@ and the per-direction observation-curator trigger.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 from defender.learning._loop_config import (
     BENIGN_JUDGE_EFFORT,
