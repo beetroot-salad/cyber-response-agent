@@ -10,6 +10,7 @@ import pytest
 
 from defender.learning import ticket_enrichment
 from defender.scripts.case_history import case_ticket, ticket_writer
+from defender.scripts.case_history.ticket_writer import TicketWriterDeps
 
 
 # ---------------------------------------------------------------------------
@@ -82,28 +83,25 @@ _CONFIG = {"URL_BASE": "http://x:8080", "BASTION_HOST": "web-1", "TIMEOUT_SEC": 
 
 
 @pytest.fixture
-def stub_transport(monkeypatch):
-    """Fake the writer's config + HTTP so annotate runs without docker. Returns a
-    recorder dict; set `recorder['ticket']` to the GET-returned ticket."""
+def stub_transport():
+    """Build a writer deps whose config + HTTP are faked so annotate/enrich run
+    without docker. Returns a recorder dict: set `recorder['ticket']` to the
+    GET-returned ticket, read POSTs off `recorder['posts']`, and pass
+    `recorder['deps']` as the entrypoint's `deps=`."""
     rec = {"ticket": {"key": "c", "comments": []}, "posts": []}
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: dict(_CONFIG))
 
     def fake_request(config, method, path, body=None):
         if method == "GET":
             return "200", json.dumps(rec["ticket"])
+        rec["posts"].append((path, body))  # POST (and any non-GET) is a write
         return "201", ""
 
-    def fake_post(config, path, body):
-        rec["posts"].append((path, body))
-        return "201", ""
-
-    monkeypatch.setattr(ticket_writer, "_request", fake_request)
-    monkeypatch.setattr(ticket_writer, "_post", fake_post)
+    rec["deps"] = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
     return rec
 
 
 def test_annotate_posts_once_on_clean_ticket(stub_transport):
-    ticket_writer.annotate_case_ticket("c", "caught")
+    ticket_writer.annotate_case_ticket("c", "caught", deps=stub_transport["deps"])
     assert len(stub_transport["posts"]) == 1
     path, body = stub_transport["posts"][0]
     assert path.endswith("/comments")
@@ -114,34 +112,30 @@ def test_annotate_idempotent_when_already_flagged(stub_transport):
     # Ticket already carries an enrichment comment → no second post.
     flagged = case_ticket.enrichment_to_comment("caught")
     stub_transport["ticket"] = {"key": "c", "comments": [{"author": "learning", **flagged}]}
-    ticket_writer.annotate_case_ticket("c", "caught")
+    ticket_writer.annotate_case_ticket("c", "caught", deps=stub_transport["deps"])
     assert stub_transport["posts"] == []
 
 
-def test_annotate_non_fatal_on_404(monkeypatch):
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: dict(_CONFIG))
-    monkeypatch.setattr(ticket_writer, "_request",
-                        lambda c, m, p, body=None: ("404", "not found"))
-    posted = []
-    monkeypatch.setattr(ticket_writer, "_post",
-                        lambda c, p, b: posted.append(1) or ("201", ""))
-    ticket_writer.annotate_case_ticket("missing", "caught")  # must not raise
-    assert posted == []
+def test_annotate_non_fatal_on_404():
+    def fake_request(c, m, p, body=None):
+        if m == "POST":
+            pytest.fail("posted after 404")
+        return "404", "not found"
+    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
+    ticket_writer.annotate_case_ticket("missing", "caught", deps=deps)  # must not raise
 
 
-def test_annotate_non_fatal_on_transport_error(monkeypatch):
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: dict(_CONFIG))
-    monkeypatch.setattr(ticket_writer, "_request",
-                        lambda c, m, p, body=None: (None, "transport error: boom"))
-    ticket_writer.annotate_case_ticket("c", "caught")  # must not raise
+def test_annotate_non_fatal_on_transport_error():
+    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG),
+                            request=lambda c, m, p, body=None: (None, "transport error: boom"))
+    ticket_writer.annotate_case_ticket("c", "caught", deps=deps)  # must not raise
 
 
-def test_annotate_no_config_is_noop(monkeypatch):
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: None)
-    # _request must never be called when config is absent.
-    monkeypatch.setattr(ticket_writer, "_request",
-                        lambda *a, **k: pytest.fail("called transport without config"))
-    ticket_writer.annotate_case_ticket("c", "caught")
+def test_annotate_no_config_is_noop():
+    # request must never be called when config is absent.
+    deps = TicketWriterDeps(load_config=lambda: None,
+                            request=lambda *a, **k: pytest.fail("called transport without config"))
+    ticket_writer.annotate_case_ticket("c", "caught", deps=deps)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +225,7 @@ _GROUNDED_METHOD = "identity-confirmed (l-002) + no-egress (l-005)"
 
 def test_enrich_resolution_posts_transition_on_ungrounded(stub_transport):
     stub_transport["ticket"] = {"key": "c", "resolution": "benign — routine", "comments": []}
-    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD, deps=stub_transport["deps"])
     assert len(stub_transport["posts"]) == 1
     path, body = stub_transport["posts"][0]
     assert path.endswith("/transitions")
@@ -244,32 +238,31 @@ def test_enrich_resolution_posts_transition_on_ungrounded(stub_transport):
 def test_enrich_resolution_idempotent_when_already_grounded(stub_transport):
     grounded = case_ticket.append_resolution_method("benign — routine", _GROUNDED_METHOD)
     stub_transport["ticket"] = {"key": "c", "resolution": grounded, "comments": []}
-    ticket_writer.enrich_case_resolution("c", "different (l-009)")
+    ticket_writer.enrich_case_resolution("c", "different (l-009)", deps=stub_transport["deps"])
     assert stub_transport["posts"] == []  # already grounded → no write
 
 
 def test_enrich_resolution_skips_foreign_resolution(stub_transport):
     stub_transport["ticket"] = {"key": "c", "resolution": "Closed by analyst.", "comments": []}
-    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD, deps=stub_transport["deps"])
     assert stub_transport["posts"] == []  # not our close resolution → untouched
 
 
 def test_enrich_resolution_noop_on_empty_method(stub_transport):
-    ticket_writer.enrich_case_resolution("c", "")
+    ticket_writer.enrich_case_resolution("c", "", deps=stub_transport["deps"])
     assert stub_transport["posts"] == []
 
 
-def test_enrich_resolution_non_fatal_on_404(monkeypatch):
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: dict(_CONFIG))
-    monkeypatch.setattr(ticket_writer, "_request",
-                        lambda c, m, p, body=None: ("404", "not found"))
-    monkeypatch.setattr(ticket_writer, "_post",
-                        lambda c, p, b: pytest.fail("posted after 404"))
-    ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD)  # must not raise
+def test_enrich_resolution_non_fatal_on_404():
+    def fake_request(c, m, p, body=None):
+        if m == "POST":
+            pytest.fail("posted after 404")
+        return "404", "not found"
+    deps = TicketWriterDeps(load_config=lambda: dict(_CONFIG), request=fake_request)
+    ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD, deps=deps)  # must not raise
 
 
-def test_enrich_resolution_no_config_is_noop(monkeypatch):
-    monkeypatch.setattr(ticket_writer, "_load_config", lambda: None)
-    monkeypatch.setattr(ticket_writer, "_request",
-                        lambda *a, **k: pytest.fail("transport without config"))
-    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD)
+def test_enrich_resolution_no_config_is_noop():
+    deps = TicketWriterDeps(load_config=lambda: None,
+                            request=lambda *a, **k: pytest.fail("transport without config"))
+    ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD, deps=deps)

@@ -24,6 +24,8 @@ import json
 import os
 import sys
 import urllib.parse
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from defender.scripts.case_history import case_ticket
@@ -65,7 +67,7 @@ def _load_config() -> dict[str, str] | None:
         return None
     # Validate TIMEOUT_SEC here, where we can say *which* key is wrong. Otherwise
     # a typo'd value (e.g. "10s") only surfaces as a ValueError from int() deep in
-    # _post, which the post-step's broad except swallows into a generic WARN.
+    # _request, which the post-step's broad except swallows into a generic WARN.
     if not cfg["TIMEOUT_SEC"].isdigit():
         _warn(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
               f"integer in {path}; skipping")
@@ -95,17 +97,31 @@ def _request(
     return status, body_text
 
 
-def _post(config: dict[str, str], path: str, body: dict) -> tuple[str | None, str]:
-    return _request(config, "POST", path, body)
+@dataclass(frozen=True)
+class TicketWriterDeps:
+    """Injected config + transport seam for the case-history write entrypoints.
+
+    Two callables, each defaulted to the production module function, so the
+    entrypoints read `deps.load_config()` / `deps.request(...)` instead of
+    hard-calling module globals. Tests pass a `TicketWriterDeps(load_config=...,
+    request=...)` (or `dataclasses.replace`) instead of monkeypatching the module.
+    Mirrors the `AuthorConfig`/`CuratorConfig` injection shape (#380); there's no
+    path layout to thread, so field defaults are the production wiring — no factory.
+    `request` covers both GET and POST (POST is just `request(config, "POST", ...)`)."""
+    load_config: Callable[[], dict[str, str] | None] = _load_config
+    request: Callable[..., tuple[str | None, str]] = _request
 
 
-def open_case_ticket(run_dir: Path) -> None:
+DEFAULT_DEPS = TicketWriterDeps()
+
+
+def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
     """Bridge: create an OPEN case-history ticket for this alert (call at materialize).
 
     409 means the ticket already exists (a replay against a populated store) — that's
     success, not an error. Never raises."""
     try:
-        config = _load_config()
+        config = deps.load_config()
         if config is None:
             return
         alert_path = run_dir / "alert.json"
@@ -115,7 +131,7 @@ def open_case_ticket(run_dir: Path) -> None:
         alert = json.loads(alert_path.read_text())
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id)
-        status, body = _post(config, "/tickets", payload)
+        status, body = deps.request(config, "POST", "/tickets", payload)
         if status is None:
             _warn(f"open {case_id}: {body}")
         elif status == "409":
@@ -128,14 +144,14 @@ def open_case_ticket(run_dir: Path) -> None:
         _warn(f"open raised, ignored: {e!r}")
 
 
-def close_case_ticket(run_dir: Path) -> None:
+def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
     """Close the case-history ticket with the disposition (call after the run).
 
     Writes a `ticket_write.json` receipt — the seam the read PR / offline enrichment
     keys on. A missing/invalid report.md leaves the ticket open (non-fatal). Never
     raises."""
     try:
-        config = _load_config()
+        config = deps.load_config()
         if config is None:
             return
         try:
@@ -148,7 +164,7 @@ def close_case_ticket(run_dir: Path) -> None:
         # filename stem, which can hold spaces / other reserved chars that would
         # otherwise produce a URL that doesn't match the stored key.
         key = urllib.parse.quote(rec.case_id, safe="")
-        status, body = _post(config, f"/tickets/{key}/transitions", payload)
+        status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
         ok = status is not None and status.startswith("2")
         if not ok:
             _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")
@@ -159,7 +175,9 @@ def close_case_ticket(run_dir: Path) -> None:
         _warn(f"close raised, ignored: {e!r}")
 
 
-def annotate_case_ticket(case_id: str, outcome: str) -> None:
+def annotate_case_ticket(
+    case_id: str, outcome: str, deps: TicketWriterDeps = DEFAULT_DEPS
+) -> None:
     """Stamp the seed-eligibility flag onto a closed case-history ticket (issue
     #317, offline enrichment). `outcome` is the adversarial-probe verdict; the
     polarity (which outcomes seed) is decided by the mapper.
@@ -170,11 +188,11 @@ def annotate_case_ticket(case_id: str, outcome: str) -> None:
     Non-fatal: every failure (config absent, unreachable, 404, HTTP error) is a WARN
     and a return. Never raises."""
     try:
-        config = _load_config()
+        config = deps.load_config()
         if config is None:
             return
         key = urllib.parse.quote(case_id, safe="")
-        status, body = _request(config, "GET", f"/tickets/{key}")
+        status, body = deps.request(config, "GET", f"/tickets/{key}")
         if status is None:
             _warn(f"annotate {case_id}: {body}")
             return
@@ -193,7 +211,7 @@ def annotate_case_ticket(case_id: str, outcome: str) -> None:
             _log(f"annotate {case_id}: already flagged — skipping")
             return
         payload = case_ticket.enrichment_to_comment(outcome)
-        status, body = _post(config, f"/tickets/{key}/comments", payload)
+        status, body = deps.request(config, "POST", f"/tickets/{key}/comments", payload)
         if status is None or not status.startswith("2"):
             _warn(f"annotate {case_id}: POST {status or 'transport error'}: {body}")
         else:
@@ -202,7 +220,9 @@ def annotate_case_ticket(case_id: str, outcome: str) -> None:
         _warn(f"annotate raised, ignored: {e!r}")
 
 
-def enrich_case_resolution(case_id: str, method: str) -> None:
+def enrich_case_resolution(
+    case_id: str, method: str, deps: TicketWriterDeps = DEFAULT_DEPS
+) -> None:
     """Stamp the grounded resolution-method onto a closed case-history ticket (issue
     #338, offline enrichment). `method` is the resolution method the adversarial judge
     confirmed (grounded predicates + policy/authority); it rides INSIDE the existing
@@ -219,11 +239,11 @@ def enrich_case_resolution(case_id: str, method: str) -> None:
     try:
         if not method or not method.strip():
             return
-        config = _load_config()
+        config = deps.load_config()
         if config is None:
             return
         key = urllib.parse.quote(case_id, safe="")
-        status, body = _request(config, "GET", f"/tickets/{key}")
+        status, body = deps.request(config, "GET", f"/tickets/{key}")
         if status is None:
             _warn(f"enrich-resolution {case_id}: {body}")
             return
@@ -252,7 +272,7 @@ def enrich_case_resolution(case_id: str, method: str) -> None:
         if new_resolution == resolution:  # nothing to add (no template / already marked)
             return
         payload = {"status": "closed", "resolution": new_resolution, "author": "learning"}
-        status, body = _post(config, f"/tickets/{key}/transitions", payload)
+        status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
         if status is None or not status.startswith("2"):
             _warn(f"enrich-resolution {case_id}: POST {status or 'transport error'}: {body}")
         else:
