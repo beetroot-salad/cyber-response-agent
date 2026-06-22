@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,7 +43,7 @@ import yaml
 
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_config import DEFAULT_PATHS, make_logger
 from defender.learning._loop_persist import rotate_queue_locked
 
 
@@ -105,12 +104,6 @@ class CuratorConfig:
     @property
     def run_log(self) -> Path:
         return _PENDING_DIR / f"{self.log_prefix}_run.jsonl"
-
-
-def _logger(cfg: CuratorConfig) -> Callable[[str], None]:
-    def _log(msg: str) -> None:
-        print(f"[{cfg.log_prefix}] {msg}", file=sys.stderr)
-    return _log
 
 
 def _by_id(rows: list[dict]) -> dict[str, dict]:
@@ -277,7 +270,7 @@ def invoke_curator_agent(
         batch_id=batch_id,
     )
     try:
-        return _runner.invoke_claude_print(options, user_prompt, _logger(cfg))
+        return _runner.invoke_claude_print(options, user_prompt, make_logger(cfg.log_prefix))
     except _runner.RunnerError as e:
         raise AuthorError(str(e)) from e
 
@@ -422,7 +415,7 @@ def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
     unmerged PR branch — see ``author.run_batch`` for the rationale (a rejected PR
     must not strand them; a merged one filters them via ``existing_observation_ids``
     next batch)."""
-    log = _logger(cfg)
+    log = make_logger(cfg.log_prefix)
     queue_lock = acquire_queue_lock(cfg)
     if queue_lock is None:
         log("queue lock held by another process — skipping this tick")
@@ -447,7 +440,7 @@ def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
 
 
 def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
-    log = _logger(cfg)
+    log = make_logger(cfg.log_prefix)
     batch = read_batch(cfg)
     if not batch:
         log("queue empty — nothing to author")
@@ -547,7 +540,7 @@ def _author_to_author(
 
     Returns (rc, commit_sha, committed, consumed_skip). rc != 0 means a FATAL
     happened and the caller should bail with that code."""
-    log = _logger(cfg)
+    log = make_logger(cfg.log_prefix)
     baseline_stray = changes_outside_corpus(cfg.corpus_dir_rel)
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)

@@ -21,26 +21,19 @@ _VENV_PY = Path(__file__).resolve().parents[3] / "defender" / ".venv" / "bin" / 
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
+# Put the workspace root on sys.path so the `defender.*` namespace import below
+# resolves whether this file is imported or run directly (after the venv re-exec
+# above, sys.path[0] is this script's dir, not the workspace root).
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
 import argparse
 
-import yaml
+from defender._frontmatter import parse_frontmatter_or_none
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
-
-
-def _parse_frontmatter(text: str) -> dict | None:
-    if not text.startswith("---\n"):
-        return None
-    end = text.find("\n---", 4)
-    if end == -1:
-        return None
-    try:
-        data = yaml.safe_load(text[4:end])
-    except yaml.YAMLError:
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def _as_list(v) -> list:
@@ -59,7 +52,7 @@ def iter_lessons(corpus: Path):
     for path in sorted(corpus.glob("*.md")):
         if path.name.startswith("_"):
             continue
-        fm = _parse_frontmatter(path.read_text())
+        fm = parse_frontmatter_or_none(path.read_text())
         if fm is None:
             print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
             continue

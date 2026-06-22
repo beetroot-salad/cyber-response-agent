@@ -29,7 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.learning._loop_config import subscription_env
+from defender.learning._loop_config import now_iso, subscription_env
 
 
 class RunnerError(Exception):
@@ -243,7 +243,7 @@ def invoke_claude_print(
     options.log_path.parent.mkdir(parents=True, exist_ok=True)
     with options.log_path.open("wb") as log_fh:
         log_fh.write(
-            (json.dumps({"batch_id": options.batch_id, "started_at": _now_iso()}) + "\n").encode()
+            (json.dumps({"batch_id": options.batch_id, "started_at": now_iso()}) + "\n").encode()
         )
         log_fh.flush()
         rc, full_text, stderr_tail = _drive_subprocess(
@@ -445,8 +445,3 @@ def _pump_stdin(
         proc.stdin.close()
         return stdin_offset, True
     return stdin_offset, False
-
-
-def _now_iso() -> str:
-    import datetime as _dt
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")

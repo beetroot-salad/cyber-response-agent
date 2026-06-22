@@ -48,7 +48,6 @@ corpus and pass no provenance trailers (issue #330).
 """
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import os
 import re
@@ -68,7 +67,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_config import DEFAULT_PATHS, make_logger, now_iso
 from defender.learning._loop_persist import (
     _flock,
     _read_jsonl_rows,
@@ -294,10 +293,6 @@ def _commit_message(result: dict) -> str:
     return _shared._commit_message(result, "findings")
 
 
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-
-
 def rotate_queue(
     *,
     held: list[dict],
@@ -329,7 +324,7 @@ def write_held_report(
         return
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     line = (
-        f"{_now_iso()} batch={batch_id} "
+        f"{now_iso()} batch={batch_id} "
         f"forward_bad={len(held_forward_bad)} "
         f"skipped={len(skipped)} "
         f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
@@ -344,8 +339,7 @@ def write_held_report(
 # ---------------------------------------------------------------------------
 
 
-def _log(msg: str) -> None:
-    print(f"[author] {msg}", file=sys.stderr)
+_log = make_logger("author")
 
 
 def _by_id(findings: list[dict]) -> dict[str, dict]:
