@@ -17,13 +17,12 @@ post-step).
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import yaml
 
 from defender.learning._loop_directions import ADVERSARIAL
-from defender.learning._loop_config import LoopError
+from defender.learning._loop_config import LoopError, make_logger
 from defender.learning._loop_validate import _outcome_keyword
 from defender.scripts.case_history import case_ticket
 from defender.scripts.case_history.ticket_writer import (
@@ -32,8 +31,7 @@ from defender.scripts.case_history.ticket_writer import (
 )
 
 
-def _log(msg: str) -> None:
-    print(f"[ticket_enrichment] {msg}", file=sys.stderr)
+_log = make_logger("ticket_enrichment")
 
 
 def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:

@@ -44,7 +44,6 @@ Lifecycle, per tick:
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import fcntl
 import json
 import os
@@ -310,12 +309,7 @@ class LeadAuthorError(Exception):
     """Fatal pre/post-flight error — caller should abort."""
 
 
-def _log(msg: str) -> None:
-    print(f"[lead-author] {msg}", file=sys.stderr, flush=True)
-
-
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+_log = _loop_config.make_logger("lead-author", flush=True)
 
 
 def acquire_queue_lock() -> Any:
@@ -744,12 +738,12 @@ def invoke_agent(
         )
     except subprocess.TimeoutExpired as e:
         with RUN_LOG_FILE.open("a") as f:
-            f.write(f"[{_now_iso()}] TIMEOUT after {LEAD_AUTHOR_TIMEOUT}s\n")
+            f.write(f"[{_loop_config.now_iso()}] TIMEOUT after {LEAD_AUTHOR_TIMEOUT}s\n")
             f.write(f"stderr-tail: {(e.stderr or '')[-2000:] if isinstance(e.stderr, str) else ''}\n")
         _log(f"claude timed out after {LEAD_AUTHOR_TIMEOUT}s")
         return 124
     with RUN_LOG_FILE.open("a") as f:
-        f.write(f"[{_now_iso()}] rc={proc.returncode}\n")
+        f.write(f"[{_loop_config.now_iso()}] rc={proc.returncode}\n")
         f.write("---stdout---\n")
         f.write(proc.stdout)
         f.write("\n---stderr---\n")
@@ -1059,7 +1053,7 @@ def _run_locked(run_dir: Path) -> int:
     if rc != 0:
         _write_state(
             _failure_marker(run_dir),
-            f"claude exited rc={rc} at {_now_iso()}\n"
+            f"claude exited rc={rc} at {_loop_config.now_iso()}\n"
             f"see {RUN_LOG_FILE} for stdout/stderr\n"
             "Human action required: review the catalog state, either drop\n"
             "any questionable commit from HEAD or remove this failure.txt\n"
@@ -1072,7 +1066,7 @@ def _run_locked(run_dir: Path) -> int:
     if not ok:
         _write_state(
             _violation_marker(run_dir),
-            f"reason: {reason}\nat: {_now_iso()}\ndetail: {json.dumps(detail, indent=2)}\n",
+            f"reason: {reason}\nat: {_loop_config.now_iso()}\ndetail: {json.dumps(detail, indent=2)}\n",
         )
         _log(f"FATAL post-flight: {reason}; wrote {_violation_marker(run_dir)}")
         return 2
@@ -1081,7 +1075,7 @@ def _run_locked(run_dir: Path) -> int:
     maybe_push(commit_made)
     _write_state(
         _done_sentinel(run_dir),
-        f"head_sha: {detail['head']}\nat: {_now_iso()}\ncommit_made: {commit_made}\n",
+        f"head_sha: {detail['head']}\nat: {_loop_config.now_iso()}\ncommit_made: {commit_made}\n",
     )
     _log(f"done; commit_made={commit_made} head={detail['head'][:12]}")
     return 0
@@ -1149,7 +1143,7 @@ def _prepare_handoffs(
         )
         _write_state(
             _done_sentinel(run_dir),
-            f"head_sha: {base_sha}\nat: {_now_iso()}\ncommit_made: False\n",
+            f"head_sha: {base_sha}\nat: {_loop_config.now_iso()}\ncommit_made: False\n",
         )
         return [], [], 0
 

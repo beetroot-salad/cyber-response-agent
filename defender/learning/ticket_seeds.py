@@ -24,7 +24,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from defender.learning._loop_config import REPO_ROOT
+from defender.learning._loop_config import REPO_ROOT, make_logger
 from defender.scripts.case_history import case_ticket
 
 _TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
@@ -53,8 +53,7 @@ class Seed:
     reason: str
 
 
-def _log(msg: str) -> None:
-    print(f"[ticket_seeds] {msg}", file=sys.stderr)
+_log = make_logger("ticket_seeds")
 
 
 def _seed_int(run_id: str) -> int:

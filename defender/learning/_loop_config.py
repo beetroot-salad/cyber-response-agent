@@ -8,8 +8,10 @@ enums) that tests never need to override.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -277,8 +279,19 @@ class LoopError(Exception):
     """Fatal orchestrator error — caller should stop processing this run."""
 
 
-def _log(msg: str) -> None:
-    print(f"[loop] {msg}", file=sys.stderr)
+def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
+    """Build a stderr logger that prefixes every line with ``[prefix]``."""
+    def _log(msg: str) -> None:
+        print(f"[{prefix}] {msg}", file=sys.stderr, flush=flush)
+    return _log
+
+
+def now_iso() -> str:
+    """UTC timestamp, seconds precision (the loop's canonical clock string)."""
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+
+
+_log = make_logger("loop")  # this module's own logger
 
 
 def subscription_env() -> dict[str, str]:
