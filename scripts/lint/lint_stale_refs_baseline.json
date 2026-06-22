@@ -1,0 +1,4 @@
+{
+  "//": "lint_stale_refs baseline — references that survive a rename/delete in the PR diff. Fingerprint is file:ident. CI fails on a surviving reference absent here. Regenerate: python scripts/lint/lint_stale_refs.py --update-baseline. This baseline is normally empty (the check is diff-relative); an entry means a knowingly-tolerated stray reference. \"\" means un-triaged.",
+  "entries": {}
+}

@@ -12,8 +12,11 @@ legitimately reference `wazuh.auth-events` as a query-template
 identifier, since `{system}.{template-name}` is the protocol surface.
 This lint surfaces references so they can be triaged — suppress
 intentional ones with `# lint-shippable: ok — <reason>` on the line.
+Pre-existing references are ratcheted via lint_shippable_surface_baseline.json
+(see scripts/lint/_baseline.py); the gate fails only on a NEW file+token pair.
 
 Run from repo root:  python scripts/lint/lint_shippable_surface.py
+Regenerate the baseline:  python scripts/lint/lint_shippable_surface.py --update-baseline
 """
 from __future__ import annotations
 
@@ -21,8 +24,11 @@ import re
 import sys
 from pathlib import Path
 
+from _baseline import Finding, gate
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
+BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 
 # Directories under defender/ that are allowed to contain vendor names
 # (they ARE per-vendor by design, or are not part of the shipped surface).
@@ -87,12 +93,8 @@ def _excluded(rel: str) -> bool:
     return any(rel.startswith(p) for p in EXCLUDED_PREFIXES)
 
 
-def main() -> int:
-    if not DEFENDER.is_dir():
-        print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
-        return 2
-
-    findings: list[str] = []
+def _scan() -> list[Finding]:
+    findings: list[Finding] = []
     for path in DEFENDER.rglob("*"):
         if not path.is_file():
             continue
@@ -111,19 +113,42 @@ def main() -> int:
             for pat in FORBIDDEN:
                 m = pat.search(line)
                 if m:
+                    token = m.group(0).lower()
+                    # Fingerprint is file+token, line-number-free: a new line that
+                    # references an already-accepted token in the same file does
+                    # not re-trip the gate; a token in a NEW file does.
                     findings.append(
-                        f"{rel}:{lineno}: [{m.group(0)}] {line.strip()[:140]}"
+                        Finding(
+                            fingerprint=f"{rel}:{token}",
+                            display=f"{rel}:{lineno}: [{m.group(0)}] {line.strip()[:140]}",
+                        )
                     )
                     break  # one finding per line
+    return findings
 
-    print(f"=== shippable-surface ({len(findings)} finding(s)) ===")
-    for f in findings:
-        print(f"  {f}")
-    print()
+
+HEADER = (
+    "lint_shippable_surface baseline — env-specific (vendor) tokens in the "
+    "shipped defender/ surface. Fingerprint is file:token (no line number). CI "
+    "fails on a file:token absent here. Regenerate: "
+    "python scripts/lint/lint_shippable_surface.py --update-baseline. "
+    'Annotate intentional entries (e.g. "intentional: protocol-surface identifier"); '
+    '"" means un-triaged debt to fix or annotate.'
+)
+
+
+def main(argv: list[str]) -> int:
+    if not DEFENDER.is_dir():
+        print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
+        return 2
+    findings = _scan()
     print("Suppress legitimate references with `# lint-shippable: ok — <reason>` on the line.")
     print("Per-vendor systems skills are excluded by directory (see EXCLUDED_PREFIXES).")
-    return 1 if findings else 0
+    return gate(
+        findings, BASELINE_PATH, argv,
+        label="lint_shippable_surface", header=HEADER,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

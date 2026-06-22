@@ -80,16 +80,13 @@ jobs:
       - name: Install jscpd
         run: npm install -g jscpd
 
-      # Code-smell signals are reported, not enforced — surface trends in the
-      # job log without blocking PRs — with ONE exception: the Python-duplication
-      # gate at the end of this job is a hard ratchet (see its step). defender/
-      # carries its own [tool.ruff] config (extend-select bugbear/simplify/
-      # complexity/pyupgrade/pytest-style), so no --config is needed.
+      # ---- Soft signals: metrics, reported but never block. ----
+      # Trend indicators with no clean pass/fail (or redundant with a hard gate
+      # below), so they stay `|| true`. defender/ carries its own [tool.ruff]
+      # config (extend-select bugbear/simplify/complexity/pyupgrade/pytest-style),
+      # so no --config is needed.
       - name: Ruff (extended — bugbear, simplify, complexity, pyupgrade, pytest-style)
         run: defender/.venv/bin/ruff check defender --statistics || true
-
-      - name: Vulture (dead code)
-        run: defender/.venv/bin/vulture defender --min-confidence 80 --exclude 'defender/.venv,defender/tests' --ignore-names 'key_field,key_value' || true
 
       - name: Radon — cyclomatic complexity (B and worse)
         run: defender/.venv/bin/radon cc defender -a -nb || true
@@ -107,43 +104,56 @@ jobs:
       - name: jscpd (copy-paste detection — all formats, soft report)
         run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py" || true
 
-      # Hard gate (the one enforced check in this otherwise-soft job): Python
-      # logic duplication. Scoped to --format python so the JSON/markdown
-      # fixtures (legitimately ~40% similar) can't pollute the signal. The
-      # threshold is a ratchet above today's ~1.4% baseline (adapter CLIs
-      # excluded, as in the soft step) — it blocks a PR that meaningfully grows
-      # copy-pasted Python (the #330 class of drift), not the existing
-      # duplication. Runs last so the soft reports above always emit before this
-      # can fail the job.
+      # ---- Hard gates: each BLOCKS CI on a NEW smell only. ----
+      # The custom lints below are ratcheted against a checked-in, reviewable
+      # baseline (scripts/lint/<lint>_baseline.json via scripts/lint/_baseline.py):
+      # today's findings are recorded, so a gate fails only on a fingerprint not
+      # in its baseline. Exclusions are explicit config, not `|| true`. Run after
+      # the soft reports so those always emit first. Invoked with the synced
+      # defender venv interpreter so a runner without `python` on PATH can't make
+      # a gate silently pass. Regenerate a baseline with the lint's
+      # --update-baseline and annotate the new entries in the PR.
+
+      # Python logic duplication. Scoped to --format python so the JSON/markdown
+      # fixtures (legitimately ~40% similar) can't pollute the signal. Threshold
+      # is a ratchet above today's ~1.4% baseline (adapter CLIs excluded) — it
+      # blocks a PR that meaningfully grows copy-pasted Python (the #330 class).
       - name: jscpd Python-duplication gate (hard — blocks CI)
         run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**,**/*_cli.py"
 
-      # Duplicate-helper lint — the small-helper complement to the jscpd gate
-      # above: jscpd catches large copy-paste blocks (>=60 tokens) but is blind
-      # to 1-5 line helpers copied across modules and to divergent same-named
-      # copies (#357/#358/#359/#360). Ratcheted against a checked-in baseline
-      # (scripts/lint/lint_duplicate_helpers_baseline.txt) so only NEW dup names
-      # surface. Soft for now; promote to a hard gate once the baseline is drawn
-      # down, mirroring how the jscpd gate was introduced.
-      - name: Duplicate-helper lint (cross-module dup names — soft report)
-        run: python scripts/lint/lint_duplicate_helpers.py || true
+      # Dead code. Wraps vulture (same invocation as the prior soft step) behind
+      # the baseline ratchet so only NEW dead code blocks.
+      - name: Vulture dead-code gate (baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_vulture.py
 
-      # Defender hygiene + discipline lints (soft — reported, not enforced).
-      # Each script is independently inspectable under scripts/lint/lint_*.py;
-      # source PRs that prompted each check are cited in the module docstrings.
+      # monkeypatch.setattr in tests — the dependency-injection-avoidance smell;
+      # new tests should inject a config/deps seam instead. Pre-existing sites
+      # are baselined and paid down over time.
+      - name: Monkeypatch-setattr gate (baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_monkeypatch.py
+
+      # Small-helper complement to the jscpd gate: jscpd catches large copy-paste
+      # blocks (>=60 tokens) but is blind to 1-5 line helpers copied across
+      # modules and to divergent same-named copies (#357/#358/#359/#360).
+      - name: Duplicate-helper gate (cross-module dup names — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_duplicate_helpers.py
+
+      # Defender hygiene + discipline gates. Each script is independently
+      # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
+      # check are cited in the module docstrings.
       - name: Fetch base ref (for stale-ref diff)
         run: git fetch origin main:refs/remotes/origin/main --depth=50 || true
 
-      - name: Hygiene lint (paths, interpreter, hook matchers)
-        run: python scripts/lint/lint_ci_hygiene.py || true
+      - name: Hygiene gate (paths, interpreter, hook matchers — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_ci_hygiene.py
 
-      - name: Shippable-surface lint (env-agnostic discipline)
-        run: python scripts/lint/lint_shippable_surface.py || true
+      - name: Shippable-surface gate (env-agnostic discipline — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_shippable_surface.py
 
-      - name: Ground-truth-leak scan
-        run: python scripts/lint/lint_ground_truth_leak.py || true
+      - name: Ground-truth-leak gate (baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_ground_truth_leak.py
 
-      - name: Stale-reference scan (vs origin/main)
+      - name: Stale-reference gate (vs origin/main — baseline-ratcheted)
         env:
           STALE_REF_BASE: origin/main
-        run: python scripts/lint/lint_stale_refs.py || true
+        run: defender/.venv/bin/python scripts/lint/lint_stale_refs.py

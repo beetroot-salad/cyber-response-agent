@@ -22,8 +22,12 @@ Three sub-checks, all soft (intended for the code-smells report job):
                          as both; missing one means the hook silently
                          never fires (bug class from b7901f1).
 
+Pre-existing findings are ratcheted via lint_ci_hygiene_baseline.json (see
+scripts/lint/_baseline.py); the gate fails only on a NEW finding.
+
 Run from repo root:  python scripts/lint/lint_ci_hygiene.py
-Exit 0 = clean, 1 = findings. Always informational under code-smells.
+Regenerate the baseline:  python scripts/lint/lint_ci_hygiene.py --update-baseline
+Exit 0 = clean (no new findings), 1 = new findings.
 """
 from __future__ import annotations
 
@@ -32,8 +36,11 @@ import re
 import sys
 from pathlib import Path
 
+from _baseline import Finding, gate
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
+BASELINE_PATH = Path(__file__).with_name("lint_ci_hygiene_baseline.json")
 
 # Files where these patterns are deliberate; do not flag.
 PATH_ALLOWLIST = {
@@ -104,8 +111,8 @@ def _iter_defender_files() -> list[Path]:
     return out
 
 
-def check_hardcoded_paths() -> list[str]:
-    findings: list[str] = []
+def check_hardcoded_paths() -> list[Finding]:
+    findings: list[Finding] = []
     for path in _iter_defender_files():
         rel = path.relative_to(REPO_ROOT).as_posix()
         try:
@@ -115,11 +122,17 @@ def check_hardcoded_paths() -> list[str]:
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "lint-hygiene: ok" in line:
                 continue
-            if not PATH_PATTERN.search(line):
+            m = PATH_PATTERN.search(line)
+            if not m:
                 continue
             if any(p.search(line) for p in DEFAULT_PATTERNS):
                 continue
-            findings.append(f"{rel}:{lineno}: {line.strip()[:140]}")
+            findings.append(
+                Finding(
+                    fingerprint=f"hardcoded-path:{rel}:{m.group(0)}",
+                    display=f"[hardcoded-path] {rel}:{lineno}: {line.strip()[:140]}",
+                )
+            )
     return findings
 
 
@@ -153,8 +166,8 @@ def _settings_files() -> list[Path]:
     return out
 
 
-def check_python_interpreter() -> list[str]:
-    findings: list[str] = []
+def check_python_interpreter() -> list[Finding]:
+    findings: list[Finding] = []
     for path in _settings_files():
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
@@ -168,8 +181,13 @@ def check_python_interpreter() -> list[str]:
                 continue
             if INTERPRETER_PATTERN.search(cmd) and not INTERPRETER_OK_PREFIX.search(cmd):
                 findings.append(
-                    f"{rel}: {jp} uses bare `python3` — substitute ${{PYTHON}} "
-                    f"or an absolute venv path: {cmd[:100]}"
+                    Finding(
+                        fingerprint=f"python-interpreter:{rel}:{jp}",
+                        display=(
+                            f"[python-interpreter] {rel}: {jp} uses bare `python3` — "
+                            f"substitute ${{PYTHON}} or an absolute venv path: {cmd[:100]}"
+                        ),
+                    )
                 )
     return findings
 
@@ -187,8 +205,8 @@ def _iter_matchers(node, path_prefix: str = ""):
             yield from _iter_matchers(item, f"{path_prefix}[{idx}]")
 
 
-def check_hook_matchers() -> list[str]:
-    findings: list[str] = []
+def check_hook_matchers() -> list[Finding]:
+    findings: list[Finding] = []
     for path in _settings_files():
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
@@ -201,32 +219,39 @@ def check_hook_matchers() -> list[str]:
             if "Task" in matcher or "Agent" in matcher:
                 if not ("Task" in matcher and "Agent" in matcher):
                     findings.append(
-                        f"{rel}: matcher='{matcher}' at {jp} — should match "
-                        f"both `Task` AND `Agent` (production dispatches as both)"
+                        Finding(
+                            fingerprint=f"hook-matcher:{rel}:{jp}",
+                            display=(
+                                f"[hook-matcher] {rel}: matcher='{matcher}' at {jp} — "
+                                f"should match both `Task` AND `Agent` "
+                                f"(production dispatches as both)"
+                            ),
+                        )
                     )
     return findings
 
 
-def _print_section(title: str, findings: list[str]) -> None:
-    print(f"\n=== {title} ({len(findings)} finding{'' if len(findings) == 1 else 's'}) ===")
-    for f in findings:
-        print(f"  {f}")
+HEADER = (
+    "lint_ci_hygiene baseline — hardcoded-paths / bare-python3 / split hook-matcher "
+    "smells in defender/. Fingerprint is check:file:token (no line number). CI fails "
+    "on a fingerprint absent here. Regenerate: "
+    "python scripts/lint/lint_ci_hygiene.py --update-baseline. "
+    'Annotate intentional entries; "" means un-triaged debt to fix or annotate.'
+)
 
 
-def main() -> int:
-    paths = check_hardcoded_paths()
-    interp = check_python_interpreter()
-    matchers = check_hook_matchers()
-
-    _print_section("hardcoded-paths", paths)
-    _print_section("python-interpreter", interp)
-    _print_section("hook-matcher", matchers)
-
-    total = len(paths) + len(interp) + len(matchers)
-    print(f"\nTotal: {total} finding(s).")
+def main(argv: list[str]) -> int:
+    findings = (
+        check_hardcoded_paths()
+        + check_python_interpreter()
+        + check_hook_matchers()
+    )
     print("Suppress legitimate references with `# lint-hygiene: ok — <reason>` on the line.")
-    return 1 if total else 0
+    return gate(
+        findings, BASELINE_PATH, argv,
+        label="lint_ci_hygiene", header=HEADER,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -18,7 +18,11 @@ What this check does:
 Filename-only matching keeps this fast (no per-file content scan).
 False positives are intentionally tolerated under code-smells.
 
+Pre-existing leaks are ratcheted via lint_ground_truth_leak_baseline.json (see
+scripts/lint/_baseline.py); the gate fails only on a NEW reachable label file.
+
 Run from repo root:  python scripts/lint/lint_ground_truth_leak.py
+Regenerate the baseline:  python scripts/lint/lint_ground_truth_leak.py --update-baseline
 """
 from __future__ import annotations
 
@@ -26,8 +30,11 @@ import re
 import sys
 from pathlib import Path
 
+from _baseline import Finding, gate
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
+BASELINE_PATH = Path(__file__).with_name("lint_ground_truth_leak_baseline.json")
 
 SCAN_ROOTS = [
     REPO_ROOT / "experiments",
@@ -120,7 +127,16 @@ def _reachable(path: Path, allow_roots: list[str], deny_patterns: list[re.Patter
     return None
 
 
-def main() -> int:
+HEADER = (
+    "lint_ground_truth_leak baseline — label/answer-key files reachable from an "
+    "agent run. Fingerprint is the file path. CI fails on a reachable label file "
+    "absent here. Regenerate: "
+    "python scripts/lint/lint_ground_truth_leak.py --update-baseline. "
+    'Annotate intentional entries; "" means un-triaged debt to move or rename.'
+)
+
+
+def _scan() -> list[Finding]:
     allow_roots, deny_patterns = _load_permission_specs()
     print("Agent-accessible roots (heuristic):")
     for r in allow_roots:
@@ -129,7 +145,7 @@ def main() -> int:
         print(f"Deny patterns: {len(deny_patterns)} (Read entries from run-settings.json)")
     print()
 
-    findings: list[str] = []
+    findings: list[Finding] = []
     for scan_root in SCAN_ROOTS:
         if not scan_root.is_dir():
             continue
@@ -149,17 +165,23 @@ def main() -> int:
                 else access_root
             )
             findings.append(
-                f"{rel}: label-file name matches /{reason}/; reachable from `{access_rel}`"
+                Finding(
+                    fingerprint=rel,
+                    display=f"{rel}: label-file name matches /{reason}/; reachable from `{access_rel}`",
+                )
             )
+    return findings
 
-    print(f"=== ground-truth-leak ({len(findings)} finding(s)) ===")
-    for f in findings:
-        print(f"  {f}")
-    print()
+
+def main(argv: list[str]) -> int:
+    findings = _scan()
     print("A finding means a label-shaped file lives in a directory the agent can Read")
     print("at runtime. Move the file outside agent scope, or rename it (see commit f11210f).")
-    return 1 if findings else 0
+    return gate(
+        findings, BASELINE_PATH, argv,
+        label="lint_ground_truth_leak", header=HEADER,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -32,8 +32,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _baseline import Finding, gate
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASE_REF = os.environ.get("STALE_REF_BASE", "origin/main")
+BASELINE_PATH = Path(__file__).with_name("lint_stale_refs_baseline.json")
 
 # Maximum total hits before we declare an ident too common to be signal.
 HIT_CAP = 50
@@ -150,10 +153,24 @@ def _batch_grep(idents: list[str], exclude_files: set[str]) -> dict[str, list[st
     return by_ident
 
 
-def main() -> int:
+HEADER = (
+    "lint_stale_refs baseline — references that survive a rename/delete in the "
+    "PR diff. Fingerprint is file:ident. CI fails on a surviving reference absent "
+    "here. Regenerate: python scripts/lint/lint_stale_refs.py --update-baseline. "
+    "This baseline is normally empty (the check is diff-relative); an entry means "
+    'a knowingly-tolerated stray reference. "" means un-triaged.'
+)
+
+
+def _hit_file(hit: str) -> str:
+    """Extract the path from a `path:lineno:content` git-grep hit line."""
+    return hit.split(":", 1)[0]
+
+
+def _scan() -> list[Finding]:
     if not _run(["git", "rev-parse", "--verify", BASE_REF]):
         print(f"WARN: base ref `{BASE_REF}` not found; skipping stale-ref scan", file=sys.stderr)
-        return 0
+        return []
 
     changed = _changed_files()
     idents = _collect_removed_idents()
@@ -171,13 +188,13 @@ def main() -> int:
         print(f"Skipped {len(skipped)} generic identifiers: {', '.join(skipped[:10])}"
               + ("..." if len(skipped) > 10 else ""))
     if not specific:
-        print("=== stale-refs (0 findings — no specific removed identifiers) ===")
-        return 0
+        print("No specific removed identifiers in the diff.")
+        return []
 
     print(f"Scanning {len(specific)} specific removed identifier(s) (base={BASE_REF})")
     results = _batch_grep(specific, changed)
 
-    total_findings = 0
+    findings: list[Finding] = []
     print()
     for ident in specific:
         hits = results.get(ident, [])
@@ -186,17 +203,26 @@ def main() -> int:
         if len(hits) > HIT_CAP:
             print(f"  SKIP `{ident}`: {len(hits)} hits (too common — likely false positive)")
             continue
-        total_findings += len(hits)
         print(f"  STALE `{ident}`: {len(hits)} reference(s) remain")
         for h in hits[:5]:
             print(f"    {h}")
         if len(hits) > 5:
             print(f"    ... and {len(hits) - 5} more")
         print()
+        for h in hits:
+            findings.append(
+                Finding(fingerprint=f"{_hit_file(h)}:{ident}", display=f"STALE {ident}: {h}")
+            )
+    return findings
 
-    print(f"=== stale-refs ({total_findings} finding(s)) ===")
-    return 1 if total_findings else 0
+
+def main(argv: list[str]) -> int:
+    findings = _scan()
+    return gate(
+        findings, BASELINE_PATH, argv,
+        label="lint_stale_refs", header=HEADER,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
