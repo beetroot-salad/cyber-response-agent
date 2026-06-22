@@ -134,7 +134,7 @@ def split_investigation_phases(run_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-_BODY_RE_CACHE: dict[str, "re.Pattern"] = {}
+_BODY_RE_CACHE: dict[str, re.Pattern] = {}
 
 
 def _header_has_body(text: str, header: str) -> bool:
@@ -324,7 +324,7 @@ def phase_attribution(
 
     # Build msg.id -> phase map from the *last* tag we saw for each id.
     msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags):
+    for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "assistant" or ph is None:
             continue
         mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
@@ -408,7 +408,7 @@ def phase_wall_times(
             return None
 
     parsed: list[tuple] = []
-    for ev, ph in zip(events, tags):
+    for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "user":
             continue
         ts = ev.get("timestamp")
@@ -426,13 +426,13 @@ def phase_wall_times(
     run_start = parsed[0][0]
     run_end = parsed[-1][0]
 
-    first_in_phase: dict[str, "object"] = {}
+    first_in_phase: dict[str, object] = {}
     for dt, ph in parsed:
         if ph not in first_in_phase:
             first_in_phase[ph] = dt
 
     next_phase_first = []
-    for i, ph in enumerate(phase_order):
+    for i, _ph in enumerate(phase_order):
         nxt = None
         for j in range(i + 1, len(phase_order)):
             if phase_order[j] in first_in_phase:

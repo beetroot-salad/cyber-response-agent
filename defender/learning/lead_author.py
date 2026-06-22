@@ -151,7 +151,7 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
     )
 
 
-def synthesize_drafts(executed: list["ExecutedLead"]) -> list[Path]:
+def synthesize_drafts(executed: list[ExecutedLead]) -> list[Path]:
     """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
     query_id that resolves to no catalog template.
 
@@ -228,7 +228,7 @@ _VALID_PAYLOAD_STATUSES = frozenset(
 )
 
 
-def _executed_query(lead: "ExecutedLead") -> str:
+def _executed_query(lead: ExecutedLead) -> str:
     """The literal query that ran, as the canonical record.
 
     Under ES|QL the whole pipe is a single positional captured as
@@ -762,9 +762,7 @@ def _dirty_protected_paths(baseline: set[tuple[str, str]]) -> list[str]:
     """
     out: list[str] = []
     for _, p in baseline:
-        if _is_catalog_path(p) and not _under_draft(p):
-            out.append(p)
-        elif _is_system_skill_md(p):
+        if _is_catalog_path(p) and not _under_draft(p) or _is_system_skill_md(p):
             out.append(p)
     return out
 

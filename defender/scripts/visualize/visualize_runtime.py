@@ -135,7 +135,7 @@ def render_phase_inner_events(
     writes "## ORIENT" lands in ORIENT rather than the prior phase.
     """
     msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags):
+    for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "assistant" or ph is None:
             continue
         mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
@@ -146,16 +146,16 @@ def render_phase_inner_events(
     merged_in_phase = {
         ((m.get("message") or {}).get("id") or m.get("uuid")): m
         for m in merged_all
-        if msg_phase.get(((m.get("message") or {}).get("id") or m.get("uuid"))) == phase
+        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid")) == phase
     }
     if not merged_in_phase and not any(
-        ev.get("type") == "user" and ph == phase for ev, ph in zip(events, tags)
+        ev.get("type") == "user" and ph == phase for ev, ph in zip(events, tags, strict=False)
     ):
         return ""
 
     out: list[dict] = []
     emitted: set[str] = set()
-    for ev, ph in zip(events, tags):
+    for ev, ph in zip(events, tags, strict=False):
         if ph != phase:
             continue
         t = ev.get("type")

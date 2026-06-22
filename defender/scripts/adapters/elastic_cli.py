@@ -584,7 +584,7 @@ def cmd_esql(args, config):
     # Named-dict rows so the agent reads the table directly; this is the answer,
     # not a doc sample. The key is `values` (not in record_query's record-key set),
     # so a small aggregation passes through whole instead of being doc-sampled.
-    rows = [dict(zip(names, row)) for row in values]
+    rows = [dict(zip(names, row, strict=False)) for row in values]
     print(json.dumps({
         "query": args.query,
         "columns": columns,

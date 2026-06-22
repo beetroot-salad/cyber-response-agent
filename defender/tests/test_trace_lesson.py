@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from pathlib import Path
 
 TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "trace_lesson.py"
@@ -35,7 +35,7 @@ def test_in_context_cases_windows_on_created_at(tmp_path):
     tl = _load()
     runs = tmp_path / "runs"
     runs.mkdir()
-    created = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    created = datetime(2026, 6, 4, tzinfo=UTC)
     _mk_run(runs, "caseA", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])  # after → counted
     _mk_run(runs, "caseB", disposition="malicious",
@@ -75,7 +75,7 @@ def test_parse_dt_normalizes_to_aware():
     tl = _load()
     naive = tl._parse_dt("2026-06-04T00:00:00")        # ISO string, no offset
     assert naive is not None and naive.tzinfo is not None
-    assert tl._parse_dt(date(2026, 6, 4)) == datetime(2026, 6, 4, tzinfo=timezone.utc)
+    assert tl._parse_dt(date(2026, 6, 4)) == datetime(2026, 6, 4, tzinfo=UTC)
     assert tl._parse_dt("2026-06-04T00:00:00Z").tzinfo is not None
     # naive datetime (PyYAML for a tz-less timestamp) → aware UTC
     assert tl._parse_dt(datetime(2026, 6, 4)).tzinfo is not None

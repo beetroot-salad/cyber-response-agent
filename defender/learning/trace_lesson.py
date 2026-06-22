@@ -24,7 +24,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
@@ -57,16 +57,16 @@ def _parse_dt(raw) -> datetime | None:
     timestamps never raise ``TypeError: can't compare offset-naive and offset-aware``.
     Check ``datetime`` before ``date`` — ``datetime`` is a ``date`` subclass."""
     if isinstance(raw, datetime):
-        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     if isinstance(raw, date):
-        return datetime(raw.year, raw.month, raw.day, tzinfo=timezone.utc)
+        return datetime(raw.year, raw.month, raw.day, tzinfo=UTC)
     if not isinstance(raw, str):
         return None
     try:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 @dataclass

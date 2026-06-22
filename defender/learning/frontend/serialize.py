@@ -204,10 +204,10 @@ def stamped_view() -> dict:
     ``build`` go through here so the contract's wall-clock field cannot
     drift between the two entry points.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     view = build_view()
-    view["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    view["generated_at"] = datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return view
 
 

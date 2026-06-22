@@ -174,8 +174,8 @@ def register_tools(agent, *, writers: bool = True) -> None:
                 env=_bash_env(ctx.deps), cwd=str(ctx.deps.defender_dir.parent),
                 timeout=_BASH_TIMEOUT_S,
             )
-        except subprocess.TimeoutExpired:
-            raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}")
+        except subprocess.TimeoutExpired as e:
+            raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
         return _format_bash_result(proc.returncode, proc.stdout, proc.stderr)
 
     @agent.tool
@@ -304,7 +304,7 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
             query_id=model_query_id or deps.query_id,
         )
     except ValueError as e:
-        raise ModelRetry(str(e))
+        raise ModelRetry(str(e)) from e
     # Circuit breaker: record this system call's outcome. An infra failure
     # (connectivity/auth exit, or timeout) advances the per-system counter and may
     # raise RunAborted via the run-wide kill switch (caught by the driver, which
