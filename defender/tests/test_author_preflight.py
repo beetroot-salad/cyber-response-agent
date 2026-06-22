@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -9,15 +10,15 @@ import pytest
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     """A second author tick exits cleanly while the first holds the lock."""
     a = tmp_repo.author
-    fh = a.acquire_lock()
+    fh = a.acquire_lock(tmp_repo.cfg)
     assert fh is not None
     try:
         # Simulate a concurrent invocation: acquire_lock should return None.
-        second = a.acquire_lock()
+        second = a.acquire_lock(tmp_repo.cfg)
         assert second is None
     finally:
         a.release_lock(fh)
-    third = a.acquire_lock()
+    third = a.acquire_lock(tmp_repo.cfg)
     assert third is not None
     a.release_lock(third)
 
@@ -31,8 +32,8 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
     import fcntl
 
     a = tmp_repo.author
-    helpers.write_source_refs(a.RUNS_DIR, "run-A", "benign")
-    helpers.write_finding(a.PENDING_FILE, finding_id="run-A/0", run_id="run-A")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
+    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
 
     # Hold the repo lock from a separate fd.
     shared = a._shared
@@ -45,13 +46,13 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
 
     invoked = {"count": 0}
 
-    def fake_invoke(findings, batch_id):
+    def fake_invoke(findings, batch_id, cfg):
         invoked["count"] += 1
         return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
 
-    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     try:
-        rc = a.run_batch()
+        rc = a.run_batch(cfg=cfg)
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
@@ -62,7 +63,7 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
     # Queue still has the original finding — nothing was rotated out.
     pending = [
         json.loads(line)
-        for line in a.PENDING_FILE.read_text().splitlines()
+        for line in tmp_repo.paths.pending_file.read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
@@ -70,26 +71,26 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
 
 def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
     a = tmp_repo.author
-    (a.LESSONS_DIR / "drift.md").write_text("uncommitted\n")
+    (tmp_repo.paths.lessons_dir / "drift.md").write_text("uncommitted\n")
     with pytest.raises(a.AuthorError, match="uncommitted changes"):
-        a.assert_clean_lessons_dir()
+        a.assert_clean_lessons_dir(tmp_repo.cfg)
 
 
 def test_clean_scope_passes_when_clean(tmp_repo):
     a = tmp_repo.author
-    a.assert_clean_lessons_dir()  # no raise
+    a.assert_clean_lessons_dir(tmp_repo.cfg)  # no raise
 
 
 def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(a.RUNS_DIR, "run-A", "inconclusive")
-    helpers.write_source_refs(a.RUNS_DIR, "run-B", "benign")
-    helpers.write_finding(a.PENDING_FILE, finding_id="run-A/0", run_id="run-A")
-    helpers.write_finding(a.PENDING_FILE, finding_id="run-B/0", run_id="run-B")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "inconclusive")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-B", "benign")
+    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
+    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-B/0", run_id="run-B")
 
     captured = {}
 
-    def fake_invoke(findings, batch_id):
+    def fake_invoke(findings, batch_id, cfg):
         captured["findings"] = findings
         captured["batch_id"] = batch_id
         # Simulate skip — no lessons authored, no commit.
@@ -103,8 +104,8 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
             "commit_sha": None,
         }
 
-    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
-    rc = a.run_batch()
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
+    rc = a.run_batch(cfg=cfg)
     assert rc == 0
 
     # Only the benign finding reached the agent.
@@ -113,7 +114,7 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
     # The inconclusive finding stayed in the queue (held).
     pending = [
         json.loads(line)
-        for line in a.PENDING_FILE.read_text().splitlines()
+        for line in tmp_repo.paths.pending_file.read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
@@ -139,18 +140,18 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     agent only from a `malicious` source case (the over-escalation it corrects); from a
     benign source it is held (no confident FP ground truth)."""
     a = tmp_repo.author
-    helpers.write_source_refs(a.RUNS_DIR, "run-M", "malicious")
-    helpers.write_source_refs(a.RUNS_DIR, "run-Bn", "benign")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-M", "malicious")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-Bn", "benign")
     helpers.write_finding(
-        a.PENDING_FILE, finding_id="run-M/0", run_id="run-M", direction="benign"
+        tmp_repo.paths.pending_file, finding_id="run-M/0", run_id="run-M", direction="benign"
     )
     helpers.write_finding(
-        a.PENDING_FILE, finding_id="run-Bn/0", run_id="run-Bn", direction="benign"
+        tmp_repo.paths.pending_file, finding_id="run-Bn/0", run_id="run-Bn", direction="benign"
     )
 
     captured = {}
 
-    def fake_invoke(findings, batch_id):
+    def fake_invoke(findings, batch_id, cfg):
         captured["findings"] = findings
         return {
             "committed": [],
@@ -161,8 +162,8 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
             "commit_sha": None,
         }
 
-    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
-    rc = a.run_batch()
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
+    rc = a.run_batch(cfg=cfg)
     assert rc == 0
 
     # Only the malicious-source benign finding reached the agent.
@@ -171,7 +172,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     # The benign-source benign finding was held — no confident FP ground truth.
     pending = [
         json.loads(line)
-        for line in a.PENDING_FILE.read_text().splitlines()
+        for line in tmp_repo.paths.pending_file.read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-Bn/0"]
@@ -182,7 +183,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     # otherwise re-author forever). Pins the benign consumed-skip categorization.
     consumed = [
         json.loads(line)
-        for line in a.CONSUMED_FILE.read_text().splitlines()
+        for line in tmp_repo.cfg.consumed_file.read_text().splitlines()
         if line.strip()
     ]
     assert [c["finding_id"] for c in consumed] == ["run-M/0"]
@@ -192,11 +193,11 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 
 def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(a.RUNS_DIR, "run-X", "benign")
-    helpers.write_finding(a.PENDING_FILE, finding_id="run-X/0", run_id="run-X")
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
+    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
 
     # Pre-existing lesson cites this finding_id — must skip the agent entirely.
-    (a.LESSONS_DIR / "preexisting.md").write_text(
+    (tmp_repo.paths.lessons_dir / "preexisting.md").write_text(
         "---\n"
         "name: preexisting\n"
         "description: covers the same pitfall\n"
@@ -210,20 +211,20 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
 
     invoked = {"called": False}
 
-    def fake_invoke(findings, batch_id):
+    def fake_invoke(findings, batch_id, cfg):
         invoked["called"] = True
         return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
 
-    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
-    rc = a.run_batch()
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
+    rc = a.run_batch(cfg=cfg)
     assert rc == 0
     assert invoked["called"] is False, "agent must not be invoked when all findings are idempotent"
 
     # Queue empty (all consumed_idempotent).
-    assert a.PENDING_FILE.read_text().strip() == ""
+    assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in a.CONSUMED_FILE.read_text().splitlines()
+        for line in tmp_repo.cfg.consumed_file.read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1
@@ -233,14 +234,14 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
 
 def test_empty_queue_is_noop(tmp_repo, monkeypatch):
     a = tmp_repo.author
-    a.PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    a.PENDING_FILE.write_text("")  # empty
+    tmp_repo.paths.pending_dir.mkdir(parents=True, exist_ok=True)
+    tmp_repo.paths.pending_file.write_text("")  # empty
     called = {"n": 0}
 
     def fake_invoke(*args, **kwargs):
         called["n"] += 1
         return {}
 
-    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
-    assert a.run_batch() == 0
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
+    assert a.run_batch(cfg=cfg) == 0
     assert called["n"] == 0

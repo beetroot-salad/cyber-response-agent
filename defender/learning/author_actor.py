@@ -27,15 +27,10 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.learning import _author_curator as _curator
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths
 
 
-REPO_ROOT = _curator.REPO_ROOT
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
 LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
-
-AUTHOR_PROMPT = LEARNING_DIR / "author_actor.md"
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
@@ -57,7 +52,7 @@ def invoke_agent(
     batch wrapper (``verify_batch.py``), so it hands the agent both command templates
     and allows both verifier scripts. The commit-trailer provenance is stamped by the
     loop, not the agent, so nothing trailer-related goes in the prompt."""
-    verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
+    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
     extra_prompt = (
         f"verify_forward_command: {verifier_py} defender/learning/verify_forward_actor.py "
         f"<lesson_path> <observation_id>\n"
@@ -75,28 +70,35 @@ def invoke_agent(
     )
 
 
-ACTOR_CONFIG = _curator.CuratorConfig(
-    corpus_dir=LESSONS_ACTOR_DIR,
-    corpus_dir_rel=LESSONS_ACTOR_DIR_REL,
-    pending_file=DEFAULT_PATHS.actor_observations_file,
-    consumed_file=DEFAULT_PATHS.actor_observations_consumed_file,
-    lock_file=DEFAULT_PATHS.actor_observations_lock_file,
-    outcome_author=frozenset({"caught", "incoherent"}),
-    outcome_skip=frozenset({"survived", "undecidable"}),
-    trailer_label="Actor-Model",
-    generation_fn=_shared.actor_generation_count,
-    actor_model=ACTOR_MODEL,
-    log_prefix="author_actor",
-    author_prompt=AUTHOR_PROMPT,
-    author_model=AUTHOR_ACTOR_MODEL,
-    author_timeout=AUTHOR_ACTOR_TIMEOUT,
-    author_effort=AUTHOR_ACTOR_EFFORT,
-    invoke_agent=invoke_agent,
-)
+def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+    """Build the actor-direction ``CuratorConfig`` from an injected ``LoopPaths``.
+
+    Constructed at call time (not import) so a test rooted at a tmp tree threads one
+    ``LoopPaths(repo_root=tmp)`` instead of monkeypatching module path globals."""
+    return _curator.CuratorConfig(
+        repo_root=paths.repo_root,
+        pending_dir=paths.pending_dir,
+        corpus_dir=paths.lessons_actor_dir,
+        corpus_dir_rel=LESSONS_ACTOR_DIR_REL,
+        pending_file=paths.actor_observations_file,
+        consumed_file=paths.actor_observations_consumed_file,
+        lock_file=paths.actor_observations_lock_file,
+        outcome_author=frozenset({"caught", "incoherent"}),
+        outcome_skip=frozenset({"survived", "undecidable"}),
+        trailer_label="Actor-Model",
+        generation_fn=_shared.actor_generation_count,
+        actor_model=ACTOR_MODEL,
+        log_prefix="author_actor",
+        author_prompt=paths.learning_dir / "author_actor.md",
+        author_model=AUTHOR_ACTOR_MODEL,
+        author_timeout=AUTHOR_ACTOR_TIMEOUT,
+        author_effort=AUTHOR_ACTOR_EFFORT,
+        invoke_agent=invoke_agent,
+    )
 
 
-def run_batch(*, hold_committed: bool = False) -> int:
-    return _curator.run_batch(hold_committed=hold_committed, cfg=ACTOR_CONFIG)
+def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
+    return _curator.run_batch(hold_committed=hold_committed, cfg=build_actor_config(paths))
 
 
 def main(argv: list[str]) -> int:

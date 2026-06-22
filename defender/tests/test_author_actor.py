@@ -19,15 +19,17 @@ import yaml
 
 # The curator engine, the lock/generation helpers, and the actor config wrapper.
 # Each resolves to one module instance (the path imports inside the modules use the
-# same names), so patching ``curator.REPO_ROOT`` / ``shared.*`` reaches them.
+# same names), so patching ``shared.*`` (the residual git-lock/generation seam) reaches
+# them; the engine's repo root now flows through the injected ``CuratorConfig.repo_root``.
 from defender.learning import _author_curator as curator  # type: ignore[import-not-found]
 from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
 from defender.learning import author_actor as aa  # type: ignore[import-not-found]
+from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
 
-# Reference ``shared.AuthorError`` live (not a captured module-level alias): the
-# ``tmp_repo`` conftest fixture reloads ``_author_shared``/``_author_curator``, rebinding
-# the class — a captured alias bound at collection time would go stale and stop matching
-# freshly-raised errors when a curator test runs after that fixture.
+# Reference ``shared.AuthorError`` live rather than a captured module-level alias:
+# every author module binds ``AuthorError = _shared.AuthorError`` once at import, so the
+# one shared class object is exactly what the curators raise — matching it directly stays
+# correct without depending on any import-time aliasing (no conftest reload to rebind it).
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +57,9 @@ def _isolate(monkeypatch, tmp_path: Path):
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
 
-    # The engine runs all git operations at curator.REPO_ROOT; the repo lock +
-    # generation counter live in _author_shared. Both point at the tmp repo.
-    monkeypatch.setattr(curator, "REPO_ROOT", repo)
+    # The engine runs all git operations at the injected ``cfg.repo_root`` (built from
+    # ``LoopPaths(repo_root=repo)`` in ``_cfg``); the repo lock + generation counter still
+    # read ``_author_shared``'s module globals, so point that residual seam at the tmp repo.
     monkeypatch.setattr(shared, "REPO_ROOT", repo)
     monkeypatch.setattr(shared, "LEARNING_DIR", learning)
     monkeypatch.setattr(shared, "REPO_LOCK_FILE", learning / "_author.lock")
@@ -71,14 +73,11 @@ def _isolate(monkeypatch, tmp_path: Path):
 
 
 def _cfg(ctx: dict, invoke_agent) -> curator.CuratorConfig:
-    """The production actor config, repointed at the tmp repo's queue + corpus and
+    """The production actor config, repointed at the tmp repo (the factory derives the
+    queue + corpus paths from ``LoopPaths(repo_root=...)``, matching ctx exactly) and
     given an injected ``invoke_agent`` so no ``claude -p`` runs."""
     return dataclasses.replace(
-        aa.ACTOR_CONFIG,
-        corpus_dir=ctx["lessons"],
-        pending_file=ctx["pending"] / "actor_observations.jsonl",
-        consumed_file=ctx["pending"] / "actor_observations.consumed.jsonl",
-        lock_file=ctx["pending"] / ".actor.lock",
+        aa.build_actor_config(LoopPaths(repo_root=ctx["repo"])),
         invoke_agent=invoke_agent,
     )
 
@@ -310,7 +309,7 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
     new_sha = curator.commit_corpus(
         3, "claude-sonnet-4-6", "defender/actor: lesson batch abc", cfg
     )
-    assert new_sha == curator.git_head_sha()
+    assert new_sha == curator.git_head_sha(ctx["repo"])
     msg = _head_message(ctx["repo"])
     assert "Generation: 3" in msg
     assert "Actor-Model: claude-sonnet-4-6" in msg
@@ -319,7 +318,7 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
     assert shared.actor_generation_count() == 2
     # The commit touched only the corpus, and the working tree is now clean.
     assert _head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
-    assert curator.changes_outside_corpus(cfg.corpus_dir_rel) == []
+    assert curator.changes_outside_corpus(ctx["repo"], cfg.corpus_dir_rel) == []
 
 
 def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
@@ -357,7 +356,7 @@ def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Pa
     ]
     by_id = {r["observation_id"]: r for r in consumed}
     assert by_id["a/0"]["consumed_category"] == "consumed_committed"
-    assert by_id["a/0"]["consumed_commit"] == curator.git_head_sha()
+    assert by_id["a/0"]["consumed_commit"] == curator.git_head_sha(ctx["repo"])
     # Queue drained.
     assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
 
@@ -373,7 +372,7 @@ def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     hook.write_text("#!/bin/sh\nexit 1\n")
     hook.chmod(0o755)
     _write_queue(ctx["pending"], [_row("a/0", "caught")])
-    head_before = curator.git_head_sha()
+    head_before = curator.git_head_sha(ctx["repo"])
 
     def committing_invoke(observations, batch_id, cfg):
         oid = observations[0]["observation_id"]
@@ -389,7 +388,7 @@ def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
     assert rc == 2
     # No un-stamped (or any) lesson commit on HEAD — the failure is atomic.
-    assert curator.git_head_sha() == head_before
+    assert curator.git_head_sha(ctx["repo"]) == head_before
     # The observation stays in the active queue; nothing rotated out.
     left = [
         json.loads(line)

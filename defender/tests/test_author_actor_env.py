@@ -4,12 +4,12 @@ distinct outcome policy + commit trailer + generation counter, but share the
 transaction envelope (issue #298)."""
 from __future__ import annotations
 
-import dataclasses
 import subprocess
 
 from defender.learning import _author_curator as curator
 from defender.learning import author_actor_benign as aenv
 from defender.learning import author_actor_env
+from defender.learning._loop_config import LoopPaths
 
 
 def _rows() -> list[dict]:
@@ -68,11 +68,12 @@ def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
     (repo / "README").write_text("seed\n")
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
-    monkeypatch.setattr(curator, "REPO_ROOT", repo)
 
-    # Both directions share the corpus dir; repoint it at the tmp tree.
-    adv = dataclasses.replace(aenv.ADVERSARIAL_CONFIG, corpus_dir=corpus)
-    ben = dataclasses.replace(aenv.BENIGN_CONFIG, corpus_dir=corpus)
+    # Both directions share the corpus dir; the factories derive it (+ the git
+    # cwd via cfg.repo_root) from the tmp tree, so no module-global patch is needed.
+    paths = LoopPaths(repo_root=repo)
+    adv = aenv.build_adversarial_config(paths)
+    ben = aenv.build_benign_config(paths)
 
     def _head_msg() -> str:
         return subprocess.run(

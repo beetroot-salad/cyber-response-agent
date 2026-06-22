@@ -209,8 +209,8 @@ def resolve_verifier_python(repo_root: Path) -> Path:
 class RunnerOptions:
     """Bundle the static knobs that `invoke_claude_print` needs.
 
-    Keeps the public function under PLR0913's arg cap; the two callers
-    (author.py / author_actor.py) construct one per invocation.
+    Keeps the public function under PLR0913's arg cap; the callers
+    (author.py / author_actor.py / lead_author.py) construct one per invocation.
     """
     system_prompt_file: Path
     allowed_tools: str
@@ -219,8 +219,14 @@ class RunnerOptions:
     timeout_seconds: int
     cwd: Path
     log_path: Path
-    result_marker: str
+    # The AUTHOR_RESULT marker the agent emits; None for callers that read their
+    # result from disk (lead_author) and use ``invoke_claude_print_raw``.
+    result_marker: str | None
     batch_id: str
+    # Test seam for the process spawn. None ⇒ resolve ``subprocess.Popen`` at call
+    # time, so a module-attr monkeypatch (test_author_streaming_timeout's shim) still
+    # takes; a direct unit test can inject a fake Popen here instead.
+    spawn: Callable | None = None
 
 
 def invoke_claude_print(
@@ -249,6 +255,7 @@ def invoke_claude_print(
         rc, full_text, stderr_tail = _drive_subprocess(
             cmd, options.cwd, user_prompt.encode(),
             options.timeout_seconds, options.log_path, log_fh, log_fn,
+            spawn=options.spawn,
         )
 
     if rc != 0:
@@ -262,6 +269,34 @@ def invoke_claude_print(
         return json.loads(body)
     except json.JSONDecodeError as e:
         raise RunnerError(f"{options.result_marker} JSON invalid: {e}\n{body}") from e
+
+
+def invoke_claude_print_raw(
+    options: RunnerOptions,
+    user_prompt: str,
+    log_fn: Callable[[str], None],
+) -> tuple[int, str]:
+    """Spawn ``claude -p`` and return ``(rc, full_assistant_text)`` with NO
+    result-marker parsing — for callers (``lead_author``) that read their result
+    from the working tree, not an ``AUTHOR_RESULT:`` line.
+
+    Shares the runner's select-loop discipline (bounded deadline, stderr drain,
+    non-blocking stdin) and its log/teeing, so the one spawn path has one timeout +
+    log implementation. Raises ``RunnerError`` on timeout (same as the dict variant);
+    a non-zero rc is *returned*, not raised, so the caller maps it to its own code."""
+    cmd = _build_claude_cmd(options)
+    options.log_path.parent.mkdir(parents=True, exist_ok=True)
+    with options.log_path.open("wb") as log_fh:
+        log_fh.write(
+            (json.dumps({"batch_id": options.batch_id, "started_at": now_iso()}) + "\n").encode()
+        )
+        log_fh.flush()
+        rc, full_text, _stderr_tail = _drive_subprocess(
+            cmd, options.cwd, user_prompt.encode(),
+            options.timeout_seconds, options.log_path, log_fh, log_fn,
+            spawn=options.spawn,
+        )
+    return (rc if rc is not None else 1), full_text
 
 
 def _build_claude_cmd(options: RunnerOptions) -> list[str]:
@@ -278,7 +313,7 @@ def _build_claude_cmd(options: RunnerOptions) -> list[str]:
     ]
 
 
-def _drive_subprocess(
+def _drive_subprocess(  # noqa: PLR0913 — per-call I/O state; bundling would not clarify
     cmd: list[str],
     cwd: Path,
     prompt_bytes: bytes,
@@ -286,6 +321,7 @@ def _drive_subprocess(
     log_path: Path,
     log_fh,
     log_fn: Callable[[str], None],
+    spawn: Callable | None = None,
 ) -> tuple[int | None, str, str]:
     """Spawn the subprocess and run the select-loop until exit or deadline.
 
@@ -301,7 +337,10 @@ def _drive_subprocess(
 
     Returns ``(rc, full_assistant_text, stderr_tail)``.
     """
-    proc = subprocess.Popen(
+    # None ⇒ resolve at call time so a module-attr monkeypatch on subprocess.Popen
+    # still takes; an injected fake (RunnerOptions.spawn) overrides for unit tests.
+    _spawn = spawn if spawn is not None else subprocess.Popen
+    proc = _spawn(
         cmd,
         cwd=cwd,
         stdin=subprocess.PIPE,

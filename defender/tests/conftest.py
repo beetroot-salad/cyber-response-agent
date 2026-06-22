@@ -1,14 +1,14 @@
 """Shared fixtures for defender learning-loop tests.
 
-Each test gets an isolated tmp git repo with the
-``defender/learning/`` source files copied in. Tests then monkeypatch
-``author.REPO_ROOT`` (and friends) to point at the tmp tree, plus
-``author.invoke_agent`` to a stub that plays the role of the curator
-without spawning ``claude``.
+Each test gets an isolated tmp git repo with the ``defender/learning/`` source
+files copied in. The fixture builds one ``LoopPaths(repo_root=tmp)`` and an
+``AuthorConfig`` from it (``ctx.paths`` / ``ctx.cfg``); tests thread those into
+``author.run_batch(paths=…, cfg=…)`` and inject a fake curator via
+``dataclasses.replace(cfg, invoke_agent=fake)`` — no module-global setattr, no
+``importlib.reload``.
 """
 from __future__ import annotations
 
-import importlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -74,64 +74,34 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_git("add", "-A")
     run_git("commit", "-q", "-m", "init")
 
-    # Re-import author with REPO_ROOT pointed at the tmp tree.
-    from defender.learning import _author_curator as curator_mod  # type: ignore[import-not-found]
     from defender.learning import _author_shared as shared_mod  # type: ignore[import-not-found]
     from defender.learning import author as author_mod  # type: ignore[import-not-found]
+    from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
 
-    # Reload shared FIRST (it mints a fresh `AuthorError` class), then every module
-    # that binds `AuthorError = _shared.AuthorError` at import — both `author` and
-    # (since #330) `_author_curator`. If curator is left un-reloaded, its stale alias
-    # (and its `except AuthorError` clauses) point at the pre-reload class, so an error
-    # raised by the reloaded shared git layer escapes `_author_curator.run_batch`
-    # uncaught when a curator test runs after this fixture in the same session.
-    importlib.reload(shared_mod)
-    importlib.reload(curator_mod)
-    importlib.reload(author_mod)
+    # No importlib.reload: every module binds `AuthorError = _shared.AuthorError` once
+    # at import and never rebinds, so a single stable class object lives for the whole
+    # session and `except shared.AuthorError` can't diverge. Tests reference
+    # ``shared.AuthorError`` live (never a collection-time alias).
+    #
+    # `_author_shared`'s git layer takes ``repo_root`` by param everywhere; only its
+    # generation counters + repo-lock still read module globals, so point that one
+    # residual seam at the tmp tree. Everything else flows through the injected
+    # ``LoopPaths`` / ``AuthorConfig`` (``ctx.paths`` / ``ctx.cfg``) below.
     monkeypatch.setattr(shared_mod, "REPO_ROOT", repo)
+    monkeypatch.setattr(shared_mod, "LEARNING_DIR", repo / "defender" / "learning")
     monkeypatch.setattr(
-        shared_mod, "LEARNING_DIR", repo / "defender" / "learning"
+        shared_mod, "REPO_LOCK_FILE", repo / "defender" / "learning" / "_author.lock"
     )
-    monkeypatch.setattr(
-        shared_mod,
-        "REPO_LOCK_FILE",
-        repo / "defender" / "learning" / "_author.lock",
-    )
-    monkeypatch.setattr(author_mod, "REPO_ROOT", repo)
-    monkeypatch.setattr(author_mod, "LEARNING_DIR", repo / "defender" / "learning")
-    monkeypatch.setattr(author_mod, "LESSONS_DIR", repo / "defender" / "lessons")
-    monkeypatch.setattr(author_mod, "RUNS_DIR", repo / "defender" / "learning" / "runs")
-    monkeypatch.setattr(author_mod, "PENDING_DIR", repo / "defender" / "learning" / "_pending")
-    monkeypatch.setattr(
-        author_mod,
-        "PENDING_FILE",
-        repo / "defender" / "learning" / "_pending" / "findings.jsonl",
-    )
-    monkeypatch.setattr(
-        author_mod,
-        "CONSUMED_FILE",
-        repo / "defender" / "learning" / "_pending" / "consumed.jsonl",
-    )
-    monkeypatch.setattr(
-        author_mod,
-        "LOCK_FILE",
-        repo / "defender" / "learning" / "_pending" / ".lock",
-    )
-    monkeypatch.setattr(
-        author_mod,
-        "FINDINGS_LOCK_FILE",
-        repo / "defender" / "learning" / "_pending" / ".findings.lock",
-    )
-    monkeypatch.setattr(
-        author_mod,
-        "HELD_REPORT",
-        repo / "defender" / "learning" / "_pending" / "held_report.log",
-    )
+
+    paths = LoopPaths(repo_root=repo)
+    cfg = author_mod.build_author_config(paths)
 
     class Ctx:
         def __init__(self) -> None:
             self.root = repo
             self.author = author_mod
+            self.paths = paths
+            self.cfg = cfg
             self.run_git = run_git
 
     return Ctx()

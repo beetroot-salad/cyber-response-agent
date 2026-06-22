@@ -8,6 +8,7 @@ instead of monkeypatching module globals.
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib
 import json
 import os
@@ -218,10 +219,10 @@ def _directions_for(disposition: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _invoke_lead_author(run_dir: Path) -> None:
+def _invoke_lead_author(run_dir: Path, *, paths: LoopPaths) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge."""
     _log("step=lead-author")
-    rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir))
+    rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
         _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
 
@@ -231,6 +232,8 @@ def _maybe_trigger_author(
     threshold_env: str,
     module_name: str,
     pending_label: str,
+    *,
+    paths: LoopPaths,
 ) -> None:
     """Run the named curator if its pending queue meets the threshold."""
     threshold = int(os.environ.get(threshold_env, "5"))
@@ -246,7 +249,11 @@ def _maybe_trigger_author(
     # hold_committed: the drain commits onto an unmerged PR branch, so curators
     # keep committed findings queued (re-authored if the PR is rejected, filtered
     # by existing_*_ids once merged) rather than rotating them out. See author.py.
-    rc = _run_curator_module(module_name, lambda mod: mod.run_batch(hold_committed=True))
+    # Thread the drain's own paths so the curator builds its config from the same
+    # layout the threshold check above read (no import-time/injected split-brain).
+    rc = _run_curator_module(
+        module_name, lambda mod: mod.run_batch(hold_committed=True, paths=paths)
+    )
     if rc not in (0, None):
         _log(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
 
@@ -546,9 +553,11 @@ def author_drain(
             f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
         )
     if run_lead_author is None:
-        run_lead_author = _invoke_lead_author
+        run_lead_author = functools.partial(_invoke_lead_author, paths=paths)
     if trigger_author is None:
-        trigger_author = _maybe_trigger_author
+        # Bind the drain's paths so the curator builds its config from the same
+        # layout; the call sites pass the 4 positional args unchanged.
+        trigger_author = functools.partial(_maybe_trigger_author, paths=paths)
     if branch is None:
         branch = AuthorBranch()
 

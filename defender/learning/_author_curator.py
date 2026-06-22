@@ -43,12 +43,9 @@ import yaml
 
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS, make_logger
+from defender.learning._loop_config import make_logger
 from defender.learning._loop_persist import rotate_queue_locked
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-_PENDING_DIR = DEFAULT_PATHS.pending_dir
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
 
@@ -65,6 +62,11 @@ AuthorError = _shared.AuthorError
 
 @dataclass(frozen=True)
 class CuratorConfig:
+    # Repo root (git cwd + relative-path anchor) and the _pending state dir,
+    # resolved from the injected ``LoopPaths`` by the per-direction factory so the
+    # engine reads no import-time module globals.
+    repo_root: Path
+    pending_dir: Path
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
@@ -97,13 +99,13 @@ class CuratorConfig:
         queue and the forward-check stay in sync — an out-of-repo queue falls back
         to its absolute path (which the verifier resolves directly)."""
         try:
-            return str(self.pending_file.relative_to(REPO_ROOT))
+            return str(self.pending_file.relative_to(self.repo_root))
         except ValueError:
             return str(self.pending_file)
 
     @property
     def run_log(self) -> Path:
-        return _PENDING_DIR / f"{self.log_prefix}_run.jsonl"
+        return self.pending_dir / f"{self.log_prefix}_run.jsonl"
 
 
 def _by_id(rows: list[dict]) -> dict[str, dict]:
@@ -127,7 +129,7 @@ def assert_clean_corpus_dir(cfg: CuratorConfig) -> None:
     cfg.corpus_dir.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         ["git", "status", "--porcelain", "--", str(cfg.corpus_dir)],
-        cwd=REPO_ROOT,
+        cwd=cfg.repo_root,
         capture_output=True,
         text=True,
         check=True,
@@ -198,17 +200,17 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     return ids
 
 
-def is_held_out_source(source_run_dir: str) -> bool:
+def is_held_out_source(repo_root: Path, source_run_dir: str) -> bool:
     """True if ``{source_run_dir}/ground_truth.yaml`` declares held-out.
 
     ``source_run_dir`` follows ``_loop_persist._source_run_dir``: repo-relative
     in-repo, absolute when the run lives out-of-repo under
-    DEFENDER_LEARNING_STATE_DIR. ``REPO_ROOT / src`` resolves both (pathlib lets an
+    DEFENDER_LEARNING_STATE_DIR. ``repo_root / src`` resolves both (pathlib lets an
     absolute right-hand side win). Missing file or malformed YAML → False (defense
     in depth, not enforcement)."""
     if not source_run_dir:
         return False
-    path = REPO_ROOT / source_run_dir.rstrip("/") / GROUND_TRUTH_FILE
+    path = repo_root / source_run_dir.rstrip("/") / GROUND_TRUTH_FILE
     if not path.is_file():
         return False
     try:
@@ -257,14 +259,14 @@ def invoke_curator_agent(
         f"Bash(rm {cfg.corpus_dir_rel}*.md),"
         f"Bash(rm {cfg.corpus_dir}/*.md)"
     )
-    _PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     options = _runner.RunnerOptions(
         system_prompt_file=cfg.author_prompt,
         allowed_tools=allowed_tools,
         model=cfg.author_model,
         effort=cfg.author_effort,
         timeout_seconds=cfg.author_timeout,
-        cwd=REPO_ROOT,
+        cwd=cfg.repo_root,
         log_path=cfg.run_log,
         result_marker="AUTHOR_RESULT:",
         batch_id=batch_id,
@@ -280,13 +282,13 @@ def invoke_curator_agent(
 # ---------------------------------------------------------------------------
 
 
-def git_head_sha() -> str:
-    return _shared.git_head_sha(REPO_ROOT)
+def git_head_sha(repo_root: Path) -> str:
+    return _shared.git_head_sha(repo_root)
 
 
-def changes_outside_corpus(corpus_dir_rel: str) -> list[str]:
+def changes_outside_corpus(repo_root: Path, corpus_dir_rel: str) -> list[str]:
     """Curator adapter over ``_shared.changes_outside`` — scope gate for the cfg corpus."""
-    return _shared.changes_outside(REPO_ROOT, corpus_dir_rel)
+    return _shared.changes_outside(repo_root, corpus_dir_rel)
 
 
 def commit_corpus(
@@ -295,7 +297,7 @@ def commit_corpus(
     """Curator adapter over ``_shared.commit_corpus`` — pins the cfg corpus and stamps the
     loop-owned ``Generation:`` / ``{trailer_label}:`` provenance trailers."""
     return _shared.commit_corpus(
-        REPO_ROOT,
+        cfg.repo_root,
         cfg.corpus_dir,
         cfg.corpus_dir_rel,
         message,
@@ -303,8 +305,8 @@ def commit_corpus(
     )
 
 
-def corpus_dir_clean(corpus_dir: Path) -> bool:
-    return _shared.corpus_dir_clean(REPO_ROOT, corpus_dir)
+def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
+    return _shared.corpus_dir_clean(repo_root, corpus_dir)
 
 
 def _result_list(result: dict, key: str) -> list[Any]:
@@ -366,7 +368,7 @@ def verify_agent_state(
     """Curator adapter over ``_shared.verify_agent_state`` — pins the cfg corpus and the
     ``observations`` noun for the post-flight working-tree cross-check."""
     _shared.verify_agent_state(
-        REPO_ROOT, result, cfg.corpus_dir, cfg.corpus_dir_rel, "observations",
+        cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel, "observations",
         baseline_stray,
     )
 
@@ -516,7 +518,7 @@ def _partition_pre_author(
             rec["skip_reason"] = f"outcome_policy:{outcome}"
             consumed_pre.append(rec)
             continue
-        if is_held_out_source(entry.get("source_run_dir", "")):
+        if is_held_out_source(cfg.repo_root, entry.get("source_run_dir", "")):
             # Producer should have dropped held-out runs; defense-in-depth hold
             # so a held-out observation can never seed a lesson.
             rec = dict(entry)
@@ -541,7 +543,7 @@ def _author_to_author(
     Returns (rc, commit_sha, committed, consumed_skip). rc != 0 means a FATAL
     happened and the caller should bail with that code."""
     log = make_logger(cfg.log_prefix)
-    baseline_stray = changes_outside_corpus(cfg.corpus_dir_rel)
+    baseline_stray = changes_outside_corpus(cfg.repo_root, cfg.corpus_dir_rel)
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
