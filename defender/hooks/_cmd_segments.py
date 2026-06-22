@@ -69,9 +69,12 @@ def adapter_shims() -> set[str]:
 
 
 def unwrap(cmd: str) -> str | None:
-    """Strip a leading `timeout <n>` and a single `bash -c`/`sh -c`, returning
-    the inner script. Returns the command unchanged if there is nothing to
-    unwrap, or None if the `-c` payload can't be cleanly extracted."""
+    """Strip a leading `timeout <n>` and an exact `bash -c`/`sh -c` wrapper,
+    returning the inner script. The `-c` must be the token IMMEDIATELY after
+    `bash`/`sh` (a `bash <script> -c …` form runs the script, not the payload) and
+    the payload must be the sole remaining token. Returns the command unchanged if
+    there is nothing to unwrap, or None if the `-c` payload can't be cleanly
+    extracted (wrong form, missing payload, or a trailing command)."""
     try:
         tokens = shlex.split(cmd)
     except ValueError:
@@ -84,16 +87,21 @@ def unwrap(cmd: str) -> str | None:
         i += 1
         while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].replace(".", "").isdigit()):
             i += 1
-    if i < len(tokens) and tokens[i] in ("bash", "sh") and "-c" in tokens[i:]:
-        c_idx = tokens.index("-c", i)
-        if c_idx + 1 >= len(tokens):
-            return None
-        # Anything AFTER the `-c` payload (`bash -c '…' ; rm`, `… && curl`, a trailing
-        # newline + command) is a SEPARATE command the OUTER shell runs but the gate
-        # would never inspect — we only analyze the payload. Fail closed.
-        if c_idx + 2 < len(tokens):
-            return None
-        return tokens[c_idx + 1]  # the quoted script payload
+    if i < len(tokens) and tokens[i] in ("bash", "sh"):
+        # Real shell semantics: the first non-option word after `bash`/`sh` is the
+        # SCRIPT FILE, and a `-c` after it is just a positional arg to that script
+        # (`bash evil.sh -c '…'` RUNS evil.sh). Only the exact `bash -c <payload>`
+        # inline form is the wrapper we unwrap: require `-c` to be the IMMEDIATE
+        # next token and the payload to be the sole remaining token. Anything
+        # AFTER the payload (`bash -c '…' ; rm`, `… && curl`, a trailing newline +
+        # command) is a SEPARATE command the OUTER shell runs but the gate would
+        # never inspect. Anything else — `bash <script> …`, a missing payload, a
+        # trailing command — fails closed.
+        if i + 1 < len(tokens) and tokens[i + 1] == "-c":
+            if i + 2 == len(tokens) - 1:
+                return tokens[i + 2]  # the quoted script payload
+            return None  # missing payload OR a trailing command
+        return None  # `bash <script> …` / bare `bash` — not the inline `-c` form
     if i > 0:
         # A `timeout <n>` prefix was stripped but no `bash -c` followed — return the
         # remainder so callers see the real command at the head, not `timeout`. Strip

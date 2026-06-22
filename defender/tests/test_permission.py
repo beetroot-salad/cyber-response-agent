@@ -154,6 +154,37 @@ def test_no_second_command_hides_behind_safe_head(cmd):
     assert not permission.decide_bash(cmd, is_main_session=True).allow
 
 
+# A SCRIPT FILE before `-c` is not the inline `bash -c <payload>` wrapper: the shell
+# runs the script and `-c`/the "payload" become its positional args. unwrap used to
+# grab the first `-c` anywhere, extract the safe-looking payload, and approve while
+# `shell=True` ran the script (issue #379 bypass). The exact-adjacency unwrap must
+# fail closed here in BOTH sessions.
+@pytest.mark.parametrize("cmd", [
+    "bash evil.sh -c 'jq .'",            # script file before -c → -c is the script's arg
+    "sh evil.sh -c 'jq .'",
+    "timeout 5 bash evil.sh -c 'jq .'",  # ... behind a timeout prefix
+])
+def test_bash_script_file_before_c_fails_closed(cmd):
+    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+
+
+# Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
+# `bash -c <payload>`/`sh -c <payload>` form (optionally behind a `timeout` prefix)
+# wrapping a read-only viewer must STILL be approved in BOTH sessions. Without this,
+# every `bash -c` test is a deny case, so a future over-tightening of unwrap could
+# flip these real commands to deny and the whole suite would stay green.
+@pytest.mark.parametrize("cmd", [
+    "bash -c 'jq .x f.json'",
+    "sh -c 'jq .x f.json'",
+    "timeout 5 bash -c 'jq .x f.json'",   # ... behind a timeout prefix
+    "bash -c 'tail -1 f.json | jq .'",    # a pipeline payload must not be re-quoted
+])
+def test_inline_bash_c_viewer_still_allowed(cmd):
+    assert permission.decide_bash(cmd, is_main_session=False).allow
+    assert permission.decide_bash(cmd, is_main_session=True).allow
+
+
 @pytest.mark.parametrize("cmd", [
     # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
     # unwrap fix must not quote the `|` or otherwise break the pipeline.
