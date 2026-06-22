@@ -97,10 +97,6 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
     )
 
 
-# Production default config; tests build their own via build_actor_config(tmp paths).
-ACTOR_CONFIG = build_actor_config(DEFAULT_PATHS)
-
-
 def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
     return _curator.run_batch(hold_committed=hold_committed, cfg=build_actor_config(paths))
 

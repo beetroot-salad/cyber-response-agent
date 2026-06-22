@@ -19,16 +19,17 @@ import yaml
 
 # The curator engine, the lock/generation helpers, and the actor config wrapper.
 # Each resolves to one module instance (the path imports inside the modules use the
-# same names), so patching ``curator.REPO_ROOT`` / ``shared.*`` reaches them.
+# same names), so patching ``shared.*`` (the residual git-lock/generation seam) reaches
+# them; the engine's repo root now flows through the injected ``CuratorConfig.repo_root``.
 from defender.learning import _author_curator as curator  # type: ignore[import-not-found]
 from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
 from defender.learning import author_actor as aa  # type: ignore[import-not-found]
 from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
 
-# Reference ``shared.AuthorError`` live (not a captured module-level alias): the
-# ``tmp_repo`` conftest fixture reloads ``_author_shared``/``_author_curator``, rebinding
-# the class — a captured alias bound at collection time would go stale and stop matching
-# freshly-raised errors when a curator test runs after that fixture.
+# Reference ``shared.AuthorError`` live rather than a captured module-level alias:
+# every author module binds ``AuthorError = _shared.AuthorError`` once at import, so the
+# one shared class object is exactly what the curators raise — matching it directly stays
+# correct without depending on any import-time aliasing (no conftest reload to rebind it).
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +57,9 @@ def _isolate(monkeypatch, tmp_path: Path):
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
 
-    # The engine runs all git operations at curator.REPO_ROOT; the repo lock +
-    # generation counter live in _author_shared. Both point at the tmp repo.
+    # The engine runs all git operations at the injected ``cfg.repo_root`` (built from
+    # ``LoopPaths(repo_root=repo)`` in ``_cfg``); the repo lock + generation counter still
+    # read ``_author_shared``'s module globals, so point that residual seam at the tmp repo.
     monkeypatch.setattr(shared, "REPO_ROOT", repo)
     monkeypatch.setattr(shared, "LEARNING_DIR", learning)
     monkeypatch.setattr(shared, "REPO_LOCK_FILE", learning / "_author.lock")
