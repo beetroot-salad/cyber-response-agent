@@ -390,6 +390,17 @@ def capture(
     # (traversal / absolute) would escape gather_raw/ and break the join.
     if not LEAD_ID_RE.match(lead):
         raise ValueError(f"invalid lead id {lead!r} (expected an `l-` row id)")
+    # A model-supplied `query_id` becomes a `{system}/_draft/{verb}.md` path
+    # segment in the offline lead-author (lead_author.synthesize_drafts); a
+    # separator or parent-ref would escape the catalog dir (arbitrary `.md`
+    # write). Reject traversal shapes at the boundary — same discipline as the
+    # `lead` guard above. Narrow (separators / `..` / NUL) so a normally coined
+    # `{system}.{kebab}` id is never rejected; the auto-derived default below is
+    # already safe.
+    if query_id is not None and any(t in query_id for t in ("/", "\\", "..", "\x00")):
+        raise ValueError(
+            f"invalid query id {query_id!r} (path-traversal characters not allowed)"
+        )
     if query_id is None:
         verb = _derive_verb(inner)
         query_id = f"{system}.{verb}" if verb else f"{system}.ad-hoc"

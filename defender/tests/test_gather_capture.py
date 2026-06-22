@@ -99,6 +99,33 @@ def test_capture_rejects_bad_lead(tmp_path, stub):
         capture(tmp_path, "../escape", _argv(stub, "ok"))
 
 
+@pytest.mark.parametrize(
+    "bad_qid",
+    [
+        "elastic.../../../../tmp/PWNED",   # `/` separators → traversal
+        "elastic.sub/dir",                 # bare `/`
+        "elastic.up..down",                # parent-ref token
+        "../../etc/passwd",                # absolute-ish escape, no dot
+        "elastic.bad\\seg",                # backslash separator
+    ],
+)
+def test_capture_rejects_traversal_query_id(tmp_path, stub, bad_qid):
+    # A model-coined --query-id with path-traversal characters is rejected at the
+    # boundary so it can never reach lead_author.synthesize_drafts' path build,
+    # and no queries-table row is written.
+    with pytest.raises(ValueError):
+        capture(tmp_path, "l-001", _argv(stub, "ok"), query_id=bad_qid)
+    assert not (tmp_path / "executed_queries.jsonl").exists()
+
+
+def test_capture_accepts_normal_coined_query_id(tmp_path, stub):
+    # A normally-coined `{system}.{kebab}` id passes through untouched.
+    _, _, record = capture(
+        tmp_path, "l-001", _argv(stub, "ok"), query_id="elastic.sshd-auth-baseline-7d"
+    )
+    assert record["query_id"] == "elastic.sshd-auth-baseline-7d"
+
+
 def test_capture_rejects_undetectable_system(tmp_path):
     # No defender-<system> shim / <system>_cli.py token → system can't be derived.
     with pytest.raises(ValueError):

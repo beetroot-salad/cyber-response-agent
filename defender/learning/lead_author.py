@@ -47,6 +47,7 @@ import argparse
 import functools
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -103,6 +104,16 @@ def _lift_threshold() -> int:
 # or ``ad-hoc`` for a flags-only call; drafting any of those would mint a junk
 # catch-all template, so they are filtered alongside prefix-less ids.
 _NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
+
+# A `query_id` segment (`{system}` / `{verb}`) becomes a path component in the
+# `{system}/_draft/{verb}.md` draft path below. The id is model-coined (the
+# gather subagent passes it as `--query-id`), so an untrusted segment containing
+# `/`, `\`, or a leading `.` (e.g. `..`) would escape the catalog dir and write
+# an arbitrary `.md` file. Require each segment to be a single safe path
+# component: starts alphanumeric, then `[a-z0-9._-]` — which the real kebab ids
+# (`sshd-auth-baseline-7d`, `change-mgmt`) all satisfy while `..`, `a/b`, and
+# `/abs` are rejected. A containment clamp on the resolved path backs this up.
+_SAFE_ID_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 # Systems whose query body is a server-side ES|QL pipe — the whole query is one
@@ -191,7 +202,16 @@ def synthesize_drafts(
         # mints a hidden ``_draft/.md`` dotfile. Drop both alongside reserved verbs.
         if not system or not verb or verb in _NON_CANDIDATE_VERBS:
             continue
+        # `system`/`verb` become path components — a `/`, `\`, or `..` segment
+        # from a model-coined id would escape the catalog (arbitrary `.md` write).
+        # Reject any non-single-component segment, then clamp the resolved draft
+        # under the system's `_draft/` dir as belt-and-suspenders.
+        if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(verb):
+            continue
         draft = catalog_dir / system / "_draft" / f"{verb}.md"
+        draft_root = (catalog_dir / system / "_draft").resolve()
+        if not draft.resolve().is_relative_to(draft_root):
+            continue
         if draft.exists() or draft in created:
             continue
         query_body = _executed_query(lead) or "# (no command captured for this query)"
