@@ -22,7 +22,9 @@ trailers) and ``_author_curator.py`` (the actor/env corpora, with
 ``Generation:``/``{trailer_label}:`` trailers) reach this plumbing through
 thin, corpus-pinning adapters rather than hand-mirroring it. Queue locks
 remain per-author because the queue paths differ, but the flock dance itself
-is shared here too (``acquire_flock``/``release_flock``) — each author just
+is shared here too (``acquire_flock``/``release_flock``, plus the scoped
+``flock_or_skip`` context-manager twin for inline lock→work→unlock call sites
+such as the author-drain and lesson-revert paths) — each author just
 supplies its own lock-file path. Both ``author.py`` and
 ``author_actor.py`` acquire this lock after their queue lock and hold it
 across the child-agent invocation through queue rotation.
@@ -117,6 +119,14 @@ def acquire_flock(path: Path) -> Any | None:
     except BlockingIOError:
         fh.close()
         return None
+    except BaseException:
+        # A genuine lock-subsystem failure (e.g. ENOLCK) propagates — fail loud
+        # (issue #367) — but close the handle first so the propagation path
+        # doesn't leak the fd. The inline dances this replaced closed it in a
+        # `finally`; here the raise escapes before any `flock_or_skip` body runs,
+        # so acquire_flock must clean up its own handle.
+        fh.close()
+        raise
     return fh
 
 
