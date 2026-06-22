@@ -43,8 +43,7 @@ def test_load_run_context(tmp_path, monkeypatch):
     (runs / rid / "source_refs.yaml").write_text(
         yaml.safe_dump({"normalized_disposition": "benign"})
     )
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
-    transcript, disp = vf.load_run_context(rid)
+    transcript, disp = vf.load_run_context(rid, runs_dir=runs)
     assert "transcript body" in transcript
     assert disp == "benign"
 
@@ -55,9 +54,8 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
     (runs / "rid" / "investigation.md").write_text("x")
     import yaml
     (runs / "rid" / "source_refs.yaml").write_text(yaml.safe_dump({}))
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
     with pytest.raises(SystemExit, match="missing normalized_disposition"):
-        vf.load_run_context("rid")
+        vf.load_run_context("rid", runs_dir=runs)
 
 
 def test_render_user_prompt_substitutes(monkeypatch, tmp_path):
@@ -99,27 +97,24 @@ def test_cited_case_ids_parses_menu(tmp_path, monkeypatch):
     (runs / "run-B" / "past_tickets.txt").write_text(
         "- case-OLD1: benign — nightly scan\n- case-OLD2: benign — maintenance\n\n"
     )
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
-    assert vf._cited_case_ids("run-B") == ["case-OLD1", "case-OLD2"]
+    assert vf._cited_case_ids("run-B", runs_dir=runs) == ["case-OLD1", "case-OLD2"]
 
 
 def test_cited_case_ids_empty_when_no_menu(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
-    assert vf._cited_case_ids("run-B") == []
+    assert vf._cited_case_ids("run-B", runs_dir=runs) == []
 
 
 def test_load_cited_policy_renders_grounded_resolutions(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
     monkeypatch.setattr(
         vf, "_fetch_closed_resolution",
         lambda cid: "benign — scan [grounded: identity-confirmed (l-002)]",
     )
-    out = vf.load_cited_policy("run-B")
+    out = vf.load_cited_policy("run-B", runs_dir=runs)
     assert "case-OLD1" in out
     assert "grounded: identity-confirmed (l-002)" in out
 
@@ -128,16 +123,14 @@ def test_load_cited_policy_neutral_when_unreachable(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
     monkeypatch.setattr(vf, "_fetch_closed_resolution", lambda cid: None)  # store down
-    assert vf.load_cited_policy("run-B") == vf._NO_CITED_POLICY
+    assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
 
 
 def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
-    monkeypatch.setattr(vf, "RUNS_DIR", runs)
-    assert vf.load_cited_policy("run-B") == vf._NO_CITED_POLICY
+    assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
 
 
 def test_render_user_prompt_substitutes_cited_policy(monkeypatch, tmp_path):

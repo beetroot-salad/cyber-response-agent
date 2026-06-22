@@ -57,8 +57,8 @@ _NO_CITED_POLICY = (
 )
 
 
-def load_run_context(run_id: str) -> tuple[str, str]:
-    run_dir = RUNS_DIR / run_id
+def load_run_context(run_id: str, runs_dir: Path = RUNS_DIR) -> tuple[str, str]:
+    run_dir = runs_dir / run_id
     investigation = run_dir / "investigation.md"
     refs = run_dir / "source_refs.yaml"
     if not investigation.is_file():
@@ -106,11 +106,11 @@ def expected_disposition(direction: str, recorded: str) -> str:
     return recorded
 
 
-def _cited_case_ids(run_id: str) -> list[str]:
+def _cited_case_ids(run_id: str, runs_dir: Path = RUNS_DIR) -> list[str]:
     """Case ids the benign actor was offered as covering-policy seeds, read from the
     source run's persisted `past_tickets.txt` menu (one `- {case_id}: …` line each).
     Empty when no menu was written (cold-start / no seeds offered)."""
-    menu = RUNS_DIR / run_id / "past_tickets.txt"
+    menu = runs_dir / run_id / "past_tickets.txt"
     if not menu.is_file():
         return []
     ids: list[str] = []
@@ -149,7 +149,7 @@ def _fetch_closed_resolution(case_id: str) -> str | None:
     return res if isinstance(res, str) and res.strip() else None
 
 
-def load_cited_policy(run_id: str) -> str:
+def load_cited_policy(run_id: str, runs_dir: Path = RUNS_DIR) -> str:
     """The cited covering policies (closed cases) for a benign forward-check, rendered
     for the verifier prompt. The benign actor cites a past closed case as a covering
     policy; loading its grounded resolution lets the verifier reproduce the close using
@@ -158,7 +158,7 @@ def load_cited_policy(run_id: str) -> str:
     non-fatal)."""
     lines = [
         f"- {case_id}: {res}"
-        for case_id in _cited_case_ids(run_id)
+        for case_id in _cited_case_ids(run_id, runs_dir)
         if (res := _fetch_closed_resolution(case_id))
     ]
     if not lines:

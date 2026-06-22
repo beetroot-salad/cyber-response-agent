@@ -24,10 +24,13 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning import author_actor_benign as _benign  # type: ignore[import-not-found]
+from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths
 
 
-def run_batch(*, hold_committed: bool = False) -> int:
-    return _benign.run_batch(hold_committed=hold_committed, cfg=_benign.ADVERSARIAL_CONFIG)
+def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
+    return _benign.run_batch(
+        hold_committed=hold_committed, cfg=_benign.build_adversarial_config(paths)
+    )
 
 
 def main(argv: list[str]) -> int:

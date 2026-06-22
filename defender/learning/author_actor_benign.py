@@ -35,15 +35,10 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.learning import _author_curator as _curator
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS
+from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths
 
 
-REPO_ROOT = _curator.REPO_ROOT
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-LESSONS_ENV_DIR = REPO_ROOT / "defender" / "lessons-environment"
 LESSONS_ENV_DIR_REL = "defender/lessons-environment/"
-
-AUTHOR_PROMPT = LEARNING_DIR / "author_actor_benign.md"
 VERIFY_SCRIPT_REL = "defender/learning/verify_forward_env.py"
 
 # The curator *agent* model/effort/timeout are shared across directions — only the
@@ -72,10 +67,10 @@ def invoke_agent(
     command. The commit-trailer provenance (including the per-direction trailer label)
     is stamped by the loop, not the agent, so nothing trailer-related goes in the
     prompt."""
-    verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
+    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
     forward_check_command = (
         f"{verifier_py} {VERIFY_SCRIPT_REL} "
-        f"--corpus {LESSONS_ENV_DIR_REL} --pending {cfg.pending_file_rel}"
+        f"--corpus {cfg.corpus_dir_rel} --pending {cfg.pending_file_rel}"
     )
     extra_prompt = (
         f"forward_check_command: {forward_check_command}\n"
@@ -88,6 +83,7 @@ def invoke_agent(
 
 
 def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field that varies
+    paths: LoopPaths,
     *,
     pending_file: Path,
     consumed_file: Path,
@@ -102,7 +98,9 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
     """Build a CuratorConfig for the shared lessons-environment/ corpus — only the
     queue + policy + trailer + actor-model fields vary between the two directions."""
     return _curator.CuratorConfig(
-        corpus_dir=LESSONS_ENV_DIR,
+        repo_root=paths.repo_root,
+        pending_dir=paths.pending_dir,
+        corpus_dir=paths.lessons_environment_dir,
         corpus_dir_rel=LESSONS_ENV_DIR_REL,
         pending_file=pending_file,
         consumed_file=consumed_file,
@@ -113,7 +111,7 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         generation_fn=generation_fn,
         actor_model=actor_model,
         log_prefix=log_prefix,
-        author_prompt=AUTHOR_PROMPT,
+        author_prompt=paths.learning_dir / "author_actor_benign.md",
         author_model=AUTHOR_ENV_MODEL,
         author_timeout=AUTHOR_ENV_TIMEOUT,
         author_effort=AUTHOR_ENV_EFFORT,
@@ -121,39 +119,56 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
     )
 
 
-# Benign (FP) direction — ``survived`` is the confirmed-FP outcome whose routine
-# story held against the evidence, so the standing facts it grounds are reliable.
-BENIGN_CONFIG = _env_config(
-    pending_file=DEFAULT_PATHS.environment_observations_file,
-    consumed_file=DEFAULT_PATHS.environment_observations_consumed_file,
-    lock_file=DEFAULT_PATHS.environment_observations_lock_file,
-    outcome_author=frozenset({"survived"}),
-    outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
-    trailer_label="Benign-Actor-Model",
-    generation_fn=_shared.benign_generation_count,
-    actor_model=BENIGN_ACTOR_MODEL,
-    log_prefix="author_actor_benign",
-)
+def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+    """Benign (FP) direction — ``survived`` is the confirmed-FP outcome whose routine
+    story held against the evidence, so the standing facts it grounds are reliable."""
+    return _env_config(
+        paths,
+        pending_file=paths.environment_observations_file,
+        consumed_file=paths.environment_observations_consumed_file,
+        lock_file=paths.environment_observations_lock_file,
+        outcome_author=frozenset({"survived"}),
+        outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
+        trailer_label="Benign-Actor-Model",
+        generation_fn=_shared.benign_generation_count,
+        actor_model=BENIGN_ACTOR_MODEL,
+        log_prefix="author_actor_benign",
+    )
 
-# Adversarial direction (issue #298) — env facts the adversarial judge extracts from
-# grounded mispredictions. Finding-bearing outcomes mirror author_actor.py:
-# ``caught``/``incoherent`` (the refutation cited real telemetry).
-ADVERSARIAL_CONFIG = _env_config(
-    pending_file=DEFAULT_PATHS.actor_environment_observations_file,
-    consumed_file=DEFAULT_PATHS.actor_environment_observations_consumed_file,
-    lock_file=DEFAULT_PATHS.actor_environment_observations_lock_file,
-    outcome_author=frozenset({"caught", "incoherent"}),
-    outcome_skip=frozenset({"survived", "undecidable"}),
-    trailer_label="Actor-Env-Model",
-    generation_fn=_shared.actor_env_generation_count,
-    actor_model=ACTOR_MODEL,
-    log_prefix="author_actor_env",
-)
+
+def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+    """Adversarial direction (issue #298) — env facts the adversarial judge extracts from
+    grounded mispredictions. Finding-bearing outcomes mirror author_actor.py:
+    ``caught``/``incoherent`` (the refutation cited real telemetry)."""
+    return _env_config(
+        paths,
+        pending_file=paths.actor_environment_observations_file,
+        consumed_file=paths.actor_environment_observations_consumed_file,
+        lock_file=paths.actor_environment_observations_lock_file,
+        outcome_author=frozenset({"caught", "incoherent"}),
+        outcome_skip=frozenset({"survived", "undecidable"}),
+        trailer_label="Actor-Env-Model",
+        generation_fn=_shared.actor_env_generation_count,
+        actor_model=ACTOR_MODEL,
+        log_prefix="author_actor_env",
+    )
+
+
+# Production default configs; tests build their own via build_*_config(tmp paths).
+BENIGN_CONFIG = build_benign_config(DEFAULT_PATHS)
+ADVERSARIAL_CONFIG = build_adversarial_config(DEFAULT_PATHS)
 
 
 def run_batch(
-    *, hold_committed: bool = False, cfg: _curator.CuratorConfig = BENIGN_CONFIG
+    *,
+    hold_committed: bool = False,
+    paths: LoopPaths = DEFAULT_PATHS,
+    cfg: _curator.CuratorConfig | None = None,
 ) -> int:
+    # Default to the benign direction built from the injected paths; the adversarial
+    # entry (author_actor_env) passes its own cfg explicitly.
+    if cfg is None:
+        cfg = build_benign_config(paths)
     return _curator.run_batch(hold_committed=hold_committed, cfg=cfg)
 
 

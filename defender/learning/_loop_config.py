@@ -39,6 +39,30 @@ class LoopPaths:
     def learning_dir(self) -> Path:
         return self.repo_root / "defender" / "learning"
 
+    # Repo-relative corpora + catalog roots (read-only at runtime; never
+    # relocate with DEFENDER_LEARNING_STATE_DIR). The author family reads these
+    # off ``paths`` instead of import-time module globals so a test rooted at a
+    # tmp tree resolves them with one ``LoopPaths(repo_root=tmp)``.
+    @property
+    def lessons_dir(self) -> Path:
+        return self.repo_root / "defender" / "lessons"
+
+    @property
+    def lessons_actor_dir(self) -> Path:
+        return self.repo_root / "defender" / "lessons-actor"
+
+    @property
+    def lessons_environment_dir(self) -> Path:
+        return self.repo_root / "defender" / "lessons-environment"
+
+    @property
+    def catalog_dir(self) -> Path:
+        return self.repo_root / "defender" / "skills" / "gather" / "queries"
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.repo_root / "defender" / "skills"
+
     @property
     def _state_root(self) -> Path:
         return self.state_dir if self.state_dir is not None else self.learning_dir
@@ -160,8 +184,8 @@ JUDGE_BENIGN_PROMPT = LEARNING_DIR / "judge_benign.md"
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
 BENIGN_ACTOR_SETTINGS = LEARNING_DIR / "benign-actor-settings.json"
-LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
-LESSONS_ENVIRONMENT_DIR = REPO_ROOT / "defender" / "lessons-environment"
+LESSONS_ACTOR_DIR = DEFAULT_PATHS.lessons_actor_dir
+LESSONS_ENVIRONMENT_DIR = DEFAULT_PATHS.lessons_environment_dir
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
 

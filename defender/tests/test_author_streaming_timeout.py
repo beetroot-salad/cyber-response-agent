@@ -9,6 +9,7 @@ the remaining deadline so the lock is released and the agent killed.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -86,12 +87,12 @@ def shim_claude(tmp_repo, monkeypatch):
 def test_silent_hang_is_killed_by_wall_clock(tmp_repo, shim_claude, monkeypatch):
     """Child emits one line then stops — AUTHOR_TIMEOUT must still fire."""
     a = tmp_repo.author
-    monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 2)  # seconds
+    cfg = replace(tmp_repo.cfg, author_timeout=2)  # seconds
     shim_claude("silent_hang")
 
     t0 = time.monotonic()
     with pytest.raises(a.AuthorError, match="timed out after 2s"):
-        a.invoke_agent([{"finding_id": "x"}], batch_id="test")
+        a.invoke_agent([{"finding_id": "x"}], batch_id="test", cfg=cfg)
     elapsed = time.monotonic() - t0
     # Generous upper bound: timeout=2s, select tick=1s, kill overhead.
     assert elapsed < 6.0, f"timeout did not fire promptly (elapsed={elapsed:.2f}s)"
@@ -100,7 +101,7 @@ def test_silent_hang_is_killed_by_wall_clock(tmp_repo, shim_claude, monkeypatch)
 def test_stdin_write_is_bounded_by_deadline(tmp_repo, shim_claude, monkeypatch):
     """Child never reads stdin; prompt > pipe buffer must not block writer."""
     a = tmp_repo.author
-    monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 2)
+    cfg = replace(tmp_repo.cfg, author_timeout=2)
     shim_claude("ignore_stdin")
 
     # Findings list large enough that json.dumps(...) exceeds the
@@ -110,7 +111,7 @@ def test_stdin_write_is_bounded_by_deadline(tmp_repo, shim_claude, monkeypatch):
 
     t0 = time.monotonic()
     with pytest.raises(a.AuthorError, match="timed out after 2s"):
-        a.invoke_agent([big], batch_id="test")
+        a.invoke_agent([big], batch_id="test", cfg=cfg)
     elapsed = time.monotonic() - t0
     assert elapsed < 6.0, f"stdin-write deadlock — elapsed={elapsed:.2f}s"
 
@@ -118,10 +119,10 @@ def test_stdin_write_is_bounded_by_deadline(tmp_repo, shim_claude, monkeypatch):
 def test_stderr_flood_does_not_deadlock(tmp_repo, shim_claude, monkeypatch):
     """Child writes 256 KiB to stderr before stdout — reader drains both."""
     a = tmp_repo.author
-    monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 5)
+    cfg = replace(tmp_repo.cfg, author_timeout=5)
     shim_claude("stderr_flood")
 
     # The fake never emits AUTHOR_RESULT, so we expect that specific
     # error — but only if the reader completed without deadlock first.
     with pytest.raises(a.AuthorError, match="did not emit AUTHOR_RESULT"):
-        a.invoke_agent([{"finding_id": "x"}], batch_id="test")
+        a.invoke_agent([{"finding_id": "x"}], batch_id="test", cfg=cfg)

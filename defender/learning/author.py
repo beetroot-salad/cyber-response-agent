@@ -54,6 +54,8 @@ import re
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +69,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning import _author_runner as _runner
 from defender.learning import _author_shared as _shared
-from defender.learning._loop_config import DEFAULT_PATHS, make_logger, now_iso
+from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths, make_logger, now_iso
 from defender.learning._loop_persist import (
     _flock,
     _read_jsonl_rows,
@@ -75,23 +77,7 @@ from defender.learning._loop_persist import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 LESSONS_DIR_REL = "defender/lessons/"  # the scope-gate prefix for the shared git layer
-# Mutable learning state resolves from DEFAULT_PATHS so it honors
-# DEFENDER_LEARNING_STATE_DIR — the same single location the producer
-# (_loop_persist.append_findings) writes to. Prompts/corpus stay repo-relative.
-RUNS_DIR = DEFAULT_PATHS.runs_dir
-PENDING_DIR = DEFAULT_PATHS.pending_dir
-PENDING_FILE = DEFAULT_PATHS.pending_file
-FINDINGS_LOCK_FILE = DEFAULT_PATHS.findings_lock_file
-CONSUMED_FILE = PENDING_DIR / "consumed.jsonl"
-LOCK_FILE = PENDING_DIR / ".lock"
-HELD_REPORT = PENDING_DIR / "held_report.log"
-
-AUTHOR_PROMPT = LEARNING_DIR / "author.md"
-VERIFY_SCRIPT = LEARNING_DIR / "verify_forward.py"
 
 AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
 AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
@@ -103,24 +89,72 @@ AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhig
 AuthorError = _shared.AuthorError
 
 
+@dataclass(frozen=True)
+class AuthorConfig:
+    """Injected filesystem layout + curator-agent wiring for the findings author.
+
+    Built once per ``run_batch`` from a ``LoopPaths`` so every helper reads ``cfg.x``
+    instead of an import-time module global — the findings-corpus analog of
+    ``_author_curator.CuratorConfig``. Mutable learning state (runs/_pending) honors
+    DEFENDER_LEARNING_STATE_DIR via the paths; prompts/corpus stay repo-relative."""
+    repo_root: Path
+    lessons_dir: Path
+    runs_dir: Path
+    pending_dir: Path
+    pending_file: Path
+    consumed_file: Path
+    lock_file: Path
+    findings_lock_file: Path
+    held_report: Path
+    author_run_log: Path
+    author_prompt: Path
+    # The curator spawn — a field (defaulted to the module ``invoke_agent``) so tests
+    # inject a fake via ``dataclasses.replace(cfg, invoke_agent=fake)``.
+    invoke_agent: Callable[[list[dict], str, AuthorConfig], dict]
+    author_model: str = AUTHOR_MODEL
+    author_timeout: int = AUTHOR_TIMEOUT
+    author_effort: str | None = AUTHOR_EFFORT
+
+
+def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
+    """Resolve the findings author's paths + agent wiring from an injected ``LoopPaths``.
+
+    Constructed at call time (not import) so a test rooted at a tmp tree threads one
+    ``LoopPaths(repo_root=tmp)`` instead of monkeypatching module path globals."""
+    return AuthorConfig(
+        repo_root=paths.repo_root,
+        lessons_dir=paths.lessons_dir,
+        runs_dir=paths.runs_dir,
+        pending_dir=paths.pending_dir,
+        pending_file=paths.pending_file,
+        consumed_file=paths.pending_dir / "consumed.jsonl",
+        lock_file=paths.pending_dir / ".lock",
+        findings_lock_file=paths.findings_lock_file,
+        held_report=paths.pending_dir / "held_report.log",
+        author_run_log=paths.pending_dir / "author_run.jsonl",
+        author_prompt=paths.learning_dir / "author.md",
+        invoke_agent=invoke_agent,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
 
 
-def acquire_lock() -> Any:
-    return _shared.acquire_flock(LOCK_FILE)
+def acquire_lock(cfg: AuthorConfig) -> Any:
+    return _shared.acquire_flock(cfg.lock_file)
 
 
 def release_lock(fh: Any) -> None:
     _shared.release_flock(fh)
 
 
-def assert_clean_lessons_dir() -> None:
-    LESSONS_DIR.mkdir(parents=True, exist_ok=True)
+def assert_clean_lessons_dir(cfg: AuthorConfig) -> None:
+    cfg.lessons_dir.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(LESSONS_DIR)],
-        cwd=REPO_ROOT,
+        ["git", "status", "--porcelain", "--", str(cfg.lessons_dir)],
+        cwd=cfg.repo_root,
         capture_output=True,
         text=True,
         check=True,
@@ -132,7 +166,7 @@ def assert_clean_lessons_dir() -> None:
         )
 
 
-def read_batch() -> list[dict]:
+def read_batch(cfg: AuthorConfig) -> list[dict]:
     """Snapshot the findings queue under the producer's lock.
 
     Unlike the observation authors, this author's instance lock (``.lock``) and
@@ -142,19 +176,19 @@ def read_batch() -> list[dict]:
     agent call) so we never read a torn multi-line append, and parse tolerantly
     so a blank/torn line left by a crashed prior append is skipped, not raised
     (the row stays queued and is picked up next tick)."""
-    if not PENDING_FILE.is_file():
+    if not cfg.pending_file.is_file():
         return []
-    with _flock(FINDINGS_LOCK_FILE):
-        return _read_jsonl_rows(PENDING_FILE)
+    with _flock(cfg.findings_lock_file):
+        return _read_jsonl_rows(cfg.pending_file)
 
 
-def disposition_for(run_id: str) -> str | None:
+def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     """Return normalized_disposition from runs/<run_id>/source_refs.yaml.
 
     Returns None if the file or field is missing — caller routes that as
     "no ground truth" (held).
     """
-    refs = RUNS_DIR / run_id / "source_refs.yaml"
+    refs = cfg.runs_dir / run_id / "source_refs.yaml"
     if not refs.is_file():
         return None
     try:
@@ -170,12 +204,12 @@ def disposition_for(run_id: str) -> str | None:
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
 
 
-def existing_finding_ids() -> set[str]:
+def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     """Union of source_finding_ids across all lesson frontmatter."""
     ids: set[str] = set()
-    if not LESSONS_DIR.is_dir():
+    if not cfg.lessons_dir.is_dir():
         return ids
-    for path in sorted(LESSONS_DIR.glob("*.md")):
+    for path in sorted(cfg.lessons_dir.glob("*.md")):
         text = path.read_text()
         m = _FRONTMATTER_RE.match(text)
         if not m:
@@ -199,10 +233,7 @@ def existing_finding_ids() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-AUTHOR_RUN_LOG = PENDING_DIR / "author_run.jsonl"
-
-
-def invoke_agent(findings: list[dict], batch_id: str) -> dict:
+def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
     """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict.
 
     Subprocess driver lives in ``_author_runner.invoke_claude_print`` —
@@ -211,7 +242,7 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     ``RunnerError`` into ``AuthorError`` so the caller's error path is
     unchanged.
     """
-    verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
+    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
@@ -232,17 +263,17 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         f"Bash({verifier_py} defender/learning/verify_batch.py:*),"
         f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
         "Bash(rm defender/lessons/*.md),"
-        f"Bash(rm {LESSONS_DIR}/*.md)"
+        f"Bash(rm {cfg.lessons_dir}/*.md)"
     )
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     options = _runner.RunnerOptions(
-        system_prompt_file=AUTHOR_PROMPT,
+        system_prompt_file=cfg.author_prompt,
         allowed_tools=allowed_tools,
-        model=AUTHOR_MODEL,
-        effort=AUTHOR_EFFORT,
-        timeout_seconds=AUTHOR_TIMEOUT,
-        cwd=REPO_ROOT,
-        log_path=AUTHOR_RUN_LOG,
+        model=cfg.author_model,
+        effort=cfg.author_effort,
+        timeout_seconds=cfg.author_timeout,
+        cwd=cfg.repo_root,
+        log_path=cfg.author_run_log,
         result_marker="AUTHOR_RESULT:",
         batch_id=batch_id,
     )
@@ -257,34 +288,34 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def git_head_sha() -> str:
-    return _shared.git_head_sha(REPO_ROOT)
+def git_head_sha(repo_root: Path) -> str:
+    return _shared.git_head_sha(repo_root)
 
 
-def changes_outside_lessons() -> list[str]:
+def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
     """Author adapter over ``_shared.changes_outside`` — scope gate for ``defender/lessons/``."""
-    return _shared.changes_outside(REPO_ROOT, LESSONS_DIR_REL)
+    return _shared.changes_outside(cfg.repo_root, LESSONS_DIR_REL)
 
 
-def commit_lessons(message: str) -> str | None:
+def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
     """Author adapter over ``_shared.commit_corpus`` — pins ``defender/lessons/`` and passes
     no provenance trailers (unlike the actor/env curators, the findings corpus carries none)."""
-    return _shared.commit_corpus(REPO_ROOT, LESSONS_DIR, LESSONS_DIR_REL, message)
+    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, LESSONS_DIR_REL, message)
 
 
-def lessons_dir_clean() -> bool:
-    return _shared.corpus_dir_clean(REPO_ROOT, LESSONS_DIR)
+def lessons_dir_clean(cfg: AuthorConfig) -> bool:
+    return _shared.corpus_dir_clean(cfg.repo_root, cfg.lessons_dir)
 
 
 def _result_list(result: dict, key: str) -> list[Any]:
     return _shared._result_list(result, key)
 
 
-def verify_agent_state(result: dict, baseline_stray: list[str]) -> None:
+def verify_agent_state(cfg: AuthorConfig, result: dict, baseline_stray: list[str]) -> None:
     """Author adapter over ``_shared.verify_agent_state`` — pins ``defender/lessons/`` and the
     ``findings`` noun for the post-flight working-tree cross-check."""
     _shared.verify_agent_state(
-        REPO_ROOT, result, LESSONS_DIR, LESSONS_DIR_REL, "findings", baseline_stray,
+        cfg.repo_root, result, cfg.lessons_dir, LESSONS_DIR_REL, "findings", baseline_stray,
     )
 
 
@@ -294,6 +325,7 @@ def _commit_message(result: dict) -> str:
 
 
 def rotate_queue(
+    cfg: AuthorConfig,
     *,
     held: list[dict],
     consumed: list[dict],
@@ -301,9 +333,9 @@ def rotate_queue(
 ) -> None:
     """Drain findings.jsonl under the findings flock, preserving concurrent appends."""
     rotate_queue_locked(
-        pending_file=PENDING_FILE,
-        consumed_file=CONSUMED_FILE,
-        lock_file=FINDINGS_LOCK_FILE,
+        pending_file=cfg.pending_file,
+        consumed_file=cfg.consumed_file,
+        lock_file=cfg.findings_lock_file,
         id_key="finding_id",
         held=held,
         consumed=consumed,
@@ -312,7 +344,7 @@ def rotate_queue(
 
 
 def write_held_report(
-    *, batch_id: str, held_forward_bad: list[dict], skipped: list[dict]
+    cfg: AuthorConfig, *, batch_id: str, held_forward_bad: list[dict], skipped: list[dict]
 ) -> None:
     """Single-line summary for no-commit runs.
 
@@ -322,7 +354,7 @@ def write_held_report(
     """
     if not held_forward_bad and not skipped:
         return
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     line = (
         f"{now_iso()} batch={batch_id} "
         f"forward_bad={len(held_forward_bad)} "
@@ -330,7 +362,7 @@ def write_held_report(
         f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
         f"skipped_ids={[s.get('finding_id') for s in skipped]}\n"
     )
-    with HELD_REPORT.open("a") as fh:
+    with cfg.held_report.open("a") as fh:
         fh.write(line)
 
 
@@ -397,7 +429,12 @@ def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None
         raise AuthorError(f"author result missing findings: {unseen}")
 
 
-def run_batch(*, hold_committed: bool = False) -> int:
+def run_batch(
+    *,
+    hold_committed: bool = False,
+    paths: LoopPaths = DEFAULT_PATHS,
+    cfg: AuthorConfig | None = None,
+) -> int:
     """Drain a findings batch into the lessons corpus.
 
     ``hold_committed`` (set by the serial author drain, which commits onto an
@@ -406,8 +443,13 @@ def run_batch(*, hold_committed: bool = False) -> int:
     them: they re-author next batch unless the PR merged — in which case
     ``existing_finding_ids()`` (reading the post-fetch ``origin/main`` corpus)
     filters them to ``consumed_idempotent`` and they rotate out cleanly. Standalone
-    callers leave it False (today's commit-and-rotate behavior)."""
-    lock_fh = acquire_lock()
+    callers leave it False (today's commit-and-rotate behavior).
+
+    ``cfg`` defaults to one built from ``paths``; tests pass a cfg with a fake
+    ``invoke_agent`` (``dataclasses.replace``) to avoid spawning ``claude``."""
+    if cfg is None:
+        cfg = build_author_config(paths)
+    lock_fh = acquire_lock(cfg)
     if lock_fh is None:
         _log("lock held by another process — skipping this tick")
         return 0
@@ -419,24 +461,24 @@ def run_batch(*, hold_committed: bool = False) -> int:
             _log(f"repo lock unavailable: {e}; queue intact")
             return 0
         try:
-            assert_clean_lessons_dir()
+            assert_clean_lessons_dir(cfg)
         except AuthorError as e:
             _log(f"FATAL: {e}")
             return 2
-        return _run_batch_inner(hold_committed=hold_committed)
+        return _run_batch_inner(cfg, hold_committed=hold_committed)
     finally:
         if repo_lock is not None:
             _shared.release_repo_lock(repo_lock)
         release_lock(lock_fh)
 
 
-def _run_batch_inner(*, hold_committed: bool = False) -> int:
-    batch = read_batch()
+def _run_batch_inner(cfg: AuthorConfig, *, hold_committed: bool = False) -> int:
+    batch = read_batch(cfg)
     if not batch:
         _log("queue empty — nothing to author")
         return 0
     all_findings = _by_id(batch)
-    held, consumed_idempotent = _partition_pre_author(batch)
+    held, consumed_idempotent = _partition_pre_author(cfg, batch)
     gated_ids = {h["finding_id"] for h in held} | {
         c["finding_id"] for c in consumed_idempotent
     }
@@ -455,7 +497,7 @@ def _run_batch_inner(*, hold_committed: bool = False) -> int:
     consumed_skip: list[dict] = []
     if to_author:
         rc, commit_sha, committed, held_forward_bad, consumed_skip = (
-            _author_to_author(to_author, all_findings, batch_id)
+            _author_to_author(cfg, to_author, all_findings, batch_id)
         )
         if rc != 0:
             return rc
@@ -470,6 +512,7 @@ def _run_batch_inner(*, hold_committed: bool = False) -> int:
     )
     try:
         rotate_queue(
+            cfg,
             held=held + held_forward_bad + held_committed,
             consumed=consumed_idempotent + rotated_committed + consumed_skip,
             commit_sha=commit_sha,
@@ -479,6 +522,7 @@ def _run_batch_inner(*, hold_committed: bool = False) -> int:
         return 2
     if commit_sha is None:
         write_held_report(
+            cfg,
             batch_id=batch_id,
             held_forward_bad=held_forward_bad,
             skipped=consumed_skip,
@@ -508,14 +552,14 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
-def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
+def _partition_pre_author(cfg: AuthorConfig, batch: list[dict]) -> tuple[list[dict], list[dict]]:
     """Split the queue into (held, consumed_idempotent) before the agent runs.
 
     held → no confident ground truth for the finding's direction; stays in
     findings.jsonl. consumed_idempotent → already-committed findings the agent
     shouldn't see again.
     """
-    existing_ids = existing_finding_ids()
+    existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
     for entry in batch:
@@ -525,7 +569,7 @@ def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
             rec["consumed_category"] = "consumed_idempotent"
             consumed_idempotent.append(rec)
             continue
-        disp = disposition_for(entry["run_id"])
+        disp = disposition_for(cfg, entry["run_id"])
         direction = entry["direction"]
         if not _has_confident_ground_truth(direction, disp):
             rec = dict(entry)
@@ -537,7 +581,7 @@ def _partition_pre_author(batch: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 def _author_to_author(
-    to_author: list[dict], all_findings: dict[str, dict], batch_id: str,
+    cfg: AuthorConfig, to_author: list[dict], all_findings: dict[str, dict], batch_id: str,
 ) -> tuple[int, str | None, list[dict], list[dict], list[dict]]:
     """Run the agent on `to_author` and partition its result.
 
@@ -545,20 +589,20 @@ def _author_to_author(
     rc != 0 means a FATAL happened and the caller should bail with that
     code; the queue stays intact via the outer lock/rotate flow.
     """
-    baseline_stray = changes_outside_lessons()
+    baseline_stray = changes_outside_lessons(cfg)
     try:
-        result = invoke_agent(to_author, batch_id)
+        result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
         _log(f"FATAL: {e}")
         return 2, None, [], [], []
     try:
-        verify_agent_state(result, baseline_stray)
+        verify_agent_state(cfg, result, baseline_stray)
         validate_agent_result_partition(result, to_author)
         commit_sha: str | None = None
         if _result_list(result, "committed"):
             # The agent runs no git; the loop is the sole committer. Commit the
             # lessons the agent left in the working tree (no provenance trailers).
-            commit_sha = commit_lessons(_commit_message(result))
+            commit_sha = commit_lessons(cfg, _commit_message(result))
     except AuthorError as e:
         _log(f"FATAL: {e}")
         return 2, None, [], [], []
