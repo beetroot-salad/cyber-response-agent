@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -39,30 +38,20 @@ HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
 
-
-def _reexec_into_venv() -> None:
-    """Switch to defender/.venv (for PyYAML) — only when run as a script.
-
-    Guarded by ``__name__ == "__main__"`` at the call site so that
-    *importing* this module (pytest, uv, build.py) never replaces the
-    caller's process. ``build_view`` is an importable api; an
-    import-time ``os.execv`` would silently hijack the importing
-    interpreter (a test runner would exec into the CLI and exit). No-op
-    when the venv is absent or we are already inside it.
-    """
-    venv_py = DEFENDER / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
-        os.execv(str(venv_py), [str(venv_py), str(HERE), *sys.argv[1:]])
-
-
-if __name__ == "__main__":
-    _reexec_into_venv()
-
 # Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (after the venv re-exec
-# above, sys.path[0] is this script's dir, not the workspace root).
+# resolves whether this file is imported or run directly (sys.path[0] is this
+# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(REPO_ROOT)) not in sys.path:
     sys.path.insert(0, _root)
+
+from defender.scripts._venv import reexec_into_venv  # noqa: E402
+
+# Switch to defender/.venv (for PyYAML) only when run as a script — gated on
+# __main__ so that *importing* this module (pytest, uv, build.py) never replaces
+# the caller's process. ``build_view`` is an importable api; an import-time
+# ``os.execv`` would silently hijack the importing interpreter.
+if __name__ == "__main__":
+    reexec_into_venv(__file__)
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 

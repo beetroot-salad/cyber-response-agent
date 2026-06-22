@@ -39,38 +39,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Sibling import — this harness runs as a standalone script, so eval/ is on
+# sys.path[0]. Shared with harness.py.
+from _harness_util import find_venv_py, init_git, run as _run
+
 
 HERE = Path(__file__).resolve().parent
 REAL_LEARNING = HERE.parent                 # .../defender/learning
 REAL_DEFENDER = REAL_LEARNING.parent        # .../defender
 REAL_REPO_ROOT = REAL_DEFENDER.parent       # workspace root (worktree)
 RESULTS_DIR = HERE / "results_lead"
-
-
-def _run(cmd: list[str], cwd: Path, env: dict | None = None,
-         check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
-                          text=True, check=check)
-
-
-def _find_venv_py() -> Path:
-    env = os.environ.get("LEARNING_VERIFIER_PYTHON")
-    if env:
-        return Path(env).resolve()
-    # Walk up from the repo root: a git worktree has no .venv of its own, so
-    # the interpreter lives in the main checkout's defender/.venv.
-    candidates = [REAL_REPO_ROOT / "defender" / ".venv" / "bin" / "python3"]
-    p = REAL_REPO_ROOT.parent
-    for _ in range(6):
-        candidates.append(p / "defender" / ".venv" / "bin" / "python3")
-        candidates.append(p / "workspace" / "defender" / ".venv" / "bin" / "python3")
-        if p.parent == p:
-            break
-        p = p.parent
-    for c in candidates:
-        if c.is_file():
-            return c
-    sys.exit(f"no defender venv found; tried {candidates}")
 
 
 def materialize(scenario: Path, tmp: Path) -> Path:
@@ -116,16 +94,8 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     return run_dst
 
 
-def init_git(tmp: Path) -> None:
-    _run(["git", "init", "-q", "-b", "main"], cwd=tmp)
-    _run(["git", "config", "user.email", "eval@local"], cwd=tmp)
-    _run(["git", "config", "user.name", "eval"], cwd=tmp)
-    _run(["git", "add", "-A"], cwd=tmp)
-    _run(["git", "commit", "-q", "-m", "scenario baseline"], cwd=tmp)
-
-
 def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
-    venv_py = _find_venv_py()
+    venv_py = find_venv_py(REAL_REPO_ROOT)
     env = os.environ.copy()
     # Keep the lead-author's mutable queue/lock state out of the repo tree so
     # the post-flight clean-tree check isn't tripped by lock files.

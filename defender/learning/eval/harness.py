@@ -35,6 +35,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Sibling import — this harness runs as a standalone script, so eval/ is on
+# sys.path[0]. Shared with harness_lead.py.
+from _harness_util import find_venv_py, init_git, run as _run
+
 
 HERE = Path(__file__).resolve().parent
 REAL_LEARNING = HERE.parent  # .../defender/learning
@@ -48,14 +52,6 @@ LEARNING_LINKS = [
     "verify_forward.py",
     "verify_forward.md",
 ]
-
-
-def _run(cmd: list[str], cwd: Path, env: dict | None = None,
-         input_: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd, cwd=cwd, env=env, input=input_,
-        capture_output=True, text=True, check=check,
-    )
 
 
 def materialize(scenario: Path, tmp: Path) -> None:
@@ -87,35 +83,8 @@ def materialize(scenario: Path, tmp: Path) -> None:
             shutil.copy(path, tmp / "defender" / "lessons" / path.name)
 
 
-def init_git(tmp: Path) -> None:
-    _run(["git", "init", "-q", "-b", "main"], cwd=tmp)
-    # author.py runs `git status --porcelain -- defender/lessons/`. Symlinks
-    # would show up as untracked; commit baseline so the lessons dir is clean.
-    _run(["git", "config", "user.email", "eval@local"], cwd=tmp)
-    _run(["git", "config", "user.name", "eval"], cwd=tmp)
-    _run(["git", "add", "-A"], cwd=tmp)
-    _run(["git", "commit", "-q", "-m", "scenario baseline"], cwd=tmp)
-
-
-def _find_venv_py() -> Path:
-    env = os.environ.get("LEARNING_VERIFIER_PYTHON")
-    if env:
-        return Path(env).resolve()
-    candidates = [REAL_REPO_ROOT / "defender" / ".venv" / "bin" / "python3"]
-    p = REAL_REPO_ROOT.parent
-    for _ in range(5):
-        candidates.append(p / "defender" / ".venv" / "bin" / "python3")
-        if p.parent == p:
-            break
-        p = p.parent
-    for c in candidates:
-        if c.is_file():
-            return c
-    sys.exit(f"no defender venv found; tried {candidates}")
-
-
 def run_author(tmp: Path) -> tuple[subprocess.CompletedProcess, float]:
-    venv_py = _find_venv_py()
+    venv_py = find_venv_py(REAL_REPO_ROOT)
     env = os.environ.copy()
     env["LEARNING_VERIFIER_PYTHON"] = str(venv_py)
     env["VERIFY_TIMING_LOG"] = str(tmp / "_verify_timing.log")

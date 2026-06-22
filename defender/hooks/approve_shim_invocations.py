@@ -45,6 +45,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.hooks._cmd_segments import (
     NON_ADAPTER_SHIMS,
     all_defender_shims as _all_defender_shims,
+    is_main_session as _is_main_session,
     split_segments as _split_segments,
     unwrap as _unwrap,
 )
@@ -147,14 +148,6 @@ def _segment_unsafe(toks: list[str]) -> bool:
         if i == 0 and _ENV_ASSIGN_RE.match(t):
             return True
     return False
-
-
-def _is_main_session(hook_data: dict) -> bool:
-    """Main loop = no `agent_id`; a Task subagent's PreToolUse payload carries it
-    (and `agent_type`). cwd is NOT usable — v2 runs the orchestrator and every
-    gather subagent in-process at the same cwd. Matches
-    block_main_loop_raw_access._is_main_session."""
-    return not hook_data.get("agent_id")
 
 
 def _all_segments_safe(script: str, safe_leading: frozenset) -> bool:

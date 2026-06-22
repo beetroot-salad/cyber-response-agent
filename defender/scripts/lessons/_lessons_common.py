@@ -15,26 +15,14 @@ frontmatter text), so only the leaf coercions are shared.
 """
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 
+# Re-exported so the lessons CLIs keep importing it from here unchanged; the
+# single implementation now lives in the neutral `defender.scripts._venv`, shared
+# with the lessons frontend. Pure stdlib, so importing it stays pre-venv-safe.
+from defender.scripts._venv import reexec_into_venv
 
-def reexec_into_venv(script: str) -> None:
-    """Re-exec the current process under ``defender/.venv``'s python.
-
-    PyYAML lives only in the defender venv, but these CLIs are reachable with
-    the system ``python3`` (the actor's Bash tool, a bare
-    ``python3 defender/scripts/lessons/…`` run). Call this from a script's
-    ``__main__`` guard, before importing any venv-only dependency.
-
-    A no-op when the venv python is missing (e.g. CI without a bootstrapped
-    venv) or already the running interpreter (e.g. the ``bin/`` shim, which
-    execs the venv python directly) — so it never double-execs.
-    """
-    venv_py = Path(script).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
-        os.execv(str(venv_py), [str(venv_py), str(script), *sys.argv[1:]])
+__all__ = ["reexec_into_venv", "as_list", "as_str_set", "csv_set", "rel_to_repo"]
 
 
 def as_list(v) -> list:
