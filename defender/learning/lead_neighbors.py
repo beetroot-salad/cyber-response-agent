@@ -248,7 +248,7 @@ def top_k_neighbors(
     them from the handoff list and logging a corpus-health warning.
 
     Returns neighbors in descending score order. The executed template
-    itself is excluded. Cross-CLI siblings (cmdb ↔ host-state) are
+    itself is excluded. Cross-CLI siblings (siem ↔ host-state) are
     excluded by the firewall.
     """
     by_id = {t.id: t for t in catalog}

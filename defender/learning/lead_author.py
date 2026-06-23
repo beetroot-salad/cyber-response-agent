@@ -239,7 +239,7 @@ class ExecutedLead:
     is_multi_query: bool          # parent lead had >1 query
     entry_index: int              # index into the joined-leads list
     query_id: str
-    system: str                   # adapter system (cmdb/identity/...), from the queries table
+    system: str                   # adapter system (siem/cmdb/...), from the queries table
     params: dict[str, Any]
     raw_command: str              # verbatim executed command (the literal query)
     goal_text: str
