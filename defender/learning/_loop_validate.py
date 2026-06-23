@@ -154,6 +154,43 @@ def dump_oracle_doc(doc: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _validate_judge_actor_observations(doc: dict[str, Any]) -> None:
+    """Optional `actor_observations` list (adversarial-only)."""
+    if "actor_observations" not in doc:
+        return
+    observations = doc["actor_observations"]
+    if not isinstance(observations, list):
+        raise LoopError("judge `actor_observations` is not a list")
+    for i, o in enumerate(observations):
+        _validate_actor_observation(i, o)
+
+
+def _validate_judge_environment_observations(doc: dict[str, Any]) -> None:
+    """Optional `environment_observations` list. The adversarial judge also emits
+    positive-polarity env facts from grounded mispredictions, into the SHARED
+    lessons-environment/ corpus (issue #298). Same schema as the benign env
+    stream — reuse the gate."""
+    if "environment_observations" not in doc:
+        return
+    obs = doc["environment_observations"]
+    if not isinstance(obs, list):
+        raise LoopError("judge `environment_observations` is not a list")
+    for i, o in enumerate(obs):
+        _validate_environment_observation(i, o)
+
+
+def _validate_judge_resolution_method(doc: dict[str, Any]) -> None:
+    """Optional `resolution_method`: the grounded form offline enrichment stamps
+    inside the case-history ticket's `resolution` (issue #338) — emitted only on
+    a benign disposition, so optional here; when present it must be a non-empty
+    scalar line."""
+    if "resolution_method" not in doc:
+        return
+    rm = doc["resolution_method"]
+    if not isinstance(rm, str) or not rm.strip():
+        raise LoopError("judge `resolution_method` must be a non-empty string")
+
+
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise LoopError("judge YAML did not parse to a mapping")
@@ -163,28 +200,9 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
         raise LoopError("judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         _validate_finding(i, f, ALL_FINDING_TYPES)
-    if "actor_observations" in doc:
-        observations = doc["actor_observations"]
-        if not isinstance(observations, list):
-            raise LoopError("judge `actor_observations` is not a list")
-        for i, o in enumerate(observations):
-            _validate_actor_observation(i, o)
-    # The adversarial judge also emits positive-polarity env facts from grounded
-    # mispredictions, into the SHARED lessons-environment/ corpus (issue #298).
-    # Same schema as the benign env stream — reuse the gate.
-    if "environment_observations" in doc:
-        obs = doc["environment_observations"]
-        if not isinstance(obs, list):
-            raise LoopError("judge `environment_observations` is not a list")
-        for i, o in enumerate(obs):
-            _validate_environment_observation(i, o)
-    # `resolution_method` is the grounded form offline enrichment stamps inside the
-    # case-history ticket's `resolution` (issue #338) — emitted only on a benign
-    # disposition, so optional here; when present it must be a non-empty scalar line.
-    if "resolution_method" in doc:
-        rm = doc["resolution_method"]
-        if not isinstance(rm, str) or not rm.strip():
-            raise LoopError("judge `resolution_method` must be a non-empty string")
+    _validate_judge_actor_observations(doc)
+    _validate_judge_environment_observations(doc)
+    _validate_judge_resolution_method(doc)
     return doc
 
 

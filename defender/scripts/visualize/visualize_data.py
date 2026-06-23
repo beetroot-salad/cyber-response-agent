@@ -292,6 +292,87 @@ def merge_assistant_events(events: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _accumulate_usage(b: dict, msg: dict) -> None:
+    """Fold one merged message's usage + cost into bucket ``b`` (shared by both
+    attribution passes)."""
+    usage = msg.get("usage") or {}
+    model = msg.get("model", "")
+    b["turns"] += 1
+    b["in"] += usage.get("input_tokens", 0)
+    b["out"] += usage.get("output_tokens", 0)
+    b["cache_r"] += usage.get("cache_read_input_tokens", 0)
+    b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
+    b["cost"] += usage_cost(model, usage)
+
+
+def _build_msg_phase(events: list[dict], tags: list[str | None]) -> dict[str, str]:
+    """msg.id -> phase map from the *last* tag we saw for each id (so a message
+    whose final delta wrote "## ORIENT" lands in ORIENT, not the prior phase)."""
+    msg_phase: dict[str, str] = {}
+    for ev, ph in zip(events, tags, strict=False):
+        if ev.get("type") != "assistant" or ph is None:
+            continue
+        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
+        if mid:
+            msg_phase[mid] = ph
+    return msg_phase
+
+
+def _attribute_main_agent(
+    deduped: list[dict],
+    buckets: dict[str, dict],
+    msg_phase: dict[str, str],
+    phase_order: list[str],
+) -> dict[str, str]:
+    """First pass: bucket main-agent messages by ``msg_phase``. Returns the
+    ``task_tool_use_id -> phase`` map so the second pass can attribute subagent
+    messages to the phase that issued their parent ``Task``."""
+    task_phase: dict[str, str] = {}
+    for ev in deduped:
+        if ev.get("parent_tool_use_id"):
+            continue
+        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid", "")
+        ph = msg_phase.get(mid, phase_order[0])
+        b = buckets.get(ph)
+        if b is None:
+            continue
+        msg = ev.get("message") or {}
+        _accumulate_usage(b, msg)
+        for blk in (msg.get("content") or []):
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                name = blk.get("name", "?")
+                b["tool_calls"] += 1
+                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+                if name in ("Task", "Agent"):
+                    b["subagent_calls"] += 1
+                    task_phase[blk.get("id", "")] = ph
+    return task_phase
+
+
+def _attribute_subagents(
+    deduped: list[dict],
+    buckets: dict[str, dict],
+    task_phase: dict[str, str],
+) -> None:
+    """Second pass: subagent messages, attributed by ``parent_tool_use_id`` to the
+    phase that issued the parent ``Task``."""
+    for ev in deduped:
+        pid = ev.get("parent_tool_use_id")
+        if not pid:
+            continue
+        ph = task_phase.get(pid)
+        if ph is None:
+            continue
+        msg = ev.get("message") or {}
+        b = buckets[ph]
+        _accumulate_usage(b, msg)
+        for blk in (msg.get("content") or []):
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                name = blk.get("name", "?")
+                b["tool_calls"] += 1
+                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+
+
 def phase_attribution(
     events: list[dict],
     phase_order: list[str],
@@ -322,83 +403,18 @@ def phase_attribution(
     tags = tag_events_by_phase(events, phase_order)
     deduped = merge_assistant_events(events)
 
-    # Build msg.id -> phase map from the *last* tag we saw for each id.
-    msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant" or ph is None:
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-        if mid:
-            msg_phase[mid] = ph
-
-    # First pass: main-agent messages.
-    task_phase: dict[str, str] = {}
-    for ev in deduped:
-        if ev.get("parent_tool_use_id"):
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid", "")
-        ph = msg_phase.get(mid, phase_order[0])
-        b = buckets.get(ph)
-        if b is None:
-            continue
-        msg = ev.get("message") or {}
-        usage = msg.get("usage") or {}
-        model = msg.get("model", "")
-        b["turns"] += 1
-        b["in"] += usage.get("input_tokens", 0)
-        b["out"] += usage.get("output_tokens", 0)
-        b["cache_r"] += usage.get("cache_read_input_tokens", 0)
-        b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-        b["cost"] += usage_cost(model, usage)
-        for blk in (msg.get("content") or []):
-            if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                name = blk.get("name", "?")
-                b["tool_calls"] += 1
-                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
-                if name in ("Task", "Agent"):
-                    b["subagent_calls"] += 1
-                    task_phase[blk.get("id", "")] = ph
-
-    # Second pass: subagent messages, attributed by parent_tool_use_id.
-    for ev in deduped:
-        pid = ev.get("parent_tool_use_id")
-        if not pid:
-            continue
-        ph = task_phase.get(pid)
-        if ph is None:
-            continue
-        msg = ev.get("message") or {}
-        usage = msg.get("usage") or {}
-        model = msg.get("model", "")
-        b = buckets[ph]
-        b["turns"] += 1
-        b["in"] += usage.get("input_tokens", 0)
-        b["out"] += usage.get("output_tokens", 0)
-        b["cache_r"] += usage.get("cache_read_input_tokens", 0)
-        b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-        b["cost"] += usage_cost(model, usage)
-        for blk in (msg.get("content") or []):
-            if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                name = blk.get("name", "?")
-                b["tool_calls"] += 1
-                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+    msg_phase = _build_msg_phase(events, tags)
+    task_phase = _attribute_main_agent(deduped, buckets, msg_phase, phase_order)
+    _attribute_subagents(deduped, buckets, task_phase)
 
     return buckets
 
 
-def phase_wall_times(
-    events: list[dict],
-    tags: list[str | None],
-    phase_order: list[str],
-) -> dict[str, dict]:
-    """Compute per-phase [start, end) durations from ``user`` event timestamps.
-
-    The trace only carries ISO timestamps on ``user`` events
-    (tool_results); we tile the run wall-clock by treating
-    *first-timestamp-in-a-phase* as the phase's end boundary for the
-    preceding phase. Returns ``{phase: {start, end, duration_sec}}``;
-    phases with no timestamped events get a zero-duration entry.
-    """
+def _parse_timestamped_user_events(
+    events: list[dict], tags: list[str | None]
+) -> list[tuple]:
+    """Pull (datetime, phase) pairs from the ``user`` events that carry a parseable
+    ISO timestamp + a phase tag (the only events the trace timestamps)."""
     from datetime import datetime
 
     def _parse(ts: str):
@@ -418,10 +434,15 @@ def phase_wall_times(
         if dt is None:
             continue
         parsed.append((dt, ph))
+    return parsed
 
-    out: dict[str, dict] = {ph: {"start": None, "end": None, "duration_sec": 0.0} for ph in phase_order}
-    if not parsed:
-        return out
+
+def _tile_phase_boundaries(
+    parsed: list[tuple], phase_order: list[str]
+) -> dict[str, dict]:
+    """Tile the run wall-clock into per-phase [start, end) windows: each phase ends
+    at the *first* timestamp seen in a later phase (or the run end if none follows).
+    Returns ``{phase: {start, end, duration_sec}}``."""
     parsed.sort(key=lambda x: x[0])
     run_start = parsed[0][0]
     run_end = parsed[-1][0]
@@ -440,6 +461,7 @@ def phase_wall_times(
                 break
         next_phase_first.append(nxt)
 
+    out: dict[str, dict] = {}
     cursor = run_start
     for i, ph in enumerate(phase_order):
         start = cursor
@@ -452,6 +474,28 @@ def phase_wall_times(
             "duration_sec": (end - start).total_seconds(),
         }
         cursor = end
+    return out
+
+
+def phase_wall_times(
+    events: list[dict],
+    tags: list[str | None],
+    phase_order: list[str],
+) -> dict[str, dict]:
+    """Compute per-phase [start, end) durations from ``user`` event timestamps.
+
+    The trace only carries ISO timestamps on ``user`` events
+    (tool_results); we tile the run wall-clock by treating
+    *first-timestamp-in-a-phase* as the phase's end boundary for the
+    preceding phase. Returns ``{phase: {start, end, duration_sec}}``;
+    phases with no timestamped events get a zero-duration entry.
+    """
+    parsed = _parse_timestamped_user_events(events, tags)
+
+    out: dict[str, dict] = {ph: {"start": None, "end": None, "duration_sec": 0.0} for ph in phase_order}
+    if not parsed:
+        return out
+    out.update(_tile_phase_boundaries(parsed, phase_order))
     return out
 
 

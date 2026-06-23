@@ -101,6 +101,31 @@ def _report_disposition(run_dir: Path) -> str:
     return str(fm.get("disposition") or "?")
 
 
+def _earliest_load(
+    loaded: Path, lesson_name: str, created_at: datetime | None
+) -> str | None:
+    """Earliest ``ts`` in one run's ``lessons_loaded.jsonl`` that cites
+    ``lesson_name`` at/after ``created_at`` (the lesson's current incarnation),
+    or None if it was never qualifyingly loaded."""
+    earliest: str | None = None
+    for line in loaded.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("lesson_name") != lesson_name:
+            continue
+        ts = _parse_dt(row.get("ts"))
+        if created_at is not None and (ts is None or ts < created_at):
+            continue  # loaded before this lesson's current incarnation
+        if earliest is None or str(row.get("ts")) < earliest:
+            earliest = str(row.get("ts"))
+    return earliest
+
+
 def in_context_cases(
     lesson_name: str, created_at: datetime | None, runs_dir: Path
 ) -> list[CaseHit]:
@@ -114,22 +139,7 @@ def in_context_cases(
         loaded = run_dir / "lessons_loaded.jsonl"
         if not loaded.is_file():
             continue
-        earliest: str | None = None
-        for line in loaded.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if row.get("lesson_name") != lesson_name:
-                continue
-            ts = _parse_dt(row.get("ts"))
-            if created_at is not None and (ts is None or ts < created_at):
-                continue  # loaded before this lesson's current incarnation
-            if earliest is None or str(row.get("ts")) < earliest:
-                earliest = str(row.get("ts"))
+        earliest = _earliest_load(loaded, lesson_name, created_at)
         if earliest is not None:
             hits.append(CaseHit(run_dir.name, _report_disposition(run_dir), earliest))
     return hits

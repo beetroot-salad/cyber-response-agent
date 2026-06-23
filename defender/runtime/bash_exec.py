@@ -239,6 +239,20 @@ def _run_one_pipeline(
     return rc, out or "", err
 
 
+def _short_circuit(pl, rc: int) -> bool:
+    """True if this pipeline's `&&`/`||` connector short-circuits given the
+    previous pipeline's `rc` — i.e. it should be SKIPPED. `&&` runs only after a
+    success, `||` runs only after a failure; `;` (and a bare first pipeline)
+    never short-circuits."""
+    return (pl.connector == "&&" and rc != 0) or (pl.connector == "||" and rc == 0)
+
+
+def _is_cd_pipeline(pl) -> bool:
+    """True for a standalone `cd …` pipeline — handled inline (it updates the cwd
+    threaded into later stages) rather than executed as a subprocess."""
+    return len(pl.stages) == 1 and bool(pl.stages[0].argv) and pl.stages[0].argv[0] == "cd"
+
+
 def run_pipeline(
     command: str, *, env: dict[str, str], cwd: str | Path, timeout: float
 ) -> tuple[int, str, str]:
@@ -268,15 +282,12 @@ def run_pipeline(
 
     ran_any = False
     for pl in pipelines:
-        if ran_any:
-            if pl.connector == "&&" and rc != 0:
-                continue
-            if pl.connector == "||" and rc == 0:
-                continue
+        if ran_any and _short_circuit(pl, rc):
+            continue
         ran_any = True
 
         # `cd` as a standalone pipeline updates the cwd threaded into later stages.
-        if len(pl.stages) == 1 and pl.stages[0].argv and pl.stages[0].argv[0] == "cd":
+        if _is_cd_pipeline(pl):
             cwd, rc, cd_err = _do_cd(cwd, pl.stages[0].argv)
             if cd_err:
                 err_parts.append(cd_err)

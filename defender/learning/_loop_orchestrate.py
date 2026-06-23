@@ -595,6 +595,46 @@ def _render_transcript(run_dir: Path) -> None:
     render_and_mirror(run_dir)
 
 
+def _process_marker(
+    marker: Path,
+    inflight_dir: Path,
+    qdir: Path,
+    run_one_fn: Callable[[Path], int],
+    render: Callable[[Path], None],
+) -> bool:
+    """Claim and process one learn-queue marker. Returns True if the run was
+    drained (counts toward the drained total), False if it was skipped (lost the
+    claim race) or quarantined. Each marker is claimed by an atomic rename into
+    ``inflight/`` before processing, so two workers never run the same run dir
+    (the loser's ``os.replace`` raises ``FileNotFoundError`` and it moves on)."""
+    claimed = inflight_dir / marker.name
+    try:
+        os.replace(marker, claimed)
+    except FileNotFoundError:
+        return False  # another worker claimed it first
+    try:
+        spec = json.loads(claimed.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
+        return False
+    run_dir = Path(spec.get("run_dir", ""))
+    if not run_dir.is_dir():
+        _quarantine_marker(spec, claimed, qdir, "artifact-missing")
+        return False
+    try:
+        run_one_fn(run_dir)
+    except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
+        _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
+        return False
+    try:
+        render(run_dir)
+    except Exception as e:  # noqa: BLE001 — render is best-effort
+        _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
+    with contextlib.suppress(OSError):
+        claimed.unlink()
+    return True
+
+
 def learn_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
@@ -630,32 +670,8 @@ def learn_drain(
         inflight_dir.mkdir(parents=True, exist_ok=True)
     drained = 0
     for marker in markers:
-        claimed = inflight_dir / marker.name
-        try:
-            os.replace(marker, claimed)
-        except FileNotFoundError:
-            continue  # another worker claimed it first
-        try:
-            spec = json.loads(claimed.read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
-            continue
-        run_dir = Path(spec.get("run_dir", ""))
-        if not run_dir.is_dir():
-            _quarantine_marker(spec, claimed, qdir, "artifact-missing")
-            continue
-        try:
-            run_one_fn(run_dir)
-        except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
-            _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
-            continue
-        try:
-            render(run_dir)
-        except Exception as e:  # noqa: BLE001 — render is best-effort
-            _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
-        with contextlib.suppress(OSError):
-            claimed.unlink()
-        drained += 1
+        if _process_marker(marker, inflight_dir, qdir, run_one_fn, render):
+            drained += 1
     _log(f"learn_drain: drained {drained} run(s)")
     return 0
 
