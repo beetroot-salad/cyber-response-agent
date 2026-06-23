@@ -160,6 +160,109 @@ def _header_has_body(text: str, header: str) -> bool:
     return len(body) >= 10
 
 
+def _introduced_headers(new_text: str, seen_headers: set[str], header_re) -> list[str]:
+    """New ``## PHASE`` headers in ``new_text`` that carry substantive body (not
+    scaffolding) and haven't been seen before in the trace. Mutates ``seen_headers``
+    so a header introduced once isn't re-counted by a later Edit that re-states it."""
+    introduced: list[str] = []
+    for m in header_re.finditer(new_text):
+        h = m.group(1).strip()
+        if h in seen_headers:
+            continue
+        if _header_has_body(new_text, h):
+            introduced.append(h)
+            seen_headers.add(h)
+    return introduced
+
+
+def _match_loop_verb(
+    verb: str, expected_loop_verbs: list[str], seen_loop_idx: int
+) -> tuple[str | None, int]:
+    """Advance the loop-verb cursor to the next phase whose verb matches ``verb``.
+    Returns (target phase or None, the advanced cursor). The cursor only moves
+    forward — skipped candidates are consumed too, so each loop phase matches once."""
+    while seen_loop_idx < len(expected_loop_verbs):
+        cand = expected_loop_verbs[seen_loop_idx]
+        seen_loop_idx += 1
+        if phase_verb(cand) == verb:
+            return cand, seen_loop_idx
+    return None, seen_loop_idx
+
+
+def _match_non_loop_verb(verb: str, expected_non_loop: list[str]) -> str | None:
+    """The non-loop phase (ORIENT/REPORT/…) whose verb matches ``verb``, or None."""
+    for cand in expected_non_loop:
+        if phase_verb(cand) == verb:
+            return cand
+    return None
+
+
+class _PhaseTagger:
+    """The cursor state for ``tag_events_by_phase``: the current phase plus the
+    bookkeeping (loop cursor, consumed tool_use ids, seen headers) the original
+    walk threaded as locals — made explicit so the per-event dispatch stays under
+    the complexity gate."""
+
+    def __init__(self, phase_order: list[str]) -> None:
+        self.current = phase_order[0]
+        self.expected_loop_verbs = [p for p in phase_order if phase_verb(p) in _LOOP_VERBS]
+        self.expected_non_loop = [p for p in phase_order if phase_verb(p) not in _LOOP_VERBS]
+        self.seen_loop_idx = 0
+        # Stream-json emits the same tool_use block id repeatedly across the
+        # streamed deltas of one message; dedupe so each Write/Edit only advances
+        # the phase once.
+        self.consumed_tool_use_ids: set[str] = set()
+        # Every "## PHASE" header ever seen in investigation.md writes. Subsequent
+        # Edits often fill in those phases without re-introducing the headers; we
+        # ask "is this header new to the trace?" rather than "absent from this
+        # Edit's old_string?" to detect real transitions.
+        self.seen_headers: set[str] = set()
+        self.header_re = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
+
+    def _advance(self, raw_header: str) -> None:
+        """Move ``current`` to the phase an introduced header names, if any."""
+        verb = raw_header.upper().split(" ", 1)[0]
+        if verb in _LOOP_VERBS:
+            target, self.seen_loop_idx = _match_loop_verb(
+                verb, self.expected_loop_verbs, self.seen_loop_idx
+            )
+        else:
+            target = _match_non_loop_verb(verb, self.expected_non_loop)
+        if target is not None:
+            self.current = target
+
+    def _process_block(self, blk) -> None:
+        """One content block: if it's a new-phase-introducing Write/Edit on
+        investigation.md, advance the cursor (deduping repeated stream deltas)."""
+        if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+            return
+        if blk.get("name") not in ("Write", "Edit"):
+            return
+        tu_id = blk.get("id") or ""
+        if tu_id and tu_id in self.consumed_tool_use_ids:
+            return
+        inp = blk.get("input", {}) or {}
+        fp = str(inp.get("file_path", ""))
+        if not fp.endswith("investigation.md"):
+            return
+        if tu_id:
+            self.consumed_tool_use_ids.add(tu_id)
+        new_text = inp.get("content") or inp.get("new_string") or ""
+        for raw in _introduced_headers(new_text, self.seen_headers, self.header_re):
+            self._advance(raw)
+
+    def tag(self, events: list[dict]) -> list[str | None]:
+        """Tag each event with the phase active when emitted — after any advance the
+        event's own writes trigger (so the turn writing "## ORIENT" lands in ORIENT)."""
+        tags: list[str | None] = []
+        for ev in events:
+            if ev.get("type") == "assistant":
+                for blk in (ev.get("message") or {}).get("content") or []:
+                    self._process_block(blk)
+            tags.append(self.current)
+        return tags
+
+
 def tag_events_by_phase(events: list[dict], phase_order: list[str]) -> list[str | None]:
     """Walk the raw event stream and tag each event with the phase active when it was emitted.
 
@@ -176,73 +279,7 @@ def tag_events_by_phase(events: list[dict], phase_order: list[str]) -> list[str 
     """
     if not phase_order:
         return [None] * len(events)
-
-    expected_loop_verbs = [p for p in phase_order if phase_verb(p) in _LOOP_VERBS]
-    expected_non_loop = [p for p in phase_order if phase_verb(p) not in _LOOP_VERBS]
-    seen_loop_idx = 0
-    current = phase_order[0]
-    header_re = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
-
-    # Stream-json emits the same tool_use block id repeatedly across the
-    # streamed deltas of one message; dedupe so each Write/Edit only
-    # advances the phase once.
-    consumed_tool_use_ids: set[str] = set()
-    # Track every "## PHASE" header we've ever seen in investigation.md
-    # writes. Subsequent Edits often fill in those phases without
-    # re-introducing the headers; we ask "is this header new to the
-    # trace?" rather than "is it absent from this specific Edit's
-    # old_string?" to detect real transitions.
-    seen_headers: set[str] = set()
-
-    tags: list[str | None] = []
-    for ev in events:
-        if ev.get("type") != "assistant":
-            tags.append(current)
-            continue
-        msg = ev.get("message") or {}
-        for blk in msg.get("content") or []:
-            if not isinstance(blk, dict) or blk.get("type") != "tool_use":
-                continue
-            if blk.get("name") not in ("Write", "Edit"):
-                continue
-            tu_id = blk.get("id") or ""
-            if tu_id and tu_id in consumed_tool_use_ids:
-                continue
-            inp = blk.get("input", {}) or {}
-            fp = str(inp.get("file_path", ""))
-            if not fp.endswith("investigation.md"):
-                continue
-            if tu_id:
-                consumed_tool_use_ids.add(tu_id)
-            new_text = inp.get("content") or inp.get("new_string") or ""
-            new_headers = [m.group(1).strip() for m in header_re.finditer(new_text)]
-            introduced: list[str] = []
-            for h in new_headers:
-                if h in seen_headers:
-                    continue
-                if _header_has_body(new_text, h):
-                    introduced.append(h)
-                    seen_headers.add(h)
-            for raw in introduced:
-                verb = raw.upper().split(" ", 1)[0]
-                target = None
-                if verb in _LOOP_VERBS:
-                    while seen_loop_idx < len(expected_loop_verbs):
-                        cand = expected_loop_verbs[seen_loop_idx]
-                        if phase_verb(cand) == verb:
-                            target = cand
-                            seen_loop_idx += 1
-                            break
-                        seen_loop_idx += 1
-                else:
-                    for cand in expected_non_loop:
-                        if phase_verb(cand) == verb:
-                            target = cand
-                            break
-                if target is not None:
-                    current = target
-        tags.append(current)
-    return tags
+    return _PhaseTagger(phase_order).tag(events)
 
 
 # ---------------------------------------------------------------------------

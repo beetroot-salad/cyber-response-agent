@@ -734,6 +734,15 @@ Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 LoopError / 
 """
 
 
+def _run_stage(stage: Callable[[], int]) -> int:
+    """Run one stage entrypoint, mapping a LoopError to the FATAL exit-2 contract."""
+    try:
+        return stage()
+    except LoopError as e:
+        print(f"[loop] FATAL: {e}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str]) -> int:
     import argparse
 
@@ -772,21 +781,13 @@ def main(argv: list[str]) -> int:
         if ns.run_dir is not None:
             print("--author-drain takes no run_dir", file=sys.stderr)
             return 1
-        try:
-            return author_drain()
-        except LoopError as e:
-            print(f"[loop] FATAL: {e}", file=sys.stderr)
-            return 2
+        return _run_stage(author_drain)
 
     if ns.learn_drain:
         if ns.run_dir is not None:
             print("--learn-drain takes no run_dir", file=sys.stderr)
             return 1
-        try:
-            return learn_drain()
-        except LoopError as e:
-            print(f"[loop] FATAL: {e}", file=sys.stderr)
-            return 2
+        return _run_stage(learn_drain)
 
     if ns.run_dir is None:
         print("run_dir required (or pass --author-drain)", file=sys.stderr)
@@ -795,8 +796,4 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    try:
-        return run_one(run_dir)
-    except LoopError as e:
-        print(f"[loop] FATAL: {e}", file=sys.stderr)
-        return 2
+    return _run_stage(lambda: run_one(run_dir))

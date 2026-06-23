@@ -56,20 +56,26 @@ package = false
 py-modules = []
 
 [tool.ruff.lint]
-# Lint gates, two tiers (issue #400):
-#   1. Repo-wide hard gate: select = ["E","F"] minus E402/E501, run in CI with
-#      explicit flags (`ruff check . --select E,F --ignore E402,E501`).
-#   2. Defender-scoped extended gate: families below graduate from extend-select
-#      into a blocking `ruff check defender --select <family>` step in ci.yml as
-#      their violations are cleared. extend-select therefore lists only the
-#      families still being paid down — a non-blocking code-smell signal via the
-#      code-smells job's `ruff check defender --statistics`.
-# Full smell sweep locally:  ruff check defender
-select = ["E", "F"]
-extend-select = [
+# Lint gates, two tiers (issue #400 — extended-ruff drain complete):
+#   1. Repo-wide hard gate — E,F only, run in CI with explicit flags
+#      (`ruff check . --select E,F --ignore E402,E501`) so it stays uniform over
+#      the whole repo; experiments/ + root scripts/ are E,F-only by design.
+#   2. Defender-scoped hard gate — the full `select` below, run config-driven as
+#      `ruff check defender` in ci.yml. The extended families graduated here from
+#      a non-blocking signal one group at a time as their violations cleared; all
+#      are now clean in defender/ and blocking.
+# Full local gate:  ruff check defender
+select = [
+    "E",
+    "F",
+    "B",             # flake8-bugbear: real bug patterns (mutable defaults, etc.)
+    "SIM",           # flake8-simplify: redundant logic
     "C901",          # mccabe complexity
     "PLR0912",       # too-many-branches
-    # Promoted to the hard gate (#400): B, SIM, UP, PT, PLR0913, PLR0915.
+    "PLR0913",       # too-many-arguments
+    "PLR0915",       # too-many-statements
+    "PT",            # flake8-pytest-style
+    "UP",            # pyupgrade
 ]
 # E402: tests/scripts intentionally do sys.path.insert(...) before imports.
 # E501: line length is enforced by formatter, not lint.

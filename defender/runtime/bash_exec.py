@@ -72,32 +72,69 @@ class _Pipeline:
     stages: list[_Stage] = field(default_factory=list)
 
 
-def _build_pipelines(inner: str) -> list[_Pipeline]:
-    """Decompose an already-unwrapped, already-validated command into the pipeline
-    structure to execute. Shares `tokenize` with the gate, so word boundaries match."""
-    pipelines: list[_Pipeline] = []
-    pending_connector = "first"
-    cur_stages: list[_Stage] = []
-    cur_argv: list[str] = []
-    cur_stderr = "capture"
+@dataclass
+class _PipelineBuilder:
+    """Accumulates the `_Pipeline` structure token by token. Holds the in-progress
+    stage/pipeline + the pending inter-pipeline connector — the nonlocal state the
+    original `end_stage`/`end_pipeline` closures mutated, made explicit so the
+    per-token dispatch stays under the complexity gate."""
 
-    def end_stage() -> None:
-        nonlocal cur_argv, cur_stderr
-        if cur_argv:
-            cur_stages.append(_Stage(cur_argv, cur_stderr))
-        cur_argv = []
-        cur_stderr = "capture"
+    pipelines: list[_Pipeline] = field(default_factory=list)
+    pending_connector: str = "first"
+    cur_stages: list[_Stage] = field(default_factory=list)
+    cur_argv: list[str] = field(default_factory=list)
+    cur_stderr: str = "capture"
 
-    def end_pipeline(next_connector: str) -> None:
-        nonlocal cur_stages, pending_connector
-        end_stage()
-        if cur_stages:
-            pipelines.append(_Pipeline(pending_connector, cur_stages))
-            cur_stages = []
-            pending_connector = next_connector
+    def end_stage(self) -> None:
+        if self.cur_argv:
+            self.cur_stages.append(_Stage(self.cur_argv, self.cur_stderr))
+        self.cur_argv = []
+        self.cur_stderr = "capture"
+
+    def end_pipeline(self, next_connector: str) -> None:
+        self.end_stage()
+        if self.cur_stages:
+            self.pipelines.append(_Pipeline(self.pending_connector, self.cur_stages))
+            self.cur_stages = []
+            self.pending_connector = next_connector
         # If nothing flushed, KEEP pending_connector — preserves a line-trailing
         # `&&`/`||` whose right operand sits on the next physical line.
 
+    def feed_token(self, toks: list[str], i: int) -> int:
+        """Fold token `toks[i]` into the in-progress structure; return the next
+        index. Raises `BashExecError` on any operator/redirect the gate wouldn't
+        have approved (validator and executor diverged → fail closed)."""
+        t, n = toks[i], len(toks)
+        if t == "|":
+            self.end_stage()
+            return i + 1
+        if t in _PIPELINE_SEPARATORS:
+            self.end_pipeline(t)
+            return i + 1
+        if t == ">":
+            # Benign stderr discard: `2>/dev/null`, tokenized `2` `>` `/dev/null`.
+            if self.cur_argv and self.cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "/dev/null":
+                self.cur_argv.pop()
+                self.cur_stderr = "devnull"
+                return i + 2
+            raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
+        if t == ">&":
+            # Benign stderr merge: `2>&1`, tokenized `2` `>&` `1`.
+            if self.cur_argv and self.cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "1":
+                self.cur_argv.pop()
+                self.cur_stderr = "stdout"
+                return i + 2
+            raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
+        if t and set(t) <= _OPERATOR_CHARS:
+            raise BashExecError(f"unexpected operator token in validated command: {t!r}")
+        self.cur_argv.append(t)
+        return i + 1
+
+
+def _build_pipelines(inner: str) -> list[_Pipeline]:
+    """Decompose an already-unwrapped, already-validated command into the pipeline
+    structure to execute. Shares `tokenize` with the gate, so word boundaries match."""
+    builder = _PipelineBuilder()
     # Tokenize per physical line so an unquoted newline stays a command boundary
     # (matches split_segments). A quote spanning a newline makes the line
     # untokenizable → fail closed (the gate already denied it).
@@ -107,37 +144,9 @@ def _build_pipelines(inner: str) -> list[_Pipeline]:
             raise BashExecError("untokenizable command reached the executor")
         i, n = 0, len(toks)
         while i < n:
-            t = toks[i]
-            if t == "|":
-                end_stage()
-                i += 1
-                continue
-            if t in _PIPELINE_SEPARATORS:
-                end_pipeline(t)
-                i += 1
-                continue
-            if t == ">":
-                # Benign stderr discard: `2>/dev/null`, tokenized `2` `>` `/dev/null`.
-                if cur_argv and cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "/dev/null":
-                    cur_argv.pop()
-                    cur_stderr = "devnull"
-                    i += 2
-                    continue
-                raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
-            if t == ">&":
-                # Benign stderr merge: `2>&1`, tokenized `2` `>&` `1`.
-                if cur_argv and cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "1":
-                    cur_argv.pop()
-                    cur_stderr = "stdout"
-                    i += 2
-                    continue
-                raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
-            if t and set(t) <= _OPERATOR_CHARS:
-                raise BashExecError(f"unexpected operator token in validated command: {t!r}")
-            cur_argv.append(t)
-            i += 1
-        end_pipeline(";")  # the physical newline ends the current command
-    return pipelines
+            i = builder.feed_token(toks, i)
+        builder.end_pipeline(";")  # the physical newline ends the current command
+    return builder.pipelines
 
 
 def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, str]:
@@ -163,6 +172,35 @@ def _kill_all(procs: list[subprocess.Popen]) -> None:
         p.wait()
 
 
+def _stage_stderr(stage: _Stage, errfile):
+    """Map a stage's stderr wiring to its Popen `stderr` target: `2>/dev/null` →
+    DEVNULL, `2>&1` → STDOUT (merge into this stage's stdout pipe), otherwise the
+    shared capture file."""
+    if stage.stderr == "devnull":
+        return subprocess.DEVNULL
+    if stage.stderr == "stdout":
+        return subprocess.STDOUT
+    return errfile
+
+
+def _reap_upstream(
+    procs: list[subprocess.Popen], deadline: float, command: str, timeout: float
+) -> None:
+    """Reap the upstream stages (all but the last), bounded by the SAME deadline as
+    the last stage. The last stage can exit before an upstream one (e.g.
+    `tail -f f | head -1`: head reads one line and exits, while tail blocks on the
+    file and never writes again, so it never receives SIGPIPE). With no outer shell
+    to bound the pipeline, an unbounded `wait()` would hang the read-only lane past
+    the caller's timeout — so wait against the remaining budget and tear the group
+    down if it elapses."""
+    for p in procs[:-1]:
+        try:
+            p.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            _kill_all(procs)
+            raise subprocess.TimeoutExpired(command, timeout) from None
+
+
 def _run_one_pipeline(
     stages: list[_Stage], *, env: dict[str, str], cwd: Path, timeout: float, command: str
 ) -> tuple[int, str, str]:
@@ -177,12 +215,7 @@ def _run_one_pipeline(
         prev_stdout = None  # None → first stage reads from /dev/null
         try:
             for stage in stages:
-                if stage.stderr == "devnull":
-                    stderr = subprocess.DEVNULL
-                elif stage.stderr == "stdout":
-                    stderr = subprocess.STDOUT  # merge into THIS stage's stdout pipe
-                else:
-                    stderr = errfile
+                stderr = _stage_stderr(stage, errfile)
                 try:
                     proc = subprocess.Popen(
                         stage.argv,
@@ -214,19 +247,7 @@ def _run_one_pipeline(
             except subprocess.TimeoutExpired:
                 _kill_all(procs)
                 raise subprocess.TimeoutExpired(command, timeout) from None
-            # Reap the upstream stages, but stay bounded by the SAME deadline. The
-            # last stage can exit before an upstream one (e.g. `tail -f f | head -1`:
-            # head reads one line and exits, while tail blocks on the file and never
-            # writes again, so it never receives SIGPIPE). With no outer shell to
-            # bound the pipeline, an unbounded `p.wait()` here would hang the
-            # read-only lane past the caller's timeout — so wait against the
-            # remaining budget and tear the group down if it elapses.
-            for p in procs[:-1]:
-                try:
-                    p.wait(timeout=max(0.0, deadline - time.monotonic()))
-                except subprocess.TimeoutExpired:
-                    _kill_all(procs)
-                    raise subprocess.TimeoutExpired(command, timeout) from None
+            _reap_upstream(procs, deadline, command, timeout)
             rc = last.returncode
         finally:
             # Close any dangling pipe fds the parent still holds.
