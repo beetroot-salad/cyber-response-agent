@@ -1,0 +1,4 @@
+{
+  "//": "lint_vulture baseline — dead-code findings from vulture over defender/. Fingerprint is the finding with the line number stripped. CI fails on a finding absent here. Regenerate: python scripts/lint/lint_vulture.py --update-baseline. Annotate intentional entries (e.g. \"intentional: public API\"); \"\" = un-triaged.",
+  "entries": {}
+}

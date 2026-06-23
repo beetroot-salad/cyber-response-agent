@@ -1,0 +1,11 @@
+{
+  "//": "lint_ci_hygiene baseline — hardcoded-paths / bare-python3 / split hook-matcher smells in defender/. Fingerprint is check:file:token (no line number). CI fails on a fingerprint absent here. Regenerate: python scripts/lint/lint_ci_hygiene.py --update-baseline. Annotate intentional entries; \"\" means un-triaged debt to fix or annotate.",
+  "entries": {
+    "hardcoded-path:defender/learning/eval_held_out.py:/tmp/defender-": "",
+    "hardcoded-path:defender/learning/test_loop.py:/tmp/defender-": "",
+    "hardcoded-path:defender/run.py:/workspace/": "",
+    "hardcoded-path:defender/runtime/permission.py:/tmp/defender-": "",
+    "hardcoded-path:defender/skills/handbook/content/run-artifacts.md:/tmp/defender-": "",
+    "hardcoded-path:defender/skills/ticket/SKILL.md:/workspace/": ""
+  }
+}

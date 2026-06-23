@@ -25,7 +25,7 @@ body (docstrings stripped) and classifies:
                           silently diverge in behavior. (#359 `_parse_frontmatter`.)
 
 Ratchet model (mirrors the jscpd gate): the duplicate names that exist *today*
-are recorded in `lint_duplicate_helpers_baseline.txt`. The lint fails (exit 1)
+are recorded in `lint_duplicate_helpers_baseline.json`. The lint fails (exit 1)
 only on a duplicate name *not* in the baseline — i.e. newly-introduced drift —
 so it blocks growth without forcing a big-bang cleanup of the existing set.
 Regenerate the baseline after a deliberate change with `--update-baseline`.
@@ -45,7 +45,8 @@ same-named copies fire, the renamed sibling does not. Block-level dup is jscpd's
 job; this is the small-helper complement.
 
 Run from repo root:  python scripts/lint/lint_duplicate_helpers.py
-Exit 0 = clean (no new dup names), 1 = new dup names. Soft under code-smells.
+Regenerate the baseline:  python scripts/lint/lint_duplicate_helpers.py --update-baseline
+Exit 0 = clean (no new dup names), 1 = new dup names.
 """
 from __future__ import annotations
 
@@ -54,9 +55,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from _baseline import Finding, gate
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
-BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.txt")
+BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.json")
 
 # Directory names (any path segment, relative to defender/) excluded from scope.
 # `.venv` + the transient run-output dirs mirror the jscpd gate's --ignore;
@@ -167,27 +170,6 @@ def _dup_groups(
     return identical, divergent
 
 
-def _load_baseline() -> set[str]:
-    if not BASELINE_PATH.exists():
-        return set()
-    return {
-        line.strip()
-        for line in BASELINE_PATH.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-
-
-def _write_baseline(names: list[str]) -> None:
-    header = (
-        "# Duplicate-helper baseline — names defined at module level in >=2\n"
-        "# in-scope defender/ modules as of the last --update-baseline run.\n"
-        "# The lint fails only on names NOT listed here (newly-introduced drift).\n"
-        "# Shrink this list as dups are consolidated; never hand-add to silence a\n"
-        "# new dup — fix it or add an inline `# lint-dup: ok — <reason>` instead.\n"
-    )
-    BASELINE_PATH.write_text(header + "\n".join(names) + "\n", encoding="utf-8")
-
-
 def _print_section(title: str, groups: list[tuple[str, list]]) -> None:
     print(f"\n=== {title} ({len(groups)} name{'' if len(groups) == 1 else 's'}) ===")
     for name, sites in groups:
@@ -195,31 +177,37 @@ def _print_section(title: str, groups: list[tuple[str, list]]) -> None:
         print(f"  {name}() x{len(sites)}: {locs}")
 
 
+HEADER = (
+    "lint_duplicate_helpers baseline — module-level helper names defined in >=2 "
+    "in-scope defender/ modules. Fingerprint is the bare name. CI fails on a dup "
+    "name absent here. Regenerate: "
+    "python scripts/lint/lint_duplicate_helpers.py --update-baseline. "
+    'Shrink as dups are consolidated; annotate intentional entries, "" = un-triaged. '
+    "Never hand-add to silence a new dup — fix it or use `# lint-dup: ok — <reason>`."
+)
+
+
 def main(argv: list[str]) -> int:
     table = _collect()
     identical, divergent = _dup_groups(table)
-    all_dup_names = sorted(name for name, _ in identical + divergent)
-
-    if "--update-baseline" in argv:
-        _write_baseline(all_dup_names)
-        print(f"Wrote {len(all_dup_names)} duplicate name(s) to {BASELINE_PATH.name}.")
-        return 0
 
     _print_section("identical-duplicate (extract to a shared module)", identical)
     _print_section("divergent-duplicate (unify the contract or rename)", divergent)
 
-    baseline = _load_baseline()
-    new_names = sorted(set(all_dup_names) - baseline)
-    print(
-        f"\n{len(all_dup_names)} duplicated helper name(s) in defender/ "
-        f"({len(all_dup_names) - len(new_names)} baselined, {len(new_names)} new)."
+    # Fingerprint is the bare helper name; the display carries its kind + sites.
+    findings = [
+        Finding(
+            fingerprint=name,
+            display=f"{kind} {name}() x{len(sites)}: "
+            + ", ".join(f"{rel}:{lineno}" for rel, lineno, _ in sites),
+        )
+        for kind, groups in (("identical", identical), ("divergent", divergent))
+        for name, sites in groups
+    ]
+    return gate(
+        findings, BASELINE_PATH, argv,
+        label="lint_duplicate_helpers", header=HEADER,
     )
-    if new_names:
-        print("\nNEW duplicate helper name(s) since baseline — extract/unify or "
-              "suppress with `# lint-dup: ok — <reason>`:")
-        for name in new_names:
-            print(f"  {name}")
-    return 1 if new_names else 0
 
 
 if __name__ == "__main__":
