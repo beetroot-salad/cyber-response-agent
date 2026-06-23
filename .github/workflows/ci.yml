@@ -65,7 +65,7 @@ jobs:
       # experiments/ + root scripts/ are intentionally out of scope. Explicit
       # --select so per-file config can't weaken it. Grows as families promote.
       - name: Ruff (defender extended — promoted families)
-        run: defender/.venv/bin/ruff check defender --select B,SIM,UP,PLR0915 --ignore E402,E501
+        run: defender/.venv/bin/ruff check defender --select B,SIM,UP,PT,PLR0915 --ignore E402,E501
 
   code-smells:
     runs-on: ubuntu-latest

@@ -61,12 +61,15 @@ def test_capture_ok_writes_row_and_payload(tmp_path, stub):
     payload = (tmp_path / record["payload_path"]).read_text()
     assert json.loads(payload) == {"hits": [{"id": 1}, {"id": 2}]}
     rows = (tmp_path / "executed_queries.jsonl").read_text().splitlines()
-    assert len(rows) == 1 and json.loads(rows[0])["seq"] == 0
+    assert len(rows) == 1
+    assert json.loads(rows[0])["seq"] == 0
     # The in-context passthrough is a field-shape SAMPLE of the record list (so
     # the raw dump never re-enters the subagent's context); the full payload is
     # persisted verbatim on disk (asserted above).
-    assert "FIELD-SHAPE sample" in passthrough and "2 records" in passthrough
-    assert "sample[0]" in passthrough and payload not in passthrough
+    assert "FIELD-SHAPE sample" in passthrough
+    assert "2 records" in passthrough
+    assert "sample[0]" in passthrough
+    assert payload not in passthrough
 
 
 def test_capture_seq_is_monotonic_per_lead(tmp_path, stub):
@@ -95,7 +98,7 @@ def test_capture_empty_status(tmp_path, stub):
 
 
 def test_capture_rejects_bad_lead(tmp_path, stub):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid lead id"):
         capture(tmp_path, "../escape", _argv(stub, "ok"))
 
 
@@ -113,7 +116,7 @@ def test_capture_rejects_traversal_query_id(tmp_path, stub, bad_qid):
     # A model-coined --query-id with path-traversal characters is rejected at the
     # boundary so it can never reach lead_author.synthesize_drafts' path build,
     # and no queries-table row is written.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="path-traversal"):
         capture(tmp_path, "l-001", _argv(stub, "ok"), query_id=bad_qid)
     assert not (tmp_path / "executed_queries.jsonl").exists()
 
@@ -128,7 +131,7 @@ def test_capture_accepts_normal_coined_query_id(tmp_path, stub):
 
 def test_capture_rejects_undetectable_system(tmp_path):
     # No defender-<system> shim / <system>_cli.py token → system can't be derived.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="system could not be derived"):
         capture(tmp_path, "l-001", ["echo", "hi"])
 
 

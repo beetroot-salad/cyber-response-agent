@@ -576,9 +576,11 @@ def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: 
     # `--status closed --require-closed` adjacently so a trailing `--status open` can't
     # slip in, and get-ticket carries the flag too.
     listline = [a for a in granted if "list-tickets" in a]
-    assert listline and "list-tickets --status closed --require-closed" in listline[0]
+    assert listline
+    assert "list-tickets --status closed --require-closed" in listline[0]
     getline = [a for a in granted if "get-ticket" in a]
-    assert getline and "--require-closed" in getline[0]
+    assert getline
+    assert "--require-closed" in getline[0]
 
 
 def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> None:

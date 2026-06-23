@@ -51,7 +51,8 @@ def test_freeze_roundtrips_to_valid_messages(tmp_path):
     assert redump[0]["parts"][0]["part_kind"] == "user-prompt"   # orientation kept
     frontier = redump[1]["parts"][0]["content"]
     assert compaction.FRONTIER_SENTINEL in frontier
-    assert "l-001" in frontier and "l-005" not in frontier        # active loop OUT
+    assert "l-001" in frontier
+    assert "l-005" not in frontier
 
 
 def test_passthrough_returns_original_objects(tmp_path):

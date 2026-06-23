@@ -47,7 +47,9 @@ def test_three_groups_present():
     groups = serialize.build_view()["groups"]
     assert set(groups) == {"defender", "actor", "environment"}
     for g in groups.values():
-        assert g["label"] and g["blurb"] and isinstance(g["fields"], list)
+        assert g["label"]
+        assert g["blurb"]
+        assert isinstance(g["fields"], list)
         assert g["fields"], "each group must declare metadata fields for the view"
 
 

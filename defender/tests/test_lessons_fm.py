@@ -76,7 +76,8 @@ def test_grep_ands_patterns(corpus, capsys):
         "attack_phase:.*persistence",
     ]) == 0
     out = _out(capsys)
-    assert "sshd-one.md" in out and "falco-one.md" not in out
+    assert "sshd-one.md" in out
+    assert "falco-one.md" not in out
 
 
 def test_output_is_path_tab_description_no_body(corpus, capsys):
@@ -91,7 +92,8 @@ def test_bare_call_lists_whole_corpus(corpus, capsys):
     mod = _load(corpus)
     assert mod.main(["prog"]) == 0
     out = _out(capsys)
-    assert "falco-one.md" in out and "sshd-one.md" in out
+    assert "falco-one.md" in out
+    assert "sshd-one.md" in out
     assert "_TEMPLATE.md" not in out  # underscore-prefixed skipped
 
 

@@ -36,12 +36,21 @@ def _corpus(d: Path) -> list[tuple[Path, dict]]:
 def test_env_corpus_has_anchor_and_wellformed_entities() -> None:
     for p, doc in _corpus(LESSONS_ENV):
         anchor = doc.get("alert_rule_ids")
-        assert isinstance(anchor, list) and anchor, (
+        assert isinstance(anchor, list), (
+            f"{p.name}: env lesson alert_rule_ids anchor must be a list"
+        )
+        assert anchor, (
             f"{p.name}: env lesson needs a non-empty alert_rule_ids anchor"
         )
         for sel in doc.get("entities") or []:
-            assert isinstance(sel, dict) and "type" in sel and "class" in sel, (
+            assert isinstance(sel, dict), (
                 f"{p.name}: entity selector must be a {{type, class}} mapping"
+            )
+            assert "type" in sel, (
+                f"{p.name}: entity selector must have a 'type' key"
+            )
+            assert "class" in sel, (
+                f"{p.name}: entity selector must have a 'class' key"
             )
             # No identity selectors — the defender never grounds the identity in
             # the prologue, so it is not a retrievable key (the grounding is body).

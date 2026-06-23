@@ -49,7 +49,8 @@ def test_over_cap_truncates_head_and_appends_notice() -> None:
     assert head == "y" * CAP  # head is exactly the first CAP chars, verbatim
     assert note  # a notice was appended
     assert "too large to read whole" in out
-    assert "jq" in out and "/run/gather_raw/l-1/0.json" in out
+    assert "jq" in out
+    assert "/run/gather_raw/l-1/0.json" in out
     # full size surfaced so the model knows the scale it can't see
     assert str(CAP + 5000) in out
 
@@ -60,7 +61,8 @@ def test_notice_reports_true_line_count() -> None:
     blob = "z" * (CAP + 1000)
     out = tools._bounded_read(blob, "/p.json")
     assert "/ 1 line(s)" in out
-    assert "offset" not in out and "limit" not in out
+    assert "offset" not in out
+    assert "limit" not in out
     # a multi-line oversized file reports its real line count
     lined = ("line\n" * ((CAP // 5) + 200))
     out2 = tools._bounded_read(lined, "/p.json")

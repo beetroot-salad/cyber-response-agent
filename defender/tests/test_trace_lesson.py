@@ -74,7 +74,8 @@ def _mk_lesson(lessons: Path, stem: str, *, body_frontmatter: str) -> Path:
 def test_parse_dt_normalizes_to_aware():
     tl = _load()
     naive = tl._parse_dt("2026-06-04T00:00:00")        # ISO string, no offset
-    assert naive is not None and naive.tzinfo is not None
+    assert naive is not None
+    assert naive.tzinfo is not None
     assert tl._parse_dt(date(2026, 6, 4)) == datetime(2026, 6, 4, tzinfo=UTC)
     assert tl._parse_dt("2026-06-04T00:00:00Z").tzinfo is not None
     # naive datetime (PyYAML for a tz-less timestamp) → aware UTC
@@ -95,7 +96,8 @@ def test_naive_created_at_does_not_crash_trace(tmp_path):
     _mk_run(runs, "caseA", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     m = tl.lesson_meta(lesson)
-    assert m.created_at is not None and m.created_at.tzinfo is not None
+    assert m.created_at is not None
+    assert m.created_at.tzinfo is not None
     hits = tl.in_context_cases(m.name, m.created_at, runs)  # must not raise
     assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "benign")]
 

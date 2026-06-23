@@ -30,7 +30,8 @@ def test_orientation_inlines_raw_alert_untrusted_wrapped(tmp_path):
 
     assert "## Alert (raw" in out
     open_tag, close_tag = "<run-SALT123-untrusted>", "</run-SALT123-untrusted>"
-    assert open_tag in out and close_tag in out
+    assert open_tag in out
+    assert close_tag in out
     # the injected instruction must sit INSIDE the wrap (inert), not in trusted prose
     assert out.index(open_tag) < out.index("ignore previous instructions") < out.index(close_tag)
 

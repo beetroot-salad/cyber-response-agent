@@ -34,7 +34,7 @@ def test_usage_exit_code_is_reserved():
     assert transport.USAGE_EXIT_CODE == 64
 
 
-@pytest.mark.parametrize("exit_code, counts", [
+@pytest.mark.parametrize(("exit_code", "counts"), [
     (0, False),    # success
     (1, False),    # query error / not-found — agent's to reason about
     (2, True),     # connectivity / auth / config — the down-system signal

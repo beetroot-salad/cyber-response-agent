@@ -95,14 +95,18 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     # {system}.{verb} default — either way the queries-table row is keyed to it).
     assert (run_dir / "gather_raw" / f"{lead_id}.lead.json").is_file()
     rows = [json.loads(x) for x in (run_dir / "executed_queries.jsonl").read_text().splitlines() if x.strip()]
-    assert rows and rows[0]["lead_id"] == lead_id
+    assert rows
+    assert rows[0]["lead_id"] == lead_id
     assert rows[0]["query_id"].startswith(f"{system}.")
     # The gather logs under a single gather: instance (Sonnet by default).
     recs = [json.loads(x) for x in (run_dir / "llm_requests.jsonl").read_text().splitlines() if x.strip()]
     aids = {r["agent_id"] for r in recs}
-    assert aids and all(a.startswith("gather:") for a in aids)
+    assert aids
+    assert all(a.startswith("gather:") for a in aids)
     # Return is untrusted-wrapped (salted tag) with no raw-path leak.
-    assert "untrusted" in out and "sALt" in out and "gather_raw" not in out
+    assert "untrusted" in out
+    assert "sALt" in out
+    assert "gather_raw" not in out
 
     # A reused lead_id is rejected with ModelRetry (bounces the defender to PLAN).
     with pytest.raises(ModelRetry):

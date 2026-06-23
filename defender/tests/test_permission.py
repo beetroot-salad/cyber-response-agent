@@ -28,7 +28,7 @@ def test_main_loop_allows_safe(cmd):
     assert permission.decide_bash(cmd, is_main_session=True).allow
 
 
-@pytest.mark.parametrize("cmd,reason_substr", [
+@pytest.mark.parametrize(("cmd", "reason_substr"), [
     ("defender-elastic query foo --raw", "data-source CLIs directly"),
     ("cat gather_raw/l-001/0.json", "must not read gather_raw"),
     ("python3 scripts/adapters/elastic_cli.py query foo", "data-source CLIs directly"),
