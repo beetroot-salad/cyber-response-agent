@@ -89,9 +89,6 @@ defender/learning/eval/_tmp/
 # Defender run transcripts — local artifacts, not committed.
 defender/run-transcripts/
 
-# Generated kanban board (regenerate via `python3 tasks/build.py`)
-/board.html
-
 # Ephemeral scratch work happens in git worktrees under .claude/worktrees/,
 # not at the repo root. Kept experiment writeups live in /experiments/ (tracked).
 /.claude/worktrees/
