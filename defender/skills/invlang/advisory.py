@@ -152,6 +152,7 @@ def advisory_recall(
     frontier: tuple[str, ...] | list[str] = (),
     classes: tuple[str, ...] | list[str] = VALID_CLASSES,
     top_k: int = 3,
+    load_fn=_cached_load,
 ) -> AdvisoryResult:
     """Compose advisory retrieval for one PLAN-time call.
 
@@ -171,7 +172,7 @@ def advisory_recall(
     if unknown:
         raise ValueError(f"unknown advisory classes: {unknown}")
 
-    corpus, report = _cached_load(str(corpus_root))
+    corpus, report = load_fn(str(corpus_root))
     corpus_list = list(corpus)
     sig_count = sum(1 for c in corpus_list if c.signature_id == signature_id)
 

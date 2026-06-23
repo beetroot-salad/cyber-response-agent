@@ -55,22 +55,24 @@ def test_read_outcome_non_mapping_is_none(tmp_path: Path, body: str):
     assert ticket_enrichment._read_adversarial_outcome(tmp_path) is None
 
 
-def test_enrich_skips_when_no_verdict(tmp_path: Path, monkeypatch):
+def test_enrich_skips_when_no_verdict(tmp_path: Path):
     calls = []
-    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
-                        lambda key, outcome: calls.append((key, outcome)))
-    ticket_enrichment.enrich_case_ticket(tmp_path / "run-1", tmp_path)
+    ticket_enrichment.enrich_case_ticket(
+        tmp_path / "run-1", tmp_path,
+        annotate_fn=lambda key, outcome: calls.append((key, outcome)),
+    )
     assert calls == []  # no verdict file → no write attempted
 
 
-def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path, monkeypatch):
+def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path):
     lrd = tmp_path / "learn"
     lrd.mkdir()
     _write_verdict(lrd, "survived")
     calls = []
-    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
-                        lambda key, outcome: calls.append((key, outcome)))
-    ticket_enrichment.enrich_case_ticket(tmp_path / "20260620-case", lrd)
+    ticket_enrichment.enrich_case_ticket(
+        tmp_path / "20260620-case", lrd,
+        annotate_fn=lambda key, outcome: calls.append((key, outcome)),
+    )
     assert calls == [("20260620-case", "survived")]  # key is the run-dir basename
 
 
@@ -181,36 +183,36 @@ def test_read_resolution_method_non_string_is_none(tmp_path: Path):
     assert ticket_enrichment._read_resolution_method(tmp_path) is None
 
 
-def test_enrich_delegates_resolution_method_when_present(tmp_path: Path, monkeypatch):
+def test_enrich_delegates_resolution_method_when_present(tmp_path: Path):
     lrd = tmp_path / "learn"
     lrd.mkdir()
     _write_verdict_with_method(lrd, "caught", "no-egress (l-005)")
     seen = []
-    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
-                        lambda key, outcome: seen.append(("annotate", key, outcome)))
-    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
-                        lambda key, method: seen.append(("resolution", key, method)))
-    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    ticket_enrichment.enrich_case_ticket(
+        tmp_path / "case-9", lrd,
+        annotate_fn=lambda key, outcome: seen.append(("annotate", key, outcome)),
+        enrich_fn=lambda key, method: seen.append(("resolution", key, method)),
+    )
     assert seen == [
         ("annotate", "case-9", "caught"),
         ("resolution", "case-9", "no-egress (l-005)"),
     ]
 
 
-def test_enrich_skips_resolution_method_when_absent(tmp_path: Path, monkeypatch):
+def test_enrich_skips_resolution_method_when_absent(tmp_path: Path):
     lrd = tmp_path / "learn"
     lrd.mkdir()
     _write_verdict(lrd, "caught")  # outcome only, no resolution_method
     seen = []
-    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
-                        lambda key, outcome: seen.append("annotate"))
-    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
-                        lambda key, method: pytest.fail("called without a method"))
-    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    ticket_enrichment.enrich_case_ticket(
+        tmp_path / "case-9", lrd,
+        annotate_fn=lambda key, outcome: seen.append("annotate"),
+        enrich_fn=lambda key, method: pytest.fail("called without a method"),
+    )
     assert seen == ["annotate"]
 
 
-def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path: Path, monkeypatch):
+def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path: Path):
     # A method present but a non-seed-eligible outcome (`survived` = flagged FN) must NOT
     # stamp a covering policy: the resolution-method rides the seed-eligibility polarity,
     # so the store never carries a benign covering policy on a case the probe contested.
@@ -218,11 +220,11 @@ def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path:
     lrd.mkdir()
     _write_verdict_with_method(lrd, "survived", "no-egress (l-005)")
     seen = []
-    monkeypatch.setattr(ticket_enrichment, "annotate_case_ticket",
-                        lambda key, outcome: seen.append("annotate"))
-    monkeypatch.setattr(ticket_enrichment, "enrich_case_resolution",
-                        lambda key, method: pytest.fail("stamped a policy on a survived case"))
-    ticket_enrichment.enrich_case_ticket(tmp_path / "case-9", lrd)
+    ticket_enrichment.enrich_case_ticket(
+        tmp_path / "case-9", lrd,
+        annotate_fn=lambda key, outcome: seen.append("annotate"),
+        enrich_fn=lambda key, method: pytest.fail("stamped a policy on a survived case"),
+    )
     assert seen == ["annotate"]
 
 

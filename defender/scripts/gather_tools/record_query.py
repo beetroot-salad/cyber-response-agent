@@ -81,7 +81,12 @@ _NON_ADAPTER = frozenset({"record-query", "invlang"})
 # replaced by a count + samples + a pointer to the on-disk payload and a
 # nudge to filter that file with jq/grep instead. The full payload is
 # always persisted regardless; only the in-context view is capped.
-PASSTHROUGH_MAX_BYTES = int(os.environ.get("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536"))
+def _passthrough_max_bytes() -> int:
+    """The pass-through byte ceiling, read at call time so an env override set
+    after import (e.g. a test's ``monkeypatch.setenv``) takes effect."""
+    return int(os.environ.get("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536"))
+
+
 PASSTHROUGH_SAMPLE_COUNT = 3
 _SAMPLE_MAX_CHARS = 600
 _RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
@@ -454,7 +459,7 @@ def capture(
     # payload (a single object/scalar — an identity profile, a host lookup) IS the
     # answer and is small, so it passes through whole, capped only if it somehow
     # exceeds the byte ceiling. The full payload is always on disk at payload_path.
-    if rc == 0 and (_is_event_payload(out) or len(out) > PASSTHROUGH_MAX_BYTES):
+    if rc == 0 and (_is_event_payload(out) or len(out) > _passthrough_max_bytes()):
         passthrough = build_truncated_view(out, payload_rel, run_dir)
     else:
         passthrough = out

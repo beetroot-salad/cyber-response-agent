@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from collections.abc import Callable
 
 from defender.learning import lead_repository
 from defender.learning import mitre_corpus
@@ -492,7 +493,8 @@ def build_judge_invocation(
 
 
 def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-                 projected_telemetry_path: Path, learning_run_dir: Path) -> str:
+                 projected_telemetry_path: Path, learning_run_dir: Path,
+                 *, judge_fn: Callable[..., str] = _run_judge_claude) -> str:
     """Grounded judge for either direction: write the per-lead comparison files +
     read-only settings (under the wiring's per-direction names), then score against the
     actual evidence (per-lead comparison files + jq over ``gather_raw/``), not the
@@ -504,7 +506,7 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
         comparison_dirname=wiring.comparison_dirname, settings_name=wiring.settings_name,
         closed_ticket_read=wiring.closed_ticket_read,
     )
-    return _run_judge_claude(
+    return judge_fn(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
         scope=_ToolScope(settings_path=inv.settings_path, add_dir=inv.add_dirs),

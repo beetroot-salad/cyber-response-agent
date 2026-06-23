@@ -1451,7 +1451,7 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
     assert "comparison" in inv.user_text.lower()
 
 
-def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
+def test_invoke_judge_benign_is_grounded(tmp_path: Path):
     """The FP-direction judge is grounded on the actuals (#317): it writes per-lead
     comparison files + a read-only settings dict, add-dirs gather_raw + comparison, and
     shells out with the BENIGN prompt/model — the same zipper the adversarial judge uses,
@@ -1476,9 +1476,10 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
         )
         return "outcome: survived\ndefender_findings: []\n"
 
-    monkeypatch.setattr(subagents, "_run_judge_claude", _fake_run_judge_claude)
-
-    out = subagents.invoke_judge(directions.BENIGN_WIRING, run, story, proj, lrd)
+    out = subagents.invoke_judge(
+        directions.BENIGN_WIRING, run, story, proj, lrd,
+        judge_fn=_fake_run_judge_claude,
+    )
 
     assert out.startswith("outcome:")
     # Grounded surface: per-lead comparison file + settings written; actuals add-dir'd.

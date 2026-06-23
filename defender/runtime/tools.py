@@ -36,40 +36,44 @@ from defender.scripts.gather_tools.record_query import (
     capture as _capture,
     derive_system as _derive_system,
     LEAD_ID_RE as _LEAD_ID_RE,
-    PASSTHROUGH_MAX_BYTES as _READ_CHAR_CAP,
+    _passthrough_max_bytes as _read_char_cap,
 )
 from defender.hooks.record_lesson_load import lesson_name as _lesson_name
 
 _BASH_TIMEOUT_S = 120
 
-# read_file char ceiling: the SAME constant that caps the gather capture's
-# passthrough (record_query.PASSTHROUGH_MAX_BYTES). A gather payload is persisted
-# whole on disk, but the in-context VIEW of it — whether seen through the capture
-# passthrough OR a later read_file of the same file — must stay bounded, or a
-# multi-MB dump overflows the model's context window (#303). Sharing one constant
-# is the point: the on-disk read can never defeat the passthrough cap. Compared
-# against str length (chars), matching record_query's own check.
+# read_file char ceiling: the SAME source that caps the gather capture's
+# passthrough (record_query._passthrough_max_bytes, imported here as
+# _read_char_cap).
+# A gather payload is persisted whole on disk, but the in-context VIEW of it —
+# whether seen through the capture passthrough OR a later read_file of the same
+# file — must stay bounded, or a multi-MB dump overflows the model's context
+# window (#303). Sharing one source is the point: the on-disk read can never
+# defeat the passthrough cap. Compared against str length (chars), matching
+# record_query's own check.
 
 
 def _bounded_read(text: str, path: str) -> str:
-    """Bound a file read to `_READ_CHAR_CAP` chars. Under the cap → verbatim (the
-    common case: every SKILL/lesson/doc fits with room to spare). Over it → the
-    head, plus a notice carrying the FULL size (chars + lines, so the model knows
-    the true scale it can't see) and the only resolution that works on a payload
-    this big: filter on disk and read the filtered result. No paging — the files
-    that overflow are single-document JSON dumps (one giant line), so an
-    offset/limit window is a no-op; jq/grep is the way through. Slices by char,
-    not byte, so a multibyte sequence is never split."""
-    if len(text) <= _READ_CHAR_CAP:
+    """Bound a file read to the shared char cap (read at call time via
+    `_read_char_cap()`). Under the cap → verbatim (the common case: every
+    SKILL/lesson/doc fits with room to spare). Over it → the head, plus a notice
+    carrying the FULL size (chars + lines, so the model knows the true scale it
+    can't see) and the only resolution that works on a payload this big: filter
+    on disk and read the filtered result. No paging — the files that overflow are
+    single-document JSON dumps (one giant line), so an offset/limit window is a
+    no-op; jq/grep is the way through. Slices by char, not byte, so a multibyte
+    sequence is never split."""
+    cap = _read_char_cap()
+    if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
     note = (
         f"\n\n[read_file] {len(text)} chars / {total_lines} line(s); showing the "
-        f"first {_READ_CHAR_CAP}. This file is too large to read whole — do not "
+        f"first {cap}. This file is too large to read whole — do not "
         "treat this head as complete. Filter it on disk (jq, grep, the Grep tool), "
         f"write the result to a file, then read that:\n  jq '<filter>' {path}"
     )
-    return text[:_READ_CHAR_CAP] + note
+    return text[:cap] + note
 
 
 def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = "") -> str:

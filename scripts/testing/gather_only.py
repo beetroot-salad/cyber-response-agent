@@ -115,7 +115,7 @@ async def main() -> int:
     run_id = sys.argv[1]
     lead = LEADS[sys.argv[2] if len(sys.argv) > 2 else "baseline-7d"]
 
-    key, src = _entry.resolve_first_party_key(DEFENDER_DIR)
+    key, src = _entry.resolve_first_party_key()
     if not key:
         print("[gather_only] no first-party key", file=sys.stderr)
         return 2
