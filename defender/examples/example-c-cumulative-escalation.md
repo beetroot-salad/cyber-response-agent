@@ -51,9 +51,9 @@ p2|proposed_edge|"destination IP has no historical reputation and was registered
 r1|p1,p2|"maintainer has long publication history, or destination IP has prior reputation"
 
 :L findings [id|loop|name|target|tests|system|window]
-l-001|1|package-source-and-maintainer|v-004|h-001,h-003|host-query|n/a
-l-002|1|process-tree-and-job-correlation|v-002|h-002,h-003|host-query|±2h
-l-003|1|destination-ip-reputation|v-003|h-001,h-003|wazuh|90d
+l-001|1|package-source-and-maintainer|v-004|h-001,h-003|host-state|n/a
+l-002|1|process-tree-and-job-correlation|v-002|h-002,h-003|host-state|±2h
+l-003|1|destination-ip-reputation|v-003|h-001,h-003|siem|90d
 ```
 
 PLAN issued three leads in one turn — each discriminates a different pair, and together they triangulate the parent class. Dispatched as three parallel `Task` calls. Gather mints whichever templates the catalog lacks.

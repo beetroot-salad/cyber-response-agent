@@ -23,7 +23,7 @@ Every query returns a baseline — the habitual, authorized emissions on that st
 
 - **Project only what the story states.** Every concrete event you emit must correspond to an occurrence the story actually describes. Do not invent occurrences to fill a query — a query the story's activity never touches is a real and common result.
 - **`what_to_summarize` guides completeness, not invention.** Use it to make sure you projected the salient fields and any co-occurring events the story actually contains. But if an item names or presupposes an event the story does NOT contain — a process that never ran, a connection that never happened, a redirect that never occurred — that item yields nothing. Do NOT fabricate the event to satisfy a `what_to_summarize` item. An unsatisfiable item is a signal the activity didn't happen, not a prompt to invent it.
-- **Suppression is earned by an explicit story action.** Emit the `− noise` suppression marker ONLY when the story performs a concrete action that disables/removes/blinds the specific stream these queries read (e.g. "the attacker stopped the Falco daemon", "cleared the auth log", "disabled auditd"). If the story merely doesn't touch this stream, that is `0` (empty), not suppression — getting this wrong turns ordinary silence into a false detection. When in doubt between `0` and `− noise`, choose `0`.
+- **Suppression is earned by an explicit story action.** Emit the `− noise` suppression marker ONLY when the story performs a concrete action that disables/removes/blinds the specific stream these queries read (e.g. "the attacker stopped the host sensor daemon", "cleared the auth log", "disabled auditd"). If the story merely doesn't touch this stream, that is `0` (empty), not suppression — getting this wrong turns ordinary silence into a false detection. When in doubt between `0` and `− noise`, choose `0`.
 - **Timestamps come from the story or an anchored placeholder — never a guess, never a window bound.** If the story or what_to_summarize gives an explicit time, use it. If the story anchors an occurrence to another event but states no clock time, emit a symbolic placeholder relative to that anchor — e.g. `"@timestamp": "<alert-time>"`, `"<alert-time+5m>"`, `"<initial-access>"`, `"<compromise+2m>"` — exactly as you would write `<hostname>` for an unknown entity. Never invent a concrete time to stand in for an unknown one, and never copy a timestamp from a query's window bounds. A window only *filters*: judge membership from the anchor's known position. If you cannot tell whether an anchored event falls in a window, still emit it with its placeholder — do not drop it for lacking a clock time. One occurrence is one event; never re-emit it at a second time to fit a second query.
 - **Stay inside the envelope.** Emit only events matching these queries' index/system, time windows, and filter predicates. An event the story produces elsewhere — different host, data source, outside the window, not matching the filter — does NOT surface here.
 - **Match the sample's shape exactly.** Same field names, nesting, value types. Do not invent fields the sample does not show, or import fields from another data source's shape.
@@ -46,7 +46,7 @@ events:
 ```
 ```
 events:
-  - "<suppressed: the attacker stopped the Falco daemon before the probe>"   # subtractive (− noise)
+  - "<suppressed: the attacker stopped the host sensor daemon before the probe>"   # subtractive (− noise)
 ```
 ```
 events: []                                 # the activity touches nothing here (0)

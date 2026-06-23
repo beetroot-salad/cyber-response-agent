@@ -13,7 +13,7 @@ payload by hand:
 It is the **tier-2 fallback** for a source with no native aggregating
 query language (see `skills/connect/cli-adapter.md` -> "Prefer native
 aggregation"). A source that can aggregate in its own language
-(elastic -> ES|QL) never needs it — that aggregation runs in the source.
+(a source whose own language aggregates, e.g. ES|QL) never needs it — that aggregation runs in the source.
 
 The stdin JSON is exposed as a table named `data`, parsed with DuckDB's
 `read_json_auto` type inference (structs and lists preserved), so SQL
@@ -140,7 +140,7 @@ def main() -> int:
         description="Sandboxed SQL aggregation over a JSON/NDJSON payload on stdin, "
                     "exposed as the table `data`. Tier-2 fallback for a source with "
                     "no native aggregation (see skills/connect/cli-adapter.md).",
-        epilog="example: defender-elastic query '<filter>' --raw | defender-sql "
+        epilog="example: defender-<system> '<filter>' --raw | defender-sql "
                "\"SELECT h.user, count(*) c "
                "FROM (SELECT unnest(result.hits) h FROM data) GROUP BY 1 ORDER BY c DESC\"",
     )

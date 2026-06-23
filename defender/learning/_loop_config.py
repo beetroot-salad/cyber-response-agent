@@ -229,7 +229,7 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
 # Story construction was never pinned, so the actor ran at the inherited global
-# `high` default. An effort A/B on a falco-nettool case (n=1/cell) found the
+# `high` default. An effort A/B on a network-tool detection case (n=1/cell) found the
 # response bimodal: medium (~194s) ≈ high (~216s) in wall + thinking, while low
 # (~37s) sharply curtails reasoning. high was *dominated* by medium — medium was
 # both faster and better-grounded (it recovered the real jump-box IP + the

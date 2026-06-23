@@ -22,7 +22,7 @@ from defender.skills.invlang.queries import (
 def _case(
     case_id: str,
     *,
-    signature_id: str | None = "wazuh-rule-5710",
+    signature_id: str | None = "5710",
     hypotheses: list[dict] | None = None,
     leads: list[dict] | None = None,
     disposition: str | None = None,
@@ -89,11 +89,11 @@ def test_lead_sequence_pattern_contains_filter():
 
 def test_lead_sequence_pattern_disposition_and_signature_filters_compose():
     corpus = [
-        _case("case-a", signature_id="wazuh-rule-5710", disposition="benign"),
-        _case("case-b", signature_id="wazuh-rule-5710", disposition="malicious"),
-        _case("case-c", signature_id="wazuh-rule-100001", disposition="benign"),
+        _case("case-a", signature_id="5710", disposition="benign"),
+        _case("case-b", signature_id="5710", disposition="malicious"),
+        _case("case-c", signature_id="100001", disposition="benign"),
     ]
-    out = lead_sequence_pattern(corpus, disposition="benign", signature_id="wazuh-rule-5710")
+    out = lead_sequence_pattern(corpus, disposition="benign", signature_id="5710")
     assert {h["case_id"] for h in out["hits"]} == {"case-a"}
 
 
@@ -422,7 +422,7 @@ def test_lead_branch_effects_ignores_unknown_assessment_shifts():
 def _shape_case(
     case_id: str,
     *,
-    signature_id: str = "wazuh-rule-5710",
+    signature_id: str = "5710",
     vertices: list[dict] | None = None,
     hypotheses: list[dict] | None = None,
     disposition: str = "benign",

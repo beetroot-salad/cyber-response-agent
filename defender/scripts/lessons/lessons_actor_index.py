@@ -12,8 +12,8 @@ Usage:
     lessons_actor_index.py                                # whole corpus (live only)
     lessons_actor_index.py --techniques T1078.004,T1550.001
     lessons_actor_index.py --alert-rule-ids 5712,5710
-    lessons_actor_index.py --defender-lead-tags wazuh.auth-events-by-srcip
-    lessons_actor_index.py --subject wazuh-rule-5712-threshold
+    lessons_actor_index.py --defender-lead-tags {system}.auth-events-by-srcip
+    lessons_actor_index.py --subject <subject-slug>
     lessons_actor_index.py --include-stale                # author-only
 
 Lessons missing a filtered field are skipped silently. Lessons with

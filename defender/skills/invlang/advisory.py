@@ -156,7 +156,7 @@ def advisory_recall(
     """Compose advisory retrieval for one PLAN-time call.
 
     `corpus_root`     — absolute path; must be explicit (no auto-discovery).
-    `signature_id`    — e.g. "wazuh-rule-5710"; used to filter Classes 5/6.
+    `signature_id`    — e.g. "5710" (the alert's bare `rule.id`); used to filter Classes 5/6.
     `frontier`        — current `?hypothesis` names; routed into Class 8's
                         `hypothesis_patterns`. When empty, Class 8 surfaces
                         the top-`top_k` leads by occurrence regardless of

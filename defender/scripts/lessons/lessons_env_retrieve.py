@@ -133,7 +133,7 @@ output:
 
 examples:
   # anchor on the rule, refine with the case's observable entities:
-  lessons_env_retrieve.py --alert-rule-ids v2-falco-suspicious-network-tool --entities process:nc,socket:tcp
+  lessons_env_retrieve.py --alert-rule-ids 100001 --entities process:nc,socket:tcp
   # rule-only (no entity refinement):
   lessons_env_retrieve.py --alert-rule-ids v2-off-hours-sudo
   # by subject (the fold key) — e.g. to find an existing lesson to update:

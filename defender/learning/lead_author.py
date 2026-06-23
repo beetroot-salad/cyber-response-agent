@@ -100,7 +100,7 @@ def _lift_threshold() -> int:
 
 # Ids gather coins for one-off, no-template probes — never catalog candidates.
 # An *untagged* adapter call (no ``--query-id``) collapses to ``{system}.{verb}``
-# where ``{verb}`` is the adapter subcommand (elastic exposes ``esql`` / ``query``)
+# where ``{verb}`` is the adapter subcommand (e.g. an adapter exposing ``esql`` / ``query``)
 # or ``ad-hoc`` for a flags-only call; drafting any of those would mint a junk
 # catch-all template, so they are filtered alongside prefix-less ids.
 _NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
@@ -121,8 +121,8 @@ _SAFE_ID_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # scalars. The one place the "this system speaks ES|QL" policy lives, so engine
 # shape (which field is the canonical query, draft frontmatter/fence) is decided
 # from the recorded ``system`` rather than re-split out of ``query_id`` or a
-# literal ``"elastic"`` scattered across call sites.
-_ESQL_SYSTEMS = frozenset({"elastic"})
+# system literal scattered across call sites.
+_ESQL_SYSTEMS = frozenset({"elastic"})  # lint-shippable: ok — ES|QL system id matched against the queries-table system value (real config, not illustrative)
 
 
 def _is_esql(system: str) -> bool:
@@ -239,7 +239,7 @@ class ExecutedLead:
     is_multi_query: bool          # parent lead had >1 query
     entry_index: int              # index into the joined-leads list
     query_id: str
-    system: str                   # adapter system (elastic/cmdb/...), from the queries table
+    system: str                   # adapter system (cmdb/identity/...), from the queries table
     params: dict[str, Any]
     raw_command: str              # verbatim executed command (the literal query)
     goal_text: str

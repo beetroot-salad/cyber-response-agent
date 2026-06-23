@@ -11,9 +11,9 @@ Pick the query shape before the verbs. Three tiers, best first:
      aggregation for two compounding reasons: simplicity (the source
      computes it; there is no payload to reduce) and priors (these query
      languages are one family the gather model already knows from training,
-     so the instruction surface stays near zero). For an Elasticsearch-class
+     so the instruction surface stays near zero). For a search-engine-class
      deployment — a rich query language — that means the `esql` verb
-     (`POST /_query` -> {columns, row_count, values}; see `elastic_cli.py`),
+     (`POST /_query` -> {columns, row_count, values}),
      NOT a Lucene filter that returns raw documents.
 
   2. The source only FILTERS and returns rows (what this example shows).

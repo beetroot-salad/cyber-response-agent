@@ -85,7 +85,7 @@ Those live in `soc-agent/`.
   off to the learning loop.
 - **`skills/`** — on-disk skills loaded on demand: `invlang` (block surface
   + author CLI), `gather` (the Haiku subagent + query templates), and
-  per-system references (`wazuh`, `host-query`, and others).
+  per-system references (`host-state`, `cmdb`, and others).
 - **`learning/`** — the offline loop: `loop.py` orchestrator plus the
   paired `*.md` prompt / `*.py` driver for each stage.
 - **`lessons/`** — checked-in pitfall lessons, authored by the loop, read
