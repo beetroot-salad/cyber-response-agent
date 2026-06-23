@@ -22,7 +22,8 @@ def main() -> int:
         sys.stderr.write("stub elastic_cli: $STUB_ELASTIC_PAYLOAD not set\n")
         return 2
     try:
-        sys.stdout.write(open(path).read())
+        with open(path) as f:
+            sys.stdout.write(f.read())
     except OSError as e:
         sys.stderr.write(f"stub elastic_cli: cannot read {path}: {e}\n")
         return 2

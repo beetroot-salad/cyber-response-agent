@@ -324,9 +324,8 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
         raise OSError(errno.ENOLCK, "No locks available")
 
     monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
-    with pytest.raises(OSError) as excinfo:
-        with shared.flock_or_skip(lock):
-            pass  # never reached — acquire raises before yielding
+    with pytest.raises(OSError) as excinfo, shared.flock_or_skip(lock):
+        pass  # never reached — acquire raises before yielding
     assert excinfo.value.errno == errno.ENOLCK
 
 

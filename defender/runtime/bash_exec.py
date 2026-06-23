@@ -31,6 +31,7 @@ cannot disagree about word boundaries.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import time
@@ -175,7 +176,7 @@ def _run_one_pipeline(
     with tempfile.TemporaryFile(mode="w+b") as errfile:
         prev_stdout = None  # None → first stage reads from /dev/null
         try:
-            for idx, stage in enumerate(stages):
+            for stage in stages:
                 if stage.stderr == "devnull":
                     stderr = subprocess.DEVNULL
                 elif stage.stderr == "stdout":
@@ -231,10 +232,8 @@ def _run_one_pipeline(
             # Close any dangling pipe fds the parent still holds.
             for p in procs:
                 if p.stdout is not None:
-                    try:
+                    with contextlib.suppress(OSError):
                         p.stdout.close()
-                    except OSError:
-                        pass
         errfile.seek(0)
         err = errfile.read().decode("utf-8", "replace")
     return rc, out or "", err
