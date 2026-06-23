@@ -198,32 +198,28 @@ def http_post(config: dict[str, str], path: str, body: dict) -> dict | list:
     return _request(config, url, method="POST", body=body)
 
 
-def _request(config: dict[str, str], url: str, *, method: str, body: dict | None = None) -> dict | list:
-    bastion = config["BASTION_HOST"]
-    timeout = int(config.get("TIMEOUT_SEC", "10"))
-    try:
-        rc, stdout, stderr = docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
-    except TransportError as e:
-        # docker CLI missing / exec timeout → connectivity failure (exit 2).
-        print(f"error: {e}", file=sys.stderr)
+def _exit_on_transport_failure(bastion: str, rc: int, stdout: str, stderr: str) -> None:
+    """curl never produced output → transport-level failure. Exit 2 (the
+    connectivity/docker/unreachable code in every stub's exit contract) so the
+    gather exit-code protocol and the circuit breaker both see it as a down
+    system, not a query error. No-op when there was usable output."""
+    if not (rc != 0 and not stdout):
+        return
+    hint = stderr.strip() or "no stderr"
+    if "No such container" in hint or "is not running" in hint:
+        print(
+            f"error: bastion container {bastion!r} unreachable: {hint}\n"
+            f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running.",
+            file=sys.stderr,
+        )
         sys.exit(2)
+    print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
+    sys.exit(2)
 
-    if rc != 0 and not stdout:
-        # curl never produced output → transport-level failure. Exit 2 (the
-        # connectivity/docker/unreachable code in every stub's exit contract) so
-        # the gather exit-code protocol and the circuit breaker both see it as a
-        # down system, not a query error.
-        hint = stderr.strip() or "no stderr"
-        if "No such container" in hint or "is not running" in hint:
-            print(
-                f"error: bastion container {bastion!r} unreachable: {hint}\n"
-                f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
-        sys.exit(2)
 
+def _parse_status_code(stdout: str, stderr: str, url: str) -> tuple[str, int]:
+    """Split curl's body/status and parse the HTTP status to an int. Exits on a
+    malformed (no status) or non-numeric response. Returns (body_text, code)."""
     body_text, status = split_status(stdout)
     if not status:
         # curl exited non-zero but emitted partial output — show what we got.
@@ -231,12 +227,17 @@ def _request(config: dict[str, str], url: str, *, method: str, body: dict | None
             f"error: malformed curl response from {url}\n"
             f"stdout: {stdout!r}\nstderr: {stderr.strip()!r}"
         )
-
     try:
         code = int(status)
     except ValueError:
         sys.exit(f"error: non-numeric http status from curl: {status!r}")
+    return body_text, code
 
+
+def _exit_on_http_error(code: int, body_text: str, url: str) -> None:
+    """Map a >=400 HTTP status to the stub exit contract: 5xx → exit 2 (system
+    down), 4xx → exit 1 (query error, surface the upstream message). No-op on a
+    success code."""
     if code >= 500:
         print(f"error: upstream {url} returned HTTP {code}: {body_text}", file=sys.stderr)
         sys.exit(2)
@@ -249,6 +250,21 @@ def _request(config: dict[str, str], url: str, *, method: str, body: dict | None
         detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
         print(f"error: HTTP {code} from {url}: {detail}", file=sys.stderr)
         sys.exit(1)
+
+
+def _request(config: dict[str, str], url: str, *, method: str, body: dict | None = None) -> dict | list:
+    bastion = config["BASTION_HOST"]
+    timeout = int(config.get("TIMEOUT_SEC", "10"))
+    try:
+        rc, stdout, stderr = docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
+    except TransportError as e:
+        # docker CLI missing / exec timeout → connectivity failure (exit 2).
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    _exit_on_transport_failure(bastion, rc, stdout, stderr)
+    body_text, code = _parse_status_code(stdout, stderr, url)
+    _exit_on_http_error(code, body_text, url)
 
     if not body_text:
         return {}

@@ -20,6 +20,7 @@ receipt — lives in `ticket_writer.py`, which imports this module.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
@@ -199,10 +200,10 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     signature_id = _SIGNATURE_FALLBACK
     alert_path = run_dir / "alert.json"
     if alert_path.is_file():
-        try:
+        # signature stays fallback on a malformed/unreadable alert; non-fatal,
+        # the disposition still records
+        with contextlib.suppress(json.JSONDecodeError, OSError):
             signature_id = _signature_id(json.loads(alert_path.read_text()), mapping)
-        except (json.JSONDecodeError, OSError):
-            pass  # signature stays fallback; non-fatal, the disposition still records
 
     return CaseRecord(
         case_id=case_id,

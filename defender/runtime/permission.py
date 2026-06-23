@@ -153,40 +153,30 @@ def adapter_argv(command: str) -> list[str] | None:
     return segs[0]  # the command's token list IS the argv (shlex-resolved)
 
 
-def decide_bash(command: str, *, is_main_session: bool) -> Decision:
-    """Allow/deny a Bash command, porting the three Bash gate hooks.
-
-    `is_main_session=True` → the orchestrator (slice 1 is always this): no
-    adapter calls, no gather_raw reads, only safe shims/viewers.
-    `is_main_session=False` → the gather subagent (slice 2): it may run a
-    data-source adapter directly (captured transparently) plus read-only
-    viewers/find; arbitrary shell fails closed.
-    """
-    cmd = command.strip()
-    if not cmd:
+def _decide_bash_gather(cmd: str) -> Decision:
+    """Gather subagent (slice 2). A standalone adapter call is allowed directly
+    — the harness captures it (queries table + payload), so no record-query
+    wrapper is needed. But only solo: capturing one adapter inside a
+    pipeline/compound is ambiguous, so a compound containing an adapter is
+    denied (run it standalone, then filter the payload). Non-adapter commands
+    must be read-only viewers / non-adapter shims, so arbitrary shell (`rm`,
+    `curl|bash`, `python3 …`) still fails closed."""
+    inner = unwrap(cmd)
+    if inner is None:
+        return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
+    segs = [s for s in split_segments(inner) if s]
+    if any(_segment_is_adapter(s) for s in segs):
+        if len(segs) != 1:
+            return Decision(False, ADAPTER_STANDALONE_REASON)
         return Decision(True)
+    if not _all_segments_safe(inner, _safe_gather_tokens()):
+        return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
+    return Decision(True)
 
-    if not is_main_session:
-        # Gather subagent. A standalone adapter call is allowed directly — the
-        # harness captures it (queries table + payload), so no record-query
-        # wrapper is needed. But only solo: capturing one adapter inside a
-        # pipeline/compound is ambiguous, so a compound containing an adapter is
-        # denied (run it standalone, then filter the payload). Non-adapter
-        # commands must be read-only viewers / non-adapter shims, so arbitrary
-        # shell (`rm`, `curl|bash`, `python3 …`) still fails closed.
-        inner = unwrap(cmd)
-        if inner is None:
-            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
-        segs = [s for s in split_segments(inner) if s]
-        if any(_segment_is_adapter(s) for s in segs):
-            if len(segs) != 1:
-                return Decision(False, ADAPTER_STANDALONE_REASON)
-            return Decision(True)
-        if not _all_segments_safe(inner, _safe_gather_tokens()):
-            return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
-        return Decision(True)
 
-    # --- main loop (block_main_loop_raw_access + approve_shim_invocations) ---
+def _decide_bash_main(cmd: str) -> Decision:
+    """Main loop (block_main_loop_raw_access + approve_shim_invocations): no
+    adapter calls, no gather_raw reads, only safe shims/viewers."""
     if RAW_MARKER in cmd and not _names_a_gather_payload_tool(cmd):
         return Decision(False, RAW_DENY_REASON)
 
@@ -204,6 +194,24 @@ def decide_bash(command: str, *, is_main_session: bool) -> Decision:
     if not _all_segments_safe(inner, _safe_main_tokens()):
         return Decision(False, FALLTHROUGH_DENY_REASON)
     return Decision(True)
+
+
+def decide_bash(command: str, *, is_main_session: bool) -> Decision:
+    """Allow/deny a Bash command, porting the three Bash gate hooks.
+
+    `is_main_session=True` → the orchestrator (slice 1 is always this): no
+    adapter calls, no gather_raw reads, only safe shims/viewers.
+    `is_main_session=False` → the gather subagent (slice 2): it may run a
+    data-source adapter directly (captured transparently) plus read-only
+    viewers/find; arbitrary shell fails closed.
+    """
+    cmd = command.strip()
+    if not cmd:
+        return Decision(True)
+
+    if not is_main_session:
+        return _decide_bash_gather(cmd)
+    return _decide_bash_main(cmd)
 
 
 # Read denylist (creds, ssh, ground truth, the held-out manifest) — enforced

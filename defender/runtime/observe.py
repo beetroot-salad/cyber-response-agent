@@ -35,6 +35,7 @@ stream. The recorded per-response usage reflects the compacted prompt either way
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -175,10 +176,9 @@ class RequestLogger:
         self.n_requests += 1
 
     def close(self) -> None:
-        try:
+        # logging must never break the run
+        with contextlib.suppress(Exception):
             self._fh.close()
-        except Exception:  # noqa: BLE001 — logging must never break the run
-            pass
 
 
 # --- projection: tool_trace.jsonl (the run_stats / visualize contract) ----

@@ -119,6 +119,49 @@ def _invlang_grammar(defender_dir: Path) -> str | None:
     )
 
 
+def _build_lessons_section(env: dict[str, str], sig: str | None) -> str | None:
+    """3. Lessons: viable tags + this signature's hits (path \t description).
+    Returns the `## Lessons` markdown block, or None when there's nothing to show."""
+    tags = _shim(["defender-lessons", "--tags"], env)
+    # re.escape: rule.id is interpolated into a regex defender-lessons compiles.
+    # Unescaped metachars would over-match (`.`, `+`) or raise re.error (unbalanced
+    # `[`/`(`) → the hits section silently drops. The display strings below keep the
+    # raw sig (human-readable); only the grep pattern is escaped.
+    hits = (
+        _shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
+        if sig else None
+    )
+    lesson_lines = []
+    if tags:
+        lesson_lines.append("### Viable tags\n" + tags)
+    if hits:
+        lesson_lines.append(
+            f"### Hits for `source_signature ~ {sig}` (read the bodies whose "
+            f"description fits the lead you're about to write)\n" + hits
+        )
+    elif sig:
+        lesson_lines.append(f"_(no lessons matched `source_signature ~ {sig}`)_")
+    if lesson_lines:
+        return "## Lessons\n" + "\n\n".join(lesson_lines)
+    return None
+
+
+def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | None:
+    """4. Corpus hypothesis vocabulary for this signature (prior ?names, or empty).
+    Returns the markdown block, or None when there's no signature / no vocabulary."""
+    if not sig:
+        return None
+    vocab_out = _shim(
+        ["defender-invlang", "hypothesis-vocabulary", "--signature", sig], env
+    )
+    if vocab_out:
+        return (
+            f"## Corpus hypothesis vocabulary — signature `{sig}` "
+            "(reuse these `?name`s where the semantics match)\n" + vocab_out
+        )
+    return None
+
+
 def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) -> str:
     """Assemble the ORIENT pack for this run. Never raises — a section that can't
     be built is skipped with a note. Returns a markdown block for the user prompt.
@@ -173,38 +216,12 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) 
     if grammar:
         sections.append(grammar)
 
-    # 3. Lessons: viable tags + this signature's hits (path \t description).
-    tags = _shim(["defender-lessons", "--tags"], env)
-    # re.escape: rule.id is interpolated into a regex defender-lessons compiles.
-    # Unescaped metachars would over-match (`.`, `+`) or raise re.error (unbalanced
-    # `[`/`(`) → the hits section silently drops. The display strings below keep the
-    # raw sig (human-readable); only the grep pattern is escaped.
-    hits = (
-        _shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
-        if sig else None
-    )
-    lesson_lines = []
-    if tags:
-        lesson_lines.append("### Viable tags\n" + tags)
-    if hits:
-        lesson_lines.append(
-            f"### Hits for `source_signature ~ {sig}` (read the bodies whose "
-            f"description fits the lead you're about to write)\n" + hits
-        )
-    elif sig:
-        lesson_lines.append(f"_(no lessons matched `source_signature ~ {sig}`)_")
-    if lesson_lines:
-        sections.append("## Lessons\n" + "\n\n".join(lesson_lines))
+    lessons = _build_lessons_section(env, sig)
+    if lessons:
+        sections.append(lessons)
 
-    # 4. Corpus hypothesis vocabulary for this signature (prior ?names, or empty).
-    if sig:
-        vocab_out = _shim(
-            ["defender-invlang", "hypothesis-vocabulary", "--signature", sig], env
-        )
-        if vocab_out:
-            sections.append(
-                f"## Corpus hypothesis vocabulary — signature `{sig}` "
-                "(reuse these `?name`s where the semantics match)\n" + vocab_out
-            )
+    corpus = _build_corpus_vocab_section(env, sig)
+    if corpus:
+        sections.append(corpus)
 
     return "\n\n".join(sections).strip() + "\n"

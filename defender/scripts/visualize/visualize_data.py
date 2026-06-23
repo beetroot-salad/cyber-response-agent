@@ -160,6 +160,109 @@ def _header_has_body(text: str, header: str) -> bool:
     return len(body) >= 10
 
 
+def _introduced_headers(new_text: str, seen_headers: set[str], header_re) -> list[str]:
+    """New ``## PHASE`` headers in ``new_text`` that carry substantive body (not
+    scaffolding) and haven't been seen before in the trace. Mutates ``seen_headers``
+    so a header introduced once isn't re-counted by a later Edit that re-states it."""
+    introduced: list[str] = []
+    for m in header_re.finditer(new_text):
+        h = m.group(1).strip()
+        if h in seen_headers:
+            continue
+        if _header_has_body(new_text, h):
+            introduced.append(h)
+            seen_headers.add(h)
+    return introduced
+
+
+def _match_loop_verb(
+    verb: str, expected_loop_verbs: list[str], seen_loop_idx: int
+) -> tuple[str | None, int]:
+    """Advance the loop-verb cursor to the next phase whose verb matches ``verb``.
+    Returns (target phase or None, the advanced cursor). The cursor only moves
+    forward — skipped candidates are consumed too, so each loop phase matches once."""
+    while seen_loop_idx < len(expected_loop_verbs):
+        cand = expected_loop_verbs[seen_loop_idx]
+        seen_loop_idx += 1
+        if phase_verb(cand) == verb:
+            return cand, seen_loop_idx
+    return None, seen_loop_idx
+
+
+def _match_non_loop_verb(verb: str, expected_non_loop: list[str]) -> str | None:
+    """The non-loop phase (ORIENT/REPORT/…) whose verb matches ``verb``, or None."""
+    for cand in expected_non_loop:
+        if phase_verb(cand) == verb:
+            return cand
+    return None
+
+
+class _PhaseTagger:
+    """The cursor state for ``tag_events_by_phase``: the current phase plus the
+    bookkeeping (loop cursor, consumed tool_use ids, seen headers) the original
+    walk threaded as locals — made explicit so the per-event dispatch stays under
+    the complexity gate."""
+
+    def __init__(self, phase_order: list[str]) -> None:
+        self.current = phase_order[0]
+        self.expected_loop_verbs = [p for p in phase_order if phase_verb(p) in _LOOP_VERBS]
+        self.expected_non_loop = [p for p in phase_order if phase_verb(p) not in _LOOP_VERBS]
+        self.seen_loop_idx = 0
+        # Stream-json emits the same tool_use block id repeatedly across the
+        # streamed deltas of one message; dedupe so each Write/Edit only advances
+        # the phase once.
+        self.consumed_tool_use_ids: set[str] = set()
+        # Every "## PHASE" header ever seen in investigation.md writes. Subsequent
+        # Edits often fill in those phases without re-introducing the headers; we
+        # ask "is this header new to the trace?" rather than "absent from this
+        # Edit's old_string?" to detect real transitions.
+        self.seen_headers: set[str] = set()
+        self.header_re = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
+
+    def _advance(self, raw_header: str) -> None:
+        """Move ``current`` to the phase an introduced header names, if any."""
+        verb = raw_header.upper().split(" ", 1)[0]
+        if verb in _LOOP_VERBS:
+            target, self.seen_loop_idx = _match_loop_verb(
+                verb, self.expected_loop_verbs, self.seen_loop_idx
+            )
+        else:
+            target = _match_non_loop_verb(verb, self.expected_non_loop)
+        if target is not None:
+            self.current = target
+
+    def _process_block(self, blk) -> None:
+        """One content block: if it's a new-phase-introducing Write/Edit on
+        investigation.md, advance the cursor (deduping repeated stream deltas)."""
+        if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+            return
+        if blk.get("name") not in ("Write", "Edit"):
+            return
+        tu_id = blk.get("id") or ""
+        if tu_id and tu_id in self.consumed_tool_use_ids:
+            return
+        inp = blk.get("input", {}) or {}
+        fp = str(inp.get("file_path", ""))
+        if not fp.endswith("investigation.md"):
+            return
+        if tu_id:
+            self.consumed_tool_use_ids.add(tu_id)
+        new_text = inp.get("content") or inp.get("new_string") or ""
+        for raw in _introduced_headers(new_text, self.seen_headers, self.header_re):
+            self._advance(raw)
+
+    def tag(self, events: list[dict]) -> list[str | None]:
+        """Tag each event with the phase active when emitted — after any advance the
+        event's own writes trigger (so the turn writing "## ORIENT" lands in ORIENT)."""
+        tags: list[str | None] = []
+        for ev in events:
+            if ev.get("type") == "assistant":
+                for blk in (ev.get("message") or {}).get("content") or []:
+                    self._process_block(blk)
+            tags.append(self.current)
+        return tags
+
+
 def tag_events_by_phase(events: list[dict], phase_order: list[str]) -> list[str | None]:
     """Walk the raw event stream and tag each event with the phase active when it was emitted.
 
@@ -176,73 +279,7 @@ def tag_events_by_phase(events: list[dict], phase_order: list[str]) -> list[str 
     """
     if not phase_order:
         return [None] * len(events)
-
-    expected_loop_verbs = [p for p in phase_order if phase_verb(p) in _LOOP_VERBS]
-    expected_non_loop = [p for p in phase_order if phase_verb(p) not in _LOOP_VERBS]
-    seen_loop_idx = 0
-    current = phase_order[0]
-    header_re = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
-
-    # Stream-json emits the same tool_use block id repeatedly across the
-    # streamed deltas of one message; dedupe so each Write/Edit only
-    # advances the phase once.
-    consumed_tool_use_ids: set[str] = set()
-    # Track every "## PHASE" header we've ever seen in investigation.md
-    # writes. Subsequent Edits often fill in those phases without
-    # re-introducing the headers; we ask "is this header new to the
-    # trace?" rather than "is it absent from this specific Edit's
-    # old_string?" to detect real transitions.
-    seen_headers: set[str] = set()
-
-    tags: list[str | None] = []
-    for ev in events:
-        if ev.get("type") != "assistant":
-            tags.append(current)
-            continue
-        msg = ev.get("message") or {}
-        for blk in msg.get("content") or []:
-            if not isinstance(blk, dict) or blk.get("type") != "tool_use":
-                continue
-            if blk.get("name") not in ("Write", "Edit"):
-                continue
-            tu_id = blk.get("id") or ""
-            if tu_id and tu_id in consumed_tool_use_ids:
-                continue
-            inp = blk.get("input", {}) or {}
-            fp = str(inp.get("file_path", ""))
-            if not fp.endswith("investigation.md"):
-                continue
-            if tu_id:
-                consumed_tool_use_ids.add(tu_id)
-            new_text = inp.get("content") or inp.get("new_string") or ""
-            new_headers = [m.group(1).strip() for m in header_re.finditer(new_text)]
-            introduced: list[str] = []
-            for h in new_headers:
-                if h in seen_headers:
-                    continue
-                if _header_has_body(new_text, h):
-                    introduced.append(h)
-                    seen_headers.add(h)
-            for raw in introduced:
-                verb = raw.upper().split(" ", 1)[0]
-                target = None
-                if verb in _LOOP_VERBS:
-                    while seen_loop_idx < len(expected_loop_verbs):
-                        cand = expected_loop_verbs[seen_loop_idx]
-                        if phase_verb(cand) == verb:
-                            target = cand
-                            seen_loop_idx += 1
-                            break
-                        seen_loop_idx += 1
-                else:
-                    for cand in expected_non_loop:
-                        if phase_verb(cand) == verb:
-                            target = cand
-                            break
-                if target is not None:
-                    current = target
-        tags.append(current)
-    return tags
+    return _PhaseTagger(phase_order).tag(events)
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +329,87 @@ def merge_assistant_events(events: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _accumulate_usage(b: dict, msg: dict) -> None:
+    """Fold one merged message's usage + cost into bucket ``b`` (shared by both
+    attribution passes)."""
+    usage = msg.get("usage") or {}
+    model = msg.get("model", "")
+    b["turns"] += 1
+    b["in"] += usage.get("input_tokens", 0)
+    b["out"] += usage.get("output_tokens", 0)
+    b["cache_r"] += usage.get("cache_read_input_tokens", 0)
+    b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
+    b["cost"] += usage_cost(model, usage)
+
+
+def _build_msg_phase(events: list[dict], tags: list[str | None]) -> dict[str, str]:
+    """msg.id -> phase map from the *last* tag we saw for each id (so a message
+    whose final delta wrote "## ORIENT" lands in ORIENT, not the prior phase)."""
+    msg_phase: dict[str, str] = {}
+    for ev, ph in zip(events, tags, strict=False):
+        if ev.get("type") != "assistant" or ph is None:
+            continue
+        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
+        if mid:
+            msg_phase[mid] = ph
+    return msg_phase
+
+
+def _attribute_main_agent(
+    deduped: list[dict],
+    buckets: dict[str, dict],
+    msg_phase: dict[str, str],
+    phase_order: list[str],
+) -> dict[str, str]:
+    """First pass: bucket main-agent messages by ``msg_phase``. Returns the
+    ``task_tool_use_id -> phase`` map so the second pass can attribute subagent
+    messages to the phase that issued their parent ``Task``."""
+    task_phase: dict[str, str] = {}
+    for ev in deduped:
+        if ev.get("parent_tool_use_id"):
+            continue
+        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid", "")
+        ph = msg_phase.get(mid, phase_order[0])
+        b = buckets.get(ph)
+        if b is None:
+            continue
+        msg = ev.get("message") or {}
+        _accumulate_usage(b, msg)
+        for blk in (msg.get("content") or []):
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                name = blk.get("name", "?")
+                b["tool_calls"] += 1
+                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+                if name in ("Task", "Agent"):
+                    b["subagent_calls"] += 1
+                    task_phase[blk.get("id", "")] = ph
+    return task_phase
+
+
+def _attribute_subagents(
+    deduped: list[dict],
+    buckets: dict[str, dict],
+    task_phase: dict[str, str],
+) -> None:
+    """Second pass: subagent messages, attributed by ``parent_tool_use_id`` to the
+    phase that issued the parent ``Task``."""
+    for ev in deduped:
+        pid = ev.get("parent_tool_use_id")
+        if not pid:
+            continue
+        ph = task_phase.get(pid)
+        if ph is None:
+            continue
+        msg = ev.get("message") or {}
+        b = buckets[ph]
+        _accumulate_usage(b, msg)
+        for blk in (msg.get("content") or []):
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                name = blk.get("name", "?")
+                b["tool_calls"] += 1
+                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+
+
 def phase_attribution(
     events: list[dict],
     phase_order: list[str],
@@ -322,83 +440,18 @@ def phase_attribution(
     tags = tag_events_by_phase(events, phase_order)
     deduped = merge_assistant_events(events)
 
-    # Build msg.id -> phase map from the *last* tag we saw for each id.
-    msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant" or ph is None:
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-        if mid:
-            msg_phase[mid] = ph
-
-    # First pass: main-agent messages.
-    task_phase: dict[str, str] = {}
-    for ev in deduped:
-        if ev.get("parent_tool_use_id"):
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid", "")
-        ph = msg_phase.get(mid, phase_order[0])
-        b = buckets.get(ph)
-        if b is None:
-            continue
-        msg = ev.get("message") or {}
-        usage = msg.get("usage") or {}
-        model = msg.get("model", "")
-        b["turns"] += 1
-        b["in"] += usage.get("input_tokens", 0)
-        b["out"] += usage.get("output_tokens", 0)
-        b["cache_r"] += usage.get("cache_read_input_tokens", 0)
-        b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-        b["cost"] += usage_cost(model, usage)
-        for blk in (msg.get("content") or []):
-            if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                name = blk.get("name", "?")
-                b["tool_calls"] += 1
-                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
-                if name in ("Task", "Agent"):
-                    b["subagent_calls"] += 1
-                    task_phase[blk.get("id", "")] = ph
-
-    # Second pass: subagent messages, attributed by parent_tool_use_id.
-    for ev in deduped:
-        pid = ev.get("parent_tool_use_id")
-        if not pid:
-            continue
-        ph = task_phase.get(pid)
-        if ph is None:
-            continue
-        msg = ev.get("message") or {}
-        usage = msg.get("usage") or {}
-        model = msg.get("model", "")
-        b = buckets[ph]
-        b["turns"] += 1
-        b["in"] += usage.get("input_tokens", 0)
-        b["out"] += usage.get("output_tokens", 0)
-        b["cache_r"] += usage.get("cache_read_input_tokens", 0)
-        b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-        b["cost"] += usage_cost(model, usage)
-        for blk in (msg.get("content") or []):
-            if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                name = blk.get("name", "?")
-                b["tool_calls"] += 1
-                b["tool_counts"][name] = b["tool_counts"].get(name, 0) + 1
+    msg_phase = _build_msg_phase(events, tags)
+    task_phase = _attribute_main_agent(deduped, buckets, msg_phase, phase_order)
+    _attribute_subagents(deduped, buckets, task_phase)
 
     return buckets
 
 
-def phase_wall_times(
-    events: list[dict],
-    tags: list[str | None],
-    phase_order: list[str],
-) -> dict[str, dict]:
-    """Compute per-phase [start, end) durations from ``user`` event timestamps.
-
-    The trace only carries ISO timestamps on ``user`` events
-    (tool_results); we tile the run wall-clock by treating
-    *first-timestamp-in-a-phase* as the phase's end boundary for the
-    preceding phase. Returns ``{phase: {start, end, duration_sec}}``;
-    phases with no timestamped events get a zero-duration entry.
-    """
+def _parse_timestamped_user_events(
+    events: list[dict], tags: list[str | None]
+) -> list[tuple]:
+    """Pull (datetime, phase) pairs from the ``user`` events that carry a parseable
+    ISO timestamp + a phase tag (the only events the trace timestamps)."""
     from datetime import datetime
 
     def _parse(ts: str):
@@ -418,10 +471,15 @@ def phase_wall_times(
         if dt is None:
             continue
         parsed.append((dt, ph))
+    return parsed
 
-    out: dict[str, dict] = {ph: {"start": None, "end": None, "duration_sec": 0.0} for ph in phase_order}
-    if not parsed:
-        return out
+
+def _tile_phase_boundaries(
+    parsed: list[tuple], phase_order: list[str]
+) -> dict[str, dict]:
+    """Tile the run wall-clock into per-phase [start, end) windows: each phase ends
+    at the *first* timestamp seen in a later phase (or the run end if none follows).
+    Returns ``{phase: {start, end, duration_sec}}``."""
     parsed.sort(key=lambda x: x[0])
     run_start = parsed[0][0]
     run_end = parsed[-1][0]
@@ -440,6 +498,7 @@ def phase_wall_times(
                 break
         next_phase_first.append(nxt)
 
+    out: dict[str, dict] = {}
     cursor = run_start
     for i, ph in enumerate(phase_order):
         start = cursor
@@ -452,6 +511,28 @@ def phase_wall_times(
             "duration_sec": (end - start).total_seconds(),
         }
         cursor = end
+    return out
+
+
+def phase_wall_times(
+    events: list[dict],
+    tags: list[str | None],
+    phase_order: list[str],
+) -> dict[str, dict]:
+    """Compute per-phase [start, end) durations from ``user`` event timestamps.
+
+    The trace only carries ISO timestamps on ``user`` events
+    (tool_results); we tile the run wall-clock by treating
+    *first-timestamp-in-a-phase* as the phase's end boundary for the
+    preceding phase. Returns ``{phase: {start, end, duration_sec}}``;
+    phases with no timestamped events get a zero-duration entry.
+    """
+    parsed = _parse_timestamped_user_events(events, tags)
+
+    out: dict[str, dict] = {ph: {"start": None, "end": None, "duration_sec": 0.0} for ph in phase_order}
+    if not parsed:
+        return out
+    out.update(_tile_phase_boundaries(parsed, phase_order))
     return out
 
 

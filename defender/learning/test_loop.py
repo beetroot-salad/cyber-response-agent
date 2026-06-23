@@ -86,9 +86,12 @@ def test_redact_exemplar_scrubs_values_keeps_shape():
         "```\n"
     )
     out = oracle_mod.redact_exemplar(payload)
-    assert "db-07" not in out and "alice" not in out
-    assert '"<host>"' in out and '"<user>"' in out
-    assert '"port": 0' in out and '"ok": false' in out
+    assert "db-07" not in out
+    assert "alice" not in out
+    assert '"<host>"' in out
+    assert '"<user>"' in out
+    assert '"port": 0' in out
+    assert '"ok": false' in out
 
 
 def test_redact_exemplar_no_sample_block_is_placeholder():
@@ -191,7 +194,8 @@ def test_assembled_doc_dumps_with_markers_inline():
         [("l-001", [{"host": "h"}]), ("l-002", ["<standard environment noise>"])]
     )
     text = dump_oracle_doc(doc)
-    assert "projections:" in text and "<standard environment noise>" in text
+    assert "projections:" in text
+    assert "<standard environment noise>" in text
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +212,11 @@ def test_build_lead_user_prompt_drops_goal_and_sanitizes_wtc():
     )
     prompt = oracle_mod.build_lead_user_prompt(lead, "the story", "SAMPLE")
     assert "SECRET defender intent" not in prompt          # goal omitted
-    assert "<alert-time>" in prompt and "17:08:19Z" not in prompt  # wtc sanitized
-    assert "wazuh.auth-events" in prompt and "the story" in prompt and "SAMPLE" in prompt
+    assert "<alert-time>" in prompt
+    assert "17:08:19Z" not in prompt
+    assert "wazuh.auth-events" in prompt
+    assert "the story" in prompt
+    assert "SAMPLE" in prompt
 
 
 def test_build_lead_user_prompt_handles_scalar_and_malformed_wtc():
@@ -229,7 +236,8 @@ def test_build_lead_user_prompt_handles_scalar_and_malformed_wtc():
 def test_dump_oracle_doc_preserves_unicode():
     doc = oracle_mod.assemble_oracle_doc([("l-001", [{"user": "Bjørn"}])])
     text = dump_oracle_doc(doc)
-    assert "Bjørn" in text and "\\xF8" not in text
+    assert "Bjørn" in text
+    assert "\\xF8" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -756,7 +764,8 @@ def test_author_drain_skips_when_lease_held(tmp_path: Path):
         branch=branch,
     )
     assert rc == 0
-    assert seen == [] and triggered == []
+    assert seen == []
+    assert triggered == []
     assert "start" not in branch.events  # never branched
     assert (paths.author_queue_dir / "case-lease.json").exists()  # marker preserved
 
@@ -1132,7 +1141,8 @@ def test_author_branch_lease_true_on_open_lessons_pr():
     assert b.open_lessons_pr_exists() is True
     call = gh.calls[0]
     # prefix-search, NOT the exact --head glob (which would match nothing)
-    assert "--search" in call and "head:lessons/" in call
+    assert "--search" in call
+    assert "head:lessons/" in call
     assert "--head" not in call
 
 
@@ -1174,8 +1184,10 @@ def test_author_branch_finish_pushes_and_opens_pr():
     assert pr == "https://github.com/o/r/pull/9"
     assert ["push", "--set-upstream", "origin", "lessons/abc123"] in git.calls
     create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
-    assert "--base" in create and "main" in create
-    assert "--head" in create and "lessons/abc123" in create
+    assert "--base" in create
+    assert "main" in create
+    assert "--head" in create
+    assert "lessons/abc123" in create
 
 
 def test_author_branch_finish_raises_on_gh_failure():
@@ -1457,9 +1469,10 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
         # positional tail mirrors _run_judge_claude: effort, trace_name, label, user,
         # learning_run_dir; settings_path/add_dir/permission_mode arrive as kwargs.
         _effort, _trace, label, user, _lrd = args
+        scope = kwargs["scope"]
         captured.update(
             prompt_path=prompt_path, model=model, label=label, user=user,
-            settings_path=kwargs.get("settings_path"), add_dir=kwargs.get("add_dir"),
+            settings_path=scope.settings_path, add_dir=scope.add_dir,
         )
         return "outcome: survived\ndefender_findings: []\n"
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 
 def render_prompt(template_path: Path, **subs: str) -> str:

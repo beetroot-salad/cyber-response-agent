@@ -119,4 +119,5 @@ def test_fallback_salt_when_no_run_dir(monkeypatch, capsys):
     out = _run(mod, {"tool_name": "mcp__x__y", "tool_response": {"a": 1}}, capsys)
     # Still wraps, with a generated (non-empty) salt.
     wrapped = out["hookSpecificOutput"]["updatedMCPToolOutput"]
-    assert "<run-" in wrapped and "-siem-data>" in wrapped
+    assert "<run-" in wrapped
+    assert "-siem-data>" in wrapped

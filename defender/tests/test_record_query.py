@@ -89,8 +89,10 @@ def test_main_writes_payload_record_and_passes_through(tmp_path, capsys):
     rows = [json.loads(ln) for ln in (run_dir / "executed_queries.jsonl").read_text().splitlines()]
     assert len(rows) == 1
     r = rows[0]
-    assert r["lead_id"] == "l-003" and r["seq"] == 0
-    assert r["system"] == "stub-cmdb" and r["query_id"] == "stub-cmdb.host-lookup"
+    assert r["lead_id"] == "l-003"
+    assert r["seq"] == 0
+    assert r["system"] == "stub-cmdb"
+    assert r["query_id"] == "stub-cmdb.host-lookup"
     assert r["verb"] == "host-lookup"
     assert r["params"] == {"arg0": "web-1", "raw": True}
     assert r["payload_path"] == "gather_raw/l-003/0.json"
@@ -269,7 +271,8 @@ def test_main_propagates_nonzero_exit_and_error_status(tmp_path):
                   sys.executable, str(cli), "host-lookup", "nope"])
     assert rc == 3
     row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
-    assert row["exit_code"] == 3 and row["payload_status"] == "error"
+    assert row["exit_code"] == 3
+    assert row["payload_status"] == "error"
 
 
 # --- size-safety: oversized pass-through is truncated, payload still persisted ---
@@ -334,8 +337,10 @@ def test_main_samples_record_list_and_persists_full(tmp_path, capsys):
                   sys.executable, str(cli), "query", "--raw"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "FIELD-SHAPE sample" in out and "100 records" in out
-    assert "sample[0]" in out and out.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
+    assert "FIELD-SHAPE sample" in out
+    assert "100 records" in out
+    assert "sample[0]" in out
+    assert out.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
     assert big not in out                          # the full dump never passes through
     persisted = (run_dir / "gather_raw" / "l-001" / "0.json").read_text()
     assert persisted == big
@@ -353,7 +358,8 @@ def test_main_small_record_list_is_still_sampled(tmp_path, capsys, monkeypatch):
                   sys.executable, str(cli), "query", "--raw"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "FIELD-SHAPE sample" in out and "1 records" in out
+    assert "FIELD-SHAPE sample" in out
+    assert "1 records" in out
 
 
 def test_main_non_list_object_passes_through_verbatim(tmp_path, capsys, monkeypatch):

@@ -20,6 +20,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
+class RunDirs:
+    """The two directories a direction leg threads together: the source ``run_dir``
+    (the finished investigation, read) and the per-case ``learning_run_dir`` (this
+    leg's artifacts, written)."""
+
+    run_dir: Path
+    learning_run_dir: Path
+
+
+@dataclass(frozen=True)
 class LoopPaths:
     """Run-dir + _pending queue layout.
 

@@ -159,4 +159,5 @@ def test_runner_spawn_seam_is_honored(tmp_path):
     )
     rc, _text = runner.invoke_claude_print_raw(options, "the prompt", lambda _m: None)
     assert rc == 0
-    assert seen["cmd"][0] == "claude" and "--allowed-tools" in seen["cmd"]
+    assert seen["cmd"][0] == "claude"
+    assert "--allowed-tools" in seen["cmd"]

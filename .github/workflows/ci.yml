@@ -57,6 +57,16 @@ jobs:
       - name: Ruff (hard gate — E + F)
         run: defender/.venv/bin/ruff check . --select E,F --ignore E402,E501
 
+      # Defender-scoped extended-rule gate (issue #400, drain complete). The full
+      # extended family set (bugbear/simplify/complexity/too-many-*/pyupgrade/
+      # pytest-style) is now clean in defender/ and blocking. Config-driven (the
+      # `select` in defender/pyproject.toml), so the local `ruff check defender`
+      # matches CI exactly. Scoped to defender/ (not repo-wide like the E,F gate
+      # above) because the extended config only governs the defender/ tree;
+      # experiments/ + root scripts/ stay E,F-only by design.
+      - name: Ruff (defender extended — full gate)
+        run: defender/.venv/bin/ruff check defender
+
   code-smells:
     runs-on: ubuntu-latest
     steps:
@@ -81,13 +91,9 @@ jobs:
         run: npm install -g jscpd
 
       # ---- Soft signals: metrics, reported but never block. ----
-      # Trend indicators with no clean pass/fail (or redundant with a hard gate
-      # below), so they stay `|| true`. defender/ carries its own [tool.ruff]
-      # config (extend-select bugbear/simplify/complexity/pyupgrade/pytest-style),
-      # so no --config is needed.
-      - name: Ruff (extended — bugbear, simplify, complexity, pyupgrade, pytest-style)
-        run: defender/.venv/bin/ruff check defender --statistics || true
-
+      # Trend indicators with no clean pass/fail, so they stay `|| true`. (The
+      # extended ruff families are now hard-gated in the lint job, #400 — the old
+      # soft `ruff --statistics` sweep is retired; radon/jscpd cover what's left.)
       - name: Radon — cyclomatic complexity (B and worse)
         run: defender/.venv/bin/radon cc defender -a -nb || true
 

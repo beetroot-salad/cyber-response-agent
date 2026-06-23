@@ -75,4 +75,5 @@ def test_runtime_smoke(tmp_path):
     # tool_trace.jsonl has a result event with usage (the run_stats / Phase-B hook).
     events = [json.loads(line) for line in (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
     result_evs = [e for e in events if e.get("type") == "result"]
-    assert result_evs and "usage" in result_evs[-1]
+    assert result_evs
+    assert "usage" in result_evs[-1]

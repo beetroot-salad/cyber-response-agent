@@ -38,7 +38,8 @@ def test_explicit_env_file_wins(tmp_path, monkeypatch):
     explicit.write_text("ANTHROPIC_API_KEY=sk-ant-api03-explicit\n")
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(explicit))
     key, src = run.resolve_first_party_key()
-    assert key == "sk-ant-api03-explicit" and src == explicit
+    assert key == "sk-ant-api03-explicit"
+    assert src == explicit
 
 
 def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
@@ -49,7 +50,8 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
     # root/.env is the first non-explicit candidate, so this is deterministic
     # regardless of any real .env on the host.
     key, src = run.resolve_first_party_key(root=repo)
-    assert key == "sk-ant-api03-repo" and src == repo / ".env"
+    assert key == "sk-ant-api03-repo"
+    assert src == repo / ".env"
 
 
 def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
@@ -60,4 +62,5 @@ def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch
     # and make this assertion fail.
     missing = tmp_path / "repo"
     key, src = run.resolve_first_party_key(root=missing, main_repo_root=missing)
-    assert key is None and src is None
+    assert key is None
+    assert src is None

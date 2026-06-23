@@ -64,7 +64,7 @@ def _enrichment_comment(outcome: str) -> dict:
 
 
 @pytest.mark.parametrize(
-    "outcome,eligible",
+    ("outcome", "eligible"),
     [("caught", True), ("skip-passthrough", True),
      ("survived", False), ("undecidable", False), ("incoherent", False)],
 )

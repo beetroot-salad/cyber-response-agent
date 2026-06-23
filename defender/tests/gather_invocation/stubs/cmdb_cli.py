@@ -17,7 +17,8 @@ import sys
 def main() -> int:
     path = os.environ.get("STUB_CMDB_PAYLOAD")
     if path and os.path.isfile(path):
-        sys.stdout.write(open(path).read())
+        with open(path) as f:
+            sys.stdout.write(f.read())
     else:
         sys.stdout.write('{"error": "host record not found", "results": []}\n')
     return 0

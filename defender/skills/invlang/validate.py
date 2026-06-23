@@ -233,9 +233,9 @@ def _check_vocab(value: Any, allowed: Any, errmsg: str) -> list[str]:
     return []
 
 
-def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
+def _check_vocab_vertices(companion: dict[str, Any]) -> list[str]:
+    """`type` slot on every vertex must be a known vertex type."""
     errors: list[str] = []
-
     for v in _walkers.all_vertices(companion):
         t = v.get("type")
         errors += _check_vocab(
@@ -243,7 +243,12 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
             f"vertex {v.get('id', '?')}: type {t!r} is not a known vertex "
             f"type (`enum types`)",
         )
+    return errors
 
+
+def _check_vocab_edges(companion: dict[str, Any]) -> list[str]:
+    """`relation` + observational `authority.kind` slots on every edge."""
+    errors: list[str] = []
     for e in _walkers.all_edges(companion):
         rel = e.get("relation")
         errors += _check_vocab(
@@ -257,8 +262,12 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
             f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "
             f"observational authority (`enum auth-kinds`)",
         )
+    return errors
 
-    # Proposed parent vertices on hypotheses also carry a type.
+
+def _check_vocab_hypotheses(companion: dict[str, Any]) -> list[str]:
+    """Proposed parent vertices on hypotheses also carry a type + relation."""
+    errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
         pv = (h.get("proposed_edge") or {}).get("parent_vertex") or {}
         pt = pv.get("type")
@@ -273,8 +282,12 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
             f"hypothesis {h.get('id', '?')}: rel {rel!r} is not a known "
             f"relation (`enum relations`)",
         )
+    return errors
 
-    # anchor_kind on contracts and on authz resolutions.
+
+def _check_vocab_anchor_kinds(companion: dict[str, Any]) -> list[str]:
+    """anchor_kind on contracts and on authz resolutions."""
+    errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
         for c in h.get("authorization_contract") or []:
             if not isinstance(c, dict):
@@ -293,11 +306,15 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
             f"authz resolution for contract {row.get('fulfills_contract', '?')}: "
             f"anchor_kind {ak!r} is not known (`enum anchor-kinds`)",
         )
+    return errors
 
-    # `:R attr_updates` key grammar: only `class` or `attrs.<name>` (defender
-    # SKILL §Open-questions). A bare key (e.g. `provenance`) is silently
-    # dropped by the resolver, so reject it at write time rather than let it
-    # land as a no-op refinement.
+
+def _check_attr_update_keys(companion: dict[str, Any]) -> list[str]:
+    """`:R attr_updates` key grammar: only `class` or `attrs.<name>` (defender
+    SKILL §Open-questions). A bare key (e.g. `provenance`) is silently
+    dropped by the resolver, so reject it at write time rather than let it
+    land as a no-op refinement."""
+    errors: list[str] = []
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
             continue
@@ -313,7 +330,16 @@ def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
                     f"refinement key — use `class` (class refinement) or "
                     f"`attrs.<name>` (attribute); a bare key is dropped silently"
                 )
+    return errors
 
+
+def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    errors += _check_vocab_vertices(companion)
+    errors += _check_vocab_edges(companion)
+    errors += _check_vocab_hypotheses(companion)
+    errors += _check_vocab_anchor_kinds(companion)
+    errors += _check_attr_update_keys(companion)
     return errors
 
 
@@ -335,16 +361,14 @@ def _has_open_slot(classification: Any) -> bool:
     return any(slot.strip() == "??" for slot in c.split("/"))
 
 
-def _effective_vertex_state(
-    companion: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Per-vertex effective {classification, attributes} after attr_updates.
-
-    `:R attr_updates` with key ``class`` overrides classification; key
-    ``attrs.<name>`` overrides an attribute. Mirrors the parser's own
-    three-state ``??`` → ``{a,b}`` → concrete resolution model.
-    """
-    state: dict[str, dict[str, Any]] = {}
+def _seed_vertex_state(
+    companion: dict[str, Any], state: dict[str, dict[str, Any]]
+) -> None:
+    """First pass — baseline per-vertex {classification, attributes} from the
+    `:V` declarations themselves. First declaration wins as the baseline; a
+    later observation may carry attributes, and may *refine* an open baseline
+    with a concrete reading (append-only: the original `??` row stays; the lead
+    observes the resolved class). It can never un-resolve a concrete baseline."""
     for v in _walkers.all_vertices(companion):
         vid = v.get("id")
         if not isinstance(vid, str):
@@ -364,6 +388,13 @@ def _effective_vertex_state(
         if v.get("attributes"):
             cur["attributes"].update(v["attributes"])
 
+
+def _apply_attr_updates(
+    companion: dict[str, Any], state: dict[str, dict[str, Any]]
+) -> None:
+    """Second pass — layer `:R attr_updates` on top of the baseline. Key
+    ``class`` overrides classification; key ``attrs.<name>`` overrides an
+    attribute."""
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
             continue
@@ -380,17 +411,26 @@ def _effective_vertex_state(
                     st["classification"] = val
                 elif isinstance(key, str) and key.startswith("attrs."):
                     st["attributes"][key[len("attrs."):]] = val
+
+
+def _effective_vertex_state(
+    companion: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Per-vertex effective {classification, attributes} after attr_updates.
+
+    `:R attr_updates` with key ``class`` overrides classification; key
+    ``attrs.<name>`` overrides an attribute. Mirrors the parser's own
+    three-state ``??`` → ``{a,b}`` → concrete resolution model.
+    """
+    state: dict[str, dict[str, Any]] = {}
+    _seed_vertex_state(companion, state)
+    _apply_attr_updates(companion, state)
     return state
 
 
-def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
-    conclude = companion.get("conclude") or {}
-    if conclude.get("disposition") != "benign":
-        return []
-
+def _check_benign_open_slots(companion: dict[str, Any]) -> list[str]:
+    """(a) no unresolved ?? / {a,b} on any vertex (class or attribute)."""
     errors: list[str] = []
-
-    # (a) no unresolved ?? / {a,b} on any vertex
     for vid, st in _effective_vertex_state(companion).items():
         if _has_open_slot(st["classification"]):
             errors.append(
@@ -405,11 +445,15 @@ def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
                     f"{name!r} is still `??` — resolve via :R attr_updates or "
                     f"escalate"
                 )
+    return errors
 
-    # (b) every authz contract on a LIVE hypothesis resolved authorized.
-    # Survival is computed from final weights (`:T conclude` carries no
-    # sub-tables), so an unauthorized contract can't slip through by being
-    # omitted from a restated survivors list.
+
+def _check_benign_authz(companion: dict[str, Any]) -> list[str]:
+    """(b) every authz contract on a LIVE hypothesis resolved authorized.
+    Survival is computed from final weights (`:T conclude` carries no
+    sub-tables), so an unauthorized contract can't slip through by being
+    omitted from a restated survivors list."""
+    errors: list[str] = []
     live = set(_walkers.live_hypothesis_ids(companion))
     hyps = _walkers.all_hypotheses(companion)
 
@@ -446,6 +490,17 @@ def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
                     f"live hypothesis {hid} resolved {bad!r}, not 'authorized' "
                     f"— benign requires every contract authorized"
                 )
+    return errors
+
+
+def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
+    conclude = companion.get("conclude") or {}
+    if conclude.get("disposition") != "benign":
+        return []
+
+    errors: list[str] = []
+    errors += _check_benign_open_slots(companion)
+    errors += _check_benign_authz(companion)
     return errors
 
 

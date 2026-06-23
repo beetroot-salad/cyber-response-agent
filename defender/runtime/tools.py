@@ -133,6 +133,117 @@ def _bash_env(deps: RunDeps) -> dict[str, str]:
     return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
+def _tool_bash(deps: RunDeps, command: str) -> str:
+    """Logic for the `bash` tool (see the closure's docstring). Module-level so the
+    tool closure stays thin; the gather-vs-main adapter-capture path lives here."""
+    decision = permission.decide_bash(
+        command, is_main_session=deps.is_main_session,
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    # Gather subagent (not the main session): a standalone adapter call is
+    # captured transparently (the queries table + payload are written by the
+    # harness), so the model never wraps it in record-query — it just runs the
+    # adapter.
+    if not deps.is_main_session:
+        argv = permission.adapter_argv(command)
+        if argv is not None:
+            system = _derive_system(argv)
+            # Circuit-breaker in-gather gate: refuse a call to a system already
+            # tripped this run before it runs again, so one dispatch can't keep
+            # hammering a dead source. RETURN the down-message (don't raise
+            # ModelRetry): a tripped system won't recover within the run, so a
+            # retry is pointless, and if the model re-issued the same call it
+            # would burn the bash tool's retry budget into an UnexpectedModel-
+            # Behavior that crashes the run instead of writing a partial trace.
+            # Returning mirrors the dispatch gate in _run_gather.
+            if system and circuit_breaker.is_tripped(deps.run_dir, system):
+                return circuit_breaker.down_message(deps.run_dir, system)
+            return _capture_adapter(deps, argv)
+    # Execute the *validated* command without a shell: the gate already
+    # decomposed it with shlex, so run that token structure directly
+    # (shell=False) instead of re-handing the string to bash. This collapses
+    # the validator/executor parser differential — `$VAR`, globs, `$(...)`,
+    # and fused redirects never expand, because bash never re-parses. See
+    # bash_exec for the rationale.
+    try:
+        rc, out, err = bash_exec.run_pipeline(
+            command,
+            env=_bash_env(deps),
+            cwd=deps.defender_dir.parent,
+            timeout=_BASH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
+    return _format_bash_result(rc, out, err)
+
+
+def _tool_read_file(deps: RunDeps, path: str) -> str:
+    """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
+    decision = permission.decide_read(
+        Path(path), is_main_session=deps.is_main_session,
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    p = Path(path)
+    if not p.is_file():
+        raise ModelRetry(f"file not found: {path}")
+    text = p.read_text()
+    _record_lesson_load(deps, p)  # lesson→outcome traceability (best-effort)
+    # Bound the in-context view BEFORE wrapping: an oversized payload read
+    # whole would overflow the model's window (#303). Cap first so the head is
+    # what gets tag-wrapped (injected text in it stays inert), not the full dump.
+    text = _bounded_read(text, path)
+    if permission.is_untrusted_read(p):
+        # Attacker-influenced data — wrap so injected instructions inside it
+        # are inert. Same delimiter as the rest of the system.
+        return _wrap(text, "untrusted", deps.salt)
+    return text
+
+
+def _tool_write_file(deps: RunDeps, path: str, content: str) -> str:
+    """Logic for the `write_file` tool: a validated run-dir write."""
+    decision = permission.decide_write(
+        Path(path), content, run_dir=deps.run_dir
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    Path(path).write_text(content)
+    return f"wrote {path} ({len(content)} bytes)"
+
+
+def _tool_edit_file(deps: RunDeps, path: str, old_string: str, new_string: str) -> str:
+    """Logic for the `edit_file` tool: the create-only / not-found / non-unique
+    guards, then a validated write."""
+    p = Path(path)
+    current = p.read_text() if p.is_file() else ""
+    if not old_string and p.is_file():
+        # Empty old_string against an existing file would replace the WHOLE
+        # file with new_string (silent clobber). Mirror Claude Code's Edit:
+        # empty old_string is create-only. Use write_file for a full replace.
+        raise ModelRetry(
+            f"{path} already exists; an empty old_string would overwrite it. "
+            "Pass a unique old_string to edit, or use write_file to replace it."
+        )
+    if old_string and old_string not in current:
+        raise ModelRetry(f"old_string not found in {path}")
+    if old_string and current.count(old_string) > 1:
+        # Mirror Claude Code's Edit: a non-unique old_string is ambiguous.
+        # Replacing the first match silently would edit the wrong occurrence
+        # (e.g. a repeated invlang row marker) and can pass invlang validation.
+        raise ModelRetry(
+            f"old_string is not unique in {path} ({current.count(old_string)} "
+            "occurrences); include enough surrounding context to match exactly "
+            "one, or use write_file to replace the whole file."
+        )
+    new_text = current.replace(old_string, new_string, 1) if old_string else new_string
+    decision = permission.decide_write(p, new_text, run_dir=deps.run_dir)
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    p.write_text(new_text)
+    return f"edited {path} ({len(new_text)} bytes)"
+
+
 def register_tools(agent, *, writers: bool = True) -> None:
     """Register the generic tools on `agent` (deps_type must be RunDeps).
 
@@ -149,69 +260,12 @@ def register_tools(agent, *, writers: bool = True) -> None:
         """Run a shell command. Use the `defender-*` shims (defender-invlang,
         defender-lessons, …) for first-party tooling. Data-source adapters are
         not runnable from the main loop — dispatch gather instead."""
-        decision = permission.decide_bash(
-            command, is_main_session=ctx.deps.is_main_session,
-        )
-        if not decision.allow:
-            raise ModelRetry(decision.reason)
-        # Gather subagent (not the main session): a standalone adapter call is
-        # captured transparently (the queries table + payload are written by the
-        # harness), so the model never wraps it in record-query — it just runs the
-        # adapter.
-        if not ctx.deps.is_main_session:
-            argv = permission.adapter_argv(command)
-            if argv is not None:
-                system = _derive_system(argv)
-                # Circuit-breaker in-gather gate: refuse a call to a system already
-                # tripped this run before it runs again, so one dispatch can't keep
-                # hammering a dead source. RETURN the down-message (don't raise
-                # ModelRetry): a tripped system won't recover within the run, so a
-                # retry is pointless, and if the model re-issued the same call it
-                # would burn the bash tool's retry budget into an UnexpectedModel-
-                # Behavior that crashes the run instead of writing a partial trace.
-                # Returning mirrors the dispatch gate in _run_gather.
-                if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
-                    return circuit_breaker.down_message(ctx.deps.run_dir, system)
-                return _capture_adapter(ctx.deps, argv)
-        # Execute the *validated* command without a shell: the gate already
-        # decomposed it with shlex, so run that token structure directly
-        # (shell=False) instead of re-handing the string to bash. This collapses
-        # the validator/executor parser differential — `$VAR`, globs, `$(...)`,
-        # and fused redirects never expand, because bash never re-parses. See
-        # bash_exec for the rationale.
-        try:
-            rc, out, err = bash_exec.run_pipeline(
-                command,
-                env=_bash_env(ctx.deps),
-                cwd=ctx.deps.defender_dir.parent,
-                timeout=_BASH_TIMEOUT_S,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
-        return _format_bash_result(rc, out, err)
+        return _tool_bash(ctx.deps, command)
 
     @agent.tool
     async def read_file(ctx: RunContext[RunDeps], path: str) -> str:
         """Read a file's contents (e.g. alert.json, a SKILL, a lesson)."""
-        decision = permission.decide_read(
-            Path(path), is_main_session=ctx.deps.is_main_session,
-        )
-        if not decision.allow:
-            raise ModelRetry(decision.reason)
-        p = Path(path)
-        if not p.is_file():
-            raise ModelRetry(f"file not found: {path}")
-        text = p.read_text()
-        _record_lesson_load(ctx.deps, p)  # lesson→outcome traceability (best-effort)
-        # Bound the in-context view BEFORE wrapping: an oversized payload read
-        # whole would overflow the model's window (#303). Cap first so the head is
-        # what gets tag-wrapped (injected text in it stays inert), not the full dump.
-        text = _bounded_read(text, path)
-        if permission.is_untrusted_read(p):
-            # Attacker-influenced data — wrap so injected instructions inside it
-            # are inert. Same delimiter as the rest of the system.
-            return _wrap(text, "untrusted", ctx.deps.salt)
-        return text
+        return _tool_read_file(ctx.deps, path)
 
     # Gather stops here: read-only surface (bash + read_file), no file writers.
     if not writers:
@@ -221,13 +275,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
     async def write_file(ctx: RunContext[RunDeps], path: str, content: str) -> str:
         """Write a file in the run dir (investigation.md, report.md). Writes of
         investigation.md are validated against the invlang schema."""
-        decision = permission.decide_write(
-            Path(path), content, run_dir=ctx.deps.run_dir
-        )
-        if not decision.allow:
-            raise ModelRetry(decision.reason)
-        Path(path).write_text(content)
-        return f"wrote {path} ({len(content)} bytes)"
+        return _tool_write_file(ctx.deps, path, content)
 
     @agent.tool
     async def edit_file(
@@ -235,33 +283,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
     ) -> str:
         """Replace the first occurrence of old_string with new_string in a run-dir
         file. The resulting full text is validated (invlang for investigation.md)."""
-        p = Path(path)
-        current = p.read_text() if p.is_file() else ""
-        if not old_string and p.is_file():
-            # Empty old_string against an existing file would replace the WHOLE
-            # file with new_string (silent clobber). Mirror Claude Code's Edit:
-            # empty old_string is create-only. Use write_file for a full replace.
-            raise ModelRetry(
-                f"{path} already exists; an empty old_string would overwrite it. "
-                "Pass a unique old_string to edit, or use write_file to replace it."
-            )
-        if old_string and old_string not in current:
-            raise ModelRetry(f"old_string not found in {path}")
-        if old_string and current.count(old_string) > 1:
-            # Mirror Claude Code's Edit: a non-unique old_string is ambiguous.
-            # Replacing the first match silently would edit the wrong occurrence
-            # (e.g. a repeated invlang row marker) and can pass invlang validation.
-            raise ModelRetry(
-                f"old_string is not unique in {path} ({current.count(old_string)} "
-                "occurrences); include enough surrounding context to match exactly "
-                "one, or use write_file to replace the whole file."
-            )
-        new_text = current.replace(old_string, new_string, 1) if old_string else new_string
-        decision = permission.decide_write(p, new_text, run_dir=ctx.deps.run_dir)
-        if not decision.allow:
-            raise ModelRetry(decision.reason)
-        p.write_text(new_text)
-        return f"edited {path} ({len(new_text)} bytes)"
+        return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
 
 # --- gather dispatch (slice 2): main agent → nested Haiku gather agent --------

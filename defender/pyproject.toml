@@ -56,13 +56,18 @@ package = false
 py-modules = []
 
 [tool.ruff.lint]
-# Hard gate (CI-blocking) is `select = ["E","F"]` minus E402/E501, run with
-# explicit flags. The extra rule sets below are layered in via extend-select and
-# reported in CI as a non-blocking code-smell signal. Hard gate locally:
-#   ruff check . --select E,F --ignore E402,E501
-# Full smell sweep:  ruff check .
-select = ["E", "F"]
-extend-select = [
+# Lint gates, two tiers (issue #400 — extended-ruff drain complete):
+#   1. Repo-wide hard gate — E,F only, run in CI with explicit flags
+#      (`ruff check . --select E,F --ignore E402,E501`) so it stays uniform over
+#      the whole repo; experiments/ + root scripts/ are E,F-only by design.
+#   2. Defender-scoped hard gate — the full `select` below, run config-driven as
+#      `ruff check defender` in ci.yml. The extended families graduated here from
+#      a non-blocking signal one group at a time as their violations cleared; all
+#      are now clean in defender/ and blocking.
+# Full local gate:  ruff check defender
+select = [
+    "E",
+    "F",
     "B",             # flake8-bugbear: real bug patterns (mutable defaults, etc.)
     "SIM",           # flake8-simplify: redundant logic
     "C901",          # mccabe complexity

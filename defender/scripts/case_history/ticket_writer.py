@@ -220,6 +220,48 @@ def annotate_case_ticket(
         _warn(f"annotate raised, ignored: {e!r}")
 
 
+def _fetch_enrich_ticket(
+    case_id: str, key: str, config: dict[str, str], deps: TicketWriterDeps
+) -> dict | None:
+    """GET the ticket and validate the response for enrichment: returns the parsed
+    ticket dict, or None (with a WARN/LOG) on any failure or skip condition
+    (transport, 404, HTTP error, unparseable, already-grounded)."""
+    status, body = deps.request(config, "GET", f"/tickets/{key}")
+    if status is None:
+        _warn(f"enrich-resolution {case_id}: {body}")
+        return None
+    if status == "404":
+        _warn(f"enrich-resolution {case_id}: ticket not found (404); skipping")
+        return None
+    if not status.startswith("2"):
+        _warn(f"enrich-resolution {case_id}: GET HTTP {status}: {body}")
+        return None
+    try:
+        ticket = json.loads(body)
+    except json.JSONDecodeError as e:
+        _warn(f"enrich-resolution {case_id}: unparseable ticket: {e}")
+        return None
+    if case_ticket.ticket_resolution_method(ticket) is not None:
+        _log(f"enrich-resolution {case_id}: already grounded — skipping")
+        return None
+    return ticket
+
+
+def _enriched_resolution(case_id: str, ticket: dict, method: str) -> str | None:
+    """The new `resolution` string to write, or None if there's nothing to stamp.
+    Only stamps a close-resolution we wrote (disposition decodes) — a missing or
+    human-edited resolution is left untouched (append would corrupt it / be
+    un-decodable downstream)."""
+    resolution = ticket.get("resolution")
+    if not isinstance(resolution, str) or case_ticket.ticket_disposition(ticket) is None:
+        _warn(f"enrich-resolution {case_id}: no decodable close resolution; skipping")
+        return None
+    new_resolution = case_ticket.append_resolution_method(resolution, method)
+    if new_resolution == resolution:  # nothing to add (no template / already marked)
+        return None
+    return new_resolution
+
+
 def enrich_case_resolution(
     case_id: str, method: str, deps: TicketWriterDeps = DEFAULT_DEPS
 ) -> None:
@@ -243,33 +285,11 @@ def enrich_case_resolution(
         if config is None:
             return
         key = urllib.parse.quote(case_id, safe="")
-        status, body = deps.request(config, "GET", f"/tickets/{key}")
-        if status is None:
-            _warn(f"enrich-resolution {case_id}: {body}")
+        ticket = _fetch_enrich_ticket(case_id, key, config, deps)
+        if ticket is None:
             return
-        if status == "404":
-            _warn(f"enrich-resolution {case_id}: ticket not found (404); skipping")
-            return
-        if not status.startswith("2"):
-            _warn(f"enrich-resolution {case_id}: GET HTTP {status}: {body}")
-            return
-        try:
-            ticket = json.loads(body)
-        except json.JSONDecodeError as e:
-            _warn(f"enrich-resolution {case_id}: unparseable ticket: {e}")
-            return
-        if case_ticket.ticket_resolution_method(ticket) is not None:
-            _log(f"enrich-resolution {case_id}: already grounded — skipping")
-            return
-        resolution = ticket.get("resolution")
-        # Only stamp a close-resolution we wrote (disposition decodes) — a missing or
-        # human-edited resolution is left untouched (append would corrupt it / be
-        # un-decodable downstream).
-        if not isinstance(resolution, str) or case_ticket.ticket_disposition(ticket) is None:
-            _warn(f"enrich-resolution {case_id}: no decodable close resolution; skipping")
-            return
-        new_resolution = case_ticket.append_resolution_method(resolution, method)
-        if new_resolution == resolution:  # nothing to add (no template / already marked)
+        new_resolution = _enriched_resolution(case_id, ticket, method)
+        if new_resolution is None:
             return
         payload = {"status": "closed", "resolution": new_resolution, "author": "learning"}
         status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)

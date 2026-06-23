@@ -31,12 +31,18 @@ from defender.learning._loop_config import (
     VALID_MERGE_MODES,
     LoopError,
     LoopPaths,
+    RunDirs,
     _log,
 )
 from defender.learning import _author_shared
 from defender.learning._loop_directions import BY_NAME, Direction
 from defender.learning.author_branch import AuthorBranch, BranchError
-from defender.learning._loop_persist import append_findings, derive_alert_rule_key, persist_run
+from defender.learning._loop_persist import (
+    DirectionArtifacts,
+    append_findings,
+    derive_alert_rule_key,
+    persist_run,
+)
 from defender.learning.ticket_enrichment import enrich_case_ticket
 from defender.learning._loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from defender.learning._loop_validate import (
@@ -122,8 +128,7 @@ def _validate_judge_yaml(
 
 def run_direction(
     spec: Direction,
-    run_dir: Path,
-    learning_run_dir: Path,
+    dirs: RunDirs,
     disposition: str,
     alert_rule_key: str,
     run_id: str,
@@ -136,6 +141,7 @@ def run_direction(
 
     Returns True if queue rows were appended (i.e. worth triggering the curators).
     """
+    run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key)
     # Write the story now so oracle + judge can read it from disk downstream; the
@@ -147,10 +153,12 @@ def run_direction(
     if is_skip_story(actor_story):
         _log(f"actor emitted SKIP ({spec.name}) — persisting, no findings")
         persist_run(
-            run_dir, learning_run_dir,
-            actor_story=actor_story, story_name=spec.story_name,
-            judge_yaml=None, judge_name=spec.judge_name,
-            telemetry_yaml=None, telemetry_name=spec.telemetry_name,
+            dirs,
+            artifacts=DirectionArtifacts(
+                actor_story=actor_story, story_name=spec.story_name,
+                judge_yaml=None, judge_name=spec.judge_name,
+                telemetry_yaml=None, telemetry_name=spec.telemetry_name,
+            ),
             disposition=disposition, alert_rule_key=alert_rule_key,
         )
         return False
@@ -170,10 +178,12 @@ def run_direction(
 
     _log(f"step=persist ({spec.name})")
     persist_run(
-        run_dir, learning_run_dir,
-        actor_story=actor_story, story_name=spec.story_name,
-        judge_yaml=judge_stripped, judge_name=spec.judge_name,
-        telemetry_yaml=telemetry_path.read_text(), telemetry_name=spec.telemetry_name,
+        dirs,
+        artifacts=DirectionArtifacts(
+            actor_story=actor_story, story_name=spec.story_name,
+            judge_yaml=judge_stripped, judge_name=spec.judge_name,
+            telemetry_yaml=telemetry_path.read_text(), telemetry_name=spec.telemetry_name,
+        ),
         disposition=disposition, alert_rule_key=alert_rule_key,
     )
 
@@ -341,12 +351,13 @@ def run_one(
     # findings/observation writes on a flock (cross-process safe). subprocess.run
     # releases the GIL while the claude child runs, so threads give real wall-time
     # overlap. Within a leg, actor→oracle→judge stays serial.
+    dirs = RunDirs(run_dir, learning_run_dir)
     errors: list[tuple[str, BaseException]] = []
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures: dict[Any, str] = {}
         for name in directions:
             futures[pool.submit(
-                run_direction, BY_NAME[name], run_dir, learning_run_dir,
+                run_direction, BY_NAME[name], dirs,
                 disposition, alert_rule_key, run_id, held_out,
                 paths=paths, agents=agents,
             )] = name
@@ -584,6 +595,46 @@ def _render_transcript(run_dir: Path) -> None:
     render_and_mirror(run_dir)
 
 
+def _process_marker(
+    marker: Path,
+    inflight_dir: Path,
+    qdir: Path,
+    run_one_fn: Callable[[Path], int],
+    render: Callable[[Path], None],
+) -> bool:
+    """Claim and process one learn-queue marker. Returns True if the run was
+    drained (counts toward the drained total), False if it was skipped (lost the
+    claim race) or quarantined. Each marker is claimed by an atomic rename into
+    ``inflight/`` before processing, so two workers never run the same run dir
+    (the loser's ``os.replace`` raises ``FileNotFoundError`` and it moves on)."""
+    claimed = inflight_dir / marker.name
+    try:
+        os.replace(marker, claimed)
+    except FileNotFoundError:
+        return False  # another worker claimed it first
+    try:
+        spec = json.loads(claimed.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
+        return False
+    run_dir = Path(spec.get("run_dir", ""))
+    if not run_dir.is_dir():
+        _quarantine_marker(spec, claimed, qdir, "artifact-missing")
+        return False
+    try:
+        run_one_fn(run_dir)
+    except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
+        _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
+        return False
+    try:
+        render(run_dir)
+    except Exception as e:  # noqa: BLE001 — render is best-effort
+        _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
+    with contextlib.suppress(OSError):
+        claimed.unlink()
+    return True
+
+
 def learn_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
@@ -619,32 +670,8 @@ def learn_drain(
         inflight_dir.mkdir(parents=True, exist_ok=True)
     drained = 0
     for marker in markers:
-        claimed = inflight_dir / marker.name
-        try:
-            os.replace(marker, claimed)
-        except FileNotFoundError:
-            continue  # another worker claimed it first
-        try:
-            spec = json.loads(claimed.read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
-            continue
-        run_dir = Path(spec.get("run_dir", ""))
-        if not run_dir.is_dir():
-            _quarantine_marker(spec, claimed, qdir, "artifact-missing")
-            continue
-        try:
-            run_one_fn(run_dir)
-        except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
-            _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
-            continue
-        try:
-            render(run_dir)
-        except Exception as e:  # noqa: BLE001 — render is best-effort
-            _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
-        with contextlib.suppress(OSError):
-            claimed.unlink()
-        drained += 1
+        if _process_marker(marker, inflight_dir, qdir, run_one_fn, render):
+            drained += 1
     _log(f"learn_drain: drained {drained} run(s)")
     return 0
 
@@ -707,6 +734,15 @@ Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 LoopError / 
 """
 
 
+def _run_stage(stage: Callable[[], int]) -> int:
+    """Run one stage entrypoint, mapping a LoopError to the FATAL exit-2 contract."""
+    try:
+        return stage()
+    except LoopError as e:
+        print(f"[loop] FATAL: {e}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str]) -> int:
     import argparse
 
@@ -745,21 +781,13 @@ def main(argv: list[str]) -> int:
         if ns.run_dir is not None:
             print("--author-drain takes no run_dir", file=sys.stderr)
             return 1
-        try:
-            return author_drain()
-        except LoopError as e:
-            print(f"[loop] FATAL: {e}", file=sys.stderr)
-            return 2
+        return _run_stage(author_drain)
 
     if ns.learn_drain:
         if ns.run_dir is not None:
             print("--learn-drain takes no run_dir", file=sys.stderr)
             return 1
-        try:
-            return learn_drain()
-        except LoopError as e:
-            print(f"[loop] FATAL: {e}", file=sys.stderr)
-            return 2
+        return _run_stage(learn_drain)
 
     if ns.run_dir is None:
         print("run_dir required (or pass --author-drain)", file=sys.stderr)
@@ -768,8 +796,4 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    try:
-        return run_one(run_dir)
-    except LoopError as e:
-        print(f"[loop] FATAL: {e}", file=sys.stderr)
-        return 2
+    return _run_stage(lambda: run_one(run_dir))

@@ -81,6 +81,55 @@ def adapter_shims() -> set[str]:
     return all_defender_shims() - set(NON_ADAPTER_SHIMS)
 
 
+def _skip_timeout_prefix(tokens: list[str]) -> int:
+    """Index of the first token past a leading `timeout <n>` / `timeout -k <n>
+    <n>` prefix (0 if there is none). The prefix is `timeout` followed by its
+    option flags / numeric durations."""
+    i = 0
+    if tokens[i] == "timeout":
+        i += 1
+        while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].replace(".", "").isdigit()):
+            i += 1
+    return i
+
+
+def _unwrap_bash_c(tokens: list[str], i: int) -> str | None:
+    """Extract the inline `bash -c <payload>` / `sh -c <payload>` script payload,
+    where `tokens[i]` is the `bash`/`sh` token. Returns the payload, or None if
+    it can't be cleanly extracted (wrong form, missing payload, or a trailing
+    command)."""
+    # Real shell semantics: the first non-option word after `bash`/`sh` is the
+    # SCRIPT FILE, and a `-c` after it is just a positional arg to that script
+    # (`bash evil.sh -c '…'` RUNS evil.sh). Only the exact `bash -c <payload>`
+    # inline form is the wrapper we unwrap: require `-c` to be the IMMEDIATE
+    # next token and the payload to be the sole remaining token. Anything
+    # AFTER the payload (`bash -c '…' ; rm`, `… && curl`, a trailing newline +
+    # command) is a SEPARATE command the OUTER shell runs but the gate would
+    # never inspect. Anything else — `bash <script> …`, a missing payload, a
+    # trailing command — fails closed.
+    if i + 1 < len(tokens) and tokens[i + 1] == "-c":
+        if i + 2 == len(tokens) - 1:
+            return tokens[i + 2]  # the quoted script payload
+        return None  # missing payload OR a trailing command
+    return None  # `bash <script> …` / bare `bash` — not the inline `-c` form
+
+
+def _strip_prefix_from_raw(cmd: str, prefix_tokens: list[str]) -> str | None:
+    """Return `cmd` with `prefix_tokens` (a stripped `timeout <n>` prefix) consumed
+    off the head of the ORIGINAL text — not `shlex.join`-ed from the remaining
+    tokens: join would quote operators (`|` → `'|'`, hiding a pipeline from the
+    splitter) and collapse a newline into a space (hiding a second command the
+    shell still runs). The prefix tokens are simple unquoted words, so consume
+    them off the raw string verbatim. Returns None if the prefix didn't sit at the
+    head as parsed (fail closed)."""
+    rest = cmd.lstrip(" \t")
+    for tok in prefix_tokens:
+        if not rest.startswith(tok):
+            return None  # prefix didn't sit at the head as parsed — fail closed
+        rest = rest[len(tok):].lstrip(" \t")
+    return rest
+
+
 def unwrap(cmd: str) -> str | None:
     """Strip a leading `timeout <n>` and an exact `bash -c`/`sh -c` wrapper,
     returning the inner script. The `-c` must be the token IMMEDIATELY after
@@ -95,40 +144,13 @@ def unwrap(cmd: str) -> str | None:
     if not tokens:
         return None
     # Drop a leading `timeout <n>` / `timeout -k <n> <n>` prefix.
-    i = 0
-    if tokens[i] == "timeout":
-        i += 1
-        while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].replace(".", "").isdigit()):
-            i += 1
+    i = _skip_timeout_prefix(tokens)
     if i < len(tokens) and tokens[i] in ("bash", "sh"):
-        # Real shell semantics: the first non-option word after `bash`/`sh` is the
-        # SCRIPT FILE, and a `-c` after it is just a positional arg to that script
-        # (`bash evil.sh -c '…'` RUNS evil.sh). Only the exact `bash -c <payload>`
-        # inline form is the wrapper we unwrap: require `-c` to be the IMMEDIATE
-        # next token and the payload to be the sole remaining token. Anything
-        # AFTER the payload (`bash -c '…' ; rm`, `… && curl`, a trailing newline +
-        # command) is a SEPARATE command the OUTER shell runs but the gate would
-        # never inspect. Anything else — `bash <script> …`, a missing payload, a
-        # trailing command — fails closed.
-        if i + 1 < len(tokens) and tokens[i + 1] == "-c":
-            if i + 2 == len(tokens) - 1:
-                return tokens[i + 2]  # the quoted script payload
-            return None  # missing payload OR a trailing command
-        return None  # `bash <script> …` / bare `bash` — not the inline `-c` form
+        return _unwrap_bash_c(tokens, i)
     if i > 0:
         # A `timeout <n>` prefix was stripped but no `bash -c` followed — return the
-        # remainder so callers see the real command at the head, not `timeout`. Strip
-        # the prefix off the ORIGINAL text rather than `shlex.join`-ing the remaining
-        # tokens: join would quote operators (`|` → `'|'`, hiding a pipeline from the
-        # splitter) and collapse a newline into a space (hiding a second command the
-        # shell still runs). The prefix tokens are simple unquoted words, so consume
-        # them off the raw string verbatim.
-        rest = cmd.lstrip(" \t")
-        for tok in tokens[:i]:
-            if not rest.startswith(tok):
-                return None  # prefix didn't sit at the head as parsed — fail closed
-            rest = rest[len(tok):].lstrip(" \t")
-        return rest
+        # remainder so callers see the real command at the head, not `timeout`.
+        return _strip_prefix_from_raw(cmd, tokens[:i])
     return cmd
 
 

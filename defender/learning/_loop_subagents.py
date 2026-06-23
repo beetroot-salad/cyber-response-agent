@@ -23,7 +23,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
+from collections.abc import Callable
 
 from defender.learning import lead_repository
 from defender.learning import mitre_corpus
@@ -320,6 +321,20 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path) -> str:
     return dump_oracle_doc(assemble_oracle_doc(projections))
 
 
+@dataclass(frozen=True)
+class _ToolScope:
+    """The tool-surface scoping kwargs forwarded to ``_run_claude`` — settings file,
+    add-dir(s), and permission mode."""
+
+    settings_path: Path | None = None
+    add_dir: Path | list[Path] | None = None
+    permission_mode: str | None = None
+
+
+# Frozen → safe to share one default instance (no mutable-default aliasing).
+_DEFAULT_TOOL_SCOPE = _ToolScope()
+
+
 def _run_judge_claude(
     prompt_path: Path,
     model: str,
@@ -329,11 +344,12 @@ def _run_judge_claude(
     user: str,
     learning_run_dir: Path,
     *,
-    settings_path: Path | None = None,
-    add_dir: Path | list[Path] | None = None,
-    permission_mode: str | None = None,
+    scope: _ToolScope = _DEFAULT_TOOL_SCOPE,
 ) -> str:
     """Shared tail for both judge paths: session id + ``claude -p`` + transcript copy."""
+    settings_path, add_dir, permission_mode = (
+        scope.settings_path, scope.add_dir, scope.permission_mode
+    )
     session_id = str(uuid.uuid4())
     _log(f"step={label} session_id={session_id}")
     try:
@@ -493,7 +509,7 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
     return judge_fn(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
-        settings_path=inv.settings_path, add_dir=inv.add_dirs, permission_mode=None,
+        scope=_ToolScope(settings_path=inv.settings_path, add_dir=inv.add_dirs),
     )
 
 

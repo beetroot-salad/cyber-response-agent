@@ -118,6 +118,53 @@ def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     return f'<div class="phase-stats">{"".join(pieces)}</div>'
 
 
+def _merged_assistant_in_phase(
+    events: list[dict], tags: list[str | None], phase: str
+) -> dict[str | None, dict]:
+    """The merged assistant messages whose *post-advance* phase (the last per-event
+    tag for the message id) is ``phase``, keyed by message id. A turn that writes
+    "## ORIENT" lands in ORIENT rather than the prior phase."""
+    msg_phase: dict[str, str] = {}
+    for ev, ph in zip(events, tags, strict=False):
+        if ev.get("type") != "assistant" or ph is None:
+            continue
+        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
+        if mid:
+            msg_phase[mid] = ph
+
+    merged_all = merge_assistant_events(events)
+    return {
+        ((m.get("message") or {}).get("id") or m.get("uuid")): m
+        for m in merged_all
+        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid")) == phase
+    }
+
+
+def _collect_phase_events(
+    events: list[dict],
+    tags: list[str | None],
+    phase: str,
+    merged_in_phase: dict[str | None, dict],
+) -> list[dict]:
+    """Walk the stream in order, collecting the merged assistant turns (deduped by
+    id) and user events (tool_results) tagged to ``phase``."""
+    out: list[dict] = []
+    emitted: set[str] = set()
+    for ev, ph in zip(events, tags, strict=False):
+        if ph != phase:
+            continue
+        t = ev.get("type")
+        if t == "assistant":
+            mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
+            if mid in emitted or mid not in merged_in_phase:
+                continue
+            out.append(merged_in_phase[mid])
+            emitted.add(mid)
+        elif t == "user":
+            out.append(ev)
+    return out
+
+
 def render_phase_inner_events(
     events: list[dict],
     tags: list[str | None],
@@ -134,40 +181,13 @@ def render_phase_inner_events(
     of the message (the last per-event tag for its id), so a turn that
     writes "## ORIENT" lands in ORIENT rather than the prior phase.
     """
-    msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant" or ph is None:
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-        if mid:
-            msg_phase[mid] = ph
-
-    merged_all = merge_assistant_events(events)
-    merged_in_phase = {
-        ((m.get("message") or {}).get("id") or m.get("uuid")): m
-        for m in merged_all
-        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid")) == phase
-    }
+    merged_in_phase = _merged_assistant_in_phase(events, tags, phase)
     if not merged_in_phase and not any(
         ev.get("type") == "user" and ph == phase for ev, ph in zip(events, tags, strict=False)
     ):
         return ""
 
-    out: list[dict] = []
-    emitted: set[str] = set()
-    for ev, ph in zip(events, tags, strict=False):
-        if ph != phase:
-            continue
-        t = ev.get("type")
-        if t == "assistant":
-            mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-            if mid in emitted or mid not in merged_in_phase:
-                continue
-            out.append(merged_in_phase[mid])
-            emitted.add(mid)
-        elif t == "user":
-            out.append(ev)
-
+    out = _collect_phase_events(events, tags, phase, merged_in_phase)
     if not out:
         return ""
     rendered = "\n".join(render_event(e) for e in out)
