@@ -114,11 +114,10 @@ def test_load_cited_policy_renders_grounded_resolutions(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    monkeypatch.setattr(
-        vf, "_fetch_closed_resolution",
-        lambda cid: "benign — scan [grounded: identity-confirmed (l-002)]",
+    out = vf.load_cited_policy(
+        "run-B", runs_dir=runs,
+        fetch_fn=lambda cid: "benign — scan [grounded: identity-confirmed (l-002)]",
     )
-    out = vf.load_cited_policy("run-B", runs_dir=runs)
     assert "case-OLD1" in out
     assert "grounded: identity-confirmed (l-002)" in out
 
@@ -127,8 +126,9 @@ def test_load_cited_policy_neutral_when_unreachable(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    monkeypatch.setattr(vf, "_fetch_closed_resolution", lambda cid: None)  # store down
-    assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
+    # store down: fetch returns None for every cited case
+    out = vf.load_cited_policy("run-B", runs_dir=runs, fetch_fn=lambda cid: None)
+    assert out == vf._NO_CITED_POLICY
 
 
 def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):

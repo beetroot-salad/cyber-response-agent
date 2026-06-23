@@ -344,7 +344,7 @@ def test_main_samples_record_list_and_persists_full(tmp_path, capsys):
 def test_main_small_record_list_is_still_sampled(tmp_path, capsys, monkeypatch):
     # Even a tiny record-list is sampled, not dumped verbatim — so a re-sent
     # context never carries the raw events (the cache-read tax this closes).
-    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 65536)
+    monkeypatch.setenv("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     cli = _fake_cli(tmp_path, "elastic_cli.py", '{"hits":[{"i":1}]}')
@@ -359,7 +359,7 @@ def test_main_small_record_list_is_still_sampled(tmp_path, capsys, monkeypatch):
 def test_main_non_list_object_passes_through_verbatim(tmp_path, capsys, monkeypatch):
     # A single object (not a record list) IS the answer and is small — it passes
     # through whole; there is nothing to "sample".
-    monkeypatch.setattr(ge, "PASSTHROUGH_MAX_BYTES", 65536)
+    monkeypatch.setenv("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     cli = _fake_cli(tmp_path, "identity_cli.py", '{"user":"dev.dana","authorized_hosts":["jump-box-1"]}')

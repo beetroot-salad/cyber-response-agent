@@ -78,7 +78,13 @@ def _read_resolution_method(learning_run_dir: Path) -> str | None:
     return None
 
 
-def enrich_case_ticket(run_dir: Path, learning_run_dir: Path) -> None:
+def enrich_case_ticket(
+    run_dir: Path,
+    learning_run_dir: Path,
+    *,
+    annotate_fn=annotate_case_ticket,
+    enrich_fn=enrich_case_resolution,
+) -> None:
     """Stamp the case-history ticket from the adversarial verdict (issue #317 + #338).
     Caller gates on a benign disposition + a successful adversarial leg; this reads the
     verdict and delegates the (idempotent, non-fatal) writes to the writer. The ticket
@@ -94,7 +100,7 @@ def enrich_case_ticket(run_dir: Path, learning_run_dir: Path) -> None:
     outcome = _read_adversarial_outcome(learning_run_dir)
     if outcome is None:
         return
-    annotate_case_ticket(run_dir.name, outcome)
+    annotate_fn(run_dir.name, outcome)
     method = _read_resolution_method(learning_run_dir)
     if method and case_ticket.outcome_seeds_eligible(outcome):
-        enrich_case_resolution(run_dir.name, method)
+        enrich_fn(run_dir.name, method)

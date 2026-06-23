@@ -51,18 +51,14 @@ def _case(
     )
 
 
-def _stub_corpus(monkeypatch, corpus: list[Companion], *, scanned: int | None = None):
-    """Monkeypatch the cached loader to return a hand-crafted corpus."""
+def _stub_loader(corpus: list[Companion], *, scanned: int | None = None):
+    """Build a `load_fn` that returns a hand-crafted corpus."""
     report = LoadReport(
         root=Path("/tmp/fake"),
         scanned=scanned if scanned is not None else len(corpus),
         loaded=len(corpus),
     )
-    monkeypatch.setattr(
-        advisory,
-        "_cached_load",
-        lambda _root: (tuple(corpus), report),
-    )
+    return lambda _root: (tuple(corpus), report)
 
 
 def _benign_case(case_id: str, *, signature_id="5710") -> Companion:
@@ -93,14 +89,14 @@ def _benign_case(case_id: str, *, signature_id="5710") -> Companion:
 # ---------------------------------------------------------------------------
 
 
-def test_advisory_recall_returns_all_three_sections_when_signature_has_cases(monkeypatch):
+def test_advisory_recall_returns_all_three_sections_when_signature_has_cases():
     corpus = [_benign_case(f"case-{i}") for i in range(4)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=("?credential-spray-scan", "?monitoring-probe"),
+        load_fn=_stub_loader(corpus),
     )
 
     assert set(out.sections) == {
@@ -112,22 +108,22 @@ def test_advisory_recall_returns_all_three_sections_when_signature_has_cases(mon
     assert all(not s.empty for s in out.sections.values())
 
 
-def test_top_k_truncates_similar_cases_and_hypothesis_vocab(monkeypatch):
+def test_top_k_truncates_similar_cases_and_hypothesis_vocab():
     corpus = [_benign_case(f"case-{i}") for i in range(10)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=("?credential-spray-scan",),
         top_k=3,
+        load_fn=_stub_loader(corpus),
     )
     assert len(out.sections[CLASS_SIMILAR_CASES].hits) == 3
     # 2 unique hypothesis names in the fixture; top_k=3 caps but won't pad.
     assert len(out.sections[CLASS_HYPOTHESIS_VOCAB].hits) == 2
 
 
-def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
+def test_hypothesis_vocab_aggregates_with_weight_histogram():
     """Each row is per-name with a {++, +, -, --} histogram, not per-case."""
     corpus = [
         _case(
@@ -153,12 +149,12 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
             leads=[],  # ?spray unassessed → unresolved
         ),
     ]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         classes=(CLASS_HYPOTHESIS_VOCAB,),
+        load_fn=_stub_loader(corpus),
     )
     row = out.sections[CLASS_HYPOTHESIS_VOCAB].hits[0]
     assert row["name"] == "?spray"
@@ -172,14 +168,14 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_loud_empty_when_signature_has_no_cases(monkeypatch):
+def test_loud_empty_when_signature_has_no_cases():
     corpus = [_benign_case("c1", signature_id="sig-OTHER")]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=("?spray",),
+        load_fn=_stub_loader(corpus),
     )
     assert out.telemetry["cases_for_signature"] == 0
     for section in out.sections.values():
@@ -193,14 +189,14 @@ def test_loud_empty_when_signature_has_no_cases(monkeypatch):
     assert CAVEAT in md
 
 
-def test_loud_empty_at_class_level_when_frontier_has_no_match(monkeypatch):
+def test_loud_empty_at_class_level_when_frontier_has_no_match():
     corpus = [_benign_case(f"case-{i}") for i in range(3)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=("?nonexistent-hypothesis",),
+        load_fn=_stub_loader(corpus),
     )
     section = out.sections[CLASS_LEAD_DISCRIMINATION]
     assert section.empty
@@ -214,14 +210,14 @@ def test_loud_empty_at_class_level_when_frontier_has_no_match(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_classes_subset_only_runs_requested(monkeypatch):
+def test_classes_subset_only_runs_requested():
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         classes=(CLASS_SIMILAR_CASES,),
+        load_fn=_stub_loader(corpus),
     )
     assert set(out.sections) == {CLASS_SIMILAR_CASES}
 
@@ -240,14 +236,14 @@ def test_unknown_class_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_as_markdown_renders_expected_sections_in_order(monkeypatch):
+def test_as_markdown_renders_expected_sections_in_order():
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=("?credential-spray-scan",),
+        load_fn=_stub_loader(corpus),
     )
     md = out.as_markdown()
     # Order matters: similar → vocab → discrimination.
@@ -260,11 +256,12 @@ def test_as_markdown_renders_expected_sections_in_order(monkeypatch):
     assert "?credential-spray-scan" in md.split("### Lead discrimination", 1)[1]
 
 
-def test_as_json_roundtrips_telemetry_and_sections(monkeypatch):
+def test_as_json_roundtrips_telemetry_and_sections():
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
-    _stub_corpus(monkeypatch, corpus)
 
-    out = advisory_recall("/tmp/fake", signature_id="5710")
+    out = advisory_recall(
+        "/tmp/fake", signature_id="5710", load_fn=_stub_loader(corpus)
+    )
     parsed = json.loads(out.as_json())
     assert parsed["signature_id"] == "5710"
     assert parsed["caveat"] == CAVEAT
@@ -272,11 +269,14 @@ def test_as_json_roundtrips_telemetry_and_sections(monkeypatch):
     assert set(parsed["sections"]) == set(out.sections)
 
 
-def test_telemetry_carries_parse_health(monkeypatch):
+def test_telemetry_carries_parse_health():
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
-    _stub_corpus(monkeypatch, corpus, scanned=5)  # 3 files didn't load
 
-    out = advisory_recall("/tmp/fake", signature_id="5710")
+    out = advisory_recall(
+        "/tmp/fake",
+        signature_id="5710",
+        load_fn=_stub_loader(corpus, scanned=5),  # 3 files didn't load
+    )
     t = out.telemetry
     assert t["cases_scanned"] == 5
     assert t["cases_loaded"] == 2
@@ -288,17 +288,17 @@ def test_telemetry_carries_parse_health(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_empty_frontier_falls_back_to_top_k_leads(monkeypatch):
+def test_empty_frontier_falls_back_to_top_k_leads():
     """Without a frontier, Class 8 surfaces the most-used leads as a
     baseline view — useful for ORIENT-only or pre-PREDICT consumers."""
     corpus = [_benign_case(f"case-{i}") for i in range(4)]
-    _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
         frontier=(),
         top_k=3,
+        load_fn=_stub_loader(corpus),
     )
     section = out.sections[CLASS_LEAD_DISCRIMINATION]
     assert not section.empty

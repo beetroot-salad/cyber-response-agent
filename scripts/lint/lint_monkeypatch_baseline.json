@@ -1,10 +1,8 @@
 {
   "//": "lint_monkeypatch baseline — monkeypatch.setattr sites in defender/ tests (the DI-avoidance smell; inject a config/deps seam instead). Fingerprint is file:target (no line number). CI fails on a file:target absent here. Regenerate: python scripts/lint/lint_monkeypatch.py --update-baseline. Annotate intentional entries; \"\" means un-triaged debt to convert to injection.",
   "entries": {
-    "defender/learning/test_eval_secondary.py:sec.WORKTREES_DIR": "debt: ensure_worktree/worktree_path_for need a worktrees_dir seam (see #390)",
     "defender/learning/test_loop.py:orch.os.replace": "boundary-ok: stdlib os.replace, fault-injection (lost claim-race)",
     "defender/learning/test_loop.py:orch.run_one": "intentional: test exercises the un-injected default (run_one_fn defaults to module run_one); seam exists",
-    "defender/learning/test_loop.py:subagents._run_judge_claude": "debt: add a judge_fn= seam (mirror run_one_fn=) to swap the claude -p judge spawn — serves PydanticAI (see #390)",
     "defender/tests/conftest.py:shared_mod.LEARNING_DIR": "residual-debt: _author_shared generation/lock reads module globals; LoopPaths models them — thread it (see #389)",
     "defender/tests/conftest.py:shared_mod.REPO_LOCK_FILE": "residual-debt: acquire_repo_lock reads REPO_LOCK_FILE global; LoopPaths.author_lock_file exists — thread it (see #389)",
     "defender/tests/conftest.py:shared_mod.REPO_ROOT": "residual-debt: _generation_count reads REPO_ROOT global; LoopPaths.repo_root exists — thread it (see #389)",
@@ -19,10 +17,7 @@
     "defender/tests/test_author_streaming_timeout.py:tmp_repo.author.subprocess.Popen": "boundary-ok: subprocess.Popen swaps a fake claude binary (process boundary)",
     "defender/tests/test_block_main_loop_raw_access.py:_cmd_segments.all_defender_shims": "boundary-ok: enumerates the bin/ dir (filesystem); stubbed for determinism",
     "defender/tests/test_block_main_loop_raw_access.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
-    "defender/tests/test_budget_enforcer.py:mod.DEFAULT_LIMITS": "debt: thread a limits dict through the hook entrypoint (check_budgets already takes limits) (see #390)",
-    "defender/tests/test_inject_system_skill_description.py:mod.SKILLS_DIR": "debt: read_description reads SKILLS_DIR global; needs a config seam (see #390)",
     "defender/tests/test_inject_system_skill_description.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
-    "defender/tests/test_invlang_advisory.py:advisory._cached_load": "debt: inject a load_fn into advisory_recall (bypasses disk + lru_cache) (see #390)",
     "defender/tests/test_lead_author.py:lead_author.CATALOG_DIR": "convertible: inject via LeadAuthorDeps/LoopPaths (catalog_dir) (see #388)",
     "defender/tests/test_lead_author.py:lead_author.REPO_ROOT": "convertible: inject via LeadAuthorDeps (repo_root already threaded into build_handoff) (see #388)",
     "defender/tests/test_lead_author.py:lead_author.SKILLS_DIR": "convertible: discover_system_drafts(skills_dir=) via LeadAuthorDeps (see #388)",
@@ -37,15 +32,8 @@
     "defender/tests/test_record_lead.py:os.fdopen": "boundary-ok: os.fdopen syscall, fault-injection (disk full)",
     "defender/tests/test_record_lead.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
     "defender/tests/test_record_query.py:Path.write_text": "boundary-ok: Path.write_text, fault-injection (one-shot write failure)",
-    "defender/tests/test_record_query.py:ge.PASSTHROUGH_MAX_BYTES": "debt: env-derived global; cheapest fix is monkeypatch.setenv (out of this lint's scope) (see #390)",
-    "defender/tests/test_run_key.py:run._run.REPO_ROOT": "debt: resolve_first_party_key reads _run.REPO_ROOT global; needs a root param (see #390)",
     "defender/tests/test_sql.py:sys.stdin": "boundary-ok: reads sys.stdin.buffer (the real interface)",
     "defender/tests/test_sql.py:tempfile.tempdir": "boundary-ok: stdlib tempfile.tempdir (odd-char temp paths)",
-    "defender/tests/test_ticket_cli.py:transport.http_get": "boundary-ok: stub-adapter docker-exec/HTTP transport (external IO); injectable but low value",
-    "defender/tests/test_ticket_enrichment.py:ticket_enrichment.annotate_case_ticket": "debt: enrich_case_ticket calls annotate_case_ticket bare; thread injectable callables (see #390)",
-    "defender/tests/test_ticket_enrichment.py:ticket_enrichment.enrich_case_resolution": "debt: enrich_case_ticket calls enrich_case_resolution bare; thread injectable callables (see #390)",
-    "defender/tests/test_ticket_seeds.py:case_ticket.signature_label": "debt: sample_seeds calls case_ticket.signature_label bare; no seam (see #390)",
-    "defender/tests/test_ticket_seeds.py:ticket_seeds._list_closed": "debt: sample_seeds needs a list_closed_fn= seam (subprocess ticket-store read) (see #390)",
-    "defender/tests/test_verify_forward.py:vf._fetch_closed_resolution": "debt: load_cited_policy needs a fetch seam (subprocess ticket adapter) (see #390)"
+    "defender/tests/test_ticket_cli.py:transport.http_get": "boundary-ok: stub-adapter docker-exec/HTTP transport (external IO); injectable but low value"
   }
 }

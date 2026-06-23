@@ -129,7 +129,8 @@ def _to_seed(ticket) -> Seed:
 
 
 def sample_seeds(
-    alert: dict, self_case_id: str, run_id: str, *, now: datetime | None = None
+    alert: dict, self_case_id: str, run_id: str, *, now: datetime | None = None,
+    list_closed_fn=_list_closed, signature_label_fn=case_ticket.signature_label,
 ) -> list[Seed]:
     """Sample 3–5 prior benign-and-survived closed cases for the alert's signature.
 
@@ -138,14 +139,14 @@ def sample_seeds(
     event time (falling back to wall-clock now only if the alert carries none); `now`
     overrides the anchor for tests."""
     try:
-        label = case_ticket.signature_label(alert)
+        label = signature_label_fn(alert)
         if not label:
             return []
         if now is None:
             now = _parse_iso(case_ticket.alert_event_time(alert)) or datetime.now(UTC)
         lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
         eligible = [
-            t for t in _list_closed(label) if _is_eligible(t, self_case_id, lo, hi)
+            t for t in list_closed_fn(label) if _is_eligible(t, self_case_id, lo, hi)
         ]
         if not eligible:
             return []

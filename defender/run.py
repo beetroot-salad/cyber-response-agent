@@ -88,7 +88,7 @@ def _main_repo_root() -> Path:
     return common.parent
 
 
-def resolve_first_party_key() -> tuple[str | None, Path | None]:
+def resolve_first_party_key(*, root: Path | None = None) -> tuple[str | None, Path | None]:
     """The billable first-party API key for the PydanticAI engine, sourced from a
     `.env` file rather than the ambient ANTHROPIC_API_KEY.
 
@@ -105,12 +105,14 @@ def resolve_first_party_key() -> tuple[str | None, Path | None]:
 
     Returns ``(key, source_path)`` or ``(None, None)``.
     """
+    if root is None:
+        root = _run.REPO_ROOT
     candidates: list[Path] = []
     explicit = os.environ.get("DEFENDER_ENV_FILE")
     if explicit:
         candidates.append(Path(explicit))
     candidates += [
-        _run.REPO_ROOT / ".env",
+        root / ".env",
         _main_repo_root() / ".env",
     ]
     seen: set[Path] = set()

@@ -63,12 +63,13 @@ def extract_system(prompt: str) -> str | None:
     return match.group(1)
 
 
-def read_description(system: str) -> str | None:
+def read_description(system: str, skills_dir: Path | None = None) -> str | None:
     """Return the SKILL.md frontmatter `description:` for the named system."""
-    skill_path = (SKILLS_DIR / system / "SKILL.md").resolve()
-    # Path-traversal guard: must live under SKILLS_DIR.
+    skills_dir = skills_dir or SKILLS_DIR
+    skill_path = (skills_dir / system / "SKILL.md").resolve()
+    # Path-traversal guard: must live under skills_dir.
     try:
-        skill_path.relative_to(SKILLS_DIR.resolve())
+        skill_path.relative_to(skills_dir.resolve())
     except ValueError:
         return None
     if not skill_path.is_file():
@@ -96,7 +97,7 @@ def read_description(system: str) -> str | None:
 
 
 @lru_cache(maxsize=1)
-def descriptor_catalog() -> str | None:
+def descriptor_catalog(skills_dir: Path | None = None) -> str | None:
     """The progressive-disclosure index for the gather subagent: every data-source
     system + its one-line SKILL `description:`. Scoped to systems that have an
     adapter CLI (`scripts/adapters/<system>_cli.py`) — the things gather can actually
@@ -111,7 +112,7 @@ def descriptor_catalog() -> str | None:
     )
     lines = []
     for system in systems:
-        desc = read_description(system)
+        desc = read_description(system, skills_dir=skills_dir)
         if desc:
             lines.append(f"- `{system}`: {desc}")
     return "\n".join(lines) or None

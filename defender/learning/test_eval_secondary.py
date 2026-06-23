@@ -223,22 +223,21 @@ def test_resolve_target_pin_picks_correct_generation(tmp_path: Path):
     assert pin.actor_model == "m"
 
 
-def test_ensure_worktree_idempotent(tmp_path: Path, monkeypatch):
+def test_ensure_worktree_idempotent(tmp_path: Path):
     repo = _init_repo_with_actor_commits(tmp_path, n=4, model_name="m")
-    monkeypatch.setattr(sec, "WORKTREES_DIR", tmp_path / "wts")
     pin = sec.resolve_target_pin(repo, k=3)
     assert pin is not None
 
-    p1 = sec.ensure_worktree(pin, repo)
+    p1 = sec.ensure_worktree(pin, repo, worktrees_dir=tmp_path / "wts")
     assert p1.is_dir()
     assert (p1 / ".git").exists()
     # Second call is a no-op (no exception, same path).
-    p2 = sec.ensure_worktree(pin, repo)
+    p2 = sec.ensure_worktree(pin, repo, worktrees_dir=tmp_path / "wts")
     assert p2 == p1
     assert sec._worktree_head_sha(p2) == pin.sha
 
 
-def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path, monkeypatch):
+def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path):
     """Reused worktree at the wrong SHA gets removed and rebuilt at pin.sha.
 
     Simulates: a prior harness run on a different branch left a
@@ -248,7 +247,7 @@ def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path, monkeypatc
     misattributing the catch rate to the wrong generation.
     """
     repo = _init_repo_with_actor_commits(tmp_path, n=4, model_name="m")
-    monkeypatch.setattr(sec, "WORKTREES_DIR", tmp_path / "wts")
+    worktrees_dir = tmp_path / "wts"
     pin = sec.resolve_target_pin(repo, k=3)  # gen 1 (4-3)
     assert pin is not None
 
@@ -257,7 +256,7 @@ def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path, monkeypatc
     all_commits = sec.list_actor_commits(repo)
     other = next(c for c in all_commits if c.generation == 4)
     assert other.sha != pin.sha
-    wrong_path = sec.worktree_path_for(pin)
+    wrong_path = sec.worktree_path_for(pin, worktrees_dir=worktrees_dir)
     wrong_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "worktree", "add", "--detach", str(wrong_path), other.sha],
@@ -265,7 +264,7 @@ def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path, monkeypatc
     )
     assert sec._worktree_head_sha(wrong_path) == other.sha
 
-    rebuilt = sec.ensure_worktree(pin, repo)
+    rebuilt = sec.ensure_worktree(pin, repo, worktrees_dir=worktrees_dir)
     assert rebuilt == wrong_path
     assert sec._worktree_head_sha(rebuilt) == pin.sha
 
