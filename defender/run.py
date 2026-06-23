@@ -19,6 +19,7 @@ which takes precedence over the ambient value.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -64,7 +65,30 @@ def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
     return None
 
 
-def resolve_first_party_key(defender_dir: Path) -> tuple[str | None, Path | None]:
+def _main_repo_root() -> Path:
+    """The main worktree's root, where shared config like `.env` lives.
+
+    Under a linked git worktree `_run.REPO_ROOT` is the *worktree* root, not the
+    main checkout, so `<repo_root>/.env` misses the canonical file. Git's common
+    dir (`.../.git`) is shared by every worktree; its parent is the main root.
+    Falls back to `_run.REPO_ROOT` outside a git tree.
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=_run.REPO_ROOT, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return _run.REPO_ROOT
+    if not out:
+        return _run.REPO_ROOT
+    common = Path(out)
+    if not common.is_absolute():
+        common = (_run.REPO_ROOT / common).resolve()
+    return common.parent
+
+
+def resolve_first_party_key() -> tuple[str | None, Path | None]:
     """The billable first-party API key for the PydanticAI engine, sourced from a
     `.env` file rather than the ambient ANTHROPIC_API_KEY.
 
@@ -73,10 +97,11 @@ def resolve_first_party_key(defender_dir: Path) -> tuple[str | None, Path | None
     REST API this engine calls), so the `.env` key takes precedence. First existing
     file with an ANTHROPIC_API_KEY wins:
 
-      1. ``$DEFENDER_ENV_FILE``  — explicit override
+      1. ``$DEFENDER_ENV_FILE``        — explicit override
       2. ``<repo_root>/.env``
-      3. ``/workspace/.env``     — canonical host location (repo_root differs under a git worktree)
-      4. ``<defender_dir>/../.env``
+      3. ``<main_worktree_root>/.env`` — repo_root points at the *worktree* root
+                                         under a linked git worktree; shared config
+                                         like .env lives in the main checkout
 
     Returns ``(key, source_path)`` or ``(None, None)``.
     """
@@ -86,8 +111,7 @@ def resolve_first_party_key(defender_dir: Path) -> tuple[str | None, Path | None
         candidates.append(Path(explicit))
     candidates += [
         _run.REPO_ROOT / ".env",
-        Path("/workspace/.env"),
-        defender_dir.parent / ".env",
+        _main_repo_root() / ".env",
     ]
     seen: set[Path] = set()
     for path in candidates:
@@ -120,7 +144,7 @@ def main(argv: list[str]) -> int:
 
     # Source the billable first-party key from .env (overrides the ambient
     # subscription credential a Claude Code session exports). See module docstring.
-    key, src = resolve_first_party_key(DEFENDER_DIR)
+    key, src = resolve_first_party_key()
     if key:
         os.environ["ANTHROPIC_API_KEY"] = key
         print(f"[run.py] first-party API key sourced from {src} "
@@ -132,7 +156,7 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
     else:
         print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
-              "/workspace/.env, <repo>/.env, or $DEFENDER_ENV_FILE (the PydanticAI "
+              "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI "
               "engine bills the first-party Anthropic API).", file=sys.stderr)
         return 2
 

@@ -217,6 +217,14 @@ def without_consumed_category(rec: dict) -> dict:
     return {k: v for k, v in rec.items() if k != "consumed_category"}
 
 
+def by_id(rows: list[dict], id_key: str) -> dict[str, dict]:
+    """Index a list of queue rows by their id field — the author keys on
+    ``finding_id``, the curator on ``observation_id`` (one body, two corpora).
+    Subscripts ``row[id_key]`` (a missing key is a real break, not silently
+    dropped), so behavior matches the per-module copies it replaces."""
+    return {r[id_key]: r for r in rows}
+
+
 def partition_committed(
     committed: list[dict], *, hold_committed: bool
 ) -> tuple[list[dict], list[dict]]:

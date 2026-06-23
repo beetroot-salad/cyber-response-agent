@@ -9,29 +9,32 @@ import pytest
 HERE = Path(__file__).resolve().parent
 
 from defender.learning import verify_forward as vf  # type: ignore[import-not-found]
+from defender.learning import _verify_forward_shared as vfs  # type: ignore[import-not-found]
+
+_PREFIX = "verify_forward"
 
 
 def test_parse_verdict_good():
-    assert vf.parse_verdict("reasoning here\n\nVERDICT: GOOD\n") == "GOOD"
+    assert vfs.parse_verdict("reasoning here\n\nVERDICT: GOOD\n", error_prefix=_PREFIX) == "GOOD"
 
 
 def test_parse_verdict_bad():
-    assert vf.parse_verdict("blah\nVERDICT: BAD") == "BAD"
+    assert vfs.parse_verdict("blah\nVERDICT: BAD", error_prefix=_PREFIX) == "BAD"
 
 
 def test_parse_verdict_takes_last_when_multiple():
     text = "VERDICT: GOOD\nmore reasoning\nVERDICT: BAD\n"
-    assert vf.parse_verdict(text) == "BAD"
+    assert vfs.parse_verdict(text, error_prefix=_PREFIX) == "BAD"
 
 
 def test_parse_verdict_missing_raises():
     with pytest.raises(SystemExit, match="no VERDICT line"):
-        vf.parse_verdict("just reasoning, no verdict")
+        vfs.parse_verdict("just reasoning, no verdict", error_prefix=_PREFIX)
 
 
 def test_parse_verdict_unrecognized_raises():
     with pytest.raises(SystemExit, match="unrecognized"):
-        vf.parse_verdict("VERDICT: MAYBE")
+        vfs.parse_verdict("VERDICT: MAYBE", error_prefix=_PREFIX)
 
 
 def test_load_run_context(tmp_path, monkeypatch):
@@ -58,11 +61,12 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
         vf.load_run_context("rid", runs_dir=runs)
 
 
-def test_render_user_prompt_substitutes(monkeypatch, tmp_path):
+def test_render_prompt_substitutes(tmp_path):
     prompt = tmp_path / "vf.md"
     prompt.write_text("T={transcript} L={lesson} D={disposition}")
-    monkeypatch.setattr(vf, "PROMPT_PATH", prompt)
-    out = vf.render_user_prompt("the lesson", "the transcript", "benign")
+    out = vfs.render_prompt(
+        prompt, transcript="the transcript", lesson="the lesson", disposition="benign"
+    )
     assert "T=the transcript" in out
     assert "L=the lesson" in out
     assert "D=benign" in out
@@ -133,12 +137,17 @@ def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
     assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
 
 
-def test_render_user_prompt_substitutes_cited_policy(monkeypatch, tmp_path):
+def test_render_prompt_substitutes_cited_policy(tmp_path):
     prompt = tmp_path / "vf.md"
     prompt.write_text("D={disposition} P={cited_policy}")
-    monkeypatch.setattr(vf, "PROMPT_PATH", prompt)
-    out = vf.render_user_prompt("L", "T", "benign", "the policy block")
+    out = vfs.render_prompt(
+        prompt, lesson="L", transcript="T", disposition="benign",
+        cited_policy="the policy block",
+    )
     assert "P=the policy block" in out
-    # default keeps the prompt valid for the adversarial path (no cited policy)
-    out2 = vf.render_user_prompt("L", "T", "benign")
+    # the adversarial call site passes the neutral placeholder explicitly
+    out2 = vfs.render_prompt(
+        prompt, lesson="L", transcript="T", disposition="benign",
+        cited_policy=vf._NO_CITED_POLICY,
+    )
     assert vf._NO_CITED_POLICY in out2

@@ -37,7 +37,7 @@ def test_explicit_env_file_wins(tmp_path, monkeypatch):
     explicit = tmp_path / "custom.env"
     explicit.write_text("ANTHROPIC_API_KEY=sk-ant-api03-explicit\n")
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(explicit))
-    key, src = run.resolve_first_party_key(tmp_path / "defender")
+    key, src = run.resolve_first_party_key()
     assert key == "sk-ant-api03-explicit" and src == explicit
 
 
@@ -47,17 +47,17 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
     repo.mkdir()
     (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-repo\n")
     monkeypatch.setattr(run._run, "REPO_ROOT", repo)
-    # repo_root/.env is checked before /workspace/.env, so this is deterministic
+    # repo_root/.env is the first non-explicit candidate, so this is deterministic
     # regardless of any real .env on the host.
-    key, src = run.resolve_first_party_key(tmp_path / "defender")
+    key, src = run.resolve_first_party_key()
     assert key == "sk-ant-api03-repo" and src == repo / ".env"
 
 
 def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ENV_FILE", raising=False)
     monkeypatch.setattr(run._run, "REPO_ROOT", tmp_path / "repo")  # no .env there
-    key, src = run.resolve_first_party_key(tmp_path / "defender")
-    # Guard on the host: /workspace/.env is a real candidate and may legitimately
-    # exist; only the no-key case is assertable when it doesn't.
-    if not Path("/workspace/.env").is_file():
-        assert key is None and src is None
+    key, src = run.resolve_first_party_key()
+    # The main-worktree-root candidate derives from `git -C REPO_ROOT rev-parse
+    # --git-common-dir`; REPO_ROOT is a non-git tmp dir here, so it falls back to
+    # REPO_ROOT itself — no host candidate escapes, making this deterministic.
+    assert key is None and src is None

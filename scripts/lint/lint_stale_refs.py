@@ -17,12 +17,17 @@ Algorithm:
   3. Filter: skip identifiers <6 chars without an underscore, and skip
      common stdlib symbols (typing/Callable/etc.) — they're never
      project-specific stale-ref signal.
-  4. Batch-grep the remaining tree for each survivor in one `git grep
-     -F -e A -e B ...` call. Idents with >50 hits are too common to be
-     stale-ref signal; skip them. Idents with 1–50 hits in files OUTSIDE
-     the diff's own changed files are surfaced.
+  4. Skip identifiers that still have a binding site (def/class/assignment/
+     import) ANYWHERE in the post-PR tree — they were moved, re-exported, or
+     their import line merely reflowed (single→multi-line), not removed. A
+     genuine stale ref is a symbol defined NOWHERE yet still referenced.
+  5. Batch-grep the remaining tree for each survivor in one word-boundary
+     (`git grep -w -F -e A -e B ...`) call — `-w` so a removed `_by_id` does
+     not match `template_path_by_id`. Idents with >50 hits are too common to
+     be signal; skip them. Idents with 1–50 hits in files OUTSIDE the diff's
+     own changed files are surfaced.
 
-Exits 0 if clean, 1 otherwise. Soft signal under code-smells.
+Exits 0 if clean, 1 otherwise.
 """
 from __future__ import annotations
 
@@ -127,10 +132,13 @@ def _is_specific(ident: str) -> bool:
 
 
 def _batch_grep(idents: list[str], exclude_files: set[str]) -> dict[str, list[str]]:
-    """Return {ident: [filtered_lines]} from one combined git grep call."""
+    """Return {ident: [filtered_lines]} from one combined git grep call.
+
+    Word-boundary (`-w`) so a removed `_by_id` doesn't match `template_path_by_id`;
+    the attribution below is `\\b`-anchored for the same reason."""
     if not idents:
         return {}
-    cmd = ["git", "grep", "-n", "-F"]
+    cmd = ["git", "grep", "-n", "-w", "-F"]
     for ident in idents:
         cmd.extend(["-e", ident])
     out = _run(cmd, timeout=60)
@@ -145,12 +153,50 @@ def _batch_grep(idents: list[str], exclude_files: set[str]) -> dict[str, list[st
             continue
         if any(rel.startswith(d + "/") or rel == d for d in EXCLUDED_GREP_DIRS):
             continue
-        # Determine which ident matched (greedy first-hit).
+        # Determine which ident matched (greedy first whole-word hit).
         for ident in idents:
-            if ident in parts[2]:
+            if re.search(rf"\b{re.escape(ident)}\b", parts[2]):
                 by_ident[ident].append(line[:200])
                 break
     return by_ident
+
+
+def _is_binding(line: str, ident: str) -> bool:
+    """True if `line` defines or imports `ident` — a `def`/`class`, a module-level
+    assignment, or any `import` line naming it (module path or target)."""
+    e = re.escape(ident)
+    return bool(
+        re.search(rf"\b(?:async\s+)?(?:def|class)\s+{e}\b", line)
+        or re.search(rf"^\s*{e}\s*(?::[^=]+)?=(?!=)", line)   # assignment / annotated
+        or ("import" in line and re.search(rf"\b{e}\b", line))  # import (module or target)
+        or re.fullmatch(rf"\s*{e},?\s*", line)               # multiline import member
+    )
+
+
+def _still_defined(idents: list[str]) -> set[str]:
+    """Idents that still have a binding site (def/class/assignment/import) ANYWHERE
+    in the post-PR tree — i.e. moved or re-exported, not removed. A genuine stale
+    ref is a symbol defined NOWHERE yet still referenced; a move/rename/import
+    reflow leaves the symbol defined elsewhere and is not stale. Scans the whole
+    tree (changed files included — that is where a moved def now lives)."""
+    if not idents:
+        return set()
+    cmd = ["git", "grep", "-n", "-w", "-F"]
+    for ident in idents:
+        cmd.extend(["-e", ident])
+    out = _run(cmd, timeout=60)
+    defined: set[str] = set()
+    for line in out.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) < 3:
+            continue
+        rel, content = parts[0], parts[2]
+        if any(rel.startswith(d + "/") or rel == d for d in EXCLUDED_GREP_DIRS):
+            continue
+        for ident in idents:
+            if ident not in defined and _is_binding(content, ident):
+                defined.add(ident)
+    return defined
 
 
 HEADER = (
@@ -187,6 +233,16 @@ def _scan() -> list[Finding]:
     if skipped:
         print(f"Skipped {len(skipped)} generic identifiers: {', '.join(skipped[:10])}"
               + ("..." if len(skipped) > 10 else ""))
+
+    # Drop idents still defined/imported somewhere post-PR (moved, re-exported, or
+    # an import line merely reflowed) — those are not stale, only a removed-AND-
+    # undefined symbol with surviving references is.
+    moved = _still_defined(specific)
+    if moved:
+        print(f"Skipped {len(moved)} still-defined identifier(s) (moved/re-exported): "
+              f"{', '.join(sorted(moved)[:10])}" + ("..." if len(moved) > 10 else ""))
+    specific = [i for i in specific if i not in moved]
+
     if not specific:
         print("No specific removed identifiers in the diff.")
         return []

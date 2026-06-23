@@ -22,6 +22,7 @@ from defender.scripts.lessons._lessons_common import (
     as_list,
     as_str_set,
     csv_set,
+    iter_lessons,
     reexec_into_venv,
     rel_to_repo,
 )
@@ -33,24 +34,9 @@ if __name__ == "__main__":
 
 import argparse
 
-from defender._frontmatter import parse_frontmatter_or_none
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
-
-
-def iter_lessons(corpus: Path):
-    if not corpus.is_dir():
-        return
-    for path in sorted(corpus.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
-        fm = parse_frontmatter_or_none(path.read_text())
-        if fm is None:
-            print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
-            continue
-        yield path, fm
 
 
 def _parse_case_entities(value: str | None) -> list[tuple[str, str]]:

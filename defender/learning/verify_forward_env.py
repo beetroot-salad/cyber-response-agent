@@ -28,7 +28,6 @@ post-flight). Prints exactly ``GOOD`` or ``BAD`` on its last line.
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +37,9 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 from defender.learning._prologue import extract_case_entities
+from defender.learning._verify_forward_shared import (
+    load_observation as _load_observation,
+)
 
 
 HERE = Path(__file__).resolve().parent
@@ -45,22 +47,6 @@ REPO_ROOT = HERE.parents[1]
 RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
 DEFAULT_PENDING = HERE / "_pending" / "environment_observations.jsonl"
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
-
-
-def load_observation(observation_id: str, pending: Path) -> dict:
-    if not pending.is_file():
-        raise SystemExit(f"verify_forward_env: pending queue not found at {pending}")
-    with pending.open() as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            if row.get("observation_id") == observation_id:
-                return row
-    raise SystemExit(
-        f"verify_forward_env: observation_id {observation_id!r} not found in {pending}"
-    )
 
 
 def case_entities_arg(row: dict, repo_root: Path) -> str:
@@ -119,7 +105,9 @@ def main(argv: list[str]) -> int:
         print(f"verify_forward_env: lesson not found: {lesson_path}", file=sys.stderr)
         return 1
 
-    row = load_observation(ns.observation_id, pending)
+    row = _load_observation(
+        ns.observation_id, pending, error_prefix="verify_forward_env"
+    )
     # The canonical key (matches the runtime actor's --alert-rule-ids) — not the
     # judge's free-read alert_rule_ids, and not whatever the curator keyed.
     rule_ids = _rule_ids_arg(row.get("alert_rule_key"))

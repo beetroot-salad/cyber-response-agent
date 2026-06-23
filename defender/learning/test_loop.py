@@ -1034,7 +1034,7 @@ def test_source_run_dir_absolute_when_state_dir_out_of_repo(tmp_path: Path):
     consumer contract (``repo_root / src``) resolves back to the real run dir."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    state = tmp_path / "state"  # out-of-repo, like /tmp/defender-state
+    state = tmp_path / "state"  # out-of-repo
     paths = LoopPaths(repo_root=repo, state_dir=state)
     assert paths.runs_dir == state / "runs"
 

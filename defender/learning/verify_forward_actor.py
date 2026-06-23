@@ -18,9 +18,7 @@ lesson (rewrite + re-run) before reverting and routing to
 """
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -34,31 +32,18 @@ REPO_ROOT = HERE.parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning._loop_config import subscription_env  # noqa: E402
+from defender.learning._verify_forward_shared import (  # noqa: E402
+    call_haiku as _call_haiku,
+    load_observation as _load_observation,
+    parse_verdict as _parse_verdict,
+    render_prompt,
+)
 
 PENDING_FILE = HERE / "_pending" / "actor_observations.jsonl"
 PROMPT_PATH = HERE / "verify_forward_actor.md"
 
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
 VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
-
-
-def load_observation(observation_id: str) -> dict:
-    if not PENDING_FILE.is_file():
-        raise SystemExit(
-            f"verify_forward_actor: pending queue not found at {PENDING_FILE}"
-        )
-    with PENDING_FILE.open() as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            if row.get("observation_id") == observation_id:
-                return row
-    raise SystemExit(
-        f"verify_forward_actor: observation_id {observation_id!r} not found "
-        f"in {PENDING_FILE}"
-    )
 
 
 def load_story(source_run_dir: str) -> str:
@@ -68,55 +53,6 @@ def load_story(source_run_dir: str) -> str:
             f"verify_forward_actor: actor_story.md missing at {path}"
         )
     return path.read_text()
-
-
-def render_user_prompt(lesson_text: str, observation_text: str, story_text: str) -> str:
-    template = PROMPT_PATH.read_text()
-    return (
-        template
-        .replace("{story}", story_text)
-        .replace("{observation}", observation_text)
-        .replace("{lesson}", lesson_text)
-    )
-
-
-def call_haiku(user_prompt: str) -> str:
-    cmd = [
-        "claude",
-        "-p",
-        "--model",
-        VERIFIER_MODEL,
-        "--output-format",
-        "text",
-    ]
-    proc = subprocess.run(
-        cmd,
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=VERIFIER_TIMEOUT,
-        env=subscription_env(),
-    )
-    if proc.returncode != 0:
-        raise SystemExit(
-            f"verify_forward_actor: claude -p failed (rc={proc.returncode}): "
-            f"{proc.stderr[-2000:]}"
-        )
-    return proc.stdout
-
-
-def parse_verdict(text: str) -> str:
-    for line in reversed(text.strip().splitlines()):
-        s = line.strip()
-        if s.startswith("VERDICT:"):
-            v = s.split(":", 1)[1].strip()
-            if v in ("GOOD", "BAD"):
-                return v
-            raise SystemExit(f"verify_forward_actor: unrecognized verdict {v!r}")
-    raise SystemExit(
-        "verify_forward_actor: no VERDICT line found in Haiku output:\n"
-        + text[-1000:]
-    )
 
 
 def main(argv: list[str]) -> int:
@@ -134,7 +70,9 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    row = load_observation(observation_id)
+    row = _load_observation(
+        observation_id, PENDING_FILE, error_prefix="verify_forward_actor"
+    )
     observation_text = row.get("observation") or ""
     source_run_dir = row.get("source_run_dir") or ""
     if not observation_text or not source_run_dir:
@@ -142,13 +80,22 @@ def main(argv: list[str]) -> int:
             f"verify_forward_actor: observation row missing observation/source_run_dir: {row!r}"
         )
     story_text = load_story(source_run_dir)
-    user_prompt = render_user_prompt(
-        lesson_path.read_text(), observation_text, story_text
+    user_prompt = render_prompt(
+        PROMPT_PATH,
+        story=story_text,
+        observation=observation_text,
+        lesson=lesson_path.read_text(),
     )
     t0 = time.monotonic()
-    output = call_haiku(user_prompt)
+    output = _call_haiku(
+        user_prompt,
+        error_prefix="verify_forward_actor",
+        model=VERIFIER_MODEL,
+        timeout=VERIFIER_TIMEOUT,
+        env_fn=subscription_env,
+    )
     elapsed = time.monotonic() - t0
-    verdict = parse_verdict(output)
+    verdict = _parse_verdict(output, error_prefix="verify_forward_actor")
     log_path = os.environ.get("VERIFY_TIMING_LOG") or str(
         HERE / "_verify_timing_actor.log"
     )

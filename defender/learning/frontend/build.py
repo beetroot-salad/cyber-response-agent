@@ -17,34 +17,25 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
-DEFENDER = REPO_ROOT / "defender"
 
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve
+# whether this file is imported or run directly (see tests/conftest.py). Must
+# precede the shared import below (and the venv re-exec, when run as a script).
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def _reexec_into_venv() -> None:
-    """Switch to defender/.venv (for PyYAML, via serialize) when run as a script.
+from defender.scripts._venv import reexec_into_venv  # noqa: E402
 
-    Must run before ``import serialize`` so serialize imports cleanly
-    under the venv. Guarded by ``__name__ == "__main__"`` — build.py is
-    only ever a CLI entry point, never imported. No-op without a venv.
-    """
-    venv_py = DEFENDER / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
-        os.execv(str(venv_py), [str(venv_py), str(HERE), *sys.argv[1:]])
-
-
+# Switch to defender/.venv (for PyYAML, via serialize) before importing serialize
+# so it imports cleanly under the venv. Gated on __main__ — build.py is only ever
+# a CLI entry point, never imported — so importing it never execs the caller away.
 if __name__ == "__main__":
-    _reexec_into_venv()
-
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
-if str(DEFENDER.parent) not in sys.path:
-    sys.path.insert(0, str(DEFENDER.parent))
+    reexec_into_venv(__file__)
 
 from defender.learning.frontend import serialize  # noqa: E402
 from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402

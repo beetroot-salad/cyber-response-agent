@@ -567,6 +567,11 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
     (fake_scripts / "_lessons_common.py").write_text(
         (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()
     )
+    # _lessons_common re-exports the shared venv helper from defender.scripts._venv,
+    # so mirror that module too (it imports nothing venv-only).
+    (ctx["repo"] / "defender" / "scripts" / "_venv.py").write_text(
+        (defender_src / "scripts" / "_venv.py").read_text()
+    )
 
     def _run(extra: list[str]) -> str:
         proc = subprocess.run(

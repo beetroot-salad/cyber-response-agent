@@ -4,37 +4,64 @@ The three lesson tools (``lessons_fm.py``, ``lessons_actor_index.py``,
 ``lessons_env_retrieve.py``) each hand-rolled the same venv re-exec dance and
 the same handful of frontmatter-coercion helpers. They are collected here once.
 
-Deliberately **pure stdlib** — it imports nothing that the defender venv
-provides (no ``yaml`` / ``defender._frontmatter``). That is what lets a caller
-import it *before* :func:`reexec_into_venv` has had a chance to swap the
-interpreter, on a bare system ``python3`` that has no PyYAML yet.
-
-Each ``iter_lessons`` stays local to its module — the three have genuinely
-divergent signatures (fixed root vs. ``corpus`` arg vs. a 3-tuple yielding raw
-frontmatter text), so only the leaf coercions are shared.
+Deliberately **pure stdlib at import time** — the module top imports nothing the
+defender venv provides (no ``yaml`` / ``defender._frontmatter``). That is what
+lets a caller import it *before* :func:`reexec_into_venv` has swapped the
+interpreter, on a bare system ``python3`` that has no PyYAML yet. :func:`iter_lessons`
+therefore imports the yaml-backed frontmatter parser *lazily*, inside the function.
 """
 from __future__ import annotations
 
-import os
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
+# Re-exported so the lessons CLIs keep importing it from here unchanged; the
+# single implementation now lives in the neutral `defender.scripts._venv`, shared
+# with the lessons frontend. Pure stdlib, so importing it stays pre-venv-safe.
+from defender.scripts._venv import reexec_into_venv
 
-def reexec_into_venv(script: str) -> None:
-    """Re-exec the current process under ``defender/.venv``'s python.
+__all__ = [
+    "reexec_into_venv", "iter_lessons",
+    "as_list", "as_str_set", "csv_set", "rel_to_repo",
+]
 
-    PyYAML lives only in the defender venv, but these CLIs are reachable with
-    the system ``python3`` (the actor's Bash tool, a bare
-    ``python3 defender/scripts/lessons/…`` run). Call this from a script's
-    ``__main__`` guard, before importing any venv-only dependency.
 
-    A no-op when the venv python is missing (e.g. CI without a bootstrapped
-    venv) or already the running interpreter (e.g. the ``bin/`` shim, which
-    execs the venv python directly) — so it never double-execs.
+def iter_lessons(
+    corpus_dir: Path,
+    *,
+    with_raw: bool = False,
+    warn_label: Callable[[Path], str] | None = None,
+) -> Iterator[tuple]:
+    """Yield well-formed lessons under ``corpus_dir``: ``*.md`` sorted, skipping
+    ``_``-prefixed files, warning-and-skipping on malformed frontmatter.
+
+    Yields ``(path, frontmatter)`` by default, or ``(path, raw_frontmatter, fm)``
+    when ``with_raw`` (the raw YAML between the fences, for frontmatter grep).
+    ``warn_label`` formats the skipped path in the warning (default ``path.name``;
+    the actor index passes a repo-relative label). The yaml-backed parser is
+    imported lazily so this module stays importable before the venv re-exec.
     """
-    venv_py = Path(script).resolve().parents[3] / "defender" / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
-        os.execv(str(venv_py), [str(venv_py), str(script), *sys.argv[1:]])
+    from defender._frontmatter import FrontmatterError, parse_frontmatter
+
+    label = warn_label or (lambda p: p.name)
+    if not corpus_dir.is_dir():
+        return
+    for path in sorted(corpus_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
+        text = path.read_text()
+        try:
+            fm, _body = parse_frontmatter(text)
+        except FrontmatterError:
+            print(f"warn: skipping {label(path)} (malformed frontmatter)", file=sys.stderr)
+            continue
+        if with_raw:
+            norm = text.replace("\r\n", "\n").replace("\r", "\n")
+            raw = norm[4:norm.find("\n---", 4)]  # YAML between the fences
+            yield path, raw, fm
+        else:
+            yield path, fm
 
 
 def as_list(v) -> list:

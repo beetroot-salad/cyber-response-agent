@@ -82,12 +82,12 @@ def test_env_observation_card_handles_missing_entities():
 
 
 def test_actor_benign_section_empty_when_story_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path))
     assert vj.render_judge_actor_benign_section("nope") == ""
 
 
 def test_actor_benign_section_renders_story(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path))
     learn = tmp_path / "runs" / "case-1"
     learn.mkdir(parents=True)
     (learn / "actor_benign_story.md").write_text("routine sweep story")
@@ -97,7 +97,7 @@ def test_actor_benign_section_renders_story(tmp_path, monkeypatch):
 
 
 def test_oracle_benign_section_empty_when_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(vj, "_learning_run_dir", lambda run_id: tmp_path / "runs" / run_id)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path))
     assert vj.render_judge_oracle_benign_section("nope") == ""
 
 

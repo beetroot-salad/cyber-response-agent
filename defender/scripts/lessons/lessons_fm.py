@@ -44,7 +44,12 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.scripts.lessons._lessons_common import as_list, reexec_into_venv, rel_to_repo
+from defender.scripts.lessons._lessons_common import (
+    as_list,
+    iter_lessons,
+    reexec_into_venv,
+    rel_to_repo,
+)
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
 # caller used (the bin/ shim already points here; this covers a direct
@@ -81,21 +86,6 @@ def _split_frontmatter(text: str) -> tuple[str, dict] | None:
     return (raw, data) if isinstance(data, dict) else None
 
 
-def iter_lessons():
-    """Yield (path, raw_frontmatter, frontmatter_dict) per well-formed lesson."""
-    if not LESSONS_DIR.is_dir():
-        return
-    for path in sorted(LESSONS_DIR.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
-        parsed = _split_frontmatter(path.read_text())
-        if parsed is None:
-            print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
-            continue
-        raw, fm = parsed
-        yield path, raw, fm
-
-
 def _emit_match(path: Path, fm: dict) -> None:
     desc = str(fm.get("description") or "").strip().replace("\t", " ").replace("\n", " ")
     print(f"{rel_to_repo(path, REPO_ROOT)}\t{desc}")
@@ -107,7 +97,7 @@ def cmd_grep(patterns: list[str]) -> int:
     except re.error as e:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
-    for path, raw, fm in iter_lessons():
+    for path, raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
         if all(rx.search(raw) for rx in regexes):
             _emit_match(path, fm)
     return 0
@@ -120,7 +110,7 @@ def cmd_tags(field: str | None) -> int:
         return 2
     for f in fields:
         counts: dict[str, int] = {}
-        for _path, _raw, fm in iter_lessons():
+        for _path, _raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
             for val in as_list(fm.get(f)):
                 counts[str(val)] = counts.get(str(val), 0) + 1
         print(f"{f}:")

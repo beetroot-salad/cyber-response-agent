@@ -27,6 +27,19 @@ from pathlib import Path
 # repo root, matching run.py's REPO_ROOT and the hook modules.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+def is_main_session(hook_data: dict) -> bool:
+    """True for the top-level agent loop, False for a Task subagent.
+
+    The discriminator is `agent_id`: the PreToolUse payload carries it (plus
+    `agent_type`) ONLY when the hook fires inside a subagent call; the main loop
+    has neither (per the hooks reference, confirmed empirically). cwd is NOT
+    usable — run.py spawns the orchestrator and every gather subagent in-process
+    at the same cwd (REPO_ROOT), so a `cwd == REPO_ROOT` test flags gather
+    subagents as the main loop and wrongly blocks their legitimate gather_raw
+    reads. Absence of `agent_id` → main loop → apply the clamps."""
+    return not hook_data.get("agent_id")
+
 # Non-adapter shims: corpus query + gather's own wrappers. Everything else
 # under defender/bin/ that starts with `defender-` is a data-source adapter.
 # This is the single source of truth for the split — the in-process gate

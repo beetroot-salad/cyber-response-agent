@@ -374,10 +374,6 @@ def write_held_report(
 _log = make_logger("author")
 
 
-def _by_id(findings: list[dict]) -> dict[str, dict]:
-    return {f["finding_id"]: f for f in findings}
-
-
 def _result_finding_id(bucket: str, entry: Any) -> str:
     if bucket == "committed":
         if not isinstance(entry, str) or not entry:
@@ -477,7 +473,7 @@ def _run_batch_inner(cfg: AuthorConfig, *, hold_committed: bool = False) -> int:
     if not batch:
         _log("queue empty — nothing to author")
         return 0
-    all_findings = _by_id(batch)
+    all_findings = _shared.by_id(batch, "finding_id")
     held, consumed_idempotent = _partition_pre_author(cfg, batch)
     gated_ids = {h["finding_id"] for h in held} | {
         c["finding_id"] for c in consumed_idempotent

@@ -4,7 +4,7 @@ description: Ticket-server stub system reference — read-only ticket lookups fo
 ---
 
 The ticket-server stub is the v1 FastAPI app reused under
-playground-v2's compose (kept in `/workspace/playground/ticket-server`
+playground-v2's compose (kept under the playground's `ticket-server`
 so v1 integrations stay working). v1's
 `soc-agent/scripts/tools/playground_ticket_cli.py` is a separate
 ActionContract-shaped adapter for that ecosystem; this adapter is

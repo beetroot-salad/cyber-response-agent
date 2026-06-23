@@ -39,6 +39,12 @@ test modules — a `tests/` dir or a flat `test_*.py` / `*_test.py` file — and
 `skills/connect/examples/` (adapter scaffold templates meant to be copied). A
 few legitimately-polymorphic names (entry points) are allowlisted below.
 
+Also skipped: thin same-name *delegators* — a def whose whole body is `return
+<mod>.<same_name>(...)` (see `_is_delegator`). The author family re-exports the
+canonical `_author_shared`/`_curator` plumbing through same-named one-line
+adapters for import-locality; the real body lives once in the target, so
+counting the re-export as a copy is a name-collision false positive.
+
 Limitation: name-based, so a dup split across *different* names (e.g. #360's
 `acquire_queue_lock` vs `acquire_lock`) is only partially surfaced — the
 same-named copies fire, the renamed sibling does not. Block-level dup is jscpd's
@@ -119,6 +125,26 @@ def _body_fingerprint(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return "".join(ast.dump(node) for node in _strip_docstring(fn.body))
 
 
+def _is_delegator(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True if the body is just `return <mod>.<same_name>(...)` (optionally
+    `await`ed) — a thin re-export/pinning adapter, NOT a copy. The author family
+    exposes the shared `_author_shared`/`_curator` plumbing through same-named
+    one-line delegators for import-locality; flagging those as duplicates is a
+    name-collision false positive (the real body lives once in the target).
+    A def that merely *calls* a differently-named shared helper is a real body."""
+    body = _strip_docstring(fn.body)
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return False
+    value = body[0].value
+    if isinstance(value, ast.Await):
+        value = value.value
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == fn.name
+    )
+
+
 def _suppressed(fn: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> bool:
     """True if the inline SUPPRESS marker sits anywhere in the def's header — any
     decorator line through the last line of a (possibly multi-line) signature —
@@ -149,6 +175,8 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if node.name in ALLOWLIST_NAMES:
+                continue
+            if _is_delegator(node):  # thin `return mod.same_name(...)` re-export
                 continue
             if _suppressed(node, lines):
                 continue

@@ -53,7 +53,11 @@ from pathlib import Path
 # is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.hooks._cmd_segments import ADAPTER_CLI_RE, adapter_shims
+from defender.hooks._cmd_segments import (
+    ADAPTER_CLI_RE,
+    adapter_shims,
+    is_main_session as _is_main_session,
+)
 
 RAW_MARKER = "gather_raw"
 # `ADAPTER_CLI_RE` (a `scripts/adapters/<name>_cli.py` path) is imported from the
@@ -103,19 +107,6 @@ def _read_target(tool_name: str, tool_input: dict) -> str:
     if tool_name == "Glob":
         return f"{tool_input.get('path', '')} {tool_input.get('pattern', '')}"
     return ""
-
-
-def _is_main_session(hook_data: dict) -> bool:
-    """True for the top-level agent loop, False for a Task subagent.
-
-    The discriminator is `agent_id`: the PreToolUse payload carries it (plus
-    `agent_type`) ONLY when the hook fires inside a subagent call; the main loop
-    has neither (per the hooks reference, confirmed empirically). cwd is NOT
-    usable — run.py spawns the orchestrator and every gather subagent in-process
-    at the same cwd (REPO_ROOT), so a `cwd == REPO_ROOT` test flags gather
-    subagents as the main loop and wrongly blocks their legitimate gather_raw
-    reads. Absence of `agent_id` → main loop → apply the clamps."""
-    return not hook_data.get("agent_id")
 
 
 def main() -> int:
