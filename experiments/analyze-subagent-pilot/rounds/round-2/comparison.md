@@ -212,7 +212,7 @@ is viable with a minimal bundle.
    context if production evaluation reveals failures.
 
 3. **Enforce hypothesis atomicity upstream** — see
-   `tasks/hypothesis-atomicity-invariant.md`. This is the load-bearing
+   `docs/decisions/hypothesis-atomicity-invariant.md`. This is the load-bearing
    upstream invariant; without it, ANALYZE correctness collapses.
 
 4. **Test with Haiku and the trust-handoff** as the next pilot

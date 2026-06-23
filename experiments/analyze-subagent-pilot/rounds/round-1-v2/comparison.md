@@ -126,7 +126,7 @@ when the underlying hypotheses were atomic. The revised view:
 1. **Hypothesis atomicity is a HYPOTHESIZE-phase quality invariant**
    — it is not an ANALYZE problem at all. Any ANALYZE (inline or
    subagent, any model) inherits ambiguity from upstream. See
-   `tasks/hypothesis-atomicity-invariant.md`.
+   `docs/decisions/hypothesis-atomicity-invariant.md`.
 
 2. **The ANALYZE-extraction question is now cleaner.** With
    atomized hypotheses, grade drift across context bundles has

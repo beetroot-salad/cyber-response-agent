@@ -2,7 +2,7 @@
 
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
 `defender/scripts/lessons/lessons_env_retrieve.py` / `lessons_actor_index.py`,
-and the task `tasks/benign-actor-success-retrieval.md`. Captures the
+and the task `docs/decisions/benign-actor-success-retrieval.md`. Captures the
 design discussion behind adding a success/usefulness signal to the
 actor-retrieved lesson corpora. The benign (FP) direction —
 `lessons-environment/` — is the worked case; §4 mirrors it to the
@@ -161,7 +161,7 @@ defender as discriminator, judge as reward) self-corrects *only* with a
 ground-truth anchor. Without one, actor and defender can co-evolve into a
 shared blind spot (GAN-style mode collapse / reward hacking) and call it
 convergence. The held-out `ground_truth.yaml` and the cross-case oracle
-(`tasks/defender-learning-loop-cross-case-oracle.md`) are that anchor;
+(`docs/decisions/defender-learning-loop-cross-case-oracle.md`) are that anchor;
 "the learning loop mitigates FN" and "gate promotion on confirmed-correct"
 are the same claim from two ends.
 

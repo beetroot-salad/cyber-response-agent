@@ -54,7 +54,7 @@ Rules (all blocking):
 Deferred (tracked as follow-ups, intentionally NOT enforced here):
 per-type class-slot grammar vocab (the slot enums behind ``compute`` etc.)
 and sibling-fork topological uniqueness — both blocked on spec
-self-contradictions; see `tasks/defender-invlang-enforcement-ramp.md`.
+self-contradictions; see `docs/decisions/defender-invlang-enforcement-ramp.md`.
 """
 
 from __future__ import annotations

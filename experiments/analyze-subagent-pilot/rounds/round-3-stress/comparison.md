@@ -156,6 +156,6 @@ grades, and extended the plan into an actionable next step.
   a directory name that doesn't leak intent, to confirm detection
   was structural not lexical.
 - **Hypothesis-atomicity invariant** still filed as
-  `tasks/hypothesis-atomicity-invariant.md` — should be promoted
+  `docs/decisions/hypothesis-atomicity-invariant.md` — should be promoted
   into HYPOTHESIZE prompt / hook design separately from the ANALYZE
   extraction work.

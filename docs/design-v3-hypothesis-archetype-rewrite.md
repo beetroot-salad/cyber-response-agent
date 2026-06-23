@@ -21,7 +21,7 @@ append-only edge attribution. Mechanism-level adversarial variants
 (`?adversary-controlled-*`) are still enumerated alongside benign
 classifications; classification carries the claim. See
 `docs/investigation-language.md` §Legitimacy as edge attribute for the full
-schema, and `tasks/adversarial-as-attribute-not-hypothesis.md` for the design
+schema, and `docs/decisions/adversarial-as-attribute-not-hypothesis.md` for the design
 discussion that drove the change.
 
 ---

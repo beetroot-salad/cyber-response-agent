@@ -12,10 +12,10 @@ During the playbook rewrites (rule-100001, rule-100110, rule-5710, 2026-04-18) i
 
 2. **DNS / SSH / FIM (enrichment-first shape — alert does not carry mechanism data).** Bad: pre-committing to a mechanism fork at loop 1 when the discriminating data isn't yet available (`?dga-malware — malware is probing candidate domains via DGA`). Good: staying in the mechanical/interpretive lane and pre-registering lead-level readings instead (no hypothesis block; `predictions` on the interpretive fields of the enrichment lead). Call out that §ASSESS routes to GATHER-without-HYPOTHESIZE in this case.
 
-3. **Legitimacy-as-attribute.** Bad: parallel adversarial hypothesis that doubles the frontier (`?compromise-followup` shape). Good: the mechanism hypothesis plus a `legitimacy_attributes` note on the confirmed parent, resolved by trust-anchor at disposition time. (This one depends on the adversarial-as-attribute task landing first — see `tasks/adversarial-as-attribute-not-hypothesis.md`.)
+3. **Legitimacy-as-attribute.** Bad: parallel adversarial hypothesis that doubles the frontier (`?compromise-followup` shape). Good: the mechanism hypothesis plus a `legitimacy_attributes` note on the confirmed parent, resolved by trust-anchor at disposition time. (This one depends on the adversarial-as-attribute task landing first — see `docs/decisions/adversarial-as-attribute-not-hypothesis.md`.)
 
 **Where to put them.** Inline under §HYPOTHESIZE → Generating Hypotheses, after the 5-step procedure. Keep each example to ~8–12 lines — short enough to live in the prompt.
 
 **Dependencies.**
-- `tasks/adversarial-as-attribute-not-hypothesis.md` — example 3 is blocked on the reframe.
+- `docs/decisions/adversarial-as-attribute-not-hypothesis.md` — example 3 is blocked on the reframe.
 - The hypothesize-subagent v2 pilot will use these examples as the ground-truth corpus once written.

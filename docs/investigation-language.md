@@ -15,7 +15,7 @@
 - Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable. Rule #36 (v2.14) is unaffected by the consolidation and counts toward the 29 active rules.
 - Per-rule audit: see `docs/invlang-rule-audit.md` (added 2026-04 alongside `docs/dense-investigation-format.md`).
 
-**v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `tasks/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
+**v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `docs/decisions/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
 **v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
 - Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
@@ -1184,7 +1184,7 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
     resolution must cite a severe lead resolving against an
     authoritative edge, so the grading is bound to concrete
     observation rather than to absence-of-benign-confirmation. Empirically
-    motivated by 4 production runs (see `tasks/analyze-true-positive-
+    motivated by 4 production runs (see `docs/decisions/analyze-true-positive-
     routing.md`) where ANALYZE routed `true_positive` while no surviving
     hypothesis was graded `++` — every survivor was at `+` or null,
     i.e. no severe-lead refutation/confirmation had landed. The honest

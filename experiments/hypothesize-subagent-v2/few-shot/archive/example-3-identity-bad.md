@@ -80,7 +80,7 @@ is anchor-resolved at disposition time.
 **4. Parallel adversarial hypothesis.** `?compromise-followup` doubles
 the frontier without adding a topology distinction. Forward-window
 success is a mandatory attribute check inside `authentication-history`,
-not a hypothesis slot. (See `tasks/adversarial-as-attribute-not-
+not a hypothesis slot. (See `docs/decisions/adversarial-as-attribute-not-
 hypothesis.md` for the SKILL.md-level reframe this depends on.)
 
 **5. Premature HYPOTHESIZE entry.** Before `source-classification` has
