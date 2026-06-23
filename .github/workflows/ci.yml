@@ -57,6 +57,16 @@ jobs:
       - name: Ruff (hard gate — E + F)
         run: defender/.venv/bin/ruff check . --select E,F --ignore E402,E501
 
+      # Defender-scoped extended-rule gate (issue #400). Extended families
+      # (bugbear/simplify/complexity/pyupgrade/pytest-style) graduate here from
+      # pyproject's extend-select as each family's violations are cleared — one
+      # family-group per PR. Scoped to defender/ (not repo-wide like the E,F gate
+      # above) because the extended config only governs the defender/ tree;
+      # experiments/ + root scripts/ are intentionally out of scope. Explicit
+      # --select so per-file config can't weaken it. Grows as families promote.
+      - name: Ruff (defender extended — promoted families)
+        run: defender/.venv/bin/ruff check defender --select PLR0915 --ignore E402,E501
+
   code-smells:
     runs-on: ubuntu-latest
     steps:
