@@ -54,7 +54,10 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
 
 def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ENV_FILE", raising=False)
-    # The injected root has no `.env`; the only other candidate is the main
-    # worktree root, which under CI carries no committed `.env`.
-    key, src = run.resolve_first_party_key(root=tmp_path / "repo")
+    # Inject BOTH `.env` roots at an empty tmp dir so resolution is hermetic: with
+    # only `root` injected, the second candidate (`_main_repo_root()/.env`) still
+    # reads the real main checkout, where a developer's local `.env` would leak in
+    # and make this assertion fail.
+    missing = tmp_path / "repo"
+    key, src = run.resolve_first_party_key(root=missing, main_repo_root=missing)
     assert key is None and src is None
