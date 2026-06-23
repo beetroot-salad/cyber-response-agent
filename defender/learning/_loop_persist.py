@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -25,6 +26,7 @@ from defender.learning._loop_config import (
     DEFAULT_PATHS,
     LoopError,
     LoopPaths,
+    RunDirs,
 )
 from defender.learning._loop_validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -277,16 +279,24 @@ def _write_source_refs(
         (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs))
 
 
+@dataclass(frozen=True)
+class DirectionArtifacts:
+    """The three per-direction artifacts ``persist_run`` writes, each a
+    (content, on-disk name) pair. ``judge_yaml`` / ``telemetry_yaml`` are None on
+    the actor-SKIP short-circuit (only the story is written)."""
+
+    actor_story: str
+    story_name: str
+    judge_yaml: str | None
+    judge_name: str
+    telemetry_yaml: str | None
+    telemetry_name: str
+
+
 def persist_run(
-    run_dir: Path,
-    learning_run_dir: Path,
+    dirs: RunDirs,
     *,
-    actor_story: str,
-    story_name: str,
-    judge_yaml: str | None,
-    judge_name: str,
-    telemetry_yaml: str | None,
-    telemetry_name: str,
+    artifacts: DirectionArtifacts,
     disposition: str,
     alert_rule_key: str,
 ) -> None:
@@ -297,6 +307,10 @@ def persist_run(
     idempotent). ``judge_yaml`` / ``telemetry_yaml`` are the fence-stripped, validated
     YAML — caller-side raw text (if any) belongs in a ``*.raw.txt`` companion.
     """
+    run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
+    actor_story, story_name = artifacts.actor_story, artifacts.story_name
+    judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
+    telemetry_yaml, telemetry_name = artifacts.telemetry_yaml, artifacts.telemetry_name
     _copy_shared_inputs(run_dir, learning_run_dir)
     (learning_run_dir / story_name).write_text(actor_story)
     if telemetry_yaml is not None:
@@ -456,6 +470,20 @@ def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]
     return ids
 
 
+@dataclass(frozen=True)
+class _EnvFactStream:
+    """One environment-observation queue + its id/provenance namespace. The benign
+    and adversarial env streams differ only in these fields; the row shape is defined
+    once in ``_append_env_fact_observations`` so the shared corpus can't drift."""
+
+    outcome_keyword: Callable[[Any], str]
+    queue_file: Path
+    consumed_file: Path
+    lock_file: Path
+    id_prefix: str
+    provenance: str
+
+
 def _append_env_fact_observations(
     judge_doc: dict,
     run_id: str,
@@ -463,18 +491,16 @@ def _append_env_fact_observations(
     learning_run_dir: Path,
     *,
     paths: LoopPaths,
-    outcome_keyword: Callable[[Any], str],
-    queue_file: Path,
-    consumed_file: Path,
-    lock_file: Path,
-    id_prefix: str,
-    provenance: str,
+    stream: _EnvFactStream,
 ) -> int:
     """Append judge ``environment_observations`` to one env queue feeding the SHARED
     lessons-environment/ corpus (issue #298). The two sources differ only in their
     outcome-keyword enum, queue paths, id namespace, and ``provenance`` tag — the env
     row shape (the retrieval keys the curator and ``verify_forward_env.py`` read) is
     one definition here so the streams can't drift apart in the shared corpus."""
+    outcome_keyword = stream.outcome_keyword
+    queue_file, consumed_file = stream.queue_file, stream.consumed_file
+    lock_file, id_prefix, provenance = stream.lock_file, stream.id_prefix, stream.provenance
     outcome = outcome_keyword(judge_doc["outcome"])
     if outcome == "skip-passthrough":
         return 0
@@ -528,12 +554,14 @@ def append_environment_observations(
     return _append_env_fact_observations(
         judge_benign_doc, run_id, alert_rule_key, learning_run_dir,
         paths=paths,
-        outcome_keyword=_benign_outcome_keyword,
-        queue_file=paths.environment_observations_file,
-        consumed_file=paths.environment_observations_consumed_file,
-        lock_file=paths.environment_observations_lock_file,
-        id_prefix="",
-        provenance="benign",
+        stream=_EnvFactStream(
+            outcome_keyword=_benign_outcome_keyword,
+            queue_file=paths.environment_observations_file,
+            consumed_file=paths.environment_observations_consumed_file,
+            lock_file=paths.environment_observations_lock_file,
+            id_prefix="",
+            provenance="benign",
+        ),
     )
 
 
@@ -556,10 +584,12 @@ def append_actor_environment_observations(
     return _append_env_fact_observations(
         judge_doc, run_id, alert_rule_key, learning_run_dir,
         paths=paths,
-        outcome_keyword=_outcome_keyword,
-        queue_file=paths.actor_environment_observations_file,
-        consumed_file=paths.actor_environment_observations_consumed_file,
-        lock_file=paths.actor_environment_observations_lock_file,
-        id_prefix="adv-env/",
-        provenance="adversarial",
+        stream=_EnvFactStream(
+            outcome_keyword=_outcome_keyword,
+            queue_file=paths.actor_environment_observations_file,
+            consumed_file=paths.actor_environment_observations_consumed_file,
+            lock_file=paths.actor_environment_observations_lock_file,
+            id_prefix="adv-env/",
+            provenance="adversarial",
+        ),
     )

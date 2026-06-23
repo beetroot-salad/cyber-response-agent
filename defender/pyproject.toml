@@ -69,8 +69,7 @@ select = ["E", "F"]
 extend-select = [
     "C901",          # mccabe complexity
     "PLR0912",       # too-many-branches
-    "PLR0913",       # too-many-arguments
-    # Promoted to the hard gate (#400): B, SIM, UP, PT, PLR0915.
+    # Promoted to the hard gate (#400): B, SIM, UP, PT, PLR0913, PLR0915.
 ]
 # E402: tests/scripts intentionally do sys.path.insert(...) before imports.
 # E501: line length is enforced by formatter, not lint.

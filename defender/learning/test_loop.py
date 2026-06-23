@@ -1469,9 +1469,10 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path, monkeypatch):
         # positional tail mirrors _run_judge_claude: effort, trace_name, label, user,
         # learning_run_dir; settings_path/add_dir/permission_mode arrive as kwargs.
         _effort, _trace, label, user, _lrd = args
+        scope = kwargs["scope"]
         captured.update(
             prompt_path=prompt_path, model=model, label=label, user=user,
-            settings_path=kwargs.get("settings_path"), add_dir=kwargs.get("add_dir"),
+            settings_path=scope.settings_path, add_dir=scope.add_dir,
         )
         return "outcome: survived\ndefender_findings: []\n"
 

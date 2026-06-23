@@ -31,12 +31,18 @@ from defender.learning._loop_config import (
     VALID_MERGE_MODES,
     LoopError,
     LoopPaths,
+    RunDirs,
     _log,
 )
 from defender.learning import _author_shared
 from defender.learning._loop_directions import BY_NAME, Direction
 from defender.learning.author_branch import AuthorBranch, BranchError
-from defender.learning._loop_persist import append_findings, derive_alert_rule_key, persist_run
+from defender.learning._loop_persist import (
+    DirectionArtifacts,
+    append_findings,
+    derive_alert_rule_key,
+    persist_run,
+)
 from defender.learning.ticket_enrichment import enrich_case_ticket
 from defender.learning._loop_subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from defender.learning._loop_validate import (
@@ -122,8 +128,7 @@ def _validate_judge_yaml(
 
 def run_direction(
     spec: Direction,
-    run_dir: Path,
-    learning_run_dir: Path,
+    dirs: RunDirs,
     disposition: str,
     alert_rule_key: str,
     run_id: str,
@@ -136,6 +141,7 @@ def run_direction(
 
     Returns True if queue rows were appended (i.e. worth triggering the curators).
     """
+    run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key)
     # Write the story now so oracle + judge can read it from disk downstream; the
@@ -147,10 +153,12 @@ def run_direction(
     if is_skip_story(actor_story):
         _log(f"actor emitted SKIP ({spec.name}) — persisting, no findings")
         persist_run(
-            run_dir, learning_run_dir,
-            actor_story=actor_story, story_name=spec.story_name,
-            judge_yaml=None, judge_name=spec.judge_name,
-            telemetry_yaml=None, telemetry_name=spec.telemetry_name,
+            dirs,
+            artifacts=DirectionArtifacts(
+                actor_story=actor_story, story_name=spec.story_name,
+                judge_yaml=None, judge_name=spec.judge_name,
+                telemetry_yaml=None, telemetry_name=spec.telemetry_name,
+            ),
             disposition=disposition, alert_rule_key=alert_rule_key,
         )
         return False
@@ -170,10 +178,12 @@ def run_direction(
 
     _log(f"step=persist ({spec.name})")
     persist_run(
-        run_dir, learning_run_dir,
-        actor_story=actor_story, story_name=spec.story_name,
-        judge_yaml=judge_stripped, judge_name=spec.judge_name,
-        telemetry_yaml=telemetry_path.read_text(), telemetry_name=spec.telemetry_name,
+        dirs,
+        artifacts=DirectionArtifacts(
+            actor_story=actor_story, story_name=spec.story_name,
+            judge_yaml=judge_stripped, judge_name=spec.judge_name,
+            telemetry_yaml=telemetry_path.read_text(), telemetry_name=spec.telemetry_name,
+        ),
         disposition=disposition, alert_rule_key=alert_rule_key,
     )
 
@@ -341,12 +351,13 @@ def run_one(
     # findings/observation writes on a flock (cross-process safe). subprocess.run
     # releases the GIL while the claude child runs, so threads give real wall-time
     # overlap. Within a leg, actor→oracle→judge stays serial.
+    dirs = RunDirs(run_dir, learning_run_dir)
     errors: list[tuple[str, BaseException]] = []
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures: dict[Any, str] = {}
         for name in directions:
             futures[pool.submit(
-                run_direction, BY_NAME[name], run_dir, learning_run_dir,
+                run_direction, BY_NAME[name], dirs,
                 disposition, alert_rule_key, run_id, held_out,
                 paths=paths, agents=agents,
             )] = name
