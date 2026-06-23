@@ -104,7 +104,7 @@ def expected_disposition(direction: str, recorded: str) -> str:
     lesson reach the corrected disposition on its own source case — not a
     cross-case FN-safety guard against under-escalating real attacks. That guard
     needs known-malicious cases the source FP case is not; it is out of scope for
-    a per-source-case forward check. See tasks/benign-actor-success-retrieval.md.)
+    a per-source-case forward check. See docs/decisions/benign-actor-success-retrieval.md.)
     """
     if direction == "benign":
         return "benign"

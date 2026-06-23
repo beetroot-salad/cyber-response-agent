@@ -1,6 +1,6 @@
 # Invlang schema assessment — post-PREDICT/REPORT audit
 
-Audit output for `tasks/invlang-schema-assessment-post-predict-report.md`. Measures the current legitimacy / authorization model against live corpus data, evaluates proposals to restructure it (authz-as-vertex, legitimacy-as-dimension, impact-as-vertex), and recommends next steps.
+Audit output for `docs/decisions/invlang-schema-assessment-post-predict-report.md`. Measures the current legitimacy / authorization model against live corpus data, evaluates proposals to restructure it (authz-as-vertex, legitimacy-as-dimension, impact-as-vertex), and recommends next steps.
 
 **Scope note.** The original task framed the core question as hypothesis vs prediction first-class. Separate design-discussion work (captured in conversation, not this doc) surfaced a more specific structural question: does authorization need to graduate from an edge-attribute refinement to a graph primitive, and if so, is business-level legitimacy a second orthogonal axis worth modeling? This audit answers those questions empirically against the v2.8/v2.9 corpus.
 

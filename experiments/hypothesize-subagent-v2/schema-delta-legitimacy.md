@@ -4,7 +4,7 @@
 **Proposed version:** v2.7.
 **Status:** Draft — pending review before promotion to the main spec.
 
-Companion to `tasks/adversarial-as-attribute-not-hypothesis.md`.
+Companion to `docs/decisions/adversarial-as-attribute-not-hypothesis.md`.
 
 ---
 

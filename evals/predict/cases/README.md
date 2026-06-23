@@ -1,7 +1,7 @@
 # PREDICT golden-set cases
 
 Each case is one labeled (input, expected) pair for evaluating a single
-PREDICT subagent invocation. See `tasks/predict-eval-rubric.md` for the
+PREDICT subagent invocation. See `docs/decisions/predict-eval-rubric.md` for the
 scoring rubric.
 
 ## Index

@@ -16,7 +16,7 @@ what makes it good or bad against `docs/investigation-language.md`
 ## Usage
 
 - **In testing (now):** ground-truth reference when scoring hypothesize-subagent arm outputs. An arm output that resembles example 3 fails regardless of polish; an arm output matching the shape of example 1 or 2 passes the relevant rubric dimensions.
-- **In prompting (later):** see `tasks/hypothesize-prompt-few-shot-examples.md`. These three are candidates for inlining into SKILL.md §HYPOTHESIZE as worked examples once the rubric is stable.
+- **In prompting (later):** see `docs/decisions/hypothesize-prompt-few-shot-examples.md`. These three are candidates for inlining into SKILL.md §HYPOTHESIZE as worked examples once the rubric is stable.
 
 ## Coverage rationale
 
@@ -29,6 +29,6 @@ what makes it good or bad against `docs/investigation-language.md`
 
 ## What each example does NOT include
 
-- No parallel adversarial hypothesis (no `?compromise-followup` shape). Legitimacy is consistently modeled as a trust-anchor attribute. See `tasks/adversarial-as-attribute-not-hypothesis.md` for the SKILL.md-level rule reframe this depends on.
+- No parallel adversarial hypothesis (no `?compromise-followup` shape). Legitimacy is consistently modeled as a trust-anchor attribute. See `docs/decisions/adversarial-as-attribute-not-hypothesis.md` for the SKILL.md-level rule reframe this depends on.
 - No narrative classifications that conflate mechanism + intent + shape. Example 3 shows and labels this failure explicitly.
 - No sub-archetype pre-decomposition at loop 1. Example 1 stays at the mechanism layer; archetype disposition is deferred to CONCLUDE-time anchor work.

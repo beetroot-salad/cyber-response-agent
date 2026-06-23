@@ -62,7 +62,7 @@ judges, the phase state machine, class-slot grammar vocab, and sibling-fork
 topological uniqueness. Two further invlang spec rules (per-type class-slot
 grammar, sibling-fork uniqueness) are *not* yet enforced because the spec's
 own examples currently contradict them — see
-`tasks/defender-invlang-enforcement-ramp.md`.
+`docs/decisions/defender-invlang-enforcement-ramp.md`.
 
 **Design rationale lives in `defender/docs/`.** Before changing the
 loop shape, the actor/judge/oracle prompts, or the lessons mechanism,

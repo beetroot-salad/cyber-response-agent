@@ -132,9 +132,8 @@ infrastructure; CI runs `-m "not llm and not live"`.
   load-bearing artifacts). Throwaway probes go in a git worktree under
   `.claude/worktrees/{branch}/`, never new top-level scratch dirs; promote to
   `experiments/` only with a writeup, otherwise discard.
-- **Tasks** — open work is one markdown file per task under `tasks/` (frontmatter:
-  `title`, `status` of backlog/todo/doing/done/deferred, `groups`). Run
-  `python3 tasks/build.py` to regenerate `board.html`.
+- **Tasks** — open work is tracked as [GitHub issues](../../issues). Design
+  records for in-flight or load-bearing decisions live under `docs/decisions/`.
 - **Per-area guidance** — `defender/CLAUDE.md` (agent runtime contracts + a
   "where to make changes" map), `playground-v2/CLAUDE.md` (the dev/eval stack),
   `infra/CLAUDE.md`. There is no repo-root CLAUDE.md.
