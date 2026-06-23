@@ -22,6 +22,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
+from . import bash_exec
 from . import circuit_breaker
 from . import permission
 
@@ -168,15 +169,22 @@ def register_tools(agent, *, writers: bool = True) -> None:
                 if system and circuit_breaker.is_tripped(ctx.deps.run_dir, system):
                     return circuit_breaker.down_message(ctx.deps.run_dir, system)
                 return _capture_adapter(ctx.deps, argv)
+        # Execute the *validated* command without a shell: the gate already
+        # decomposed it with shlex, so run that token structure directly
+        # (shell=False) instead of re-handing the string to bash. This collapses
+        # the validator/executor parser differential — `$VAR`, globs, `$(...)`,
+        # and fused redirects never expand, because bash never re-parses. See
+        # bash_exec for the rationale.
         try:
-            proc = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                env=_bash_env(ctx.deps), cwd=str(ctx.deps.defender_dir.parent),
+            rc, out, err = bash_exec.run_pipeline(
+                command,
+                env=_bash_env(ctx.deps),
+                cwd=ctx.deps.defender_dir.parent,
                 timeout=_BASH_TIMEOUT_S,
             )
         except subprocess.TimeoutExpired as e:
             raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
-        return _format_bash_result(proc.returncode, proc.stdout, proc.stderr)
+        return _format_bash_result(rc, out, err)
 
     @agent.tool
     async def read_file(ctx: RunContext[RunDeps], path: str) -> str:

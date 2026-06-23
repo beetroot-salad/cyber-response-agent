@@ -53,12 +53,17 @@ from defender.hooks._cmd_segments import (
 # Read-only utilities safe to approve in any composition. Deliberately small:
 # viewers/filters over already-materialized files, plus navigation. No `env`,
 # `printenv`, `export`, `python3`, `netstat`, `docker`.
-# The `datamash` + coreutils filters (`cut`/`comm`/`join`/`tr`/`paste`/`nl`) are
-# pure-transform analysis tools over already-materialized payload files (e.g.
-# `jq -r '…|@tsv' f | sort | datamash …`); they have no exec/network/write surface.
+# The download-and-reduce coreutils filters (`sort`/`uniq`/`datamash`/`cut`/`comm`/
+# `join`/`tr`/`paste`/`nl`) were dropped as residual: the analysis path is now jq
+# on-disk + native server-side ES|QL aggregation / `defender-sql` (skills/connect/
+# decisions.md "Prefer native aggregation"), so hand-reduction is dead — they were
+# added in the #289 "verifiable summary code" era and superseded by the #340–#346
+# lean ES|QL/defender-sql redesign. jq covers ordering/grouping/uniqueness
+# (`sort`/`sort_by`/`group_by`/`unique`) without a separate binary. Dropping the set
+# also closes their file-WRITE side-doors (`sort -o FILE`, `uniq INPUT OUTPUT`) by
+# removal — no remaining viewer writes a file, so no per-tool gate guard is needed.
 READONLY_TOOLS = frozenset(
-    {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "sort", "uniq",
-     "true", "datamash", "cut", "comm", "join", "tr", "paste", "nl"}
+    {"jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "true"}
 )
 
 # Extra read-only tools the GATHER subagent gets but the main loop does not:
@@ -85,7 +90,6 @@ _FIND_SENSITIVE_RE = re.compile(
 # A leading `VAR=value` env-assignment prefix (the credential-groping vector) —
 # matched against the first token of a segment only.
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
 
 # Shell-operator metacharacters. `shlex(punctuation_chars=True)` returns a RUN of
 # these as one standalone token, but only when UNQUOTED (a `>`/`|` inside a quoted

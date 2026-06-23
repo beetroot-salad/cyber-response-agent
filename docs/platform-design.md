@@ -676,6 +676,34 @@ needs live storage virtualization or multi-host mid-run mutation (§6).
   #321 non-atomicity window — the loop is the sole committer, so the provenance trailers can never split
   from the commit. Dev runs may grant the agent `rm` within the corpus for iteration ergonomics; prod relies
   on the mount/Landlock boundary, not on the agent's cooperation.
+- **The investigation agent needs the same OS boundary — its in-process `bash` gate is
+  defense-in-depth, not containment.** `runtime/permission.py` validates a `shlex`
+  decomposition of the model's command against a read-only-tool allowlist; the runtime
+  then executes that *validated token structure* directly (`shell=False`, via
+  `runtime/bash_exec.py`) with the parent environment at the repo root — it no longer
+  re-hands the original string to bash. That collapses the validator/executor parser
+  differential a `shell=True` re-parse used to open: `$VAR`, `~`, globs, `$(...)`, brace
+  expansion, and fused redirect operators (`>|`, `|&`) all expanded under bash but never
+  under the gate's `shlex` view, and the trail of bypass fixes (#379 `bash -c` adjacency,
+  the `>|`/`|&` fused-operator hole) was that gap reopening. What is validated is now what
+  runs. The gate still cannot be the confidentiality or integrity boundary, though:
+  (a) the secrets/ground-truth read denylist (`decide_read`) is enforced only on the
+  `read_file` tool — `cat`/`grep`/`head`/`jq`/`ls` over `.env`, `.ssh`, or `credentials`
+  are still allowed through `bash` (shell-free exec reads the named file just the same);
+  (b) the `$VAR`-expansion exfil (`echo $SECRET`) is now closed — `shell=False` performs
+  no parameter expansion, and the billable key is stripped from the bash env regardless;
+  (c) the file-write side-doors (`sort -o`/`--output`; `uniq INPUT OUTPUT`) are closed by
+  removal — the residual reduce-by-hand coreutils set
+  (`sort`/`uniq`/`datamash`/`cut`/`comm`/`join`/`tr`/`paste`/`nl`) was dropped from the
+  allowlist (analysis is jq on-disk + native ES|QL/`defender-sql` now), so no remaining
+  viewer writes a file. (b) and (c) are now closed at the root — the whole injection /
+  expansion class went away with the shell, not one operator at a time. (a) is the residual:
+  a *read* denylist a string matcher can't reliably enforce. The real boundary is
+  kernel-enforced and identical to the curator's: a
+  **read-only bind-mount of the app tree + host secrets, read-write only on the run dir**,
+  plus the per-job scoped, short-lived creds above (so the agent's shell carries no standing
+  SIEM/`.env` secrets to read or echo in the first place). Until that lands, `.env` must not
+  be mounted into — or exported into the shell of — the investigation container.
 - **Auth at the boundary, audit everywhere** — coarse tenant roles (§2.10); every write and artifact read
   is a tenant-scoped audit event.
 
