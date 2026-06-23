@@ -33,14 +33,19 @@ BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 # Directories under defender/ that are allowed to contain vendor names
 # (they ARE per-vendor by design, or are not part of the shipped surface).
 EXCLUDED_PREFIXES = (
-    "defender/skills/wazuh/",
-    "defender/skills/host-query/",
-    "defender/skills/stub-cmdb/",
-    "defender/skills/stub-iam/",
-    "defender/skills/gather/queries/wazuh/",
-    "defender/skills/gather/queries/host-query/",
-    "defender/skills/gather/queries/stub-cmdb/",
-    "defender/skills/gather/queries/stub-iam/",
+    # Per-vendor systems skills (the v2 data-source carve-out) — vendor-named BY
+    # DESIGN. The v1 names (wazuh/host-query/stub-cmdb/stub-iam) were renamed to
+    # these; keep this list in step with the actual skills/<system>/ dirs.
+    "defender/skills/elastic/",
+    "defender/skills/cmdb/",
+    "defender/skills/identity/",
+    "defender/skills/host-state/",
+    "defender/skills/change-mgmt/",
+    "defender/skills/threat-intel/",
+    "defender/skills/ticket/",
+    # Gather query templates are all per-system (+ the SCHEMA doc that documents
+    # them) — the per-vendor surface, not env-agnostic code.
+    "defender/skills/gather/queries/",
     "defender/knowledge/environment/systems/",
     "defender/fixtures/",
     "defender/tests/",
@@ -48,6 +53,11 @@ EXCLUDED_PREFIXES = (
     "defender/run-transcripts/",
     "defender/lessons/",
     "defender/lessons-actor/",
+    # Per-environment lesson corpus (sibling to lessons-actor) + learning-loop
+    # calibration/eval fixtures — internal, not the shipped vendor-neutral surface.
+    "defender/lessons-environment/",
+    "defender/learning/judge-alignment/",
+    "defender/learning/eval/",
     "defender/.venv/",
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.
@@ -89,6 +99,11 @@ FORBIDDEN = [
 
 def _excluded(rel: str) -> bool:
     if rel in EXCLUDED_FILES:
+        return True
+    # Flat pytest modules (test_*.py / *_test.py) anywhere — fixture/scaffold code
+    # that names systems for its scenarios, like the already-excluded tests/ dir.
+    name = rel.rsplit("/", 1)[-1]
+    if name.startswith("test_") or name.endswith("_test.py"):
         return True
     return any(rel.startswith(p) for p in EXCLUDED_PREFIXES)
 
