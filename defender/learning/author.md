@@ -41,7 +41,7 @@ does, and keep it in the convention below.
 - `source_signature` — the alert `rule.id`, taken from the source run's
   `alert.json` (`rule.id`).
 - `telemetry_source` — the sensor the lesson's check keys on (`sshd`,
-  `falco`, `zeek`, `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`,
+  `zeek`, `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`,
   `host-state`, `change-mgmt`, …). For "this source can't see X / isn't in
   the toolset" lessons, tag the **absent** source too — that's the whole
   retrieval point.

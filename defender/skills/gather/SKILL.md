@@ -31,7 +31,7 @@ A fenced YAML block carries:
 ### 1. ORIENT
 
 Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
-`{system}`. If `{system}` is elastic, the query language is **ES|QL** against the
+`{system}`. If `{system}` is the SIEM, the query language is **ES|QL** against the
 `logs-*` data streams; read `{defender_dir}/skills/{system}/execution.md` only if
 you need the index list or CLI flags.
 
@@ -57,7 +57,7 @@ Run the adapter standalone via `Bash` — **never pipe, chain (`&&`/`;`), or
 redirect it**:
 
 ```bash
-defender-elastic esql '<ES|QL query>' --query-id <id>
+defender-<system> esql '<ES|QL query>' --query-id <id>
 ```
 
 - **Put the whole ES|QL query on ONE line inside the quotes.** The catalog
@@ -68,7 +68,7 @@ defender-elastic esql '<ES|QL query>' --query-id <id>
   line, single-quoted, no trailing `\` continuations.
 
 - **Tag every call with `--query-id`** — the `id:` of the template you bound in
-  step 2 (e.g. `elastic.sshd-auth-history`), or a coined `elastic.<descriptive-kebab>`
+  step 2 (e.g. `{system}.sshd-auth-history`), or a coined `{system}.<descriptive-kebab>`
   when none fit. The harness strips this flag (the adapter never sees it) and
   records it as the query's catalog binding — it's how the offline lead-author
   tracks which template answered which lead, so set it per query (one lead may run

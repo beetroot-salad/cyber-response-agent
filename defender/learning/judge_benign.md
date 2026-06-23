@@ -149,7 +149,7 @@ Allowed values of `subject_anchor` by finding type:
 - `lead-set` — a lead position id (`l-001`, `l-002`, …) for an existing lead the gap centers on, or the literal `no-lead-exists` if the gap is the absence of any lead grounding this routine claim.
 - `lead-quality` / `analyze-discipline` — the specific lead position id (`l-001`, `l-002`, …).
 - `disposition-confirmed` — the lead position id whose result justified the escalation.
-- `observability` — a system directory name under `defender/skills/` (e.g. `host-query`, `wazuh`), or the literal `no-system-covers-this` if no skills directory covers the load-bearing system.
+- `observability` — a system directory name under `defender/skills/` (e.g. `host-state`, `siem`), or the literal `no-system-covers-this` if no skills directory covers the load-bearing system.
 
 Example: `subject_anchor: no-lead-exists` + `subject_topic: monitor-account authorization` (not `subject: "No lead exists" (monitor-account authorization)`).
 

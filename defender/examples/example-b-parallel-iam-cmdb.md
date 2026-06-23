@@ -1,6 +1,6 @@
 ---
 name: example-b-parallel-iam-cmdb
-description: Two parallel single-fact registry leads (CMDB + IAM) plus a Loop-2 host-query follow-up after IAM lookup misses. Demonstrates indeterminate-authz forcing a structural loop-back, and the "one-question = one-lead" rule against composite-lead temptation. Load when an alert involves a registry / identity question and you're tempted to bundle multiple registry checks into one composite lead.
+description: Two parallel single-fact registry leads (CMDB + IAM) plus a Loop-2 host-state follow-up after IAM lookup misses. Demonstrates indeterminate-authz forcing a structural loop-back, and the "one-question = one-lead" rule against composite-lead temptation. Load when an alert involves a registry / identity question and you're tempted to bundle multiple registry checks into one composite lead.
 ---
 
 # Example B — SSH login by a non-stereotyped account from a documented monitoring source
@@ -69,14 +69,14 @@ h-002  null → -    [l-001 weak ⟂ source is sanctioned monitoring infra, not 
 
 `ac1` lands `indeterminate`, which blocks `disposition: benign`
 regardless of the behavioral grading on `h-001`. The loop-back is
-structural: ask host-query the question IAM couldn't answer — is
+structural: ask host-state the question IAM couldn't answer — is
 `metrics-shipper` a packaged daemon on the source?
 
 Loop 2 PLAN:
 
 ```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-003|2|metrics-shipper-daemon-on-source|v-001|h-001,h-002|host-query|±14d
+l-003|2|metrics-shipper-daemon-on-source|v-001|h-001,h-002|host-state|±14d
 ```
 
 GATHER returned: `metrics-shipper.service` enabled and active since
@@ -115,5 +115,5 @@ defender combines those facts by reasoning, so per the
 "one-question = one-lead" rule they're separate `:L` rows. **Three**,
 the Loop-2 follow-up is the registry-sparseness escape hatch: when
 the registry of record has a gap, the right move is a different
-system (host-query) answering the underlying mechanism question, not
+system (host-state) answering the underlying mechanism question, not
 a louder query against the same registry.

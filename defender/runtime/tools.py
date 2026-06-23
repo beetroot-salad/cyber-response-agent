@@ -267,7 +267,7 @@ def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
     adapter argv, returning (cleaned argv the adapter actually runs, the id).
 
     The single-agent gather annotates each bare adapter call with the catalog
-    id it bound (e.g. ``elastic.sshd-auth-history``) or a coined id, because one
+    id it bound (e.g. ``{system}.sshd-auth-history``) or a coined id, because one
     lead can run several queries with different bindings and a single
     ``deps.query_id`` can't carry them. The harness strips the flag so the adapter
     never sees it; capture records it as the queries-table ``query_id`` (the

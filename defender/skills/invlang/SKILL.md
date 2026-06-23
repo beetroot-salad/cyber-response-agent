@@ -139,7 +139,7 @@ hypotheses earns nothing. Mark the slot open and let the lead close it:
 v-001|compute|??/??/??|10.42.7.183|knowledge=partial
 
 :L findings [id|loop|name|target|tests|system|window]
-l-001|1|cmdb-lookup|v-001||stub-cmdb|n/a
+l-001|1|cmdb-lookup|v-001||cmdb|n/a
 
 :R attr_updates [resolved_by|target|key|value]
 l-001|v-001|class|monitoring-agent/internal/known-corp
@@ -168,7 +168,7 @@ v-003|compute|ip-only/internet/anonymous|10.42.7.183|kind=physical;knowledge=par
 
 ```invlang
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-003|v-001|2026-05-05T03:47:12Z|siem-event:wazuh|outcome=failed
+e-001|attempted_auth|v-003|v-001|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed
 ```
 
 State edges (`runs_on`, `member_of`, `authenticated_as`, `contained_in`)
@@ -198,7 +198,7 @@ payload rather than packing into `attrs?`.
 
 ```invlang
 :L findings [id|loop|name|target|mode?|tests|system|window]
-l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|90d
+l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|siem|90d
 
 # PLAN names the lead by measurement and the `system` it targets; gather
 # chooses the template and binds params, and writes both as a row in
@@ -215,7 +215,7 @@ not world-state predictions.
 
 ```invlang
 :E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-002|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success;user=jsmith;count=142
+e-002|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:siem|outcome=success;user=jsmith;count=142
 
 :R attr_updates [resolved_by|target|key|value]
 l-001|v-003|class|bastion/internal/known-corp
@@ -314,7 +314,7 @@ through. Read it as: "what's upstream of v-N?", not "what produced
 edge e-N?".
 
 **Worked example: process-discovery behind a DNS interaction.** A DNS
-alert names host `target-endpoint` (v-001) querying a domain
+alert names host `app-server-01` (v-001) querying a domain
 (v-002). The alert lights up a single edge — but the discovery
 question isn't about the edge, it's about *what process on v-001
 issued the query*. The answer space forks meaningfully:
@@ -331,11 +331,11 @@ on **v-001 (the host the process runs on)**, propose competing
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|server/internal/known-corp|target-endpoint|os=linux
+v-001|compute|server/internal/known-corp|app-server-01|os=linux
 v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wmcw6lyp
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|connected_to|v-001|v-002|2026-04-18T08:04:42Z|siem-event:wazuh|subdomain=2obsn5wmcw6lyp;query_type=A
+e-001|connected_to|v-001|v-002|2026-04-18T08:04:42Z|siem-event:siem|subdomain=2obsn5wmcw6lyp;query_type=A
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
 h-001|?tracking-sdk-process|v-001|runs_on|process|unclassified-process||null|active

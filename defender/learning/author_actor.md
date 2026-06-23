@@ -10,7 +10,7 @@ One flat corpus at `defender/lessons-actor/*.md`. No subdirectories. Each lesson
 
 There is **one** lesson shape here — a **pattern lesson**: the body describes an attacker shape that fails or succeeds against the deployment ("staggering the spray below the volume detector still surfaces if creds are in the breach corpus"). Frontmatter requires `techniques:` and `mutable: false`. `subject:` is omitted unless the pattern is bound to one specific deployment referent. `applies_to:` may list environment-fact subjects (in `defender/lessons-environment/`) the pattern exploits or is bounded by — a human cross-reference, not a fold target here.
 
-Do **not** author a standing deployment fact as its own lesson (e.g. "Wazuh rule 5712 fires at 10 failures / 120s"; "auditd does not capture stdin"). If an observation is purely such a fact with no attacker-shape teaching, `skip` it. Author here only the tradecraft: what the actor should do differently given that fact.
+Do **not** author a standing deployment fact as its own lesson (e.g. "a SIEM threshold rule fires at 10 failures / 120s"; "auditd does not capture stdin"). If an observation is purely such a fact with no attacker-shape teaching, `skip` it. Author here only the tradecraft: what the actor should do differently given that fact.
 
 ## Workflow
 

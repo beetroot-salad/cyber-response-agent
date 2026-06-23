@@ -80,7 +80,11 @@ def _read_signature_id(alert_path: Path) -> str | None:
     rid = rule.get("id")
     if rid is None:
         return None
-    return f"wazuh-rule-{rid}"
+    # The case signature is its bare `rule.id` — the same vendor-neutral
+    # convention as `case_history.case_ticket._signature_id`. It is only an
+    # opaque cross-case join key (advisory Classes 5/6/8), recomputed live on
+    # every corpus load and never persisted, so the format is free to change.
+    return str(rid)
 
 
 def _read_created_at(run_dir: Path) -> str | None:

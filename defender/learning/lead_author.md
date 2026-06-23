@@ -10,15 +10,15 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 ## What you receive
 
 - **`run_dir`** — absolute path of the defender run that triggered this tick. Read-only.
-- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `elastic/auth-events.md`). Established templates live at `{system}/{id}.md`; drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Drafts are auto-synthesized (skeletons) from the run's executed-query record when gather ran a `{system}.{verb}` id with no matching template — gather no longer authors them mid-run. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
-- **`skills_dir`** — `defender/skills/`. System-skill SKILL.md bodies (e.g. `elastic/SKILL.md`) live one level under here, each with an optional sibling `_draft/` that holds pending lifts.
+- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `<system>/auth-events.md`). Established templates live at `{system}/{id}.md`; drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Drafts are auto-synthesized (skeletons) from the run's executed-query record when gather ran a `{system}.{verb}` id with no matching template — gather no longer authors them mid-run. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
+- **`skills_dir`** — `defender/skills/`. System-skill SKILL.md bodies (e.g. `<system>/SKILL.md`) live one level under here, each with an optional sibling `_draft/` that holds pending lifts.
 - **`executed_template_handoffs`** — a JSON array, one entry per *executed template* (not per invocation). When the same template was dispatched multiple times in this run, those invocations collapse to one handoff so you make one decision per file. Schema:
 
   ```jsonc
   {
     "executed_template_path":                // example values throughout
-      "defender/skills/gather/queries/elastic/auth-events.md",
-    "query_id": "elastic.auth-events",
+      "defender/skills/gather/queries/<system>/auth-events.md",
+    "query_id": "<system>.auth-events",
     "status": "established",                // or "draft"
     "neighbors": [                          // top-3 catalog siblings (same CLI)
       {"template_path": "...", "score": 0.41},
@@ -43,15 +43,15 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 
   `executed_template_path`, `neighbors`, `executed_query`, `payload_status`, `payload_digest`, and `composite_kind` are pre-computed by the driver (see Hard rules). Read the payload at `result_refs` only when the digest leaves a question it can't answer.
 
-  **`executed_query` is the verbatim query that ran — the canonical record.** Some systems inline the whole query as a single positional — e.g. Elastic's ES|QL puts the entire pipe in `params.arg0` with the bindings (user, source, time window) inside it — so `params` carries only that raw positional, not the named filters; read `executed_query`, not `params`.
+  **`executed_query` is the verbatim query that ran — the canonical record.** Some systems inline the whole query as a single positional — e.g. an ES|QL-style language puts the entire pipe in `params.arg0` with the bindings (user, source, time window) inside it — so `params` carries only that raw positional, not the named filters; read `executed_query`, not `params`.
 
 - **`pending_system_drafts`** — a JSON array, one entry per pending draft file under `defender/skills/{system}/_draft/`. The driver scans the directory on every tick; the list is empty when the queue is below the lift threshold (env `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`, default 5). Schema:
 
   ```jsonc
   {
-    "draft_path": "defender/skills/elastic/_draft/falco-container-name-na.md",
-    "system": "elastic",
-    "skill_path": "defender/skills/elastic/SKILL.md"
+    "draft_path": "defender/skills/<system>/_draft/<draft-id>.md",
+    "system": "<system>",
+    "skill_path": "defender/skills/<system>/SKILL.md"
   }
   ```
 
@@ -110,7 +110,7 @@ For each entry in `pending_system_drafts`:
 Folding discipline (mirrors the catalog "Grounded edits only" rule):
 
 - Only fold concrete behavior the draft *observed*. Do not extrapolate to neighboring field names or hypothetical failure modes the draft doesn't surface.
-- Preserve the SKILL.md audience split if it has one (e.g. elastic's *Visibility surface* vs *Execution*) — vendor sentinels belong with the rest of the visibility-surface content, not in execution.
+- Preserve the SKILL.md audience split if it has one (e.g. a *Visibility surface* vs *Execution* split) — vendor sentinels belong with the rest of the visibility-surface content, not in execution.
 - Keep the fold tight. One short paragraph or a bullet under the relevant gap entry is usually enough; do not paste the draft body verbatim.
 - Cite the draft id (the frontmatter `id:`) in the fold only when adding a genuinely new gap entry. Otherwise the SKILL.md prose stays anonymous.
 
@@ -120,7 +120,7 @@ Folding discipline (mirrors the catalog "Grounded edits only" rule):
 - The draft's claim does not hold up against the payload it cites (a parser-quirk classification that's actually genuine missing data).
 - The draft is a duplicate of another pending draft you've already lifted in this tick.
 
-**skip** — leave the draft in place for a future tick. Use only when the SKILL.md edit would require evidence the draft doesn't carry (e.g. the draft asserts a quirk affects "all-falco-templates" but you can't confirm without a query). Drafts should not accumulate; skip is the rare path.
+**skip** — leave the draft in place for a future tick. Use only when the SKILL.md edit would require evidence the draft doesn't carry (e.g. the draft asserts a quirk affects "all-templates-for-a-source" but you can't confirm without a query). Drafts should not accumulate; skip is the rare path.
 
 `_draft/README.md` is the surface-declaration file. Never modify or delete it.
 

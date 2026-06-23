@@ -119,7 +119,7 @@ def _segment_is_adapter(toks: list[str]) -> bool:
     """True iff the segment's COMMAND (first token) is a data-source adapter — a
     `defender-<system>` shim or a `<system>_cli.py` script. `toks` is one command's
     token list from `split_segments`. Anchored to command position: an adapter name
-    appearing as an *argument* (`which defender-elastic`, `cat …/defender-elastic`)
+    appearing as an *argument* (`which defender-<system>`, `cat …/defender-<system>`)
     is NOT a query and must not be captured."""
     if not toks:
         return False

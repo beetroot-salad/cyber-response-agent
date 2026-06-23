@@ -21,7 +21,7 @@ substitution falls through untouched (exit 0, no decision) to the normal
 permission flow.
 
 Clamp-aware: in the main session (no `agent_id`) the data-source adapter
-shims (`defender-elastic`, `defender-cmdb`, …) are NOT in the safe set, so
+shims (`defender-<system>`, …) are NOT in the safe set, so
 this hook never approves a main-loop adapter call — that stays the job of
 `block_main_loop_raw_access.py`. Approving here only ever *adds* permission
 for shapes the allowlist can't express; it never overrides the clamp.

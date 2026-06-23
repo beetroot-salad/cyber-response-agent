@@ -12,7 +12,7 @@ resolution conventions — is **configuration, not code**: it lives in
 Change the convention by editing that file; no code change required. Keeping the
 translation in one module + one config means the drivers, the report schema, and
 (PR 2) the learning reader never bind to ticket field names — when the store changes
-(e.g. Elastic Cases), only this module, the transport, and the mapping move.
+(e.g. to a hosted ticket store), only this module, the transport, and the mapping move.
 
 Pure by construction: no network, no transport import. `read_case_record` /
 `_load_mapping` do file reads only. The I/O — posting payloads, the run-dir

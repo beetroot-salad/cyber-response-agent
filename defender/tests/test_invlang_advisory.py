@@ -28,7 +28,7 @@ def _clear_cache():
 def _case(
     case_id: str,
     *,
-    signature_id: str | None = "wazuh-rule-5710",
+    signature_id: str | None = "5710",
     hypotheses=None,
     leads=None,
     disposition=None,
@@ -65,7 +65,7 @@ def _stub_corpus(monkeypatch, corpus: list[Companion], *, scanned: int | None = 
     )
 
 
-def _benign_case(case_id: str, *, signature_id="wazuh-rule-5710") -> Companion:
+def _benign_case(case_id: str, *, signature_id="5710") -> Companion:
     return _case(
         case_id,
         signature_id=signature_id,
@@ -99,7 +99,7 @@ def test_advisory_recall_returns_all_three_sections_when_signature_has_cases(mon
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=("?credential-spray-scan", "?monitoring-probe"),
     )
 
@@ -118,7 +118,7 @@ def test_top_k_truncates_similar_cases_and_hypothesis_vocab(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=("?credential-spray-scan",),
         top_k=3,
     )
@@ -132,7 +132,7 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
     corpus = [
         _case(
             "c1",
-            signature_id="wazuh-rule-5710",
+            signature_id="5710",
             hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
             leads=[{"name": "L", "resolutions": [
                 {"hypothesis": "h-001", "before": "+", "after": "++"}
@@ -140,7 +140,7 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
         ),
         _case(
             "c2",
-            signature_id="wazuh-rule-5710",
+            signature_id="5710",
             hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
             leads=[{"name": "L", "resolutions": [
                 {"hypothesis": "h-001", "before": "+", "after": "--"}
@@ -148,7 +148,7 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
         ),
         _case(
             "c3",
-            signature_id="wazuh-rule-5710",
+            signature_id="5710",
             hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
             leads=[],  # ?spray unassessed → unresolved
         ),
@@ -157,7 +157,7 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         classes=(CLASS_HYPOTHESIS_VOCAB,),
     )
     row = out.sections[CLASS_HYPOTHESIS_VOCAB].hits[0]
@@ -173,12 +173,12 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram(monkeypatch):
 
 
 def test_loud_empty_when_signature_has_no_cases(monkeypatch):
-    corpus = [_benign_case("c1", signature_id="wazuh-rule-OTHER")]
+    corpus = [_benign_case("c1", signature_id="sig-OTHER")]
     _stub_corpus(monkeypatch, corpus)
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=("?spray",),
     )
     assert out.telemetry["cases_for_signature"] == 0
@@ -187,7 +187,7 @@ def test_loud_empty_when_signature_has_no_cases(monkeypatch):
         assert "no cases" in section.note
 
     md = out.as_markdown()
-    assert "No past cases for wazuh-rule-5710" in md
+    assert "No past cases for 5710" in md
     # Loud-empty short-circuits per-section rendering — one banner, not three.
     assert "### Similar cases" not in md
     assert CAVEAT in md
@@ -199,7 +199,7 @@ def test_loud_empty_at_class_level_when_frontier_has_no_match(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=("?nonexistent-hypothesis",),
     )
     section = out.sections[CLASS_LEAD_DISCRIMINATION]
@@ -220,7 +220,7 @@ def test_classes_subset_only_runs_requested(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         classes=(CLASS_SIMILAR_CASES,),
     )
     assert set(out.sections) == {CLASS_SIMILAR_CASES}
@@ -246,7 +246,7 @@ def test_as_markdown_renders_expected_sections_in_order(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=("?credential-spray-scan",),
     )
     md = out.as_markdown()
@@ -264,9 +264,9 @@ def test_as_json_roundtrips_telemetry_and_sections(monkeypatch):
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
     _stub_corpus(monkeypatch, corpus)
 
-    out = advisory_recall("/tmp/fake", signature_id="wazuh-rule-5710")
+    out = advisory_recall("/tmp/fake", signature_id="5710")
     parsed = json.loads(out.as_json())
-    assert parsed["signature_id"] == "wazuh-rule-5710"
+    assert parsed["signature_id"] == "5710"
     assert parsed["caveat"] == CAVEAT
     assert parsed["telemetry"]["cases_loaded"] == 2
     assert set(parsed["sections"]) == set(out.sections)
@@ -276,7 +276,7 @@ def test_telemetry_carries_parse_health(monkeypatch):
     corpus = [_benign_case(f"case-{i}") for i in range(2)]
     _stub_corpus(monkeypatch, corpus, scanned=5)  # 3 files didn't load
 
-    out = advisory_recall("/tmp/fake", signature_id="wazuh-rule-5710")
+    out = advisory_recall("/tmp/fake", signature_id="5710")
     t = out.telemetry
     assert t["cases_scanned"] == 5
     assert t["cases_loaded"] == 2
@@ -296,7 +296,7 @@ def test_empty_frontier_falls_back_to_top_k_leads(monkeypatch):
 
     out = advisory_recall(
         "/tmp/fake",
-        signature_id="wazuh-rule-5710",
+        signature_id="5710",
         frontier=(),
         top_k=3,
     )

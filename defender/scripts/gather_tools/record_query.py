@@ -259,7 +259,7 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     payload (gather SKILL §4), never read off this view.
 
     When the payload carries an exact envelope `total` greater than the returned
-    set (an adapter with a non-overridable returned-doc cap, e.g. elastic), the
+    set (an adapter with a non-overridable returned-doc cap), the
     on-disk file is a *bounded sample*, not the full data: counts come from `total`,
     never from counting the sample — so the message says so, and the agent doesn't
     jq-length a capped array and report the cap as the count."""

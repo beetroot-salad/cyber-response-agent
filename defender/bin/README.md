@@ -2,7 +2,7 @@
 
 Thin, stable wrappers the defender agent (orchestrator + gather subagents)
 invokes by a single token — `defender-invlang enum types`,
-`defender-elastic query '<kql>' --raw`, `defender-record-query … -- defender-elastic …`.
+`defender-<system> <verb> '<query>' --raw`, `defender-record-query … -- defender-<system> …`.
 
 ## Why
 
@@ -26,9 +26,8 @@ shims resolve from any cwd.
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
   root, so the agent never passes a path.
-- The data-source **adapter** shims (`defender-elastic`, `defender-cmdb`,
-  `defender-identity`, `defender-host-state`, `defender-threat-intel`,
-  `defender-change-mgmt`, `defender-ticket`) are clamped out of the main loop
+- The data-source **adapter** shims (`defender-<system>`, one per data source)
+  are clamped out of the main loop
   by `runtime/permission.py` (using the `block_main_loop_raw_access` predicates).
   Inside the gather subagent a standalone adapter call runs **directly** — the
   runtime captures it transparently (`tools._capture_adapter` → the queries

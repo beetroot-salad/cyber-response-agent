@@ -248,7 +248,7 @@ def top_k_neighbors(
     them from the handoff list and logging a corpus-health warning.
 
     Returns neighbors in descending score order. The executed template
-    itself is excluded. Cross-CLI siblings (wazuh ↔ host-query) are
+    itself is excluded. Cross-CLI siblings (siem ↔ host-state) are
     excluded by the firewall.
     """
     by_id = {t.id: t for t in catalog}
@@ -286,7 +286,7 @@ _HELP_EPILOG = """\
 Examples
   # Top-3 siblings for a known template
   python -m defender.learning.lead_neighbors score \\
-      --query-id wazuh.auth-events
+      --query-id {system}.auth-events
 
   # List every template's id, system, cli, and goal-first-line
   python -m defender.learning.lead_neighbors dump
@@ -362,7 +362,7 @@ def main(argv: list[str]) -> int:
         description="Score one executed lead against the catalog.",
     )
     p_score.add_argument("--query-id", required=True,
-                         help="executed template id, e.g. wazuh.auth-events")
+                         help="executed template id, e.g. {system}.auth-events")
     p_score.add_argument("-k", "--k", type=int, default=3,
                          help="number of neighbors to return (default 3)")
     p_score.set_defaults(func=_cmd_score)

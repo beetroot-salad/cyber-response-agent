@@ -442,7 +442,7 @@ Loaded on demand:
   block** of your first message — don't re-enumerate them; just Read the
   bodies whose name/role looks relevant to the alert. The CLI/query surface and
   any connectivity detail live in the gather subagent's surface (e.g.
-  `skills/elastic/execution.md`), not here — you route to systems, you
+  `skills/<system>/execution.md`), not here — you route to systems, you
   do not query them.
 
 ## Worked examples
@@ -489,7 +489,7 @@ p2|proposed_edge|"checksum_after diverges from any published package SHA"
 r1|p1,p2|"write traces to package-manager process tree, checksum matches upstream"
 
 :L findings [id|loop|name|target|tests|system|window]
-l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|±10m
+l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-state|±10m
 ```
 
 GATHER dispatch (single-lead, parallel-of-one):
@@ -497,7 +497,7 @@ GATHER dispatch (single-lead, parallel-of-one):
 ```
 gather(
   lead_id="l-001",
-  system="host-query",
+  system="host-state",
   goal="Did the file modification at 02:14:01Z trace to a managed apt upgrade?",
   what_to_summarize=[
     "apt history events ±10m around the FIM timestamp",
@@ -507,7 +507,7 @@ gather(
 )
 ```
 
-Gather authored a new template (`host-query.apt-history-around` —
+Gather authored a new template (`host-state.apt-history-around` —
 catalog was empty for this system) and returned: an `unattended-upgrades`
 event at 02:13:48Z (13s before the FIM fire), package signature verified,
 checksum_after matches the upstream Packages.gz SHA, fleet 11/12 received
@@ -559,7 +559,7 @@ body only when the alert shape matches:
 
 - `defender/examples/example-b-parallel-iam-cmdb.md` — two parallel
   registry leads (CMDB + IAM), `indeterminate`-authz forcing a Loop-2
-  host-query follow-up. Read when an alert involves a registry/identity
+  host-state follow-up. Read when an alert involves a registry/identity
   question or you're about to bundle multiple registry checks into one
   composite lead.
 - `defender/examples/example-c-cumulative-escalation.md` — three
