@@ -94,6 +94,19 @@ jobs:
       # Trend indicators with no clean pass/fail, so they stay `|| true`. (The
       # extended ruff families are now hard-gated in the lint job, #400 — the old
       # soft `ruff --statistics` sweep is retired; radon/jscpd cover what's left.)
+
+      # Type-check signal (issue #403) — runs the [tool.mypy] config in
+      # defender/pyproject.toml, NON-BLOCKING for now (`|| true`). Soft-launch:
+      # surfaces type errors across the shippable defender/ modules (tests +
+      # .venv excluded) without gating. The ramp to a hard gate — clear a module,
+      # pin it strict via a [[tool.mypy.overrides]] block, then promote this step
+      # to the blocking lint job once the tree is strict-clean — is documented in
+      # docs/decisions/defender-mypy-ramp.md. Invoked from the repo root with the
+      # synced defender venv (matching the gates below); config pointed explicitly
+      # since there's no root pyproject for mypy to discover.
+      - name: Mypy (type-check — soft signal, non-blocking)
+        run: defender/.venv/bin/mypy --config-file defender/pyproject.toml || true
+
       - name: Radon — cyclomatic complexity (B and worse)
         run: defender/.venv/bin/radon cc defender -a -nb || true
 
