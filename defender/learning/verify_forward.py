@@ -154,7 +154,9 @@ def _fetch_closed_resolution(case_id: str) -> str | None:
     return res if isinstance(res, str) and res.strip() else None
 
 
-def load_cited_policy(run_id: str, runs_dir: Path = RUNS_DIR) -> str:
+def load_cited_policy(
+    run_id: str, runs_dir: Path = RUNS_DIR, *, fetch_fn=_fetch_closed_resolution
+) -> str:
     """The cited covering policies (closed cases) for a benign forward-check, rendered
     for the verifier prompt. The benign actor cites a past closed case as a covering
     policy; loading its grounded resolution lets the verifier reproduce the close using
@@ -164,7 +166,7 @@ def load_cited_policy(run_id: str, runs_dir: Path = RUNS_DIR) -> str:
     lines = [
         f"- {case_id}: {res}"
         for case_id in _cited_case_ids(run_id, runs_dir)
-        if (res := _fetch_closed_resolution(case_id))
+        if (res := fetch_fn(case_id))
     ]
     if not lines:
         return _NO_CITED_POLICY

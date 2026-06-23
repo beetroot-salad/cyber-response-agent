@@ -23,8 +23,8 @@ def _load():
     return mod
 
 
-def _run(mod, payload: dict) -> int:
-    return mod.main(stdin=io.StringIO(json.dumps(payload)))
+def _run(mod, payload: dict, limits: dict | None = None) -> int:
+    return mod.main(stdin=io.StringIO(json.dumps(payload)), limits=limits)
 
 
 def test_noop_without_run_dir(monkeypatch):
@@ -47,14 +47,14 @@ def test_counts_tool_calls_and_spawns(monkeypatch, tmp_path):
 
 def test_warns_when_over_cap(monkeypatch, tmp_path, capsys):
     mod = _load()
-    monkeypatch.setattr(mod, "DEFAULT_LIMITS", {
+    limits = {
         "max_tool_calls": 2,
         "max_subagent_spawns": 40,
         "wall_clock_timeout": 1800,
-    })
+    }
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
-    _run(mod, {"tool_name": "Bash"})
-    _run(mod, {"tool_name": "Bash"})  # hits cap (2/2)
+    _run(mod, {"tool_name": "Bash"}, limits=limits)
+    _run(mod, {"tool_name": "Bash"}, limits=limits)  # hits cap (2/2)
     err = capsys.readouterr().err
     assert "Budget exceeded: tool_calls at 2/2" in err
 

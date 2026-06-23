@@ -63,12 +63,13 @@ def extract_system(prompt: str) -> str | None:
     return match.group(1)
 
 
-def read_description(system: str) -> str | None:
+def read_description(system: str, skills_dir: Path | None = None) -> str | None:
     """Return the SKILL.md frontmatter `description:` for the named system."""
-    skill_path = (SKILLS_DIR / system / "SKILL.md").resolve()
-    # Path-traversal guard: must live under SKILLS_DIR.
+    skills_dir = skills_dir or SKILLS_DIR
+    skill_path = (skills_dir / system / "SKILL.md").resolve()
+    # Path-traversal guard: must live under skills_dir.
     try:
-        skill_path.relative_to(SKILLS_DIR.resolve())
+        skill_path.relative_to(skills_dir.resolve())
     except ValueError:
         return None
     if not skill_path.is_file():

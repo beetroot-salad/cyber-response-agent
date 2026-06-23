@@ -46,18 +46,18 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-repo\n")
-    monkeypatch.setattr(run._run, "REPO_ROOT", repo)
-    # repo_root/.env is the first non-explicit candidate, so this is deterministic
+    # root/.env is the first non-explicit candidate, so this is deterministic
     # regardless of any real .env on the host.
-    key, src = run.resolve_first_party_key()
+    key, src = run.resolve_first_party_key(root=repo)
     assert key == "sk-ant-api03-repo" and src == repo / ".env"
 
 
 def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ENV_FILE", raising=False)
-    monkeypatch.setattr(run._run, "REPO_ROOT", tmp_path / "repo")  # no .env there
-    key, src = run.resolve_first_party_key()
-    # The main-worktree-root candidate derives from `git -C REPO_ROOT rev-parse
-    # --git-common-dir`; REPO_ROOT is a non-git tmp dir here, so it falls back to
-    # REPO_ROOT itself — no host candidate escapes, making this deterministic.
+    # Inject BOTH `.env` roots at an empty tmp dir so resolution is hermetic: with
+    # only `root` injected, the second candidate (`_main_repo_root()/.env`) still
+    # reads the real main checkout, where a developer's local `.env` would leak in
+    # and make this assertion fail.
+    missing = tmp_path / "repo"
+    key, src = run.resolve_first_party_key(root=missing, main_repo_root=missing)
     assert key is None and src is None

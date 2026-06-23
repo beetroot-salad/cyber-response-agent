@@ -238,8 +238,9 @@ def resolve_target_pin(repo_root: Path, k: int) -> GenerationPin | None:
 # Worktree management
 # ---------------------------------------------------------------------------
 
-def worktree_path_for(pin: GenerationPin) -> Path:
-    return WORKTREES_DIR / f"replay-gen-{pin.generation}"
+def worktree_path_for(pin: GenerationPin, worktrees_dir: Path | None = None) -> Path:
+    worktrees_dir = worktrees_dir or WORKTREES_DIR
+    return worktrees_dir / f"replay-gen-{pin.generation}"
 
 
 def _worktree_head_sha(path: Path) -> str | None:
@@ -252,7 +253,7 @@ def _worktree_head_sha(path: Path) -> str | None:
     return proc.stdout.strip() or None
 
 
-def ensure_worktree(pin: GenerationPin, repo_root: Path) -> Path:
+def ensure_worktree(pin: GenerationPin, repo_root: Path, worktrees_dir: Path | None = None) -> Path:
     """Idempotent: create the gen-{N-K} worktree if missing.
 
     Detached HEAD at the pinned SHA. Re-uses an existing worktree
@@ -262,7 +263,7 @@ def ensure_worktree(pin: GenerationPin, repo_root: Path) -> Path:
     to the wrong generation. Mismatched worktrees are removed and
     recreated.
     """
-    path = worktree_path_for(pin)
+    path = worktree_path_for(pin, worktrees_dir=worktrees_dir)
     if path.is_dir() and (path / ".git").exists():
         head = _worktree_head_sha(path)
         if head == pin.sha:
@@ -652,6 +653,7 @@ def run_secondary(
     runs_base: Path,
     fixtures_dir: Path,
     repo_root: Path,
+    worktrees_dir: Path | None = None,
 ) -> SecondarySummary:
     shared = _load_shared()
     n_next = shared.actor_generation_count()  # = 1 + prior committed
@@ -684,7 +686,7 @@ def run_secondary(
     summary.pinned_sha = pin.sha
     summary.pinned_model = pin.actor_model
 
-    worktree = ensure_worktree(pin, repo_root)
+    worktree = ensure_worktree(pin, repo_root, worktrees_dir=worktrees_dir)
     if not worktree_has_replay_script(worktree):
         summary.replay_incompatible_reason = (
             f"gen-{pin.generation} worktree at {worktree} does not ship "

@@ -110,7 +110,7 @@ def check_budgets(budget: dict, limits: dict) -> list[str]:
     return warnings
 
 
-def main(*, stdin=None) -> int:
+def main(*, stdin=None, limits: dict | None = None) -> int:
     try:
         hook_data = json.loads((stdin or sys.stdin).read())
     except (json.JSONDecodeError, ValueError):
@@ -122,7 +122,7 @@ def main(*, stdin=None) -> int:
 
     tool_name = hook_data.get("tool_name", "")
     budget = update_budget_locked(run_dir, run_dir.name, tool_name)
-    for warning in check_budgets(budget, DEFAULT_LIMITS):
+    for warning in check_budgets(budget, limits if limits is not None else DEFAULT_LIMITS):
         print(f"⚠ {warning}", file=sys.stderr)
     return 0
 

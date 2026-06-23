@@ -11,12 +11,11 @@ from pathlib import Path
 HOOK_PATH = Path(__file__).resolve().parents[1] / "hooks" / "inject_system_skill_description.py"
 
 
-def _load(monkeypatch, skills_dir: Path):
+def _load():
     spec = importlib.util.spec_from_file_location("inject_system_skill_description", HOOK_PATH)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "SKILLS_DIR", skills_dir)
     return mod
 
 
@@ -48,39 +47,35 @@ def _write_skill(skills_dir: Path, name: str, description: str, *, block_scalar:
     (skill_dir / "SKILL.md").write_text(front + "\n# body\n")
 
 
-def test_injects_oneliner_description(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
+def test_injects_oneliner_description(tmp_path):
+    hook = _load()
     _write_skill(tmp_path, "elastic", "Use elastic_cli.py --help, not source reads.")
-    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(_gather_prompt(tmp_path, "elastic"))))
 
-    assert hook.main() == 0
-    out = json.loads(capsys.readouterr().out)
-    augmented = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+    desc = hook.read_description("elastic", skills_dir=tmp_path)
+    augmented = hook.build_augmented_prompt(_gather_prompt(tmp_path, "elastic"), "elastic", desc)
     assert "auto-injected from SKILL frontmatter" in augmented
     assert "Use elastic_cli.py --help, not source reads." in augmented
 
 
-def test_injects_block_scalar_description(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
+def test_injects_block_scalar_description(tmp_path):
+    hook = _load()
     _write_skill(
         tmp_path, "elastic",
         "Rule 1: --help, not source reads.\nRule 2: absolute paths only.",
         block_scalar=True,
     )
-    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(_gather_prompt(tmp_path, "elastic"))))
 
-    assert hook.main() == 0
-    out = json.loads(capsys.readouterr().out)
-    augmented = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+    desc = hook.read_description("elastic", skills_dir=tmp_path)
+    augmented = hook.build_augmented_prompt(_gather_prompt(tmp_path, "elastic"), "elastic", desc)
     assert "Rule 1: --help, not source reads." in augmented
     assert "Rule 2: absolute paths only." in augmented
 
 
-def test_block_scalar_with_blank_line_between_paragraphs(tmp_path, monkeypatch, capsys):
+def test_block_scalar_with_blank_line_between_paragraphs(tmp_path):
     """Multi-paragraph block scalars survive — regression for the original
     regex that stopped at the first unindented blank line and silently
     dropped everything after it."""
-    hook = _load(monkeypatch, tmp_path)
+    hook = _load()
     _write_skill(
         tmp_path, "elastic",
         "First paragraph names the system and when it applies.\n"
@@ -88,17 +83,15 @@ def test_block_scalar_with_blank_line_between_paragraphs(tmp_path, monkeypatch, 
         "Second paragraph carries an extra runtime caveat.",
         block_scalar=True,
     )
-    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(_gather_prompt(tmp_path, "elastic"))))
 
-    assert hook.main() == 0
-    out = json.loads(capsys.readouterr().out)
-    augmented = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+    desc = hook.read_description("elastic", skills_dir=tmp_path)
+    augmented = hook.build_augmented_prompt(_gather_prompt(tmp_path, "elastic"), "elastic", desc)
     assert "First paragraph names the system" in augmented
     assert "Second paragraph carries an extra runtime caveat" in augmented
 
 
 def test_silent_noop_when_dispatch_has_no_system_field(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
+    hook = _load()
     _write_skill(tmp_path, "elastic", "ignored")
     prompt_no_system = (
         "Read defender/skills/gather/SKILL.md and follow it.\n\n"
@@ -110,18 +103,14 @@ def test_silent_noop_when_dispatch_has_no_system_field(tmp_path, monkeypatch, ca
     assert capsys.readouterr().out == ""
 
 
-def test_silent_noop_when_skill_file_missing(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
-    # No skill written.
-    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(_gather_prompt(tmp_path, "elastic"))))
-
-    assert hook.main() == 0
-    assert capsys.readouterr().out == ""
+def test_silent_noop_when_skill_file_missing(tmp_path):
+    hook = _load()
+    # No skill written under the injected skills_dir.
+    assert hook.read_description("elastic", skills_dir=tmp_path) is None
 
 
-def test_silent_noop_for_non_gather_task(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
-    _write_skill(tmp_path, "elastic", "ignored")
+def test_silent_noop_for_non_gather_task(monkeypatch, capsys):
+    hook = _load()
     payload = json.dumps({
         "tool_name": "Task",
         "tool_input": {"prompt": "Some other subagent prompt without the marker"},
@@ -133,23 +122,27 @@ def test_silent_noop_for_non_gather_task(tmp_path, monkeypatch, capsys):
 
 
 def test_path_traversal_via_system_field_is_blocked(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
+    hook = _load()
     # Attacker-controlled prompt with a traversal payload.
     prompt = _gather_prompt(tmp_path, "../../etc/passwd")
     monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(prompt)))
 
     # The system-key regex restricts to identifier-shape chars, so this
-    # never even reaches resolve_description. If it did, the path-traversal
-    # guard would catch it.
+    # never even reaches read_description. If it did, the path-traversal
+    # guard would catch it: a name with separators resolves outside
+    # skills_dir and is rejected.
     assert hook.main() == 0
     assert capsys.readouterr().out == ""
+    assert hook.read_description("../../etc/passwd", skills_dir=tmp_path) is None
 
 
-def test_preserves_other_tool_input_fields(tmp_path, monkeypatch, capsys):
-    hook = _load(monkeypatch, tmp_path)
-    _write_skill(tmp_path, "elastic", "guidance")
+def test_preserves_other_tool_input_fields(monkeypatch, capsys):
+    """main() copies the rest of tool_input through untouched, swapping only
+    `prompt`. Driven end-to-end against a real system skill (`elastic`,
+    resolved from the default SKILLS_DIR) so no module global is patched."""
+    hook = _load()
     full_input = {
-        "prompt": _gather_prompt(tmp_path, "elastic"),
+        "prompt": _gather_prompt(Path("/tmp"), "elastic"),
         "subagent_type": "general-purpose",
         "description": "Gather: companion alert scan",
     }
@@ -160,7 +153,7 @@ def test_preserves_other_tool_input_fields(tmp_path, monkeypatch, capsys):
     updated = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["updatedInput"]
     assert updated["subagent_type"] == "general-purpose"
     assert updated["description"] == "Gather: companion alert scan"
-    assert "guidance" in updated["prompt"]
+    assert "auto-injected from SKILL frontmatter" in updated["prompt"]
 
 
 class _StringIn:

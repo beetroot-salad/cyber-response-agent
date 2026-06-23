@@ -21,15 +21,15 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime import tools  # noqa: E402
 
-CAP = tools._READ_CHAR_CAP
+CAP = tools._read_char_cap()
 
 
 def test_cap_matches_passthrough() -> None:
-    """The read cap IS record_query's passthrough cap — one shared constant so
+    """The read cap IS record_query's passthrough cap — one shared source so
     the on-disk read can't defeat the capture's bound."""
-    from defender.scripts.gather_tools.record_query import PASSTHROUGH_MAX_BYTES
+    from defender.scripts.gather_tools.record_query import _passthrough_max_bytes
 
-    assert CAP == PASSTHROUGH_MAX_BYTES
+    assert CAP == _passthrough_max_bytes()
 
 
 def test_under_cap_verbatim() -> None:
