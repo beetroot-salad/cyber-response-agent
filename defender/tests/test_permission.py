@@ -273,9 +273,23 @@ def test_gather_keeps_find():
 
 
 def test_gather_keeps_compute_and_adapter():
+    # Compute is jq on-disk + the adapter (native ES|QL / defender-sql aggregation);
+    # the residual reduce-by-hand coreutils set (datamash/uniq/cut/…) was removed.
     for cmd in ("jq '.hits|length' /tmp/p.json",
-                "datamash mean 1",
-                "defender-elastic query 'x' --raw"):
+                "jq '[.hits[].user]|group_by(.)|map(length)' /tmp/p.json",
+                "defender-elastic query 'x' --raw",
+                "cat /tmp/p.json | defender-sql 'SELECT count(*) FROM data'"):
         assert permission.decide_bash(
+            cmd, is_main_session=False,
+        ).allow, cmd
+
+
+def test_gather_drops_residual_reduce_by_hand_tools():
+    # sort/uniq/datamash/cut/comm/join/tr/paste/nl were dropped from the allowlist
+    # (residual download-and-reduce era, superseded by native ES|QL/defender-sql).
+    for cmd in ("datamash mean 1", "jq -r .x f | uniq -c", "cut -d, -f1 /tmp/p",
+                "join /tmp/a /tmp/b", "nl /tmp/p", "jq -r .x f | sort",
+                "sort -o /tmp/p f"):
+        assert not permission.decide_bash(
             cmd, is_main_session=False,
         ).allow, cmd

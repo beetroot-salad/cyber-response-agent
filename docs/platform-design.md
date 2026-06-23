@@ -676,6 +676,26 @@ needs live storage virtualization or multi-host mid-run mutation (§6).
   #321 non-atomicity window — the loop is the sole committer, so the provenance trailers can never split
   from the commit. Dev runs may grant the agent `rm` within the corpus for iteration ergonomics; prod relies
   on the mount/Landlock boundary, not on the agent's cooperation.
+- **The investigation agent needs the same OS boundary — its in-process `bash` gate is
+  defense-in-depth, not containment.** `runtime/permission.py` validates a `shlex`
+  decomposition of the model's command against a read-only-tool allowlist, then executes
+  the original string under `shell=True` with the parent environment at the repo root. That
+  gate stops command *execution* outside the allowlist, but it cannot be the confidentiality
+  or integrity boundary: (a) the secrets/ground-truth read denylist (`decide_read`) is
+  enforced only on the `read_file` tool — `cat`/`grep`/`head`/`jq`/`ls` over `.env`, `.ssh`,
+  or `credentials` are allowed through `bash`; (b) `shell=True` expands `$VAR`, so `echo
+  $SECRET` exfiltrates any secret in the agent's environment; (c) some allowlisted
+  "read-only" tools had file-write side-doors (`sort -o`/`--output`; `uniq INPUT OUTPUT`)
+  that escape the run-dir write containment. (c) is now closed by removal — the residual
+  reduce-by-hand coreutils set (`sort`/`uniq`/`datamash`/`cut`/`comm`/`join`/`tr`/`paste`/
+  `nl`) was dropped from the allowlist (analysis is jq on-disk + native ES|QL/`defender-sql`
+  now), so no remaining viewer writes a file — and (b) is curtailed by stripping the billable
+  key from the bash env, but both are whack-a-mole on a string matcher. The real
+  boundary is kernel-enforced and identical to the curator's: a **read-only bind-mount of
+  the app tree + host secrets, read-write only on the run dir**, plus the per-job scoped,
+  short-lived creds above (so the agent's shell carries no standing SIEM/`.env` secrets to
+  read or echo in the first place). Until that lands, `.env` must not be mounted into — or
+  exported into the shell of — the investigation container.
 - **Auth at the boundary, audit everywhere** — coarse tenant roles (§2.10); every write and artifact read
   is a tenant-scoped audit event.
 

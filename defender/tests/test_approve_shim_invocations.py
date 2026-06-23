@@ -70,8 +70,8 @@ def _decide(mod, monkeypatch, capsys, command: str, cwd: str | None) -> str:
     "defender-record-query --run-dir /r --lead l-1 --system elastic --query-id elastic.q -- defender-elastic query foo --raw",
     "tail -1 /r/executed_queries.jsonl | jq .",
     "cat /r/gather_raw/0/0.json | jq '.hits | length'",
-    "jq -r '.[].data.srcip' /r/gather_raw/l-1/0.json | sort | uniq -c | sort -rn",  # self-test pipeline
-    "jq -r '.[].v' /r/gather_raw/l-1/0.json | datamash median 1",                   # datamash self-test
+    "jq -r '[.[].data.srcip]|sort|.[]' /r/gather_raw/l-1/0.json",                   # ordering in jq, not coreutils
+    "jq '[.hits[].user]|group_by(.)|map({k:.[0],n:length})' /r/0.json",             # aggregation in jq, not coreutils
 ])
 def test_approves_safe_shapes_in_subagent(monkeypatch, capsys, command):
     mod = _load(monkeypatch)
@@ -164,6 +164,31 @@ def test_benign_stderr_redirect_approved(monkeypatch, capsys, command):
     "find / -delete 2>/dev/null",       # danger flag survives the stderr strip
 ])
 def test_real_redirect_or_danger_still_passes_through(monkeypatch, capsys, command):
+    mod = _load(monkeypatch)
+    assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "PASSTHROUGH"
+
+
+# --- the residual download-and-reduce coreutils set was removed from the allowlist
+#     (analysis is jq + native ES|QL/defender-sql now); they no longer auto-approve.
+#     Removal also closes their file-WRITE side-doors (`sort -o`, `uniq INPUT OUTPUT`).
+
+@pytest.mark.parametrize("command", [
+    "jq -r '.[].x' f | sort",                     # sort: removed (jq orders)
+    "sort -o /workspace/defender/SKILL.md x",     # sort -o write side-door: gone with sort
+    "jq -r '.[].u' f | uniq -c",                  # uniq: removed (and its OUTPUT write side-door)
+    "jq -r '.[].v' f | datamash median 1",        # datamash: removed
+    "cut -d, -f1 /r/x",                            # cut: removed
+    "jq -r '.[]|@tsv' f | tr '\\t' ','",          # tr: removed
+    "join /r/a /r/b",                              # join: removed
+    "paste /r/a /r/b",                             # paste: removed
+    "comm /r/a /r/b",                              # comm: removed
+    "nl /r/x",                                     # nl: removed
+])
+def test_removed_reduce_by_hand_tools_pass_through(monkeypatch, capsys, command):
+    """The reduce-by-hand coreutils filters (incl. sort) were dropped as residual
+    (#289 era, superseded by lean ES|QL/defender-sql). They are no longer on the
+    allowlist, so a command using one is not auto-approved — which also removes
+    their file-write side-doors by construction."""
     mod = _load(monkeypatch)
     assert _decide(mod, monkeypatch, capsys, command, SUBAGENT_CWD) == "PASSTHROUGH"
 
