@@ -177,9 +177,38 @@ def test_timeout_raises():
         _run("sleep 3", timeout=0.3)
 
 
-def test_unexpected_redirect_fails_closed():
+def test_timeout_bounds_nonterminating_upstream():
+    # The last stage can exit BEFORE an upstream one: here the producer writes one
+    # line then sleeps, so `head -1` exits at once while the producer keeps running
+    # and never receives SIGPIPE (it isn't writing). communicate() only bounds the
+    # last stage, so without a bounded upstream reap this pipeline would hang past
+    # the timeout — the read-only-lane regression vs the old shell=True path.
+    import shlex
+    import sys
+    producer = f"{sys.executable} -c " + shlex.quote(
+        "import sys,time; sys.stdout.write('x\\n'); sys.stdout.flush(); time.sleep(30)"
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run(f"{producer} | head -1", timeout=0.5)
+
+
+def test_non_utf8_output_does_not_crash():
+    # A read-only viewer that emits non-UTF-8 bytes must not raise UnicodeDecodeError
+    # out of run_pipeline (tools.py only catches TimeoutExpired); the bytes are
+    # decoded with replacement instead of crashing the run.
+    import shlex
+    import sys
+    emit = f"{sys.executable} -c " + shlex.quote(
+        "import sys; sys.stdout.buffer.write(b'\\xff\\xfe')"
+    )
+    rc, out, err = _run(emit)
+    assert rc == 0 and "�" in out
+
+
+def test_unexpected_redirect_fails_closed(tmp_path):
     # A real stdout redirect never passes the gate; if one reached the executor
     # it must fail closed rather than write a file.
+    target = tmp_path / "should_not_write"
     with pytest.raises(bash_exec.BashExecError):
-        _run("echo hi > /tmp/should_not_write_xyz")
-    assert not os.path.exists("/tmp/should_not_write_xyz")
+        _run(f"echo hi > {target}")
+    assert not target.exists()

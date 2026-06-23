@@ -153,6 +153,15 @@ def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, str]:
     return cwd, 1, f"cd: {raw}: No such file or directory\n"
 
 
+def _kill_all(procs: list[subprocess.Popen]) -> None:
+    """Tear down a partially- or fully-started pipeline: SIGKILL every process,
+    then reap, so a timeout or a mid-pipe spawn failure never leaks a child."""
+    for p in procs:
+        p.kill()
+    for p in procs:
+        p.wait()
+
+
 def _run_one_pipeline(
     stages: list[_Stage], *, env: dict[str, str], cwd: Path, timeout: float, command: str
 ) -> tuple[int, str, str]:
@@ -163,7 +172,7 @@ def _run_one_pipeline(
     import tempfile
 
     procs: list[subprocess.Popen] = []
-    with tempfile.TemporaryFile(mode="w+") as errfile:
+    with tempfile.TemporaryFile(mode="w+b") as errfile:
         prev_stdout = None  # None → first stage reads from /dev/null
         try:
             for idx, stage in enumerate(stages):
@@ -182,14 +191,13 @@ def _run_one_pipeline(
                         cwd=str(cwd),
                         env=env,
                         text=True,
+                        errors="replace",  # a viewer emitting non-UTF-8 bytes must
+                                           # not crash communicate() with a decode error
                     )
                 except FileNotFoundError:
                     # bash prints "command not found" and returns 127. Match that
                     # rather than crashing the run; tear down anything started.
-                    for p in procs:
-                        p.kill()
-                    for p in procs:
-                        p.wait()
+                    _kill_all(procs)
                     return 127, "", f"{stage.argv[0]}: command not found\n"
                 # The parent's copy of the previous stage's read end must close so
                 # EOF propagates when that stage exits.
@@ -199,16 +207,25 @@ def _run_one_pipeline(
                 procs.append(proc)
 
             last = procs[-1]
+            deadline = time.monotonic() + timeout
             try:
                 out, _ = last.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                for p in procs:
-                    p.kill()
-                for p in procs:
-                    p.wait()
+                _kill_all(procs)
                 raise subprocess.TimeoutExpired(command, timeout) from None
+            # Reap the upstream stages, but stay bounded by the SAME deadline. The
+            # last stage can exit before an upstream one (e.g. `tail -f f | head -1`:
+            # head reads one line and exits, while tail blocks on the file and never
+            # writes again, so it never receives SIGPIPE). With no outer shell to
+            # bound the pipeline, an unbounded `p.wait()` here would hang the
+            # read-only lane past the caller's timeout — so wait against the
+            # remaining budget and tear the group down if it elapses.
             for p in procs[:-1]:
-                p.wait()
+                try:
+                    p.wait(timeout=max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    _kill_all(procs)
+                    raise subprocess.TimeoutExpired(command, timeout) from None
             rc = last.returncode
         finally:
             # Close any dangling pipe fds the parent still holds.
@@ -219,7 +236,7 @@ def _run_one_pipeline(
                     except OSError:
                         pass
         errfile.seek(0)
-        err = errfile.read()
+        err = errfile.read().decode("utf-8", "replace")
     return rc, out or "", err
 
 
