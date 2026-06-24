@@ -27,7 +27,7 @@ LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
 
 @pytest.fixture
-def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def tmp_repo(tmp_path: Path):
     """Build an isolated git repo with the learning module mounted in.
 
     Returns a namespace with ``root`` (tmp repo path), ``author``
@@ -74,7 +74,6 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_git("add", "-A")
     run_git("commit", "-q", "-m", "init")
 
-    from defender.learning import _author_shared as shared_mod  # type: ignore[import-not-found]
     from defender.learning import author as author_mod  # type: ignore[import-not-found]
     from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
 
@@ -83,16 +82,10 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # session and `except shared.AuthorError` can't diverge. Tests reference
     # ``shared.AuthorError`` live (never a collection-time alias).
     #
-    # `_author_shared`'s git layer takes ``repo_root`` by param everywhere; only its
-    # generation counters + repo-lock still read module globals, so point that one
-    # residual seam at the tmp tree. Everything else flows through the injected
-    # ``LoopPaths`` / ``AuthorConfig`` (``ctx.paths`` / ``ctx.cfg``) below.
-    monkeypatch.setattr(shared_mod, "REPO_ROOT", repo)
-    monkeypatch.setattr(shared_mod, "LEARNING_DIR", repo / "defender" / "learning")
-    monkeypatch.setattr(
-        shared_mod, "REPO_LOCK_FILE", repo / "defender" / "learning" / "_author.lock"
-    )
-
+    # `_author_shared` reads no import-time module globals any more: its git layer, repo
+    # lock, and generation counters all take ``repo_root`` / lock-file by param, threaded
+    # from the injected ``LoopPaths`` / ``AuthorConfig`` (``ctx.paths`` / ``ctx.cfg``)
+    # below — there is nothing left on the shared module to point at the tmp tree (#389).
     paths = LoopPaths(repo_root=repo)
     cfg = author_mod.build_author_config(paths)
 

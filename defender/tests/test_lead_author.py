@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from defender.learning import lead_author  # type: ignore[import-not-found]
-from defender.learning import lead_neighbors  # type: ignore[import-not-found]
 from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
 
 
@@ -86,12 +85,12 @@ def run_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def catalog(tmp_path: Path, monkeypatch) -> Path:
+def catalog(tmp_path: Path) -> Path:
     """Self-contained query catalog so build_handoff resolves ids without
     depending on the live, environment-specific on-disk catalog (v2 ships an
-    elastic/host-state/cmdb catalog; main ships wazuh). Points both
-    CATALOG_ROOT and REPO_ROOT at the temp tree (build_handoff renders
-    template paths relative to REPO_ROOT)."""
+    elastic/host-state/cmdb catalog; main ships wazuh). Returns the catalog dir;
+    tests pass it as ``build_handoff(..., repo_root=catalog.parent, catalog_dir=catalog)``
+    (the read root + the relative-path anchor), so no module-global patch is needed."""
     cat = tmp_path / "queries"
     (cat / "elastic").mkdir(parents=True)
     (cat / "host-state").mkdir(parents=True)
@@ -105,10 +104,6 @@ def catalog(tmp_path: Path, monkeypatch) -> Path:
         "## Goal\nRunning processes matching a pattern.\n\n"
         "## Query\n\n```\nhost_state_cli.py process-list ${pattern}\n```\n"
     )
-    monkeypatch.setattr(lead_neighbors, "CATALOG_ROOT", cat)
-    monkeypatch.setattr(lead_author.lead_neighbors, "CATALOG_ROOT", cat)
-    monkeypatch.setattr(lead_author, "CATALOG_DIR", cat)
-    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
     return cat
 
 
@@ -193,7 +188,9 @@ def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
         _write_query(run_dir, lid, 0, "elastic.auth-events", {"host": f"h{i}"},
                      payload_digest=f"call-{i}")
     leads = lead_author.extract(run_dir)
-    handoffs = lead_author.build_handoff(run_dir, leads)
+    handoffs = lead_author.build_handoff(
+        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+    )
     assert len(handoffs) == 1
     h = handoffs[0]
     assert h["query_id"] == "elastic.auth-events"
@@ -216,7 +213,9 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
         payload_digest="0 events; data.srcip is IP-typed",
     )
     leads = lead_author.extract(run_dir)
-    handoffs = lead_author.build_handoff(run_dir, leads)
+    handoffs = lead_author.build_handoff(
+        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+    )
     assert len(handoffs) == 1
     inv = handoffs[0]["invocations"][0]
     assert inv["payload_status"] == "suspect_empty"
@@ -239,7 +238,9 @@ def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path)
     _write_lead_meta(run_dir, "l-001", "x")
     _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"arg0": pipe})
     leads = lead_author.extract(run_dir)
-    inv = lead_author.build_handoff(run_dir, leads)[0]["invocations"][0]
+    inv = lead_author.build_handoff(
+        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+    )[0]["invocations"][0]
     assert inv["executed_query"] == pipe
 
 
@@ -251,7 +252,9 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     _write_query(run_dir, "l-002", 0, "elastic.auth-events")
     leads = lead_author.extract(run_dir)
     assert len(leads) == 2
-    handoffs = lead_author.build_handoff(run_dir, leads)
+    handoffs = lead_author.build_handoff(
+        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+    )
     # Only the resolved lead survives.
     assert len(handoffs) == 1
     assert handoffs[0]["query_id"] == "elastic.auth-events"
@@ -271,7 +274,9 @@ def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path)
     _write_query(run_dir, "l-001", 0, "elastic.auth-events")
     _write_query(run_dir, "l-001", 1, "host-state.process-list", {"pattern": "x"})
     leads = lead_author.extract(run_dir)
-    handoffs = lead_author.build_handoff(run_dir, leads)
+    handoffs = lead_author.build_handoff(
+        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+    )
     # Two handoffs (one per template).
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
@@ -303,16 +308,12 @@ def test_run_held_queue_lock_returns_zero(run_dir: Path):
     assert lead_author.run(run_dir, deps=deps) == 0
 
 
-def test_run_failure_marker_brakes_retry(run_dir: Path, monkeypatch):
+def test_run_failure_marker_brakes_retry(run_dir: Path):
     state = run_dir / "lead_author"
     state.mkdir()
     (state / "failure.txt").write_text("prior failure")
-    # The shared repo lock stays a module seam (residual); the queue lock + spawn
-    # are injected via deps instead of patching lead_author's own functions.
-    monkeypatch.setattr(lead_author._author_shared, "acquire_repo_lock",
-                        lambda timeout_seconds=None: object())
-    monkeypatch.setattr(lead_author._author_shared, "release_repo_lock",
-                        lambda fh: None)
+    # The repo lock runs for real against the injected tmp ``paths.author_lock_file``
+    # (uncontended); the queue lock + spawn are injected via deps — no module patch.
     deps = _deps(
         run_dir.parent,
         acquire_queue_lock=lambda: object(),
@@ -322,14 +323,10 @@ def test_run_failure_marker_brakes_retry(run_dir: Path, monkeypatch):
     assert lead_author.run(run_dir, deps=deps) == 2
 
 
-def test_run_done_sentinel_short_circuits(run_dir: Path, monkeypatch):
+def test_run_done_sentinel_short_circuits(run_dir: Path):
     state = run_dir / "lead_author"
     state.mkdir()
     (state / "done").write_text("ok")
-    monkeypatch.setattr(lead_author._author_shared, "acquire_repo_lock",
-                        lambda timeout_seconds=None: object())
-    monkeypatch.setattr(lead_author._author_shared, "release_repo_lock",
-                        lambda fh: None)
     deps = _deps(
         run_dir.parent,
         acquire_queue_lock=lambda: object(),
@@ -397,7 +394,7 @@ def test_is_in_scope_covers_both_surfaces():
     assert not lead_author._is_in_scope("defender/other/stray.md")
 
 
-def test_discover_system_drafts_finds_files_excluding_readme(tmp_path, monkeypatch):
+def test_discover_system_drafts_finds_files_excluding_readme(tmp_path):
     """README.md and _TEMPLATE.md are surface declarations, not drafts."""
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
@@ -414,20 +411,17 @@ def test_discover_system_drafts_finds_files_excluding_readme(tmp_path, monkeypat
     (skills / "cmdb" / "_draft").mkdir(parents=True)
     (skills / "cmdb" / "_draft" / "_TEMPLATE.md").write_text("template\n")
 
-    monkeypatch.setattr(lead_author, "SKILLS_DIR", skills)
-    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
-    found = lead_author.discover_system_drafts()
+    found = lead_author.discover_system_drafts(skills_dir=skills)
     rel = [str(p.relative_to(tmp_path)) for p in found]
     assert rel == ["defender/skills/elastic/_draft/real-draft.md"]
 
 
-def test_build_system_draft_handoffs_emits_triple(tmp_path, monkeypatch):
+def test_build_system_draft_handoffs_emits_triple(tmp_path):
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     draft = skills / "elastic" / "_draft" / "falco-na.md"
     draft.write_text("---\nstatus: draft\n---\n")
-    monkeypatch.setattr(lead_author, "REPO_ROOT", tmp_path)
-    handoffs = lead_author.build_system_draft_handoffs([draft])
+    handoffs = lead_author.build_system_draft_handoffs([draft], repo_root=tmp_path)
     assert handoffs == [{
         "draft_path": "defender/skills/elastic/_draft/falco-na.md",
         "system": "elastic",
@@ -476,8 +470,9 @@ def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def tmp_git_repo(tmp_path: Path, monkeypatch):
-    """Stand up a tmp git repo with a catalog dir and point the driver at it."""
+def tmp_git_repo(tmp_path: Path) -> Path:
+    """Stand up a tmp git repo with a catalog dir; pass it as the git layer's
+    ``repo_root`` (``_git_head(repo)`` / ``verify_postflight(..., repo)``)."""
     repo = tmp_path / "repo"
     catalog = repo / "defender" / "skills" / "gather" / "queries"
     catalog.mkdir(parents=True)
@@ -488,31 +483,30 @@ def tmp_git_repo(tmp_path: Path, monkeypatch):
     _run_git(repo, "add", "-A")
     _run_git(repo, "commit", "-q", "-m", "init")
 
-    monkeypatch.setattr(lead_author, "REPO_ROOT", repo)
     return repo
 
 
 def test_verify_postflight_rejects_amended_base(tmp_git_repo: Path):
     """`git commit --amend` rewrites the base commit; must be rejected."""
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "--amend", "-m", "amended")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "ancestor" in reason
 
 
 def test_verify_postflight_accepts_clean_single_commit(tmp_git_repo: Path):
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "add x")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
 
 
@@ -520,24 +514,24 @@ def test_verify_postflight_rejects_reset_to_earlier(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "a.md").write_text("a")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "add a")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "reset", "--hard", "-q", "HEAD~1")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "ancestor" in reason
 
 
 def test_verify_postflight_rejects_multi_commit(tmp_git_repo: Path):
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     for stem in ("a", "b"):
         (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / f"{stem}.md").write_text(stem)
         _run_git(tmp_git_repo, "add", "-A")
         _run_git(tmp_git_repo, "commit", "-q", "-m", f"add {stem}")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "more than one commit" in reason
     assert detail["rev_list_count"] == 2
@@ -545,24 +539,24 @@ def test_verify_postflight_rejects_multi_commit(tmp_git_repo: Path):
 
 def test_verify_postflight_rejects_commit_outside_scope(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "stray edit")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "outside lead_author scope" in reason
     assert "defender/other/stray.md" in detail["diff_paths"]
 
 
 def test_verify_postflight_rejects_dirt_without_commit(tmp_git_repo: Path):
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "uncommitted.md").write_text("u")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "no commit" in reason
     assert "defender/skills/gather/queries/uncommitted.md" in detail["new_paths"]
@@ -570,23 +564,23 @@ def test_verify_postflight_rejects_dirt_without_commit(tmp_git_repo: Path):
 
 def test_verify_postflight_rejects_sibling_dirt_alongside_commit(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "add x")
     (tmp_git_repo / "defender" / "other" / "leak.md").write_text("leak")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "outside lead_author scope" in reason
     assert "defender/other/leak.md" in detail["new_paths"]
 
 
 def test_verify_postflight_accepts_no_commit_clean(tmp_git_repo: Path):
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
     assert detail["rev_list_count"] == 0
 
@@ -598,8 +592,8 @@ def test_verify_postflight_accepts_draft_promotion(tmp_git_repo: Path):
     (draft / "newthing.md").write_text("---\nid: wazuh.newthing\nstatus: draft\n---\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed draft")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     # Promote: mv draft → root, then edit status.
     _run_git(tmp_git_repo, "mv",
              "defender/skills/gather/queries/wazuh/_draft/newthing.md",
@@ -610,7 +604,7 @@ def test_verify_postflight_accepts_draft_promotion(tmp_git_repo: Path):
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "promote")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
 
 
@@ -621,13 +615,13 @@ def test_verify_postflight_accepts_draft_discard(tmp_git_repo: Path):
     (draft / "throwaway.md").write_text("---\nid: wazuh.throwaway\nstatus: draft\n---\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed draft")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "rm", "-q",
              "defender/skills/gather/queries/wazuh/_draft/throwaway.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "discard")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
 
 
@@ -638,13 +632,13 @@ def test_verify_postflight_rejects_established_deletion(tmp_git_repo: Path):
     (catalog / "auth-events.md").write_text("---\nid: wazuh.auth-events\nstatus: established\n---\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed established")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "rm", "-q",
              "defender/skills/gather/queries/wazuh/auth-events.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "DESTROY")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "established" in reason
     assert detail["deleted_path"].endswith("auth-events.md")
@@ -657,15 +651,15 @@ def test_verify_postflight_rejects_root_to_draft_demotion(tmp_git_repo: Path):
     (catalog / "stable.md").write_text("---\nid: wazuh.stable\nstatus: established\n---\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed established")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     (catalog / "_draft").mkdir(exist_ok=True)
     _run_git(tmp_git_repo, "mv",
              "defender/skills/gather/queries/wazuh/stable.md",
              "defender/skills/gather/queries/wazuh/_draft/stable.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "demote")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "demote" in reason or "established" in reason
 
@@ -690,8 +684,8 @@ def _seed_system_skill(repo: Path, system: str, draft_name: str) -> None:
 def test_verify_postflight_accepts_system_skill_lift(tmp_git_repo: Path):
     """Lift = Edit SKILL.md + git rm draft, committed together."""
     _seed_system_skill(tmp_git_repo, "elastic", "falco-na.md")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     # Lift: append a section to SKILL.md, remove the draft.
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\n## Falco quirk\nworkaround text\n")
@@ -700,32 +694,32 @@ def test_verify_postflight_accepts_system_skill_lift(tmp_git_repo: Path):
     _run_git(tmp_git_repo, "add", "defender/skills/elastic/SKILL.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "lift elastic.falco-na")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
 
 
 def test_verify_postflight_accepts_system_skill_discard(tmp_git_repo: Path):
     """Discard = git rm of a system-skill draft, no SKILL.md touch."""
     _seed_system_skill(tmp_git_repo, "elastic", "stale.md")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "rm", "-q",
              "defender/skills/elastic/_draft/stale.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "discard elastic.stale")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert ok, f"expected ok, got reason={reason}"
 
 
 def test_verify_postflight_rejects_skill_md_deletion(tmp_git_repo: Path):
     """git rm of an established SKILL.md must fail."""
     _seed_system_skill(tmp_git_repo, "elastic", "x.md")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "rm", "-q", "defender/skills/elastic/SKILL.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "DESTROY SKILL")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "established" in reason
     assert detail["deleted_path"].endswith("SKILL.md")
@@ -734,14 +728,14 @@ def test_verify_postflight_rejects_skill_md_deletion(tmp_git_repo: Path):
 def test_verify_postflight_rejects_draft_readme_mutation(tmp_git_repo: Path):
     """_draft/README.md is a surface declaration — modifying it is rejected."""
     _seed_system_skill(tmp_git_repo, "elastic", "x.md")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     readme = tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "README.md"
     readme.write_text(readme.read_text() + "\nstomped\n")
     _run_git(tmp_git_repo, "add", "-A")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "stomp README")
 
-    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "_draft/README.md" in reason or "surface declaration" in reason
     assert detail["touched_readme"].endswith("_draft/README.md")
@@ -750,14 +744,14 @@ def test_verify_postflight_rejects_draft_readme_mutation(tmp_git_repo: Path):
 def test_verify_postflight_rejects_skill_md_to_draft_demotion(tmp_git_repo: Path):
     """Renaming SKILL.md into _draft/ is rejected."""
     _seed_system_skill(tmp_git_repo, "elastic", "x.md")
-    base_sha = lead_author._git_head()
-    baseline = lead_author._git_status_records()
+    base_sha = lead_author._git_head(tmp_git_repo)
+    baseline = lead_author._git_status_records(tmp_git_repo)
     _run_git(tmp_git_repo, "mv",
              "defender/skills/elastic/SKILL.md",
              "defender/skills/elastic/_draft/SKILL.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "demote SKILL.md")
 
-    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline, tmp_git_repo)
     assert not ok
     assert "demote" in reason or "established" in reason
 

@@ -15,6 +15,7 @@ here. Commits carry ``Generation: N`` + ``Actor-Model:`` trailers.
 """
 from __future__ import annotations
 
+import functools
 import os
 import sys
 from pathlib import Path
@@ -83,10 +84,12 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
         pending_file=paths.actor_observations_file,
         consumed_file=paths.actor_observations_consumed_file,
         lock_file=paths.actor_observations_lock_file,
+        repo_lock_file=paths.author_lock_file,
+        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         outcome_author=frozenset({"caught", "incoherent"}),
         outcome_skip=frozenset({"survived", "undecidable"}),
         trailer_label="Actor-Model",
-        generation_fn=_shared.actor_generation_count,
+        generation_fn=functools.partial(_shared.actor_generation_count, paths.repo_root),
         actor_model=ACTOR_MODEL,
         log_prefix="author_actor",
         author_prompt=paths.learning_dir / "author_actor.md",

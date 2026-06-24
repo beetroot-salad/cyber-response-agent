@@ -105,6 +105,11 @@ class AuthorConfig:
     consumed_file: Path
     lock_file: Path
     findings_lock_file: Path
+    # The shared repo lock every curator serializes on + its wait ceiling, threaded
+    # from the config so tests inject a tmp lock instead of patching _author_shared
+    # module globals (issue #389).
+    repo_lock_file: Path
+    repo_lock_wait_seconds: int
     held_report: Path
     author_run_log: Path
     author_prompt: Path
@@ -130,6 +135,8 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         consumed_file=paths.pending_dir / "consumed.jsonl",
         lock_file=paths.pending_dir / ".lock",
         findings_lock_file=paths.findings_lock_file,
+        repo_lock_file=paths.author_lock_file,
+        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         held_report=paths.pending_dir / "held_report.log",
         author_run_log=paths.pending_dir / "author_run.jsonl",
         author_prompt=paths.learning_dir / "author.md",
@@ -449,22 +456,20 @@ def run_batch(
     if lock_fh is None:
         _log("lock held by another process — skipping this tick")
         return 0
-    repo_lock = None
     try:
-        try:
-            repo_lock = _shared.acquire_repo_lock()
-        except TimeoutError as e:
-            _log(f"repo lock unavailable: {e}; queue intact")
-            return 0
-        try:
-            assert_clean_lessons_dir(cfg)
-        except AuthorError as e:
-            _log(f"FATAL: {e}")
-            return 2
-        return _run_batch_inner(cfg, hold_committed=hold_committed)
+        with _shared.repo_lock(
+            cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
+        ):
+            try:
+                assert_clean_lessons_dir(cfg)
+            except AuthorError as e:
+                _log(f"FATAL: {e}")
+                return 2
+            return _run_batch_inner(cfg, hold_committed=hold_committed)
+    except TimeoutError as e:
+        _log(f"repo lock unavailable: {e}; queue intact")
+        return 0
     finally:
-        if repo_lock is not None:
-            _shared.release_repo_lock(repo_lock)
         release_lock(lock_fh)
 
 

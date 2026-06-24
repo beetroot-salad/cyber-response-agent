@@ -74,6 +74,11 @@ class CuratorConfig:
     pending_file: Path
     consumed_file: Path
     lock_file: Path
+    # Shared repo lock every curator serializes on + its wait ceiling, threaded
+    # from the LoopPaths so tests inject a tmp lock instead of patching
+    # _author_shared module globals (issue #389).
+    repo_lock_file: Path
+    repo_lock_wait_seconds: int
     # Outcome policy — which judge_outcomes author vs skip-by-policy.
     outcome_author: frozenset[str]
     outcome_skip: frozenset[str]
@@ -418,22 +423,20 @@ def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
     if queue_lock is None:
         log("queue lock held by another process — skipping this tick")
         return 0
-    repo_lock = None
     try:
-        try:
-            repo_lock = _shared.acquire_repo_lock()
-        except TimeoutError as e:
-            log(f"repo lock unavailable: {e}; queue intact")
-            return 0
-        try:
-            assert_clean_corpus_dir(cfg)
-        except AuthorError as e:
-            log(f"FATAL: {e}")
-            return 2
-        return _run_batch_inner(hold_committed=hold_committed, cfg=cfg)
+        with _shared.repo_lock(
+            cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
+        ):
+            try:
+                assert_clean_corpus_dir(cfg)
+            except AuthorError as e:
+                log(f"FATAL: {e}")
+                return 2
+            return _run_batch_inner(hold_committed=hold_committed, cfg=cfg)
+    except TimeoutError as e:
+        log(f"repo lock unavailable: {e}; queue intact")
+        return 0
     finally:
-        if repo_lock is not None:
-            _shared.release_repo_lock(repo_lock)
         release_queue_lock(queue_lock)
 
 
