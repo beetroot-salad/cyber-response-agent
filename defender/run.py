@@ -173,8 +173,9 @@ def main(argv: list[str]) -> int:
     # below (engine-agnostic helper, shared with run.py). Opt-in; non-fatal.
     ticket_writer = None
     if ns.update_ticket:
-        from defender.scripts.case_history import ticket_writer
-        ticket_writer.open_case_ticket(run_dir)
+        from defender.scripts.case_history import ticket_writer as _tw
+        _tw.open_case_ticket(run_dir)
+        ticket_writer = _tw
 
     salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
     model = ns.model or os.environ.get("DEFENDER_MODEL") or driver.DEFAULT_MODEL

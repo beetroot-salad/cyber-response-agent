@@ -159,6 +159,11 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
             # Returning mirrors the dispatch gate in _run_gather.
             if system and circuit_breaker.is_tripped(deps.run_dir, system):
                 return circuit_breaker.down_message(deps.run_dir, system)
+            # Gather context (not the main session) ⇒ deps is a GatherDeps, which
+            # carries the lead_id/query_id _capture_adapter records. The runtime
+            # invariant the types don't yet express — main-vs-gather is split
+            # across the is_main_session bool AND the subclass — is tracked in #410.
+            assert isinstance(deps, GatherDeps)
             return _capture_adapter(deps, argv)
     # Execute the *validated* command without a shell: the gate already
     # decomposed it with shlex, so run that token structure directly

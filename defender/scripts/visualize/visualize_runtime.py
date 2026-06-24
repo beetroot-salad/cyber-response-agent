@@ -136,7 +136,7 @@ def _merged_assistant_in_phase(
     return {
         ((m.get("message") or {}).get("id") or m.get("uuid")): m
         for m in merged_all
-        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid")) == phase
+        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid") or "") == phase
     }
 
 
@@ -149,7 +149,7 @@ def _collect_phase_events(
     """Walk the stream in order, collecting the merged assistant turns (deduped by
     id) and user events (tool_results) tagged to ``phase``."""
     out: list[dict] = []
-    emitted: set[str] = set()
+    emitted: set[str | None] = set()
     for ev, ph in zip(events, tags, strict=False):
         if ph != phase:
             continue

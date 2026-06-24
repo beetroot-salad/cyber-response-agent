@@ -569,7 +569,7 @@ def _lead_header_record(
         ("status", "status"),
     ):
         if rec.get(k_in):
-            v = rec[k_in]
+            v: Any = rec[k_in]
             if k_in == "loop":
                 with contextlib.suppress(ValueError):
                     v = int(v)

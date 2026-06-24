@@ -18,9 +18,9 @@ import re
 from pathlib import Path
 
 try:
-    import yaml  # type: ignore[import-not-found]
+    import yaml
 except ImportError:  # pragma: no cover — yaml is in defender deps
-    yaml = None  # type: ignore[assignment]
+    yaml = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

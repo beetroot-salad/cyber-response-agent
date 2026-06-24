@@ -33,6 +33,7 @@ import datetime as _dt
 import json
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -124,11 +125,20 @@ def _normalize(path: Path, fm: dict, body: str, *, group: str, title_keys: list[
     }
 
 
+class GroupSpec(TypedDict):
+    label: str
+    dir: str
+    blurb: str
+    title_keys: list[str]
+    desc_key: str
+    fields: list[dict[str, str]]
+
+
 # Per-group: the corpus dir (under defender/), where the title/description
 # live, and which metadata fields the view renders. `kind` tells the view
 # how to render the value. This dict is the single source of group order
 # and identity — the view derives both from the contract it produces.
-GROUPS = {
+GROUPS: dict[str, GroupSpec] = {
     "defender": {
         "label": "Defender lessons",
         "dir": "lessons",

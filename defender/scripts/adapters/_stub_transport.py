@@ -26,6 +26,7 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
@@ -198,6 +199,19 @@ def http_post(config: dict[str, str], path: str, body: dict) -> dict | list:
     return _request(config, url, method="POST", body=body)
 
 
+def http_get_obj(config: dict[str, str], path: str, *, params: dict | None = None) -> dict[str, Any]:
+    """`http_get` for endpoints whose contract is a JSON *object*. Narrows the
+    `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing,
+    and fails fast (exit 1, the module's malformed-response code) if the upstream
+    ever returns a non-object where one is expected — instead of crashing later on
+    `list.get`. List endpoints keep raw `http_get` + their `isinstance(payload,
+    list)` guard. Per-endpoint response schemas are the next step — see #409."""
+    payload = http_get(config, path, params=params)
+    if not isinstance(payload, dict):
+        sys.exit(f"error: expected a JSON object from {path}, got {type(payload).__name__}")
+    return payload
+
+
 def _exit_on_transport_failure(bastion: str, rc: int, stdout: str, stderr: str) -> None:
     """curl never produced output → transport-level failure. Exit 2 (the
     connectivity/docker/unreachable code in every stub's exit contract) so the
@@ -276,7 +290,7 @@ def _request(config: dict[str, str], url: str, *, method: str, body: dict | None
 
 def health_check(config: dict[str, str], system_label: str) -> None:
     """Standard health-check: GET <URL_BASE>/health and print summary."""
-    payload = http_get(config, "/health")
+    payload = http_get_obj(config, "/health")
     print("connected")
     print(f"{system_label}: {payload.get('status', 'unknown')}")
     for key in sorted(k for k in payload if k != "status"):

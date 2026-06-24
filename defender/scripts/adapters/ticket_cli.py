@@ -69,7 +69,7 @@ def cmd_list_tickets(args, config):
 
 
 def cmd_get_ticket(args, config):
-    payload = transport.http_get(config, f"/tickets/{args.key}")
+    payload = transport.http_get_obj(config, f"/tickets/{args.key}")
     # `--require-closed` is a structural closed-only guard for the offline benign
     # judge's scoped read (issue #338): it confirms a *cited* closed case, never the
     # in-flight (open) ticket for the alert under judgment. Refusing a non-closed

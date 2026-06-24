@@ -1,21 +1,24 @@
 ---
-title: Defender mypy type-check — soft-launch signal, ramp to a hard gate
+title: Defender mypy type-check — now a blocking gate; ramp continues
 status: todo
 groups: defender, typing, code-quality
 ---
 
-**Shipped (issue #403).** mypy runs in CI's `code-smells` job as a
-**non-blocking** soft signal:
+**Shipped (issue #403).** mypy is a **blocking** gate in CI's `lint` job — the
+tree is at **zero errors** under this config, so a new type error fails CI:
 
 ```yaml
-- name: Mypy (type-check — soft signal, non-blocking)
-  run: defender/.venv/bin/mypy --config-file defender/pyproject.toml || true
+- name: Mypy (type-check — hard gate)
+  run: defender/.venv/bin/mypy --config-file defender/pyproject.toml
 ```
 
-Config is the `[tool.mypy]` block in `defender/pyproject.toml`. This
-re-files `tasks/typing-mypy-soft-launch.md`, whose `soc-agent`-scoped
-config was dropped in the collapse; the intent (soft-launch → incremental
-hardening → promote to a hard gate) is retained, repointed at `defender/`.
+It launched as a non-blocking `code-smells` signal, then graduated to the
+blocking gate above once the errors were driven to zero (same path the extended
+ruff families took, #400). Config is the `[tool.mypy]` block in
+`defender/pyproject.toml`. This re-files `tasks/typing-mypy-soft-launch.md`,
+whose `soc-agent`-scoped config was dropped in the collapse; the intent
+(soft-launch → incremental hardening → promote to a hard gate) is retained,
+repointed at `defender/`.
 
 ## Posture
 
@@ -46,11 +49,14 @@ Local run (from the repo root):
 defender/.venv/bin/mypy --config-file defender/pyproject.toml
 ```
 
-## Baseline (2026-06-23, at soft-launch)
+## Baseline at soft-launch (2026-06-23) → zero (2026-06-24)
 
-`Found 78 errors in 21 files (checked 98 source files)` — i.e. **77 of 98
-shippable modules are already mypy-clean** under this config. The errors
-concentrate:
+The launch baseline was `Found 78 errors in 21 files (checked 98 source files)`
+(dev-only, the gate condition; 84 with the `runtime` extra synced — the extra 6
+are `runtime/driver.py` pydantic-ai generics, invisible to the dev-only gate).
+All were cleared in the promotion PR; the gate now reports
+`Success: no issues found in 98 source files` under **both** conditions. For the
+record, the launch errors concentrated:
 
 | Cluster | Errors | Dominant code |
 |---|---|---|
@@ -71,16 +77,25 @@ the obvious first batch.
 
 ## Ramp
 
-Each step is a small, reviewable PR. The signal is non-blocking throughout,
-so a step never breaks CI — it just shrinks the report.
+1. ~~**Drain the `adapters/*_cli.py` cluster.**~~ **Done.** Added a typed
+   `_stub_transport.http_get_obj() -> dict[str, Any]` accessor (asserts the
+   response is an object, fails fast otherwise) and pointed the dict-shaped
+   endpoints at it; list endpoints keep raw `http_get -> dict | list` + their
+   guards. (`-> Any` on the loader was rejected — a black hole right as the gate
+   went blocking.)
+2. ~~**Clear the tail** — narrows, `importlib` `spec` asserts, the
+   `name-defined`/`unused-ignore` cruft, and two real bugs the gate surfaced
+   (an author-drain restore warning that fired on every success; a `subprocess.
+   _RunFn` DI-seam type that doesn't exist).~~ **Done.**
+3. ~~**Promote to the hard gate.**~~ **Done** — the step moved from `code-smells`
+   to the blocking `lint` job (`|| true` dropped). The config stays permissive
+   (no `disallow_untyped_defs`), so it blocks *new type errors*, not untyped
+   defs.
 
-1. **Drain the `adapters/*_cli.py` cluster** (~38 errors). Type the shared
-   fixture-loader boundary; the `union-attr` mass falls out.
-2. **Clear the easy tail** — missing return annotations, `var-annotated`,
-   `name-defined`, stale `# type: ignore` (the `unused-ignore` hits).
-3. **Pin each cleared module strict.** Once a module (or subtree) is
-   error-free, lock it so it can't regress, even while the global signal
-   stays soft:
+**Remaining (future PRs):**
+
+4. **Pin cleared subtrees strict.** Layer `disallow_untyped_defs` per module so
+   regressions to untyped surface, bottom-up:
 
    ```toml
    [[tool.mypy.overrides]]
@@ -88,16 +103,20 @@ so a step never breaks CI — it just shrinks the report.
    disallow_untyped_defs = true
    ```
 
-   Add overrides bottom-up as subtrees clear (`runtime.*`, `learning.*`, …).
-   A regression in a pinned module then shows as a *new* error in the soft
-   report — the ratchet, without a checked-in baseline file.
-4. **Fold in tests.** Drop the test exclude (or override `tests.*` with
-   relaxed flags). Decide whether the duck-typed-fake pattern gets a typed
-   fixture or a per-module `disable_error_code`.
-5. **Promote to the hard gate.** When `defender/` is strict-clean, move the
-   step from `code-smells` to the blocking `lint` job in
-   `.github/workflows/ci.yml` and drop the `|| true` — the same graduation
-   the extended ruff families went through (issue #400).
+5. **Fold in tests.** Drop the test exclude (or override `tests.*` with relaxed
+   flags); decide whether the duck-typed-fake pattern gets a typed fixture or a
+   per-module `disable_error_code`.
 
-**Done (this issue):** mypy runs in CI with a documented ramp path — ✓. The
-steps above are follow-up work, tracked from here.
+**Spun off as design work** (band-aided to reach zero, tracked separately):
+
+- **#409 — typed contracts for the dict-blob envelopes.** Most of the cleared
+  `Any|None` narrows are symptoms of passing bare `dict` records (adapter
+  responses, hypothesis/lead/query-row shapes) untyped. The `schemas/` step:
+  TypedDict/dataclass contracts, starting with the adapter responses behind
+  `http_get_obj`.
+- **#410 — unify `RunDeps`/`GatherDeps` modeling.** Main-vs-gather is split
+  across an `is_main_session` bool *and* a subclass; `runtime/tools.py`'s
+  `assert isinstance(deps, GatherDeps)` is the band-aid.
+
+**Done (this issue):** mypy runs in CI as a blocking gate over a zero-error
+tree, with the ramp path documented above.

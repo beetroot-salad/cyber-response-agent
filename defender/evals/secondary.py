@@ -93,9 +93,16 @@ import re
 import shutil
 import subprocess
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import yaml
+
+
+# DI seam for the real `subprocess.run` (the test injects a fake). Forward-ref the
+# return so the alias never subscripts CompletedProcess at runtime.
+_RunFn = Callable[..., "subprocess.CompletedProcess[Any]"]
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +141,8 @@ def _load_loop():
     spec = importlib.util.spec_from_file_location(
         "_defender_learning_loop_secondary", LEARNING_DIR / "loop.py"
     )
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("_defender_learning_loop_secondary", mod)
     spec.loader.exec_module(mod)
@@ -144,6 +153,8 @@ def _load_shared():
     spec = importlib.util.spec_from_file_location(
         "_defender_learning_shared_secondary", LEARNING_DIR / "_author_shared.py"
     )
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("_defender_learning_shared_secondary", mod)
     spec.loader.exec_module(mod)
@@ -355,7 +366,7 @@ def run_head_defender(
     run_id: str,
     runs_base: Path,
     *,
-    runner: subprocess._RunFn = subprocess.run,
+    runner: _RunFn = subprocess.run,
 ) -> Path:
     """Invoke ``defender/run.py --no-learn`` and return the run dir.
 
@@ -416,7 +427,7 @@ def run_frozen_actor(
     case_id: str,
     loop_mod,
     *,
-    runner: subprocess._RunFn = subprocess.run,
+    runner: _RunFn = subprocess.run,
 ) -> Path:
     """Invoke replay_actor.py in the gen-{N-K} worktree. Returns staging.
 

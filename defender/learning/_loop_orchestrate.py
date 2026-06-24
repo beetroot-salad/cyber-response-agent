@@ -388,8 +388,8 @@ def run_one(
     _enqueue_for_authoring(run_dir, paths)
 
     if errors:
-        for name, e in errors:
-            _log(f"{name} leg failed: {e!r}")
+        for name, exc in errors:
+            _log(f"{name} leg failed: {exc!r}")
         raise errors[0][1]
 
     if not directions:
@@ -519,7 +519,8 @@ def _author_drain_locked(
         # surface it loudly instead of suppressing silently.
         restored = False
         with contextlib.suppress(Exception):
-            restored = branch.restore_ref(original_ref)
+            branch.restore_ref(original_ref)
+            restored = True
         if not restored:
             _log(f"author_drain: WARNING could not restore HEAD to {original_ref!r} "
                  "— dev checkout may be stranded on the lessons branch")

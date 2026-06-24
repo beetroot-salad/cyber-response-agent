@@ -67,6 +67,19 @@ jobs:
       - name: Ruff (defender extended — full gate)
         run: defender/.venv/bin/ruff check defender
 
+      # Type-check hard gate (issue #403). mypy over the shippable defender/
+      # modules (tests + .venv excluded), config in defender/pyproject.toml.
+      # Promoted from a non-blocking code-smells signal to this blocking gate once
+      # the tree reached zero errors — the ramp's "promote when clean" step (see
+      # docs/decisions/defender-mypy-ramp.md), the same graduation the extended
+      # ruff families went through (#400). Config pointed explicitly; there's no
+      # root pyproject for mypy to discover. The lint venv is --extra dev (no
+      # pydantic_ai), so mypy treats it as Any — runtime-only driver.py generic-
+      # variance errors are invisible here by design (they're checked locally with
+      # the runtime extra synced; the dict-blob typing debt is tracked in #409).
+      - name: Mypy (type-check — hard gate)
+        run: defender/.venv/bin/mypy --config-file defender/pyproject.toml
+
   code-smells:
     runs-on: ubuntu-latest
     steps:
@@ -92,21 +105,9 @@ jobs:
 
       # ---- Soft signals: metrics, reported but never block. ----
       # Trend indicators with no clean pass/fail, so they stay `|| true`. (The
-      # extended ruff families are now hard-gated in the lint job, #400 — the old
-      # soft `ruff --statistics` sweep is retired; radon/jscpd cover what's left.)
-
-      # Type-check signal (issue #403) — runs the [tool.mypy] config in
-      # defender/pyproject.toml, NON-BLOCKING for now (`|| true`). Soft-launch:
-      # surfaces type errors across the shippable defender/ modules (tests +
-      # .venv excluded) without gating. The ramp to a hard gate — clear a module,
-      # pin it strict via a [[tool.mypy.overrides]] block, then promote this step
-      # to the blocking lint job once the tree is strict-clean — is documented in
-      # docs/decisions/defender-mypy-ramp.md. Invoked from the repo root with the
-      # synced defender venv (matching the gates below); config pointed explicitly
-      # since there's no root pyproject for mypy to discover.
-      - name: Mypy (type-check — soft signal, non-blocking)
-        run: defender/.venv/bin/mypy --config-file defender/pyproject.toml || true
-
+      # extended ruff families AND mypy are now hard-gated in the lint job —
+      # #400 / #403; the old soft `ruff --statistics` sweep is retired; radon/
+      # jscpd cover what's left.)
       - name: Radon — cyclomatic complexity (B and worse)
         run: defender/.venv/bin/radon cc defender -a -nb || true
 

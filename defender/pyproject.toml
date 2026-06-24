@@ -57,13 +57,13 @@ package = false
 py-modules = []
 
 [tool.mypy]
-# Type-check signal (issue #403). Soft-launch posture: mypy runs in CI's
-# code-smells job NON-BLOCKING (`|| true`) today. The ramp to a hard gate —
-# clear a module, pin it strict via a [[tool.mypy.overrides]] block below, then
-# promote the step to the blocking lint job once the tree is strict-clean — is
-# documented in docs/decisions/defender-mypy-ramp.md.
+# Type-check gate (issue #403). BLOCKING: mypy runs in CI's lint job with no
+# `|| true` — the tree is at zero errors under this config, so a new type error
+# fails CI. Config is still permissive (no disallow_untyped_defs); the next ramp
+# steps (pin cleared modules strict via [[tool.mypy.overrides]], fold in tests)
+# are documented in docs/decisions/defender-mypy-ramp.md.
 #
-# Invoked from the REPO ROOT (matching the other code-smells steps) as
+# Invoked from the REPO ROOT (matching the other lint/code-smells steps) as
 #   defender/.venv/bin/mypy --config-file defender/pyproject.toml
 # so `files`/`mypy_path` below are relative to the repo root, not defender/.
 python_version = "3.11"

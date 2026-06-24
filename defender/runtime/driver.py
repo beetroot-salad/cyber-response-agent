@@ -99,7 +99,7 @@ def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str)
     )
 
 
-def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks:
+def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
     """The budget + observability hooks, shared by the main and gather agents.
     `agent_id` tags this instance's logged requests ("main" / "gather:{lead_id}")
     and binds the same run-scoped budget (keyed by run_dir, locked)."""
@@ -151,7 +151,7 @@ def _gather_model() -> str:
 def _build_subagent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     instructions: str, model_name: str,
-) -> Agent:
+) -> Agent[GatherDeps, str]:
     """A nested subagent with the read-only slice of the generic tools (bash +
     read_file; the bash tool auto-captures the gather's adapter calls under
     `is_main_session=False`). `writers=False`: this subagent measures and returns a
@@ -175,7 +175,7 @@ def _gather_instructions(defender_dir: Path) -> str:
     return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
 
 
-def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent:
+def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent[GatherDeps, str]:
     """The single-agent gather (#340) — the production gather for the
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
@@ -281,8 +281,8 @@ def _make_compaction_processor():
     return process
 
 
-def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent:
-    capabilities = [_make_hooks(logger, "main")]
+def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent[RunDeps, str]:
+    capabilities: list[Hooks[Any] | ProcessHistory[Any]] = [_make_hooks(logger, "main")]
     if _compaction_enabled():
         # Main agent only — gather sub-runs are short single leads, nothing to
         # compact. Listed after the hooks so observability wraps the rewritten

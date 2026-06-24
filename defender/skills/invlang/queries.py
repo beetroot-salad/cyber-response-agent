@@ -174,7 +174,7 @@ def hypothesis_name_wildcard(
             name = _hypothesis_name(h)
             if not fnmatch.fnmatchcase(name, pattern):
                 continue
-            weight = final.get(h.get("id"))
+            weight = final.get(h.get("id") or "")
             if final_weight is not None and weight != final_weight:
                 continue
             hits.append({
@@ -453,7 +453,7 @@ def hypothesis_shape_match(
                 "cases": set(),
             })
             entry["n"] += 1
-            w = final.get(h.get("id"))
+            w = final.get(h.get("id") or "")
             entry["weights"][w if w in _WEIGHT_BUCKETS else "null"] += 1
             entry["dispositions"][disp] = entry["dispositions"].get(disp, 0) + 1
             entry["cases"].add(c.case_id)

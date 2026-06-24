@@ -260,6 +260,9 @@ def invoke_claude_print(
 
     if rc != 0:
         raise RunnerError(f"agent failed (rc={rc}):\nstderr: {stderr_tail}")
+    # This drive path only runs for marker-extracting agents; the error below
+    # already assumes a marker. Make the precondition explicit for the narrow.
+    assert options.result_marker is not None
     body = extract_marked_result(full_text, options.result_marker)
     if body is None:
         raise RunnerError(

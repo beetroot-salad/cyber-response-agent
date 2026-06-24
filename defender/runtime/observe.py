@@ -272,7 +272,7 @@ def write_trace(run_dir: Path, messages: list[dict], *, wall_ms: float) -> None:
     # gather mixes Sonnet (main) and Haiku (gather), and Haiku is ~3x cheaper —
     # pricing the combined totals at one model's rate would over-report.
     total_cost = sum(
-        usage_cost(r.get("model"), r.get("usage") or {})
+        usage_cost(r.get("model") or "", r.get("usage") or {})
         for r in messages if r.get("kind") == "response"
     )
     main_responses = sum(1 for r in _main_messages(messages) if r.get("kind") == "response")
