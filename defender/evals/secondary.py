@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Secondary-metric harness — frozen-actor replay catch rate.
 
-Where the primary metric (``eval_held_out.py``) asks "does the
+Where the primary metric (``held_out.py``) asks "does the
 current defender disposition match ground truth on held-out alerts?"
 the secondary asks "would the current defender's lead sequence refute
 stories an *older* actor writes?"
@@ -35,7 +35,7 @@ to write a story) is excluded from the denominator and reported
 separately as SKIP rate.
 
 Usage:
-  python3 defender/learning/eval_secondary.py [--k 3] [--out <dir>]
+  python3 defender/evals/secondary.py [--k 3] [--out <dir>]
 
 The harness writes no commits and creates no queue entries.
 """
@@ -109,7 +109,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-EVAL_OUT_DIR = LEARNING_DIR / "eval" / "secondary"
+EVAL_OUT_DIR = REPO_ROOT / "defender" / "evals" / "results" / "secondary"
 FIXTURES_DIR = REPO_ROOT / "defender" / "fixtures" / "held-out"
 WORKTREES_DIR = REPO_ROOT / ".claude" / "worktrees"
 

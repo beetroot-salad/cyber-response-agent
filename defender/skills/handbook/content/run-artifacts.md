@@ -34,7 +34,7 @@ writable scratch space.
   `disposition` / `class_axes` / `rationale`; the learning loop's persist
   stage uses it to recognize held-out cases and **suppress queue appends**, so
   eval / held-out runs don't feed the authored corpus (`learning/author_actor.py`,
-  `learning/eval_held_out.py`). Absent for unlabeled runs.
+  `evals/held_out.py`). Absent for unlabeled runs.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.

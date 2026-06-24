@@ -39,14 +39,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Sibling import — this harness runs as a standalone script, so eval/ is on
+# Sibling import — this harness runs as a standalone script, so evals/ is on
 # sys.path[0]. Shared with harness.py.
 from _harness_util import find_venv_py, init_git, run as _run
 
 
-HERE = Path(__file__).resolve().parent
-REAL_LEARNING = HERE.parent                 # .../defender/learning
-REAL_DEFENDER = REAL_LEARNING.parent        # .../defender
+HERE = Path(__file__).resolve().parent      # .../defender/evals
+REAL_DEFENDER = HERE.parent                 # .../defender
+REAL_LEARNING = REAL_DEFENDER / "learning"  # .../defender/learning
 REAL_REPO_ROOT = REAL_DEFENDER.parent       # workspace root (worktree)
 RESULTS_DIR = HERE / "results_lead"
 
