@@ -188,7 +188,7 @@ def synthesize_drafts(
     record (see ``_executed_query``).
     """
     catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
-    by_id = {t.id for t in lead_neighbors.load_catalog()}
+    by_id = {t.id for t in lead_neighbors.load_catalog(catalog_dir)}
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
@@ -364,10 +364,10 @@ def release_queue_lock(fh: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _git(*args: str, repo_root: Path, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
-        cwd=REPO_ROOT,
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=check,
@@ -403,19 +403,21 @@ def _parse_status_z(blob: str) -> set[tuple[str, str]]:
     return out
 
 
-def _diff_name_only_z(base_sha: str, head_sha: str) -> list[str]:
-    proc = _git("diff", "--name-only", "-z", f"{base_sha}..{head_sha}")
+def _diff_name_only_z(base_sha: str, head_sha: str, repo_root: Path) -> list[str]:
+    proc = _git("diff", "--name-only", "-z", f"{base_sha}..{head_sha}", repo_root=repo_root)
     return [p for p in proc.stdout.split("\0") if p]
 
 
-def _diff_name_status_z(base_sha: str, head_sha: str) -> list[tuple[str, list[str]]]:
+def _diff_name_status_z(
+    base_sha: str, head_sha: str, repo_root: Path
+) -> list[tuple[str, list[str]]]:
     """Parse ``git diff --name-status -z`` into ``[(code, [paths])]``.
 
     Status codes: ``M``/``A``/``D``/``T`` carry one path each; ``R<score>``
     and ``C<score>`` carry two (source then destination). With ``-z``
     each field is NUL-separated.
     """
-    proc = _git("diff", "--name-status", "-z", f"{base_sha}..{head_sha}")
+    proc = _git("diff", "--name-status", "-z", f"{base_sha}..{head_sha}", repo_root=repo_root)
     parts = [p for p in proc.stdout.split("\0") if p]
     out: list[tuple[str, list[str]]] = []
     i = 0
@@ -495,20 +497,22 @@ def _is_in_scope(path: str) -> bool:
     )
 
 
-def _git_head() -> str:
-    return _git("rev-parse", "HEAD").stdout.strip()
+def _git_head(repo_root: Path) -> str:
+    return _git("rev-parse", "HEAD", repo_root=repo_root).stdout.strip()
 
 
-def _git_rev_list_count(base_sha: str) -> int:
-    return int(_git("rev-list", "--count", f"{base_sha}..HEAD").stdout.strip())
+def _git_rev_list_count(base_sha: str, repo_root: Path) -> int:
+    return int(
+        _git("rev-list", "--count", f"{base_sha}..HEAD", repo_root=repo_root).stdout.strip()
+    )
 
 
-def _git_status_records() -> set[tuple[str, str]]:
-    proc = _git("status", "--porcelain=v1", "-z", "--untracked-files=all")
+def _git_status_records(repo_root: Path) -> set[tuple[str, str]]:
+    proc = _git("status", "--porcelain=v1", "-z", "--untracked-files=all", repo_root=repo_root)
     return _parse_status_z(proc.stdout)
 
 
-def _stage_pending_drafts() -> list[str]:
+def _stage_pending_drafts(repo_root: Path) -> list[str]:
     """Stage untracked ``_draft/`` deposits so the curator's ``git mv``
     (promote/lift) and ``git rm -f`` (discard) operate on index-tracked
     files — git refuses both on an untracked source.
@@ -518,14 +522,14 @@ def _stage_pending_drafts() -> list[str]:
     ``_draft/``. Called *before* the baseline snapshot so the staged drafts
     are recorded as expected queue content, not flagged as post-flight dirt.
     """
-    proc = _git("ls-files", "--others", "--exclude-standard", "-z")
+    proc = _git("ls-files", "--others", "--exclude-standard", "-z", repo_root=repo_root)
     untracked = [p for p in proc.stdout.split("\0") if p]
     drafts = [
         p for p in untracked
         if (_under_draft(p) or _is_system_skill_draft(p)) and not _is_draft_readme(p)
     ]
     if drafts:
-        _git("add", "--", *drafts)
+        _git("add", "--", *drafts, repo_root=repo_root)
     return drafts
 
 
@@ -536,7 +540,7 @@ def _stage_pending_drafts() -> list[str]:
 
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
-    *, repo_root: Path | None = None,
+    *, repo_root: Path | None = None, catalog_dir: Path | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
 
@@ -551,10 +555,10 @@ def build_handoff(
     contract violation worth surfacing in the log but not worth taking
     the catalog out for.
     """
-    # None ⇒ resolve the module global at call time (back-compat: a test that
-    # setattrs REPO_ROOT still takes); the deps factory binds the injected paths.
+    # None ⇒ resolve the module global at call time (the production default); the
+    # deps factory binds the injected paths so tests drive a tmp tree via LoopPaths.
     repo_root = repo_root if repo_root is not None else REPO_ROOT
-    catalog = lead_neighbors.load_catalog()
+    catalog = lead_neighbors.load_catalog(catalog_dir)
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
     # Reconstruct dict-shaped entries from the join surface for the
@@ -795,25 +799,25 @@ def _dirty_protected_paths(baseline: set[tuple[str, str]]) -> list[str]:
 
 
 def verify_postflight(
-    base_sha: str, baseline: set[tuple[str, str]]
+    base_sha: str, baseline: set[tuple[str, str]], repo_root: Path
 ) -> tuple[bool, str, dict]:
     """Check post-flight git state. Returns (ok, reason, details)."""
-    head_sha = _git_head()
-    fail = _check_base_sha_ancestor(base_sha, head_sha)
+    head_sha = _git_head(repo_root)
+    fail = _check_base_sha_ancestor(base_sha, head_sha, repo_root)
     if fail:
         return fail
-    count = _git_rev_list_count(base_sha)
+    count = _git_rev_list_count(base_sha, repo_root)
     if count > 1:
         return False, "more than one commit since base", {
             "rev_list_count": count, "head": head_sha,
         }
     diff_paths: list[str] = []
     if count == 1:
-        diff_paths = _diff_name_only_z(base_sha, head_sha)
-        fail = _check_commit_contents(base_sha, head_sha, count, diff_paths)
+        diff_paths = _diff_name_only_z(base_sha, head_sha, repo_root)
+        fail = _check_commit_contents(base_sha, head_sha, count, diff_paths, repo_root)
         if fail:
             return fail
-    new_paths, fail = _check_post_status(baseline, count)
+    new_paths, fail = _check_post_status(baseline, count, repo_root)
     if fail:
         return fail
     return True, "ok", {
@@ -825,14 +829,14 @@ def verify_postflight(
 
 
 def _check_base_sha_ancestor(
-    base_sha: str, head_sha: str,
+    base_sha: str, head_sha: str, repo_root: Path,
 ) -> tuple[bool, str, dict] | None:
     # If base_sha isn't an ancestor of HEAD, the agent rewrote history
     # (`git commit --amend`, `git rebase`, `git reset`), a hard-rule
     # violation that would make rev-list / diff comparisons against
     # base_sha lie. `merge-base --is-ancestor` exits 0 when ancestor,
     # 1 when not, ≥2 on error.
-    anc = _git("merge-base", "--is-ancestor", base_sha, head_sha, check=False)
+    anc = _git("merge-base", "--is-ancestor", base_sha, head_sha, repo_root=repo_root, check=False)
     if anc.returncode == 1:
         return False, "base_sha is not an ancestor of HEAD (history rewritten)", {
             "base": base_sha, "head": head_sha,
@@ -846,7 +850,7 @@ def _check_base_sha_ancestor(
 
 
 def _check_commit_contents(
-    base_sha: str, head_sha: str, count: int, diff_paths: list[str],
+    base_sha: str, head_sha: str, count: int, diff_paths: list[str], repo_root: Path,
 ) -> tuple[bool, str, dict] | None:
     for path in diff_paths:
         if not _is_in_scope(path):
@@ -864,7 +868,7 @@ def _check_commit_contents(
     # drafts). SKILL.md and established templates are delete-prohibited.
     # Renames may move a draft into the system root (catalog promotion) but
     # not the reverse.
-    for code, paths in _diff_name_status_z(base_sha, head_sha):
+    for code, paths in _diff_name_status_z(base_sha, head_sha, repo_root):
         if code == "D":
             src = paths[0]
             if not (_under_draft(src) or _is_system_skill_draft(src)):
@@ -893,9 +897,9 @@ def _check_commit_contents(
 
 
 def _check_post_status(
-    baseline: set[tuple[str, str]], count: int,
+    baseline: set[tuple[str, str]], count: int, repo_root: Path,
 ) -> tuple[list[str], tuple[bool, str, dict] | None]:
-    post = _git_status_records()
+    post = _git_status_records(repo_root)
     new_records = post - baseline
     new_paths = sorted({p for _, p in new_records})
     if count == 0:
@@ -924,7 +928,7 @@ def _check_post_status(
 _FORBIDDEN_UPSTREAMS = {"origin/main", "origin/master"}
 
 
-def maybe_push(commit_made: bool) -> None:
+def maybe_push(commit_made: bool, repo_root: Path) -> None:
     """Push to upstream if ``LEAD_AUTHOR_PUSH=1`` and the upstream is allowed."""
     if not commit_made:
         return
@@ -933,7 +937,7 @@ def maybe_push(commit_made: bool) -> None:
         return
     try:
         proc = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
-                    check=False)
+                    repo_root=repo_root, check=False)
     except subprocess.CalledProcessError:
         proc = subprocess.CompletedProcess([], 1, "", "")
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -944,7 +948,7 @@ def maybe_push(commit_made: bool) -> None:
         _log(f"push REFUSED — upstream={upstream} (origin/main and origin/master are forbidden)")
         return
     _log(f"push upstream={upstream}")
-    push = _git("push", check=False)
+    push = _git("push", repo_root=repo_root, check=False)
     if push.returncode != 0:
         _log(f"push FAILED rc={push.returncode}: {push.stderr.strip()} "
              "(manual retry required — done sentinel will block driver retries)")
@@ -1008,7 +1012,9 @@ def build_lead_author_deps(
         paths=paths,
         invoke_agent=invoke_agent,
         extract=extract,
-        build_handoff=functools.partial(build_handoff, repo_root=paths.repo_root),
+        build_handoff=functools.partial(
+            build_handoff, repo_root=paths.repo_root, catalog_dir=paths.catalog_dir
+        ),
         discover_system_drafts=functools.partial(
             discover_system_drafts, skills_dir=paths.skills_dir
         ),
@@ -1032,18 +1038,18 @@ def run(
     queue_lock = deps.acquire_queue_lock()
     if queue_lock is None:
         return 0
-    repo_lock = None
     try:
-        _log(f"acquire repo-lock={_author_shared.REPO_LOCK_FILE}")
-        try:
-            repo_lock = _author_shared.acquire_repo_lock()
-        except TimeoutError as e:
-            _log(f"repo-lock unavailable: {e}; releasing queue-lock")
-            return 0
-        _log("repo-lock acquired")
-        return _run_locked(run_dir, deps)
+        _log(f"acquire repo-lock={deps.paths.author_lock_file}")
+        with _author_shared.repo_lock(
+            deps.paths.author_lock_file,
+            timeout_seconds=_author_shared.REPO_LOCK_WAIT_SECONDS,
+        ):
+            _log("repo-lock acquired")
+            return _run_locked(run_dir, deps)
+    except TimeoutError as e:
+        _log(f"repo-lock unavailable: {e}; releasing queue-lock")
+        return 0
     finally:
-        _author_shared.release_repo_lock(repo_lock)
         _log("release repo-lock")
         deps.release_queue_lock(queue_lock)
 
@@ -1078,16 +1084,19 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
             + ", ".join(p.name for p in synth)
         )
 
+    # Every git operation runs at the injected repo root (the production default in
+    # prod; a tmp tree under test) — the git layer takes it by param, not a global.
+    repo_root = deps.paths.repo_root
     # Stage all pending drafts (synthesized + gather-authored + system-skill
     # deposits) so the curator can `git mv` (promote/lift) and `git rm -f`
     # (discard) them — git refuses both on an untracked source. Stage before
     # the baseline so they read as expected queue content, not post-flight dirt.
-    staged = _stage_pending_drafts()
+    staged = _stage_pending_drafts(repo_root)
     if staged:
         _log(f"staged {len(staged)} pending draft(s) for curation")
 
-    base_sha = _git_head()
-    baseline = _git_status_records()
+    base_sha = _git_head(repo_root)
+    baseline = _git_status_records(repo_root)
     # Refuse if the established catalog is already dirty. Untracked drafts
     # under {system}/_draft/ are the expected gather output that this
     # author is being run to process — they belong in the baseline.
@@ -1120,7 +1129,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
         _log(f"FATAL: claude exited non-zero; wrote {_failure_marker(run_dir)}")
         return 2
 
-    ok, reason, detail = verify_postflight(base_sha, baseline)
+    ok, reason, detail = verify_postflight(base_sha, baseline, repo_root)
     if not ok:
         _write_state(
             _violation_marker(run_dir),
@@ -1130,7 +1139,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
         return 2
 
     commit_made = detail["rev_list_count"] == 1
-    maybe_push(commit_made)
+    maybe_push(commit_made, repo_root)
     _write_state(
         _done_sentinel(run_dir),
         f"head_sha: {detail['head']}\nat: {_loop_config.now_iso()}\ncommit_made: {commit_made}\n",

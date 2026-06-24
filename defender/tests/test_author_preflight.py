@@ -23,7 +23,7 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     a.release_lock(third)
 
 
-def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
+def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     """run_batch exits cleanly when the shared repo lock is unavailable.
 
     Mirrors the actor-author behavior: queue stays intact, no agent
@@ -35,14 +35,12 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
 
-    # Hold the repo lock from a separate fd.
-    shared = a._shared
-    shared.REPO_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    holder = shared.REPO_LOCK_FILE.open("a+")
+    # Hold the repo lock from a separate fd — the same lock file the config points the
+    # run at — and give the run a 1-second wait so the test doesn't block for half an hour.
+    lock_file = tmp_repo.cfg.repo_lock_file
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    holder = lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
-
-    # Short timeout so the test doesn't sleep for half an hour.
-    monkeypatch.setattr(shared, "REPO_LOCK_WAIT_SECONDS", 1)
 
     invoked = {"count": 0}
 
@@ -50,7 +48,7 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
         invoked["count"] += 1
         return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
 
-    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
+    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke, repo_lock_wait_seconds=1)
     try:
         rc = a.run_batch(cfg=cfg)
     finally:
