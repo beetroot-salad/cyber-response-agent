@@ -348,7 +348,7 @@ def commit_corpus(
     un-stamped lesson commit behind, issue #321). A guard refuses a ``commit_message`` that
     already carries one of those trailer keys: ``git --trailer`` *appends*, so a
     hand-written one would survive alongside ours and shadow it for first-match readers
-    (``eval_secondary.parse_trailers``). ``author.py`` passes no trailers — the findings
+    (``evals/secondary.py`` ``parse_trailers``). ``author.py`` passes no trailers — the findings
     corpus carries none — so neither the guard nor the ``--trailer`` args apply."""
     trailers = trailers or []  # normalize None→[] once; both the guard and args below
     if trailers:

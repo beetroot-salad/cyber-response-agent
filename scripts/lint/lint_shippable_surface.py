@@ -57,7 +57,7 @@ EXCLUDED_PREFIXES = (
     # calibration/eval fixtures — internal, not the shipped vendor-neutral surface.
     "defender/lessons-environment/",
     "defender/learning/judge-alignment/",
-    "defender/learning/eval/",
+    "defender/evals/",
     "defender/.venv/",
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.

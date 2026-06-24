@@ -71,10 +71,10 @@ for f in defender/fixtures/held-out/*/alert.json; do
 done
 
 # Score correctness against ground truth:
-python3 defender/learning/eval_held_out.py /tmp/defender-runs
+python3 defender/evals/held_out.py /tmp/defender-runs
 ```
 
-`eval_held_out.py` reports aggregate accuracy plus per-class recall and
+`held_out.py` reports aggregate accuracy plus per-class recall and
 flags runs that crashed / produced no parseable `report.md` as **wrong**
 against the ground-truth class (see the failure-accounting rule in
 §Metrics of the design doc).

@@ -6,8 +6,8 @@ collected here. `materialize` / `capture` stay per-harness — those copy genuin
 different fixtures per scenario family.
 
 Imported sibling-style (`from _harness_util import ...`): both harnesses run as
-standalone scripts (`python defender/learning/eval/harness*.py`) and never import
-the `defender.*` package, so `eval/` is on `sys.path[0]`.
+standalone scripts (`python defender/evals/harness*.py`) and never import
+the `defender.*` package, so `evals/` is on `sys.path[0]`.
 """
 from __future__ import annotations
 

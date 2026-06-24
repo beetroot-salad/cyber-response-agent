@@ -29,7 +29,7 @@ def _load(name: str, path: Path):
     return mod
 
 
-sec = _load("eval_secondary_t", _HERE / "eval_secondary.py")
+sec = _load("eval_secondary_t", _HERE / "secondary.py")
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     ``staging.name``. This is the invariant that protects catch rate
     from per-attempt noise.
     """
-    replay = _load("replay_actor_t", _HERE / "replay_actor.py")
+    replay = _load("replay_actor_t", _HERE.parent / "learning" / "replay_actor.py")
 
     captured: dict = {}
 

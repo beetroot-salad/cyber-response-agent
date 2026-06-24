@@ -12,7 +12,7 @@ in the closed enum, or a runtime crash that aborted the run) counts as
 regressions hide behind crashes.
 
 Usage:
-  python3 defender/learning/eval_held_out.py [<runs_dir>]
+  python3 defender/evals/held_out.py [<runs_dir>]
 """
 from __future__ import annotations
 

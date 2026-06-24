@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Thin one-shot actor-stage entrypoint for the secondary-metric replay.
 
-The secondary harness (``defender/learning/eval_secondary.py``) needs
+The secondary harness (``defender/evals/secondary.py``) needs
 to invoke the actor stage *inside a worktree pinned to gen-{N-K}* —
 where the worktree's ``loop.py`` ships the actor.md / mitre_corpus /
 lessons-actor / model-pin state of that older generation. The full
@@ -48,7 +48,7 @@ import yaml
 
 # Put the workspace root on sys.path so the sibling loaders below resolve the
 # modules' absolute `defender.learning.*` imports when this script is run
-# directly (or as the eval_secondary subprocess). _loop_subagents.py and
+# directly (or as the evals/secondary subprocess). _loop_subagents.py and
 # lead_repository.py are library modules — unlike the entry points, they don't
 # self-bootstrap. See defender/tests/conftest.py.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:

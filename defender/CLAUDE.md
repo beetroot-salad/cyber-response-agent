@@ -121,8 +121,13 @@ defender/
     author_branch.py    # serial author's git/gh: in-place branch off origin/main + writer lease + one PR per batch (injected runners)
     trace_lesson.py     # lesson→outcome: which cases had a lesson in context since merge, + their dispositions
     revert_lesson.py    # one-click lesson revert: opens a PR that git-rm's defender/lessons/<name>.md off origin/main
-    eval/               # harness-on-the-harness: scenarios for evaluating the loop itself
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
+  evals/                # measurement layer (researcher-cadence; emits scores, not CI pass/fail) — see evals/README.md
+    held_out.py         # primary metric: runtime disposition accuracy on labeled held-out alerts (= the loop's north star)
+    secondary.py        # secondary metric: frozen-actor (gen N-K) replay catch rate; divergence vs. primary = curriculum-overfit signal
+    test_secondary.py   # unit tests for the secondary harness
+    harness.py  harness_lead.py  _harness_util.py   # harness-on-the-harness: materializes a temp tree + runs scenarios against the loop
+    scenarios/  scenarios_lead/                      # author + lead-author eval scenarios consumed by the harnesses
   lessons/              # checked-in pitfall lessons, authored by the loop, read by the runtime agent at PLAN time
   fixtures/             # alert.json + (optionally) gather_raw payloads, used as inputs
   run-transcripts/      # curated transcripts of past runs (real alerts)
@@ -310,6 +315,7 @@ breaking changes through the PoC phase.
 | How the two tables are read/joined | `defender/learning/lead_repository.py` (the single join surface) |
 | Actor / oracle / judge / verify-forward / author prompts | `defender/learning/*.md` (paired with a `.py` driver in the same dir) |
 | Lessons corpus | `defender/lessons/*.md` (authored by the curator; hand-edits fine if they match `author.md`'s schema) |
+| Eval metrics / loop-eval scenarios | `defender/evals/` (`held_out.py`, `secondary.py`, the `harness*.py` + `scenarios*/`) |
 
 ## Out of scope here
 
