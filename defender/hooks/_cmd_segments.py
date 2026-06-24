@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Shared Bash-command decomposition + `defender-*` shim taxonomy.
+"""Shared command unwrapping + `defender-*` shim taxonomy.
 
-The in-process gate reasons about the same things — how a Bash command
-decomposes into shell segments, and which `defender-*` shims are
+Two concerns the gate shares: how to strip a leading `timeout`/`bash -c`
+wrapper off a command (`unwrap`/`tokenize`), and which `defender-*` shims are
 data-source *adapters* (captured transparently by the gather bash tool) vs.
-*non-adapter* tooling. Keeping that logic in one place means a newly
+*non-adapter* tooling. Keeping the taxonomy in one place means a newly
 onboarded adapter shim auto-gates everywhere with no per-site edit.
 
-Consumers (all via `runtime/permission.py`, which imports these predicates):
-  - ``approve_shim_invocations`` — auto-approve safe shim / read-only
-    compositions.
-  - ``block_main_loop_raw_access`` — clamp adapters / `gather_raw` out of
-    the main loop.
+Consumers:
+  - ``runtime/bash_exec`` — the no-shell executor (`unwrap`/`tokenize`).
+  - ``runtime/permission`` — the in-process gate (the taxonomy + `unwrap`).
+  - ``block_main_loop_raw_access`` — the main-loop adapter/raw deny reasons.
+
+The argv-stage decomposition the gate validates against now lives with the
+executor (`bash_exec.stage_argvs`), so validator and executor share one
+decomposition (#379) — this module no longer splits commands into segments.
 
 This module is pure (parsing + a cheap ``bin/`` dir read); no IO beyond
 listing ``defender/bin``.
@@ -43,8 +46,7 @@ def is_main_session(hook_data: dict) -> bool:
 # Non-adapter shims: corpus query + gather's own wrappers. Everything else
 # under defender/bin/ that starts with `defender-` is a data-source adapter.
 # This is the single source of truth for the split — the in-process gate
-# (runtime/permission.py, via the approve_shim_invocations +
-# block_main_loop_raw_access predicates) derives its adapter set from here.
+# (runtime/permission.py) derives its adapter set from here.
 # `defender-lessons` is read-only corpus tooling (frontmatter grep / tag
 # enumeration); it queries no data source, so it stays a non-adapter and
 # remains allowed in the main loop.
@@ -154,14 +156,6 @@ def unwrap(cmd: str) -> str | None:
     return cmd
 
 
-# Shell command separators: a `;`/`|`/`||`/`&&` at top level ends one command and
-# begins the next. (A bare `&` background operator is intentionally NOT a separator
-# here, preserving the prior splitter's behavior.) `shlex(punctuation_chars=True)`
-# emits these — and redirects like `>` — as their own tokens, but only when they
-# are OUTSIDE quotes; a `|`/`>` inside a jq filter stays part of its token.
-_SEGMENT_SEPARATORS = frozenset({"|", "||", "&&", ";"})
-
-
 def tokenize(script: str) -> list[str] | None:
     """Shell tokens via stdlib `shlex` (POSIX + `punctuation_chars`): quotes and
     backslash escapes are resolved by the tokenizer, and shell operators
@@ -180,32 +174,3 @@ def tokenize(script: str) -> list[str] | None:
         return list(lex)
     except ValueError:
         return None
-
-
-def split_segments(script: str) -> list[list[str]]:
-    """Decompose a command into per-command token lists, split on top-level shell
-    separators (`|`/`||`/`&&`/`;` AND an unquoted newline). Tokenization is `shlex`'s
-    job, so a `|`/`;`/an escaped `\\"` inside a jq filter is token content, not a
-    separator (the false splits the old char-scanner made on a stray `\\"` are gone).
-    Returns a list of token lists (each the argv of one command, with redirect/
-    operator tokens kept in place); on unbalanced quotes, the whole script comes back
-    as a single opaque token so the head/safety checks refuse it rather than
-    mis-parsing."""
-    segs: list[list[str]] = [[]]
-    # A shell treats an unquoted newline as a command separator, but `shlex`
-    # (whitespace_split) swallows it as ordinary whitespace — so `jq x⏎rm -rf /`
-    # would tokenize to ONE command and the `rm` would hide as args behind a safe
-    # head. Tokenize per physical line so the newline boundary survives as a split.
-    # A quote that spans a newline makes a line untokenizable → opaque (fail closed);
-    # an inline multi-line quoted arg has a single-line rewrite and isn't worth a hole.
-    for line in script.split("\n"):
-        toks = tokenize(line)
-        if toks is None:
-            return [[script]]
-        for t in toks:
-            if t in _SEGMENT_SEPARATORS:
-                segs.append([])
-            else:
-                segs[-1].append(t)
-        segs.append([])  # the newline itself ends this command
-    return segs

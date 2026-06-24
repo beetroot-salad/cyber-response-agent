@@ -40,10 +40,9 @@ from pathlib import Path
 
 from defender.hooks._cmd_segments import tokenize, unwrap
 
-# Shell-operator characters, mirrored from approve_shim_invocations._OPERATOR_CHARS.
-# After splitting on the separators below, the only operator tokens a *validated*
-# command can still carry are the two benign stderr redirects; anything else here
-# is a divergence and fails closed.
+# Shell-operator characters. After splitting on the separators below, the only
+# operator tokens a *validated* command can still carry are the two benign stderr
+# redirects; anything else here is a divergence and fails closed.
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
@@ -135,9 +134,8 @@ def _build_pipelines(inner: str) -> list[_Pipeline]:
     """Decompose an already-unwrapped, already-validated command into the pipeline
     structure to execute. Shares `tokenize` with the gate, so word boundaries match."""
     builder = _PipelineBuilder()
-    # Tokenize per physical line so an unquoted newline stays a command boundary
-    # (matches split_segments). A quote spanning a newline makes the line
-    # untokenizable → fail closed (the gate already denied it).
+    # Tokenize per physical line so an unquoted newline stays a command boundary.
+    # A quote spanning a newline makes the line untokenizable → fail closed.
     for line in inner.split("\n"):
         toks = tokenize(line)
         if toks is None:
@@ -147,6 +145,16 @@ def _build_pipelines(inner: str) -> list[_Pipeline]:
             i = builder.feed_token(toks, i)
         builder.end_pipeline(";")  # the physical newline ends the current command
     return builder.pipelines
+
+
+def stage_argvs(inner: str) -> list[list[str]]:
+    """Public seam for the permission gate: the flat list of per-stage argvs the
+    executor would run for an already-unwrapped command. Shares `_build_pipelines`,
+    so the gate validates EXACTLY the structure the executor runs — there is no
+    validator/executor differential to bypass (#379). Raises `BashExecError` on any
+    operator/redirect the executor does not model, which the gate maps to a
+    fail-closed deny."""
+    return [st.argv for pl in _build_pipelines(inner) for st in pl.stages if st.argv]
 
 
 def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, str]:

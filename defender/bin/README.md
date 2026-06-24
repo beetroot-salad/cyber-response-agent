@@ -39,8 +39,7 @@ shims resolve from any cwd.
   source.) The adapter vs.
   non-adapter split is defined once in `hooks/_cmd_segments.py`
   (`adapter_shims()` = all `defender-*` minus `NON_ADAPTER_SHIMS`) and is read by
-  the in-process gate (`runtime/permission.py`, via the `approve_shim_invocations`
-  + `block_main_loop_raw_access` predicates), so a new adapter dropped in this
+  the in-process gate (`runtime/permission.py`), so a new adapter dropped in this
   dir auto-gates with no per-site edit.
 
 To add a tool: drop a shim here following the same pattern; no allowlist edit

@@ -198,9 +198,10 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    # A quote spanning a newline is unparseable → split_segments hands back one
-    # opaque token. It must fail CLOSED, not be mistaken for an adapter (its head
-    # "starts with defender-") and routed to the capture path.
+    # A quote spanning a newline is unparseable → the shared executor decomposition
+    # (bash_exec.stage_argvs) raises, so _stage_programs returns None. It must fail
+    # CLOSED, not be mistaken for an adapter (its head "starts with defender-") and
+    # routed to the capture path.
     "defender-elastic query 'unterminated\nrest'",
     "jq '.a\n.b' f.json",
 ])
@@ -265,12 +266,14 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
 
 # --- gather subagent: compute + adapter surface ---
 
-def test_gather_keeps_find():
-    # The gather subagent keeps the looser read-only surface, incl. `find`
-    # (template scanning during orientation).
-    assert permission.decide_bash(
-        "find /workspace -type d -name gather", role=AgentRole.GATHER,
-    ).allow
+def test_gather_drops_find():
+    # `find` was dropped from the allowlist (#379): template discovery is Read/Grep
+    # now (gather SKILL §2), and find was the one tool needing arg-level deny rules
+    # (-exec/-delete, sensitive-path locator). It now fails closed in both lanes.
+    for cmd in ("find /workspace -type d -name gather",
+                "find skills/gather/queries -name '*.md'"):
+        assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow, cmd
+        assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow, cmd
 
 
 def test_gather_keeps_compute_and_adapter():
@@ -283,6 +286,28 @@ def test_gather_keeps_compute_and_adapter():
         assert permission.decide_bash(
             cmd, role=AgentRole.GATHER,
         ).allow, cmd
+
+
+def test_gather_allows_adapter_sql_pipe():
+    # The sanctioned aggregation pipe (#379): an adapter producing `--raw` piped
+    # straight into the sandboxed defender-sql. Allowed in gather only — the
+    # adapter stage is captured, defender-sql is a local transform over its payload.
+    cmd = ("defender-elastic query 'x' --raw | "
+           "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    # The split is exposed for the bash tool to route capture + aggregation.
+    pipe = permission.adapter_sql_pipe(cmd)
+    assert pipe is not None
+    adapter_av, sql_av = pipe
+    assert adapter_av == ["defender-elastic", "query", "x", "--raw"]
+    assert sql_av[0] == "defender-sql"
+    # adapter_argv must NOT claim it (it's a pipe, not a standalone capture).
+    assert permission.adapter_argv(cmd) is None
+    # Main loop never gets the adapter, pipe or not.
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    # A non-sql consumer downstream of an adapter stays denied (not the exception).
+    assert not permission.decide_bash(
+        "defender-elastic query 'x' --raw | cat", role=AgentRole.GATHER).allow
 
 
 def test_gather_drops_residual_reduce_by_hand_tools():

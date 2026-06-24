@@ -1,15 +1,28 @@
 """Single in-process permission/validation gate for the PydanticAI runtime.
 
-This is the simplified port of the four Claude Code PreToolUse hooks
-(`approve_shim_invocations`, `block_main_loop_raw_access`,
-`block_unwrapped_adapter_calls`, `invlang_validate`). Instead of four
-subprocesses reading stdin-JSON and exiting 2, one module exposes pure decision
-functions that the driver calls in-process and raises `ModelRetry` on a deny.
+This is the simplified port of the old `claude -p` PreToolUse hooks (the
+main-loop raw/adapter clamp, the safe-shim allowlist, and invlang validation).
+Instead of subprocesses reading stdin-JSON and exiting 2, one module exposes
+pure decision functions that the driver calls in-process and raises `ModelRetry`
+on a deny.
 
-**Functionality parity:** the *logic* is the existing logic — we import the same
-`hooks/_cmd_segments.py` taxonomy and the same gate predicates, so a newly
-onboarded `defender-*` adapter auto-gates here too, exactly as in the `claude -p`
-runtime. We do not re-implement the rules; we re-host them.
+**The Bash gate is structured around the no-shell executor (#379).** The
+read-only Bash lane runs `shell=False` (`runtime/bash_exec.py`), so the gate no
+longer parses a shell string and predicts what bash will do — it validates the
+SAME argv-stage decomposition the executor runs (`bash_exec.stage_argvs`). What
+the gate approves is exactly what executes; there is no validator/executor
+parser differential to bypass. The decision is then a deny-by-default allowlist
+over each stage's program, sourced from the declarative `bash_policy.json`:
+
+  - main loop — only the read-only viewers + non-adapter `defender-*` shims; no
+    data-source adapters (dispatch gather), no `gather_raw/` reads.
+  - gather subagent — the same viewers/shims, plus a data-source adapter run
+    either standalone (captured transparently) or as the sanctioned
+    `adapter --raw | defender-sql '<SQL>'` aggregation pipe.
+
+The adapter/non-adapter shim taxonomy still comes from `hooks/_cmd_segments.py`
+(one source of truth, so a newly onboarded adapter auto-gates), and the
+main-loop raw/adapter deny *reasons* from `hooks/block_main_loop_raw_access.py`.
 
 Decisions are pure (`command`/`text` in, `Decision` out) so they unit-test for
 free, with no model call.
@@ -17,31 +30,22 @@ free, with no model call.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-# Reuse the same hook taxonomy + gate predicates verbatim (`defender.hooks.*`) —
-# these are pure (no stdin/exit), so the in-process gate and the subprocess hooks
-# can never disagree. The workspace root is on sys.path via the entry-point
-# bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks._cmd_segments import (
     ADAPTER_CLI_RE,
     NON_ADAPTER_SHIMS,
-    split_segments,
     unwrap,
-)
-from defender.hooks.approve_shim_invocations import (
-    GATHER_READONLY_TOOLS,
-    READONLY_TOOLS,
-    _all_segments_safe,
 )
 from defender.hooks.block_main_loop_raw_access import (
     ADAPTER_DENY_REASON,
     RAW_DENY_REASON,
     RAW_MARKER,
-    _adapter_shim_re,
 )
+from defender.runtime import bash_exec, bash_policy
 from defender.runtime.agent_role import AgentRole
 from defender.skills.invlang.validate import validate_companion
 
@@ -59,7 +63,7 @@ FALLTHROUGH_DENY_REASON = (
 # advice is nonsensical here — it would tell gather to dispatch itself. Gather may
 # run a data-source adapter (`defender-<system> …`) directly as a standalone
 # command (captured automatically) plus read-only viewers; everything else fails
-# closed. Give it that lane verbatim instead of the main-loop reason.
+# closed.
 GATHER_FALLTHROUGH_DENY_REASON = (
     "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as "
     "a standalone command — it is captured automatically — plus read-only viewers "
@@ -67,14 +71,15 @@ GATHER_FALLTHROUGH_DENY_REASON = (
     "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
 )
 
-# The finder finds the query and delegates execution to the assay tool — it has
 # Gather may run a data-source adapter directly — it's captured transparently —
-# but only as a standalone command (a pipeline/compound makes "the payload"
-# ambiguous). Run it solo, then filter the persisted payload file.
+# but only solo, or as the sanctioned `adapter --raw | defender-sql '<SQL>'`
+# aggregation pipe. Any other pipeline/compound makes "the payload" ambiguous.
 ADAPTER_STANDALONE_REASON = (
     "Blocked: run the data-source adapter as a standalone command (it is captured "
     "automatically — no wrapper needed), then filter the persisted payload file "
-    "with jq/grep/Read. Don't pipe or chain the adapter call."
+    "with jq/grep/Read. The only adapter pipe allowed is "
+    "`defender-<system> … --raw | defender-sql '<SQL>'`. Don't otherwise pipe or "
+    "chain the adapter call."
 )
 
 # The gather-payload capture wrapper legitimately names `gather_raw` paths on the
@@ -83,6 +88,14 @@ ADAPTER_STANDALONE_REASON = (
 _GATHER_PAYLOAD_TOKENS = (
     "record_query", "defender-record-query",
 )
+
+# A leading `VAR=value` env-assignment prefix (the credential-groping vector) —
+# matched against the first token of a stage only.
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# The aggregation shim that consumes an adapter's `--raw` payload on stdin. Only
+# this program may sit downstream of an adapter in the sanctioned pipe.
+_SQL_SHIM = "defender-sql"
 
 
 @dataclass(frozen=True)
@@ -95,42 +108,56 @@ def _names_a_gather_payload_tool(cmd: str) -> bool:
     return any(tok in cmd for tok in _GATHER_PAYLOAD_TOKENS)
 
 
-# The bin/ roster and the adapter regex are constant for this process's lifetime
-# (under `claude -p` each hook was a fresh subprocess, so per-call rebuild was
-# unavoidable; in-process it's wasted work + a per-call dir scan). Memoize both.
 @lru_cache(maxsize=1)
-def _cached_adapter_re():
-    return _adapter_shim_re()
+def _allowed_programs() -> frozenset:
+    """Programs allowed as a stage head in either lane: the declarative read-only
+    viewers (`bash_policy.json`) plus the non-adapter `defender-*` shims (the
+    taxonomy's source of truth). Adapters are gated separately (per-agent)."""
+    return frozenset(bash_policy.viewers() | set(NON_ADAPTER_SHIMS))
 
 
-@lru_cache(maxsize=1)
-def _safe_main_tokens() -> frozenset:
-    return frozenset(set(READONLY_TOOLS) | set(NON_ADAPTER_SHIMS))
+def _stage_unsafe(argv: list[str]) -> bool:
+    """A stage carrying a construct we refuse to auto-approve even though the
+    no-shell executor renders it inert: a subshell / command substitution
+    (`(`/`)`/`$(`/backtick), an `export`, or a leading `VAR=` assignment. With
+    shell=False these expand to literal bytes (no security risk), but we keep the
+    deny as cheap defense-in-depth — the last line if `shell=True` is ever
+    reintroduced anywhere downstream — and so the agent gets a clear deny rather
+    than a confusing literal-`$(...)`-as-filename error."""
+    for i, t in enumerate(argv):
+        if t in ("(", ")"):
+            return True
+        if "$(" in t or "`" in t:
+            return True
+        if t == "export":
+            return True
+        if i == 0 and _ENV_ASSIGN_RE.match(t):
+            return True
+    return False
 
 
-@lru_cache(maxsize=1)
-def _safe_gather_tokens() -> frozenset:
-    # Gather gets the main safe set plus its discovery tools (find). The
-    # find action-flag guard lives in _all_segments_safe, so a `-exec`/`-delete`
-    # find is still denied here.
-    return frozenset(_safe_main_tokens() | GATHER_READONLY_TOOLS)
+def _stage_programs(inner: str) -> list[list[str]] | None:
+    """The argv stages the executor would run for `inner` (already unwrapped), or
+    None to fail closed. None means either the command carries an operator/redirect
+    the no-shell executor does not model (`bash_exec` raises) or a stage trips the
+    substitution/assignment guard. Sharing `bash_exec.stage_argvs` is the whole
+    point of #379: the gate and the executor decompose identically."""
+    try:
+        stages = bash_exec.stage_argvs(inner)
+    except bash_exec.BashExecError:
+        return None
+    if any(_stage_unsafe(s) for s in stages):
+        return None
+    return stages
 
 
 def _segment_is_adapter(toks: list[str]) -> bool:
-    """True iff the segment's COMMAND (first token) is a data-source adapter — a
-    `defender-<system>` shim or a `<system>_cli.py` script. `toks` is one command's
-    token list from `split_segments`. Anchored to command position: an adapter name
-    appearing as an *argument* (`which defender-<system>`, `cat …/defender-<system>`)
-    is NOT a query and must not be captured."""
+    """True iff the stage's COMMAND (first token) is a data-source adapter — a
+    `defender-<system>` shim or a `<system>_cli.py` script. Anchored to command
+    position: an adapter name appearing as an *argument* (`which defender-<system>`,
+    a `defender-record-query … -- defender-<system> …` wrapper) is NOT a query and
+    must not be captured/denied as one."""
     if not toks:
-        return False
-    # split_segments hands back the whole script as one opaque token when it can't
-    # parse it (a quote spanning a newline). A real command's head is a single
-    # whitespace-free word, so a head carrying whitespace IS that opaque fallback —
-    # never an adapter. Refusing it routes the command to the fail-closed deny in
-    # decide_bash/_all_segments_safe instead of the capture path (which would only
-    # error on an unrunnable argv).
-    if any(c.isspace() for c in toks[0]):
         return False
     cmd = toks[0]
     if cmd in ("python", "python3") and len(toks) > 1:
@@ -140,59 +167,89 @@ def _segment_is_adapter(toks: list[str]) -> bool:
     return bool(ADAPTER_CLI_RE.search(cmd))
 
 
+def _is_adapter_sql_pipe(stages: list[list[str]]) -> bool:
+    """True for the sanctioned `defender-<system> … --raw | defender-sql '<SQL>'`
+    shape: exactly two stages, an adapter producing on the left and defender-sql
+    consuming on the right. defender-sql is self-sandboxed (no file/network), so
+    aggregating the captured payload through it is a local transform, not a second
+    data-source query."""
+    return (
+        len(stages) == 2
+        and _segment_is_adapter(stages[0])
+        and bool(stages[1]) and stages[1][0] == _SQL_SHIM
+    )
+
+
 def adapter_argv(command: str) -> list[str] | None:
     """If `command` is a STANDALONE adapter invocation (the gather-captured case),
-    return its argv; else None. Standalone = a single shell segment whose command
-    is an adapter, after unwrapping a leading `timeout`/`bash -c`. The gather bash
-    tool uses this to route the call through the transparent capture path."""
+    return its argv; else None. Standalone = a single stage whose command is an
+    adapter, after unwrapping a leading `timeout`/`bash -c`. The gather bash tool
+    uses this to route the call through the transparent capture path."""
     inner = unwrap(command.strip())
     if inner is None:
         return None
-    segs = [s for s in split_segments(inner) if s]
-    if len(segs) != 1 or not _segment_is_adapter(segs[0]):
+    stages = _stage_programs(inner)
+    if stages is None or len(stages) != 1 or not _segment_is_adapter(stages[0]):
         return None
-    return segs[0]  # the command's token list IS the argv (shlex-resolved)
+    return stages[0]  # the stage's argv IS the adapter argv (shlex-resolved)
+
+
+def adapter_sql_pipe(command: str) -> tuple[list[str], list[str]] | None:
+    """If `command` is the sanctioned `adapter --raw | defender-sql '<SQL>'` pipe,
+    return `(adapter_argv, sql_argv)`; else None. The gather bash tool uses this to
+    capture the adapter payload and then aggregate it through defender-sql."""
+    inner = unwrap(command.strip())
+    if inner is None:
+        return None
+    stages = _stage_programs(inner)
+    if stages is None or not _is_adapter_sql_pipe(stages):
+        return None
+    return stages[0], stages[1]
 
 
 def _decide_bash_gather(cmd: str) -> Decision:
-    """Gather subagent (slice 2). A standalone adapter call is allowed directly
-    — the harness captures it (queries table + payload), so no record-query
-    wrapper is needed. But only solo: capturing one adapter inside a
-    pipeline/compound is ambiguous, so a compound containing an adapter is
-    denied (run it standalone, then filter the payload). Non-adapter commands
-    must be read-only viewers / non-adapter shims, so arbitrary shell (`rm`,
-    `curl|bash`, `python3 …`) still fails closed."""
+    """Gather subagent. A standalone adapter call is allowed directly (the harness
+    captures it), as is the `adapter --raw | defender-sql '<SQL>'` aggregation
+    pipe. Any other pipeline/compound containing an adapter is ambiguous and
+    denied. Non-adapter commands must be read-only viewers / non-adapter shims, so
+    arbitrary shell (`rm`, `curl|bash`, `python3 …`) still fails closed."""
     inner = unwrap(cmd)
     if inner is None:
         return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
-    segs = [s for s in split_segments(inner) if s]
-    if any(_segment_is_adapter(s) for s in segs):
-        if len(segs) != 1:
-            return Decision(False, ADAPTER_STANDALONE_REASON)
-        return Decision(True)
-    if not _all_segments_safe(inner, _safe_gather_tokens()):
+    stages = _stage_programs(inner)
+    if stages is None:
+        return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
+    if any(_segment_is_adapter(s) for s in stages):
+        if len(stages) == 1:
+            return Decision(True)
+        if bash_policy.adapter_sql_pipe_allowed("gather") and _is_adapter_sql_pipe(stages):
+            return Decision(True)
+        return Decision(False, ADAPTER_STANDALONE_REASON)
+    if not all(s[0] in _allowed_programs() for s in stages):
         return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
     return Decision(True)
 
 
 def _decide_bash_main(cmd: str) -> Decision:
-    """Main loop (block_main_loop_raw_access + approve_shim_invocations): no
-    adapter calls, no gather_raw reads, only safe shims/viewers."""
+    """Main loop: no adapter calls, no gather_raw reads, only safe shims/viewers.
+    A `defender-record-query … -- <adapter> …` wrapper is fine — its stage head is
+    the (allowlisted) wrapper, not the adapter, so it is neither flagged as an
+    adapter call nor denied."""
     if RAW_MARKER in cmd and not _names_a_gather_payload_tool(cmd):
         return Decision(False, RAW_DENY_REASON)
 
-    shim_re = _cached_adapter_re()
-    is_adapter = bool(ADAPTER_CLI_RE.search(cmd)) or bool(shim_re and shim_re.search(cmd))
-    wrapped = "record_query.py" in cmd or "defender-record-query" in cmd
-    if is_adapter and not wrapped:
-        return Decision(False, ADAPTER_DENY_REASON)
-
-    # Allow iff composed entirely of safe tokens (readonly viewers + non-adapter
-    # shims), after unwrapping a leading `timeout`/`bash -c`. Else fail closed.
     inner = unwrap(cmd)
     if inner is None:
         return Decision(False, FALLTHROUGH_DENY_REASON)
-    if not _all_segments_safe(inner, _safe_main_tokens()):
+    stages = _stage_programs(inner)
+    if stages is None:
+        return Decision(False, FALLTHROUGH_DENY_REASON)
+    # A data-source adapter from the main loop is denied with the specific reason
+    # (it must be dispatched via gather, and run directly here it escapes the audit
+    # trail) rather than the generic fall-through.
+    if not bash_policy.adapters_allowed("main") and any(_segment_is_adapter(s) for s in stages):
+        return Decision(False, ADAPTER_DENY_REASON)
+    if not all(s[0] in _allowed_programs() for s in stages):
         return Decision(False, FALLTHROUGH_DENY_REASON)
     return Decision(True)
 
@@ -203,9 +260,10 @@ def decide_bash(command: str, *, role: AgentRole) -> Decision:
     `role=MAIN` → the orchestrator (slice 1): no adapter calls, no gather_raw
     reads, only safe shims/viewers.
     Any non-MAIN role (today `GATHER`, slice 2) → the gather subagent: it may
-    run a data-source adapter directly (captured transparently) plus read-only
-    viewers/find; arbitrary shell fails closed. New subagent roles get their own
-    branch here when their policy diverges from gather's.
+    run a data-source adapter directly (captured transparently) — standalone or
+    piped into defender-sql — plus read-only viewers; arbitrary shell fails
+    closed. New subagent roles get their own branch here when their policy
+    diverges from gather's.
     """
     cmd = command.strip()
     if not cmd:
@@ -216,21 +274,19 @@ def decide_bash(command: str, *, role: AgentRole) -> Decision:
     return _decide_bash_main(cmd)
 
 
-# Read denylist (creds, ssh, ground truth, the held-out manifest) — enforced
-# in-process here. Matched on any path component / suffix.
-_READ_DENY_SUBSTR = (".env", "credentials", "ground_truth", "ground-truth", "cases.json")
-_READ_DENY_DIR = ".ssh"
-
-
 def decide_read(path: Path, *, role: AgentRole) -> Decision:
     """Allow/deny a file read, porting the Read deny rules + the gather_raw clamp
-    (`block_main_loop_raw_access` on Read). The clamp applies to the main loop:
-    it consumes the gather summary, never the raw payload. A subagent (non-MAIN
-    role) reads its own gather_raw to verify its query result."""
+    (`block_main_loop_raw_access` on Read). The denylist (secrets / ground truth)
+    is declarative (`bash_policy.json`): substrings match the filename, dirs match
+    any path component. The clamp applies to the main loop: it consumes the gather
+    summary, never the raw payload. A subagent (non-MAIN role) reads its own
+    gather_raw to verify its query result."""
     p = Path(path)
     name = p.name
     parts = set(p.parts)
-    if _READ_DENY_DIR in parts or any(s in name for s in _READ_DENY_SUBSTR):
+    if any(d in parts for d in bash_policy.read_deny_dirs()) or any(
+        s in name for s in bash_policy.read_deny_substrings()
+    ):
         return Decision(False, f"Blocked: {name} is a denied read (secrets / ground truth).")
     # No gather-payload-tool exemption here: that exemption is about a Bash
     # *command* invoking record-query (which legitimately names a gather_raw
