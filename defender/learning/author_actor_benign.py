@@ -23,6 +23,7 @@ actor model differ.
 """
 from __future__ import annotations
 
+import functools
 import os
 import sys
 from pathlib import Path
@@ -105,6 +106,8 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         pending_file=pending_file,
         consumed_file=consumed_file,
         lock_file=lock_file,
+        repo_lock_file=paths.author_lock_file,
+        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         outcome_author=outcome_author,
         outcome_skip=outcome_skip,
         trailer_label=trailer_label,
@@ -130,7 +133,7 @@ def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorCon
         outcome_author=frozenset({"survived"}),
         outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
         trailer_label="Benign-Actor-Model",
-        generation_fn=_shared.benign_generation_count,
+        generation_fn=functools.partial(_shared.benign_generation_count, paths.repo_root),
         actor_model=BENIGN_ACTOR_MODEL,
         log_prefix="author_actor_benign",
     )
@@ -148,7 +151,7 @@ def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.Curat
         outcome_author=frozenset({"caught", "incoherent"}),
         outcome_skip=frozenset({"survived", "undecidable"}),
         trailer_label="Actor-Env-Model",
-        generation_fn=_shared.actor_env_generation_count,
+        generation_fn=functools.partial(_shared.actor_env_generation_count, paths.repo_root),
         actor_model=ACTOR_MODEL,
         log_prefix="author_actor_env",
     )

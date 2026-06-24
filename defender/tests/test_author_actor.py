@@ -3,8 +3,8 @@
 Covers the deterministic pre/post-flight without spawning ``claude -p``. The
 transaction envelope lives in ``_author_curator``; ``author_actor`` supplies the
 actor ``CuratorConfig``. Tests drive the engine with a config pointed at a tmp repo
-and an injected ``invoke_agent`` — no module-global monkeypatching beyond the single
-repo-root seam shared with ``_author_shared`` (git/lock/generation operations).
+and an injected ``invoke_agent`` — no module-global monkeypatching: git, repo lock,
+and the generation counters all take their root/lock-file by param via the config.
 """
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import pytest
 import yaml
 
 # The curator engine, the lock/generation helpers, and the actor config wrapper.
-# Each resolves to one module instance (the path imports inside the modules use the
-# same names), so patching ``shared.*`` (the residual git-lock/generation seam) reaches
-# them; the engine's repo root now flows through the injected ``CuratorConfig.repo_root``.
+# Each resolves to one module instance, and the engine's repo root, repo lock, and
+# generation counters all flow through the injected ``CuratorConfig`` — no ``shared.*``
+# module globals to patch (#389).
 from defender.learning import _author_curator as curator  # type: ignore[import-not-found]
 from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
 from defender.learning import author_actor as aa  # type: ignore[import-not-found]
@@ -37,7 +37,7 @@ from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-
 # ---------------------------------------------------------------------------
 
 
-def _isolate(monkeypatch, tmp_path: Path):
+def _isolate(tmp_path: Path):
     """Point the curator's git/lock/generation operations at a fresh tmp repo.
 
     Returns a dict of pointers; build a config with ``_cfg(ctx, invoke)``."""
@@ -57,13 +57,10 @@ def _isolate(monkeypatch, tmp_path: Path):
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
 
-    # The engine runs all git operations at the injected ``cfg.repo_root`` (built from
-    # ``LoopPaths(repo_root=repo)`` in ``_cfg``); the repo lock + generation counter still
-    # read ``_author_shared``'s module globals, so point that residual seam at the tmp repo.
-    monkeypatch.setattr(shared, "REPO_ROOT", repo)
-    monkeypatch.setattr(shared, "LEARNING_DIR", learning)
-    monkeypatch.setattr(shared, "REPO_LOCK_FILE", learning / "_author.lock")
-
+    # The engine runs every git/lock/generation operation at the injected
+    # ``cfg.repo_root`` / ``cfg.repo_lock_file`` (built from ``LoopPaths(repo_root=repo)``
+    # in ``_cfg``); the generation counters take ``repo_root`` by param. Nothing on
+    # ``_author_shared`` needs pointing at the tmp repo any more (#389).
     return {
         "repo": repo,
         "learning": learning,
@@ -137,9 +134,9 @@ def _write_lesson(
 
 
 def test_outcome_policy_filter_drops_survived_and_undecidable(
-    monkeypatch, tmp_path: Path
+    tmp_path: Path
 ):
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     _write_queue(
         ctx["pending"],
         [
@@ -174,8 +171,8 @@ def test_outcome_policy_filter_drops_survived_and_undecidable(
     assert by_id["c/0"]["skip_reason"] == "outcome_policy:undecidable"
 
 
-def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: Path):
-    ctx = _isolate(monkeypatch, tmp_path)
+def test_idempotency_consumes_already_cited_observations(tmp_path: Path):
+    ctx = _isolate(tmp_path)
     _write_lesson(
         ctx["lessons"],
         "existing",
@@ -218,8 +215,8 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
     assert by_id["a/0"]["consumed_category"] == "consumed_idempotent"
 
 
-def test_held_out_double_check_holds_observation(monkeypatch, tmp_path: Path):
-    ctx = _isolate(monkeypatch, tmp_path)
+def test_held_out_double_check_holds_observation(tmp_path: Path):
+    ctx = _isolate(tmp_path)
     # Synthesize a held-out source run dir under the tmp repo root.
     src = ctx["repo"] / "defender" / "learning" / "runs" / "held/"
     src.mkdir(parents=True)
@@ -298,11 +295,11 @@ def _head_message(repo: Path) -> str:
     ).stdout
 
 
-def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
+def test_commit_corpus_appends_provenance(tmp_path: Path):
     """The loop — not the agent — commits the corpus with the Generation/model trailers,
     so the recorded provenance can't drift from the prompt. The agent runs no git: it
     leaves the lesson un-committed in the working tree and the loop commits it."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     cfg = _cfg(ctx, _consume_all)
     (ctx["lessons"] / "x.md").write_text("hello\n")  # agent edit, uncommitted
 
@@ -315,17 +312,17 @@ def test_commit_corpus_appends_provenance(monkeypatch, tmp_path: Path):
     assert "Actor-Model: claude-sonnet-4-6" in msg
     # The committed trailer is exactly what the generation counter greps, so the next
     # generation advances — provenance round-trips through git history.
-    assert shared.actor_generation_count() == 2
+    assert shared.actor_generation_count(ctx["repo"]) == 2
     # The commit touched only the corpus, and the working tree is now clean.
     assert _head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
     assert curator.changes_outside_corpus(ctx["repo"], cfg.corpus_dir_rel) == []
 
 
-def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Path):
+def test_committed_batch_gets_trailers_stamped_by_loop(tmp_path: Path):
     """End-to-end: the agent leaves a lesson in the working tree (no git); run_batch
     commits it with the provenance trailers and rotates the committed observation out
     against the loop's commit sha."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     _write_queue(ctx["pending"], [_row("a/0", "caught")])
 
     def committing_invoke(observations, batch_id, cfg):
@@ -361,11 +358,11 @@ def test_committed_batch_gets_trailers_stamped_by_loop(monkeypatch, tmp_path: Pa
     assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
 
 
-def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
+def test_commit_failure_is_atomic_queue_intact(tmp_path: Path):
     """#321 regression: if the loop's commit fails (here, a rejecting pre-commit hook —
     the issue's exact trigger), no commit lands, there is **no** un-stamped lesson commit
     on HEAD, and the queue is fully intact for retry."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     hooks = ctx["repo"] / ".git" / "hooks"
     hooks.mkdir(parents=True, exist_ok=True)
     hook = hooks / "pre-commit"
@@ -400,14 +397,14 @@ def test_commit_failure_is_atomic_queue_intact(monkeypatch, tmp_path: Path):
     assert not consumed_path.exists() or consumed_path.read_text().strip() == ""
 
 
-def test_verify_adapter_threads_observations_noun(monkeypatch, tmp_path: Path):
+def test_verify_adapter_threads_observations_noun(tmp_path: Path):
     """The curator ``verify_agent_state`` adapter delegates to the shared layer; this pins
     that it threads *its* corpus noun (``observations``) and ``cfg`` corpus, not the author
     side's ``findings``/``defender/lessons/``. ``committed`` non-empty but the corpus clean
     is the inconsistent state the post-flight gate must reject — and the one branch whose
     error string carries the noun, so a mis-threaded adapter arg would surface here. The
     shared-layer branch logic itself is covered corpus-agnostically in test_author_shared."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     cfg = _cfg(ctx, _consume_all)
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
     with pytest.raises(shared.AuthorError, match="committed observations but left"):
@@ -419,15 +416,15 @@ def test_verify_adapter_threads_observations_noun(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_actor_generation_count_starts_at_1(monkeypatch, tmp_path: Path):
-    _isolate(monkeypatch, tmp_path)
-    assert shared.actor_generation_count() == 1
+def test_actor_generation_count_starts_at_1(tmp_path: Path):
+    ctx = _isolate(tmp_path)
+    assert shared.actor_generation_count(ctx["repo"]) == 1
 
 
-def test_actor_generation_count_ignores_pre_author_commits(monkeypatch, tmp_path: Path):
+def test_actor_generation_count_ignores_pre_author_commits(tmp_path: Path):
     """Pre-author commits that touch lessons-actor/ (corpus structure, templates)
     must NOT advance the counter — only commits carrying the Actor-Model: trailer do."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     pre = ctx["lessons"] / "_TEMPLATE.md"
     pre.write_text("template\n")
     subprocess.run(
@@ -438,13 +435,13 @@ def test_actor_generation_count_ignores_pre_author_commits(monkeypatch, tmp_path
         ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "seed templates"],
         check=True,
     )
-    assert shared.actor_generation_count() == 1
+    assert shared.actor_generation_count(ctx["repo"]) == 1
 
 
 def test_actor_generation_count_increments_with_prior_author_commits(
-    monkeypatch, tmp_path: Path
+    tmp_path: Path
 ):
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     for i in range(2):
         p = ctx["lessons"] / f"gen{i}.md"
         p.write_text("x\n")
@@ -459,7 +456,7 @@ def test_actor_generation_count_increments_with_prior_author_commits(
         subprocess.run(
             ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True
         )
-    assert shared.actor_generation_count() == 3
+    assert shared.actor_generation_count(ctx["repo"]) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -467,16 +464,17 @@ def test_actor_generation_count_increments_with_prior_author_commits(
 # ---------------------------------------------------------------------------
 
 
-def test_repo_lock_blocks_second_acquire(monkeypatch, tmp_path: Path):
-    _isolate(monkeypatch, tmp_path)
-    fh = shared.acquire_repo_lock(timeout_seconds=2)
+def test_repo_lock_blocks_second_acquire(tmp_path: Path):
+    ctx = _isolate(tmp_path)
+    lock = ctx["learning"] / "_author.lock"
+    fh = shared.acquire_repo_lock(lock, timeout_seconds=2)
     try:
         with pytest.raises(TimeoutError, match="repo lock"):
-            shared.acquire_repo_lock(timeout_seconds=1)
+            shared.acquire_repo_lock(lock, timeout_seconds=1)
     finally:
         shared.release_repo_lock(fh)
     # After release a fresh acquire succeeds.
-    fh2 = shared.acquire_repo_lock(timeout_seconds=1)
+    fh2 = shared.acquire_repo_lock(lock, timeout_seconds=1)
     shared.release_repo_lock(fh2)
 
 
@@ -485,8 +483,8 @@ def test_repo_lock_blocks_second_acquire(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_rotate_queue_preserves_held_and_appends_consumed(monkeypatch, tmp_path: Path):
-    ctx = _isolate(monkeypatch, tmp_path)
+def test_rotate_queue_preserves_held_and_appends_consumed(tmp_path: Path):
+    ctx = _isolate(tmp_path)
     held = [{**_row("h/0", "caught"), "held_reason": "x"}]
     consumed = [
         {**_row("c/0", "caught"), "consumed_category": "consumed_committed"},
@@ -521,11 +519,11 @@ def test_rotate_queue_preserves_held_and_appends_consumed(monkeypatch, tmp_path:
 # ---------------------------------------------------------------------------
 
 
-def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
+def test_index_cli_hides_stale_lessons_by_default(tmp_path: Path):
     """The runtime actor uses lessons_actor_index.py; stale lessons must not be
     surfaced unless --include-stale is passed. v2: stale-hiding applies to any
     mutable=true lesson, not just env-channel."""
-    ctx = _isolate(monkeypatch, tmp_path)
+    ctx = _isolate(tmp_path)
     _write_lesson(
         ctx["lessons"],
         "live-claim",

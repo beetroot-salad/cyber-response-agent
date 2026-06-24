@@ -41,16 +41,15 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-
-# Resolve the shared repo lock from DEFAULT_PATHS so it honors
-# DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs) — the single
-# location every curator serializes on.
-from defender.learning._loop_config import DEFAULT_PATHS
-REPO_LOCK_FILE = DEFAULT_PATHS.author_lock_file
 LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
 
+# Default repo-lock wait — the env-derived ceiling each curator config sources as
+# its ``repo_lock_wait_seconds``. The lock file and repo root are no longer module
+# globals: every caller threads them from its ``LoopPaths``/config so a test rooted
+# at a tmp tree injects instead of patching (issue #389). The lock path itself is
+# ``LoopPaths.author_lock_file``, which honors DEFENDER_LEARNING_STATE_DIR
+# (out-of-repo under concurrent runs) — the single location every curator
+# serializes on.
 REPO_LOCK_WAIT_SECONDS = int(
     os.environ.get("LEARNING_REPO_LOCK_WAIT_SECONDS", "1800")
 )
@@ -60,23 +59,23 @@ class AuthorError(Exception):
     """Fatal pre/post-flight error — caller should abort, queue stays intact."""
 
 
-def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
+def acquire_repo_lock(lock_file: Path, *, timeout_seconds: int) -> Any:
     """Blocking-with-timeout acquire of the shared repo lock.
 
     Returns the open file handle. Callers must release with
-    ``release_repo_lock`` in reverse order with respect to the queue
-    lock.
+    ``release_repo_lock`` in reverse order with respect to the queue lock — or,
+    better, drive both through the ``repo_lock`` context manager. ``lock_file`` is
+    the per-config ``author_lock_file`` and ``timeout_seconds`` its wait ceiling,
+    both threaded from a ``LoopPaths``/config rather than read off a module global.
 
     Raises ``TimeoutError`` if the lock cannot be acquired within
     ``timeout_seconds``. The caller is expected to leave its queue
     lock intact in that case so the batch is retried later.
     """
-    if timeout_seconds is None:
-        timeout_seconds = REPO_LOCK_WAIT_SECONDS
     # mkdir the lock's own parent — the out-of-repo state_dir when
-    # DEFENDER_LEARNING_STATE_DIR is set, not LEARNING_DIR.
-    REPO_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fh = REPO_LOCK_FILE.open("a+")
+    # DEFENDER_LEARNING_STATE_DIR is set, not the repo's learning dir.
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    fh = lock_file.open("a+")
     deadline = time.monotonic() + max(1, timeout_seconds)
     while True:
         try:
@@ -86,7 +85,7 @@ def acquire_repo_lock(timeout_seconds: int | None = None) -> Any:
             if time.monotonic() >= deadline:
                 fh.close()
                 raise TimeoutError(
-                    f"repo lock {REPO_LOCK_FILE} held by another author "
+                    f"repo lock {lock_file} held by another author "
                     f"for >{timeout_seconds}s"
                 ) from exc
             time.sleep(0.2)
@@ -99,6 +98,29 @@ def release_repo_lock(fh: Any) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
         fh.close()
+
+
+@contextlib.contextmanager
+def repo_lock(lock_file: Path, *, timeout_seconds: int) -> Iterator[Any]:
+    """Hold the shared repo lock for the block (acquire on enter, release on exit).
+
+    The scoped twin of ``acquire_repo_lock``/``release_repo_lock`` — the three
+    curator entrypoints (``author`` / ``_author_curator`` / ``lead_author``) drive
+    the repo lock through this instead of a hand-rolled ``repo_lock = None`` +
+    try/finally. Propagates ``TimeoutError`` from the acquire so the caller can
+    leave its queue lock intact and retry the batch later::
+
+        try:
+            with repo_lock(cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds):
+                ...
+        except TimeoutError:
+            return 0  # queue intact, batch retried next tick
+    """
+    fh = acquire_repo_lock(lock_file, timeout_seconds=timeout_seconds)
+    try:
+        yield fh
+    finally:
+        release_repo_lock(fh)
 
 
 def acquire_flock(path: Path) -> Any | None:
@@ -166,7 +188,7 @@ def flock_or_skip(path: Path) -> Iterator[bool]:
         release_flock(fh)
 
 
-def _generation_count(trailer_label: str) -> int:
+def _generation_count(trailer_label: str, *, repo_root: Path) -> int:
     """Generation a commit carrying a ``{trailer_label}:`` trailer would assert:
     1 + the count of prior commits bearing that trailer.
 
@@ -183,7 +205,7 @@ def _generation_count(trailer_label: str) -> int:
     """
     proc = subprocess.run(
         ["git", "rev-list", "--count", f"--grep=^{trailer_label}:", "HEAD"],
-        cwd=REPO_ROOT,
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=True,
@@ -191,23 +213,23 @@ def _generation_count(trailer_label: str) -> int:
     return int(proc.stdout.strip() or "0") + 1
 
 
-def actor_generation_count() -> int:
+def actor_generation_count(repo_root: Path) -> int:
     """Generation for a tradecraft (``Actor-Model:``) ``lessons-actor/`` commit."""
-    return _generation_count("Actor-Model")
+    return _generation_count("Actor-Model", repo_root=repo_root)
 
 
-def benign_generation_count() -> int:
+def benign_generation_count(repo_root: Path) -> int:
     """Generation for an FP-env (``Benign-Actor-Model:``) ``lessons-environment/``
     commit — the false-positive-direction analog of ``actor_generation_count``."""
-    return _generation_count("Benign-Actor-Model")
+    return _generation_count("Benign-Actor-Model", repo_root=repo_root)
 
 
-def actor_env_generation_count() -> int:
+def actor_env_generation_count(repo_root: Path) -> int:
     """Generation for an adversarial-env (``Actor-Env-Model:``) ``lessons-environment/``
     commit (issue #298) — a third counter disjoint from the other two, so per-stream
     generation analytics stay clean even though adversarial-env and FP-env commits
     land in the same corpus."""
-    return _generation_count("Actor-Env-Model")
+    return _generation_count("Actor-Env-Model", repo_root=repo_root)
 
 
 def without_consumed_category(rec: dict) -> dict:
@@ -249,7 +271,9 @@ def partition_committed(
 # the two corpora (issue #330). ``repo_root`` (the worktree the git commands run
 # in) is passed in, not read from a module global — so the layer is exercised by
 # injection: tests point it at a tmp repo directly, no monkeypatching of module
-# state. The adapters supply their module's ``REPO_ROOT`` as the production root.
+# state. The adapters supply their config's ``repo_root`` (``AuthorConfig`` /
+# ``CuratorConfig``, built from a ``LoopPaths``) as the production root — and as of
+# #389 the repo lock + generation counters take it by param the same way.
 # ---------------------------------------------------------------------------
 
 

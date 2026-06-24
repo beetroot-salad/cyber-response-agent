@@ -656,7 +656,7 @@ def run_secondary(
     worktrees_dir: Path | None = None,
 ) -> SecondarySummary:
     shared = _load_shared()
-    n_next = shared.actor_generation_count()  # = 1 + prior committed
+    n_next = shared.actor_generation_count(repo_root)  # = 1 + prior committed
     n_committed = n_next - 1                  # latest committed gen
     summary = SecondarySummary(
         current_generation=n_committed,
