@@ -36,8 +36,12 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from defender.skills.invlang.schema import CompanionBody
 
 
 GATHER_DIR = "gather_raw"
@@ -398,7 +402,7 @@ def narration_crosscheck_from_run(run_dir: Path) -> dict:
     return narration_crosscheck(run_dir, _lead_ids_from_companion(companion))
 
 
-def _lead_ids_from_companion(companion: dict) -> set[str]:
+def _lead_ids_from_companion(companion: CompanionBody) -> set[str]:
     """The `:L` row ids from a parsed companion, filtered to the lead-id grammar.
 
     The parser also surfaces `:R` resolution rows under `findings`, whose "id"
