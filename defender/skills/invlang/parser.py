@@ -468,9 +468,17 @@ _HYP_PREFIX_RE = re.compile(
     r"^(?P<hyp>h-[A-Za-z0-9]+)\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
 )
 
+# Column grammars for the `:H h-NNN.<sub>` sub-blocks. Named (not inline
+# literals) so the SKILL.md grammar pin (`tests/test_invlang_grammar_pin.py`)
+# can assert the documented headers match what the parser actually reads.
+_HYP_PRED_COLS = ["id", "subject", "claim"]
+_HYP_ATTR_PRED_COLS = ["id", "target", "attribute", "claim"]
+_HYP_REFUT_COLS = ["id", "refutes", "claim"]
+_HYP_AUTHZ_COLS = ["id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "on_indet"]
+
 
 def _hyp_sub_pred_row(block: Block, row: str) -> PredictionRecord:
-    rec = _row_dict(block, row, ["id", "subject", "claim"])
+    rec = _row_dict(block, row, _HYP_PRED_COLS)
     _require(rec, "id", "subject", msg="preds row missing id/subject")
     return {
         "id": rec["id"],
@@ -480,7 +488,7 @@ def _hyp_sub_pred_row(block: Block, row: str) -> PredictionRecord:
 
 
 def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
-    rec = _row_dict(block, row, ["id", "target", "attribute", "claim"])
+    rec = _row_dict(block, row, _HYP_ATTR_PRED_COLS)
     _require(
         rec, "id", "target", "attribute",
         msg="attr_preds row missing id/target/attribute",
@@ -494,7 +502,7 @@ def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
 
 
 def _hyp_sub_refut_row(block: Block, row: str) -> RefutationRecord:
-    rec = _row_dict(block, row, ["id", "refutes", "claim"])
+    rec = _row_dict(block, row, _HYP_REFUT_COLS)
     _require(rec, "id", msg="refuts row missing id")
     out: RefutationRecord = {
         "id": rec["id"],
@@ -506,9 +514,7 @@ def _hyp_sub_refut_row(block: Block, row: str) -> RefutationRecord:
 
 
 def _hyp_sub_authz_row(block: Block, row: str) -> AuthorizationContract:
-    rec = _row_dict(block, row, [
-        "id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "on_indet",
-    ])
+    rec = _row_dict(block, row, _HYP_AUTHZ_COLS)
     _require(rec, "id", "anchor_kind", msg="authz row missing id/anchor_kind")
     return {
         "id": rec["id"],
