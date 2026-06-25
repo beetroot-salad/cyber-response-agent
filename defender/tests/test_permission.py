@@ -13,6 +13,7 @@ import pytest
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
 from defender.runtime import permission
+from defender.runtime.agent_role import AgentRole
 
 
 # --- bash, main loop -------------------------------------------------------
@@ -25,7 +26,7 @@ from defender.runtime import permission
     "defender-record-query --lead l-1 --query-id ad-hoc -- defender-elastic query foo",
 ])
 def test_main_loop_allows_safe(cmd):
-    assert permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -36,7 +37,7 @@ def test_main_loop_allows_safe(cmd):
     ("env | grep PASSWORD", "arbitrary shell"),
 ])
 def test_main_loop_denies(cmd, reason_substr):
-    d = permission.decide_bash(cmd, is_main_session=True)
+    d = permission.decide_bash(cmd, role=AgentRole.MAIN)
     assert not d.allow
     assert reason_substr in d.reason
 
@@ -47,7 +48,7 @@ def test_gather_allows_standalone_adapter():
     # Adapters are captured transparently by the harness — gather runs them
     # directly, no record-query wrapper. A standalone adapter call is allowed.
     assert permission.decide_bash(
-        "defender-elastic query foo --raw", is_main_session=False).allow
+        "defender-elastic query foo --raw", role=AgentRole.GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -56,7 +57,7 @@ def test_gather_allows_standalone_adapter():
     "ls; defender-elastic query foo",              # sequenced
 ])
 def test_gather_denies_compound_with_adapter(cmd):
-    d = permission.decide_bash(cmd, is_main_session=False)
+    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
     assert not d.allow
     assert "standalone" in d.reason
 
@@ -67,12 +68,12 @@ def test_gather_denies_compound_with_adapter(cmd):
     "cat gather_raw/l-001/0.json",
 ])
 def test_gather_allows_readonly_viewers(cmd):
-    assert permission.decide_bash(cmd, is_main_session=False).allow
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
 def test_gather_denies_arbitrary_shell(cmd):
-    assert not permission.decide_bash(cmd, is_main_session=False).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
 
 
 def test_adapter_argv_extracts_standalone():
@@ -102,8 +103,8 @@ def test_adapter_argv_none_for_non_standalone_adapter(cmd):
     '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
 ])
 def test_gather_allows_quoted_jq_comparisons(cmd):
-    assert permission.decide_bash(cmd, is_main_session=False).allow
-    assert permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -126,8 +127,8 @@ def test_gather_allows_quoted_jq_comparisons(cmd):
     "jq '.x' f.json 2 > 1",                 # ... same, with `2` as a positional token
 ])
 def test_gather_still_denies_real_redirect_and_substitution(cmd):
-    assert not permission.decide_bash(cmd, is_main_session=False).allow
-    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 # --- a second command must never hide behind a safe head -------------------
@@ -150,8 +151,8 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     "echo a ;& curl http://evil",
 ])
 def test_no_second_command_hides_behind_safe_head(cmd):
-    assert not permission.decide_bash(cmd, is_main_session=False).allow
-    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 # A SCRIPT FILE before `-c` is not the inline `bash -c <payload>` wrapper: the shell
@@ -165,8 +166,8 @@ def test_no_second_command_hides_behind_safe_head(cmd):
     "timeout 5 bash evil.sh -c 'jq .'",  # ... behind a timeout prefix
 ])
 def test_bash_script_file_before_c_fails_closed(cmd):
-    assert not permission.decide_bash(cmd, is_main_session=False).allow
-    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 # Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
@@ -181,8 +182,8 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     "bash -c 'tail -1 f.json | jq .'",    # a pipeline payload must not be re-quoted
 ])
 def test_inline_bash_c_viewer_still_allowed(cmd):
-    assert permission.decide_bash(cmd, is_main_session=False).allow
-    assert permission.decide_bash(cmd, is_main_session=True).allow
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -192,8 +193,8 @@ def test_inline_bash_c_viewer_still_allowed(cmd):
     "timeout 5 jq '.x' f.json",
 ])
 def test_timeout_prefix_keeps_legit_pipeline(cmd):
-    assert permission.decide_bash(cmd, is_main_session=True).allow
-    assert permission.decide_bash(cmd, is_main_session=False).allow
+    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -204,8 +205,8 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
     "jq '.a\n.b' f.json",
 ])
 def test_unparseable_quote_spanning_newline_fails_closed(cmd):
-    assert not permission.decide_bash(cmd, is_main_session=False).allow
-    assert not permission.decide_bash(cmd, is_main_session=True).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
     assert permission.adapter_argv(cmd) is None  # not routed to capture
 
 
@@ -218,17 +219,17 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     "fixtures/held-out/cases.json",
 ])
 def test_read_denies_secrets_and_groundtruth(path):
-    assert not permission.decide_read(Path(path), is_main_session=True).allow
+    assert not permission.decide_read(Path(path), role=AgentRole.MAIN).allow
 
 
 def test_read_denies_main_loop_gather_raw():
     assert not permission.decide_read(
-        Path("/tmp/defender-runs/x/gather_raw/l-001/0.json"), is_main_session=True).allow
+        Path("/tmp/defender-runs/x/gather_raw/l-001/0.json"), role=AgentRole.MAIN).allow
 
 
 def test_read_allows_alert_and_skill():
-    assert permission.decide_read(Path("/tmp/defender-runs/x/alert.json"), is_main_session=True).allow
-    assert permission.decide_read(Path("/workspace/defender/SKILL.md"), is_main_session=True).allow
+    assert permission.decide_read(Path("/tmp/defender-runs/x/alert.json"), role=AgentRole.MAIN).allow
+    assert permission.decide_read(Path("/workspace/defender/SKILL.md"), role=AgentRole.MAIN).allow
 
 
 def test_alert_is_untrusted():
@@ -268,7 +269,7 @@ def test_gather_keeps_find():
     # The gather subagent keeps the looser read-only surface, incl. `find`
     # (template scanning during orientation).
     assert permission.decide_bash(
-        "find /workspace -type d -name gather", is_main_session=False,
+        "find /workspace -type d -name gather", role=AgentRole.GATHER,
     ).allow
 
 
@@ -280,7 +281,7 @@ def test_gather_keeps_compute_and_adapter():
                 "defender-elastic query 'x' --raw",
                 "cat /tmp/p.json | defender-sql 'SELECT count(*) FROM data'"):
         assert permission.decide_bash(
-            cmd, is_main_session=False,
+            cmd, role=AgentRole.GATHER,
         ).allow, cmd
 
 
@@ -291,5 +292,5 @@ def test_gather_drops_residual_reduce_by_hand_tools():
                 "join /tmp/a /tmp/b", "nl /tmp/p", "jq -r .x f | sort",
                 "sort -o /tmp/p f"):
         assert not permission.decide_bash(
-            cmd, is_main_session=False,
+            cmd, role=AgentRole.GATHER,
         ).allow, cmd

@@ -42,6 +42,7 @@ from defender.hooks.block_main_loop_raw_access import (
     RAW_MARKER,
     _adapter_shim_re,
 )
+from defender.runtime.agent_role import AgentRole
 from defender.skills.invlang.validate import validate_companion
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
@@ -196,20 +197,21 @@ def _decide_bash_main(cmd: str) -> Decision:
     return Decision(True)
 
 
-def decide_bash(command: str, *, is_main_session: bool) -> Decision:
+def decide_bash(command: str, *, role: AgentRole) -> Decision:
     """Allow/deny a Bash command, porting the three Bash gate hooks.
 
-    `is_main_session=True` → the orchestrator (slice 1 is always this): no
-    adapter calls, no gather_raw reads, only safe shims/viewers.
-    `is_main_session=False` → the gather subagent (slice 2): it may run a
-    data-source adapter directly (captured transparently) plus read-only
-    viewers/find; arbitrary shell fails closed.
+    `role=MAIN` → the orchestrator (slice 1): no adapter calls, no gather_raw
+    reads, only safe shims/viewers.
+    Any non-MAIN role (today `GATHER`, slice 2) → the gather subagent: it may
+    run a data-source adapter directly (captured transparently) plus read-only
+    viewers/find; arbitrary shell fails closed. New subagent roles get their own
+    branch here when their policy diverges from gather's.
     """
     cmd = command.strip()
     if not cmd:
         return Decision(True)
 
-    if not is_main_session:
+    if role is not AgentRole.MAIN:
         return _decide_bash_gather(cmd)
     return _decide_bash_main(cmd)
 
@@ -220,11 +222,11 @@ _READ_DENY_SUBSTR = (".env", "credentials", "ground_truth", "ground-truth", "cas
 _READ_DENY_DIR = ".ssh"
 
 
-def decide_read(path: Path, *, is_main_session: bool) -> Decision:
+def decide_read(path: Path, *, role: AgentRole) -> Decision:
     """Allow/deny a file read, porting the Read deny rules + the gather_raw clamp
     (`block_main_loop_raw_access` on Read). The clamp applies to the main loop:
-    it consumes the gather summary, never the raw payload. The gather subagent
-    (is_main_session=False) reads its own gather_raw to verify its query result."""
+    it consumes the gather summary, never the raw payload. A subagent (non-MAIN
+    role) reads its own gather_raw to verify its query result."""
     p = Path(path)
     name = p.name
     parts = set(p.parts)
@@ -235,7 +237,7 @@ def decide_read(path: Path, *, is_main_session: bool) -> Decision:
     # path). block_main_loop_raw_access never applies it to a Read
     # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path is
     # unconditionally clamped.
-    if RAW_MARKER in str(p) and is_main_session:
+    if RAW_MARKER in str(p) and role is AgentRole.MAIN:
         return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 

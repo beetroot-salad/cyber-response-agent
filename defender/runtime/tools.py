@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
@@ -25,6 +26,7 @@ from pydantic_ai.usage import UsageLimits
 from . import bash_exec
 from . import circuit_breaker
 from . import permission
+from .agent_role import AgentRole
 
 # Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
 # PreToolUse hooks + the gather capture core). The workspace root is on sys.path
@@ -87,41 +89,36 @@ def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = ""
 @dataclass(frozen=True)
 class RunDeps:
     """Per-run state threaded into every tool via `ctx.deps`. This base type is
-    the main session's deps; the gather subagent gets the `GatherDeps` subtype.
-    The main-vs-gather split has a single source of truth — the deps class —
-    so `is_main_session` is *derived* from the type, not a stored field that
-    could drift out of sync with it."""
+    the main orchestrator's deps; each subagent gets a `RunDeps` subtype. The
+    agent's identity lives in one place — the `role` class constant — so the
+    permission gate keys on it (not a main/not-main bool, which would cap the
+    runtime at two agents); code that needs a subtype's fields narrows with
+    `isinstance`."""
 
     run_dir: Path
     defender_dir: Path
     run_id: str
     salt: str
 
-    @property
-    def is_main_session(self) -> bool:
-        return True
+    role: ClassVar[AgentRole] = AgentRole.MAIN
 
 
 @dataclass(frozen=True)
 class GatherDeps(RunDeps):
     """Gather subagent deps: RunDeps + the lead being gathered. The harness reads
     `lead_id` here to attribute captured queries (it is never model-supplied to
-    the capture path). Being a `GatherDeps` *is* the not-main-session signal:
-    code that needs the gather-only fields narrows with `isinstance(deps,
-    GatherDeps)`, and the stateless permission gate reads the derived
-    `is_main_session` bool below.
+    the capture path). The `GATHER` role drives the permission policy; code that
+    needs the gather-only fields narrows with `isinstance(deps, GatherDeps)`.
 
     `query_id` is a fallback capture id stamped on the lead's queries when the
     model doesn't tag a call with `--query-id`; the gather leaves it unset
     (None) and tags per query, so capture falls back to record_query's
     `{system}.{verb}` default."""
 
+    role: ClassVar[AgentRole] = AgentRole.GATHER
+
     lead_id: str = ""
     query_id: str | None = None
-
-    @property
-    def is_main_session(self) -> bool:
-        return False
 
 
 def _record_lesson_load(deps: RunDeps, path: Path) -> None:
@@ -151,7 +148,7 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     """Logic for the `bash` tool (see the closure's docstring). Module-level so the
     tool closure stays thin; the gather-vs-main adapter-capture path lives here."""
     decision = permission.decide_bash(
-        command, is_main_session=deps.is_main_session,
+        command, role=deps.role,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
@@ -197,7 +194,7 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
 def _tool_read_file(deps: RunDeps, path: str) -> str:
     """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
     decision = permission.decide_read(
-        Path(path), is_main_session=deps.is_main_session,
+        Path(path), role=deps.role,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
