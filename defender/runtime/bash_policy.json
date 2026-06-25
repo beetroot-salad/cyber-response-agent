@@ -1,0 +1,38 @@
+{
+  "_README": [
+    "Deny-by-default policy for the defender runtime gate (runtime/permission.py).",
+    "Issue #379: the read-only Bash lane runs shell=False (runtime/bash_exec.py), so",
+    "the gate no longer parses a shell string and predicts bash — it validates the",
+    "SAME argv-stage decomposition the executor runs. With the shell gone there are",
+    "no per-argument constraints to express here: the allowlist is just program",
+    "names. `find` was dropped (template discovery is Read/Grep now), which removed",
+    "the one tool that needed arg-level deny rules.",
+    "",
+    "viewers  = read-only utilities allowed in any composition, both agents.",
+    "           The non-adapter defender-* shims are added from the taxonomy",
+    "           (hooks/_cmd_segments.NON_ADAPTER_SHIMS), the single source of truth",
+    "           for the adapter/non-adapter split, so they are NOT re-listed here.",
+    "adapters = whether the agent may invoke a data-source adapter (defender-<sys>",
+    "           or scripts/adapters/<sys>_cli.py). main: no (dispatch gather);",
+    "           gather: yes, captured transparently.",
+    "adapter_sql_pipe = whether `defender-<sys> ... --raw | defender-sql '<SQL>'` is",
+    "           sanctioned (gather only): the adapter stage is captured, then the",
+    "           payload is aggregated through the sandboxed defender-sql.",
+    "read_deny = secrets / ground-truth the agent may never read. Kept as a",
+    "           declarative last line (defense-in-depth) even though OS isolation is",
+    "           the eventual boundary. substrings match the filename; dirs match any",
+    "           path component."
+  ],
+  "version": 1,
+  "bash": {
+    "viewers": ["jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "true"],
+    "agents": {
+      "main": {"adapters": false, "adapter_sql_pipe": false},
+      "gather": {"adapters": true, "adapter_sql_pipe": true}
+    }
+  },
+  "read_deny": {
+    "substrings": [".env", "credentials", "ground_truth", "ground-truth", "cases.json"],
+    "dirs": [".ssh"]
+  }
+}

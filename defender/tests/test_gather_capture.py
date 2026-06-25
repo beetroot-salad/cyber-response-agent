@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,15 @@ import pytest
 # `defender.*` namespace imports resolve.
 from defender.scripts.gather_tools.record_query import capture
 from defender.hooks.record_lead import claim_lead
+
+# A defender dir whose `.venv` carries duckdb — needed only by the adapter→
+# defender-sql pipe test, which runs the real shim. Prefer this checkout's defender
+# dir (CI bootstraps its venv); fall back to the canonical /workspace install.
+_DEFENDER_DIR = next(
+    (d for d in (Path(__file__).resolve().parents[1], Path("/workspace/defender"))
+     if (d / ".venv/bin/python3").exists()),
+    None,
+)
 
 # A stub adapter named like an adapter CLI so derive_system → "elastic".
 # argv[1] selects the mode (ok / empty / error).
@@ -133,6 +143,32 @@ def test_capture_rejects_undetectable_system(tmp_path):
     # No defender-<system> shim / <system>_cli.py token → system can't be derived.
     with pytest.raises(ValueError, match="system could not be derived"):
         capture(tmp_path, "l-001", ["echo", "hi"])
+
+
+@pytest.mark.skipif(_DEFENDER_DIR is None, reason="needs a defender .venv with duckdb")
+def test_capture_adapter_sql_pipe_aggregates(tmp_path, stub):
+    # The sanctioned `adapter --raw | defender-sql '<SQL>'` pipe (#379): the bash
+    # tool captures the adapter payload, then aggregates it through the real
+    # defender-sql shim. The adapter query is audited (queries row + by-ref
+    # payload); the SQL runs over the FULL payload, not the truncated passthrough.
+    pytest.importorskip("duckdb")  # the shim's interpreter needs duckdb (runtime extra)
+    from defender.runtime import tools
+
+    deps = tools.GatherDeps(
+        run_dir=tmp_path, defender_dir=_DEFENDER_DIR, run_id="r", salt="s",
+        lead_id="l-001",
+    )
+    out = tools._capture_adapter_sql(
+        deps, _argv(stub, "ok"), ["defender-sql", "SELECT len(hits) AS n FROM data"],
+    )
+    # The adapter query is recorded (audited) and its payload persisted by-ref.
+    rows = (tmp_path / "executed_queries.jsonl").read_text().splitlines()
+    assert len(rows) == 1
+    assert json.loads(rows[0])["system"] == "elastic"
+    assert (tmp_path / "gather_raw" / "l-001" / "0.json").exists()
+    # defender-sql aggregated the full 2-record payload.
+    body = out.split("--- stdout ---\n", 1)[1].split("\n[record_query]")[0].strip()
+    assert json.loads(body) == [{"n": 2}]
 
 
 def test_claim_lead_claims_then_rejects_reuse(tmp_path):

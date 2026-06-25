@@ -7,9 +7,11 @@ the code disagree, the code wins. Note: of the four PreToolUse hooks mapped
 below, `block_unwrapped_adapter_calls` and `invlang_validate` were **retired,
 not ported** — adapter capture is now transparent in-process
 (`tools._capture_adapter`), and invlang validation is invoked directly by
-`runtime/permission.py` (`validate_companion`); the other two
-(`approve_shim_invocations`, `block_main_loop_raw_access`) live on as predicate
-libraries that `permission.py` imports.
+`runtime/permission.py` (`validate_companion`). The safe-shim allowlist hook was
+later **also retired** (#379): its read-only allowlist became the declarative
+`runtime/bash_policy.json`, validated over the no-shell executor's argv stages.
+`block_main_loop_raw_access` lives on as a small library `permission.py` imports
+for the main-loop adapter/raw deny reasons.
 
 ## Why
 
@@ -160,7 +162,7 @@ engine fires" to "Python the loop runs".
 | `record_query.py` (gather capture wrapper) | execute query → queries table + by-ref payload | wrap the MCP adapter call in the gather agent's tool layer |
 | `block_main_loop_raw_access.py` (PreToolUse Bash/Read) | deny main loop running CLIs / reading gather_raw | **structural**: main agent simply has no adapter tools and no raw-read tool. Enforced by tool surface, not a gate |
 | `block_unwrapped_adapter_calls.py` (PreToolUse Bash) | force adapter calls through record-query | adapter access only via the capturing tool — same structural answer |
-| `approve_shim_invocations.py` (PreToolUse) | auto-approve safe shims | N/A — no permission prompts when we own the loop |
+| (safe-shim allowlist hook, PreToolUse) | auto-approve safe shims | retired (#379) — the read-only allowlist is now declarative (`runtime/bash_policy.json`), matched over the no-shell executor's argv stages |
 | `invlang_validate.py` (PreToolUse Write/Edit) | block non-conforming `investigation.md` writes (exit 2) | `before_tool_validate` on `write_investigation`, or raise `ModelRetry` from the tool → model retries with the validator error |
 | `tag_tool_results.py` (PostToolUse) | salted untrusted-data wrapping of tool output | `after_tool_execute` hook (or `ProcessHistory`) wrapping gather + MCP results before they enter context |
 | `budget_enforcer.py` (PostToolUse) | per-run tool/spawn/wall-clock budget (warn) | `before_model_request` / node hook with a per-run counter (or `usage_limits` for a hard cap) |
@@ -169,8 +171,8 @@ engine fires" to "Python the loop runs".
 Two themes: the *integrity-gate* hooks (`record_lead`, `record_query`,
 `invlang_validate`) become tool wrappers / validators that keep their
 guarantees; the *access-denial* hooks
-(`block_main_loop_raw_access`, `block_unwrapped_adapter_calls`,
-`approve_shim_invocations`) largely **dissolve** — when we choose the main
+(`block_main_loop_raw_access`, `block_unwrapped_adapter_calls`, and the
+safe-shim allowlist hook) largely **dissolve** — when we choose the main
 agent's tool surface, "the main loop can't touch raw adapters" stops being
 a thing we police and becomes a thing that's simply absent.
 

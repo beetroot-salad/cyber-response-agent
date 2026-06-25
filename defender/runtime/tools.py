@@ -161,18 +161,20 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     if isinstance(deps, GatherDeps):
         argv = permission.adapter_argv(command)
         if argv is not None:
-            system = _derive_system(argv)
-            # Circuit-breaker in-gather gate: refuse a call to a system already
-            # tripped this run before it runs again, so one dispatch can't keep
-            # hammering a dead source. RETURN the down-message (don't raise
-            # ModelRetry): a tripped system won't recover within the run, so a
-            # retry is pointless, and if the model re-issued the same call it
-            # would burn the bash tool's retry budget into an UnexpectedModel-
-            # Behavior that crashes the run instead of writing a partial trace.
-            # Returning mirrors the dispatch gate in _run_gather.
-            if system and circuit_breaker.is_tripped(deps.run_dir, system):
-                return circuit_breaker.down_message(deps.run_dir, system)
+            tripped = _tripped_message(deps, _derive_system(argv))
+            if tripped is not None:
+                return tripped
             return _capture_adapter(deps, argv)
+        # The sanctioned `adapter --raw | defender-sql '<SQL>'` aggregation pipe:
+        # capture the adapter payload (queries table + by-ref file), then run the
+        # captured bytes through the sandboxed defender-sql.
+        pipe = permission.adapter_sql_pipe(command)
+        if pipe is not None:
+            adapter_av, sql_av = pipe
+            tripped = _tripped_message(deps, _derive_system(adapter_av))
+            if tripped is not None:
+                return tripped
+            return _capture_adapter_sql(deps, adapter_av, sql_av)
     # Execute the *validated* command without a shell: the gate already
     # decomposed it with shlex, so run that token structure directly
     # (shell=False) instead of re-handing the string to bash. This collapses
@@ -194,7 +196,8 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
 def _tool_read_file(deps: RunDeps, path: str) -> str:
     """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
     decision = permission.decide_read(
-        Path(path), role=deps.role,
+        Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        role=deps.role,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
@@ -337,6 +340,93 @@ def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
     return out, qid
 
 
+def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
+    """Circuit-breaker in-gather gate: if `system` is already tripped this run,
+    return its down-message so one dispatch can't keep hammering a dead source;
+    else None (proceed). RETURN the message (don't raise ModelRetry): a tripped
+    system won't recover within the run, so a retry is pointless, and a re-issued
+    call would burn the bash tool's retry budget into an UnexpectedModelBehavior
+    that crashes the run instead of writing a partial trace. Mirrors the dispatch
+    gate in _run_gather."""
+    if system and circuit_breaker.is_tripped(deps.run_dir, system):
+        return circuit_breaker.down_message(deps.run_dir, system)
+    return None
+
+
+def _capture_query(
+    deps: GatherDeps, argv: list[str], env: dict[str, str]
+) -> tuple[str, str, dict]:
+    """Shared adapter-capture prelude for the gather bash tool: strip a model
+    ``--query-id``, run the transparent capture (queries table + by-ref payload),
+    and record the circuit-breaker outcome. Returns ``(passthrough, stderr,
+    record)``. Raises ``ModelRetry`` on the structural ``ValueError`` capture raises
+    (undetectable system / malformed lead id) so the model can correct and retry.
+
+    The circuit breaker keys on ``record['system']`` (the system the capture bound
+    the query to — authoritative over re-deriving from argv); an infra failure
+    advances the per-system counter and may raise RunAborted via the run-wide kill
+    switch (caught by the driver, which writes the partial trace)."""
+    argv, model_query_id = _extract_query_id(argv)
+    try:
+        passthrough, stderr, record = _capture(
+            deps.run_dir, deps.lead_id, argv, env=env,
+            query_id=model_query_id or deps.query_id,
+        )
+    except ValueError as e:
+        raise ModelRetry(str(e)) from e
+    circuit_breaker.record_outcome(
+        deps.run_dir, record.get("system", ""), record["exit_code"]
+    )
+    return passthrough, stderr, record
+
+
+def _payload_note(deps: GatherDeps, record: dict) -> str:
+    """The ``[record_query] raw payload: <path>`` line the gather SKILL filters
+    against for large payloads, or "" when no payload was persisted. Report it
+    ABSOLUTE: the bash/read tools resolve relative to the repo root, not run_dir, so
+    the relative table FK (``record['payload_path']``) would be unresolvable.
+    Matches build_truncated_view's absolute path."""
+    return (
+        f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
+        if record.get("payload_path") else ""
+    )
+
+
+def _capture_adapter_sql(
+    deps: GatherDeps, adapter_argv: list[str], sql_argv: list[str]
+) -> str:
+    """The `adapter --raw | defender-sql '<SQL>'` pipe (gather only). Capture the
+    adapter's raw payload (queries table + by-ref file), then aggregate that
+    payload through the sandboxed defender-sql on stdin. The queries-table row
+    records the adapter query (audited); defender-sql is a local, self-sandboxed
+    transform over the captured bytes — not a second data-source query, so it is
+    not separately recorded."""
+    env = _bash_env(deps)
+    passthrough, stderr, record = _capture_query(deps, adapter_argv, env)
+    note = _payload_note(deps, record)
+    # The adapter itself failed → surface ITS error (exit code + stderr), exactly as
+    # the standalone _capture_adapter path does, instead of piping an empty/partial
+    # payload into defender-sql and returning its confusing "no input on stdin"
+    # error. capture() writes an (empty) payload file even on a non-zero adapter
+    # exit, so a payload path alone does NOT mean the query succeeded — gate on the
+    # exit code, not on payload_path, to decide whether there is anything to
+    # aggregate.
+    if record["exit_code"] != 0 or not record.get("payload_path"):
+        return _format_bash_result(record["exit_code"], passthrough, stderr, note)
+    # Aggregate the FULL captured payload: the passthrough view is truncated for
+    # the model's context, but defender-sql must see every row, so read it back
+    # from the by-ref file.
+    raw = (deps.run_dir / record["payload_path"]).read_text()
+    try:
+        proc = subprocess.run(
+            sql_argv, input=raw, capture_output=True, text=True,
+            env=env, timeout=_BASH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ModelRetry(f"defender-sql timed out after {_BASH_TIMEOUT_S}s") from e
+    return _format_bash_result(proc.returncode, proc.stdout, proc.stderr, note)
+
+
 def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     """Run a standalone adapter command through the transparent capture (queries
     table + payload), returning the same shape the bash tool would. lead_id comes
@@ -344,31 +434,10 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
     MAY tag the call with ``--query-id <id>`` (stripped here) to bind the query to
     a catalog id; otherwise ``deps.query_id`` (the finder/executor split's bound
     id) or record_query's default applies."""
-    argv, model_query_id = _extract_query_id(argv)
-    try:
-        passthrough, stderr, record = _capture(
-            deps.run_dir, deps.lead_id, argv, env=_bash_env(deps),
-            query_id=model_query_id or deps.query_id,
-        )
-    except ValueError as e:
-        raise ModelRetry(str(e)) from e
-    # Circuit breaker: record this system call's outcome. An infra failure
-    # (connectivity/auth exit, or timeout) advances the per-system counter and may
-    # raise RunAborted via the run-wide kill switch (caught by the driver, which
-    # writes the partial trace). record['system'] is the system the capture bound
-    # the query to — authoritative over re-deriving from argv.
-    circuit_breaker.record_outcome(
-        deps.run_dir, record.get("system", ""), record["exit_code"]
+    passthrough, stderr, record = _capture_query(deps, argv, _bash_env(deps))
+    return _format_bash_result(
+        record["exit_code"], passthrough, stderr, _payload_note(deps, record)
     )
-    # Surface the persisted payload path (the gather SKILL filters against it for
-    # large payloads). Report it ABSOLUTE: the bash/read tools resolve relative to
-    # the repo root, not run_dir, so the relative table FK (record['payload_path'])
-    # would be unresolvable. Matches build_truncated_view's absolute path.
-    note = (
-        f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
-        if record.get("payload_path") else ""
-    )
-    return _format_bash_result(record["exit_code"], passthrough, stderr, note)
 
 
 def _gather_prompt(
