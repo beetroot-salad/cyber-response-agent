@@ -62,9 +62,14 @@ its parts.
   `{SYSTEM}_`-prefixed env var — e.g. `ASSETDB_URL_BASE` — overrides a
   declared key, scoped per system so overrides can't collide across
   adapters). Use `die(EXIT_CONN_ERROR, hint)` for a missing key.
-- **`--raw`.** `print_raw(system, endpoint, args, result)` emits the
-  stable JSON envelope the gather capture persists by-ref. Keep the
-  envelope stable across adapters — drift breaks replay.
+- **JSON envelope is the only output.** Every command prints the stable
+  JSON envelope (`print_raw(system, endpoint, args, result)`) the gather
+  capture persists by-ref — unconditionally. There is no human pretty-print
+  mode: the gather agent consumes the envelope and `defender-sql` reduces it,
+  so prose output has no reader. Keep the envelope stable across adapters —
+  drift breaks replay. The `--raw` flag is still accepted (the gather SKILL,
+  query templates, and `defender-sql` recipes pass it) but no longer toggles
+  anything.
 - **Native query pass-through, native aggregation first.** A query source
   takes its native language unmodified; a lookup source keys on an
   identifier. No translation, no field renaming. When the source can

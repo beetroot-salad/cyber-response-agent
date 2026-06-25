@@ -45,20 +45,7 @@ def cmd_lookup(args, config):
     # /lookup/{value:path} — caller's value may contain dots/colons; quote it.
     quoted = urllib.parse.quote(args.value, safe="")
     payload = transport.http_get_obj(config, f"/lookup/{quoted}")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    verdict = payload.get("verdict", "?")
-    print(f"value: {payload.get('value', args.value)}")
-    print(f"verdict: {verdict}")
-    print(f"score: {payload.get('score', '?')}")
-    print(f"type: {payload.get('type', '—')}")
-    tags = payload.get("tags") or []
-    print(f"tags: {', '.join(tags) or '—'}")
-    if verdict == "unknown":
-        print()
-        print("NOTE: verdict=unknown is a lookup-miss synthetic, not a benign signal.")
-        print("Refutation requires verdict in {benign, malicious, suspicious}.")
+    print(json.dumps(payload))
 
 
 def cmd_list_indicators(args, config):
@@ -70,24 +57,7 @@ def cmd_list_indicators(args, config):
     if args.tag:
         params["tag"] = args.tag
     payload = transport.http_get(config, "/indicators", params=params or None)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    if isinstance(payload, dict):
-        items = payload.get("indicators") or payload.get("items") or []
-        total = payload.get("total", len(items))
-    else:
-        items = payload if isinstance(payload, list) else []
-        total = len(items)
-    print(f"total: {total}")
-    print(f"shown: {min(len(items), args.limit)}")
-    for ind in items[: args.limit]:
-        print(
-            f"- {ind.get('value', '?'):<30} "
-            f"verdict:{ind.get('verdict', '?'):<12} "
-            f"type:{ind.get('type', '?'):<10} "
-            f"score:{ind.get('score', '?')}"
-        )
+    print(json.dumps(payload))
 
 
 def build_parser():
@@ -108,7 +78,7 @@ def build_parser():
     li.add_argument("--tag")
     li.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}).",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     li.add_argument("--raw", action="store_true")
 
