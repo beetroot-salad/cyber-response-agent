@@ -33,7 +33,9 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.runtime import driver  # noqa: E402
+from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
+from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -260,3 +262,93 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     assert m is not None
     assert m.group(1) == "malicious"
     assert (run_dir / "tool_trace.jsonl").is_file()
+
+
+# --- deny-tail fixtures (synthesized; spec-anchored) -----------------------
+# These verdicts NEVER appear in an organic run — a well-behaved agent doesn't
+# try to run an adapter from the main loop or write outside the run dir. So they
+# can't be mined; the golden is the SPEC verdict (deny), asserted once here. They
+# guard the security boundary, so a future change that flips them must be a loud,
+# reviewed event — not a silent re-record.
+
+def _messages_text(messages) -> str:
+    """Flatten every message part's content to one string — used to assert the
+    deny reason bounced back to the model as retry feedback."""
+    out: list[str] = []
+    for msg in messages:
+        for part in getattr(msg, "parts", []):
+            content = getattr(part, "content", None)
+            if content is not None:
+                out.append(content if isinstance(content, str) else str(content))
+    return "\n".join(out)
+
+
+class _DenyProbe:
+    """A model that emits one offending tool call, then text. Records the message
+    history of each request so the test can assert the deny reason came back."""
+
+    __name__ = "DenyProbe"
+
+    def __init__(self, tool_name: str, args: dict):
+        self._offending = (tool_name, args)
+        self.calls = 0
+        self.seen: list[str] = []
+
+    def __call__(self, messages, info) -> ModelResponse:
+        self.calls += 1
+        self.seen.append(_messages_text(messages))
+        if self.calls == 1:
+            name, args = self._offending
+            return ModelResponse(parts=[ToolCallPart(tool_name=name, args=args)])
+        return ModelResponse(parts=[TextPart(content="Acknowledged; stopping.")])
+
+
+@pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr", "escape_name"), [
+    # D1 — the breach: the main loop must NOT run a data-source adapter directly
+    # (that's the exfil lane; the gather subagent is the only data-access role).
+    ("adapter-from-main", "bash",
+     lambda rd: {"command": "defender-elastic query foo --raw"},
+     "data-source CLIs directly", None),
+    # D6 — a write escaping the run dir must be refused.
+    ("write-escape", "write_file",
+     lambda rd: {"path": str(rd.parent / "ESCAPE_OUTSIDE_RUNDIR.txt"), "content": "x"},
+     "stay inside the run dir", "ESCAPE_OUTSIDE_RUNDIR.txt"),
+])
+def test_main_loop_deny_bounces(tmp_path, monkeypatch, label, tool_name, args_fn,
+                                reason_substr, escape_name):
+    run_id, salt = f"deny-{label}", "8899aabbccddeeff"
+    run_dir = _materialize(tmp_path, _GOLDEN_AB3, run_id=run_id, salt=salt)
+
+    probe = _DenyProbe(tool_name, args_fn(run_dir))
+    monkeypatch.setattr(driver, "AnthropicModel", lambda *a, **k: FunctionModel(probe))
+    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
+
+    asyncio.run(driver.run_investigation(
+        alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
+        defender_dir=_DEFENDER, salt=salt,
+    ))
+
+    # 1. The deny BOUNCED the agent (ModelRetry → re-prompt), not crashed it: the
+    #    model was called again after the offending turn.
+    assert probe.calls >= 2, "deny did not bounce the agent back into the loop"
+
+    # 2. The spec deny reason reached the model as retry feedback (the in-process
+    #    twin of the claude -p exit-2). Proves the driver wired role/run_dir into
+    #    the gate — the unit test of decide_* can't see this.
+    assert reason_substr in probe.seen[-1]
+
+    # 3. The breach did not happen: a write-escape never created the file outside
+    #    the run dir.
+    if escape_name is not None:
+        assert not (run_dir.parent / escape_name).exists()
+
+
+def test_role_flip_adapter_is_role_dependent():
+    """The crown-jewel contrast, asserted directly: the SAME adapter command is
+    DENIED from the main loop (wired-and-bounced by test_main_loop_deny_bounces
+    above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
+    deferred nested-gather increment; this pins the role-dependence the driver
+    must thread."""
+    cmd = "defender-elastic query foo --raw"
+    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
