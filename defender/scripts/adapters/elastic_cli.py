@@ -83,7 +83,6 @@ KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
 REQUEST_TIMEOUT_SEC = 30
-RAW_SAMPLE_COUNT = 3
 
 
 # ---------------------------------------------------------------------------
@@ -308,115 +307,6 @@ def health_check(config):
 
 
 # ---------------------------------------------------------------------------
-# Output formatting
-# ---------------------------------------------------------------------------
-
-
-def _trim(s, n=80):
-    if not isinstance(s, str):
-        s = str(s)
-    return s if len(s) <= n else s[: n - 1] + "…"
-
-
-def format_events_output(query_string, index_pattern, time_start, time_end, hits, total_hits, truncated):
-    latest_ts = hits[0].get("@timestamp", "none") if hits else "no matching events"
-
-    if not hits:
-        sample_text = "(no matching events)"
-    else:
-        lines = []
-        for i, e in enumerate(hits[:5], 1):
-            ev = e.get("event", {}) or {}
-            src = e.get("source", {}) or {}
-            usr = e.get("user", {}) or {}
-            host = e.get("host", {}) or {}
-            falco = e.get("falco", {}) or {}
-            falco_rule = falco.get("rule")
-            extra = f" falco.rule:{_trim(falco_rule, 50)}" if falco_rule else ""
-            lines.append(
-                f"{i}. [{e.get('@timestamp', '?')}] "
-                f"dataset:{(e.get('data_stream') or {}).get('dataset') or ev.get('dataset', '?')} "
-                f"host:{host.get('name', '?')} "
-                f"user:{usr.get('name', '?')} "
-                f"src.ip:{src.get('ip', '?')}"
-                f"{extra}"
-            )
-        sample_text = "\n".join(lines)
-
-    raw_text = (
-        "(no matching events)" if not hits
-        else json.dumps(hits[:RAW_SAMPLE_COUNT], indent=2, default=str)
-    )
-
-    return f"""## Query Results
-**Query:** {query_string or '(match all)'}
-**Index pattern:** {index_pattern}
-**Time range:** {time_start or '(unbounded)'} to {time_end or '(now)'}
-
-### Summary
-- **Matching events:** {total_hits}
-- **Returned:** {len(hits)}{' (truncated)' if truncated else ''}
-- **Most recent matching event:** {latest_ts}
-
-### Sample Events (first 5)
-{sample_text}
-
-### Raw Sample Events (first {RAW_SAMPLE_COUNT}, full _source)
-```json
-{raw_text}
-```"""
-
-
-def format_alerts_output(query_string, index_pattern, time_start, time_end, hits, total_hits, truncated):
-    latest_ts = hits[0].get("@timestamp", "none") if hits else "no matching alerts"
-
-    if not hits:
-        sample_text = "(no matching alerts)"
-    else:
-        lines = []
-        for i, a in enumerate(hits[:5], 1):
-            alert = (a.get("kibana") or {}).get("alert") or {}
-            rule = alert.get("rule") or {}
-            name = rule.get("name") if isinstance(rule, dict) else None
-            rule_id = rule.get("rule_id") if isinstance(rule, dict) else None
-            severity = alert.get("severity", "?")
-            status = alert.get("workflow_status", "?")
-            host = (a.get("host") or {}).get("name", "?")
-            lines.append(
-                f"{i}. [{a.get('@timestamp', '?')}] "
-                f"rule_id:{rule_id or '?'} "
-                f"rule:{_trim(name or '?', 40)} "
-                f"severity:{severity} "
-                f"status:{status} "
-                f"host:{host}"
-            )
-        sample_text = "\n".join(lines)
-
-    raw_text = (
-        "(no matching alerts)" if not hits
-        else json.dumps(hits[:RAW_SAMPLE_COUNT], indent=2, default=str)
-    )
-
-    return f"""## Alert Results
-**Query:** {query_string or '(match all)'}
-**Index pattern:** {index_pattern}
-**Time range:** {time_start or '(unbounded)'} to {time_end or '(now)'}
-
-### Summary
-- **Matching alerts:** {total_hits}
-- **Returned:** {len(hits)}{' (truncated)' if truncated else ''}
-- **Most recent alert:** {latest_ts}
-
-### Sample Alerts (first 5)
-{sample_text}
-
-### Raw Sample Alerts (first {RAW_SAMPLE_COUNT}, full _source)
-```json
-{raw_text}
-```"""
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -517,18 +407,13 @@ def cmd_query(args, config):
         config, index, args.native_query, args.start, args.end,
         time_field="@timestamp", limit=args.limit,
     )
-    if args.raw:
-        print(json.dumps({
-            "index": index,
-            "total": total,
-            "returned": len(docs),
-            "truncated": truncated,
-            "hits": docs,
-        }, default=str))
-    else:
-        print(format_events_output(
-            args.native_query, index, args.start, args.end, docs, total, truncated,
-        ))
+    print(json.dumps({
+        "index": index,
+        "total": total,
+        "returned": len(docs),
+        "truncated": truncated,
+        "hits": docs,
+    }, default=str))
 
 
 def cmd_alerts(args, config):
@@ -537,18 +422,13 @@ def cmd_alerts(args, config):
         config, index, args.native_query, args.start, args.end,
         time_field="@timestamp", limit=args.limit,
     )
-    if args.raw:
-        print(json.dumps({
-            "index": index,
-            "total": total,
-            "returned": len(docs),
-            "truncated": truncated,
-            "hits": docs,
-        }, default=str))
-    else:
-        print(format_alerts_output(
-            args.native_query, index, args.start, args.end, docs, total, truncated,
-        ))
+    print(json.dumps({
+        "index": index,
+        "total": total,
+        "returned": len(docs),
+        "truncated": truncated,
+        "hits": docs,
+    }, default=str))
 
 
 def run_esql(config, query):

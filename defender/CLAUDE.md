@@ -21,10 +21,17 @@ wiring were retired; the gate *logic* lives on, re-hosted in-process (the
 hooks). The gates:
 
 - **`runtime/permission.py`** — the single in-process permission/validation
-  gate. It unifies the four old `claude -p` PreToolUse hooks: it imports the
-  same `approve_shim_invocations` / `block_main_loop_raw_access` predicates and
-  `_cmd_segments.py` taxonomy verbatim, and the driver calls it before each
-  tool, raising `ModelRetry` on a deny (the in-process twin of the old exit-2).
+  gate. It unifies the four old `claude -p` PreToolUse hooks, the driver calls
+  it before each tool, raising `ModelRetry` on a deny (the in-process twin of the
+  old exit-2). The Bash gate is structured around the **no-shell executor**
+  (#379): the read-only lane runs `shell=False` (`runtime/bash_exec.py`), so the
+  gate validates the SAME argv-stage decomposition the executor runs
+  (`bash_exec.stage_argvs`) — what it approves is exactly what executes, with no
+  validator/executor parser differential to bypass. The decision is then a
+  **deny-by-default allowlist** over each stage's program, sourced from the
+  declarative `runtime/bash_policy.json` (read-only viewers + the read denylist);
+  the adapter/non-adapter shim taxonomy still comes from `_cmd_segments.py` and
+  the main-loop deny *reasons* from `block_main_loop_raw_access.py`.
   - **Main-loop raw-access + shim gating** — only the `defender-*` shims and
     read-only viewers run from the main loop; data-source adapters and
     `gather_raw/` reads are denied there (the gather subagent is the
@@ -33,7 +40,11 @@ hooks). The gates:
     standalone adapter call directly and `tools._capture_adapter` records it
     (queries table + by-ref payload) in-process, so the old
     `block_unwrapped_adapter_calls.py` wrapper-forcing hook is gone (no
-    `defender-record-query` wrapper to require). The queries table is still a
+    `defender-record-query` wrapper to require). The sanctioned
+    `defender-<sys> … --raw | defender-sql '<SQL>'` aggregation pipe is captured
+    the same way (`tools._capture_adapter_sql`): the adapter stage is recorded,
+    then its payload is aggregated through the sandboxed defender-sql. The
+    queries table is still a
     real integrity gate.
   - **invlang validation on `investigation.md` writes** — `permission.py`
     runs the structural validator (`skills/invlang/validate.py`'s
@@ -84,13 +95,15 @@ defender/
     driver.py           # the main-agent loop (agent.iter); installs in-process budget + observability Hooks
     tools.py            # the four generic tools + gather dispatch; in-process adapter capture; imports claim_lead/descriptor_catalog/tag/lesson-load
     permission.py       # the single in-process gate (raw-access/shim/adapter + invlang validation) — raises ModelRetry on deny
+    bash_exec.py        # shell=False executor for the read-only Bash lane; stage_argvs() is the shared decomposition the gate validates against (#379)
+    bash_policy.json    # declarative deny-by-default allowlist: read-only viewers + per-agent adapter capability + the read denylist
+    bash_policy.py      # loader for bash_policy.json (fails closed to built-in defaults if unreadable)
     orient.py  observe.py  compaction.py  circuit_breaker.py
   hooks/                # gate LOGIC, imported as plain libraries by runtime/ (no longer wired as Claude Code hooks)
     record_lead.py                      # claim_lead: writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse raises)
     inject_system_skill_description.py  # descriptor_catalog: the progressive-disclosure system descriptor catalog
-    block_main_loop_raw_access.py       # predicates: block the main loop from running system CLIs / reading gather_raw/ (used by permission.py)
-    approve_shim_invocations.py         # predicates: the safe defender-* shim + read-only allowlist (used by permission.py)
-    _cmd_segments.py                    # shared: Bash-command decomposition + adapter/non-adapter shim taxonomy
+    block_main_loop_raw_access.py       # the main-loop adapter/raw deny reasons + adapter-shim regex (used by permission.py)
+    _cmd_segments.py                    # shared: timeout/bash-c unwrap + adapter/non-adapter shim taxonomy
     tag_tool_results.py                 # wrap(): salted untrusted-data tagging of adapter-CLI / alert.json output + the gather return
     budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; driver.py Hook)
     record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl

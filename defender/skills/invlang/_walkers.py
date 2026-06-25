@@ -15,7 +15,16 @@ has no dependency on `corpus`.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
+
+from .schema import (
+    CompanionBody,
+    EdgeRecord,
+    HypothesisRecord,
+    ResolutionRecord,
+    VertexRecord,
+)
 
 # Numeric ladder for resolution weights, worst → best. `--` (strongly
 # refuted) is the only weight that takes a hypothesis out of contention.
@@ -23,9 +32,9 @@ WEIGHT_ORDER: dict[Any, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4}
 REFUTED_WEIGHT = "--"
 
 
-def all_vertices(companion: dict[str, Any]) -> list[dict[str, Any]]:
+def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
     """Every vertex: prologue + per-lead observations, in document order."""
-    out: list[dict[str, Any]] = []
+    out: list[VertexRecord] = []
     pro = companion.get("prologue") or {}
     out.extend(v for v in (pro.get("vertices") or []) if isinstance(v, dict))
     for lead in companion.get("findings") or []:
@@ -36,9 +45,9 @@ def all_vertices(companion: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def all_edges(companion: dict[str, Any]) -> list[dict[str, Any]]:
+def all_edges(companion: CompanionBody) -> list[EdgeRecord]:
     """Every edge: prologue + per-lead observations, in document order."""
-    out: list[dict[str, Any]] = []
+    out: list[EdgeRecord] = []
     pro = companion.get("prologue") or {}
     out.extend(e for e in (pro.get("edges") or []) if isinstance(e, dict))
     for lead in companion.get("findings") or []:
@@ -49,13 +58,13 @@ def all_edges(companion: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def all_hypotheses(companion: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def all_hypotheses(companion: CompanionBody) -> dict[str, HypothesisRecord]:
     """Hypotheses by id: the PREDICT frontier plus any lead-discovered ones.
 
     First declaration of an id wins (the frontier outranks a later
     lead's `new_hypotheses` re-mention).
     """
-    out: dict[str, dict[str, Any]] = {}
+    out: dict[str, HypothesisRecord] = {}
     hyps = (companion.get("hypothesize") or {}).get("hypotheses") or []
     for h in hyps:
         if isinstance(h, dict) and isinstance(h.get("id"), str):
@@ -69,7 +78,9 @@ def all_hypotheses(companion: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def iter_resolutions(companion: dict[str, Any]):
+def iter_resolutions(
+    companion: CompanionBody,
+) -> Iterator[tuple[str, ResolutionRecord]]:
     """Yield (lead_id, resolution) for every `:T resolutions` row."""
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
@@ -80,7 +91,9 @@ def iter_resolutions(companion: dict[str, Any]):
                 yield lid, res
 
 
-def iter_authz_resolutions(companion: dict[str, Any]):
+def iter_authz_resolutions(
+    companion: CompanionBody,
+) -> Iterator[dict[str, Any]]:
     """Yield every `:R authz` resolution row across all leads, in order."""
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
@@ -90,7 +103,7 @@ def iter_authz_resolutions(companion: dict[str, Any]):
                 yield row
 
 
-def final_weights(companion: dict[str, Any]) -> dict[str, Any]:
+def final_weights(companion: CompanionBody) -> dict[str, Any]:
     """Per-hypothesis weight: declared weight overlaid by the last resolution."""
     final: dict[str, Any] = {
         hid: h.get("weight") for hid, h in all_hypotheses(companion).items()
@@ -102,7 +115,7 @@ def final_weights(companion: dict[str, Any]) -> dict[str, Any]:
     return final
 
 
-def live_hypothesis_ids(companion: dict[str, Any]) -> list[str]:
+def live_hypothesis_ids(companion: CompanionBody) -> list[str]:
     """Hypothesis ids that survived: final weight is not ``--`` (strongly
     refuted). Computed from the resolution record; ``:T conclude`` carries
     no sub-tables to restate this."""

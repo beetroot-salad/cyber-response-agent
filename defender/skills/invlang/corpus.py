@@ -20,34 +20,40 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from .parser import ParseWarning, parse_dense_companion
+from .schema import (
+    CompanionBody,
+    Conclude,
+    FindingRecord,
+    HypothesisRecord,
+    Prologue,
+)
 
 
 @dataclass
 class Companion:
     case_id: str
     source_path: Path
-    body: dict[str, Any]
+    body: CompanionBody
     signature_id: str | None = None
     created_at: str | None = None
     parse_warnings: list[ParseWarning] = field(default_factory=list)
 
     @property
-    def prologue(self) -> dict[str, Any]:
+    def prologue(self) -> Prologue:
         return self.body.get("prologue", {})
 
     @property
-    def hypotheses(self) -> list[dict[str, Any]]:
+    def hypotheses(self) -> list[HypothesisRecord]:
         return self.body.get("hypothesize", {}).get("hypotheses", [])
 
     @property
-    def leads(self) -> list[dict[str, Any]]:
+    def leads(self) -> list[FindingRecord]:
         return [e for e in self.body.get("findings", []) if isinstance(e, dict)]
 
     @property
-    def conclude(self) -> dict[str, Any]:
+    def conclude(self) -> Conclude:
         return self.body.get("conclude", {})
 
 

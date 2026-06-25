@@ -45,7 +45,22 @@ import contextlib
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
+
+from .schema import (
+    AttrPredictionRecord,
+    AuthorityRef,
+    AuthorizationContract,
+    CompanionBody,
+    EdgeRecord,
+    HypothesisRecord,
+    ParentVertex,
+    PredictionRecord,
+    ProposedEdge,
+    RefutationRecord,
+    ResolutionRecord,
+    VertexRecord,
+)
 
 INVLANG_FENCE_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
 HEADER_RE = re.compile(
@@ -218,7 +233,7 @@ def _parse_attrs(cell: str) -> dict[str, str]:
     return out
 
 
-def _parse_auth(cell: str) -> dict[str, str]:
+def _parse_auth(cell: str) -> AuthorityRef:
     if ":" not in cell:
         return {"kind": cell.strip(), "source": ""}
     kind, source = cell.split(":", 1)
@@ -346,10 +361,10 @@ _VERTEX_COLS = ["id", "type", "class", "ident", "attrs"]
 _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 
 
-def _vertex_record(block: Block, row: str) -> dict[str, Any]:
+def _vertex_record(block: Block, row: str) -> VertexRecord:
     rec = _row_dict(block, row, _VERTEX_COLS)
     _require(rec, "id", "type", msg="vertex missing id/type")
-    out: dict[str, Any] = {
+    out: VertexRecord = {
         "id": rec["id"],
         "type": rec["type"],
         "classification": rec.get("class", ""),
@@ -360,11 +375,11 @@ def _vertex_record(block: Block, row: str) -> dict[str, Any]:
     return out
 
 
-def _edge_record(block: Block, row: str) -> dict[str, Any]:
+def _edge_record(block: Block, row: str) -> EdgeRecord:
     cols = block.columns or _EDGE_COLS
     rec = _row_dict(block, row, _EDGE_COLS)
     _require(rec, "id", "rel", msg="edge missing id/rel")
-    out: dict[str, Any] = {
+    out: EdgeRecord = {
         "id": rec["id"],
         "relation": rec["rel"],
         "source_vertex": rec.get("src", ""),
@@ -404,10 +419,10 @@ def _is_current_hyp_header(cols: list[str] | None) -> bool:
     return set(cols) == _HYP_HEADER_COLS
 
 
-def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
+def _hypothesis_record(block: Block, row: str) -> HypothesisRecord:
     rec = _row_dict(block, row)
     _require(rec, "id", "name", msg="hypothesis missing id/name")
-    out: dict[str, Any] = {"id": rec["id"], "name": rec["name"]}
+    out: HypothesisRecord = {"id": rec["id"], "name": rec["name"]}
     if rec.get("attached_to"):
         anchor = rec["attached_to"]
         if anchor.startswith("e-"):
@@ -430,12 +445,12 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
     return out
 
 
-def _build_proposed_edge(rec: dict) -> dict[str, Any]:
-    edge: dict[str, Any] = {}
+def _build_proposed_edge(rec: dict[str, str]) -> ProposedEdge:
+    edge: ProposedEdge = {}
     if rec.get("rel"):
         edge["relation"] = rec["rel"]
     if rec.get("parent_type") or rec.get("parent_class"):
-        pv: dict[str, Any] = {}
+        pv: ParentVertex = {}
         if rec.get("parent_type"):
             pv["type"] = rec["parent_type"]
         if rec.get("parent_class"):
@@ -462,7 +477,7 @@ _HYP_REFUT_COLS = ["id", "refutes", "claim"]
 _HYP_AUTHZ_COLS = ["id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "on_indet"]
 
 
-def _hyp_sub_pred_row(block: Block, row: str) -> dict[str, Any]:
+def _hyp_sub_pred_row(block: Block, row: str) -> PredictionRecord:
     rec = _row_dict(block, row, _HYP_PRED_COLS)
     _require(rec, "id", "subject", msg="preds row missing id/subject")
     return {
@@ -472,7 +487,7 @@ def _hyp_sub_pred_row(block: Block, row: str) -> dict[str, Any]:
     }
 
 
-def _hyp_sub_attr_pred_row(block: Block, row: str) -> dict[str, Any]:
+def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
     rec = _row_dict(block, row, _HYP_ATTR_PRED_COLS)
     _require(
         rec, "id", "target", "attribute",
@@ -486,10 +501,10 @@ def _hyp_sub_attr_pred_row(block: Block, row: str) -> dict[str, Any]:
     }
 
 
-def _hyp_sub_refut_row(block: Block, row: str) -> dict[str, Any]:
+def _hyp_sub_refut_row(block: Block, row: str) -> RefutationRecord:
     rec = _row_dict(block, row, _HYP_REFUT_COLS)
     _require(rec, "id", msg="refuts row missing id")
-    out: dict[str, Any] = {
+    out: RefutationRecord = {
         "id": rec["id"],
         "claim": _unquote(rec.get("claim", "")),
     }
@@ -498,7 +513,7 @@ def _hyp_sub_refut_row(block: Block, row: str) -> dict[str, Any]:
     return out
 
 
-def _hyp_sub_authz_row(block: Block, row: str) -> dict[str, Any]:
+def _hyp_sub_authz_row(block: Block, row: str) -> AuthorizationContract:
     rec = _row_dict(block, row, _HYP_AUTHZ_COLS)
     _require(rec, "id", "anchor_kind", msg="authz row missing id/anchor_kind")
     return {
@@ -638,7 +653,7 @@ def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
     return pred_ids, refut_ids
 
 
-def _resolution_record(row: str) -> tuple[str | None, dict[str, Any]]:
+def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     """Parse `<hyp> <before> → <after> [<lead> <pred-refs> <sev> ⟂ <edges> :: <ann>]`.
 
     The `⟂` separator is required by the current schema. Rows that omit
@@ -679,7 +694,7 @@ def _resolution_record(row: str) -> tuple[str | None, dict[str, Any]]:
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
     matched_pred_ids = iff_pred_ids or [t for t in head_refs if t.startswith("p")]
     matched_refut_ids = iff_refut_ids or [t for t in head_refs if t.startswith("r")]
-    record: dict[str, Any] = {
+    record: ResolutionRecord = {
         "hypothesis": m.group("hyp"),
         "hypothesis_id": m.group("hyp"),  # alias, matches soc-agent shape
         "before": m.group("before"),
@@ -831,7 +846,7 @@ _RESOLUTION_BUCKET_KEY = {
 
 def companion_from_blocks(
     blocks: list[Block],
-) -> tuple[dict[str, Any], list[ParseWarning]]:
+) -> tuple[CompanionBody, list[ParseWarning]]:
     """Project blocks → canonical companion dict + per-row warnings."""
     out: dict[str, Any] = {}
     warnings: list[ParseWarning] = []
@@ -853,7 +868,7 @@ def companion_from_blocks(
 
     if findings:
         out["findings"] = list(findings.values())
-    return out, warnings
+    return cast(CompanionBody, out), warnings
 
 
 def _project_block(
@@ -1107,12 +1122,12 @@ def _project_shelved_block(
 
 def parse_dense_companion(
     text: str,
-) -> tuple[dict[str, Any], list[ParseWarning]]:
+) -> tuple[CompanionBody, list[ParseWarning]]:
     """Walk every ```invlang fence in `text` and project to companion dict.
     Returns (companion_body, parse_warnings)."""
     blocks: list[Block] = []
     for match in INVLANG_FENCE_RE.finditer(text):
         blocks.extend(_tokenize_fence(match.group(1)))
     if not blocks:
-        return {}, []
+        return cast(CompanionBody, {}), []
     return companion_from_blocks(blocks)

@@ -22,7 +22,6 @@ Exit codes:
 from __future__ import annotations
 
 import json
-import sys
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
@@ -42,49 +41,17 @@ def cmd_can_access(args, config):
     payload = transport.http_get_obj(
         config, f"/users/{args.user}/can_access", params={"host": args.host},
     )
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    authorized = payload.get("authorized")
-    via = payload.get("via") or "—"
-    role = payload.get("role") or "—"
-    sudo = payload.get("sudo")
-    shell = payload.get("shell") or "—"
-    print(f"user: {args.user}")
-    print(f"host: {args.host}")
-    print(f"authorized: {str(authorized).lower()}")
-    print(f"via: {via}")
-    print(f"role: {role}")
-    print(f"sudo: {str(sudo).lower()}")
-    print(f"shell: {shell}")
+    print(json.dumps(payload))
 
 
 def cmd_get_user(args, config):
     payload = transport.http_get_obj(config, f"/users/{args.user}")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    print(f"username: {payload.get('username', '?')}")
-    print(f"realm_role: {payload.get('realm_role', '?')}")
-    print(f"enabled: {str(payload.get('enabled', '?')).lower()}")
-    print(f"email: {payload.get('email', '—')}")
-    auth_hosts = payload.get("authorized_hosts") or []
-    sudo_hosts = payload.get("sudo_hosts") or []
-    print(f"authorized_hosts ({len(auth_hosts)}): {', '.join(auth_hosts) or '—'}")
-    print(f"sudo_hosts ({len(sudo_hosts)}): {', '.join(sudo_hosts) or '—'}")
+    print(json.dumps(payload))
 
 
 def cmd_list_authorized_hosts(args, config):
     payload = transport.http_get(config, f"/users/{args.user}/authorized_hosts")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    if not isinstance(payload, list):
-        sys.exit(f"error: expected JSON array, got: {payload!r}")
-    print(f"user: {args.user}")
-    print(f"authorized_hosts ({len(payload)}):")
-    for h in payload:
-        print(f"  - {h}")
+    print(json.dumps(payload))
 
 
 def cmd_list_users(args, config):
@@ -94,27 +61,12 @@ def cmd_list_users(args, config):
     if args.enabled is not None:
         params["enabled"] = "true" if args.enabled else "false"
     payload = transport.http_get(config, "/users", params=params or None)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    users = payload.get("users", []) if isinstance(payload, dict) else []
-    total = payload.get("total", len(users)) if isinstance(payload, dict) else len(users)
-    print(f"total: {total}")
-    print(f"shown: {min(len(users), args.limit)}")
-    for u in users[: args.limit]:
-        print(
-            f"- {u.get('username', '?'):<18} "
-            f"role:{u.get('realm_role', '?'):<14} "
-            f"enabled:{str(u.get('enabled', '?')).lower()}"
-        )
+    print(json.dumps(payload))
 
 
 def cmd_list_roles(args, config):
     payload = transport.http_get(config, "/roles")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(payload))
 
 
 def build_parser():
@@ -143,7 +95,7 @@ def build_parser():
     lu.add_argument("--enabled", type=lambda v: v.lower() in ("true", "1", "yes"))
     lu.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}). Raw mode is uncapped.",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     lu.add_argument("--raw", action="store_true")
 

@@ -57,36 +57,12 @@ def _require_utc(value: str) -> str:
 def cmd_active_changes(args, config):
     params = {"host": args.host, "at": _require_utc(args.at)}
     payload = transport.http_get(config, "/changes/active", params=params)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    if not isinstance(payload, list):
-        sys.exit(f"error: expected JSON array, got: {payload!r}")
-    print(f"host: {args.host}")
-    print(f"at: {args.at}")
-    print(f"active CRs: {len(payload)}")
-    for cr in payload:
-        print(
-            f"- {cr.get('id', '?'):<32} "
-            f"status:{cr.get('status', '?'):<10} "
-            f"window:{cr.get('window_start', '?')} → {cr.get('window_end', '?')}"
-        )
+    print(json.dumps(payload))
 
 
 def cmd_get_change(args, config):
     payload = transport.http_get_obj(config, f"/changes/{args.cr_id}")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    print(f"id: {payload.get('id', '?')}")
-    print(f"status: {payload.get('status', '?')}")
-    print(f"summary: {payload.get('summary', '—')}")
-    print(f"hosts: {', '.join(payload.get('hosts') or []) or '—'}")
-    print(f"window: {payload.get('window_start', '?')} → {payload.get('window_end', '?')}")
-    print(f"owner: {payload.get('owner', '—')}")
-    print()
-    print("full record:")
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(payload))
 
 
 def cmd_list_changes(args, config):
@@ -98,23 +74,7 @@ def cmd_list_changes(args, config):
     if args.active_at:
         params["active_at"] = _require_utc(args.active_at)
     payload = transport.http_get(config, "/changes", params=params or None)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    if isinstance(payload, dict):
-        items = payload.get("changes") or payload.get("items") or []
-        total = payload.get("total", len(items))
-    else:
-        items = payload if isinstance(payload, list) else []
-        total = len(items)
-    print(f"total: {total}")
-    print(f"shown: {min(len(items), args.limit)}")
-    for cr in items[: args.limit]:
-        print(
-            f"- {cr.get('id', '?'):<32} "
-            f"status:{cr.get('status', '?'):<10} "
-            f"hosts:{','.join(cr.get('hosts') or []) or '—'}"
-        )
+    print(json.dumps(payload))
 
 
 def build_parser():
@@ -143,7 +103,7 @@ def build_parser():
     lc.add_argument("--active-at", help="UTC ISO 8601 — filter to CRs active at this instant.")
     lc.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}).",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     lc.add_argument("--raw", action="store_true")
 

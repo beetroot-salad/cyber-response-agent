@@ -24,8 +24,9 @@ second one.
   argument parser (`AdapterArgumentParser`, usage errors → exit 64),
   `load_config(system, prefix)`, and the transport helpers
   (`docker_exec_curl`, `http_get`/`http_post`, `health_check`,
-  `split_status`). New verbs and output formatting live in the adapter; the
-  contract lives here.
+  `split_status`). New verbs live in the adapter — each emits its JSON
+  payload (`print(json.dumps(payload))`), no human pretty-print; the contract
+  lives here.
 - **Transport — `docker --context soc-playground exec <bastion> curl …`.**
   The systems are services on the playground compose network, reached by
   shelling out through the bastion named in `BASTION_HOST`, not by direct

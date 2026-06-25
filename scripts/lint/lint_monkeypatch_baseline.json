@@ -3,8 +3,6 @@
   "entries": {
     "defender/learning/test_loop.py:orch.os.replace": "boundary-ok: stdlib os.replace, fault-injection (lost claim-race)",
     "defender/learning/test_loop.py:orch.run_one": "intentional: test exercises the un-injected default (run_one_fn defaults to module run_one); seam exists",
-    "defender/tests/test_approve_shim_invocations.py:mod._all_defender_shims": "boundary-ok: enumerates the bin/ dir (filesystem); stubbed for determinism",
-    "defender/tests/test_approve_shim_invocations.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
     "defender/tests/test_author_shared.py:Path.open": "boundary-ok: stdlib Path.open, fault-injection (fd-leak on ENOLCK path)",
     "defender/tests/test_author_shared.py:shared.fcntl.flock": "boundary-ok: fcntl.flock syscall, fault-injection (OSError ENOLCK)",
     "defender/tests/test_author_streaming_timeout.py:tmp_repo.author.subprocess.Popen": "boundary-ok: subprocess.Popen swaps a fake claude binary (process boundary)",

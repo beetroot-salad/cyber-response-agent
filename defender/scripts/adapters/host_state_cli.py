@@ -148,30 +148,19 @@ def cmd_container_inspect(args, _config):
     # `.Name` comes back with a leading slash (docker's canonical form).
     name = json.loads(parts[0]).lstrip("/") if parts and parts[0] else ""
     image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
-    if args.raw:
-        print(json.dumps({
-            "container_id": args.container_id,
-            "captured_at": _utcnow_z(),
-            "name": name,
-            "image": image,
-        }))
-        return
-    print(f"container_id: {args.container_id}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(f"name: {name}")
-    print(f"image: {image}")
+    print(json.dumps({
+        "container_id": args.container_id,
+        "captured_at": _utcnow_z(),
+        "name": name,
+        "image": image,
+    }))
 
 
 def cmd_proc_tree(args, _config):
     _check_host(args.host)
     rc, out, err = _exec(args.host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
     _exit_on_docker_error(rc, err, args.host)
-    if args.raw:
-        print(json.dumps({"host": args.host, "captured_at": _utcnow_z(), "ps_output": out}))
-        return
-    print(f"host: {args.host}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(out)
+    print(json.dumps({"host": args.host, "captured_at": _utcnow_z(), "ps_output": out}))
 
 
 def cmd_passwd(args, _config):
@@ -179,18 +168,11 @@ def cmd_passwd(args, _config):
     rc, out, err = _exec(args.host, ["cat", "/etc/passwd"])
     _exit_on_docker_error(rc, err, args.host)
     entries = [line for line in out.splitlines() if line and not line.startswith("#")]
-    if args.raw:
-        print(json.dumps({
-            "host": args.host,
-            "captured_at": _utcnow_z(),
-            "entries": entries,
-        }))
-        return
-    print(f"host: {args.host}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(f"entries: {len(entries)}")
-    for e in entries:
-        print(e)
+    print(json.dumps({
+        "host": args.host,
+        "captured_at": _utcnow_z(),
+        "entries": entries,
+    }))
 
 
 def cmd_authorized_keys(args, _config):
@@ -220,30 +202,13 @@ def cmd_authorized_keys(args, _config):
     else:
         keys = [line for line in out.splitlines() if line.strip() and not line.startswith("#")]
 
-    if args.raw:
-        print(json.dumps({
-            "host": args.host,
-            "user": user,
-            "path": ak_path,
-            "captured_at": _utcnow_z(),
-            "keys": keys,
-        }))
-        return
-    print(f"host: {args.host}")
-    print(f"user: {user}")
-    print(f"path: {ak_path}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(f"key count: {len(keys)}")
-    for k in keys:
-        # Fingerprint summary: type + last-32-chars + comment
-        head = k.split()
-        if len(head) >= 2:
-            ktype = head[0]
-            tail = head[1][-32:]
-            comment = " ".join(head[2:]) if len(head) > 2 else ""
-            print(f"- {ktype} …{tail} {comment}".rstrip())
-        else:
-            print(f"- {k[:80]}…")
+    print(json.dumps({
+        "host": args.host,
+        "user": user,
+        "path": ak_path,
+        "captured_at": _utcnow_z(),
+        "keys": keys,
+    }))
 
 
 def cmd_fim_checksum(args, _config):
@@ -257,18 +222,12 @@ def cmd_fim_checksum(args, _config):
             sys.exit(f"error: {args.path!r} does not exist on {args.host}")
         _exit_on_docker_error(rc, err, args.host)
     digest = out.split()[0] if out.strip() else ""
-    if args.raw:
-        print(json.dumps({
-            "host": args.host,
-            "path": args.path,
-            "captured_at": _utcnow_z(),
-            "sha256": digest,
-        }))
-        return
-    print(f"host: {args.host}")
-    print(f"path: {args.path}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(f"sha256: {digest}")
+    print(json.dumps({
+        "host": args.host,
+        "path": args.path,
+        "captured_at": _utcnow_z(),
+        "sha256": digest,
+    }))
 
 
 def cmd_package_list(args, _config):
@@ -278,20 +237,11 @@ def cmd_package_list(args, _config):
     rc, out, err = _exec(args.host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
     _exit_on_docker_error(rc, err, args.host)
     pkgs = [line for line in out.splitlines() if line.strip()]
-    if args.raw:
-        print(json.dumps({
-            "host": args.host,
-            "captured_at": _utcnow_z(),
-            "packages": pkgs,
-        }))
-        return
-    print(f"host: {args.host}")
-    print(f"captured_at: {_utcnow_z()}")
-    print(f"package count: {len(pkgs)}")
-    for p in pkgs[: args.limit]:
-        print(p)
-    if len(pkgs) > args.limit:
-        print(f"… ({len(pkgs) - args.limit} more — use --raw for full list)")
+    print(json.dumps({
+        "host": args.host,
+        "captured_at": _utcnow_z(),
+        "packages": pkgs,
+    }))
 
 
 def _utcnow_z() -> str:
@@ -336,7 +286,7 @@ def build_parser():
     pl.add_argument("host")
     pl.add_argument(
         "--limit", type=int, default=200,
-        help="Cap rows shown in text mode (default 200). Raw mode is uncapped.",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     pl.add_argument("--raw", action="store_true")
 

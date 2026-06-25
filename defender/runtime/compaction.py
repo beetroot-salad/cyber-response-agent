@@ -29,7 +29,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from defender.skills.invlang.schema import FindingRecord
 
 # Lenient invlang parser — same surface the validator and corpus queries use,
 # so loop detection rides the validator-guarded committed artifact rather than
@@ -71,14 +74,14 @@ def detect_loop(investigation_md: str) -> int | None:
     except Exception:
         return None
     loops = [
-        f["loop"]
+        n
         for f in companion.get("findings", [])
-        if isinstance(f.get("loop"), int)
+        if isinstance((n := f.get("loop")), int)
     ]
     return max(loops) if loops else None
 
 
-def _lead_resolved(finding: dict[str, Any]) -> bool:
+def _lead_resolved(finding: FindingRecord) -> bool:
     """True once a lead has committed results — any `outcome` (observations,
     attribute updates, authz resolutions) or a resolution row. A planned-but-not-
     yet-gathered-and-analyzed lead has neither."""

@@ -38,23 +38,7 @@ DEFAULT_LIST_LIMIT = 50
 
 def cmd_get_host(args, config):
     payload = transport.http_get_obj(config, f"/hosts/{args.name}")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    print(f"name: {payload.get('name', '?')}")
-    print(f"role: {payload.get('role', '?')}")
-    print(f"criticality: {payload.get('criticality', '?')}")
-    print(f"owner: {payload.get('owner', '—')}")
-    print(f"os: {(payload.get('os') or {}).get('base', '—')}")
-    cw = payload.get("change_window")
-    if cw:
-        print(f"change_window: {cw}")
-    te = payload.get("trust_edges_out") or []
-    if te:
-        print(f"trust_edges_out: {', '.join(te)}")
-    print()
-    print("full record:")
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(payload))
 
 
 def cmd_list_hosts(args, config):
@@ -66,32 +50,12 @@ def cmd_list_hosts(args, config):
     if args.owner:
         params["owner"] = args.owner
     payload = transport.http_get(config, "/hosts", params=params or None)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    hosts = payload.get("hosts", []) if isinstance(payload, dict) else []
-    total = payload.get("total", len(hosts)) if isinstance(payload, dict) else len(hosts)
-    print(f"total: {total}")
-    print(f"shown: {min(len(hosts), args.limit)}")
-    for h in hosts[: args.limit]:
-        print(
-            f"- {h.get('name', '?'):<14} "
-            f"role:{h.get('role', '?'):<10} "
-            f"criticality:{h.get('criticality', '?'):<8} "
-            f"owner:{h.get('owner', '—')}"
-        )
+    print(json.dumps(payload))
 
 
 def cmd_list_roles(args, config):
     payload = transport.http_get(config, "/roles")
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    if isinstance(payload, list):
-        for r in payload:
-            print(f"- {r}")
-    else:
-        print(json.dumps(payload, indent=2))
+    print(json.dumps(payload))
 
 
 def build_parser():
@@ -112,7 +76,7 @@ def build_parser():
     lh.add_argument("--owner")
     lh.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}). Raw mode is uncapped.",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     lh.add_argument("--raw", action="store_true")
 
