@@ -233,7 +233,7 @@ def _parse_attrs(cell: str) -> dict[str, str]:
     return out
 
 
-def _parse_auth(cell: str) -> dict[str, str]:
+def _parse_auth(cell: str) -> AuthorityRef:
     if ":" not in cell:
         return {"kind": cell.strip(), "source": ""}
     kind, source = cell.split(":", 1)
@@ -389,7 +389,7 @@ def _edge_record(block: Block, row: str) -> EdgeRecord:
         out["when"] = {"timestamp": rec["when"]}
     auth_col = next((c for c in cols if c.startswith("auth_kind")), None)
     if auth_col and rec.get(auth_col):
-        out["authority"] = cast(AuthorityRef, _parse_auth(rec[auth_col]))
+        out["authority"] = _parse_auth(rec[auth_col])
     if rec.get("attrs"):
         out["attributes"] = _parse_attrs(rec["attrs"])
     return out

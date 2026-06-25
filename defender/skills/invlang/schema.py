@@ -239,7 +239,9 @@ class _FindingRequired(TypedDict):
 class FindingRecord(_FindingRequired, total=False):
     """A lead / finding row (`_lead_header_record` + the lead bucket assembled
     in `companion_from_blocks.lead_bucket`). ``loop`` is coerced to ``int``
-    when numeric. The ``*_resolutions`` / ``attribute_updates`` buckets
+    when numeric, else the raw cell string is kept (`_lead_header_record`
+    suppresses the `ValueError`) — hence ``int | str``, and consumers
+    `isinstance(..., int)`-guard it. The ``*_resolutions`` / ``attribute_updates`` buckets
     projected from the `:R`/`:T` blocks (`_RESOLUTION_BUCKET_KEY`) live nested
     under ``outcome`` (see `LeadOutcome`), not directly on the finding.
 
@@ -248,7 +250,7 @@ class FindingRecord(_FindingRequired, total=False):
 
     name: str
     target: str
-    loop: int
+    loop: int | str
     mode: str
     trust_root_reached: str
     screen_result: str

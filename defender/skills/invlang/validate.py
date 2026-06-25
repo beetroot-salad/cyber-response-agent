@@ -111,13 +111,19 @@ def _vertex_core(v: VertexRecord) -> tuple:
     return (v.get("type"), v.get("classification"), v.get("identifier"))
 
 
-def _edge_core(e: EdgeRecord) -> tuple:
+def _auth_kind(e: EdgeRecord) -> str | None:
+    """The observational authority ``kind`` on an edge, or None when the edge
+    carries no authority cell."""
     auth = e.get("authority")
+    return auth.get("kind") if auth else None
+
+
+def _edge_core(e: EdgeRecord) -> tuple:
     return (
         e.get("relation"),
         e.get("source_vertex"),
         e.get("target_vertex"),
-        auth.get("kind") if auth else None,
+        _auth_kind(e),
     )
 
 
@@ -193,8 +199,7 @@ def _check_edge_authority(companion: CompanionBody) -> list[str]:
     auth_by_edge: dict[str, str] = {}
     for e in _walkers.all_edges(companion):
         eid = e.get("id")
-        auth = e.get("authority")
-        kind = auth.get("kind") if auth else None
+        kind = _auth_kind(e)
         if isinstance(eid, str) and isinstance(kind, str):
             auth_by_edge[eid] = kind
 
@@ -260,8 +265,7 @@ def _check_vocab_edges(companion: CompanionBody) -> list[str]:
             f"edge {e.get('id', '?')}: rel {rel!r} is not a known relation "
             f"(`enum relations`)",
         )
-        auth = e.get("authority")
-        kind = auth.get("kind") if auth else None
+        kind = _auth_kind(e)
         errors += _check_vocab(
             kind, vocab.AUTH_KINDS,
             f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "

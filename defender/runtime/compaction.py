@@ -74,9 +74,9 @@ def detect_loop(investigation_md: str) -> int | None:
     except Exception:
         return None
     loops = [
-        f["loop"]
+        n
         for f in companion.get("findings", [])
-        if isinstance(f.get("loop"), int)
+        if isinstance((n := f.get("loop")), int)
     ]
     return max(loops) if loops else None
 
