@@ -21,6 +21,7 @@ import asyncio
 import json
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from defender.runtime import driver  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -352,3 +354,83 @@ def test_role_flip_adapter_is_role_dependent():
     cmd = "defender-elastic query foo --raw"
     assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
     assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+
+
+# --- nested-gather replay: drives the two-table capture path ---------------
+# Unlike test_replay_full_run_ab3 (gather faked at its boundary), this runs a
+# REAL nested gather subagent so the capture path executes end-to-end:
+# _run_gather -> record_lead.claim_lead (leads table) -> the gather agent's
+# adapter bash -> decide_bash(GATHER) -> _capture_adapter -> record_query.capture
+# (queries table + gather_raw payload). The only fake below the model is the
+# adapter SUBPROCESS — record_query.capture's `subprocess.run` is stubbed to
+# return a canned payload, so the run stays hermetic and deterministic while the
+# real capture/record code runs.
+
+class _FakeAdapterSubprocess:
+    """Drop-in for record_query's `subprocess`: `.run` returns a canned adapter
+    payload; `.TimeoutExpired` keeps capture's except-clause valid."""
+    TimeoutExpired = subprocess.TimeoutExpired
+    PAYLOAD = '[{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana", "event.action": "ssh_login"}]'
+
+    @staticmethod
+    def run(inner, **kwargs):
+        return subprocess.CompletedProcess(inner, 0, stdout=_FakeAdapterSubprocess.PAYLOAD, stderr="")
+
+
+def test_nested_gather_capture(tmp_path, monkeypatch):
+    run_id, salt = "nested-gather", "1122334455667788"
+    run_dir = _materialize(tmp_path, _GOLDEN_AB3, run_id=run_id, salt=salt)
+
+    report_md = ("---\ncase_id: nested-gather\ndisposition: malicious\n"
+                 "confidence: low\n---\nSynthetic nested-gather capture test.\n")
+
+    # Main loop: dispatch ONE gather lead, then write report, then end.
+    main_replay = ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": "l-001", "system": "elastic",
+            "goal": "check sshd auth history", "what_to_summarize": ["auth events"]})]),
+        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
+        Turn(text="Investigation complete."),
+    ])
+    # The nested gather agent: run one standalone adapter query (captured), then
+    # return a measurements summary.
+    gather_replay = ReplayFn([
+        Turn(tool_calls=[("bash", {"command": "defender-elastic query sshd-auth-history"})]),
+        Turn(text="Summary: 1 sshd auth event for dev.dana."),
+    ])
+
+    # Per-agent model dispatch: the main agent is built first (1 AnthropicModel
+    # call), the nested gather agent on the single dispatch (2nd call).
+    models = iter([FunctionModel(main_replay), FunctionModel(gather_replay)])
+    monkeypatch.setattr(driver, "AnthropicModel",
+                        lambda *a, **k: next(models, FunctionModel(gather_replay)))
+    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
+    # Stub ONLY the adapter subprocess inside record_query (isolated to that module).
+    monkeypatch.setattr(record_query, "subprocess", _FakeAdapterSubprocess)
+
+    asyncio.run(driver.run_investigation(
+        alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
+        defender_dir=_DEFENDER, salt=salt,
+    ))
+
+    # Both loops ran (main dispatched, nested gather executed its query + summary).
+    assert main_replay.calls == 3
+    assert gather_replay.calls == 2
+
+    # LEADS table: claim_lead wrote the lead sidecar with the dispatch goal.
+    lead_row = run_dir / "gather_raw" / "l-001.lead.json"
+    assert lead_row.is_file()
+    assert "check sshd auth history" in lead_row.read_text()
+
+    # QUERIES table: the adapter call was captured as a row bound to system=elastic.
+    qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
+    assert len(qlines) == 1
+    row = json.loads(qlines[0])
+    assert row["lead_id"] == "l-001"
+    assert row["system"] == "elastic"
+    assert row["exit_code"] == 0
+
+    # gather_raw payload persisted by-ref at the path the row names.
+    payload = run_dir / row["payload_path"]
+    assert payload.is_file()
+    assert "dev.dana" in payload.read_text()
