@@ -336,7 +336,7 @@ async def run_investigation(
     agent = build_agent(model_name, defender_dir, logger)
     deps = RunDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-        salt=salt, is_main_session=True,
+        salt=salt,
     )
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 

@@ -114,9 +114,12 @@ the obvious first batch.
   responses, hypothesis/lead/query-row shapes) untyped. The `schemas/` step:
   TypedDict/dataclass contracts, starting with the adapter responses behind
   `http_get_obj`.
-- **#410 — unify `RunDeps`/`GatherDeps` modeling.** Main-vs-gather is split
-  across an `is_main_session` bool *and* a subclass; `runtime/tools.py`'s
-  `assert isinstance(deps, GatherDeps)` is the band-aid.
+- ~~**#410 — unify `RunDeps`/`GatherDeps` modeling.**~~ **Done.** Main-vs-gather
+  was split across an `is_main_session` bool *and* a subclass. `is_main_session`
+  is now a derived `@property` (single source of truth: the deps type), and the
+  capture path in `runtime/tools.py` narrows with `isinstance(deps, GatherDeps)`
+  — so the `assert isinstance(...)` band-aid is gone and the redundant bool can
+  no longer drift out of sync with the subclass.
 
 **Done (this issue):** mypy runs in CI as a blocking gate over a zero-error
 tree, with the ramp path documented above.
