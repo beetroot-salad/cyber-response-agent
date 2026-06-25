@@ -199,7 +199,7 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
 
 @pytest.mark.parametrize("cmd", [
     # A quote spanning a newline is unparseable → the shared executor decomposition
-    # (bash_exec.stage_argvs) raises, so _stage_programs returns None. It must fail
+    # (bash_exec.stage_argvs) raises, so _decompose returns None. It must fail
     # CLOSED, not be mistaken for an adapter (its head "starts with defender-") and
     # routed to the capture path.
     "defender-elastic query 'unterminated\nrest'",
@@ -308,6 +308,42 @@ def test_gather_allows_adapter_sql_pipe():
     # A non-sql consumer downstream of an adapter stays denied (not the exception).
     assert not permission.decide_bash(
         "defender-elastic query 'x' --raw | cat", role=AgentRole.GATHER).allow
+
+
+@pytest.mark.parametrize("sep", [";", "&&", "||"])
+def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
+    # ONLY the single `|` pipe is the sanctioned aggregation shape. A `;`/`&&`/`||`
+    # SEQUENCE of `adapter --raw` then `defender-sql` is a separate-pipelines compound
+    # (the shell would sequence/short-circuit them — with `||`, run defender-sql only
+    # on adapter FAILURE), not a pipe; it must be denied, and neither routing seam may
+    # claim it (else the harness would silently stream the payload as if it were `|`).
+    cmd = f"defender-elastic query 'x' --raw {sep} defender-sql 'SELECT 1'"
+    d = permission.decide_bash(cmd, is_main_session=False)
+    assert not d.allow, cmd
+    assert "standalone" in d.reason
+    assert permission.adapter_sql_pipe(cmd) is None
+    assert permission.adapter_argv(cmd) is None
+    assert not permission.decide_bash(cmd, is_main_session=True).allow
+
+
+@pytest.mark.parametrize("cmd", [
+    # An adapter query whose value contains a `$(`/backtick substring is a LITERAL
+    # query payload, not shell — the adapter runs shell=False (no expansion). It was
+    # over-denied when the substitution guard was applied to the adapter stage; a
+    # standalone adapter must be allowed and routed to capture so its argv reaches the
+    # data source verbatim (e.g. hunting command-line telemetry for injection IOCs).
+    "defender-elastic query 'process.command_line:*$(*' --raw",
+    "defender-elastic query 'cmd:`id`' --raw",
+])
+def test_gather_allows_adapter_query_with_inert_shell_metachars(cmd):
+    assert permission.decide_bash(cmd, is_main_session=False).allow, cmd
+    argv = permission.adapter_argv(cmd)
+    assert argv is not None, cmd
+    assert argv[0] == "defender-elastic", cmd
+    # The metachar survives verbatim in the captured argv (one shlex-resolved token).
+    assert any("$(" in t or "`" in t for t in argv), cmd
+    # The defense-in-depth guard is still enforced for a non-adapter VIEWER stage.
+    assert not permission.decide_bash('jq ".x" "$(rm -rf /)"', is_main_session=False).allow
 
 
 def test_gather_drops_residual_reduce_by_hand_tools():

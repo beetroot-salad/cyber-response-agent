@@ -136,19 +136,19 @@ def _stage_unsafe(argv: list[str]) -> bool:
     return False
 
 
-def _stage_programs(inner: str) -> list[list[str]] | None:
-    """The argv stages the executor would run for `inner` (already unwrapped), or
-    None to fail closed. None means either the command carries an operator/redirect
-    the no-shell executor does not model (`bash_exec` raises) or a stage trips the
-    substitution/assignment guard. Sharing `bash_exec.stage_argvs` is the whole
-    point of #379: the gate and the executor decompose identically."""
+def _decompose(inner: str) -> list[list[str]] | None:
+    """The flat argv stages the executor would run for `inner` (already unwrapped),
+    or None to fail closed when the command carries an operator/redirect the no-shell
+    executor does not model (`bash_exec` raises). Sharing `bash_exec.stage_argvs` is
+    the whole point of #379: the gate and the executor decompose identically. The
+    substitution/assignment guard (`_stage_unsafe`) is applied by the caller, and
+    ONLY to non-adapter viewer stages — an adapter / defender-sql query payload is
+    passed straight to `subprocess` (shell=False), where `$(…)`/backticks are inert
+    literal bytes, so guarding those stages only false-denies legitimate queries."""
     try:
-        stages = bash_exec.stage_argvs(inner)
+        return bash_exec.stage_argvs(inner)
     except bash_exec.BashExecError:
         return None
-    if any(_stage_unsafe(s) for s in stages):
-        return None
-    return stages
 
 
 def _segment_is_adapter(toks: list[str]) -> bool:
@@ -167,17 +167,31 @@ def _segment_is_adapter(toks: list[str]) -> bool:
     return bool(ADAPTER_CLI_RE.search(cmd))
 
 
-def _is_adapter_sql_pipe(stages: list[list[str]]) -> bool:
-    """True for the sanctioned `defender-<system> … --raw | defender-sql '<SQL>'`
-    shape: exactly two stages, an adapter producing on the left and defender-sql
-    consuming on the right. defender-sql is self-sandboxed (no file/network), so
-    aggregating the captured payload through it is a local transform, not a second
-    data-source query."""
-    return (
-        len(stages) == 2
-        and _segment_is_adapter(stages[0])
-        and bool(stages[1]) and stages[1][0] == _SQL_SHIM
-    )
+def _adapter_sql_pipe_split(inner: str) -> tuple[list[str], list[str]] | None:
+    """If `inner` (already unwrapped) is the sanctioned `defender-<system> … --raw |
+    defender-sql '<SQL>'` shape, return `(adapter_argv, sql_argv)`; else None. The
+    shape is ONE pipeline of exactly two stages — an adapter producing on the left,
+    defender-sql consuming on the right. defender-sql is self-sandboxed (no
+    file/network), so aggregating the captured payload through it is a local
+    transform, not a second data-source query.
+
+    Uses `bash_exec.pipeline_argvs` (PIPELINE structure), not the flattened stage
+    list: a `;`/`&&`/`||` compound (`adapter --raw ; defender-sql …`) is a SEQUENCE
+    of separate pipelines, not a pipe, and must NOT be treated as the sanctioned
+    pipe — the shell would sequence/short-circuit them (with `||`, run defender-sql
+    only on adapter *failure*), whereas `_capture_adapter_sql` unconditionally
+    streams the captured payload into defender-sql. Accepting those compounds was a
+    validator/executor differential and a hole in the deny-by-default compound rule."""
+    try:
+        pipelines = bash_exec.pipeline_argvs(inner)
+    except bash_exec.BashExecError:
+        return None
+    if len(pipelines) != 1 or len(pipelines[0]) != 2:
+        return None
+    adapter, consumer = pipelines[0]
+    if _segment_is_adapter(adapter) and consumer and consumer[0] == _SQL_SHIM:
+        return adapter, consumer
+    return None
 
 
 def adapter_argv(command: str) -> list[str] | None:
@@ -188,7 +202,7 @@ def adapter_argv(command: str) -> list[str] | None:
     inner = unwrap(command.strip())
     if inner is None:
         return None
-    stages = _stage_programs(inner)
+    stages = _decompose(inner)
     if stages is None or len(stages) != 1 or not _segment_is_adapter(stages[0]):
         return None
     return stages[0]  # the stage's argv IS the adapter argv (shlex-resolved)
@@ -201,10 +215,7 @@ def adapter_sql_pipe(command: str) -> tuple[list[str], list[str]] | None:
     inner = unwrap(command.strip())
     if inner is None:
         return None
-    stages = _stage_programs(inner)
-    if stages is None or not _is_adapter_sql_pipe(stages):
-        return None
-    return stages[0], stages[1]
+    return _adapter_sql_pipe_split(inner)
 
 
 def _decide_bash_gather(cmd: str) -> Decision:
@@ -216,15 +227,26 @@ def _decide_bash_gather(cmd: str) -> Decision:
     inner = unwrap(cmd)
     if inner is None:
         return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
-    stages = _stage_programs(inner)
+    stages = _decompose(inner)
     if stages is None:
         return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
     if any(_segment_is_adapter(s) for s in stages):
+        # A standalone adapter is captured transparently; the only sanctioned
+        # multi-stage shape is the `adapter --raw | defender-sql '<SQL>'` pipe (a
+        # single two-stage pipeline). Any other compound containing an adapter — a
+        # different downstream program, or a `;`/`&&`/`||` sequence — is ambiguous
+        # and denied. The adapter/sql query payloads are NOT run through the
+        # substitution guard (they go straight to subprocess shell=False).
         if len(stages) == 1:
             return Decision(True)
-        if bash_policy.adapter_sql_pipe_allowed("gather") and _is_adapter_sql_pipe(stages):
+        if bash_policy.adapter_sql_pipe_allowed("gather") and _adapter_sql_pipe_split(inner):
             return Decision(True)
         return Decision(False, ADAPTER_STANDALONE_REASON)
+    # Non-adapter command: read-only viewers / non-adapter shims only. The
+    # substitution/assignment guard applies here (these stages execute through the
+    # no-shell executor), but not to the adapter/defender-sql payloads above.
+    if any(_stage_unsafe(s) for s in stages):
+        return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
     if not all(s[0] in _allowed_programs() for s in stages):
         return Decision(False, GATHER_FALLTHROUGH_DENY_REASON)
     return Decision(True)
@@ -241,7 +263,7 @@ def _decide_bash_main(cmd: str) -> Decision:
     inner = unwrap(cmd)
     if inner is None:
         return Decision(False, FALLTHROUGH_DENY_REASON)
-    stages = _stage_programs(inner)
+    stages = _decompose(inner)
     if stages is None:
         return Decision(False, FALLTHROUGH_DENY_REASON)
     # A data-source adapter from the main loop is denied with the specific reason
@@ -249,6 +271,10 @@ def _decide_bash_main(cmd: str) -> Decision:
     # trail) rather than the generic fall-through.
     if not bash_policy.adapters_allowed("main") and any(_segment_is_adapter(s) for s in stages):
         return Decision(False, ADAPTER_DENY_REASON)
+    # The main loop runs only the read-only viewers/shims (no adapters past the
+    # check above), so the substitution/assignment guard applies to every stage.
+    if any(_stage_unsafe(s) for s in stages):
+        return Decision(False, FALLTHROUGH_DENY_REASON)
     if not all(s[0] in _allowed_programs() for s in stages):
         return Decision(False, FALLTHROUGH_DENY_REASON)
     return Decision(True)
