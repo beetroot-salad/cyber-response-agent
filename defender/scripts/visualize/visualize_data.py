@@ -31,6 +31,7 @@ Key concepts:
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
@@ -303,7 +304,7 @@ def merge_assistant_events(events: list[dict]) -> list[dict]:
         if ev.get("type") != "assistant":
             continue
         msg = ev.get("message") or {}
-        mid = msg.get("id") or ev.get("uuid")
+        mid = msg.get("id") or ev.get("uuid") or ""
         if mid not in by_id:
             order.append(mid)
             by_id[mid] = {
@@ -452,7 +453,6 @@ def _parse_timestamped_user_events(
 ) -> list[tuple]:
     """Pull (datetime, phase) pairs from the ``user`` events that carry a parseable
     ISO timestamp + a phase tag (the only events the trace timestamps)."""
-    from datetime import datetime
 
     def _parse(ts: str):
         try:
@@ -484,12 +484,12 @@ def _tile_phase_boundaries(
     run_start = parsed[0][0]
     run_end = parsed[-1][0]
 
-    first_in_phase: dict[str, object] = {}
+    first_in_phase: dict[str, datetime] = {}
     for dt, ph in parsed:
         if ph not in first_in_phase:
             first_in_phase[ph] = dt
 
-    next_phase_first = []
+    next_phase_first: list[datetime | None] = []
     for i, _ph in enumerate(phase_order):
         nxt = None
         for j in range(i + 1, len(phase_order)):
@@ -502,7 +502,8 @@ def _tile_phase_boundaries(
     cursor = run_start
     for i, ph in enumerate(phase_order):
         start = cursor
-        end = next_phase_first[i] if next_phase_first[i] is not None else run_end
+        nxt = next_phase_first[i]
+        end = nxt if nxt is not None else run_end
         if end < start:
             end = start
         out[ph] = {

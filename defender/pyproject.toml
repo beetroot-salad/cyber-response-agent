@@ -31,6 +31,7 @@ dev = [
     "ruff",
     "vulture",
     "radon",
+    "mypy",
 ]
 
 [tool.pytest.ini_options]
@@ -54,6 +55,42 @@ package = false
 # skills/, learning/, …). Discover nothing: install metadata + deps only.
 [tool.setuptools]
 py-modules = []
+
+[tool.mypy]
+# Type-check gate (issue #403). BLOCKING: mypy runs in CI's lint job with no
+# `|| true` — the tree is at zero errors under this config, so a new type error
+# fails CI. Config is still permissive (no disallow_untyped_defs); the next ramp
+# steps (pin cleared modules strict via [[tool.mypy.overrides]], fold in tests)
+# are documented in docs/decisions/defender-mypy-ramp.md.
+#
+# Invoked from the REPO ROOT (matching the other lint/code-smells steps) as
+#   defender/.venv/bin/mypy --config-file defender/pyproject.toml
+# so `files`/`mypy_path` below are relative to the repo root, not defender/.
+python_version = "3.11"
+files = ["defender"]
+# defender/ is a namespace tree: no top-level package, modules invoked by path,
+# tests sys.path.insert("..") (so imports resolve as `defender.*`). mypy_path +
+# explicit_package_bases + namespace_packages give every file a unique dotted
+# module name (`defender.runtime.driver`, …), dodging the duplicate-module crash
+# a bare run hits on the repeated leaf names (conftest.py, _cli.py, __init__-less
+# dirs).
+mypy_path = "."
+namespace_packages = true
+explicit_package_bases = true
+# Scope the soft-launch to shippable modules: .venv (third-party sources) and the
+# test tree are excluded. Tests lean on duck-typed fakes (a bare object() passed
+# where a typed deps struct is expected) that mypy can't see through — high-noise,
+# low-value for the production-typing ramp. Folding tests in is a later ramp step
+# (see docs/decisions/defender-mypy-ramp.md), matching how the ruff families
+# graduated one group at a time.
+exclude = ['(^|/)\.venv/', '(^|/)tests/', '(^|/)test_[^/]*\.py$', '(^|/)conftest\.py$']
+ignore_missing_imports = true
+follow_imports = "silent"
+# Surface type errors without blocking on every untyped def. Tighten per module
+# via [[tool.mypy.overrides]] (disallow_untyped_defs = true) as each clears.
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 
 [tool.ruff.lint]
 # Lint gates, two tiers (issue #400 — extended-ruff drain complete):

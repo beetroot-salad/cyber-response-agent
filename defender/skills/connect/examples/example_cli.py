@@ -83,7 +83,7 @@ def _request(config: dict[str, str], path: str, params: dict[str, str]) -> Any:
         die(EXIT_CONN_ERROR,
             f"{SYSTEM}: URL_BASE is not set in config.env.")
     timeout = float(config.get("TIMEOUT_SEC", "10"))
-    url = base.rstrip("/") + path
+    url = (base or "").rstrip("/") + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
 

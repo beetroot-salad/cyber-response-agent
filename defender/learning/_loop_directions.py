@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
+from pathlib import Path
 
 from defender.learning._loop_config import (
     BENIGN_JUDGE_EFFORT,
@@ -43,7 +44,7 @@ BENIGN_WIRING = JudgeWiring(
 class ObsTrigger:
     """Threshold-gated trigger for a direction's observation-curator module."""
 
-    pending_file: Callable[[LoopPaths], object]  # LoopPaths -> the queue file Path
+    pending_file: Callable[[LoopPaths], Path]  # LoopPaths -> the queue file Path
     threshold_env: str
     module_name: str
     pending_label: str

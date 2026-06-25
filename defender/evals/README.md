@@ -21,8 +21,8 @@ never the reverse.
 Run them by hand:
 
 ```bash
-# Primary: score a runs dir against ground truth
-python3 defender/evals/held_out.py /tmp/defender-runs
+# Primary: score a runs dir against ground truth (defaults to $DEFENDER_RUNS_BASE)
+python3 defender/evals/held_out.py "$DEFENDER_RUNS_BASE"
 
 # Secondary: frozen-actor replay, pinned K generations back (default 3)
 python3 defender/evals/secondary.py [--k 3] [--out <dir>]

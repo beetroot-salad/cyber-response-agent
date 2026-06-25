@@ -100,7 +100,7 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
     agent = Agent(deps_type=tools.RunDeps)
     tools.register_tools(agent)
     deps = tools.RunDeps(
-        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt, is_main_session=True
+        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt
     )
     result = asyncio.run(agent.run("go", deps=deps, model=FunctionModel(_model_fn)))
 

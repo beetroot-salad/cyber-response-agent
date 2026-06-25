@@ -86,20 +86,30 @@ def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = ""
 
 @dataclass(frozen=True)
 class RunDeps:
-    """Per-run state threaded into every tool via `ctx.deps`."""
+    """Per-run state threaded into every tool via `ctx.deps`. This base type is
+    the main session's deps; the gather subagent gets the `GatherDeps` subtype.
+    The main-vs-gather split has a single source of truth — the deps class —
+    so `is_main_session` is *derived* from the type, not a stored field that
+    could drift out of sync with it."""
 
     run_dir: Path
     defender_dir: Path
     run_id: str
     salt: str
-    is_main_session: bool = True
+
+    @property
+    def is_main_session(self) -> bool:
+        return True
 
 
 @dataclass(frozen=True)
 class GatherDeps(RunDeps):
     """Gather subagent deps: RunDeps + the lead being gathered. The harness reads
     `lead_id` here to attribute captured queries (it is never model-supplied to
-    the capture path). Always constructed with `is_main_session=False`.
+    the capture path). Being a `GatherDeps` *is* the not-main-session signal:
+    code that needs the gather-only fields narrows with `isinstance(deps,
+    GatherDeps)`, and the stateless permission gate reads the derived
+    `is_main_session` bool below.
 
     `query_id` is a fallback capture id stamped on the lead's queries when the
     model doesn't tag a call with `--query-id`; the gather leaves it unset
@@ -108,6 +118,10 @@ class GatherDeps(RunDeps):
 
     lead_id: str = ""
     query_id: str | None = None
+
+    @property
+    def is_main_session(self) -> bool:
+        return False
 
 
 def _record_lesson_load(deps: RunDeps, path: Path) -> None:
@@ -144,8 +158,10 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     # Gather subagent (not the main session): a standalone adapter call is
     # captured transparently (the queries table + payload are written by the
     # harness), so the model never wraps it in record-query — it just runs the
-    # adapter.
-    if not deps.is_main_session:
+    # adapter. `GatherDeps` IS the gather context and carries the lead_id/
+    # query_id `_capture_adapter` records, so the isinstance narrow is both the
+    # not-main-session test and the type evidence the capture path needs.
+    if isinstance(deps, GatherDeps):
         argv = permission.adapter_argv(command)
         if argv is not None:
             system = _derive_system(argv)
@@ -465,7 +481,7 @@ async def _run_gather(
     gagent = gather_factory(f"gather:{lead_id}")
     gdeps = GatherDeps(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        run_id=deps.run_id, salt=deps.salt, is_main_session=False, lead_id=lead_id,
+        run_id=deps.run_id, salt=deps.salt, lead_id=lead_id,
     )
     prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
     try:

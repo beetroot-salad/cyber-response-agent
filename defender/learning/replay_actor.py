@@ -57,6 +57,8 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 def _load_sibling(modname: str, path: Path):
     spec = importlib.util.spec_from_file_location(modname, path)
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[modname] = mod
     spec.loader.exec_module(mod)

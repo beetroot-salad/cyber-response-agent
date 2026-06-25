@@ -79,7 +79,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("STUB_ELASTIC_PAYLOAD", str(fx / "elastic_payload.json"))
     lead_id, system = "l-007", params["system"]
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    deps = tools.RunDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt", is_main_session=True)
+    deps = tools.RunDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt")
 
     def factory(agent_id):
         return driver.build_gather_agent(sb, logger, agent_id)

@@ -37,7 +37,7 @@ DEFAULT_LIST_LIMIT = 50
 
 
 def cmd_get_host(args, config):
-    payload = transport.http_get(config, f"/hosts/{args.name}")
+    payload = transport.http_get_obj(config, f"/hosts/{args.name}")
     if args.raw:
         print(json.dumps(payload))
         return

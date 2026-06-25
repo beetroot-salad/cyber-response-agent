@@ -39,7 +39,7 @@ DEFAULT_LIST_LIMIT = 50
 
 
 def cmd_can_access(args, config):
-    payload = transport.http_get(
+    payload = transport.http_get_obj(
         config, f"/users/{args.user}/can_access", params={"host": args.host},
     )
     if args.raw:
@@ -60,7 +60,7 @@ def cmd_can_access(args, config):
 
 
 def cmd_get_user(args, config):
-    payload = transport.http_get(config, f"/users/{args.user}")
+    payload = transport.http_get_obj(config, f"/users/{args.user}")
     if args.raw:
         print(json.dumps(payload))
         return

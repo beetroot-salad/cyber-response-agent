@@ -23,7 +23,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning import author_actor_benign as _benign  # type: ignore[import-not-found]
+from defender.learning import author_actor_benign as _benign
 from defender.learning._loop_config import DEFAULT_PATHS, LoopPaths
 
 

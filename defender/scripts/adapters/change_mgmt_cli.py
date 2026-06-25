@@ -74,7 +74,7 @@ def cmd_active_changes(args, config):
 
 
 def cmd_get_change(args, config):
-    payload = transport.http_get(config, f"/changes/{args.cr_id}")
+    payload = transport.http_get_obj(config, f"/changes/{args.cr_id}")
     if args.raw:
         print(json.dumps(payload))
         return

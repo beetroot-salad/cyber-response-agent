@@ -44,7 +44,7 @@ DEFAULT_LIST_LIMIT = 50
 def cmd_lookup(args, config):
     # /lookup/{value:path} — caller's value may contain dots/colons; quote it.
     quoted = urllib.parse.quote(args.value, safe="")
-    payload = transport.http_get(config, f"/lookup/{quoted}")
+    payload = transport.http_get_obj(config, f"/lookup/{quoted}")
     if args.raw:
         print(json.dumps(payload))
         return
