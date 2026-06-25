@@ -156,7 +156,7 @@ def test_capture_adapter_sql_pipe_aggregates(tmp_path, stub):
 
     deps = tools.GatherDeps(
         run_dir=tmp_path, defender_dir=_DEFENDER_DIR, run_id="r", salt="s",
-        is_main_session=False, lead_id="l-001",
+        lead_id="l-001",
     )
     out = tools._capture_adapter_sql(
         deps, _argv(stub, "ok"), ["defender-sql", "SELECT len(hits) AS n FROM data"],

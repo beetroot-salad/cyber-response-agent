@@ -300,16 +300,47 @@ def decide_bash(command: str, *, role: AgentRole) -> Decision:
     return _decide_bash_main(cmd)
 
 
-def decide_read(path: Path, *, role: AgentRole) -> Decision:
-    """Allow/deny a file read, porting the Read deny rules + the gather_raw clamp
-    (`block_main_loop_raw_access` on Read). The denylist (secrets / ground truth)
-    is declarative (`bash_policy.json`): substrings match the filename, dirs match
-    any path component. The clamp applies to the main loop: it consumes the gather
-    summary, never the raw payload. A subagent (non-MAIN role) reads its own
-    gather_raw to verify its query result."""
+def _is_within(p: Path, root: Path) -> bool:
+    """True iff resolved path `p` is `root` or below it."""
+    try:
+        p.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def decide_read(
+    path: Path, *, run_dir: Path, defender_dir: Path, role: AgentRole
+) -> Decision:
+    """Allow/deny a file read — a **deny-by-default allowlist**, matching the shape
+    `decide_write` already uses for writes. A read must resolve INSIDE one of two
+    roots: the run dir (the agent's own case artifacts + gather payloads) or the
+    defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md). Past
+    runs read essentially nothing else (alert.json, SKILLs, lessons, run artifacts);
+    everything outside both roots fails closed. `resolve()` collapses `..` and
+    symlinks, so an allowed-root prefix can't be escaped (the structural close for
+    the `cat …/.env` / basename-only / case-sensitivity gaps a denylist alone left).
+
+    On top of the allowlist, the declarative secret/ground-truth denylist
+    (`bash_policy.json`) still denies a sensitive file that lands INSIDE a root — a
+    captured `.env` in the run dir, the eval `cases.json` — cheap belt-and-suspenders.
+
+    The main-loop gather_raw clamp is unchanged: the main loop consumes the gather
+    summary, never the raw payload; the gather subagent (a non-MAIN role) reads
+    its own gather_raw to verify its query result."""
     p = Path(path)
-    name = p.name
-    parts = set(p.parts)
+    rp = p.resolve()
+    roots = (Path(run_dir).resolve(), Path(defender_dir).resolve())
+    if not any(_is_within(rp, root) for root in roots):
+        return Decision(
+            False,
+            "Blocked: reads are limited to the run dir and the defender corpus "
+            f"(skills/lessons/scripts); {p} is outside both.",
+        )
+    # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
+    # still denied (substrings match the filename, dirs match any path component).
+    name = rp.name
+    parts = set(rp.parts)
     if any(d in parts for d in bash_policy.read_deny_dirs()) or any(
         s in name for s in bash_policy.read_deny_substrings()
     ):
@@ -319,7 +350,7 @@ def decide_read(path: Path, *, role: AgentRole) -> Decision:
     # path). block_main_loop_raw_access never applies it to a Read
     # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path is
     # unconditionally clamped.
-    if RAW_MARKER in str(p) and role is AgentRole.MAIN:
+    if RAW_MARKER in str(rp) and role is AgentRole.MAIN:
         return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 

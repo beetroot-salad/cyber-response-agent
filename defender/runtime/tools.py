@@ -196,7 +196,8 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
 def _tool_read_file(deps: RunDeps, path: str) -> str:
     """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
     decision = permission.decide_read(
-        Path(path), role=deps.role,
+        Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        role=deps.role,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
