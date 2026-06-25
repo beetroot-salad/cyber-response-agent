@@ -29,8 +29,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-import pydantic_ai.models as pai_models  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
+from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.runtime import driver  # noqa: E402
@@ -144,9 +144,27 @@ def _normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
+def _drive(run_dir: Path, *, run_id: str, salt: str, main_model, gather_model=None):
+    """Run the real driver with injected fake models — no monkeypatching of the
+    model symbol. `make_model` is the driver's DI seam; it dispatches on agent id
+    ("main" vs "gather:<lead>") so the main loop and a nested gather get distinct
+    fakes. `override_allow_model_requests(False)` makes any real provider call
+    raise, so the run is provably hermetic."""
+    def make_model(model_name, agent_id):
+        if gather_model is not None and agent_id != "main":
+            return gather_model
+        return main_model
+
+    with override_allow_model_requests(False):
+        return asyncio.run(driver.run_investigation(
+            alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
+            defender_dir=_DEFENDER, salt=salt, make_model=make_model,
+        ))
+
+
 # --- the test --------------------------------------------------------------
 
-def test_replay_golden_v2sshd(tmp_path, monkeypatch):
+def test_replay_golden_v2sshd(tmp_path):
     run_id, salt = "replay-v2sshd", "deadbeefcafe0000"
     run_dir = _materialize(tmp_path, _GOLDEN, run_id=run_id, salt=salt)
 
@@ -164,21 +182,7 @@ def test_replay_golden_v2sshd(tmp_path, monkeypatch):
         Turn(text="Investigation complete."),
     ]
     replay = ReplayFn(script)
-
-    # Seam: driver builds `Agent(AnthropicModel(model_name))`. Swap the model
-    # constructor for our FunctionModel — touches no production code, fakes the
-    # main loop (and the gather subagent, were it dispatched).
-    monkeypatch.setattr(driver, "AnthropicModel", lambda *a, **k: FunctionModel(replay))
-    # Any real provider request now raises — proves the run is hermetic.
-    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
-
-    asyncio.run(driver.run_investigation(
-        alert_path=run_dir / "alert.json",
-        run_dir=run_dir,
-        run_id=run_id,
-        defender_dir=_DEFENDER,
-        salt=salt,
-    ))
+    _drive(run_dir, run_id=run_id, salt=salt, main_model=FunctionModel(replay))
 
     # 1. The loop replayed our script exactly (3 model requests).
     assert replay.calls == 3, f"expected 3 model turns, got {replay.calls}"
@@ -224,26 +228,21 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     )
     replay = ReplayFn(turns)
 
-    # Fake the main model (replays the script) ...
-    monkeypatch.setattr(driver, "AnthropicModel", lambda *a, **k: FunctionModel(replay))
-    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
-
-    # ... and fake `gather` at its boundary: a dispatched lead returns a recorded
-    # summary string without re-driving the nested agent. Signature mirrors
-    # tools._run_gather(deps, gather_factory, request_limit, lead_id, system, ...).
+    # Fake `gather` at its boundary: a dispatched lead returns a summary string
+    # without re-driving the nested agent. Signature mirrors tools._run_gather.
+    # The nested gather + its capture path are exercised by test_nested_gather_
+    # capture; this test deliberately isolates the MAIN loop.
     async def _fake_run_gather(deps, gather_factory, request_limit,
                                lead_id, system, goal, what_to_summarize):
         return f"[replayed gather summary: lead={lead_id} system={system}]"
 
-    monkeypatch.setattr(runtime_tools, "_run_gather", _fake_run_gather)
+    # Boundary fake of the gather subagent's return contract — isolates the MAIN
+    # loop; the nested gather + capture path are covered by test_nested_gather_capture.
+    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary fake (see comment above)
+        runtime_tools, "_run_gather", _fake_run_gather,
+    )
 
-    asyncio.run(driver.run_investigation(
-        alert_path=run_dir / "alert.json",
-        run_dir=run_dir,
-        run_id=run_id,
-        defender_dir=_DEFENDER,
-        salt=salt,
-    ))
+    _drive(run_dir, run_id=run_id, salt=salt, main_model=FunctionModel(replay))
 
     # 1. The whole trace replayed — no early termination from an unexpected deny.
     assert replay.calls == len(turns), \
@@ -316,19 +315,13 @@ class _DenyProbe:
      lambda rd: {"path": str(rd.parent / "ESCAPE_OUTSIDE_RUNDIR.txt"), "content": "x"},
      "stay inside the run dir", "ESCAPE_OUTSIDE_RUNDIR.txt"),
 ])
-def test_main_loop_deny_bounces(tmp_path, monkeypatch, label, tool_name, args_fn,
+def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
                                 reason_substr, escape_name):
     run_id, salt = f"deny-{label}", "8899aabbccddeeff"
     run_dir = _materialize(tmp_path, _GOLDEN_AB3, run_id=run_id, salt=salt)
 
     probe = _DenyProbe(tool_name, args_fn(run_dir))
-    monkeypatch.setattr(driver, "AnthropicModel", lambda *a, **k: FunctionModel(probe))
-    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
-
-    asyncio.run(driver.run_investigation(
-        alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-        defender_dir=_DEFENDER, salt=salt,
-    ))
+    _drive(run_dir, run_id=run_id, salt=salt, main_model=FunctionModel(probe))
 
     # 1. The deny BOUNCED the agent (ModelRetry → re-prompt), not crashed it: the
     #    model was called again after the offending turn.
@@ -399,19 +392,17 @@ def test_nested_gather_capture(tmp_path, monkeypatch):
         Turn(text="Summary: 1 sshd auth event for dev.dana."),
     ])
 
-    # Per-agent model dispatch: the main agent is built first (1 AnthropicModel
-    # call), the nested gather agent on the single dispatch (2nd call).
-    models = iter([FunctionModel(main_replay), FunctionModel(gather_replay)])
-    monkeypatch.setattr(driver, "AnthropicModel",
-                        lambda *a, **k: next(models, FunctionModel(gather_replay)))
-    monkeypatch.setattr(pai_models, "ALLOW_MODEL_REQUESTS", False)
-    # Stub ONLY the adapter subprocess inside record_query (isolated to that module).
-    monkeypatch.setattr(record_query, "subprocess", _FakeAdapterSubprocess)
+    # Stub ONLY the adapter subprocess inside record_query (isolated to that module)
+    # so the real capture/record code runs while staying hermetic — the adapter's
+    # external-process IO has no in-process seam.
+    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary: adapter subprocess IO
+        record_query, "subprocess", _FakeAdapterSubprocess,
+    )
 
-    asyncio.run(driver.run_investigation(
-        alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-        defender_dir=_DEFENDER, salt=salt,
-    ))
+    # Per-agent model dispatch via the driver's make_model seam (agent id keys
+    # main vs the nested gather) — no model-symbol patching.
+    _drive(run_dir, run_id=run_id, salt=salt,
+           main_model=FunctionModel(main_replay), gather_model=FunctionModel(gather_replay))
 
     # Both loops ran (main dispatched, nested gather executed its query + summary).
     assert main_replay.calls == 3

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.usage import UsageLimits
 
@@ -148,9 +150,22 @@ def _gather_model() -> str:
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
+# Model-construction seam: tests inject a fake model (pydantic-ai's FunctionModel)
+# by passing `make_model` instead of patching the AnthropicModel symbol. Called
+# with the resolved model name + the agent id ("main" / "gather:<lead_id>"), so a
+# test can hand the main loop and a nested gather distinct fakes. The default is
+# exactly the prior `AnthropicModel(model_name)`, so production is unchanged.
+ModelFactory = Callable[[str, str], Model]
+
+
+def _default_make_model(model_name: str, agent_id: str) -> Model:
+    return AnthropicModel(model_name)
+
+
 def _build_subagent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     instructions: str, model_name: str,
+    make_model: ModelFactory = _default_make_model,
 ) -> Agent[GatherDeps, str]:
     """A nested subagent with the read-only slice of the generic tools (bash +
     read_file; the bash tool auto-captures the gather's adapter calls under the
@@ -160,7 +175,7 @@ def _build_subagent(
     the lead/measurement. The system prompt (`instructions`) + `model_name`
     specialize the instance into the gather (Sonnet)."""
     agent = Agent(
-        AnthropicModel(model_name),
+        make_model(model_name, agent_id),
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
@@ -175,7 +190,10 @@ def _gather_instructions(defender_dir: Path) -> str:
     return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
 
 
-def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_id: str) -> Agent[GatherDeps, str]:
+def build_gather_agent(
+    defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
+    make_model: ModelFactory = _default_make_model,
+) -> Agent[GatherDeps, str]:
     """The single-agent gather (#340) — the production gather for the
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
@@ -183,7 +201,7 @@ def build_gather_agent(defender_dir: Path, logger: observe.RequestLogger, agent_
     (Sonnet; `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _gather_instructions(defender_dir),
-        _gather_model(),
+        _gather_model(), make_model,
     )
 
 
@@ -281,7 +299,10 @@ def _make_compaction_processor():
     return process
 
 
-def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogger) -> Agent[RunDeps, str]:
+def build_agent(
+    model_name: str, defender_dir: Path, logger: observe.RequestLogger,
+    make_model: ModelFactory = _default_make_model,
+) -> Agent[RunDeps, str]:
     capabilities: list[Hooks[Any] | ProcessHistory[Any]] = [_make_hooks(logger, "main")]
     if _compaction_enabled():
         # Main agent only — gather sub-runs are short single leads, nothing to
@@ -292,7 +313,7 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {_gather_model()}{_override}", file=sys.stderr)
     agent = Agent(
-        AnthropicModel(model_name),
+        make_model(model_name, "main"),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,
@@ -306,7 +327,7 @@ def build_agent(model_name: str, defender_dir: Path, logger: observe.RequestLogg
     # superseded by this before it ever merged.
     register_gather_tool(
         agent,
-        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id),
+        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id, make_model),
         GATHER_REQUEST_LIMIT,
     )
     return agent
@@ -329,11 +350,12 @@ async def run_investigation(
     defender_dir: Path,
     salt: str,
     model_name: str | None = None,
+    make_model: ModelFactory = _default_make_model,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary."""
     model_name = model_name or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    agent = build_agent(model_name, defender_dir, logger)
+    agent = build_agent(model_name, defender_dir, logger, make_model)
     deps = RunDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt,

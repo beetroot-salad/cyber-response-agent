@@ -48,6 +48,10 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/",
     "defender/knowledge/environment/systems/",
     "defender/fixtures/",
+    # Vendored golden RUNS replayed by the e2e harness (tests/test_replay_*) —
+    # captured from the v2 playground, so env-specific test data BY DESIGN, like
+    # defender/fixtures/ above; not the shipped vendor-neutral surface.
+    "defender/fixtures-e2e/",
     "defender/tests/",
     "defender/run-visualizations/",
     "defender/run-transcripts/",
