@@ -30,6 +30,7 @@ from pydantic_ai.usage import UsageLimits
 from . import compaction
 from . import observe
 from . import orient
+from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
 from .tools import (
     GatherDeps,
@@ -152,13 +153,15 @@ def _gather_model() -> str:
 
 # Model-construction seam: tests inject a fake model (pydantic-ai's FunctionModel)
 # by passing `make_model` instead of patching the AnthropicModel symbol. Called
-# with the resolved model name + the agent id ("main" / "gather:<lead_id>"), so a
-# test can hand the main loop and a nested gather distinct fakes. The default is
-# exactly the prior `AnthropicModel(model_name)`, so production is unchanged.
-ModelFactory = Callable[[str, str], Model]
+# with the resolved model name + the agent's `AgentRole` (sourced from the deps
+# type's `role` ClassVar — the same value the permission gate keys on, so model
+# and gate dispatch can't drift). Keying on the role enum, not a main/not-main
+# flag, keeps the seam open to future subagent roles. The default is exactly the
+# prior `AnthropicModel(model_name)`, so production is unchanged.
+ModelFactory = Callable[[str, AgentRole], Model]
 
 
-def _default_make_model(model_name: str, agent_id: str) -> Model:
+def _default_make_model(model_name: str, role: AgentRole) -> Model:
     return AnthropicModel(model_name)
 
 
@@ -175,7 +178,7 @@ def _build_subagent(
     the lead/measurement. The system prompt (`instructions`) + `model_name`
     specialize the instance into the gather (Sonnet)."""
     agent = Agent(
-        make_model(model_name, agent_id),
+        make_model(model_name, GatherDeps.role),
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
@@ -313,7 +316,7 @@ def build_agent(
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {_gather_model()}{_override}", file=sys.stderr)
     agent = Agent(
-        make_model(model_name, "main"),
+        make_model(model_name, RunDeps.role),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,

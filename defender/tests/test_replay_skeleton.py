@@ -146,12 +146,12 @@ def _normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
 
 def _drive(run_dir: Path, *, run_id: str, salt: str, main_model, gather_model=None):
     """Run the real driver with injected fake models — no monkeypatching of the
-    model symbol. `make_model` is the driver's DI seam; it dispatches on agent id
-    ("main" vs "gather:<lead>") so the main loop and a nested gather get distinct
-    fakes. `override_allow_model_requests(False)` makes any real provider call
-    raise, so the run is provably hermetic."""
-    def make_model(model_name, agent_id):
-        if gather_model is not None and agent_id != "main":
+    model symbol. `make_model` is the driver's DI seam; it dispatches on the
+    agent's `AgentRole` so the main loop and a nested gather get distinct fakes.
+    `override_allow_model_requests(False)` makes any real provider call raise, so
+    the run is provably hermetic."""
+    def make_model(model_name, role):
+        if gather_model is not None and role is not AgentRole.MAIN:
             return gather_model
         return main_model
 
