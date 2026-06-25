@@ -120,17 +120,7 @@ def cmd_query(config: dict[str, str], args: Any) -> int:
     if args.end:
         params["end"] = args.end
     result = _request(config, "/events", params)
-    hits = result.get("hits", []) if isinstance(result, dict) else result
-
-    if args.raw:
-        print_raw(SYSTEM, "/events", params, result)
-        return EXIT_OK
-
-    # Default output: a short summary plus a few sample rows. The gather
-    # subagent prefers --raw; humans read this.
-    print(f"{len(hits)} hit(s) for {args.query!r}")
-    for hit in hits[:5]:
-        print(f"  {json.dumps(hit)}")
+    print_raw(SYSTEM, "/events", params, result)
     return EXIT_OK
 
 

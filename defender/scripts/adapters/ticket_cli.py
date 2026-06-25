@@ -52,20 +52,7 @@ def cmd_list_tickets(args, config):
     if args.q:
         params["q"] = args.q
     payload = transport.http_get(config, "/tickets", params=params or None)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    tickets = payload.get("tickets", []) if isinstance(payload, dict) else []
-    total = payload.get("total", len(tickets)) if isinstance(payload, dict) else len(tickets)
-    print(f"total: {total}")
-    print(f"shown: {min(len(tickets), args.limit)}")
-    for t in tickets[: args.limit]:
-        print(
-            f"- {t.get('key', '?'):<14} "
-            f"status:{t.get('status', '?'):<10} "
-            f"labels:{','.join(t.get('labels') or []) or '—':<24} "
-            f"summary:{(t.get('summary') or '—')[:60]}"
-        )
+    print(json.dumps(payload))
 
 
 def cmd_get_ticket(args, config):
@@ -83,27 +70,7 @@ def cmd_get_ticket(args, config):
                 file=_sys.stderr,
             )
             _sys.exit(1)
-    if args.raw:
-        print(json.dumps(payload))
-        return
-    print(f"key: {payload.get('key', '?')}")
-    print(f"status: {payload.get('status', '?')}")
-    print(f"resolution: {payload.get('resolution', '—')}")
-    print(f"summary: {payload.get('summary', '—')}")
-    print(f"labels: {', '.join(payload.get('labels') or []) or '—'}")
-    print(f"created: {payload.get('created', '?')}")
-    print(f"updated: {payload.get('updated', '?')}")
-    desc = (payload.get("description") or "").strip()
-    if desc:
-        print()
-        print("description:")
-        print(desc)
-    comments = payload.get("comments") or []
-    if comments:
-        print()
-        print(f"comments ({len(comments)}):")
-        for c in comments:
-            print(f"  [{c.get('created', '?')}] {c.get('author', '?')}: {c.get('body', '')[:200]}")
+    print(json.dumps(payload))
 
 
 def build_parser():
@@ -120,7 +87,7 @@ def build_parser():
     lt.add_argument("--q", help="Substring on summary or description.")
     lt.add_argument(
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help=f"Cap rows shown in text mode (default {DEFAULT_LIST_LIMIT}).",
+        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
     lt.add_argument(
         "--require-closed", action="store_true",
