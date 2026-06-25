@@ -18,7 +18,7 @@ Retrieve a host's CMDB inventory record to inspect its declared outbound trust e
 ## Query
 
 ```
-${host}
+get-host ${host}
 ```
 
 ## Common pitfalls
