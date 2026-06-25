@@ -1,0 +1,73 @@
+{
+  "alert_id": "94f777794d60c7c8f112d07b455ed79a41d4f0a0e932fccd94ce0d9914997606",
+  "alert_timestamp": "2026-05-25T15:27:22.928Z",
+  "rule": {
+    "id": "v2-sshd-success-after-failures",
+    "name": "v2 sshd success after failures",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 65,
+    "tags": [
+      "v2",
+      "auth",
+      "ssh",
+      "correlation",
+      "brute-force-success"
+    ],
+    "description": "Successful sshd login on a host preceded by three or more failed password attempts on the same host within 10 minutes. The EQL sequence keys by host.name; same-user join would be more precise but the system.auth integration does not extract user.name from the sshd 'Failed password for X' message reliably across PAM and openssh log lines.",
+    "language": "eql",
+    "query": "sequence by host.name with maxspan=10m\n  [any where process.name == \"sshd\" and event.outcome == \"failure\"] with runs=3\n  [any where process.name == \"sshd\" and event.outcome == \"success\"]"
+  },
+  "reason": "authentication event with process sshd, source ::1 by dev.dana on office-ws-1 created high alert v2 sshd success after failures.",
+  "host": {
+    "hostname": "office-ws-1",
+    "containerized": false,
+    "ip": [
+      "172.18.0.14"
+    ],
+    "name": "office-ws-1",
+    "mac": [
+      "F6-9B-F9-D4-DE-F9"
+    ],
+    "architecture": "x86_64",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "jammy",
+      "name": "Ubuntu",
+      "type": "linux",
+      "family": "debian",
+      "version": "22.04.5 LTS (Jammy Jellyfish)",
+      "platform": "ubuntu"
+    }
+  },
+  "user": {
+    "name": "dev.dana"
+  },
+  "ancestor_events": [
+    {
+      "id": "AZ5fuw9rEmDJyXFcPn5t",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ5fuw9rEmDJyXFcPn5w",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ5fuw9rEmDJyXFcPn5z",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ5fuw9rEmDJyXFcPn51",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}

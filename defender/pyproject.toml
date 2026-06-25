@@ -28,6 +28,8 @@ runtime = [
 ]
 dev = [
     "pytest>=8.0",
+    "pytest-cov",
+    "coverage",
     "ruff",
     "vulture",
     "radon",
@@ -42,6 +44,7 @@ pythonpath = [".."]
 markers = [
     "llm: spawns a real claude -p subprocess (skip in CI with -m 'not llm')",
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
+    "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
 ]
 
 [tool.uv]

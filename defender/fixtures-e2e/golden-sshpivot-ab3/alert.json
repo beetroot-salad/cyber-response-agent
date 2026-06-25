@@ -1,0 +1,42 @@
+{
+  "alert_id": "43d6d7042a1400be4fcbba4359ee80d3bcc860844a7c6a433b6b61bb850643f4",
+  "alert_timestamp": "2026-05-25T13:53:35.193Z",
+  "rule": {
+    "id": "v2-cross-tier-ssh-pivot",
+    "name": "v2 cross-tier SSH pivot",
+    "type": "eql",
+    "severity": "high",
+    "risk_score": 73,
+    "tags": [
+      "v2",
+      "auth",
+      "lateral-movement",
+      "correlation"
+    ],
+    "description": "Successful sshd login on a workstation host (dev-ws-*, office-ws-*) followed within 15 minutes by an sshd authentication event (Accepted or Failed) on a prod-tier host (web-*, db-*, jump-box-*). Cross-tier lateral movement detector; alerts on the staging-then-pivot pattern in playground-v2/attacks/catalog.yaml cross-tier-ssh-probe.",
+    "language": "eql",
+    "query": "sequence with maxspan=15m\n  [any where (host.name like \"dev-ws-*\" or host.name like \"office-ws-*\") and process.name == \"sshd\" and event.outcome == \"success\"]\n  [any where (host.name like \"web-*\" or host.name like \"db-*\" or host.name like \"jump-box-*\") and process.name == \"sshd\" and event.outcome in (\"success\", \"failure\")]"
+  },
+  "reason": "authentication event with process sshd, by dev.dana created high alert v2 cross-tier SSH pivot.",
+  "host": {
+    "name": null
+  },
+  "user": {
+    "name": "dev.dana"
+  },
+  "ancestor_events": [
+    {
+      "id": "AZ5faQ9rEmDJyXEvHqWo",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    },
+    {
+      "id": "AZ5faQ9rEmDJyXFGHg20",
+      "type": "event",
+      "index": ".ds-logs-system.auth-default-2026.05.24-000002",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}
