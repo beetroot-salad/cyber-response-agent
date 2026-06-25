@@ -31,6 +31,7 @@ from collections.abc import Iterable
 
 from . import _walkers
 from .corpus import Companion
+from .schema import Conclude, FindingRecord, HypothesisRecord
 
 
 # ---------------------------------------------------------------------------
@@ -46,17 +47,17 @@ _WEIGHT_BUCKETS = ("++", "+", "-", "--")
 # Per-record helpers
 # ---------------------------------------------------------------------------
 
-def _hypothesis_name(h: dict[str, Any]) -> str:
+def _hypothesis_name(h: HypothesisRecord) -> str:
     return h.get("name", "") or ""
 
 
-def _all_hypotheses(c: Companion) -> Iterable[dict[str, Any]]:
+def _all_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
     """Hypothesize-block hypotheses plus any new_hypotheses spawned in leads
     (deduped by id; shared with the write-time validator via `_walkers`)."""
     return _walkers.all_hypotheses(c.body).values()
 
 
-def _lead_outcome_empty(lead: dict[str, Any]) -> bool:
+def _lead_outcome_empty(lead: FindingRecord) -> bool:
     """A lead is 'empty' when its analyzed observations carry no vertices and no
     edges. Defender's gather records payload-shape sidecars separately, but at
     the invlang level the observations block is the only signal we have.
@@ -65,7 +66,11 @@ def _lead_outcome_empty(lead: dict[str, Any]) -> bool:
     return not obs.get("vertices") and not obs.get("edges")
 
 
-def _conclude_field(conclude: dict[str, Any], *path: str) -> Any:
+# `conclude` is the `Conclude` TypedDict, but the helper walks a *dynamic*
+# string path (`conclude["termination"]["category"]`) — TypedDict indexing
+# needs literal keys, so the cursor stays `Any` to keep the dynamic `.get`
+# walk type-checking. The id-stripping behavior is unaffected.
+def _conclude_field(conclude: Conclude, *path: str) -> Any:
     cur: Any = conclude
     for key in path:
         if not isinstance(cur, dict):
@@ -257,7 +262,7 @@ def lead_branch_effects(
 
 
 def _accumulate_lead_effects(
-    lead: dict,
+    lead: FindingRecord,
     h_names: dict[str, str],
     hypothesis_patterns: tuple[str, ...],
     patterns_active: bool,
@@ -306,7 +311,9 @@ def _hyp_pattern_matches(name: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(name, p) for p in patterns)
 
 
-def _touched_hypothesis_names(lead: dict, h_names: dict[str, str]) -> set[str]:
+def _touched_hypothesis_names(
+    lead: FindingRecord, h_names: dict[str, str]
+) -> set[str]:
     """Hypothesis names this lead occurrence touched.
 
     Union of two sources: declared via `tests_hypotheses` (surfaces
@@ -366,7 +373,7 @@ def _compute_final_weights(c: Companion) -> dict[str, Any]:
 
 
 def _hypothesis_matches_shape(
-    h: dict,
+    h: HypothesisRecord,
     v_type: dict[str, str],
     *,
     parent_type: str | None,

@@ -64,6 +64,7 @@ from typing import Any
 
 from . import _walkers, vocab
 from .parser import INVLANG_FENCE_RE, parse_dense_companion
+from .schema import CompanionBody, EdgeRecord, VertexRecord
 
 # Only these observational-authority kinds can carry a ``++``/``--``
 # resolution (defender SKILL §Core blocks). Mirrors soc-agent edge
@@ -106,16 +107,17 @@ def _check_surface(proposed_text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _vertex_core(v: dict[str, Any]) -> tuple:
+def _vertex_core(v: VertexRecord) -> tuple:
     return (v.get("type"), v.get("classification"), v.get("identifier"))
 
 
-def _edge_core(e: dict[str, Any]) -> tuple:
+def _edge_core(e: EdgeRecord) -> tuple:
+    auth = e.get("authority")
     return (
         e.get("relation"),
         e.get("source_vertex"),
         e.get("target_vertex"),
-        (e.get("authority") or {}).get("kind"),
+        auth.get("kind") if auth else None,
     )
 
 
@@ -134,8 +136,8 @@ def _by_id_first(records, core_fn) -> dict[str, tuple]:
 def _check_append_only(
     proposed_text: str,
     current_text: str | None,
-    proposed: dict[str, Any] | None,
-    current: dict[str, Any] | None,
+    proposed: CompanionBody | None,
+    current: CompanionBody | None,
 ) -> list[str]:
     if current_text is None:
         return []
@@ -157,9 +159,10 @@ def _check_append_only(
     # later observations/attr_updates but its original declaration row must
     # not be rewritten or dropped. Catches in-fence mutation that the block
     # count misses.
+    proposed = proposed or CompanionBody()
     for label, records_cur, records_new, core_fn in (
-        ("vertex", _walkers.all_vertices(current), _walkers.all_vertices(proposed or {}), _vertex_core),
-        ("edge", _walkers.all_edges(current), _walkers.all_edges(proposed or {}), _edge_core),
+        ("vertex", _walkers.all_vertices(current), _walkers.all_vertices(proposed), _vertex_core),
+        ("edge", _walkers.all_edges(current), _walkers.all_edges(proposed), _edge_core),
     ):
         cur_idx = _by_id_first(records_cur, core_fn)
         new_idx = _by_id_first(records_new, core_fn)
@@ -185,12 +188,13 @@ def _check_append_only(
 # ---------------------------------------------------------------------------
 
 
-def _check_edge_authority(companion: dict[str, Any]) -> list[str]:
+def _check_edge_authority(companion: CompanionBody) -> list[str]:
     """A resolution reaching ``++``/``--`` must cite a strong-authority edge."""
     auth_by_edge: dict[str, str] = {}
     for e in _walkers.all_edges(companion):
         eid = e.get("id")
-        kind = (e.get("authority") or {}).get("kind")
+        auth = e.get("authority")
+        kind = auth.get("kind") if auth else None
         if isinstance(eid, str) and isinstance(kind, str):
             auth_by_edge[eid] = kind
 
@@ -233,7 +237,7 @@ def _check_vocab(value: Any, allowed: Any, errmsg: str) -> list[str]:
     return []
 
 
-def _check_vocab_vertices(companion: dict[str, Any]) -> list[str]:
+def _check_vocab_vertices(companion: CompanionBody) -> list[str]:
     """`type` slot on every vertex must be a known vertex type."""
     errors: list[str] = []
     for v in _walkers.all_vertices(companion):
@@ -246,7 +250,7 @@ def _check_vocab_vertices(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_vocab_edges(companion: dict[str, Any]) -> list[str]:
+def _check_vocab_edges(companion: CompanionBody) -> list[str]:
     """`relation` + observational `authority.kind` slots on every edge."""
     errors: list[str] = []
     for e in _walkers.all_edges(companion):
@@ -256,7 +260,8 @@ def _check_vocab_edges(companion: dict[str, Any]) -> list[str]:
             f"edge {e.get('id', '?')}: rel {rel!r} is not a known relation "
             f"(`enum relations`)",
         )
-        kind = (e.get("authority") or {}).get("kind")
+        auth = e.get("authority")
+        kind = auth.get("kind") if auth else None
         errors += _check_vocab(
             kind, vocab.AUTH_KINDS,
             f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "
@@ -265,7 +270,7 @@ def _check_vocab_edges(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_vocab_hypotheses(companion: dict[str, Any]) -> list[str]:
+def _check_vocab_hypotheses(companion: CompanionBody) -> list[str]:
     """Proposed parent vertices on hypotheses also carry a type + relation."""
     errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
@@ -285,7 +290,7 @@ def _check_vocab_hypotheses(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_vocab_anchor_kinds(companion: dict[str, Any]) -> list[str]:
+def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
     """anchor_kind on contracts and on authz resolutions."""
     errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
@@ -300,16 +305,16 @@ def _check_vocab_anchor_kinds(companion: dict[str, Any]) -> list[str]:
                 f"(`enum anchor-kinds`)",
             )
     for row in _walkers.iter_authz_resolutions(companion):
-        ak = row.get("anchor_kind")
+        row_ak = row.get("anchor_kind")
         errors += _check_vocab(
-            ak, vocab.ANCHOR_KINDS,
+            row_ak, vocab.ANCHOR_KINDS,
             f"authz resolution for contract {row.get('fulfills_contract', '?')}: "
-            f"anchor_kind {ak!r} is not known (`enum anchor-kinds`)",
+            f"anchor_kind {row_ak!r} is not known (`enum anchor-kinds`)",
         )
     return errors
 
 
-def _check_attr_update_keys(companion: dict[str, Any]) -> list[str]:
+def _check_attr_update_keys(companion: CompanionBody) -> list[str]:
     """`:R attr_updates` key grammar: only `class` or `attrs.<name>` (defender
     SKILL §Open-questions). A bare key (e.g. `provenance`) is silently
     dropped by the resolver, so reject it at write time rather than let it
@@ -333,7 +338,7 @@ def _check_attr_update_keys(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_closed_vocab(companion: dict[str, Any]) -> list[str]:
+def _check_closed_vocab(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
     errors += _check_vocab_vertices(companion)
     errors += _check_vocab_edges(companion)
@@ -362,7 +367,7 @@ def _has_open_slot(classification: Any) -> bool:
 
 
 def _seed_vertex_state(
-    companion: dict[str, Any], state: dict[str, dict[str, Any]]
+    companion: CompanionBody, state: dict[str, dict[str, Any]]
 ) -> None:
     """First pass — baseline per-vertex {classification, attributes} from the
     `:V` declarations themselves. First declaration wins as the baseline; a
@@ -390,7 +395,7 @@ def _seed_vertex_state(
 
 
 def _apply_attr_updates(
-    companion: dict[str, Any], state: dict[str, dict[str, Any]]
+    companion: CompanionBody, state: dict[str, dict[str, Any]]
 ) -> None:
     """Second pass — layer `:R attr_updates` on top of the baseline. Key
     ``class`` overrides classification; key ``attrs.<name>`` overrides an
@@ -414,7 +419,7 @@ def _apply_attr_updates(
 
 
 def _effective_vertex_state(
-    companion: dict[str, Any],
+    companion: CompanionBody,
 ) -> dict[str, dict[str, Any]]:
     """Per-vertex effective {classification, attributes} after attr_updates.
 
@@ -428,7 +433,7 @@ def _effective_vertex_state(
     return state
 
 
-def _check_benign_open_slots(companion: dict[str, Any]) -> list[str]:
+def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
     """(a) no unresolved ?? / {a,b} on any vertex (class or attribute)."""
     errors: list[str] = []
     for vid, st in _effective_vertex_state(companion).items():
@@ -448,7 +453,7 @@ def _check_benign_open_slots(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_benign_authz(companion: dict[str, Any]) -> list[str]:
+def _check_benign_authz(companion: CompanionBody) -> list[str]:
     """(b) every authz contract on a LIVE hypothesis resolved authorized.
     Survival is computed from final weights (`:T conclude` carries no
     sub-tables), so an unauthorized contract can't slip through by being
@@ -493,7 +498,7 @@ def _check_benign_authz(companion: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
+def _check_benign_gating(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
     if conclude.get("disposition") != "benign":
         return []
@@ -509,7 +514,7 @@ def _check_benign_gating(companion: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _check_loop_close(companion: dict[str, Any]) -> list[str]:
+def _check_loop_close(companion: CompanionBody) -> list[str]:
     """A `:T close loop=N` marks loop N complete (the per-loop compaction
     boundary). Block writing one that the fold must never honor:
 
@@ -566,7 +571,7 @@ def validate_companion(
     errors.extend(_check_surface(proposed_text))
 
     companion, warnings = parse_dense_companion(proposed_text)
-    current_companion: dict[str, Any] | None = None
+    current_companion: CompanionBody | None = None
     if current_text is not None:
         current_companion, _ = parse_dense_companion(current_text)
 
