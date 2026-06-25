@@ -153,8 +153,8 @@ def _build_subagent(
     instructions: str, model_name: str,
 ) -> Agent[GatherDeps, str]:
     """A nested subagent with the read-only slice of the generic tools (bash +
-    read_file; the bash tool auto-captures the gather's adapter calls under
-    `is_main_session=False`). `writers=False`: this subagent measures and returns a
+    read_file; the bash tool auto-captures the gather's adapter calls under the
+    `GATHER` role). `writers=False`: this subagent measures and returns a
     summary — it never authors investigation.md/report.md, so denying it
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
     the lead/measurement. The system prompt (`instructions`) + `model_name`

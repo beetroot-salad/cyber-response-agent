@@ -320,7 +320,7 @@ in `permission.py`.
 **What this means for the `permission.py` framework.** The "configurable
 per-agent gate" critique is right, but its primary axis is **read-scope /
 visibility**, not the adapter-handling that main-vs-gather differ on. The
-current `is_main_session` bool captures the adapter axis and is blind to the
+current `AgentRole` enum captures the adapter axis and is blind to the
 scope axis — and scope is what carries Phase C's value. So the framework
 should *not* be generalized against only main + gather (near-identical
 scopes); design the `Workspace`/scope abstraction when the **actor** lands
