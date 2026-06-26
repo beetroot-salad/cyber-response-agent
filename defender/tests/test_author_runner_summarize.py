@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.learning import _author_runner as runner
+from defender.learning.author import runner as runner
 
 
 @pytest.mark.parametrize("command", [None, "", "   ", "\n"])

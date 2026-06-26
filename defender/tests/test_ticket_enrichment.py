@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning import ticket_enrichment
+from defender.learning.tickets import ticket_enrichment
 from defender.scripts.case_history import case_ticket, ticket_writer
 from defender.scripts.case_history.ticket_writer import TicketWriterDeps
 

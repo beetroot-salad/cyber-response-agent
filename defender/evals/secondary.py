@@ -295,8 +295,20 @@ def ensure_worktree(pin: GenerationPin, repo_root: Path, worktrees_dir: Path | N
     return path
 
 
+def replay_script_path(worktree: Path) -> Path:
+    """Resolve the replay entrypoint in a (possibly older) pinned worktree.
+
+    The reorg moved it to ``learning/ops/replay_actor.py``; pre-reorg generations
+    still carry the flat ``learning/replay_actor.py``. Prefer the new location, fall
+    back to the legacy one so frozen gen-{N-K} worktrees across the boundary both run.
+    """
+    new = worktree / "defender" / "learning" / "ops" / "replay_actor.py"
+    legacy = worktree / "defender" / "learning" / "replay_actor.py"
+    return new if new.is_file() else legacy
+
+
 def worktree_has_replay_script(worktree: Path) -> bool:
-    return (worktree / "defender" / "learning" / "replay_actor.py").is_file()
+    return replay_script_path(worktree).is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +462,7 @@ def run_frozen_actor(
     proc = runner(
         [
             str(python),
-            str(worktree / "defender" / "learning" / "replay_actor.py"),
+            str(replay_script_path(worktree)),
             str(staging_dir),
             "--case-id", case_id,
         ],

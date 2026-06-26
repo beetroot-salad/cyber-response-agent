@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.learning import lead_author
+from defender.learning.leads import lead_author
 
 
 def _lead(

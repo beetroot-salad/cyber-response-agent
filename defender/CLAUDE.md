@@ -122,18 +122,27 @@ defender/
     case_history/         # case-ticket write path (case_ticket.py, ticket_writer.py)
     pricing.py            # model cost table — read live by runtime/observe.py for cost attribution (runtime dep, not analytics)
     workspace_map.py      # on-disk orientation injected by runtime/orient.py (message 0)
-  learning/             # offline learning loop — see §Learning loop below
-    lead_repository.py  # the single read/join surface over the two tables (leads + queries)
+  learning/             # offline learning loop — flow-oriented package tree; see §Learning loop below
     loop.py             # orchestrator CLI: <run_dir> (LEARN one) / --learn-drain (off-process worker) / --author-drain (serial commit)
-    actor.md            # adversarial counterfactual story
-    mitre_corpus.py     # hand-curated MITRE ATT&CK technique pool for actor-menu sampling
-    oracle.md           # telemetry oracle: per-lead synthesized events
-    judge.md            # outcome classifier + finding emitter
-    verify_forward.{md,py}     # forward-check gate (author-time: a candidate lesson must still resolve its own source case before it's committed)
-    author.{md,py}      # lessons curator: folds queued findings into defender/lessons/
-    author_branch.py    # serial author's git/gh: in-place branch off origin/main + writer lease + one PR per batch (injected runners)
-    trace_lesson.py     # lesson→outcome: which cases had a lesson in context since merge, + their dispositions
-    revert_lesson.py    # one-click lesson revert: opens a PR that git-rm's defender/lessons/<name>.md off origin/main
+    lead_repository.py  # the single read/join surface over the two tables (leads + queries)
+    pipeline/           # the per-case flow: actor → oracle → judge (each stage = prompt + driver)
+      malicious_actor/  # run.py (invoke_actor) + prompt.md (adversarial story) + mitre_corpus.py (ATT&CK menu pool)
+      benign_actor/     # run.py (invoke_actor_benign) + prompt.md (ops-teamer/FP story)
+      oracle/           # run.py (per-lead fan-out) + prompt.md + sample.py (redaction/parsing helpers)
+      judge/            # run.py (one wiring-parametrized driver) + malicious.md/benign.md prompts + compare.py (projection↔actual join)
+    author/             # findings → lessons curators (per author) + shared transaction machinery
+      curator.py runner.py shared.py branch.py   # the transaction envelope + git/gh (branch.py: branch off origin/main + writer lease + 1 PR/batch)
+      lessons/          # run.py + prompt.md — the main curator: folds queued findings into defender/lessons/
+      malicious_actor/  # run.py + prompt.md — adversarial-actor lessons curator (→ lessons-actor/)
+      benign_actor/     # run.py + prompt.md + env.py — environment-lessons curator (→ lessons-environment/)
+      verify_forward/   # forward.py/.md (author-time same-case regression gate) + actor.py/.md + env.py + shared.py + batch.py
+    core/               # cross-cutting plumbing (NOT the flow): the flow lives in pipeline/
+      runner.py         # the claude -p transport (shared by every stage)
+      subagents.py      # the Subagents port + ClaudePrintSubagents adapter (composes the pipeline invoke_* fns)
+      orchestrate.py config.py persist.py validate.py directions.py prologue.py
+    leads/              # offline lead-author sub-loop: lead_author.{py,md}, lead_classifier/neighbors/render.py
+    tickets/            # ticket_seeds.py + ticket_enrichment.py (case-history seeding/enrichment)
+    ops/                # trace_lesson.py (lesson→outcome) + revert_lesson.py (one-click revert PR) + replay_actor.py (frozen-gen replay)
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md
   evals/                # measurement layer (researcher-cadence; emits scores, not CI pass/fail) — see evals/README.md
     held_out.py         # primary metric: runtime disposition accuracy on labeled held-out alerts (= the loop's north star)
@@ -201,31 +210,31 @@ The serial AUTHOR stage (`--author-drain`) is what commits.
    selects which direction(s) run: `benign` → adversarial only (hunt the
    missed attack / FN), `malicious` → benign only (hunt the over-escalation /
    FP), `inconclusive` → both. Steps 2–7 below trace the **adversarial**
-   direction; the benign direction (`actor_benign.md` /
-   `author_actor_benign.py`) is its FP-hunting mirror.
+   direction; the benign direction (`pipeline/benign_actor/` /
+   `author/benign_actor/`) is its FP-hunting mirror.
 2. **Projects** the queries table to an actor-facing view
    (`lead_repository.actor_view` — queries only, no goal/what_to_summarize).
-3. **Actor** (`actor.md`, gray-box adversarial) — given alert + lead
+3. **Actor** (`pipeline/malicious_actor/`, gray-box adversarial) — given alert + lead
    set + `actor_archetype` (`internal`/`external`) + `mitre_menu` (a
-   12-technique subset sampled from `mitre_corpus.py`), writes a
+   12-technique subset sampled from `pipeline/malicious_actor/mitre_corpus.py`), writes a
    candidate attack story citing the techniques used in a Section 0
    table. Seed is derived from the run id so menu + archetype are
    reproducible per case. Can short-circuit with SKIP when no coherent
    story fits the menu — required when a causal step the story needs
    (e.g. initial access) has no covering technique to cite from it.
-4. **Telemetry oracle** (`oracle.md`) — synthesizes per-lead events
+4. **Telemetry oracle** (`pipeline/oracle/`) — synthesizes per-lead events
    the actor's story would have produced. Sits between actor and
    judge so the judge isn't grading its own imagination.
-5. **Judge** (`judge.md`) — classifies outcome
+5. **Judge** (`pipeline/judge/`) — classifies outcome
    (`caught | survived | undecidable | incoherent | skip-passthrough`)
    and emits findings.
 6. **Persist + queue** under `defender/learning/runs/`, append
    queueable findings to `_pending/findings.jsonl`.
    `detection-confirmed` findings are audit-only.
-7. **Author + forward-check** (`author.{md,py}`) — once `_pending`
+7. **Author + forward-check** (`author/lessons/`) — once `_pending`
    reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), the lessons curator
    folds findings into `defender/lessons/*.md`. After each lesson edit,
-   before committing, it runs the forward-check (`verify_forward.{md,py}`):
+   before committing, it runs the forward-check (`author/verify_forward/forward.{py,md}`):
    a same-case regression gate that re-runs the candidate lesson against
    its source-case transcript + ground-truth disposition and checks whether
    the agent, with the lesson loaded at PLAN, would still reach that
@@ -328,7 +337,8 @@ breaking changes through the PoC phase.
 | Per-system reference (what data the system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
 | Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` (the single join surface) |
-| Actor / oracle / judge / verify-forward / author prompts | `defender/learning/*.md` (paired with a `.py` driver in the same dir) |
+| Actor / oracle / judge prompts + drivers | the stage dir under `defender/learning/pipeline/<stage>/` (each holds `prompt.md` + `run.py`; judge has `malicious.md`/`benign.md`) |
+| Author / verify-forward prompts + drivers | the curator dir under `defender/learning/author/` (`lessons/`, `malicious_actor/`, `benign_actor/`, `verify_forward/`) |
 | Lessons corpus | `defender/lessons/*.md` (authored by the curator; hand-edits fine if they match `author.md`'s schema) |
 | Eval metrics / loop-eval scenarios | `defender/evals/` (`held_out.py`, `secondary.py`, the `harness*.py` + `scenarios*/`) |
 

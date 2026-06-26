@@ -8,8 +8,8 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 
-from defender.learning import verify_forward as vf  # type: ignore[import-not-found]
-from defender.learning import _verify_forward_shared as vfs  # type: ignore[import-not-found]
+from defender.learning.author.verify_forward import forward as vf  # type: ignore[import-not-found]
+from defender.learning.author.verify_forward import shared as vfs  # type: ignore[import-not-found]
 
 _PREFIX = "verify_forward"
 

@@ -36,7 +36,7 @@ alone. Design rationale: `defender/docs/learning-loop.md` §Secondary.
 
 `secondary.py` writes its summary + per-alert detail under
 `defender/evals/results/secondary/` (gitignored). It shells out to
-`defender/learning/replay_actor.py` inside a worktree pinned to gen-(N−K); that
+`defender/learning/ops/replay_actor.py` inside a worktree pinned to gen-(N−K); that
 script stays in `learning/` because the live loop uses it too.
 
 ## The harness-on-the-harness

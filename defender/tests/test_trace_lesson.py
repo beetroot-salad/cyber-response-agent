@@ -7,7 +7,7 @@ import sys
 from datetime import date, datetime, UTC
 from pathlib import Path
 
-TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "trace_lesson.py"
+TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "ops" / "trace_lesson.py"
 
 
 def _load():

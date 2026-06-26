@@ -33,16 +33,16 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning import lead_repository  # noqa: E402
-from defender.learning._loop_config import (  # noqa: E402
+from defender.learning.core.config import (  # noqa: E402
     DEFAULT_PATHS,
     LoopError,
     LoopPaths,
 )
-from defender.learning._loop_directions import (  # noqa: E402
+from defender.learning.core.directions import (  # noqa: E402
     ADVERSARIAL_WIRING,
     BENIGN_WIRING,
 )
-from defender.learning._loop_orchestrate import (  # noqa: E402
+from defender.learning.core.orchestrate import (  # noqa: E402
     author_drain,
     enqueue_for_learning,
     is_held_out,
@@ -52,7 +52,7 @@ from defender.learning._loop_orchestrate import (  # noqa: E402
     run_one,
     _directions_for,
 )
-from defender.learning._loop_persist import (  # noqa: E402
+from defender.learning.core.persist import (  # noqa: E402
     append_actor_environment_observations,
     append_actor_observations,
     append_environment_observations,
@@ -60,16 +60,16 @@ from defender.learning._loop_persist import (  # noqa: E402
     derive_alert_rule_key,
     _anchor_with_case_key,
 )
-from defender.learning._loop_subagents import (  # noqa: E402
+from defender.learning.core.subagents import (  # noqa: E402
     ClaudePrintSubagents,
     Subagents,
-    invoke_actor,
-    invoke_actor_benign,
-    invoke_judge,
-    invoke_oracle,
     is_skip_story,
 )
-from defender.learning._loop_validate import (  # noqa: E402
+from defender.learning.pipeline.malicious_actor.run import invoke_actor  # noqa: E402
+from defender.learning.pipeline.benign_actor.run import invoke_actor_benign  # noqa: E402
+from defender.learning.pipeline.oracle.run import invoke_oracle  # noqa: E402
+from defender.learning.pipeline.judge.run import invoke_judge  # noqa: E402
+from defender.learning.core.validate import (  # noqa: E402
     dump_oracle_doc,
     normalize_disposition,
     strip_yaml_fence,
@@ -77,7 +77,7 @@ from defender.learning._loop_validate import (  # noqa: E402
     validate_judge_doc,
     _outcome_keyword,
 )
-from defender.learning._prologue import extract_case_entities  # noqa: E402
+from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
     "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",

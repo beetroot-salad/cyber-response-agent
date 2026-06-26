@@ -136,7 +136,7 @@ def test_runner_spawn_seam_is_honored(tmp_path):
     import subprocess
     import sys as _sys
 
-    from defender.learning import _author_runner as runner
+    from defender.learning.author import runner as runner
 
     seen = {}
 

@@ -55,13 +55,20 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     """Build the temp working tree; return the scenario's run_dir inside it."""
     learning_dst = tmp / "defender" / "learning"
     learning_dst.mkdir(parents=True)
-    # Copy the learning scripts + prompts (top-level files only — the agent
-    # needs lead_author.{py,md} and its imported sibling modules). Copying,
-    # not symlinking, so lead_author's REPO_ROOT = parents[2] lands in tmp.
-    for path in sorted(REAL_LEARNING.glob("*.py")):
-        shutil.copy(path, learning_dst / path.name)
-    for path in sorted(REAL_LEARNING.glob("*.md")):
-        shutil.copy(path, learning_dst / path.name)
+    # Copy the learning scripts + prompts, preserving the reorganized subtree so
+    # lead_author lands at leads/lead_author.py and its imported sibling modules
+    # resolve. Copying, not symlinking, so lead_author's REPO_ROOT = parents[3]
+    # lands in tmp. Skip generated/state/frontend trees.
+    _SKIP = {"__pycache__", "_pending", "_pending_leads", "runs", "frontend", "judge-alignment"}
+    for path in sorted(REAL_LEARNING.rglob("*")):
+        if path.suffix not in (".py", ".md"):
+            continue
+        rel = path.relative_to(REAL_LEARNING)
+        if set(rel.parts) & _SKIP:
+            continue
+        dst = learning_dst / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(path, dst)
 
     # The real query catalog (the thing under curation).
     shutil.copytree(
@@ -104,7 +111,7 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     # (env already carries any inherited LEAD_AUTHOR_MODEL via the copy above).
     env.setdefault("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
     return _run(
-        [str(venv_py), str(tmp / "defender" / "learning" / "lead_author.py"), str(run_dir)],
+        [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],
         cwd=tmp, env=env, check=False,
     )
 

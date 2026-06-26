@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
+from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 
 # Reference ``shared.AuthorError`` live (not a module-level alias): a sibling test's
 # ``tmp_repo`` fixture reloads ``_author_shared``, which rebinds the class — a captured

@@ -45,12 +45,13 @@ REAL_LEARNING = HERE.parent / "learning"    # .../defender/learning
 REAL_REPO_ROOT = REAL_LEARNING.parents[1]  # workspace root (worktree)
 RESULTS_DIR = HERE / "results"
 
-# Files the temp tree needs as symlinks into the real script set.
+# Files the temp tree needs (copied, not symlinked) into the real script set,
+# at their post-reorg relative paths so the copied entry's REPO_ROOT lands in tmp.
 LEARNING_LINKS = [
-    "author.py",
-    "author.md",
-    "verify_forward.py",
-    "verify_forward.md",
+    "author/lessons/run.py",
+    "author/lessons/prompt.md",
+    "author/verify_forward/forward.py",
+    "author/verify_forward/forward.md",
 ]
 
 
@@ -62,8 +63,10 @@ def materialize(scenario: Path, tmp: Path) -> None:
     # Copy learning scripts + prompts. Symlinks would break author.py's
     # REPO_ROOT computation (Path(__file__).resolve() follows the symlink).
     learning_dir = tmp / "defender" / "learning"
-    for name in LEARNING_LINKS:
-        shutil.copy(REAL_LEARNING / name, learning_dir / name)
+    for rel in LEARNING_LINKS:
+        dst = learning_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(REAL_LEARNING / rel, dst)
 
     # Copy findings.jsonl.
     src_findings = scenario / "findings.jsonl"
@@ -91,7 +94,7 @@ def run_author(tmp: Path) -> tuple[subprocess.CompletedProcess, float]:
     import time
     t0 = time.monotonic()
     proc = _run(
-        [str(venv_py), str(tmp / "defender" / "learning" / "author.py")],
+        [str(venv_py), str(tmp / "defender" / "learning" / "author" / "lessons" / "run.py")],
         cwd=tmp, env=env, check=False,
     )
     return proc, time.monotonic() - t0

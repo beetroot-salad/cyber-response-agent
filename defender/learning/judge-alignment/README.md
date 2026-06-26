@@ -1,6 +1,6 @@
 # Judge-alignment dataset
 
-Synthetic judge inputs for validating `defender/learning/judge.md` against human
+Synthetic judge inputs for validating `defender/learning/pipeline/judge/malicious.md` against human
 labels. Each batch (`batch_NN.md`) is a self-contained markdown file with 3
 samples; each sample bundles the four artifacts the judge sees (alert,
 investigation excerpt, actor story, projected telemetry) plus the human-expected

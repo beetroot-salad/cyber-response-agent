@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning import lead_author  # type: ignore[import-not-found]
-from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
+from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
 
 def _deps(tmp_path: Path, **overrides):

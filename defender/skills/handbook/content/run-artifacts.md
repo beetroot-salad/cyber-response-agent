@@ -33,7 +33,7 @@ writable scratch space.
   input alert. It carries a `held_out` flag plus the fixture's true
   `disposition` / `class_axes` / `rationale`; the learning loop's persist
   stage uses it to recognize held-out cases and **suppress queue appends**, so
-  eval / held-out runs don't feed the authored corpus (`learning/author_actor.py`,
+  eval / held-out runs don't feed the authored corpus (`learning/author/malicious_actor/run.py`,
   `evals/held_out.py`). Absent for unlabeled runs.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See

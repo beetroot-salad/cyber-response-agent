@@ -35,13 +35,13 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
 
 
 # ---------------------------------------------------------------------------
-# Enum drift guard — the local copy must track defender.learning._loop_config.
+# Enum drift guard — the local copy must track defender.learning.core.config.
 # (The test may import learning; the production write path must not.)
 # ---------------------------------------------------------------------------
 
 
 def test_disposition_enum_matches_loop_config():
-    from defender.learning._loop_config import DISPOSITION_ENUM as canonical
+    from defender.learning.core.config import DISPOSITION_ENUM as canonical
 
     assert canonical == case_ticket.DISPOSITION_ENUM
 
@@ -49,7 +49,7 @@ def test_disposition_enum_matches_loop_config():
 def test_seed_eligible_outcomes_subset_of_outcome_enum():
     # The seed-eligibility polarity is keyed off the adversarial outcome enum;
     # the local copy must stay a subset of the canonical OUTCOME_ENUM.
-    from defender.learning._loop_config import OUTCOME_ENUM
+    from defender.learning.core.config import OUTCOME_ENUM
 
     assert case_ticket._SEED_ELIGIBLE_OUTCOMES <= OUTCOME_ENUM
 
