@@ -150,7 +150,7 @@ def _drive(run_dir: Path, *, run_id: str, salt: str, main_model, gather_model=No
     agent's `AgentRole` so the main loop and a nested gather get distinct fakes.
     `override_allow_model_requests(False)` makes any real provider call raise, so
     the run is provably hermetic."""
-    def make_model(model_name, role):
+    def make_model(role):
         if gather_model is not None and role is not AgentRole.MAIN:
             return gather_model
         return main_model

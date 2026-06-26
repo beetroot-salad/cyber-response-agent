@@ -151,34 +151,46 @@ def _gather_model() -> str:
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
-# Model-construction seam: tests inject a fake model (pydantic-ai's FunctionModel)
-# by passing `make_model` instead of patching the AnthropicModel symbol. Called
-# with the resolved model name + the agent's `AgentRole` (sourced from the deps
-# type's `role` ClassVar — the same value the permission gate keys on, so model
-# and gate dispatch can't drift). Keying on the role enum, not a main/not-main
-# flag, keeps the seam open to future subagent roles. The default is exactly the
-# prior `AnthropicModel(model_name)`, so production is unchanged.
-ModelFactory = Callable[[str, AgentRole], Model]
+# Model-construction seam: tests inject fake models (pydantic-ai's FunctionModel)
+# by passing `make_model` instead of patching the AnthropicModel symbol. The
+# factory is keyed on `AgentRole` ALONE — the role is the single discriminator,
+# sourced from each deps type's `role` ClassVar (the same value the permission
+# gate reads, so model and gate dispatch can't drift) — and it owns the
+# role->model policy, so build sites never thread a model name. A new subagent
+# role adds a branch here, not a name parameter through four signatures.
+ModelFactory = Callable[[AgentRole], Model]
 
 
-def _default_make_model(model_name: str, role: AgentRole) -> Model:
-    return AnthropicModel(model_name)
+def _make_default_factory(main_model_name: str) -> ModelFactory:
+    """The production model factory: MAIN runs `main_model_name` (run.py's
+    `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
+    gather model (`_gather_model()`; Sonnet, `$DEFENDER_GATHER_MODEL` overrides).
+    Tests replace the whole factory; production is the prior AnthropicModel build."""
+    def make(role: AgentRole) -> Model:
+        name = main_model_name if role is AgentRole.MAIN else _gather_model()
+        return AnthropicModel(name)
+    return make
+
+
+# Default for direct `build_*` callers without an explicit main-model override:
+# resolve the main model from the environment (run.py's flagless path).
+def _env_make_model(role: AgentRole) -> Model:
+    return _make_default_factory(os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL)(role)
 
 
 def _build_subagent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
-    instructions: str, model_name: str,
-    make_model: ModelFactory = _default_make_model,
+    instructions: str, make_model: ModelFactory = _env_make_model,
 ) -> Agent[GatherDeps, str]:
     """A nested subagent with the read-only slice of the generic tools (bash +
     read_file; the bash tool auto-captures the gather's adapter calls under the
     `GATHER` role). `writers=False`: this subagent measures and returns a
     summary — it never authors investigation.md/report.md, so denying it
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
-    the lead/measurement. The system prompt (`instructions`) + `model_name`
-    specialize the instance into the gather (Sonnet)."""
+    the lead/measurement. The system prompt (`instructions`) + the factory's
+    GATHER-role model specialize the instance into the gather (Sonnet)."""
     agent = Agent(
-        make_model(model_name, GatherDeps.role),
+        make_model(GatherDeps.role),
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
@@ -195,16 +207,16 @@ def _gather_instructions(defender_dir: Path) -> str:
 
 def build_gather_agent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
-    make_model: ModelFactory = _default_make_model,
+    make_model: ModelFactory = _env_make_model,
 ) -> Agent[GatherDeps, str]:
     """The single-agent gather (#340) — the production gather for the
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
-    split). Loads `skills/gather/SKILL.md`. Model is `_gather_model()`
-    (Sonnet; `DEFENDER_GATHER_MODEL` overrides)."""
+    split). Loads `skills/gather/SKILL.md`. The factory resolves the GATHER-role
+    model (`_gather_model()`; Sonnet, `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _gather_instructions(defender_dir),
-        _gather_model(), make_model,
+        make_model,
     )
 
 
@@ -303,8 +315,8 @@ def _make_compaction_processor():
 
 
 def build_agent(
-    model_name: str, defender_dir: Path, logger: observe.RequestLogger,
-    make_model: ModelFactory = _default_make_model,
+    defender_dir: Path, logger: observe.RequestLogger,
+    make_model: ModelFactory = _env_make_model,
 ) -> Agent[RunDeps, str]:
     capabilities: list[Hooks[Any] | ProcessHistory[Any]] = [_make_hooks(logger, "main")]
     if _compaction_enabled():
@@ -316,7 +328,7 @@ def build_agent(
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {_gather_model()}{_override}", file=sys.stderr)
     agent = Agent(
-        make_model(model_name, RunDeps.role),
+        make_model(RunDeps.role),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,
@@ -353,12 +365,13 @@ async def run_investigation(
     defender_dir: Path,
     salt: str,
     model_name: str | None = None,
-    make_model: ModelFactory = _default_make_model,
+    make_model: ModelFactory | None = None,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary."""
     model_name = model_name or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
+    make_model = make_model or _make_default_factory(model_name)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    agent = build_agent(model_name, defender_dir, logger, make_model)
+    agent = build_agent(defender_dir, logger, make_model)
     deps = RunDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt,
