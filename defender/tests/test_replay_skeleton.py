@@ -187,11 +187,16 @@ def test_replay_golden_v2sshd(tmp_path):
     # 1. The loop replayed our script exactly (3 model requests).
     assert replay.calls == 3, f"expected 3 model turns, got {replay.calls}"
 
-    # 2. investigation.md passed the REAL invlang gate and is byte-identical to
-    #    the golden (characterization of the write path + validator).
+    # 2. investigation.md was written byte-for-byte (the write path is faithful) AND
+    #    independently re-validates clean through the live invlang gate. The byte
+    #    compare alone is near-tautological (write_file is verbatim); the explicit
+    #    validate_companion is the load-bearing check that the golden passes the
+    #    REAL validator — without it, stubbing the validator to a pass-through would
+    #    still leave this test green.
     produced_inv = (run_dir / "investigation.md").read_text()
     assert _normalize(produced_inv, run_dir=run_dir, salt=salt, run_id=run_id) == \
            _normalize(inv_text, run_dir=run_dir, salt=salt, run_id=run_id)
+    assert validate_companion(produced_inv, None) == []
 
     # 3. report.md present + disposition parses (the learning-loop's headline).
     m = re.search(r"^disposition:\s*(\w+)", (run_dir / "report.md").read_text(), re.M)

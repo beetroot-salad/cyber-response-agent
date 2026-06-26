@@ -144,14 +144,16 @@ defender/
   lessons/              # checked-in pitfall lessons, authored by the loop, read by the runtime agent at PLAN time
   fixtures/             # alert.json + (optionally) gather_raw payloads, used as inputs
   run-transcripts/      # curated transcripts of past runs (real alerts)
-  tests/                # learning-loop guarantees not enforced by hooks
+  tests/                # learning-loop guarantees + hermetic runtime e2e replay (test_replay_*)
   docs/                 # design docs (learning-loop, system-skill-shape, experiment notes)
 ```
 
-The runtime agent has no unit tests — it's evaluated by running real
-alerts through `defender/run.py` and reviewing the run dir.
-`defender/tests/` covers learning-loop invariants (lesson schema,
-author pre/post-flight, atomic writes, forward-check).
+The runtime agent has no *unit* tests — its behavior is evaluated by
+running real alerts through `defender/run.py` and reviewing the run dir,
+plus a hermetic e2e replay suite (`defender/tests/test_replay_skeleton.py`,
+run with `-m e2e`). `defender/tests/` covers learning-loop invariants
+(lesson schema, author pre/post-flight, atomic writes, forward-check) and
+that runtime replay harness.
 
 ## Python environment
 
