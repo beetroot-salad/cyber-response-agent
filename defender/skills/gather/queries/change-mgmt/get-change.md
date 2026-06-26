@@ -19,7 +19,7 @@ Fetches full details of a specific change request by CR ID. Use after identifyin
 ## Query
 
 ```
-change-mgmt_cli.py get-change ${cr_id}
+get-change ${cr_id}
 ```
 
 ## Common pitfalls

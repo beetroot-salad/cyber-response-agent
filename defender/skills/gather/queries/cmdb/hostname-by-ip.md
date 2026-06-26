@@ -12,12 +12,14 @@ Look up a CMDB inventory record by IP address. Use to determine whether an obser
 - hostname and role of the IP owner (when record found)
 - host criticality and owner team
 - `trust_edges_out` list (declared authorized outbound targets)
-- whether the IP is registered (found vs. HTTP 404)
+- whether the resolved host is registered in CMDB (found vs. HTTP 404)
 
 ## Query
 
 ```
-${ip}
+# CMDB is keyed by hostname and stores no IP field — there is no by-IP lookup.
+# Resolve ${ip} → hostname first via elastic.ip-to-host-search, then bind it here:
+get-host ${host}
 ```
 
 ## Common pitfalls

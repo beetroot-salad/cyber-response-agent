@@ -18,7 +18,7 @@ Lists change requests whose change window is active at a specific point in time 
 ## Query
 
 ```
-change-mgmt_cli.py active-changes ${host} ${at}
+active-changes --host ${host} --at ${at}
 ```
 
 ## Common pitfalls

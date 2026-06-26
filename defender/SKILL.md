@@ -375,6 +375,16 @@ you have actually worked (≥1 committed finding); a loop you have merely
 planned cannot be closed. The final loop goes to REPORT instead — it gets
 `:T conclude`, not `:T close`.
 
+**Append, don't re-navigate.** `investigation.md` grows append-only —
+ORIENT, then one PLAN + ANALYZE block per loop, each landed at the end of
+the file. You author every line, so its current content is already in your
+context: never `Read`, `grep`, `tail`, or `wc` `investigation.md` to
+re-find an anchor or confirm state. Land each block with one Edit that
+appends after the previous block's closing marker (the prior loop's
+`:T close (loop N)` line is a unique, stable anchor for the next PLAN).
+An Edit/Write that returns no error committed exactly as written — there
+is nothing to verify by reading it back.
+
 If a lead resolved a legitimacy contract declared in `:H h-NNN.authz`,
 write the outcome as a `:R authz` row — not as `:R attr_updates`. One
 row per contract closed; the `fulfills` column names the `ac<n>` from

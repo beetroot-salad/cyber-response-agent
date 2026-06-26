@@ -18,7 +18,7 @@ Lists change requests by status for a given host, or across all hosts when no ho
 ## Query
 
 ```
-change-mgmt_cli.py list-changes ${host} ${status}
+list-changes --host ${host} --status ${status}
 ```
 
 ## Common pitfalls
