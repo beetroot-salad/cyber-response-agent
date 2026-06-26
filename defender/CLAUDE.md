@@ -164,6 +164,19 @@ run with `-m e2e`). `defender/tests/` covers learning-loop invariants
 (lesson schema, author pre/post-flight, atomic writes, forward-check) and
 that runtime replay harness.
 
+**Terminology — "frontend".** When the user says *frontend* / *the
+visualizations* / *the HTML pages*, they mean the runtime's rendered HTML
+output, **not** any web app (there is none). Two builders produce it:
+
+- `scripts/visualize/` — the per-run renderer (`visualize_run.py` + the
+  `data`/`judge`/`primitives`/`runtime` modules). `run.py` invokes it as a
+  post-step to emit two self-contained pages into the run dir:
+  `transcript.html` (judge/eval view, default landing) and `runtime.html`
+  (defender-run inspection: top-fold analysis/metrics + a searchable
+  chronological transcript over `llm_requests.jsonl`). The default referent.
+- `learning/frontend/` — `build.py` → the standalone `lessons.html` posture
+  view over the three lesson corpora.
+
 ## Python environment
 
 Defender has its own venv at `defender/.venv` (declared by
