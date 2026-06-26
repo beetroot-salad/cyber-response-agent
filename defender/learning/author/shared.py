@@ -359,11 +359,10 @@ def commit_corpus(
     The agent authors lesson content + a commit message but runs no git: the loop is the
     **sole committer**. The ``git commit`` is **pathspec-scoped** to the corpus
     (``-- <corpus_dir>``): staging alone does not bound a commit — a plain index-global
-    ``git commit`` sweeps in whatever else sits staged in the shared worktree (e.g. a
-    sibling author's ``_draft/`` deposits from ``lead_author._stage_pending_drafts``), so
-    the pathspec is what keeps anything *outside* the corpus out of the lesson commit.
-    Returns the new sha, or ``None`` when the agent authored nothing (empty index → no
-    commit).
+    ``git commit`` sweeps in whatever else sits staged in the batch worktree (e.g. a sibling
+    curator's own corpus edits earlier in the same drain), so the pathspec is what keeps
+    anything *outside* this corpus out of the commit. Returns the new sha, or ``None`` when
+    the agent authored nothing (empty index → no commit).
 
     When ``trailers`` is given (the actor/env curators pass ``Generation:`` /
     ``{trailer_label}:``), the loop owns that provenance — it already computes both values,

@@ -74,8 +74,23 @@ class LoopPaths:
         return self.repo_root / "defender" / "skills"
 
     @property
+    def worktree_base(self) -> Path:
+        # Repo-local scratch where each author drain creates its throwaway batch
+        # worktree (one leaf dir per batch; see author/branch.py). Repo-relative
+        # so a tmp-tree test resolves it under its own root.
+        return self.repo_root / ".worktrees"
+
+    @property
     def _state_root(self) -> Path:
         return self.state_dir if self.state_dir is not None else self.learning_dir
+
+    def with_repo_root(self, repo_root: Path) -> LoopPaths:
+        """A copy rooted at a different ``repo_root`` (e.g. an author batch worktree)
+        that keeps this layout's *resolved* state dir. So the corpus/catalog dirs move
+        to the worktree (where the curator edits + the loop commits) while the queues,
+        locks, and pending files stay at the shared original location — the markers
+        being drained live there, not in the throwaway worktree."""
+        return LoopPaths(repo_root=repo_root, state_dir=self._state_root)
 
     @property
     def runs_dir(self) -> Path:
@@ -112,6 +127,14 @@ class LoopPaths:
         # holds this so a second drainer exits, while the curators it calls can
         # still take author_lock_file without a same-process deadlock.
         return self._state_root / ".author-drain.lock"
+
+    @property
+    def lead_author_drain_lock_file(self) -> Path:
+        # The lead-author drain's own one-drainer-at-a-time lock, distinct from
+        # author_drain_lock_file so the lessons drain and the lead-author drain
+        # are independently scheduled. Each drain runs in its own git worktree,
+        # so they need no cross-drain lock — this only serializes same-type ticks.
+        return self._state_root / ".lead-author-drain.lock"
 
     @property
     def pending_file(self) -> Path:
