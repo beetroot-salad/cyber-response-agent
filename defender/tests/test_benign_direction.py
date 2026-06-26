@@ -11,9 +11,9 @@ import pytest
 REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"  # source dir for file-path refs
 
-from defender.learning import author  # type: ignore[import-not-found]
+from defender.learning.author.lessons import run as author  # type: ignore[import-not-found]
 from defender.learning import loop  # type: ignore[import-not-found]
-from defender.learning import verify_forward  # type: ignore[import-not-found]
+from defender.learning.author.verify_forward import forward as verify_forward  # type: ignore[import-not-found]
 
 
 # --------------------------------------------------------------------------
@@ -389,7 +389,7 @@ def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
 import subprocess  # noqa: E402
 
 RETRIEVE = REAL_REPO / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
-VERIFY_ENV = LEARNING_SRC / "verify_forward_env.py"
+VERIFY_ENV = LEARNING_SRC / "author" / "verify_forward" / "env.py"
 VENV_PY = REAL_REPO / "defender" / ".venv" / "bin" / "python3"
 _PY = str(VENV_PY) if VENV_PY.is_file() else sys.executable
 
@@ -430,7 +430,7 @@ def test_retrieve_skips_empty_anchor_on_rule_query(tmp_path: Path) -> None:
 # (P2-b / #1), not the observation's own selectors.
 # --------------------------------------------------------------------------
 
-from defender.learning import verify_forward_env  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning.author.verify_forward import env as verify_forward_env  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _make_source_run(tmp_path: Path, prologue_rows: str) -> Path:
@@ -558,13 +558,13 @@ def test_validate_judge_doc_rejects_non_string_resolution_method() -> None:
 
 
 def test_wiring_closed_ticket_read_flag() -> None:
-    from defender.learning._loop_directions import ADVERSARIAL, BENIGN
+    from defender.learning.core.directions import ADVERSARIAL, BENIGN
     assert BENIGN.judge_wiring.closed_ticket_read is True
     assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
 
 
 def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: Path) -> None:
-    from defender.learning import _loop_comparison as lc
+    from defender.learning.pipeline.judge import compare as lc
     gather_raw, comp = tmp_path / "gather_raw", tmp_path / "comparison_benign"
     base = lc.judge_settings_dict(gather_raw, comp)
     allow_base = base["permissions"]["allow"]
@@ -584,7 +584,7 @@ def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: 
 
 
 def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> None:
-    from defender.learning import _loop_subagents as su
+    from defender.learning.pipeline.judge import run as su
     run_dir = tmp_path / "20260620T0000Z-sshd"
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_text(
@@ -615,7 +615,7 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
 
 
 def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -> None:
-    from defender.learning import _loop_subagents as su
+    from defender.learning.pipeline.judge import run as su
     run_dir = tmp_path / "case-adv"
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))

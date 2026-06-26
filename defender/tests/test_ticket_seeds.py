@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, UTC
 
 import pytest
 
-from defender.learning import ticket_seeds
+from defender.learning.tickets import ticket_seeds
 from defender.scripts.case_history import case_ticket
 
 

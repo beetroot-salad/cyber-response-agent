@@ -21,10 +21,10 @@ import yaml
 # Each resolves to one module instance, and the engine's repo root, repo lock, and
 # generation counters all flow through the injected ``CuratorConfig`` — no ``shared.*``
 # module globals to patch (#389).
-from defender.learning import _author_curator as curator  # type: ignore[import-not-found]
-from defender.learning import _author_shared as shared  # type: ignore[import-not-found]
-from defender.learning import author_actor as aa  # type: ignore[import-not-found]
-from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
+from defender.learning.author import curator as curator  # type: ignore[import-not-found]
+from defender.learning.author import shared as shared  # type: ignore[import-not-found]
+from defender.learning.author.malicious_actor import run as aa  # type: ignore[import-not-found]
+from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
 # Reference ``shared.AuthorError`` live rather than a captured module-level alias:
 # every author module binds ``AuthorError = _shared.AuthorError`` once at import, so the

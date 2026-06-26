@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import subprocess
 
-from defender.learning import _author_curator as curator
-from defender.learning import author_actor_benign as aenv
-from defender.learning import author_actor_env
-from defender.learning._loop_config import LoopPaths
+from defender.learning.author import curator as curator
+from defender.learning.author.benign_actor import run as aenv
+from defender.learning.author.benign_actor import env as author_actor_env
+from defender.learning.core.config import LoopPaths
 
 
 def _rows() -> list[dict]:
@@ -52,7 +52,7 @@ def test_configs_are_distinct() -> None:
     assert b.outcome_author == frozenset({"survived"})
     assert a.outcome_author == frozenset({"caught", "incoherent"})
     # the adversarial entry point delegates with the adversarial config.
-    assert author_actor_env.run_batch.__module__ == "defender.learning.author_actor_env"
+    assert author_actor_env.run_batch.__module__ == "defender.learning.author.benign_actor.env"
 
 
 def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:

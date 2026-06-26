@@ -29,12 +29,12 @@ from typing import Any
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 
-# Mirrors defender.learning._loop_config.DISPOSITION_ENUM. Defined locally so the
+# Mirrors defender.learning.core.config.DISPOSITION_ENUM. Defined locally so the
 # write path carries no `defender.learning` import (the runtime/learning decoupling
 # goal of #317); test_case_ticket asserts the two stay in sync.
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
-# The adversarial-probe outcomes (defender.learning._loop_config.OUTCOME_ENUM) that
+# The adversarial-probe outcomes (defender.learning.core.config.OUTCOME_ENUM) that
 # make a benign-disposed case a SAFE cover-story seed. Polarity is load-bearing: the
 # benign case ran the *adversarial* leg (hunt the missed attack), so `survived` means
 # the attack got through = the defender MISSED it = a poisonous seed → excluded. Only

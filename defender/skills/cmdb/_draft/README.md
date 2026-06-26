@@ -61,5 +61,5 @@ scans for drafts on every tick and, once the queue depth crosses
 `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD` (default 5), folds accepted
 content into `defender/skills/cmdb/SKILL.md` (action: **lift**)
 or removes the draft (action: **discard**). The decision procedure
-lives in `defender/learning/lead_author.md` §"Pending system-skill
+lives in `defender/learning/leads/lead_author.md` §"Pending system-skill
 drafts".

@@ -1,7 +1,7 @@
 """Composite-kind classifier — pin the v1 inference rules."""
 from __future__ import annotations
 
-from defender.learning import lead_classifier  # type: ignore[import-not-found]
+from defender.learning.leads import lead_classifier  # type: ignore[import-not-found]
 
 
 def _entry(position: int, queries: list[dict]) -> dict:

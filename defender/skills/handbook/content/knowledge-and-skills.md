@@ -66,7 +66,7 @@ runtime agent reads** — the two ends of the feedback loop.
 - **Consumed at PLAN.** The runtime agent enumerates the frontmatter, then
   Reads the bodies whose `description` looks relevant to the current alert,
   before writing its `:H`/`:L` blocks.
-- **Authored by the loop.** The lessons curator (`learning/author.py`) folds
+- **Authored by the loop.** The lessons curator (`learning/author/lessons/run.py`) folds
   queued findings into `lessons/` once `_pending` crosses the threshold (see
   `content/learning-loop.md`). Hand-edits are fine if they match
   `author.md`'s schema, but the corpus is meant to be loop-authored.

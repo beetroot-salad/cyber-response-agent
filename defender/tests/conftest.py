@@ -23,7 +23,7 @@ LEARNING_SRC = REAL_REPO / "defender" / "learning"
 # [tool.pytest.ini_options], so `defender.*` namespace imports resolve. Note that
 # learning/ is intentionally NOT on the path: a bare `import author` must fail
 # loudly so a missed migration surfaces instead of silently creating a second
-# module object (defender.learning.author vs author) that monkeypatch misses.
+# module object (defender.learning.author.lessons.run vs author) that monkeypatch misses.
 
 
 @pytest.fixture
@@ -39,17 +39,20 @@ def tmp_repo(tmp_path: Path):
     (repo / "defender" / "lessons").mkdir(parents=True)
     (repo / "defender" / "lessons" / ".gitkeep").write_text("")
 
-    # Copy learning module so author.py / verify_forward.py / *.md exist
-    # at the same relative paths as in the real repo.
-    for name in (
-        "author.py",
-        "author.md",
-        "_author_shared.py",
-        "_author_runner.py",
-        "verify_forward.py",
-        "verify_forward.md",
+    # Copy the author entry + verifier (and prompts) so they exist at the same
+    # relative paths as the real (reorganized) repo — git tracks them and the
+    # author resolves its prompt/verifier commands off these paths.
+    for rel in (
+        "author/lessons/run.py",
+        "author/lessons/prompt.md",
+        "author/shared.py",
+        "author/runner.py",
+        "author/verify_forward/forward.py",
+        "author/verify_forward/forward.md",
     ):
-        shutil.copy2(LEARNING_SRC / name, repo / "defender" / "learning" / name)
+        dst = repo / "defender" / "learning" / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LEARNING_SRC / rel, dst)
 
     def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -74,8 +77,8 @@ def tmp_repo(tmp_path: Path):
     run_git("add", "-A")
     run_git("commit", "-q", "-m", "init")
 
-    from defender.learning import author as author_mod  # type: ignore[import-not-found]
-    from defender.learning._loop_config import LoopPaths  # type: ignore[import-not-found]
+    from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
+    from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
     # No importlib.reload: every module binds `AuthorError = _shared.AuthorError` once
     # at import and never rebinds, so a single stable class object lives for the whole
