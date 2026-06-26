@@ -49,7 +49,14 @@ jobs:
 
       - name: Sync defender venv
         working-directory: defender
-        run: uv sync --extra dev
+        # --extra runtime: mypy (below) type-checks the whole `defender` tree,
+        # including runtime/, against the REAL pydantic-ai types. Without it,
+        # ignore_missing_imports collapses every pydantic_ai type to `Any`, so the
+        # runtime layer's annotations (ModelFactory, Model, Agent[…]) are
+        # unchecked — defeating the #403 mypy gate there. The Anthropic+MCP stack
+        # is the cost; the `code-smells` job stays dev-only (its AST gates don't
+        # import the tree).
+        run: uv sync --extra dev --extra runtime
 
       # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
       # clean repo-wide; extra rule sets are reported in the code-smells job.
