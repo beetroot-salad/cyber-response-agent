@@ -474,6 +474,25 @@ def _drain_curators(
             )
 
 
+def _discard_worktree_changes(repo_root: Path) -> None:
+    """Discard every uncommitted change in the batch worktree so one marker's leftover
+    edits can't leak into the next (the lead-author batch shares a single worktree across
+    all its markers). A marker that succeeded already committed its corpus delta, so this
+    is a no-op for it; a marker that failed the scope gate (quarantined) or exited
+    non-zero leaves uncommitted edits that — left in place — would either be swept into
+    the next marker's pathspec commit or falsely trip its scope gate. Safe because the
+    worktree is throwaway and committed markers persist in HEAD; ``clean -fd`` (no ``-x``)
+    leaves gitignored state (e.g. ``runs/``) untouched. Best-effort: a missing worktree
+    (the fake-branch test path has no real checkout) or a git error is suppressed."""
+    if not (repo_root / ".git").exists():
+        return  # no real worktree here (e.g. the _FakeBranch test path) — nothing to reset
+    for args in (["reset", "--hard", "--quiet"], ["clean", "-fdq"]):
+        subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True, text=True, check=False,
+        )
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[[LoopPaths, Path], None],
@@ -481,7 +500,11 @@ def _drain_lead_author_markers(
     """The lead-author drain's work: lead-author each queued run dir, committing in
     ``paths.repo_root`` (a batch worktree). The queue + quarantine dir resolve off the
     shared state root, so markers are drained from (and quarantined to) the original
-    location, not the throwaway worktree."""
+    location, not the throwaway worktree.
+
+    The batch worktree is shared across markers, so after each marker we discard any
+    uncommitted leftovers (``_discard_worktree_changes``) — a failed/quarantined marker
+    must not contaminate the next one's commit or gate."""
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
     _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
@@ -502,8 +525,13 @@ def _drain_lead_author_markers(
             # marker): quarantine it and move on to the remaining work.
             _quarantine_marker(spec, marker, paths.author_queue_dir, f"lead-author-error: {e!r}")
             continue
-        with contextlib.suppress(OSError):
-            marker.unlink()
+        else:
+            with contextlib.suppress(OSError):
+                marker.unlink()
+        finally:
+            # Always leave the shared worktree clean for the next marker — committed work
+            # survives, uncommitted leftovers (a quarantined or rc!=0 marker) are dropped.
+            _discard_worktree_changes(paths.repo_root)
 
 
 def _validate_merge_mode() -> None:

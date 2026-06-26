@@ -917,6 +917,60 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     assert "head:lead-author/" in lease
 
 
+def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
+    """The batch worktree is shared across all markers, so a marker that fails the scope
+    gate leaves uncommitted dirt that must NOT bleed into the next marker. The drain
+    discards the worktree's uncommitted changes between markers, so the second marker sees
+    a clean tree (and can neither inherit the first's leftover edit nor be falsely
+    quarantined by it). Uses a real git repo as the worktree (the _FakeBranch path has no
+    .git and short-circuits the reset)."""
+    wt = tmp_path / "wt"
+    catalog = wt / "defender" / "skills" / "gather" / "queries" / "wazuh"
+    catalog.mkdir(parents=True)
+    (catalog / "auth-events.md").write_text("---\nstatus: established\n---\n")
+    _real(wt, "init", "-q", "-b", "main")
+    _real(wt, "config", "user.email", "t@e.com")
+    _real(wt, "config", "user.name", "T")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "seed")
+
+    # repo_root=worktree, state_dir elsewhere — mirrors LoopPaths.with_repo_root, so the
+    # queue/quarantine live outside the worktree the reset operates on.
+    paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
+    poison = tmp_path / "runs" / "case-a-poison"  # sorts before "case-b-good" → runs first
+    good = tmp_path / "runs" / "case-b-good"
+    poison.mkdir(parents=True)
+    good.mkdir(parents=True)
+    orch._enqueue_for_authoring(poison, paths)
+    orch._enqueue_for_authoring(good, paths)
+
+    clean_at_entry: dict[str, bool] = {}
+
+    def run_lead_author(p, rd: Path) -> None:
+        st = _subprocess.run(
+            ["git", "-C", str(p.repo_root), "status", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        clean_at_entry[rd.name] = st.stdout.strip() == ""
+        if rd.name == "case-a-poison":
+            # delete an established template and raise: the marker is quarantined and its
+            # uncommitted deletion is left behind in the shared worktree.
+            (p.repo_root / "defender" / "skills" / "gather" / "queries"
+             / "wazuh" / "auth-events.md").unlink()
+            raise RuntimeError("scope-gate boom")
+
+    orch._drain_lead_author_markers(paths, run_lead_author)
+
+    assert clean_at_entry["case-a-poison"] is True   # first marker starts on a clean tree
+    assert clean_at_entry["case-b-good"] is True      # reset wiped the poison's leftover
+    # worktree ends clean — the poison's deletion was discarded, not left dangling
+    end = _subprocess.run(["git", "-C", str(wt), "status", "--porcelain"],
+                          capture_output=True, text=True)
+    assert end.stdout.strip() == ""
+    assert (paths.author_queue_dir / "failed" / "case-a-poison.json").exists()  # quarantined
+    assert not (paths.author_queue_dir / "case-b-good.json").exists()           # consumed
+
+
 # ---------------------------------------------------------------------------
 # Off-process LEARN worker — learn-queue marker + learn_drain
 # ---------------------------------------------------------------------------

@@ -64,8 +64,9 @@ def _lessons_pr_title(batch_id: str) -> str:
 
 def _lessons_pr_body(branch: str) -> str:
     return (
-        "Automated lessons/templates batch from the serial author drain "
-        f"(branch `{branch}`, off freshly-fetched `{_BRANCH_BASE}`)."
+        "Automated lessons batch from the lessons author drain "
+        f"(branch `{branch}`, off freshly-fetched `{_BRANCH_BASE}`). Touches "
+        "`defender/lessons/` only — distinct from the lead-author PR."
     )
 
 
