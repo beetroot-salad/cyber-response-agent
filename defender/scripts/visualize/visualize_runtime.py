@@ -363,6 +363,7 @@ def render_runtime_toc(
     <li class="item phase-nav phase-nav-top"><a href="#top"><span class="pn-tag">↑</span>top</a></li>
     {phase_links}
     <li class="section">Sections</li>
+    <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
     <li class="item"><a href="#sec-investigation">investigation</a></li>
     <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>

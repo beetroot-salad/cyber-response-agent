@@ -139,13 +139,15 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-def render_header(case_id: str, active: str, byline: str) -> str:
+def render_header(case_id: str, active: str, byline: str, stats_html: str = "") -> str:
     judge_active = " active" if active == "judge" else ""
     runtime_active = " active" if active == "runtime" else ""
+    stats = f'<div class="top-stats">{stats_html}</div>' if stats_html else ""
     return f"""
 <header class="top">
   <div class="top-row">
     <h1>defender run: {esc(case_id)}</h1>
+    {stats}
     <nav class="tabs">
       <a class="tab{judge_active}" href="{JUDGE_FILENAME}">Judge eval</a>
       <a class="tab{runtime_active}" href="{RUNTIME_FILENAME}">Runtime inspection</a>
@@ -211,14 +213,12 @@ def render_runtime_headline(
     run_dir: Path,
     report: dict,
     health: dict,
-    attribution: dict[str, dict],
-    phase_order: list[str],
-    wall_times: dict[str, dict],
-    totals: dict,
     leads: list,
 ) -> str:
-    """The top fold: an ANALYSIS card (disposition + execution health + report +
-    lead summary) beside a METRICS card (total cost / wall + per-phase bars)."""
+    """The top fold: a single full-width ANALYSIS card (disposition + execution
+    health + report + lead summary) that owns the first screen. The run totals
+    (cost / wall) sit in the header top bar; the per-phase bars + tool usage live
+    in the § Metrics section below the fold (``render_runtime_metrics``)."""
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
     body = report.get("body", "").strip() or "(no report body)"
@@ -233,6 +233,35 @@ def render_runtime_headline(
         f'<span class="health health-{esc(health["level"])}">{icon} {esc(health["label"])}</span>{detail}'
     )
 
+    return f"""
+<section class="headline headline-runtime">
+  <div class="fold fold-single">
+    <div class="fold-card card-analysis">
+      <div class="card-label">analysis</div>
+      <div class="an-top">
+        <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
+        <span class="an-conf">confidence: {esc(confidence)}</span>
+      </div>
+      <div class="an-health">{health_html}</div>
+      <div class="an-report">{esc(body)}</div>
+      <div class="an-leads">{_lead_summary(leads)}</div>
+    </div>
+  </div>
+</section>
+"""
+
+
+def render_runtime_metrics(
+    attribution: dict[str, dict],
+    phase_order: list[str],
+    wall_times: dict[str, dict],
+    tools: list[dict],
+    totals: dict,
+    health: dict,
+) -> str:
+    """§ Metrics — the per-phase cost / wall bars + a tool-usage breakdown. Lives
+    below the analysis fold; the headline numbers (total cost / wall) are in the
+    header top bar."""
     cost_bar = _phase_bar(
         {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
         phase_order, lambda v: f"${v:.3f}",
@@ -246,31 +275,30 @@ def render_runtime_headline(
     )
     foot = f'loops {health["loops"]} · turns {health["turns"]} · {totals.get("tool_calls", 0)} tool calls'
 
+    if tools:
+        max_n = max((t["count"] for t in tools), default=1) or 1
+        rows: list[str] = []
+        for t in tools:
+            warn = f'<span class="tu-warn">⚠{t["retries"]}</span>' if t.get("retries") else ""
+            pct = t["count"] / max_n * 100
+            rows.append(
+                f'<div class="tu-row"><span class="tu-name">{esc(t["tool"])}</span>'
+                f'<span class="tu-track"><span class="tu-fill" style="width:{pct:.1f}%"></span></span>'
+                f'<span class="tu-count">{t["count"]}{warn}</span></div>'
+            )
+        tools_html = f'<div class="tu-list">{"".join(rows)}</div>'
+    else:
+        tools_html = '<div class="empty">(no tool calls)</div>'
+
     return f"""
-<section class="headline headline-runtime">
-  <div class="fold">
-    <div class="fold-card card-analysis">
-      <div class="card-label">analysis</div>
-      <div class="an-top">
-        <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
-        <span class="an-conf">confidence: {esc(confidence)}</span>
-      </div>
-      <div class="an-health">{health_html}</div>
-      <div class="an-report">{esc(body)}</div>
-      <div class="an-leads">{_lead_summary(leads)}</div>
-    </div>
-    <div class="fold-card card-metrics">
-      <div class="card-label">metrics</div>
-      <div class="me-top">
-        <span class="me-cost">${totals.get("cost", 0.0):.4f}</span>
-        <span class="me-wall">{fmt_duration(totals.get("wall_ms", 0))}</span>
-      </div>
-      <div class="me-models">{model_bits}</div>
-      <div class="me-bar-row"><span class="me-bar-label">cost</span><div class="cost-bar">{cost_bar}</div></div>
-      <div class="me-bar-row"><span class="me-bar-label">wall</span><div class="cost-bar">{wall_bar}</div></div>
-      <div class="me-foot">{esc(foot)}</div>
-    </div>
-  </div>
+<section id="sec-metrics" class="stage stage-defender">
+  <h2>§ Metrics <span class="stage-sub">— per-phase cost / wall + tool usage</span></h2>
+  <div class="me-models">{model_bits}</div>
+  <div class="me-bar-row"><span class="me-bar-label">cost</span><div class="cost-bar">{cost_bar}</div></div>
+  <div class="me-bar-row"><span class="me-bar-label">wall</span><div class="cost-bar">{wall_bar}</div></div>
+  <h3>tool usage</h3>
+  {tools_html}
+  <div class="me-foot">{esc(foot)}</div>
 </section>
 """
 
@@ -389,6 +417,11 @@ header.top {
 }
 .top-row { display: flex; align-items: center; gap: 24px; }
 header.top h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-bright); flex-shrink: 0; }
+/* Run totals, promoted into the top bar from the old metrics card. */
+.top-stats { display: flex; gap: 10px; align-items: baseline; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.top-stats .ts-cost { font-size: 17px; font-weight: 700; color: var(--text-bright); }
+.top-stats .ts-wall { font-size: 14px; font-weight: 600; color: var(--text); }
+.top-stats .ts-sep { color: var(--text-dim); opacity: 0.6; }
 nav.tabs { display: flex; gap: 4px; margin-left: auto; }
 nav.tabs .tab {
   padding: 8px 16px;
@@ -872,6 +905,8 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 /* start-aligned: each card is its own natural height, so the shorter metrics
    card doesn't get stretched to match analysis (which left dead space below). */
 .fold { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+/* Single full-width card (the analysis fold, now that metrics moved below). */
+.fold-single { grid-template-columns: 1fr; }
 .fold-card {
   position: relative;
   padding: 14px 16px 12px;
@@ -911,13 +946,19 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .lead-mini.expanded .lead-mini-goal { overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; }
 .lead-dead { color: var(--warn); font-weight: 700; }
 
-.me-top { display: flex; gap: 20px; align-items: baseline; margin-bottom: 2px; }
-.me-cost { font-size: 24px; font-weight: 700; color: var(--text-bright); font-family: 'SF Mono', Menlo, Consolas, monospace; }
-.me-wall { font-size: 17px; font-weight: 600; color: var(--text); font-family: 'SF Mono', Menlo, Consolas, monospace; }
 .me-models { font-size: 12px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-bottom: 8px; }
 .me-bar-row { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; margin-top: 8px; }
 .me-bar-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; text-align: right; font-family: 'SF Mono', Menlo, Consolas, monospace; }
-.me-foot { font-size: 12px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-top: 10px; }
+.me-foot { font-size: 12px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-top: 14px; }
+
+/* Tool-usage breakdown in § Metrics: name · proportional bar · count. */
+.tu-list { display: flex; flex-direction: column; gap: 5px; max-width: 620px; margin-top: 4px; }
+.tu-row { display: grid; grid-template-columns: 160px 1fr 64px; gap: 12px; align-items: center; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; }
+.tu-name { color: var(--code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tu-track { background: var(--bg-3); border: 1px solid var(--border-2); border-radius: 3px; height: 14px; overflow: hidden; }
+.tu-fill { display: block; height: 100%; background: var(--accent-defender); }
+.tu-count { color: var(--text); text-align: right; }
+.tu-warn { color: var(--warn); margin-left: 5px; }
 
 .phase-stats .ps-gather { color: var(--accent-learning); margin-left: 6px; }
 
@@ -1200,8 +1241,19 @@ def render_runtime_page(run_dir: Path) -> str:
     investigation_html, phases = render_runtime_investigation(
         run_dir, attribution, wall_times, raw_phases
     )
+    metrics_html = render_runtime_metrics(
+        attribution, phase_order, wall_times, tools, totals, health
+    )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
+
+    # Run totals now headline the top bar (was the metrics card); the bars moved
+    # to § Metrics below the fold.
+    stats_html = (
+        f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
+        f'<span class="ts-sep">·</span>'
+        f'<span class="ts-wall">{fmt_duration(totals.get("wall_ms", 0))}</span>'
+    )
 
     byline_parts = []
     if md["started"]:
@@ -1214,11 +1266,12 @@ def render_runtime_page(run_dir: Path) -> str:
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
-{render_header(case_id, active="runtime", byline=byline)}
-{render_runtime_headline(run_dir, report, health, attribution, phase_order, wall_times, totals, leads)}
+{render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
+{render_runtime_headline(run_dir, report, health, leads)}
 <div class="layout">
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases)}
   <article class="content">
+    {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}
     {transcript_html}

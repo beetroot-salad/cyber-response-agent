@@ -231,14 +231,17 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     html = render_runtime_page(run)
 
-    for marker in ("card-analysis", "card-metrics", "sec-transcript", "sec-leads", "tx-chip", "disp-badge"):
+    for marker in (
+        "card-analysis", "top-stats", "sec-metrics", "tu-row",
+        "sec-transcript", "sec-leads", "tx-chip", "disp-badge",
+    ):
         assert marker in html, f"missing {marker}"
 
     # leads & queries table has the ran lead and the dead-end lead
     assert "elastic.ssh-auth" in html
     assert "dead-end lead" in html
 
-    # headline cost == sum of the cost-bar $ segments
-    headline = float(re.search(r'me-cost">\$([0-9.]+)', html).group(1))
+    # top-bar total cost == sum of the § Metrics cost-bar $ segments
+    headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
     segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
     assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"
