@@ -1,12 +1,19 @@
 """Runtime view sections (runtime.html).
 
-Mirrors the agent's working surface: investigation.md split per ``##
-PHASE`` header with cost / wall / tool-count stats, a per-phase
-inner-events expander that filters tool_trace.jsonl down to the
-events tagged to that phase, gather subagent panels paired with
-their gather_raw/ payloads, and the on-disk lead sequence + report
-card. Raw stream-json events sit collapsed at the bottom. The footer
-lists any concurrent lesson-author commits.
+The defender-run *inspection* page. Above the fold (composed in
+``visualize_run.py``) sit the analysis + metrics cards; this module renders the
+drill-down below it:
+
+  - § Investigation — investigation.md split per ``## PHASE`` header, each with
+    its corrected cost / wall / tool-count stats (the narrative reading).
+  - § Transcript — a searchable, filterable, chronological main-agent transcript
+    built from ``llm_requests.jsonl`` (turns, tool calls + their results, gate
+    retries), with the tool-usage stats doubling as click-to-filter chips.
+  - § Leads & queries — the two-table data trail, read from
+    ``lead_repository.joined`` (NOT scraped from the lossy trace).
+
+The footer lists any concurrent lesson-author commits. A sticky phase sidebar
+(``render_runtime_toc``) navigates the chronological transcript.
 """
 from __future__ import annotations
 
@@ -16,13 +23,12 @@ import re
 import subprocess
 from pathlib import Path
 
+from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
-    extract_main_subagents,
-    merge_assistant_events,
     normalize_phase_names,
-    result_totals,
+    phase_color,
+    phase_verb,
     split_investigation_phases,
-    subagent_cost_by_task,
 )
 from defender.scripts.visualize.visualize_primitives import (
     REPO_ROOT,
@@ -30,14 +36,23 @@ from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
     pre_text,
-    render_event,
-    render_lead_sequence_compact,
-    render_report_card,
 )
 
 
+def _short_phase(name: str | None) -> str:
+    """Compact gutter/sidebar tag: ``GATHER (loop 1)`` → ``G1``, ``ORIENT`` → ``OR``."""
+    if not name:
+        return ""
+    verb = phase_verb(name)
+    abbr = {"ORIENT": "OR", "PLAN": "P", "GATHER": "G", "ANALYZE": "A", "REPORT": "RP"}.get(
+        verb, verb[:2].title()
+    )
+    m = re.search(r"loop (\d+)", name)
+    return f"{abbr}{m.group(1)}" if m else abbr
+
+
 # ---------------------------------------------------------------------------
-# Investigation phase blocks
+# Investigation phase blocks (the narrative reading of investigation.md)
 # ---------------------------------------------------------------------------
 
 
@@ -45,9 +60,13 @@ def render_runtime_investigation(
     run_dir: Path,
     attribution: dict[str, dict] | None = None,
     wall_times: dict[str, dict] | None = None,
-    inner_events_by_phase: dict[str, str] | None = None,
+    phases: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
-    phases = normalize_phase_names(split_investigation_phases(run_dir))
+    # ``phases`` may be passed by a caller that already split investigation.md
+    # (the same normalize_phase_names(split_investigation_phases(run_dir))), to
+    # avoid re-reading and re-parsing the file; ``None`` computes it here.
+    if phases is None:
+        phases = normalize_phase_names(split_investigation_phases(run_dir))
     if not phases:
         body = '<div class="empty">no investigation.md or empty</div>'
         return (
@@ -64,8 +83,7 @@ def render_runtime_investigation(
         stats = (attribution or {}).get(ph["name"])
         wall = (wall_times or {}).get(ph["name"])
         stats_html = _phase_stats_html(stats, wall) if stats else ""
-        inner_html = (inner_events_by_phase or {}).get(ph["name"], "")
-        body_html = stats_html + f'<pre class="text invlang">{esc(ph["body"])}</pre>' + inner_html
+        body_html = stats_html + f'<pre class="text invlang">{esc(ph["body"])}</pre>'
         blocks.append(block("phase", ph["name"], body_html, open_=True, anchor=ph["anchor"]))
     return (
         f"""
@@ -81,35 +99,21 @@ def render_runtime_investigation(
 def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     if not stats:
         return ""
-    pieces = [
-        f'<span class="ps-cost">${stats["cost"]:.4f}</span>',
-    ]
+    pieces = [f'<span class="ps-cost">${stats["cost"]:.4f}</span>']
+    if stats.get("gather_cost"):
+        pieces.append(f'<span class="ps-gather">(incl gather ${stats["gather_cost"]:.4f})</span>')
     if wall and wall.get("duration_sec"):
         pieces += [
             '<span class="ps-sep">·</span>',
             f'<span class="ps-wall">{fmt_duration(wall["duration_sec"] * 1000)}</span>',
         ]
-    pieces += [
-        '<span class="ps-sep">·</span>',
-        f'<span>{stats["turns"]} turn(s)</span>',
-    ]
+    pieces += ['<span class="ps-sep">·</span>', f'<span>{stats["turns"]} turn(s)</span>']
     tc = stats.get("tool_counts") or {}
     if tc:
-        hist = " ".join(f'{name}×{count}' for name, count in sorted(tc.items(), key=lambda kv: -kv[1]))
-        pieces += [
-            '<span class="ps-sep">·</span>',
-            f'<span class="ps-hist">{esc(hist)}</span>',
-        ]
+        hist = " ".join(f"{name}×{count}" for name, count in sorted(tc.items(), key=lambda kv: -kv[1]))
+        pieces += ['<span class="ps-sep">·</span>', f'<span class="ps-hist">{esc(hist)}</span>']
     else:
-        pieces += [
-            '<span class="ps-sep">·</span>',
-            f'<span>{stats["tool_calls"]} tool call(s)</span>',
-        ]
-    if stats.get("subagent_calls"):
-        pieces += [
-            '<span class="ps-sep">·</span>',
-            f'<span>{stats["subagent_calls"]} subagent(s)</span>',
-        ]
+        pieces += ['<span class="ps-sep">·</span>', f'<span>{stats["tool_calls"]} tool call(s)</span>']
     pieces += [
         '<span class="ps-sep">·</span>',
         f'<span class="ps-tok">in {stats["in"]:,} / out {stats["out"]:,}'
@@ -118,272 +122,250 @@ def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     return f'<div class="phase-stats">{"".join(pieces)}</div>'
 
 
-def _merged_assistant_in_phase(
-    events: list[dict], tags: list[str | None], phase: str
-) -> dict[str | None, dict]:
-    """The merged assistant messages whose *post-advance* phase (the last per-event
-    tag for the message id) is ``phase``, keyed by message id. A turn that writes
-    "## ORIENT" lands in ORIENT rather than the prior phase."""
-    msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant" or ph is None:
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-        if mid:
-            msg_phase[mid] = ph
-
-    merged_all = merge_assistant_events(events)
-    return {
-        ((m.get("message") or {}).get("id") or m.get("uuid")): m
-        for m in merged_all
-        if msg_phase.get((m.get("message") or {}).get("id") or m.get("uuid") or "") == phase
-    }
+# ---------------------------------------------------------------------------
+# Transcript: searchable, filterable, chronological (main agent)
+# ---------------------------------------------------------------------------
 
 
-def _collect_phase_events(
-    events: list[dict],
-    tags: list[str | None],
-    phase: str,
-    merged_in_phase: dict[str | None, dict],
-) -> list[dict]:
-    """Walk the stream in order, collecting the merged assistant turns (deduped by
-    id) and user events (tool_results) tagged to ``phase``."""
-    out: list[dict] = []
-    emitted: set[str | None] = set()
-    for ev, ph in zip(events, tags, strict=False):
-        if ph != phase:
-            continue
-        t = ev.get("type")
-        if t == "assistant":
-            mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-            if mid in emitted or mid not in merged_in_phase:
-                continue
-            out.append(merged_in_phase[mid])
-            emitted.add(mid)
-        elif t == "user":
-            out.append(ev)
-    return out
+def render_runtime_transcript(
+    entries: list[dict],
+    tools: list[dict],
+    phases: list[dict],
+) -> tuple[str, int, set[str]]:
+    """The § Transcript section: a filter toolbar, the tool-usage filter chips,
+    and the chronological entry stream.
+
+    Returns ``(html, n_entries, anchored_phases)`` — ``anchored_phases`` is the
+    set of phase names that actually received a ``tx-{anchor}`` target, so the
+    sidebar can route only those into the transcript and fall back to the
+    investigation block for phases the transcript never rendered (e.g. a
+    preamble, or a phase whose header-introducing turn was tagged to a later
+    phase by last-tag-wins)."""
+    phase_anchor = {ph["name"]: ph["anchor"] for ph in phases}
+    anchored: set[str] = set()
+
+    chips: list[str] = []
+    for t in tools:
+        warn = f'<span class="chip-err">⚠{t["retries"]}</span>' if t.get("retries") else ""
+        chips.append(
+            f'<button type="button" class="tx-chip" data-tool="{esc(t["tool"])}">'
+            f'{esc(t["tool"])}<span class="chip-n">×{t["count"]}</span>{warn}</button>'
+        )
+    chips_html = "".join(chips) or '<span class="empty">(no tool calls)</span>'
+
+    if not entries:
+        rows_html = (
+            '<div class="empty">llm_requests.jsonl not found — transcript unavailable '
+            '(older run, or the run is still in flight)</div>'
+        )
+    else:
+        seen_phase: set[str] = set()
+        rows: list[str] = []
+        for e in entries:
+            ph = e.get("phase")
+            anchor_attr = ""
+            if ph and ph not in seen_phase:
+                seen_phase.add(ph)
+                a = phase_anchor.get(ph)
+                if a:
+                    anchor_attr = f' id="tx-{esc(a)}"'
+                    anchored.add(ph)
+            rows.append(_render_tx_entry(e, anchor_attr))
+        rows_html = "".join(rows)
+
+    return (
+        f"""
+<section id="sec-transcript" class="stage stage-defender">
+  <h2>§ Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
+  <div class="tx-toolbar">
+    <input type="search" class="tx-search" placeholder="search transcript…" aria-label="search transcript">
+    <select class="tx-type" aria-label="filter by type">
+      <option value="">all types</option>
+      <option value="assistant">assistant turns</option>
+      <option value="tool_result">tool results</option>
+      <option value="retry">gate retries</option>
+    </select>
+    <label class="tx-errtoggle"><input type="checkbox" class="tx-errors"> errors only</label>
+    <button type="button" class="tx-clear">clear</button>
+  </div>
+  <div class="tx-chips">{chips_html}</div>
+  <div class="tx-stream">{rows_html}</div>
+  <div class="tx-noresults empty" hidden>no entries match the current filter</div>
+</section>
+""",
+        len(entries),
+        anchored,
+    )
 
 
-def render_phase_inner_events(
-    events: list[dict],
-    tags: list[str | None],
-    phase: str,
-) -> str:
-    """Collapsible per-phase event log: assistant turns + tool_results tagged to this phase.
+def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
+    kind = e["kind"]
+    phase = e.get("phase") or ""
+    verb = phase_verb(phase)
+    tag = (
+        f'<span class="tx-phasetag" style="color:{phase_color(verb)}">{esc(_short_phase(phase))}</span>'
+    )
+    data_tools = " ".join(e.get("tools") or [])
 
-    Assistant events are merged across stream-json deltas so a turn
-    that issued three parallel ``Task`` calls renders as a single block
-    containing all three. User events (tool_results) interleave in
-    chronological order.
+    if kind == "assistant":
+        meta = f'{e["out_tokens"]:,} tok'
+        if e.get("duration_ms"):
+            meta += " · " + fmt_duration(e["duration_ms"])
+        if e.get("model"):
+            meta += " · " + esc(e["model"])
+        body: list[str] = []
+        for t in e.get("texts") or []:
+            if t and t.strip():
+                body.append(f'<div class="tx-text">{esc(t)}</div>')
+        for th in e.get("thinks") or []:
+            if th and th.strip():
+                body.append(block("tx-think", "thinking", pre_text(th)))
+        for c in e.get("calls") or []:
+            body.append(
+                f'<details class="block tx-call"><summary>→ {esc(c["tool"])}</summary>'
+                f'<div class="body">{pre_text(c["args"])}</div></details>'
+            )
+        inner = "".join(body) or '<div class="empty">(no content)</div>'
+        return (
+            f'<div class="tx-entry tx-assistant"{anchor_attr} data-kind="assistant" '
+            f'data-phase="{esc(phase)}" data-tools="{esc(data_tools)}">'
+            f'<div class="tx-gutter"><span class="tx-turn">#{e.get("turn", "")}</span>{tag}</div>'
+            f'<div class="tx-body"><div class="tx-head">'
+            f'<span class="tx-role">assistant</span> <span class="tx-meta">{meta}</span></div>'
+            f"{inner}</div></div>"
+        )
 
-    A merged assistant message is bucketed by the *post-advance* phase
-    of the message (the last per-event tag for its id), so a turn that
-    writes "## ORIENT" lands in ORIENT rather than the prior phase.
-    """
-    merged_in_phase = _merged_assistant_in_phase(events, tags, phase)
-    if not merged_in_phase and not any(
-        ev.get("type") == "user" and ph == phase for ev, ph in zip(events, tags, strict=False)
-    ):
-        return ""
+    if kind == "tool_result":
+        content = e.get("content") or ""
+        head = f'<span class="tx-role">← {esc(e.get("tool", "?"))}</span> <span class="tx-meta">{len(content):,} chars</span>'
+        inner = (
+            block("tx-resultbody", "result", pre_text(content), open_=len(content) <= 400)
+            if content
+            else '<div class="empty">(empty result)</div>'
+        )
+        return (
+            f'<div class="tx-entry tx-result"{anchor_attr} data-kind="tool_result" '
+            f'data-phase="{esc(phase)}" data-tool="{esc(e.get("tool", ""))}" data-tools="{esc(data_tools)}">'
+            f'<div class="tx-gutter">{tag}</div>'
+            f'<div class="tx-body"><div class="tx-head">{head}</div>{inner}</div></div>'
+        )
 
-    out = _collect_phase_events(events, tags, phase, merged_in_phase)
-    if not out:
-        return ""
-    rendered = "\n".join(render_event(e) for e in out)
-    return block(
-        "phase-events",
-        f"raw events ({len(out)} in this phase) — assistant turns + tool_results",
-        rendered,
+    # retry
+    content = e.get("content") or ""
+    tool = e.get("tool") or ""
+    head = '<span class="tx-role">⟲ gate retry</span>' + (
+        f' <span class="tx-meta">{esc(tool)}</span>' if tool else ""
+    )
+    return (
+        f'<div class="tx-entry tx-retry"{anchor_attr} data-kind="retry" '
+        f'data-phase="{esc(phase)}" data-tool="{esc(tool)}" data-tools="{esc(data_tools)}">'
+        f'<div class="tx-gutter">{tag}</div>'
+        f'<div class="tx-body"><div class="tx-head">{head}</div>{pre_text(content)}</div></div>'
     )
 
 
 # ---------------------------------------------------------------------------
-# Gather subagent panel
+# Leads & queries: the two-table data trail (lead_repository.joined)
 # ---------------------------------------------------------------------------
 
 
-def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
-    calls = extract_main_subagents(events)
-    gather_dir = run_dir / "gather_raw"
-    if not calls:
-        body = '<div class="empty">(no Task/Agent calls)</div>'
+def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tuple[str, int]:
+    if leads is None:
+        leads = lead_repository.joined(run_dir)
+    if not leads:
+        body = '<div class="empty">no leads recorded (monitor case — the agent ran no queries)</div>'
         return (
             f"""
-<section id="sec-gather" class="stage stage-defender">
-  <h2>§ Gather subagents <span class="stage-sub">— prompt → query → raw payload</span></h2>
+<section id="sec-leads" class="stage stage-defender">
+  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
   {body}
 </section>
 """,
             0,
         )
-    costs = subagent_cost_by_task(events)
-    # Rescale per-call costs to match the reported haiku total (the
-    # stream-json output-token undercount affects subagent traces too).
-    haiku_reported = result_totals(events)["haiku"]
-    sub_total = sum(costs.values())
-    if sub_total > 0 and haiku_reported > 0:
-        scale = haiku_reported / sub_total
-        for k in list(costs.keys()):
-            costs[k] *= scale
-    blocks = [
-        _render_gather_call(i, call, gather_dir, costs.get(call.get("id", ""), 0.0))
-        for i, call in enumerate(calls)
-    ]
+    rows: list[str] = []
+    for jl in leads:
+        goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
+        qs = jl.queries
+        lead_cell = (
+            f'<td class="lq-lead" rowspan="{max(1, len(qs))}">'
+            f'<div class="lq-leadid">{esc(jl.lead_id)}</div>'
+            f'<div class="lq-goal">{esc(goal)}</div></td>'
+        )
+        if not qs:
+            rows.append(
+                f'<tr class="lq-deadend">{lead_cell}'
+                f'<td colspan="5" class="lq-empty">∅ no queries (dead-end lead)</td></tr>'
+            )
+            continue
+        for i, q in enumerate(qs):
+            params = json.dumps(q.params, ensure_ascii=False) if q.params else "—"
+            exit_cls = "lq-ok" if q.exit_code == 0 else "lq-bad"
+            payload = esc(q.payload_status or "")
+            if q.raw_ref is not None:
+                try:
+                    rel = q.raw_ref.relative_to(run_dir)
+                except ValueError:
+                    rel = q.raw_ref.name
+                payload = f"{payload} · {esc(str(rel))}" if payload else esc(str(rel))
+            rows.append(
+                f"<tr>{lead_cell if i == 0 else ''}"
+                f'<td class="lq-qid">{esc(q.query_id or "?")}</td>'
+                f'<td class="lq-sys">{esc(q.system or "")}</td>'
+                f'<td class="lq-params">{esc(params)}</td>'
+                f'<td class="lq-exit {exit_cls}">{q.exit_code}</td>'
+                f'<td class="lq-payload">{payload or "—"}</td></tr>'
+            )
+    table = (
+        '<table class="lq-table"><thead><tr>'
+        "<th>lead</th><th>query_id</th><th>sys</th><th>params</th><th>exit</th><th>payload</th>"
+        f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+    )
     return (
         f"""
-<section id="sec-gather" class="stage stage-defender">
-  <h2>§ Gather subagents · {len(calls)} call(s) <span class="stage-sub">— each paired with its gather_raw/ payload</span></h2>
-  {"".join(blocks)}
+<section id="sec-leads" class="stage stage-defender">
+  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
+  {table}
 </section>
 """,
-        len(calls),
+        len(leads),
     )
 
 
-def _render_gather_call(i: int, call: dict, gather_dir: Path, cost: float = 0.0) -> str:
-    inp = call.get("input", {}) or {}
-    description = inp.get("description") or "(no description)"
-    subagent_type = inp.get("subagent_type") or "(default)"
-    prompt = inp.get("prompt", "")
-    result = call.get("result")
-    err = " [error]" if call.get("is_error") else ""
-    title = f"#{i} [{subagent_type}] {description}{err}"
-    result_chars = len(result) if isinstance(result, str) else 0
-    stats_html = (
-        f'<div class="phase-stats">'
-        f'<span class="ps-cost">${cost:.4f}</span>'
-        f'<span class="ps-sep">·</span>'
-        f'<span>prompt {len(prompt):,} char</span>'
-        f'<span class="ps-sep">·</span>'
-        f'<span>result {result_chars:,} char</span>'
-        f'</div>'
-    )
-    inner = stats_html + block("subagent-input", "input prompt", pre_text(prompt))
-    if result is not None:
-        inner += block(
-            "subagent-output",
-            "subagent output (summary back to defender)",
-            pre_text(result if isinstance(result, str) else json.dumps(result, indent=2)),
-            open_=True,
-        )
-    else:
-        inner += '<div class="empty">(no result captured)</div>'
-    m = _LEAD_ID_RE.search(prompt)
-    inner += _render_gather_raw_payloads(m.group(1) if m else None, gather_dir)
-    return block("subcall gather", title, inner, anchor=f"gather-{i}")
-
-
-# Pull the lead_id out of the (model-authored) dispatch YAML. Tolerate leading
-# indentation: the dispatch block is free-form text, so the `lead_id:` key may
-# be indented even though the canonical renderer emits it flush-left. The id
-# body mirrors hooks/record_lead.py's LEAD_ID_RE — keep in sync.
-_LEAD_ID_RE = re.compile(r"^[ \t]*lead_id:\s*(l-[A-Za-z0-9]+)", re.MULTILINE)
-
-
-def _render_gather_raw_payloads(lead_id: str | None, gather_dir: Path) -> str:
-    """Render the by-ref payloads for one dispatched lead.
-
-    Payloads live under ``gather_raw/{lead_id}/{seq}.json`` — the FK subdir
-    scopes a lead's outputs, so we list that lead's directory directly (no
-    prefix-matching against a flat namespace).
-    """
-    if not lead_id:
-        return ""
-    lead_dir = gather_dir / lead_id
-    if not lead_dir.is_dir():
-        return ""
-    out = ""
-    for entry in sorted(lead_dir.iterdir()):
-        if not entry.is_file() or entry.suffix not in (".json", ".txt"):
-            continue
-        try:
-            raw = entry.read_text()
-            if entry.suffix == ".json":
-                raw = json.dumps(json.loads(raw), indent=2)
-        except (OSError, json.JSONDecodeError):
-            raw = "<unreadable>"
-        out += block("gather-raw", f"gather_raw/{lead_id}/{entry.name}", pre_text(raw))
-    return out
-
-
 # ---------------------------------------------------------------------------
-# Lead-sequence, report, raw, TOC
+# Sticky sidebar: phase navigation into the transcript + section jumps
 # ---------------------------------------------------------------------------
 
 
-def render_runtime_lead_sequence(run_dir: Path) -> str:
-    raw = ""
-    p = run_dir / "executed_queries.jsonl"
-    if p.is_file():
-        raw = block("artifact", "executed_queries.jsonl (queries table)", pre_text(p.read_text()))
-    return f"""
-<section id="sec-lead-sequence" class="stage stage-defender">
-  <h2>§ Lead sequence</h2>
-  {render_lead_sequence_compact(run_dir)}
-  {raw}
-</section>
-"""
+def render_runtime_toc(
+    phases: list[dict], n_tx: int, n_leads: int, tx_phases: set[str] | None = None
+) -> str:
+    tx_phases = tx_phases or set()
 
+    def _phase_target(ph: dict) -> str:
+        # Jump into the transcript only for a phase that actually rendered a
+        # tx-anchor; otherwise fall back to its investigation block (always
+        # present), so phases the transcript skipped don't get a dead link.
+        anchor = ph["anchor"]
+        return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
-def render_runtime_report(run_dir: Path) -> str:
-    return f"""
-<section id="sec-report" class="stage stage-defender">
-  <h2>§ Report</h2>
-  {render_report_card(run_dir)}
-</section>
-"""
-
-
-def render_runtime_raw(events: list[dict]) -> str:
-    inner = "\n".join(render_event(e) for e in events) or '<div class="empty">(no events)</div>'
-    body = block("raw-stream", f"stream-json events ({len(events)})", inner)
-    return f"""
-<section id="sec-raw" class="stage stage-raw">
-  <h2>§ Raw transcript <span class="stage-sub">— full stream-json, for debugging</span></h2>
-  {body}
-</section>
-"""
-
-
-def render_runtime_toc(phases: list[dict], n_gather: int) -> str:
     phase_links = "".join(
-        f'<li class="item"><a href="#{esc(ph["anchor"])}">{esc(ph["name"])}</a></li>'
+        f'<li class="item phase-nav"><a href="{_phase_target(ph)}" '
+        f'data-phase-link="{esc(ph["name"])}">'
+        f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
+        f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
         for ph in phases
-    )
-    if not phases:
-        phase_links = '<li class="item muted">(no phases)</li>'
-    gather_links = "".join(
-        f'<li class="item"><a href="#gather-{i}">gather #{i}</a></li>'
-        for i in range(n_gather)
-    )
-    if n_gather == 0:
-        gather_links = '<li class="item muted">(no calls)</li>'
+    ) or '<li class="item muted">(no phases)</li>'
     return f"""
 <nav class="toc">
   <ul>
-    <li class="section">Headline</li>
-    <li class="item"><a href="#top">disposition + report</a></li>
-
-    <li class="section">§ Alert</li>
-    <li class="item"><a href="#sec-alert">alert.json</a></li>
-
-    <li class="section">§ Investigation</li>
+    <li class="section">Phases <span class="toc-hint">→ transcript</span></li>
     {phase_links}
-
-    <li class="section">§ Gather</li>
-    {gather_links}
-
-    <li class="section">§ Lead sequence</li>
-    <li class="item"><a href="#sec-lead-sequence">leads</a></li>
-
-    <li class="section">§ Report</li>
-    <li class="item"><a href="#sec-report">report.md</a></li>
-
-    <li class="section">§ Raw</li>
-    <li class="item"><a href="#sec-raw">stream-json</a></li>
-
-    <li class="section">Footer</li>
+    <li class="section">Sections</li>
+    <li class="item"><a href="#sec-alert">alert.json</a></li>
+    <li class="item"><a href="#sec-investigation">investigation</a></li>
+    <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>
+    <li class="item"><a href="#sec-leads">leads &amp; queries ({n_leads})</a></li>
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>
 </nav>
