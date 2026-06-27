@@ -890,6 +890,23 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
+def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch):
+    """A lead-author run that exits non-zero (rc=2 — agent crash/timeout) is quarantined
+    to failed/, not dropped (issue #426). Drives the real ``_invoke_lead_author`` (the
+    default ``run_lead_author``) with the lead_author module's ``run`` stubbed to rc=2."""
+    import defender.learning.leads.lead_author as la
+
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-rc"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    monkeypatch.setattr(la, "run", lambda rd, paths=None: 2)
+    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+    assert not (paths.author_queue_dir / "case-rc.json").exists()
+    failed = paths.author_queue_dir / "failed" / "case-rc.json"
+    assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
+
+
 def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     """End-to-end with fake git/gh: the lead-author drain branches off ``lead-author/``
     (NOT ``lessons/``) and opens its own PR."""

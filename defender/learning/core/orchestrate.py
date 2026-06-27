@@ -232,11 +232,16 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge.
 
     ``paths`` is the batch worktree's layout (``LoopPaths(repo_root=<worktree>)``), so
-    the lead author edits + the loop commits in the worktree, not the dev checkout."""
+    the lead author edits + the loop commits in the worktree, not the dev checkout.
+
+    A non-zero rc (the agent crashed / timed out) **raises** so the drain quarantines
+    the marker to ``failed/`` — the same surfacing the scope-gate path gets — instead of
+    dropping it. ``None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
+    ``_run_curator_module``) is left to retry on the next tick."""
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
-        _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
+        raise LoopError(f"lead-author returned rc={rc}")
 
 
 def _maybe_trigger_author(

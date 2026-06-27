@@ -308,21 +308,6 @@ def test_run_held_queue_lock_returns_zero(run_dir: Path):
     assert lead_author.run(run_dir, deps=deps) == 0
 
 
-def test_run_failure_marker_brakes_retry(run_dir: Path):
-    state = run_dir / "lead_author"
-    state.mkdir()
-    (state / "failure.txt").write_text("prior failure")
-    # The repo lock runs for real against the injected tmp ``paths.author_lock_file``
-    # (uncontended); the queue lock + spawn are injected via deps — no module patch.
-    deps = _deps(
-        run_dir.parent,
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
-        invoke_agent=_claude_should_not_be_called,
-    )
-    assert lead_author.run(run_dir, deps=deps) == 2
-
-
 def test_run_done_sentinel_short_circuits(run_dir: Path):
     state = run_dir / "lead_author"
     state.mkdir()
@@ -628,6 +613,29 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
         lead_author.run(run_dir, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
+
+
+def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Path):
+    """A non-zero agent exit (crash/timeout) makes ``run`` return 2 — the drain
+    quarantines the marker. The loop commits nothing, writes no done sentinel, and
+    (post-#426) writes no ``failure.txt`` brake (quarantine is the sole surfacing)."""
+    repo = tmp_git_repo
+    run_dir = tmp_path / "lead-run"
+    run_dir.mkdir()
+    deps = _deps(
+        repo,
+        **_bypass_tables(),
+        invoke_agent=lambda rd, handoffs, pending: 124,
+        build_handoff=lambda rd, ex, jl=None: [{"query_id": "x.y"}],
+        discover_system_drafts=lambda: [],
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+    )
+    head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert lead_author.run(run_dir, deps=deps) == 2
+    assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert not (run_dir / "lead_author" / "done").is_file()
+    assert not (run_dir / "lead_author" / "failure.txt").exists()
 
 
 # ---------------------------------------------------------------------------
