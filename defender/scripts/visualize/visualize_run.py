@@ -41,6 +41,7 @@ Usage:
 """
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -53,7 +54,9 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
+    gather_cost_by_model,
     gather_cost_by_phase,
+    gather_wall_by_phase,
     load_messages,
     msg_phase_map,
     normalize_phase_names,
@@ -299,21 +302,34 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
     return "".join(segs)
 
 
+def _lead_sort_key(jl) -> tuple[int, str]:
+    """Numeric order over lead ids (``l-002`` before ``l-010``); falls back to the
+    raw id when there's no number to parse (e.g. an orphan)."""
+    m = re.search(r"\d+", jl.lead_id or "")
+    return (int(m.group()) if m else 1 << 30, jl.lead_id or "")
+
+
 def _lead_summary(leads: list) -> str:
-    """The analysis card's compact lead list: id + truncated goal + a ∅ marker
-    for dead-ends. The full queries live in § Leads & queries below."""
+    """The analysis card's compact lead list: id + goal + a ∅ marker for
+    dead-ends. The goal is CSS-clamped to one line; clicking it expands the full
+    text in place (the truncating ellipsis is the affordance). The full queries
+    live in § Leads & queries below."""
     if not leads:
         return '<span class="empty">no leads</span>'
     rows: list[str] = []
     for jl in leads:
         dead = jl.orphan or not jl.queries
         goal = (jl.goal or ("orphan" if jl.orphan else "")).strip()
-        if len(goal) > 64:
-            goal = goal[:61] + "…"
         mark = ' <span class="lead-dead">∅</span>' if dead else ""
+        # Full goal in the DOM; CSS clamps it and the click-to-expand JS unclamps.
+        goal_html = (
+            f'<span class="lead-mini-goal" title="click to expand">{esc(goal)}</span>'
+            if goal
+            else ""
+        )
         rows.append(
             f'<div class="lead-mini"><span class="lead-mini-id">{esc(jl.lead_id)}</span>'
-            f'<span class="lead-mini-goal">{esc(goal)}</span>{mark}</div>'
+            f'{goal_html}{mark}</div>'
         )
     return f'<div class="an-sublabel">leads</div><div class="lead-mini-list">{"".join(rows)}</div>'
 
@@ -597,7 +613,8 @@ nav.toc li.item.muted { padding: 3px 0 3px 14px; color: var(--text-dim); font-si
 
 article.content {
   padding: 24px 32px 80px;
-  max-width: 1200px;
+  /* Fill the grid track — capping the width here left a dead band on the right
+     of wide screens; the content's own elements (bars, tables) read fine full-width. */
   min-width: 0;
 }
 
@@ -817,6 +834,24 @@ pre {
 }
 pre.json { color: var(--code); }
 pre.text { color: var(--text); }
+/* Syntax-highlighted JSON (alert.json + any pretty_json_html caller). */
+pre.json-pretty {
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.5 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--text-dim);
+}
+pre.json-pretty .j-key { color: #7ee787; }
+pre.json-pretty .j-str { color: #a5d6ff; }
+pre.json-pretty .j-num { color: #79c0ff; }
+pre.json-pretty .j-bool { color: #d2a8ff; }
+pre.json-pretty .j-null { color: var(--text-dim); font-style: italic; }
 pre.files { font-size: 11px; color: var(--text-dim); }
 .text-block { padding: 4px 0; white-space: pre-wrap; }
 
@@ -863,7 +898,9 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .lead-mini-list { display: flex; flex-direction: column; gap: 3px; }
 .lead-mini { display: flex; gap: 8px; font-size: 11px; align-items: baseline; }
 .lead-mini-id { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--code); flex-shrink: 0; }
-.lead-mini-goal { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-mini-goal { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; min-width: 0; }
+.lead-mini-goal:hover { color: var(--text); }
+.lead-mini.expanded .lead-mini-goal { overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; }
 .lead-dead { color: var(--warn); font-weight: 700; }
 
 .me-top { display: flex; gap: 20px; align-items: baseline; margin-bottom: 2px; }
@@ -1011,6 +1048,12 @@ RUNTIME_JS = """
       markers.forEach(function (m) { obs.observe(m); });
     }
   }
+  // Click a clamped lead goal (in the metrics/analysis fold) to expand it in place.
+  [].slice.call(document.querySelectorAll('.lead-mini-goal')).forEach(function (g) {
+    g.addEventListener('click', function () {
+      g.parentNode.classList.toggle('expanded');
+    });
+  });
 })();
 """
 
@@ -1083,7 +1126,10 @@ def render_runtime_page(run_dir: Path) -> str:
     # join + report once here and thread them into the consumers below.
     _, n_tool_calls, result_total = _stats(events)
     report = parse_report(run_dir)
-    leads = lead_repository.joined(run_dir)
+    # joined() orders leads by execution order (its contract, shared with the
+    # actor view); for the inspection page we want them in numeric lead-id order
+    # (l-002 before l-010) across both the fold summary and the § Leads table.
+    leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
     # Drop "preamble" from the attribution order — agent work before the first
     # ## header is functionally ORIENT-bucket work. The phase still renders.
@@ -1102,6 +1148,18 @@ def render_runtime_page(run_dir: Path) -> str:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     wall_times = phase_wall_times(events, tags, phase_order)
+    # Move gather's execution wall out of the PLAN window it was dispatched in and
+    # into the GATHER bar, mirroring the cost reattribution above (else GATHER
+    # renders as a zero-width sliver — the gather work is the bulk of the loop).
+    g_wall_to, g_wall_from = gather_wall_by_phase(
+        run_dir, events, tags, phase_order, messages
+    )
+    for ph in phase_order:
+        d = wall_times.get(ph) or {"start": None, "end": None, "duration_sec": 0.0}
+        base = d.get("duration_sec", 0.0) or 0.0
+        moved = min(g_wall_from.get(ph, 0.0), base)
+        d["duration_sec"] = base - moved + g_wall_to.get(ph, 0.0)
+        wall_times[ph] = d
 
     msg_phase = msg_phase_map(events, tags)
     entries = build_transcript(messages, msg_phase, phase_order)
@@ -1112,8 +1170,10 @@ def render_runtime_page(run_dir: Path) -> str:
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
-    if gather_total > 0:
-        by_model["haiku"] = gather_total
+    # Fold gather cost in under the model the gather agent actually ran on (read
+    # from the log), not a hardcoded name — same-model gather merges into one line.
+    for model, cost in gather_cost_by_model(run_dir, messages).items():
+        by_model[model] = by_model.get(model, 0.0) + cost
     # Headline total = main + gather, which by gather_cost_by_phase's contract
     # always equals the sum of the per-phase cost bars. With no phases there are
     # no bars to reconcile against, so fall back to the run's reported total

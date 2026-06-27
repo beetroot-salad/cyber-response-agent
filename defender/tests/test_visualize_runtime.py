@@ -141,8 +141,10 @@ def test_tagger_advances_on_write_file(tmp_path):
 
 
 def test_gather_dispatch_phase_and_cost(tmp_path):
-    """The gather call is tagged to the PLAN turn that issued it, and its Haiku
-    cost folds into that phase (the trace alone can't see gather messages)."""
+    """The gather call is *dispatched* from the PLAN turn that issued it, but its
+    subagent cost lands in the GATHER phase of that loop — the agent calls gather
+    before writing the ``## GATHER`` header, so raw tagging would bury the cost in
+    PLAN and leave the GATHER bar empty."""
     run = _build_run(tmp_path)
     events = load_jsonl(run / "tool_trace.jsonl")
     order = _phase_order(run)
@@ -155,7 +157,32 @@ def test_gather_dispatch_phase_and_cost(tmp_path):
     main_total = sum(b["cost"] for b in attr.values())
     by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, main_total, 0.5)
     assert gather_total > 0
-    assert by_phase[gphase["l-001"]] > 0
+    # reattributed off the PLAN dispatch phase onto the matching GATHER bar
+    gather_phase = next(p for p in order if p.startswith("GATHER"))
+    assert by_phase[gather_phase] > 0
+    assert by_phase[gphase["l-001"]] == 0
+
+
+def test_gather_wall_and_model_reattribution(tmp_path):
+    """Gather wall moves from its PLAN dispatch window into the GATHER bar, and
+    gather cost is reported under the model the gather agent actually ran on."""
+    run = _build_run(tmp_path)
+    events = load_jsonl(run / "tool_trace.jsonl")
+    order = _phase_order(run)
+    tags = d.tag_events_by_phase(events, order)
+
+    to_gather, from_dispatch = d.gather_wall_by_phase(run, events, tags, order)
+    gather_phase = next(p for p in order if p.startswith("GATHER"))
+    plan_phase = next(p for p in order if p.startswith("PLAN"))
+    assert to_gather[gather_phase] > 0
+    assert from_dispatch[plan_phase] > 0
+    assert to_gather[plan_phase] == 0
+
+    # the fixture's gather agent runs on Haiku — the breakdown reflects that, not
+    # a hardcoded name.
+    by_model = d.gather_cost_by_model(run)
+    assert list(by_model) == ["haiku-4-5"]
+    assert by_model["haiku-4-5"] > 0
 
 
 def test_transcript_from_messages(tmp_path):
