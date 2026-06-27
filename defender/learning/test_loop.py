@@ -660,85 +660,52 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
 
 
 class _FakeBranch:
-    """Stand-in for AuthorBranch — records the lifecycle, no real git/gh.
+    """Stand-in for AuthorBranch — records the worktree-batch lifecycle, no real git/gh.
 
-    ``pr_exists`` simulates the writer lease, ``dirty`` an uncommitted dev tree,
-    ``commits`` whether the batch produced any commits to PR."""
+    ``pr_exists`` simulates the per-prefix writer lease; ``commits`` whether the batch
+    produced any commits to PR. ``branch_prefix`` mirrors the real field the drain logs."""
 
-    def __init__(self, *, pr_exists: bool = False, dirty: bool = False, commits: int = 1):
+    def __init__(self, *, prefix: str = "lessons/", pr_exists: bool = False, commits: int = 1):
+        self.branch_prefix = prefix
         self._pr_exists = pr_exists
-        self._dirty = dirty
         self._commits = commits
         self.events: list[str] = []
 
-    def open_lessons_pr_exists(self) -> bool:
+    def open_pr_exists(self) -> bool:
         self.events.append("lease-check")
         return self._pr_exists
 
-    def start_batch_branch(self, batch_id: str) -> str:
-        if self._dirty:
-            raise orch.BranchError("working tree is dirty")
+    def start_batch(self, batch_id: str) -> Path:
         self.events.append("start")
-        return "orig-ref"
+        return Path(f"/tmp/wt-{batch_id}")
 
-    def finish_batch(self, batch_id: str):
+    def finish_batch(self, batch_id: str, wt: Path):
         self.events.append("finish")
         return f"PR/{batch_id}" if self._commits else None
 
-    def restore_ref(self, ref: str) -> bool:
-        self.events.append(f"restore:{ref}")
-        return True
+    def cleanup(self, wt: Path) -> None:
+        self.events.append("cleanup")
 
 
-def test_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-b"
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
-    seen: list[Path] = []
-    branch = _FakeBranch()
-    orch.author_drain(
-        paths,
-        run_lead_author=lambda rd: seen.append(rd),
-        trigger_author=lambda *a: None,
-        branch=branch,
-    )
-    assert seen == [run_dir.resolve()]
-    assert not (paths.author_queue_dir / "case-b.json").exists()
-    # full lifecycle: lease check → branch → author → PR → HEAD restored
-    assert branch.events == ["lease-check", "start", "finish", "restore:orig-ref"]
+def _seed_curator_findings(paths, n: int = 5) -> None:
+    """Write ``n`` rows to the findings queue so ``_has_curator_work`` is satisfied
+    (default LEARNING_AUTHOR_THRESHOLD is 5)."""
+    paths.pending_file.parent.mkdir(parents=True, exist_ok=True)
+    with paths.pending_file.open("w") as fh:
+        for i in range(n):
+            fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
 
-def test_author_drain_marks_artifact_missing(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-real"  # gives the drain work to do
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
-    gone = tmp_path / "tmprun" / "case-gone"  # never created
-    orch._enqueue_for_authoring(gone, paths)
-    seen: list[Path] = []
-    orch.author_drain(
-        paths,
-        run_lead_author=lambda rd: seen.append(rd),
-        trigger_author=lambda *a: None,
-        branch=_FakeBranch(),
-    )
-    assert seen == [run_dir.resolve()]  # lead-author NOT called on the vanished one
-    assert not (paths.author_queue_dir / "case-gone.json").exists()
-    failed = paths.author_queue_dir / "failed" / "case-gone.json"
-    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
+# -- lessons author_drain (curators only; lead author is its own drain) ------
 
 
 def test_author_drain_triggers_all_curators(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-c"  # a marker gives the drain work
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    _seed_curator_findings(paths)  # curator queue at threshold = the drain's work
     triggered: list[str] = []
     orch.author_drain(
         paths,
-        run_lead_author=lambda rd: None,
-        trigger_author=lambda pending_file, env, module, label: triggered.append(module),
+        trigger_author=lambda paths, pending_file, env, module, label: triggered.append(module),
         branch=_FakeBranch(),
     )
     # The current four-direction set: findings + actor + actor-env + actor-benign.
@@ -748,77 +715,45 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
 
 
 def test_author_drain_skips_when_lease_held(tmp_path: Path):
-    """An open lessons PR holds the writer lease — the drain forms no second
-    branch and leaves the queued work untouched for after the merge."""
+    """An open lessons PR holds the writer lease — the drain forms no second branch
+    and leaves the queued work untouched for after the merge."""
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-lease"
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
-    seen: list[Path] = []
-    triggered: list[str] = []
+    _seed_curator_findings(paths)
+    triggered: list = []
     branch = _FakeBranch(pr_exists=True)
     rc = orch.author_drain(
         paths,
-        run_lead_author=lambda rd: seen.append(rd),
         trigger_author=lambda *a: triggered.append(a),
         branch=branch,
     )
     assert rc == 0
-    assert seen == []
     assert triggered == []
-    assert "start" not in branch.events  # never branched
-    assert (paths.author_queue_dir / "case-lease.json").exists()  # marker preserved
+    assert "start" not in branch.events  # never created a worktree
 
 
 def test_author_drain_skips_when_no_work(tmp_path: Path):
-    """Empty tick: no markers, no curator at threshold → git is never touched."""
+    """Empty tick: no curator at threshold → git is never touched."""
     paths, _ = _isolate(tmp_path)
     triggered: list = []
     branch = _FakeBranch()
     rc = orch.author_drain(
         paths,
-        run_lead_author=lambda rd: None,
         trigger_author=lambda *a: triggered.append(a),
         branch=branch,
     )
     assert rc == 0
-    assert branch.events == []  # no lease-check, no branch checkout
+    assert branch.events == []  # no lease-check, no worktree
     assert triggered == []
 
 
-def test_author_drain_skips_dirty_working_tree(tmp_path: Path):
-    """A dirty dev checkout blocks the batch branch — drain skips, queue intact."""
+def test_author_drain_no_commits_opens_no_pr_but_cleans_up(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-dirty"
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
-    seen: list[Path] = []
-    rc = orch.author_drain(
-        paths,
-        run_lead_author=lambda rd: seen.append(rd),
-        trigger_author=lambda *a: None,
-        branch=_FakeBranch(dirty=True),
-    )
-    assert rc == 0
-    assert seen == []  # never authored
-    assert (paths.author_queue_dir / "case-dirty.json").exists()  # marker preserved
-
-
-def test_author_drain_no_commits_opens_no_pr_but_restores_head(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-empty"
-    run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    _seed_curator_findings(paths)
     branch = _FakeBranch(commits=0)
-    rc = orch.author_drain(
-        paths,
-        run_lead_author=lambda rd: None,
-        trigger_author=lambda *a: None,
-        branch=branch,
-    )
+    rc = orch.author_drain(paths, trigger_author=lambda *a: None, branch=branch)
     assert rc == 0
     assert "finish" in branch.events
-    assert branch.events[-1] == "restore:orig-ref"  # HEAD restored even with no PR
+    assert branch.events[-1] == "cleanup"  # worktree removed even with no PR
 
 
 def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
@@ -826,6 +761,7 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
     import fcntl
 
     paths, _ = _isolate(tmp_path)
+    _seed_curator_findings(paths)
     paths.author_drain_lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = paths.author_drain_lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
@@ -833,7 +769,6 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
         worked: list[str] = []
         rc = orch.author_drain(
             paths,
-            run_lead_author=lambda rd: worked.append("lead"),
             trigger_author=lambda *a: worked.append("trigger"),
             branch=_FakeBranch(),
         )
@@ -844,32 +779,196 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
         holder.close()
 
 
-def test_author_drain_quarantines_poison_run_dir(tmp_path: Path):
-    """A lead-author that raises on one (present) run dir must NOT wedge the
-    serial drain: the marker is quarantined to failed/ (so it can't re-poison
-    every tick) and the threshold curators still fire."""
+# -- lead_author_drain (its own marker queue, lock, worktree, and PR) --------
+
+
+def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-poison"
+    run_dir = tmp_path / "tmprun" / "case-b"
     run_dir.mkdir(parents=True)
     orch._enqueue_for_authoring(run_dir, paths)
-    triggered: list[str] = []
-
-    def boom(_rd: Path) -> None:
-        raise RuntimeError("lead-author blew up")
-
-    orch.author_drain(
+    seen: list[tuple[Path, Path]] = []
+    branch = _FakeBranch(prefix="lead-author/")
+    orch.lead_author_drain(
         paths,
-        run_lead_author=boom,
-        trigger_author=lambda pending_file, env, module, label: triggered.append(module),
-        branch=_FakeBranch(),
+        run_lead_author=lambda wt_paths, rd: seen.append((wt_paths.repo_root, rd)),
+        branch=branch,
     )
+    assert [rd for _, rd in seen] == [run_dir.resolve()]
+    # the lead author runs rooted at the batch worktree, not the dev checkout
+    assert str(seen[0][0]).startswith("/tmp/wt-")
+    assert not (paths.author_queue_dir / "case-b.json").exists()
+    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
+
+
+def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-real"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    gone = tmp_path / "tmprun" / "case-gone"  # never created
+    orch._enqueue_for_authoring(gone, paths)
+    seen: list[Path] = []
+    orch.lead_author_drain(
+        paths,
+        run_lead_author=lambda wt_paths, rd: seen.append(rd),
+        branch=_FakeBranch(prefix="lead-author/"),
+    )
+    assert seen == [run_dir.resolve()]  # lead-author NOT called on the vanished one
+    assert not (paths.author_queue_dir / "case-gone.json").exists()
+    failed = paths.author_queue_dir / "failed" / "case-gone.json"
+    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
+
+
+def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
+    """An open lead-author PR holds the per-prefix lease — no second worktree."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-lease"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    seen: list = []
+    branch = _FakeBranch(prefix="lead-author/", pr_exists=True)
+    rc = orch.lead_author_drain(
+        paths, run_lead_author=lambda wt_paths, rd: seen.append(rd), branch=branch
+    )
+    assert rc == 0
+    assert seen == []
+    assert "start" not in branch.events
+    assert (paths.author_queue_dir / "case-lease.json").exists()  # marker preserved
+
+
+def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
+    """The lead-author drain's lock is distinct from the lessons drain's, so holding
+    the lessons drain lock does NOT block it (only its own lock does)."""
+    import fcntl
+
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-d"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    # Hold the *lessons* drain lock — must not block the lead-author drain.
+    paths.author_drain_lock_file.parent.mkdir(parents=True, exist_ok=True)
+    holder = paths.author_drain_lock_file.open("a+")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+    try:
+        seen: list = []
+        rc = orch.lead_author_drain(
+            paths,
+            run_lead_author=lambda wt_paths, rd: seen.append(rd),
+            branch=_FakeBranch(prefix="lead-author/"),
+        )
+        assert rc == 0
+        assert seen == [run_dir.resolve()]  # ran despite the lessons lock being held
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
+    """A lead-author that raises on one run dir is quarantined to failed/ (so it can't
+    re-poison every tick); a second good marker still processes."""
+    paths, _ = _isolate(tmp_path)
+    poison = tmp_path / "tmprun" / "case-poison"
+    poison.mkdir(parents=True)
+    good = tmp_path / "tmprun" / "case-good"
+    good.mkdir(parents=True)
+    orch._enqueue_for_authoring(poison, paths)
+    orch._enqueue_for_authoring(good, paths)
+    seen: list[Path] = []
+
+    def maybe_boom(wt_paths, rd: Path) -> None:
+        if rd.name == "case-poison":
+            raise RuntimeError("lead-author blew up")
+        seen.append(rd)
+
+    orch.lead_author_drain(
+        paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/")
+    )
+    assert seen == [good.resolve()]  # the good marker still processed
     assert not (paths.author_queue_dir / "case-poison.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-poison.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
-    # the poison run dir didn't starve the accumulated findings/observation queues
-    assert triggered == [
-        "author", "author_actor", "author_actor_env", "author_actor_benign",
-    ]
+
+
+def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
+    """End-to-end with fake git/gh: the lead-author drain branches off ``lead-author/``
+    (NOT ``lessons/``) and opens its own PR."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-pr"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    git = _git_runner(ahead=1)
+    gh = _gh_runner(create_out="https://github.com/o/r/pull/77")
+    branch = ab.AuthorBranch(
+        git=git, gh=gh, branch_prefix="lead-author/",
+        pr_title=orch._lead_author_pr_title, pr_body=orch._lead_author_pr_body,
+        worktree_base=tmp_path / "wt",
+    )
+    rc = orch.lead_author_drain(
+        paths, run_lead_author=lambda wt_paths, rd: None, branch=branch
+    )
+    assert rc == 0
+    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
+    head = create[create.index("--head") + 1]
+    assert head.startswith("lead-author/")
+    assert not head.startswith("lessons/")
+    # lease search was scoped to the lead-author prefix, not lessons
+    lease = next(c for c in gh.calls if c[:2] == ["pr", "list"])
+    assert "head:lead-author/" in lease
+
+
+def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
+    """The batch worktree is shared across all markers, so a marker that fails the scope
+    gate leaves uncommitted dirt that must NOT bleed into the next marker. The drain
+    discards the worktree's uncommitted changes between markers, so the second marker sees
+    a clean tree (and can neither inherit the first's leftover edit nor be falsely
+    quarantined by it). Uses a real git repo as the worktree (the _FakeBranch path has no
+    .git and short-circuits the reset)."""
+    wt = tmp_path / "wt"
+    catalog = wt / "defender" / "skills" / "gather" / "queries" / "wazuh"
+    catalog.mkdir(parents=True)
+    (catalog / "auth-events.md").write_text("---\nstatus: established\n---\n")
+    _real(wt, "init", "-q", "-b", "main")
+    _real(wt, "config", "user.email", "t@e.com")
+    _real(wt, "config", "user.name", "T")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "seed")
+
+    # repo_root=worktree, state_dir elsewhere — mirrors LoopPaths.with_repo_root, so the
+    # queue/quarantine live outside the worktree the reset operates on.
+    paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
+    poison = tmp_path / "runs" / "case-a-poison"  # sorts before "case-b-good" → runs first
+    good = tmp_path / "runs" / "case-b-good"
+    poison.mkdir(parents=True)
+    good.mkdir(parents=True)
+    orch._enqueue_for_authoring(poison, paths)
+    orch._enqueue_for_authoring(good, paths)
+
+    clean_at_entry: dict[str, bool] = {}
+
+    def run_lead_author(p, rd: Path) -> None:
+        st = _subprocess.run(
+            ["git", "-C", str(p.repo_root), "status", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        clean_at_entry[rd.name] = st.stdout.strip() == ""
+        if rd.name == "case-a-poison":
+            # delete an established template and raise: the marker is quarantined and its
+            # uncommitted deletion is left behind in the shared worktree.
+            (p.repo_root / "defender" / "skills" / "gather" / "queries"
+             / "wazuh" / "auth-events.md").unlink()
+            raise RuntimeError("scope-gate boom")
+
+    orch._drain_lead_author_markers(paths, run_lead_author)
+
+    assert clean_at_entry["case-a-poison"] is True   # first marker starts on a clean tree
+    assert clean_at_entry["case-b-good"] is True      # reset wiped the poison's leftover
+    # worktree ends clean — the poison's deletion was discarded, not left dangling
+    end = _subprocess.run(["git", "-C", str(wt), "status", "--porcelain"],
+                          capture_output=True, text=True)
+    assert end.stdout.strip() == ""
+    assert (paths.author_queue_dir / "failed" / "case-a-poison.json").exists()  # quarantined
+    assert not (paths.author_queue_dir / "case-b-good.json").exists()           # consumed
 
 
 # ---------------------------------------------------------------------------
@@ -1103,8 +1202,10 @@ def _cp(stdout: str = "", returncode: int = 0, stderr: str = ""):
 def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1,
                 lesson_on_base: bool = True):
     def run(args):
-        run.calls.append(list(args))
         a = list(args)
+        if a[:1] == ["-C"]:
+            a = a[2:]  # strip the `git -C <worktree>` cwd redirect before matching
+        run.calls.append(a)
         if a[:1] == ["status"]:
             return _cp(stdout=" M file\n" if dirty else "")
         if a[:1] == ["symbolic-ref"]:
@@ -1113,7 +1214,7 @@ def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1,
             return _cp(stdout=str(ahead))
         if a[:2] == ["cat-file", "-e"]:  # revert existence check vs origin/main
             return _cp(returncode=0 if lesson_on_base else 1)
-        return _cp()  # fetch / checkout / push succeed silently
+        return _cp()  # fetch / worktree add|remove|prune / checkout / push succeed silently
 
     run.calls = []
     return run
@@ -1135,10 +1236,10 @@ def _gh_runner(*, pr_list_json: str = "[]", create_out: str = "https://pr/1",
     return run
 
 
-def test_author_branch_lease_true_on_open_lessons_pr():
+def test_author_branch_lease_true_on_open_pr():
     gh = _gh_runner(pr_list_json='[{"number":1,"headRefName":"lessons/abc"}]')
     b = ab.AuthorBranch(git=_git_runner(), gh=gh)
-    assert b.open_lessons_pr_exists() is True
+    assert b.open_pr_exists() is True
     call = gh.calls[0]
     # prefix-search, NOT the exact --head glob (which would match nothing)
     assert "--search" in call
@@ -1146,32 +1247,57 @@ def test_author_branch_lease_true_on_open_lessons_pr():
     assert "--head" not in call
 
 
-def test_author_branch_lease_false_when_no_lessons_pr():
+def test_author_branch_lease_false_when_no_matching_pr():
     gh = _gh_runner(pr_list_json='[{"number":2,"headRefName":"feature/x"}]')
     b = ab.AuthorBranch(git=_git_runner(), gh=gh)
-    assert b.open_lessons_pr_exists() is False
+    assert b.open_pr_exists() is False
 
 
-def test_author_branch_start_refuses_dirty_tree():
-    b = ab.AuthorBranch(git=_git_runner(dirty=True), gh=_gh_runner())
-    with pytest.raises(ab.BranchError):
-        b.start_batch_branch("abc123")
+def test_author_branch_lease_keyed_on_prefix():
+    """A lessons PR does NOT hold the lead-author lease (per-prefix lease)."""
+    gh = _gh_runner(pr_list_json='[{"number":3,"headRefName":"lessons/abc"}]')
+    b = ab.AuthorBranch(git=_git_runner(), gh=gh, branch_prefix="lead-author/")
+    assert b.open_pr_exists() is False
+    assert "head:lead-author/" in gh.calls[0]
 
 
-def test_author_branch_start_fetches_and_branches_off_origin_main():
-    git = _git_runner(ref="my-feature")
-    b = ab.AuthorBranch(git=git, gh=_gh_runner())
-    orig = b.start_batch_branch("abc123")
-    assert orig == "my-feature"  # original ref captured for restore
+def test_author_branch_start_adds_worktree_off_origin_main(tmp_path: Path):
+    git = _git_runner()
+    b = ab.AuthorBranch(git=git, gh=_gh_runner(), worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")
+    assert wt == tmp_path / "wt" / "lessons-abc123"
+    assert ["worktree", "prune"] in git.calls  # stale-batch cleanup first
     assert ["fetch", "origin"] in git.calls
-    assert ["checkout", "-B", "lessons/abc123", "origin/main"] in git.calls
+    assert ["worktree", "add", "-B", "lessons/abc123", str(wt), "origin/main"] in git.calls
+
+
+def test_author_branch_start_cleans_up_partial_worktree_on_add_failure(tmp_path: Path):
+    """If `worktree add` fails mid-create, start_batch reclaims the partial worktree and
+    re-raises — the caller's `finally: cleanup` only runs once `wt` has been returned, so
+    an un-handled partial would leak (prune won't reclaim a present-but-broken dir)."""
+    calls: list[list[str]] = []
+
+    def git(args):
+        a = list(args)
+        if a[:1] == ["-C"]:
+            a = a[2:]
+        calls.append(a)
+        if a[:2] == ["worktree", "add"]:
+            return _cp(returncode=1, stderr="disk full")
+        return _cp()
+
+    b = ab.AuthorBranch(git=git, gh=_gh_runner(), worktree_base=tmp_path / "wt")
+    with pytest.raises(ab.BranchError):
+        b.start_batch("abc123")
+    wt = tmp_path / "wt" / "lessons-abc123"
+    assert ["worktree", "remove", "--force", str(wt)] in calls  # partial reclaimed
 
 
 def test_author_branch_finish_no_commits_returns_none():
     git = _git_runner(ahead=0)
     gh = _gh_runner()
     b = ab.AuthorBranch(git=git, gh=gh)
-    assert b.finish_batch("abc123") is None
+    assert b.finish_batch("abc123", Path("/tmp/wt")) is None
     assert not any(c[:1] == ["push"] for c in git.calls)
     assert not any(c[:2] == ["pr", "create"] for c in gh.calls)
 
@@ -1180,8 +1306,9 @@ def test_author_branch_finish_pushes_and_opens_pr():
     git = _git_runner(ahead=2)
     gh = _gh_runner(create_out="https://github.com/o/r/pull/9")
     b = ab.AuthorBranch(git=git, gh=gh)
-    pr = b.finish_batch("abc123")
+    pr = b.finish_batch("abc123", Path("/tmp/wt"))
     assert pr == "https://github.com/o/r/pull/9"
+    # push is worktree-scoped (git -C wt …); _git_runner strips the -C prefix
     assert ["push", "--set-upstream", "origin", "lessons/abc123"] in git.calls
     create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
     assert "--base" in create
@@ -1193,13 +1320,54 @@ def test_author_branch_finish_pushes_and_opens_pr():
 def test_author_branch_finish_raises_on_gh_failure():
     b = ab.AuthorBranch(git=_git_runner(ahead=1), gh=_gh_runner(create_rc=1))
     with pytest.raises(ab.BranchError):
-        b.finish_batch("abc123")
+        b.finish_batch("abc123", Path("/tmp/wt"))
 
 
-def test_author_branch_restore_ref_checks_out():
+def test_author_branch_cleanup_removes_worktree():
     git = _git_runner()
-    ab.AuthorBranch(git=git, gh=_gh_runner()).restore_ref("my-feature")
-    assert ["checkout", "my-feature"] in git.calls
+    ab.AuthorBranch(git=git, gh=_gh_runner()).cleanup(Path("/tmp/wt-x"))
+    assert ["worktree", "remove", "--force", "/tmp/wt-x"] in git.calls
+
+
+def test_author_branch_worktree_lifecycle_real_git(tmp_path: Path):
+    """Real git: start_batch adds a worktree on a lead-author/<id> branch off
+    origin/main and finish/cleanup leave the dev checkout's HEAD untouched."""
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    _real(origin.parent, "init", "--bare", "-q", str(origin), "-b", "main")
+    _real(tmp_path, "clone", "-q", str(origin), str(work))
+    _real(work, "config", "user.email", "t@e.com")
+    _real(work, "config", "user.name", "T")
+    (work / "seed.md").write_text("seed\n")
+    _real(work, "add", "-A")
+    _real(work, "commit", "-q", "-m", "seed")
+    _real(work, "push", "-q", "origin", "main")
+
+    def real_git(args):
+        return _subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+
+    gh = _gh_runner(create_out="https://pr/lead/1")
+    b = ab.AuthorBranch(
+        git=real_git, gh=gh, branch_prefix="lead-author/",
+        worktree_base=tmp_path / "wt",
+    )
+    head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
+    wt = b.start_batch("xyz789")
+    assert wt.is_dir()  # a real worktree checkout exists
+    # a commit on the worktree's branch — the dev checkout never moves
+    (wt / "defender").mkdir(exist_ok=True)
+    (wt / "added.md").write_text("from worktree\n")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "wt edit")
+    pr = b.finish_batch("xyz789", wt)
+    assert pr == "https://pr/lead/1"
+    b.cleanup(wt)
+    assert not wt.exists()  # worktree removed
+    assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before
+
+
+def _real(cwd: Path, *args: str):
+    return _subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 # ---------------------------------------------------------------------------

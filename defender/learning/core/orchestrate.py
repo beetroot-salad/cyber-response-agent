@@ -8,7 +8,6 @@ instead of monkeypatching module globals.
 from __future__ import annotations
 
 import contextlib
-import functools
 import importlib
 import json
 import os
@@ -229,8 +228,11 @@ def _directions_for(disposition: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _invoke_lead_author(run_dir: Path, *, paths: LoopPaths) -> None:
-    """Catalog/template refinement. Independent of disposition + actor/judge."""
+def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
+    """Catalog/template refinement. Independent of disposition + actor/judge.
+
+    ``paths`` is the batch worktree's layout (``LoopPaths(repo_root=<worktree>)``), so
+    the lead author edits + the loop commits in the worktree, not the dev checkout."""
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
@@ -238,14 +240,16 @@ def _invoke_lead_author(run_dir: Path, *, paths: LoopPaths) -> None:
 
 
 def _maybe_trigger_author(
+    paths: LoopPaths,
     pending_file: Path,
     threshold_env: str,
     module_name: str,
     pending_label: str,
-    *,
-    paths: LoopPaths,
 ) -> None:
-    """Run the named curator if its pending queue meets the threshold."""
+    """Run the named curator if its pending queue meets the threshold.
+
+    ``paths`` is the batch worktree's layout, so ``run_batch`` resolves its corpus dir
+    (and the loop commits) under the worktree while the pending/lock files stay shared."""
     threshold = int(os.environ.get(threshold_env, "5"))
     pending_count = 0
     if pending_file.is_file():
@@ -436,12 +440,9 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     return checks
 
 
-def _has_drain_work(paths: LoopPaths) -> bool:
-    """Whether a drain would do anything — markers queued, or a curator queue at
-    threshold. Lets the drain skip touching git (no branch churn) on empty ticks."""
-    qdir = paths.author_queue_dir
-    if qdir.is_dir() and any(qdir.glob("*.json")):
-        return True
+def _has_curator_work(paths: LoopPaths) -> bool:
+    """Whether the lessons drain would do anything — any findings/observation curator
+    queue at threshold. Lets the drain skip creating a worktree on empty ticks."""
     for pending_file, env in _curator_queue_checks(paths):
         threshold = int(os.environ.get(env, "5"))
         if pending_file.is_file():
@@ -451,143 +452,244 @@ def _has_drain_work(paths: LoopPaths) -> bool:
     return False
 
 
-def _drain_lead_author_and_curators(
+def _has_lead_author_work(paths: LoopPaths) -> bool:
+    """Whether the lead-author drain would do anything — any run dir queued for
+    catalog/skill curation. Lets the drain skip creating a worktree on empty ticks."""
+    qdir = paths.author_queue_dir
+    return qdir.is_dir() and any(qdir.glob("*.json"))
+
+
+def _drain_curators(
     paths: LoopPaths,
-    run_lead_author: Callable[[Path], None],
-    trigger_author: Callable[[Path, str, str, str], None],
+    trigger_author: Callable[[LoopPaths, Path, str, str, str], None],
 ) -> None:
-    """The actual authoring work: lead-author each queued run dir, then the
-    threshold-gated findings/observation curators. Runs on the lessons branch."""
+    """The lessons drain's work: the threshold-gated findings/observation curators,
+    committing in ``paths.repo_root`` (a batch worktree). The lead author is NOT here
+    — it has its own drain (``lead_author_drain``)."""
+    trigger_author(paths, paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
+    for direction in BY_NAME.values():
+        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
+            trigger_author(
+                paths, t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label
+            )
+
+
+def _discard_worktree_changes(repo_root: Path) -> None:
+    """Discard every uncommitted change in the batch worktree so one marker's leftover
+    edits can't leak into the next (the lead-author batch shares a single worktree across
+    all its markers). A marker that succeeded already committed its corpus delta, so this
+    is a no-op for it; a marker that failed the scope gate (quarantined) or exited
+    non-zero leaves uncommitted edits that — left in place — would either be swept into
+    the next marker's pathspec commit or falsely trip its scope gate. Safe because the
+    worktree is throwaway and committed markers persist in HEAD; ``clean -fd`` (no ``-x``)
+    leaves gitignored state (e.g. ``runs/``) untouched. Best-effort: a missing worktree
+    (the fake-branch test path has no real checkout) or a git error is suppressed."""
+    if not (repo_root / ".git").exists():
+        return  # no real worktree here (e.g. the _FakeBranch test path) — nothing to reset
+    for args in (["reset", "--hard", "--quiet"], ["clean", "-fdq"]):
+        subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True, text=True, check=False,
+        )
+
+
+def _drain_lead_author_markers(
+    paths: LoopPaths,
+    run_lead_author: Callable[[LoopPaths, Path], None],
+) -> None:
+    """The lead-author drain's work: lead-author each queued run dir, committing in
+    ``paths.repo_root`` (a batch worktree). The queue + quarantine dir resolve off the
+    shared state root, so markers are drained from (and quarantined to) the original
+    location, not the throwaway worktree.
+
+    The batch worktree is shared across markers, so after each marker we discard any
+    uncommitted leftovers (``_discard_worktree_changes``) — a failed/quarantined marker
+    must not contaminate the next one's commit or gate."""
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
-    _log(f"author_drain: {len(markers)} run(s) queued for lead-author")
+    _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
     for marker in markers:
         try:
             spec = json.loads(marker.read_text())
         except (OSError, json.JSONDecodeError) as e:
-            _log(f"author_drain: unreadable marker {marker.name}: {e!r}; skipping")
+            _log(f"lead_author_drain: unreadable marker {marker.name}: {e!r}; skipping")
             continue
         run_dir = Path(spec.get("run_dir", ""))
         if not run_dir.is_dir():
             _quarantine_marker(spec, marker, paths.author_queue_dir, "artifact-missing")
             continue
         try:
-            run_lead_author(run_dir)
+            run_lead_author(paths, run_dir)
         except Exception as e:  # noqa: BLE001 — one poison run dir must not wedge
             # the whole serial drain (and re-crash every tick on the same
             # marker): quarantine it and move on to the remaining work.
             _quarantine_marker(spec, marker, paths.author_queue_dir, f"lead-author-error: {e!r}")
             continue
-        with contextlib.suppress(OSError):
-            marker.unlink()
+        else:
+            with contextlib.suppress(OSError):
+                marker.unlink()
+        finally:
+            # Always leave the shared worktree clean for the next marker — committed work
+            # survives, uncommitted leftovers (a quarantined or rc!=0 marker) are dropped.
+            _discard_worktree_changes(paths.repo_root)
 
-    trigger_author(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
-    for direction in BY_NAME.values():
-        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
-            trigger_author(t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label)
+
+def _validate_merge_mode() -> None:
+    """Validated at the author stage (not at config import) so an author-only
+    misconfig fails loud for the drains without crashing the LEARN / run_one
+    importers that never read it. main() maps LoopError→rc 2."""
+    if MERGE_MODE not in VALID_MERGE_MODES:
+        raise LoopError(
+            f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
+        )
 
 
-def _author_drain_locked(
+def _run_worktree_batch(
     paths: LoopPaths,
-    run_lead_author: Callable[[Path], None],
-    trigger_author: Callable[[Path, str, str, str], None],
     branch: AuthorBranch,
+    *,
+    label: str,
+    has_work: Callable[[LoopPaths], bool],
+    do_work: Callable[[LoopPaths], None],
 ) -> int:
-    if not _has_drain_work(paths):
-        _log("author_drain: nothing queued and no curator at threshold — skipping")
+    """Shared worktree-batch envelope for an author drain.
+
+    Writer lease → ``start_batch`` (fresh worktree off ``origin/main``) → run the
+    drain's work rooted at the worktree → ``finish_batch`` (push + one PR) → always
+    ``cleanup`` the worktree. The dev checkout is never touched, so two drains never
+    race on a shared HEAD and a failed cleanup can't strand anyone."""
+    if not has_work(paths):
+        _log(f"{label}: nothing queued and no curator at threshold — skipping")
         return 0
 
-    # Writer lease (§4.4): at most one open lessons PR per tenant, so we never form
-    # a second divergent branch. Under human_review the lease naturally spans the
-    # whole review window.
+    # Writer lease (§4.4): at most one open PR per branch-prefix, so we never form a
+    # second divergent branch. Under human_review the lease spans the whole review window.
     try:
-        if branch.open_lessons_pr_exists():
-            _log("author_drain: an open lessons PR holds the writer lease — skipping")
+        if branch.open_pr_exists():
+            _log(f"{label}: an open {branch.branch_prefix} PR holds the writer lease — skipping")
             return 0
         batch_id = uuid.uuid4().hex[:12]
-        original_ref = branch.start_batch_branch(batch_id)
+        wt = branch.start_batch(batch_id)
     except BranchError as e:
-        _log(f"author_drain: cannot start batch branch: {e} — skipping")
+        _log(f"{label}: cannot start batch worktree: {e} — skipping")
         return 0
 
+    # Re-root the layout at the worktree: corpus/catalog dirs move there (where the
+    # curator edits + the loop commits) while queues/locks/pending stay shared.
+    wt_paths = paths.with_repo_root(wt)
     pr = None
     try:
-        _drain_lead_author_and_curators(paths, run_lead_author, trigger_author)
+        do_work(wt_paths)
         try:
-            pr = branch.finish_batch(batch_id)
+            pr = branch.finish_batch(batch_id, wt)
         except BranchError as e:
-            # push / `gh pr create` failed (auth, network, branch already on
-            # origin). The findings were held (hold_committed), so they stay
-            # queued and re-author next tick — don't crash the serial drainer
-            # (BranchError is not a LoopError, so main() would not catch it).
-            _log(f"author_drain: finish_batch failed: {e} — findings stay queued, "
-                 "retry next tick")
+            # push / `gh pr create` failed (auth, network, branch already on origin).
+            # Work was held (hold_committed) / re-authored next tick — don't crash the
+            # drainer (BranchError is not a LoopError, so main() would not catch it).
+            _log(f"{label}: finish_batch failed: {e} — work stays queued, retry next tick")
     finally:
-        # Always put the dev's HEAD back, even if the batch raised. A swallowed
-        # restore failure strands the dev on the lessons branch and (with in-repo
-        # state) wedges every future drain on the refuse-if-dirty check, so
-        # surface it loudly instead of suppressing silently.
-        restored = False
+        # Always remove the batch worktree. Unlike the old in-place restore, a failed
+        # cleanup is harmless: the dev checkout was never moved, and the next batch's
+        # `worktree prune` clears a stale registration.
         with contextlib.suppress(Exception):
-            branch.restore_ref(original_ref)
-            restored = True
-        if not restored:
-            _log(f"author_drain: WARNING could not restore HEAD to {original_ref!r} "
-                 "— dev checkout may be stranded on the lessons branch")
+            branch.cleanup(wt)
 
     if pr is None:
-        _log("author_drain: batch produced no commits — no PR opened")
+        _log(f"{label}: batch produced no commits — no PR opened")
         return 0
-    _log(f"author_drain: opened lessons PR {pr}")
+    _log(f"{label}: opened PR {pr}")
     if MERGE_MODE == "auto_on_green":
         # PR C wires the green bar + `gh pr merge --auto` here; until then the PR
         # falls through to human review even under auto_on_green.
-        _log("author_drain: merge_mode=auto_on_green — green-bar auto-merge not yet "
+        _log(f"{label}: merge_mode=auto_on_green — green-bar auto-merge not yet "
              "wired (PR C); leaving PR for review")
     return 0
+
+
+def _lead_author_pr_title(batch_id: str) -> str:
+    return f"learning: lead-author catalog/skill batch {batch_id}"
+
+
+def _lead_author_pr_body(branch: str) -> str:
+    return (
+        "Automated gather-catalog / system-skill curation from the lead-author drain "
+        f"(branch `{branch}`, off freshly-fetched `origin/main`). Touches "
+        "`defender/skills/` only — distinct from the lessons PR."
+    )
 
 
 def author_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
-    run_lead_author: Callable[[Path], None] | None = None,
-    trigger_author: Callable[[Path, str, str, str], None] | None = None,
+    trigger_author: Callable[[LoopPaths, Path, str, str, str], None] | None = None,
     branch: AuthorBranch | None = None,
 ) -> int:
-    """Serial AUTHOR stage: branch off freshly-fetched ``origin/main``, lead-author
-    each queued run dir + drain the threshold-gated findings/observation curators
-    (committing on the branch), then push and open one PR.
+    """Lessons AUTHOR stage: in a fresh ``lessons/<id>`` worktree off freshly-fetched
+    ``origin/main``, drain the threshold-gated findings/observation curators (committing
+    in the worktree), then push and open one ``lessons/`` PR. The lead author is no
+    longer part of this drain — it has its own (``lead_author_drain``).
 
-    The **writer lease** (one open lessons PR at a time) plus the in-place branch
-    keep batches non-conflicting; ``merge_mode`` (default ``human_review``) decides
-    whether the PR auto-merges on a green bar (PR C) or waits for a human.
+    The **per-prefix writer lease** (one open ``lessons/`` PR at a time) plus the
+    per-batch worktree keep batches non-conflicting; ``merge_mode`` (default
+    ``human_review``) decides whether the PR auto-merges on a green bar (PR C).
 
-    One live drainer at a time, guarded by a non-blocking flock on a *dedicated*
-    lock (``author_drain_lock_file``) — distinct from the curators' repo lock so
-    the curators it calls can take that without a same-process deadlock. A second
-    drainer that can't grab the lock simply exits. ``run_lead_author`` /
+    One live drainer at a time, guarded by a non-blocking flock on a dedicated lock
+    (``author_drain_lock_file``). A second drainer that can't grab it exits.
     ``trigger_author`` / ``branch`` are injectable for tests."""
-    if MERGE_MODE not in VALID_MERGE_MODES:
-        # Validated here (the author stage), not at _loop_config import, so an
-        # author-only misconfig fails loud for *this* stage without crashing the
-        # LEARN / run_one importers that never read it. main() maps LoopError→rc 2.
-        raise LoopError(
-            f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
-        )
-    if run_lead_author is None:
-        run_lead_author = functools.partial(_invoke_lead_author, paths=paths)
+    _validate_merge_mode()
     if trigger_author is None:
-        # Bind the drain's paths so the curator builds its config from the same
-        # layout; the call sites pass the 4 positional args unchanged.
-        trigger_author = functools.partial(_maybe_trigger_author, paths=paths)
+        trigger_author = _maybe_trigger_author
     if branch is None:
-        branch = AuthorBranch()
+        branch = AuthorBranch(worktree_base=paths.worktree_base)
 
     with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
         if not locked:
             _log("author_drain: another drainer holds the lock — exiting")
             return 0
-        return _author_drain_locked(paths, run_lead_author, trigger_author, branch)
+        return _run_worktree_batch(
+            paths, branch, label="author_drain",
+            has_work=_has_curator_work,
+            do_work=lambda wt_paths: _drain_curators(wt_paths, trigger_author),
+        )
+
+
+def lead_author_drain(
+    paths: LoopPaths = DEFAULT_PATHS,
+    *,
+    run_lead_author: Callable[[LoopPaths, Path], None] | None = None,
+    branch: AuthorBranch | None = None,
+) -> int:
+    """Lead-author AUTHOR stage: in a fresh ``lead-author/<id>`` worktree off
+    freshly-fetched ``origin/main``, curate the gather query-template catalog +
+    system-skill surface for each queued run dir (the loop commits each in the
+    worktree), then push and open one ``lead-author/`` PR — separate from the lessons
+    PR (different dirs `defender/skills/` vs `defender/lessons/`, different merge
+    concerns).
+
+    Its own non-blocking lock (``lead_author_drain_lock_file``) makes it independently
+    schedulable from the lessons ``author_drain``; per-author worktrees mean the two
+    never share a HEAD, so no cross-drain lock is needed. ``run_lead_author`` /
+    ``branch`` are injectable for tests."""
+    _validate_merge_mode()
+    if run_lead_author is None:
+        run_lead_author = _invoke_lead_author
+    if branch is None:
+        branch = AuthorBranch(
+            branch_prefix="lead-author/",
+            pr_title=_lead_author_pr_title,
+            pr_body=_lead_author_pr_body,
+            worktree_base=paths.worktree_base,
+        )
+
+    with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
+        if not locked:
+            _log("lead_author_drain: another drainer holds the lock — exiting")
+            return 0
+        return _run_worktree_batch(
+            paths, branch, label="lead_author_drain",
+            has_work=_has_lead_author_work,
+            do_work=lambda wt_paths: _drain_lead_author_markers(wt_paths, run_lead_author),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -773,8 +875,15 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--author-drain", action="store_true",
-        help="AUTHOR stage: serially drain the author-work + findings/observation "
-             "queues and commit lessons/templates (takes no run_dir; one drainer at a time).",
+        help="LESSONS AUTHOR stage: in a fresh lessons/ worktree, drain the "
+             "findings/observation curator queues and open one lessons PR "
+             "(takes no run_dir; one drainer at a time).",
+    )
+    parser.add_argument(
+        "--lead-author-drain", action="store_true",
+        help="LEAD-AUTHOR stage: in a fresh lead-author/ worktree, curate the gather "
+             "catalog + system skills for each queued run dir and open one lead-author "
+             "PR (separate from the lessons PR; takes no run_dir; one drainer at a time).",
     )
     parser.add_argument(
         "--learn-drain", action="store_true",
@@ -784,8 +893,10 @@ def main(argv: list[str]) -> int:
     )
     ns = parser.parse_args(argv[1:])
 
-    if ns.author_drain and ns.learn_drain:
-        print("--author-drain and --learn-drain are mutually exclusive", file=sys.stderr)
+    drain_flags = sum((ns.author_drain, ns.lead_author_drain, ns.learn_drain))
+    if drain_flags > 1:
+        print("--author-drain, --lead-author-drain, and --learn-drain are mutually "
+              "exclusive", file=sys.stderr)
         return 1
 
     if ns.author_drain:
@@ -794,6 +905,12 @@ def main(argv: list[str]) -> int:
             return 1
         return _run_stage(author_drain)
 
+    if ns.lead_author_drain:
+        if ns.run_dir is not None:
+            print("--lead-author-drain takes no run_dir", file=sys.stderr)
+            return 1
+        return _run_stage(lead_author_drain)
+
     if ns.learn_drain:
         if ns.run_dir is not None:
             print("--learn-drain takes no run_dir", file=sys.stderr)
@@ -801,7 +918,7 @@ def main(argv: list[str]) -> int:
         return _run_stage(learn_drain)
 
     if ns.run_dir is None:
-        print("run_dir required (or pass --author-drain)", file=sys.stderr)
+        print("run_dir required (or pass --author-drain / --lead-author-drain)", file=sys.stderr)
         return 1
     run_dir = ns.run_dir.resolve()
     if not run_dir.is_dir():

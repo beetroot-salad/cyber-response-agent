@@ -1,45 +1,40 @@
 #!/usr/bin/env python3
 """Minimal lead-author driver: fold lessons from one defender run into
 the executed-side query template catalog at
-``defender/skills/gather/queries/``.
+``defender/skills/gather/queries/`` plus the per-system ``SKILL.md`` surface.
 
 Per ``defender/CLAUDE.md``, defender is an experimental PoC; this
 driver carries the minimum discipline needed for safe interleaving
-with the gap-side authors (`author.py`, `author_actor.py`) and nothing
-more. No Tier-1 gate, no streaming JSON parse, no result marker — git
-is the source of truth.
+with the gap-side authors and nothing more.
 
-Lifecycle, per tick:
+**The agent runs no git; the loop is the sole committer** (mirrors the lessons
+author). The agent edits ``defender/skills/`` and ``rm``s discarded/promoted
+drafts; the loop verifies the working-tree edits and commits them, pathspec-scoped,
+via ``_author_shared.commit_corpus``. The lead-author **drain** runs this in its own
+``lead-author/<id>`` git worktree (``core.orchestrate.lead_author_drain``), so two
+authors never share a HEAD — ``run`` here just edits + commits at ``deps.paths.repo_root``
+(the worktree in prod; a tmp tree under test) and is agnostic to which it is.
+
+Lifecycle, per tick (one queued run dir):
 
   1. Acquire the per-author queue lock
-     (``defender/learning/_pending_leads/.lock``). Non-blocking; another
-     in-flight tick ⇒ return 0 silently.
-  2. Acquire the shared repo lock
-     (``defender/learning/_author.lock``) via ``_author_shared``.
-     Blocking with timeout — same discipline as ``author.py``.
-  3. Preflight brakes (in order):
+     (``_pending_leads/.lock``). Non-blocking; another in-flight tick ⇒ return 0.
+     (No shared repo lock — worktree isolation + the drain lock replace it.)
+  2. Preflight brakes (in order):
        a. ``<run_dir>/lead_author/failure.txt`` ⇒ a prior tick aborted
           mid-stream; refuse to retry until a human clears it.
        b. ``<run_dir>/lead_author/done`` ⇒ already processed.
-  4. Capture ``base_sha`` + ``baseline_status``. Refuse to author if the
-     catalog itself is already dirty (uncommitted file under
-     ``defender/skills/gather/queries/``).
-  5. Extract ``ExecutedLead`` records by joining the leads + queries
-     tables via ``lead_repository.joined(<run_dir>)``.
-  6. Build per-lead handoff blocks (top-k neighbors via
-     ``lead_neighbors.top_k_neighbors``).
-  7. Spawn ``claude -p`` with a narrow allowlist. Stdout/stderr → log.
-     Non-zero exit ⇒ write ``failure.txt`` and return rc=2, even if a
-     valid catalog commit was made; the next tick refuses to retry
-     until a human clears ``failure.txt``.
-  8. Post-flight scope check: at most one commit; that commit's paths
-     all under the catalog; no newly-dirty paths outside the catalog;
-     no-commit runs must end clean. Violations ⇒ write ``violation.txt``,
-     return rc=2. **No auto-reset** — destructive.
-  9. Optional push (``LEAD_AUTHOR_PUSH=1``). Refuses ``origin/main`` /
-     ``origin/master`` under any circumstance. Push failure ⇒ logged,
-     manual retry required.
- 10. Write ``<run_dir>/lead_author/done`` sentinel.
+  3. Extract ``ExecutedLead`` records by joining the leads + queries tables;
+     synthesize ``_draft/`` skeletons for executed-but-uncatalogued verbs.
+  4. Capture the pre-agent stray baseline (paths outside ``defender/skills/``*.md).
+  5. Build per-lead handoff blocks + pending system-skill drafts.
+  6. Spawn ``claude -p`` with a no-git allowlist (Edit/Write ``defender/skills/`` +
+     ``rm`` drafts). Non-zero exit ⇒ write ``failure.txt`` and return rc=2.
+  7. Loop-side scope gate (``_verify_skills_state``) over one ``git status`` read:
+     no strays outside scope, no protected-surface mutation, no established/SKILL.md
+     deletion. A violation raises ``LeadAuthorError`` (the drain quarantines the marker).
+  8. Loop commits the corpus pathspec-scoped (``commit_corpus``) with a deterministic
+     loop-authored message, then writes the ``done`` sentinel.
 """
 from __future__ import annotations
 
@@ -271,16 +266,19 @@ def _executed_query(lead: ExecutedLead) -> str:
     return (arg0 or raw) if _is_esql(lead.system) else (raw or arg0)
 
 
-def extract(run_dir: Path) -> list[ExecutedLead]:
+def extract(run_dir: Path) -> tuple[list, list[ExecutedLead]]:
     """Join the two tables via ``lead_repository`` and emit one ExecutedLead
-    per executed query.
+    per executed query. Returns ``(joined_leads, executed)`` so a caller that
+    needs the raw join surface too (for handoff building) reuses this single
+    read instead of re-joining.
 
     Queries whose payload file is missing are dropped silently (the dispatch
     never landed). The payload status comes from the queries-table row
     (``record_query`` writes it deterministically); an out-of-vocabulary
     status is a loud failure — the loop refuses to author against it.
     """
-    return extract_from_joined(lead_repository.joined(run_dir))
+    joined = lead_repository.joined(run_dir)
+    return joined, extract_from_joined(joined)
 
 
 def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
@@ -358,81 +356,8 @@ def release_queue_lock(fh: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Git helpers — porcelain v1 -z parsing
+# Path classifiers — lead_author's edit scope (domain logic, not git lifecycle)
 # ---------------------------------------------------------------------------
-
-
-def _git(*args: str, repo_root: Path, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=check,
-    )
-
-
-def _parse_status_z(blob: str) -> set[tuple[str, str]]:
-    """Parse ``git status --porcelain=v1 -z`` into ``{(XY, path)}``.
-
-    Porcelain v1 record format: ``XY <space> path`` where ``XY`` is
-    exactly two characters (one for staged status, one for working-tree
-    status — either can be space). With ``-z``, records are separated
-    by NUL bytes. Rename/copy entries use TWO NUL-terminated records:
-    the destination path first, then the source path. We key on the
-    destination (the post-rename name) because that's the one a
-    baseline-vs-post diff cares about.
-    """
-    out: set[tuple[str, str]] = set()
-    parts = blob.split("\0")
-    i = 0
-    while i < len(parts):
-        rec = parts[i]
-        if not rec or len(rec) < 3:
-            i += 1
-            continue
-        xy = rec[:2]
-        path = rec[3:] if rec[2] == " " else rec[2:]
-        if xy[0] in ("R", "C"):
-            i += 2  # consume source record
-        else:
-            i += 1
-        out.add((xy, path))
-    return out
-
-
-def _diff_name_only_z(base_sha: str, head_sha: str, repo_root: Path) -> list[str]:
-    proc = _git("diff", "--name-only", "-z", f"{base_sha}..{head_sha}", repo_root=repo_root)
-    return [p for p in proc.stdout.split("\0") if p]
-
-
-def _diff_name_status_z(
-    base_sha: str, head_sha: str, repo_root: Path
-) -> list[tuple[str, list[str]]]:
-    """Parse ``git diff --name-status -z`` into ``[(code, [paths])]``.
-
-    Status codes: ``M``/``A``/``D``/``T`` carry one path each; ``R<score>``
-    and ``C<score>`` carry two (source then destination). With ``-z``
-    each field is NUL-separated.
-    """
-    proc = _git("diff", "--name-status", "-z", f"{base_sha}..{head_sha}", repo_root=repo_root)
-    parts = [p for p in proc.stdout.split("\0") if p]
-    out: list[tuple[str, list[str]]] = []
-    i = 0
-    while i < len(parts):
-        code = parts[i]
-        i += 1
-        if code[:1] in ("R", "C"):
-            if i + 1 >= len(parts):
-                break
-            out.append((code, [parts[i], parts[i + 1]]))
-            i += 2
-        else:
-            if i >= len(parts):
-                break
-            out.append((code, [parts[i]]))
-            i += 1
-    return out
 
 
 def _under_draft(path: str) -> bool:
@@ -482,6 +407,12 @@ def _is_draft_readme(path: str) -> bool:
     return Path(path).name == "README.md"
 
 
+def _is_schema_md(path: str) -> bool:
+    """True if ``path`` is a catalog ``SCHEMA.md`` (the template-schema doc, not a
+    template). Loop-protected: the lead author curates templates, never the schema."""
+    return _is_catalog_path(path) and Path(path).name == "SCHEMA.md"
+
+
 def _is_in_scope(path: str) -> bool:
     """True if ``path`` is within lead_author's edit scope.
 
@@ -495,40 +426,26 @@ def _is_in_scope(path: str) -> bool:
     )
 
 
-def _git_head(repo_root: Path) -> str:
-    return _git("rev-parse", "HEAD", repo_root=repo_root).stdout.strip()
-
-
-def _git_rev_list_count(base_sha: str, repo_root: Path) -> int:
-    return int(
-        _git("rev-list", "--count", f"{base_sha}..HEAD", repo_root=repo_root).stdout.strip()
-    )
-
-
-def _git_status_records(repo_root: Path) -> set[tuple[str, str]]:
-    proc = _git("status", "--porcelain=v1", "-z", "--untracked-files=all", repo_root=repo_root)
-    return _parse_status_z(proc.stdout)
-
-
-def _stage_pending_drafts(repo_root: Path) -> list[str]:
-    """Stage untracked ``_draft/`` deposits so the curator's ``git mv``
-    (promote/lift) and ``git rm -f`` (discard) operate on index-tracked
-    files — git refuses both on an untracked source.
-
-    Covers both catalog drafts (gather-authored mid-run or auto-synthesized
-    by ``synthesize_drafts``) and any pending system-skill drafts under
-    ``_draft/``. Called *before* the baseline snapshot so the staged drafts
-    are recorded as expected queue content, not flagged as post-flight dirt.
+def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
+    """``[(XY, path)]`` from ``git status --porcelain --untracked-files=all -z`` at
+    ``repo_root`` (a batch worktree). The agent runs no git, so its edits sit uncommitted
+    in the working tree (``M`` / ``D`` / ``??``) — this is the single read the scope gate
+    verifies. The agent stages nothing, so no rename/copy (``R`` / ``C``) records arise (a
+    "move" shows as a delete + an untracked add): each ``-z`` field is therefore one
+    ``XY␣path`` record. A stray staged rename, were one ever to appear, fails safe — its
+    second (source) field reads as an out-of-corpus path and the gate quarantines rather
+    than mis-committing.
     """
-    proc = _git("ls-files", "--others", "--exclude-standard", "-z", repo_root=repo_root)
-    untracked = [p for p in proc.stdout.split("\0") if p]
-    drafts = [
-        p for p in untracked
-        if (_under_draft(p) or _is_system_skill_draft(p)) and not _is_draft_readme(p)
-    ]
-    if drafts:
-        _git("add", "--", *drafts, repo_root=repo_root)
-    return drafts
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "-z"],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    out: list[tuple[str, str]] = []
+    for rec in proc.stdout.split("\0"):
+        if not rec or len(rec) < 3:
+            continue
+        out.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -714,18 +631,16 @@ def build_system_draft_handoffs(
 # ---------------------------------------------------------------------------
 
 
+# The agent runs NO git — the loop is the sole committer. Edit/Write are scoped to the
+# skills tree; promote = Write the established template + ``rm`` the draft, discard = ``rm``
+# the draft, fold/split/lift = Edit/Write. The loop's ``_verify_skills_state`` enforces the
+# fine scope (in-scope, no protected-surface mutation, draft-only deletion), so the
+# allowlist itself can be the coarse ``defender/skills/`` tree.
 _ALLOWLIST = (
     "Read,Glob,Grep,"
-    f"Edit({CATALOG_REL}**),"
-    f"Write({CATALOG_REL}**),"
-    f"Edit({SKILLS_REL}*/SKILL.md),"
-    f"Write({SKILLS_REL}*/SKILL.md),"
-    f"Bash(git add {SKILLS_REL}:*),"
-    "Bash(git mv:*),"
-    "Bash(git rm:*),"
-    "Bash(git commit:*),"
-    "Bash(git status:*),"
-    "Bash(git diff:*)"
+    f"Edit({SKILLS_REL}**),"
+    f"Write({SKILLS_REL}**),"
+    f"Bash(rm {SKILLS_REL}**)"
 )
 
 
@@ -733,15 +648,19 @@ def invoke_agent(
     run_dir: Path,
     handoffs: list[dict],
     pending_drafts: list[dict] | None = None,
+    *,
+    repo_root: Path = REPO_ROOT,
 ) -> int:
     """Spawn ``claude -p`` via the shared runner with the lead-author prompt. Returns rc.
 
     Routed through ``_author_runner.invoke_claude_print_raw`` (issue #373) so the lead
     author shares the one spawn path — select-loop deadline, stderr drain, non-blocking
-    stdin, event teeing to the run log — instead of its own ``subprocess.run``. It reads
-    its result from the working tree (git is the source of truth), so it uses the raw
-    variant (no ``AUTHOR_RESULT:`` marker) and maps the runner's timeout to rc 124 so the
-    ``_run_locked`` caller writes ``failure.txt`` and refuses retry until a human clears it."""
+    stdin, event teeing to the run log — instead of its own ``subprocess.run``. The agent
+    runs no git and writes no result marker; its edits + ``rm``s sit in the working tree
+    (the source of truth), so it uses the raw variant (no ``AUTHOR_RESULT:`` marker) and
+    maps the runner's timeout to rc 124 so ``_run_locked`` writes ``failure.txt`` and
+    refuses retry until a human clears it. ``repo_root`` is the batch worktree (the drain
+    passes ``deps.paths.repo_root``); the agent's cwd + ``rm`` matcher resolve under it."""
     pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
@@ -754,13 +673,16 @@ def invoke_agent(
     )
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     _log(f"spawn claude (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
+    # Also permit the worktree-absolute form of the rm matcher, since the agent may pass
+    # an absolute path; the relative form covers cwd-relative `rm`.
+    allowed_tools = _ALLOWLIST + f",Bash(rm {repo_root / 'defender' / 'skills'}/**)"
     options = _author_runner.RunnerOptions(
         system_prompt_file=LEAD_AUTHOR_PROMPT,
-        allowed_tools=_ALLOWLIST,
+        allowed_tools=allowed_tools,
         model=LEAD_AUTHOR_MODEL,
         effort=None,
         timeout_seconds=LEAD_AUTHOR_TIMEOUT,
-        cwd=REPO_ROOT,
+        cwd=repo_root,
         log_path=RUN_LOG_FILE,
         result_marker=None,
         batch_id=run_dir.name,
@@ -775,183 +697,78 @@ def invoke_agent(
 
 
 # ---------------------------------------------------------------------------
-# Post-flight
+# Scope gate — the loop verifies the agent's working-tree edits before committing
 # ---------------------------------------------------------------------------
 
 
-def _dirty_protected_paths(baseline: set[tuple[str, str]]) -> list[str]:
-    """Established paths in ``baseline`` that lead_author must not stomp.
+def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+    """Verify the agent's uncommitted edits before the loop commits + writes ``done``.
 
-    Covers:
-      * catalog paths outside ``{system}/_draft/`` (established templates),
-      * system-skill ``SKILL.md`` files (lift targets).
-
-    Untracked deposits under any ``_draft/`` are expected queue content
-    and intentionally not flagged.
+    The agent runs no git, so its edits sit in the working tree. One ``git status`` read
+    (``_porcelain_records``) drives every check; returns the in-scope changed paths (for
+    the commit message). Raises ``LeadAuthorError`` — the drain quarantines the marker — on:
+      * a NEW change outside ``defender/skills/``*.md (stray ``Write`` / improvised shim),
+        diffed against ``baseline_stray`` captured before the agent ran so pre-existing
+        leftovers aren't blamed on it;
+      * an in-skills change outside lead_author's scope (not catalog / system ``SKILL.md`` /
+        ``_draft/``), or a ``_draft/README.md`` / catalog ``SCHEMA.md`` mutation;
+      * a deletion of a non-draft established template or ``SKILL.md`` — delete-prohibition,
+        which also covers a demotion (rm-established + write-draft shows the ``D`` here).
     """
-    out: list[str] = []
-    for _, p in baseline:
-        if _is_catalog_path(p) and not _under_draft(p) or _is_system_skill_md(p):
-            out.append(p)
-    return out
+    records = _porcelain_records(repo_root)
 
+    def _in_corpus(p: str) -> bool:
+        return p.startswith(SKILLS_REL) and p.endswith(".md")
 
-def verify_postflight(
-    base_sha: str, baseline: set[tuple[str, str]], repo_root: Path
-) -> tuple[bool, str, dict]:
-    """Check post-flight git state. Returns (ok, reason, details)."""
-    head_sha = _git_head(repo_root)
-    fail = _check_base_sha_ancestor(base_sha, head_sha, repo_root)
-    if fail:
-        return fail
-    count = _git_rev_list_count(base_sha, repo_root)
-    if count > 1:
-        return False, "more than one commit since base", {
-            "rev_list_count": count, "head": head_sha,
-        }
-    diff_paths: list[str] = []
-    if count == 1:
-        diff_paths = _diff_name_only_z(base_sha, head_sha, repo_root)
-        fail = _check_commit_contents(base_sha, head_sha, count, diff_paths, repo_root)
-        if fail:
-            return fail
-    new_paths, fail = _check_post_status(baseline, count, repo_root)
-    if fail:
-        return fail
-    return True, "ok", {
-        "rev_list_count": count,
-        "head": head_sha,
-        "diff_paths": diff_paths,
-        "new_paths": new_paths,
-    }
+    strays = sorted({p for _, p in records if not _in_corpus(p)})
+    new_stray = sorted(set(strays) - set(baseline_stray))
+    if new_stray:
+        raise LeadAuthorError(
+            f"agent changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
+        )
 
-
-def _check_base_sha_ancestor(
-    base_sha: str, head_sha: str, repo_root: Path,
-) -> tuple[bool, str, dict] | None:
-    # If base_sha isn't an ancestor of HEAD, the agent rewrote history
-    # (`git commit --amend`, `git rebase`, `git reset`), a hard-rule
-    # violation that would make rev-list / diff comparisons against
-    # base_sha lie. `merge-base --is-ancestor` exits 0 when ancestor,
-    # 1 when not, ≥2 on error.
-    anc = _git("merge-base", "--is-ancestor", base_sha, head_sha, repo_root=repo_root, check=False)
-    if anc.returncode == 1:
-        return False, "base_sha is not an ancestor of HEAD (history rewritten)", {
-            "base": base_sha, "head": head_sha,
-        }
-    if anc.returncode != 0:
-        return False, "merge-base --is-ancestor failed", {
-            "base": base_sha, "head": head_sha,
-            "stderr": anc.stderr.strip(),
-        }
-    return None
-
-
-def _check_commit_contents(
-    base_sha: str, head_sha: str, count: int, diff_paths: list[str], repo_root: Path,
-) -> tuple[bool, str, dict] | None:
-    for path in diff_paths:
+    changed: list[str] = []
+    for xy, path in records:
+        if not _in_corpus(path):
+            continue  # non-corpus strays already rejected above
         if not _is_in_scope(path):
-            return False, "commit touches paths outside lead_author scope", {
-                "rev_list_count": count, "head": head_sha,
-                "diff_paths": diff_paths,
-            }
-        if _is_draft_readme(path):
-            return False, "commit touches a _draft/README.md (surface declaration)", {
-                "rev_list_count": count, "head": head_sha,
-                "diff_paths": diff_paths,
-                "touched_readme": path,
-            }
-    # Deletions are only allowed for drafts (catalog drafts or system-skill
-    # drafts). SKILL.md and established templates are delete-prohibited.
-    # Renames may move a draft into the system root (catalog promotion) but
-    # not the reverse.
-    for code, paths in _diff_name_status_z(base_sha, head_sha, repo_root):
-        if code == "D":
-            src = paths[0]
-            if not (_under_draft(src) or _is_system_skill_draft(src)):
-                return False, "commit deletes an established file", {
-                    "rev_list_count": count, "head": head_sha,
-                    "diff_paths": diff_paths,
-                    "deleted_path": src,
-                }
-        if code.startswith(("R", "C")):
-            src, dst = paths[0], paths[1]
-            # Catalog: established → _draft demotion.
-            if _under_draft(dst) and not _under_draft(src):
-                return False, "commit demotes an established template to _draft", {
-                    "rev_list_count": count, "head": head_sha,
-                    "rename_src": src,
-                    "rename_dst": dst,
-                }
-            # System-skill: SKILL.md → _draft demotion.
-            if _is_system_skill_draft(dst) and not _is_system_skill_draft(src):
-                return False, "commit demotes a system-skill file into _draft", {
-                    "rev_list_count": count, "head": head_sha,
-                    "rename_src": src,
-                    "rename_dst": dst,
-                }
-    return None
+            raise LeadAuthorError(
+                f"agent edited an out-of-scope skills path ({path}); refusing to commit"
+            )
+        if _is_draft_readme(path) or _is_schema_md(path):
+            raise LeadAuthorError(
+                f"agent mutated a protected surface file ({path}); refusing to commit"
+            )
+        if "D" in xy and not (_under_draft(path) or _is_system_skill_draft(path)):
+            raise LeadAuthorError(
+                f"agent deleted an established template / SKILL.md ({path}); refusing to "
+                "commit (delete-prohibition; a demotion is rejected the same way)"
+            )
+        changed.append(path)
+    return sorted(changed)
 
 
-def _check_post_status(
-    baseline: set[tuple[str, str]], count: int, repo_root: Path,
-) -> tuple[list[str], tuple[bool, str, dict] | None]:
-    post = _git_status_records(repo_root)
-    new_records = post - baseline
-    new_paths = sorted({p for _, p in new_records})
-    if count == 0:
-        if new_records:
-            return new_paths, (False, "no commit but new dirty/untracked records exist", {
-                "new_paths": new_paths,
-            })
-        return new_paths, None
-    for _, path in new_records:
-        if _is_in_scope(path):
-            return new_paths, (False, "uncommitted in-scope dirt alongside commit", {
-                "new_paths": new_paths,
-            })
-        if path.startswith("defender/"):
-            return new_paths, (False, "new dirt under defender/ outside lead_author scope", {
-                "new_paths": new_paths,
-            })
-    return new_paths, None
+def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
+    """Deterministic loop-authored commit message — the agent runs no git and authors no
+    message. Title names the scope touched + the source run; body lists the changed paths.
 
-
-# ---------------------------------------------------------------------------
-# Push
-# ---------------------------------------------------------------------------
-
-
-_FORBIDDEN_UPSTREAMS = {"origin/main", "origin/master"}
-
-
-def maybe_push(commit_made: bool, repo_root: Path) -> None:
-    """Push to upstream if ``LEAD_AUTHOR_PUSH=1`` and the upstream is allowed."""
-    if not commit_made:
-        return
-    if os.environ.get("LEAD_AUTHOR_PUSH") != "1":
-        _log("push skipped (LEAD_AUTHOR_PUSH not set)")
-        return
-    try:
-        proc = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
-                    repo_root=repo_root, check=False)
-    except subprocess.CalledProcessError:
-        proc = subprocess.CompletedProcess([], 1, "", "")
-    if proc.returncode != 0 or not proc.stdout.strip():
-        _log("push skipped — no upstream configured")
-        return
-    upstream = proc.stdout.strip()
-    if upstream in _FORBIDDEN_UPSTREAMS:
-        _log(f"push REFUSED — upstream={upstream} (origin/main and origin/master are forbidden)")
-        return
-    _log(f"push upstream={upstream}")
-    push = _git("push", repo_root=repo_root, check=False)
-    if push.returncode != 0:
-        _log(f"push FAILED rc={push.returncode}: {push.stderr.strip()} "
-             "(manual retry required — done sentinel will block driver retries)")
+    (Distinct from ``_author_shared._commit_message``, which *extracts* the agent-authored
+    message for the lessons curators — opposite direction; named apart to avoid confusion.)"""
+    has_catalog = any(_is_catalog_path(p) for p in changed)
+    has_skill = any(_is_system_skill_md(p) or _is_system_skill_draft(p) for p in changed)
+    if has_catalog and has_skill:
+        scope = "gather catalog + system skills"
+    elif has_skill:
+        scope = "system skills"
     else:
-        _log("push ok")
+        scope = "gather catalog"
+    body_paths = "\n".join(f"- {p}" for p in changed)
+    return (
+        f"learning(lead-author): {scope} for {run_dir.name}\n\n"
+        "Curated by the lead author; loop-committed (the agent runs no git).\n\n"
+        f"Paths:\n{body_paths}\n\n"
+        f"source-run: {run_dir.name}\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -969,10 +786,6 @@ def _done_sentinel(run_dir: Path) -> Path:
 
 def _failure_marker(run_dir: Path) -> Path:
     return _state_dir(run_dir) / "failure.txt"
-
-
-def _violation_marker(run_dir: Path) -> Path:
-    return _state_dir(run_dir) / "violation.txt"
 
 
 def _write_state(path: Path, content: str) -> None:
@@ -993,7 +806,8 @@ class LeadAuthorDeps:
     monkeypatching lead_author's own functions (the SUT-patching #374 removes)."""
     paths: _loop_config.LoopPaths
     invoke_agent: Callable[..., int]
-    extract: Callable[[Path], list[ExecutedLead]]
+    extract: Callable[[Path], tuple[list, list[ExecutedLead]]]
+    synthesize: Callable[..., list[Path]]
     build_handoff: Callable[..., list[dict]]
     discover_system_drafts: Callable[[], list[Path]]
     acquire_queue_lock: Callable[[], Any]
@@ -1008,8 +822,11 @@ def build_lead_author_deps(
     rooted at a tmp tree drives them with one ``LoopPaths(repo_root=tmp)``."""
     return LeadAuthorDeps(
         paths=paths,
-        invoke_agent=invoke_agent,
+        # The agent edits + the loop commits at paths.repo_root (the batch worktree),
+        # so the spawn's cwd + rm matcher resolve there, not at the module REPO_ROOT.
+        invoke_agent=functools.partial(invoke_agent, repo_root=paths.repo_root),
         extract=extract,
+        synthesize=synthesize_drafts,
         build_handoff=functools.partial(
             build_handoff, repo_root=paths.repo_root, catalog_dir=paths.catalog_dir
         ),
@@ -1033,22 +850,16 @@ def run(
 
     if deps is None:
         deps = build_lead_author_deps(paths)
+    # No shared repo lock: each lead-author tick runs in its own git worktree (the
+    # drain's ``lead-author/<id>`` checkout), so it can't collide with the lessons
+    # author or another tick on a shared HEAD. The non-blocking queue lock still
+    # makes a stray second tick a no-op.
     queue_lock = deps.acquire_queue_lock()
     if queue_lock is None:
         return 0
     try:
-        _log(f"acquire repo-lock={deps.paths.author_lock_file}")
-        with _author_shared.repo_lock(
-            deps.paths.author_lock_file,
-            timeout_seconds=_author_shared.REPO_LOCK_WAIT_SECONDS,
-        ):
-            _log("repo-lock acquired")
-            return _run_locked(run_dir, deps)
-    except TimeoutError as e:
-        _log(f"repo-lock unavailable: {e}; releasing queue-lock")
-        return 0
+        return _run_locked(run_dir, deps)
     finally:
-        _log("release repo-lock")
         deps.release_queue_lock(queue_lock)
 
 
@@ -1065,53 +876,37 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     # synthesis, handoff extraction, the composite classifier's entry view) —
     # the run dir is immutable by now, so re-joining would be pure repeated I/O.
     try:
-        joined_leads = lead_repository.joined(run_dir)
-        executed = extract_from_joined(joined_leads)
+        joined_leads, executed = deps.extract(run_dir)
     except (FileNotFoundError, ValueError) as e:
         _log(f"FATAL: cannot extract leads: {e}")
         return 2
 
-    # Mint drafts for executed-but-uncatalogued verbs BEFORE capturing the
-    # git baseline, so the new {system}/_draft/ files are expected queue
-    # content (the dirty-protected preflight ignores _draft/) and the
-    # post-flight verifies against a baseline that already includes them.
-    synth = synthesize_drafts(executed, catalog_dir=deps.paths.catalog_dir)
+    # Mint drafts for executed-but-uncatalogued verbs. They land under
+    # {system}/_draft/ in the worktree corpus; the agent curates each (promote/
+    # discard), and whatever survives is committed by the loop with the rest.
+    synth = deps.synthesize(executed, catalog_dir=deps.paths.catalog_dir)
     if synth:
         _log(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
 
-    # Every git operation runs at the injected repo root (the production default in
-    # prod; a tmp tree under test) — the git layer takes it by param, not a global.
+    # The agent edits + the loop commits at the injected repo root (the batch
+    # worktree in prod; a tmp tree under test). The agent runs no git, so capture the
+    # pre-agent stray baseline (paths outside defender/skills/*.md) to diff against —
+    # a fresh worktree is clean, but the synthesized drafts above are in-scope *.md and
+    # so are never counted as strays.
     repo_root = deps.paths.repo_root
-    # Stage all pending drafts (synthesized + gather-authored + system-skill
-    # deposits) so the curator can `git mv` (promote/lift) and `git rm -f`
-    # (discard) them — git refuses both on an untracked source. Stage before
-    # the baseline so they read as expected queue content, not post-flight dirt.
-    staged = _stage_pending_drafts(repo_root)
-    if staged:
-        _log(f"staged {len(staged)} pending draft(s) for curation")
-
-    base_sha = _git_head(repo_root)
-    baseline = _git_status_records(repo_root)
-    # Refuse if the established catalog is already dirty. Untracked drafts
-    # under {system}/_draft/ are the expected gather output that this
-    # author is being run to process — they belong in the baseline.
-    dirty_protected = _dirty_protected_paths(baseline)
-    if dirty_protected:
-        _log(f"FATAL preflight: protected paths dirty before authoring: {dirty_protected}")
-        return 2
+    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
 
     handoffs, pending_drafts, rc = _prepare_handoffs(
-        run_dir, base_sha, deps, executed, joined_leads
+        run_dir, deps, executed, joined_leads
     )
     if rc is not None:
         return rc
     _log(
         f"built {len(handoffs)} executed-template handoff(s) and "
-        f"{len(pending_drafts)} pending system-skill draft(s); "
-        f"base_sha={base_sha[:12]}"
+        f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
     rc = deps.invoke_agent(run_dir, handoffs, pending_drafts)
@@ -1120,34 +915,30 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
             _failure_marker(run_dir),
             f"claude exited rc={rc} at {_loop_config.now_iso()}\n"
             f"see {RUN_LOG_FILE} for stdout/stderr\n"
-            "Human action required: review the catalog state, either drop\n"
-            "any questionable commit from HEAD or remove this failure.txt\n"
-            "to opt in to a retry on the next tick.\n",
+            "Human action required: review the worktree edits, then remove this\n"
+            "failure.txt to opt in to a retry on the next tick.\n",
         )
         _log(f"FATAL: claude exited non-zero; wrote {_failure_marker(run_dir)}")
         return 2
 
-    ok, reason, detail = verify_postflight(base_sha, baseline, repo_root)
-    if not ok:
-        _write_state(
-            _violation_marker(run_dir),
-            f"reason: {reason}\nat: {_loop_config.now_iso()}\ndetail: {json.dumps(detail, indent=2)}\n",
-        )
-        _log(f"FATAL post-flight: {reason}; wrote {_violation_marker(run_dir)}")
-        return 2
-
-    commit_made = detail["rev_list_count"] == 1
-    maybe_push(commit_made, repo_root)
+    # Scope gate over the working tree, then the loop commits pathspec-scoped. A gate
+    # or commit failure raises (LeadAuthorError / AuthorError), which the drain catches
+    # and quarantines the marker for a human — no auto-reset.
+    changed = _verify_skills_state(repo_root, baseline_stray)
+    sha = _author_shared.commit_corpus(
+        repo_root, repo_root / "defender" / "skills", SKILLS_REL,
+        _loop_commit_message(run_dir, changed),
+    )
     _write_state(
         _done_sentinel(run_dir),
-        f"head_sha: {detail['head']}\nat: {_loop_config.now_iso()}\ncommit_made: {commit_made}\n",
+        f"commit: {sha or 'none'}\nat: {_loop_config.now_iso()}\ncommit_made: {sha is not None}\n",
     )
-    _log(f"done; commit_made={commit_made} head={detail['head'][:12]}")
+    _log(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0
 
 
 def _prepare_handoffs(
-    run_dir: Path, base_sha: str, deps: LeadAuthorDeps,
+    run_dir: Path, deps: LeadAuthorDeps,
     executed: list | None = None, joined_leads: list | None = None,
 ) -> tuple[list, list, int | None]:
     """Extract leads + build executed-template + system-draft handoffs.
@@ -1182,7 +973,7 @@ def _prepare_handoffs(
 
     if executed is None:
         try:
-            executed = deps.extract(run_dir)
+            joined_leads, executed = deps.extract(run_dir)
         except (FileNotFoundError, ValueError) as e:
             _log(f"FATAL: cannot extract leads: {e}")
             return [], [], 2
@@ -1210,7 +1001,7 @@ def _prepare_handoffs(
         )
         _write_state(
             _done_sentinel(run_dir),
-            f"head_sha: {base_sha}\nat: {_loop_config.now_iso()}\ncommit_made: False\n",
+            f"commit: none\nat: {_loop_config.now_iso()}\ncommit_made: False\n",
         )
         return [], [], 0
 
@@ -1223,13 +1014,14 @@ def _prepare_handoffs(
 
 
 _HELP_EPILOG = """\
+The agent runs no git; the loop commits. Invoked directly this commits onto the
+current branch/worktree's HEAD — in production the lead-author drain
+(``loop.py --lead-author-drain``) runs it inside a fresh ``lead-author/<id>``
+worktree and opens the PR.
+
 Preconditions
-  * ``defender/skills/gather/queries/`` and each ``defender/skills/{system}/SKILL.md``
-    must be git-clean (untracked deposits under ``_draft/`` are expected).
   * No other lead-author tick may be running (per-author queue lock at
     defender/learning/_pending_leads/.lock).
-  * No defender-side author tick may be running (shared repo lock at
-    defender/learning/_author.lock).
   * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
     (the two tables) must exist — written live during the run by
     record_query.py + record_lead.py.
@@ -1238,13 +1030,10 @@ State files written under ``<run_dir>/lead_author/``
   done           sentinel on successful completion; makes the run a no-op.
   failure.txt    written when ``claude`` exits non-zero; preflight refuses
                  to retry until a human removes it.
-  violation.txt  written when post-flight scope check fails.
 
 Environment
   LEAD_AUTHOR_MODEL                          claude model id (default claude-sonnet-4-6)
   LEAD_AUTHOR_TIMEOUT_SECONDS                spawn timeout (default 1800)
-  LEAD_AUTHOR_PUSH=1                         attempt to push the commit upstream
-                                             (refuses origin/main / origin/master)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
                                              system-skill lift queue (default 5)
 """

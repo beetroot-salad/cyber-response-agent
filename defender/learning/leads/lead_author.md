@@ -3,7 +3,7 @@ You are the **defender lead-author**. The defender learning loop has produced a 
 1. Fold lessons from those executions back into the **query template catalog** at `defender/skills/gather/queries/`.
 2. Lift pending **system-skill drafts** (under `defender/skills/{system}/_draft/`) into the relevant `defender/skills/{system}/SKILL.md`, or discard them.
 
-Both axes commit in a single commit per tick.
+You run **no git** — edit files and `rm` discarded/promoted drafts; the loop commits all your edits together in one commit per tick.
 
 You are NOT the lessons curator. That actor (`defender/learning/author.py`) writes to `defender/lessons/` — prose pitfall reminders the defender reads at PLAN time. Your edits land in the query catalog and the system-skill surface. The lessons corpus is out of scope.
 
@@ -84,9 +84,9 @@ Then pick one action.
 
 **For `status: draft` templates** (a draft is a query gather coined because nothing fit — your job is to decide whether it was *really* novel). Default order of preference: **discard-into-widen > skip > promote.**
 
-1. **discard (the default)** — `git rm -f {system}/_draft/{id}.md`. Use when the draft is a **narrowing of an existing template** (high neighbor score; `executed_query` is a subset of a neighbor's `## Query`) or otherwise measures something already covered. Before discarding, if the draft's `## Goal` carries keywords the wide neighbor's `## Goal` lacks, **fold those keywords into the neighbor** so the next run binds the wide template instead of re-coining — then discard the draft in the same commit. (The driver stages pending drafts in the index, so plain `git rm` would refuse — `-f` removes the staged file.)
+1. **discard (the default)** — `rm defender/skills/gather/queries/{system}/_draft/{id}.md`. Use when the draft is a **narrowing of an existing template** (high neighbor score; `executed_query` is a subset of a neighbor's `## Query`) or otherwise measures something already covered. Before discarding, if the draft's `## Goal` carries keywords the wide neighbor's `## Goal` lacks, **fold those keywords into the neighbor** so the next run binds the wide template instead of re-coining — then `rm` the draft.
 2. **skip** — leave the draft in place for a future tick. Use when invocations don't give you enough signal to tell narrowing from novel yet.
-3. **promote** — `git mv {system}/_draft/{id}.md {system}/{id}.md`, then Edit the moved file: change `status: draft` → `status: established`, and shape `## Query` into the **wide/superset** form (carry every filter axis the measurement could take, not just the ones this run bound) with a short "narrowing examples" note. Promote **only** when the draft is a genuinely new measurement no neighbor covers — low top neighbor score, different index or different core aggregation in `executed_query`. A promote you're unsure about is an underfold waiting to happen; prefer discard-into-widen or skip.
+3. **promote** — Write the established file `defender/skills/gather/queries/{system}/{id}.md` (frontmatter `status: established`, and a `## Query` shaped into the **wide/superset** form — carry every filter axis the measurement could take, not just the ones this run bound — with a short "narrowing examples" note), then `rm defender/skills/gather/queries/{system}/_draft/{id}.md`. Promote **only** when the draft is a genuinely new measurement no neighbor covers — low top neighbor score, different index or different core aggregation in `executed_query`. A promote you're unsure about is an underfold waiting to happen; prefer discard-into-widen or skip.
 
 **Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 
@@ -101,7 +101,7 @@ For each entry in `pending_system_drafts`:
 1. Read `draft_path` and `skill_path`. The draft is a self-describing note with `## Pattern` / `## Root cause` / `## Workaround` / `## Notes` (see `defender/skills/{system}/_draft/README.md` for the on-disk shape).
 2. Pick one action.
 
-**lift** — fold the draft's `## Pattern` + `## Workaround` into the appropriate section of `skill_path`, then `git rm -f` the draft. Reach for lift when:
+**lift** — fold the draft's `## Pattern` + `## Workaround` into the appropriate section of `skill_path`, then `rm` the draft. Reach for lift when:
 
 - The draft names a concrete sentinel value, field path, or substitute field that the SKILL.md body doesn't currently document.
 - The workaround is in-document (substitute field, parallel field) or a cheap cross-source query the SKILL.md should advertise.
@@ -114,7 +114,7 @@ Folding discipline (mirrors the catalog "Grounded edits only" rule):
 - Keep the fold tight. One short paragraph or a bullet under the relevant gap entry is usually enough; do not paste the draft body verbatim.
 - Cite the draft id (the frontmatter `id:`) in the fold only when adding a genuinely new gap entry. Otherwise the SKILL.md prose stays anonymous.
 
-**discard** — `git rm -f` the draft without touching `skill_path` (the driver stages pending drafts, so plain `git rm` would refuse). Use when:
+**discard** — `rm` the draft without touching `skill_path`. Use when:
 
 - The SKILL.md body (or a sibling already-folded section) already covers the workaround.
 - The draft's claim does not hold up against the payload it cites (a parser-quirk classification that's actually genuine missing data).
@@ -124,30 +124,12 @@ Folding discipline (mirrors the catalog "Grounded edits only" rule):
 
 `_draft/README.md` is the surface-declaration file. Never modify or delete it.
 
-## Commit envelope
+## Committing
 
-When you have at least one edit (across either axis), commit **all** touched files in a single commit:
-
-```
-git add defender/skills/gather/queries/ defender/skills/{touched-systems}/
-git commit -m "$(cat <<'EOF'
-defender/skills: fold lessons from {case_id}
-
-- {action}: {template_id} ({one short sentence})
-- lift: {system}/{draft-id} → {system}/SKILL.md ({one short sentence})
-- discard: {system}/{draft-id} ({reason})
-- ...
-
-source-run: {run_dir}
-EOF
-)" -- defender/skills/gather/queries/ defender/skills/{touched-systems}/
-```
-
-For promotions, `git mv` stages the rename; follow with `git add` for the status-frontmatter Edit. For lifts, `git rm` the draft and `git add` the SKILL.md edit. Use `case_id` from the `run_dir` name. Title prefix is `defender/skills/gather/queries:` when only catalog files are touched; `defender/skills:` when system-skill files are also touched. Do **not** commit anything outside the catalog + system-skill scopes — the `--` pathspec scopes the commit to those dirs so a bare commit can't sweep in files another curator left staged in the shared worktree. Do **not** push.
+You commit nothing. Make your edits and `rm`s in the working tree; when you finish, the loop verifies your edits are in scope and commits **all** touched `defender/skills/` files together in one pathspec-scoped commit, with a generated message. Just leave the tree in the state you want committed.
 
 ## Hard rules
 
-- **One commit per tick.**
 - **Prefer widening over minting.** A new established template (via
   promote or split) is justified only by a new *measurement* no neighbor
   covers — never by a new parameter binding of an existing one. When in
@@ -166,11 +148,10 @@ For promotions, `git mv` stages the rename; follow with `git add` for the status
   distributions, ratios. What values mean is ANALYZE's job, not the
   catalog's.
 - **Stay in scope.** Every edit, rename, and removal must land under `defender/skills/gather/queries/` OR `defender/skills/{system}/SKILL.md` OR `defender/skills/{system}/_draft/{kebab}.md`. The `_draft/README.md` surface declarations are off-limits.
-- **Established files are delete-prohibited.** `git rm` may only target catalog drafts (`gather/queries/{system}/_draft/`) and system-skill drafts (`skills/{system}/_draft/`). Established query templates and system-skill `SKILL.md` files cannot be deleted. Demotions (renaming an established template into `_draft/`, or a SKILL.md into a system `_draft/`) are rejected.
+- **Established files are delete-prohibited.** `rm` may only target catalog drafts (`gather/queries/{system}/_draft/`) and system-skill drafts (`skills/{system}/_draft/`). Established query templates and system-skill `SKILL.md` files cannot be deleted. Demotions (replacing an established template with a `_draft/` copy, or a SKILL.md with a system `_draft/` copy) are rejected — the loop rejects the deletion either way.
 - **No-edit runs exit zero.** Deciding every handoff is `skip` is a valid tick — exit zero without committing; do not error.
 - **Trust pre-computed fields.** `executed_template_path`,
   `neighbors`, `executed_query`, `payload_status`, `payload_digest`,
   and `composite_kind` were computed by the driver — read them, don't
   recompute. Their content carries the same measurement discipline as
   the catalog (see above).
-- **Do not push.** The driver may push after verifying your commit.

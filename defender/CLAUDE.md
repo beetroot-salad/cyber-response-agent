@@ -123,7 +123,7 @@ defender/
     pricing.py            # model cost table — read live by runtime/observe.py for cost attribution (runtime dep, not analytics)
     workspace_map.py      # on-disk orientation injected by runtime/orient.py (message 0)
   learning/             # offline learning loop — flow-oriented package tree; see §Learning loop below
-    loop.py             # orchestrator CLI: <run_dir> (LEARN one) / --learn-drain (off-process worker) / --author-drain (serial commit)
+    loop.py             # orchestrator CLI: <run_dir> (LEARN one) / --learn-drain (off-process worker) / --author-drain (lessons commit) / --lead-author-drain (catalog/skill commit)
     lead_repository.py  # the single read/join surface over the two tables (leads + queries)
     pipeline/           # the per-case flow: actor → oracle → judge (each stage = prompt + driver)
       malicious_actor/  # run.py (invoke_actor) + prompt.md (adversarial story) + mitre_corpus.py (ATT&CK menu pool)
@@ -131,7 +131,7 @@ defender/
       oracle/           # run.py (per-lead fan-out) + prompt.md + sample.py (redaction/parsing helpers)
       judge/            # run.py (one wiring-parametrized driver) + malicious.md/benign.md prompts + compare.py (projection↔actual join)
     author/             # findings → lessons curators (per author) + shared transaction machinery
-      curator.py runner.py shared.py branch.py   # the transaction envelope + git/gh (branch.py: branch off origin/main + writer lease + 1 PR/batch)
+      curator.py runner.py shared.py branch.py   # the transaction envelope + git/gh (branch.py: per-batch git worktree off origin/main + per-prefix writer lease + 1 PR/batch)
       lessons/          # run.py + prompt.md — the main curator: folds queued findings into defender/lessons/
       malicious_actor/  # run.py + prompt.md — adversarial-actor lessons curator (→ lessons-actor/)
       benign_actor/     # run.py + prompt.md + env.py — environment-lessons curator (→ lessons-environment/)
@@ -217,7 +217,11 @@ enqueues a learn-queue marker per finished run (skip with `--no-learn`),
 and a SIEM-free worker drains it via `python3 defender/learning/loop.py
 --learn-drain` (concurrent-safe; re-renders each transcript's judge page).
 Run `python3 defender/learning/loop.py <run_dir>` to LEARN one run directly.
-The serial AUTHOR stage (`--author-drain`) is what commits.
+The AUTHOR stages are what commit: `--author-drain` curates `defender/lessons/`
+(the lessons curators) and `--lead-author-drain` curates `defender/skills/` (the
+gather catalog + system skills). Each drains independently, in its own git
+worktree off `origin/main`, and opens its own PR (`lessons/<id>` vs
+`lead-author/<id>`); the spawned agent runs no git — the loop is the sole committer.
 
 1. **Normalizes** disposition from `report.md` frontmatter. The disposition
    selects which direction(s) run: `benign` → adversarial only (hunt the

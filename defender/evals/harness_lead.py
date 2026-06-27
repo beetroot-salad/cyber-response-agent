@@ -151,11 +151,13 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
     # 3) Did the agent widen the preferred wide template? (informational.)
     widened = expect.get("prefer_widened")
     if widened:
-        # Only meaningful when the agent actually committed: a no-edit/skip run
-        # leaves HEAD at the baseline, so HEAD~1 doesn't exist (git errors, empty
-        # stdout) and we'd mislabel it "untouched". Gate on a second commit, and
-        # match the path exactly against the name-only lines (not a substring,
-        # which a longer sibling path would spuriously satisfy).
+        # Only meaningful when the loop actually committed: the agent edits the tree
+        # and runs no git, so the loop commits onto HEAD (this CLI path commits
+        # in-place — worktrees are only in the drain). A no-edit/skip run leaves HEAD
+        # at the baseline, so HEAD~1 doesn't exist (git errors, empty stdout) and we'd
+        # mislabel it "untouched". Gate on a second commit, and match the path exactly
+        # against the name-only lines (not a substring, which a longer sibling path
+        # would spuriously satisfy).
         count = _run(["git", "rev-list", "--count", "HEAD"], cwd=tmp, check=False)
         ncommits = int(count.stdout.strip()) if count.stdout.strip().isdigit() else 0
         if ncommits >= 2:
@@ -163,7 +165,7 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
             touched = widened in diff.stdout.split()
             notes.append(f"prefer_widened {'TOUCHED' if touched else 'untouched'}: {widened}")
         else:
-            notes.append(f"prefer_widened untouched (no agent commit): {widened}")
+            notes.append(f"prefer_widened untouched (no loop commit): {widened}")
 
     return ("PASS" if draft_gone else "WEAK-PASS"), notes
 
