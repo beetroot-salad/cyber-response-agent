@@ -389,16 +389,19 @@ def render_runtime_toc(
         f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
         for ph in phases
     )
-    # Phases hang off the transcript entry as a collapsible drop-down — they jump
-    # into the chronological transcript. Open by default so the scroll-spy
-    # highlight stays visible.
-    phases_dd = (
-        '<details class="toc-phases" open>'
-        '<summary>phases <span class="toc-hint">→ jump</span></summary>'
-        f'<ul class="toc-phaselist">{phase_links}</ul></details>'
-        if phases
-        else ""
-    )
+    # Transcript and phases are ONE nav entry: the "transcript" item is itself the
+    # phases drop-down — expanding it lists the phase jump-links (each targets its
+    # group in the transcript). Open by default so the scroll-spy stays visible.
+    # The link text still jumps to the section top (JS suppresses the toggle on it).
+    if phases:
+        transcript_item = (
+            '<li class="item toc-trans"><details class="toc-trans-dd" open>'
+            '<summary class="toc-trans-head">'
+            f'<a href="#sec-transcript" class="toc-trans-link">transcript ({n_tx})</a></summary>'
+            f'<ul class="toc-phaselist">{phase_links}</ul></details></li>'
+        )
+    else:
+        transcript_item = f'<li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>'
     return f"""
 <nav class="toc">
   <ul>
@@ -407,7 +410,7 @@ def render_runtime_toc(
     <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
     <li class="item"><a href="#sec-investigation">investigation</a></li>
-    <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a>{phases_dd}</li>
+    {transcript_item}
     <li class="item"><a href="#sec-leads">leads &amp; queries ({n_leads})</a></li>
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>

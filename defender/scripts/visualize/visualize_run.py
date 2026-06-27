@@ -937,8 +937,8 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 /* Report beside the lead list (was stacked). Report takes the flexible column
    (capped ~90ch for readability — the full width ran lines past the comfortable
    ~50-75ch range); leads sit in a fixed side column. */
-.an-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 360px); gap: 28px; align-items: start; }
-.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; max-width: 90ch; }
+.an-cols { display: grid; grid-template-columns: minmax(0, 90ch) minmax(240px, 360px); gap: 28px; align-items: start; justify-content: start; }
+.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; }
 .an-leads { min-width: 0; }
 @media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
 .an-sublabel { text-transform: uppercase; font-size: 10px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }
@@ -1042,11 +1042,13 @@ nav.toc .toc-hint { text-transform: none; font-weight: 400; font-style: italic; 
 nav.toc li.phase-nav a { display: flex; align-items: baseline; gap: 8px; }
 nav.toc li.phase-nav .pn-tag { font-family: 'SF Mono', Menlo, Consolas, monospace; font-weight: 700; font-size: 10px; flex-shrink: 0; min-width: 22px; }
 nav.toc li.phase-nav a.pn-active { color: var(--text-bright); border-left-color: var(--accent); background: var(--bg-2); }
-/* Phases drop-down nested under the transcript section entry. */
-nav.toc .toc-phases { margin: 2px 0 4px 12px; }
-nav.toc .toc-phases > summary { cursor: pointer; user-select: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); font-weight: 600; padding: 3px 0; }
-nav.toc .toc-phases > summary:hover { color: var(--text-bright); }
-nav.toc .toc-phaselist { list-style: none; padding: 0; margin: 2px 0 0; }
+/* The transcript nav entry IS the phases drop-down — one unified item. */
+nav.toc .toc-trans { padding: 0; }
+nav.toc .toc-trans-dd > summary { cursor: pointer; user-select: none; padding: 3px 0 3px 12px; margin-left: 2px; list-style: revert; }
+nav.toc .toc-trans-dd > summary::-webkit-details-marker { color: var(--text-dim); }
+nav.toc .toc-trans-dd > summary .toc-trans-link { display: inline; padding: 0; margin: 0; border-left: none; color: var(--text); font-size: 12px; }
+nav.toc .toc-trans-dd > summary:hover .toc-trans-link { color: var(--text-bright); }
+nav.toc .toc-phaselist { list-style: none; padding: 0; margin: 2px 0 4px; }
 """
 
 
@@ -1136,6 +1138,14 @@ RUNTIME_JS = """
     g.addEventListener('click', function () {
       g.parentNode.classList.toggle('expanded');
     });
+  });
+  // The transcript nav link sits inside its <summary>, so a click would both
+  // navigate and toggle the phases drop-down. Suppress the toggle and jump
+  // manually, so clicking "transcript" goes to the section without collapsing.
+  var trLink = document.querySelector('.toc-trans-link');
+  if (trLink) trLink.addEventListener('click', function (e) {
+    e.preventDefault();
+    location.hash = 'sec-transcript';
   });
 })();
 """
