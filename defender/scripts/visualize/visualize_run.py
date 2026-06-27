@@ -1290,7 +1290,7 @@ def render_runtime_page(run_dir: Path) -> str:
     stats_html = (
         f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
         f'<span class="ts-sep">·</span>'
-        f'<span class="ts-wall">{fmt_duration(totals.get("wall_ms", 0))}</span>'
+        f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )
 
     byline_parts = []
