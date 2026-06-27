@@ -698,6 +698,9 @@ section.stage-actor { border-left-color: var(--accent-actor); }
 section.stage-judge { border-left-color: var(--accent-judge); }
 section.stage-oracle { border-left-color: var(--accent-oracle); }
 section.stage-raw { border-left-color: var(--accent-raw); }
+/* Runtime page: no colored left accent on the section boxes — uniform border.
+   (The judge page keeps its stage color-coding.) */
+.content-runtime section.stage { border-left-width: 1px; border-left-color: var(--border); }
 
 /* ----- Report card ----- */
 .report-card {
@@ -1023,7 +1026,7 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .lq-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .lq-table th { text-align: left; text-transform: uppercase; font-size: 9px; letter-spacing: 0.6px; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .lq-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-2); vertical-align: top; }
-.lq-lead { background: var(--bg-3); border-right: 1px solid var(--border-2); }
+.lq-lead { background: var(--bg-3); border-right: 1px solid var(--border-2); scroll-margin-top: 96px; }
 .lq-leadid { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--code); font-weight: 600; }
 .lq-goal { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 220px; }
 .lq-qid, .lq-sys, .lq-params, .lq-payload { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; }
@@ -1040,13 +1043,15 @@ nav.toc .toc-hint { text-transform: none; font-weight: 400; font-style: italic; 
 nav.toc li.phase-nav a { display: flex; align-items: baseline; gap: 8px; }
 nav.toc li.phase-nav .pn-tag { font-family: 'SF Mono', Menlo, Consolas, monospace; font-weight: 700; font-size: 10px; flex-shrink: 0; min-width: 22px; }
 nav.toc li.phase-nav a.pn-active { color: var(--text-bright); border-left-color: var(--accent); background: var(--bg-2); }
-/* The transcript nav entry IS the phases drop-down — one unified item. */
-nav.toc .toc-trans { padding: 0; }
-nav.toc .toc-trans-dd > summary { cursor: pointer; user-select: none; padding: 3px 0 3px 12px; margin-left: 2px; list-style: revert; }
-nav.toc .toc-trans-dd > summary::-webkit-details-marker { color: var(--text-dim); }
-nav.toc .toc-trans-dd > summary .toc-trans-link { display: inline; padding: 0; margin: 0; border-left: none; color: var(--text); font-size: 12px; }
-nav.toc .toc-trans-dd > summary:hover .toc-trans-link { color: var(--text-bright); }
-nav.toc .toc-phaselist { list-style: none; padding: 0; margin: 2px 0 4px; }
+/* A section nav entry that doubles as its subsection drop-down (investigation →
+   phases, leads → lead rows, transcript → phase groups). */
+nav.toc .toc-dd { padding: 0; }
+nav.toc .toc-dd-d > summary { cursor: pointer; user-select: none; padding: 3px 0 3px 12px; margin-left: 2px; list-style: revert; }
+nav.toc .toc-dd-d > summary::-webkit-details-marker { color: var(--text-dim); }
+nav.toc .toc-dd-d > summary .toc-dd-link { display: inline; padding: 0; margin: 0; border-left: none; color: var(--text); font-size: 12px; }
+nav.toc .toc-dd-d > summary:hover .toc-dd-link { color: var(--text-bright); }
+nav.toc .toc-sublist { list-style: none; padding: 0; margin: 2px 0 4px; }
+nav.toc li.lead-nav .pn-tag.pn-lead { color: var(--code); }
 """
 
 
@@ -1137,13 +1142,14 @@ RUNTIME_JS = """
       g.parentNode.classList.toggle('expanded');
     });
   });
-  // The transcript nav link sits inside its <summary>, so a click would both
-  // navigate and toggle the phases drop-down. Suppress the toggle and jump
-  // manually, so clicking "transcript" goes to the section without collapsing.
-  var trLink = document.querySelector('.toc-trans-link');
-  if (trLink) trLink.addEventListener('click', function (e) {
-    e.preventDefault();
-    location.hash = 'sec-transcript';
+  // A drop-down nav link sits inside its <summary>, so a plain click would both
+  // navigate and toggle the drop-down. Suppress the toggle and jump manually, so
+  // clicking the section label goes to the section without collapsing its list.
+  [].slice.call(document.querySelectorAll('.toc-dd-link')).forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      location.hash = a.getAttribute('href');
+    });
   });
 })();
 """
@@ -1306,14 +1312,14 @@ def render_runtime_page(run_dir: Path) -> str:
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
 <div class="layout">
-  {render_runtime_toc(phases, n_tx, n_leads, tx_phases)}
-  <article class="content">
+  {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads)}
+  <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}
-    {transcript_html}
     {leads_html}
+    {transcript_html}
   </article>
 </div>
 {render_footer(run_dir, case_id)}

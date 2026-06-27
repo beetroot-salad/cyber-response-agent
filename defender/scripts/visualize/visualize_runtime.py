@@ -321,7 +321,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
         qs = jl.queries
         lead_cell = (
-            f'<td class="lq-lead" rowspan="{max(1, len(qs))}">'
+            f'<td class="lq-lead" id="lead-{esc(jl.lead_id)}" rowspan="{max(1, len(qs))}">'
             f'<div class="lq-leadid">{esc(jl.lead_id)}</div>'
             f'<div class="lq-goal">{esc(goal)}</div></td>'
         )
@@ -370,38 +370,60 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
 # ---------------------------------------------------------------------------
 
 
+def _toc_dropdown(section_id: str, label: str, sublinks: str) -> str:
+    """A nav entry that doubles as a drop-down: the label jumps to the section
+    (JS suppresses the summary toggle on the link), the body lists jump-links into
+    its subsections. Falls back to a plain link when there are no subsections."""
+    if not sublinks:
+        return f'<li class="item"><a href="#{section_id}">{label}</a></li>'
+    return (
+        '<li class="item toc-dd"><details class="toc-dd-d" open>'
+        f'<summary class="toc-dd-head"><a href="#{section_id}" class="toc-dd-link">{label}</a></summary>'
+        f'<ul class="toc-sublist">{sublinks}</ul></details></li>'
+    )
+
+
+def _phase_nav_li(ph: dict, href: str, data_attr: str = "") -> str:
+    return (
+        f'<li class="item phase-nav"><a href="{href}"{data_attr}>'
+        f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
+        f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
+    )
+
+
 def render_runtime_toc(
-    phases: list[dict], n_tx: int, n_leads: int, tx_phases: set[str] | None = None
+    phases: list[dict],
+    n_tx: int,
+    n_leads: int,
+    tx_phases: set[str] | None = None,
+    leads: list | None = None,
 ) -> str:
     tx_phases = tx_phases or set()
+    leads = leads or []
 
-    def _phase_target(ph: dict) -> str:
+    def _tx_target(ph: dict) -> str:
         # Jump into the transcript only for a phase that actually rendered a
         # tx-anchor; otherwise fall back to its investigation block (always
         # present), so phases the transcript skipped don't get a dead link.
         anchor = ph["anchor"]
         return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
-    phase_links = "".join(
-        f'<li class="item phase-nav"><a href="{_phase_target(ph)}" '
-        f'data-phase-link="{esc(ph["name"])}">'
-        f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
-        f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
-        for ph in phases
+    # Transcript → phase groups (scroll-spy tracked); investigation → its per-phase
+    # blocks; leads & queries → each lead row. Each section's nav item is itself
+    # the expandable drop-down listing those jump-links.
+    tx_links = "".join(
+        _phase_nav_li(ph, _tx_target(ph), f' data-phase-link="{esc(ph["name"])}"') for ph in phases
     )
-    # Transcript and phases are ONE nav entry: the "transcript" item is itself the
-    # phases drop-down — expanding it lists the phase jump-links (each targets its
-    # group in the transcript). Open by default so the scroll-spy stays visible.
-    # The link text still jumps to the section top (JS suppresses the toggle on it).
-    if phases:
-        transcript_item = (
-            '<li class="item toc-trans"><details class="toc-trans-dd" open>'
-            '<summary class="toc-trans-head">'
-            f'<a href="#sec-transcript" class="toc-trans-link">transcript ({n_tx})</a></summary>'
-            f'<ul class="toc-phaselist">{phase_links}</ul></details></li>'
-        )
-    else:
-        transcript_item = f'<li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>'
+    inv_links = "".join(_phase_nav_li(ph, f'#{esc(ph["anchor"])}') for ph in phases)
+    lead_links = "".join(
+        f'<li class="item phase-nav lead-nav"><a href="#lead-{esc(jl.lead_id)}">'
+        f'<span class="pn-tag pn-lead">{esc(jl.lead_id)}</span></a></li>'
+        for jl in leads
+    )
+
+    investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
+    leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links)
+    transcript_item = _toc_dropdown("sec-transcript", f"transcript ({n_tx})", tx_links)
     return f"""
 <nav class="toc">
   <ul>
@@ -409,9 +431,9 @@ def render_runtime_toc(
     <li class="item"><a href="#top">↑ top</a></li>
     <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
-    <li class="item"><a href="#sec-investigation">investigation</a></li>
+    {investigation_item}
+    {leads_item}
     {transcript_item}
-    <li class="item"><a href="#sec-leads">leads &amp; queries ({n_leads})</a></li>
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>
 </nav>
