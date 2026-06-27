@@ -159,19 +159,7 @@ def render_runtime_transcript(
             '(older run, or the run is still in flight)</div>'
         )
     else:
-        seen_phase: set[str] = set()
-        rows: list[str] = []
-        for e in entries:
-            ph = e.get("phase")
-            anchor_attr = ""
-            if ph and ph not in seen_phase:
-                seen_phase.add(ph)
-                a = phase_anchor.get(ph)
-                if a:
-                    anchor_attr = f' id="tx-{esc(a)}"'
-                    anchored.add(ph)
-            rows.append(_render_tx_entry(e, anchor_attr))
-        rows_html = "".join(rows)
+        rows_html = _render_tx_groups(entries, phase_anchor, anchored)
 
     return (
         f"""
@@ -196,6 +184,51 @@ def render_runtime_transcript(
         len(entries),
         anchored,
     )
+
+
+def _render_tx_groups(
+    entries: list[dict], phase_anchor: dict[str, str], anchored: set[str]
+) -> str:
+    """Group the chronological entries into per-phase collapsible ``<details>``
+    blocks — the transcript's own expandable phase navigation, unified with the
+    sidebar's phases drop-down (both target the same ``tx-{anchor}`` group).
+
+    Groups are open by default (the stream reads as before) and run over
+    *contiguous* same-phase entries; the first group of each phase carries the
+    ``tx-{anchor}`` id + records the phase in ``anchored`` so the sidebar routes
+    to it (later groups of a recurring phase stay anchor-less, as before)."""
+    groups: list[tuple[str | None, list[dict]]] = []
+    for e in entries:
+        ph = e.get("phase")
+        if groups and groups[-1][0] == ph:
+            groups[-1][1].append(e)
+        else:
+            groups.append((ph, [e]))
+
+    blocks: list[str] = []
+    for ph, items in groups:
+        inner = "".join(_render_tx_entry(e) for e in items)
+        verb = phase_verb(ph or "")
+        tag = (
+            f'<span class="pn-tag" style="color:{phase_color(verb)}">{esc(_short_phase(ph))}</span>'
+            if ph
+            else ""
+        )
+        id_attr = ""
+        if ph and ph not in anchored:
+            a = phase_anchor.get(ph)
+            if a:
+                id_attr = f' id="tx-{esc(a)}"'
+                anchored.add(ph)
+        n = len(items)
+        blocks.append(
+            f'<details class="tx-group" open{id_attr} data-phase="{esc(ph or "")}">'
+            f'<summary class="tx-group-head">{tag}'
+            f'<span class="tx-group-name">{esc(ph or "(unphased)")}</span>'
+            f'<span class="tx-group-n">{n} turn{"" if n == 1 else "s"}</span></summary>'
+            f'<div class="tx-group-body">{inner}</div></details>'
+        )
+    return "".join(blocks)
 
 
 def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:

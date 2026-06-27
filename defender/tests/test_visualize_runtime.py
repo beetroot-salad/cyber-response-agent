@@ -185,6 +185,24 @@ def test_gather_wall_and_model_reattribution(tmp_path):
     assert by_model["haiku-4-5"] > 0
 
 
+def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
+    """A gather whose dispatch turn was never tagged (no matching trace event)
+    and a run with no ``## GATHER`` header still has its cost placed in a bar —
+    so gather_total stays equal to the full gather cost the per-model breakdown
+    reports, and the headline never under-counts what by_model shows."""
+    order = ["ORIENT loop 1", "PLAN loop 1", "REPORT loop 1"]  # no GATHER phase
+    messages = [
+        {"kind": "response", "agent_id": "gather:l-001", "model": "claude-haiku-4-5", "usage": _USAGE},
+    ]
+    # empty events/tags → gather_dispatch_phase can't tag l-001 (gphase miss)
+    by_phase, gather_total = d.gather_cost_by_phase(
+        tmp_path, [], [], order, 0.0, 0.0, messages
+    )
+    full = sum(d.gather_cost_by_model(tmp_path, messages).values())
+    assert full > 0
+    assert gather_total == full  # nothing dropped
+    assert by_phase[order[0]] == gather_total  # landed in the first phase
+
 def test_transcript_from_messages(tmp_path):
     """The transcript is built from llm_requests.jsonl with full content +
     retries, one entry per assistant turn / tool-return / retry, phase-tagged."""
@@ -232,8 +250,8 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     html = render_runtime_page(run)
 
     for marker in (
-        "card-analysis", "top-stats", "sec-metrics", "tu-row",
-        "sec-transcript", "sec-leads", "tx-chip", "disp-badge",
+        "card-analysis", "an-cols", "top-stats", "sec-metrics", "tu-row",
+        "sec-transcript", "tx-group", "tx-group-head", "sec-leads", "tx-chip", "disp-badge",
     ):
         assert marker in html, f"missing {marker}"
 

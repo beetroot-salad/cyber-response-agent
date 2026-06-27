@@ -243,8 +243,10 @@ def render_runtime_headline(
         <span class="an-conf">confidence: {esc(confidence)}</span>
       </div>
       <div class="an-health">{health_html}</div>
-      <div class="an-report">{esc(body)}</div>
-      <div class="an-leads">{_lead_summary(leads)}</div>
+      <div class="an-cols">
+        <div class="an-report">{esc(body)}</div>
+        <div class="an-leads">{_lead_summary(leads)}</div>
+      </div>
     </div>
   </div>
 </section>
@@ -455,10 +457,16 @@ section.headline {
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
 }
-/* The runtime fold sits at natural content height — forcing it to 100vh and
-   centering left big dead bands above/below whenever the card didn't exactly
-   fill the screen. A content-rich analysis card fills most of the fold on its
-   own; § Metrics follows immediately, no padding. */
+/* The runtime fold now lives inside the content column (so the sidebar sits
+   beside it from the top), at natural content height. Drop the full-width band
+   styling it inherited from section.headline — it reads as the page's opening
+   content, not a banner. */
+section.headline-runtime {
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
+  margin-bottom: 28px;
+}
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tile {
   padding: 12px 16px;
@@ -926,9 +934,13 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .health-warn { color: var(--warn); }
 .health-bad { color: var(--bad); }
 .health-detail { color: var(--text-dim); font-weight: 400; }
-/* Cap the measure (~90ch) — the full page width ran lines far past the
-   comfortable ~50-75ch reading range. */
-.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; margin-bottom: 10px; max-width: 90ch; }
+/* Report beside the lead list (was stacked). Report takes the flexible column
+   (capped ~90ch for readability — the full width ran lines past the comfortable
+   ~50-75ch range); leads sit in a fixed side column. */
+.an-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 360px); gap: 28px; align-items: start; }
+.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; max-width: 90ch; }
+.an-leads { min-width: 0; }
+@media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
 .an-sublabel { text-transform: uppercase; font-size: 10px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }
 .lead-mini-list { display: flex; flex-direction: column; gap: 4px; }
 .lead-mini { display: flex; gap: 8px; font-size: 12.5px; align-items: baseline; }
@@ -979,7 +991,20 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .tx-chip .chip-err { color: var(--warn); margin-left: 5px; }
 .tx-chip.chip-active .chip-err { color: var(--bg); }
 
-.tx-stream { display: flex; flex-direction: column; gap: 6px; }
+.tx-stream { display: flex; flex-direction: column; gap: 10px; }
+/* Per-phase collapsible group — the transcript's own expandable phase sections. */
+.tx-group { border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); scroll-margin-top: 100px; }
+.tx-group[hidden] { display: none; }
+.tx-group > summary.tx-group-head {
+  display: flex; align-items: baseline; gap: 10px; cursor: pointer; user-select: none;
+  padding: 8px 12px; font-weight: 600; color: var(--text-bright);
+  border-bottom: 1px solid var(--border-2); border-radius: 6px 6px 0 0; background: var(--bg-3);
+}
+.tx-group:not([open]) > summary.tx-group-head { border-bottom: none; border-radius: 6px; }
+.tx-group > summary.tx-group-head:hover { color: var(--text-bright); background: var(--bg-4); }
+.tx-group .tx-group-name { font-size: 13px; }
+.tx-group .tx-group-n { margin-left: auto; font-size: 11px; color: var(--text-dim); font-weight: 400; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.tx-group-body { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
 .tx-entry { display: grid; grid-template-columns: 56px 1fr; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 5px; background: var(--bg-3); scroll-margin-top: 100px; }
 .tx-entry[hidden] { display: none; }
 .tx-assistant { border-left: 3px solid var(--accent-defender); }
@@ -1035,6 +1060,7 @@ RUNTIME_JS = """
   var stream = document.querySelector('.tx-stream');
   if (stream) {
     var entries = [].slice.call(stream.querySelectorAll('.tx-entry'));
+    var txGroups = [].slice.call(stream.querySelectorAll('.tx-group'));
     var search = document.querySelector('.tx-search');
     var typeSel = document.querySelector('.tx-type');
     var errToggle = document.querySelector('.tx-errors');
@@ -1058,6 +1084,10 @@ RUNTIME_JS = """
         if (ok && q && el.textContent.toLowerCase().indexOf(q) < 0) ok = false;
         el.hidden = !ok;
         if (ok) shown++;
+      });
+      // Collapse a phase group whose every entry was filtered out.
+      txGroups.forEach(function (g) {
+        g.hidden = g.querySelectorAll('.tx-entry:not([hidden])').length === 0;
       });
       if (noRes) noRes.hidden = shown > 0;
     }
@@ -1084,7 +1114,7 @@ RUNTIME_JS = """
     var navLinks = [].slice.call(document.querySelectorAll('.phase-nav a'));
     var byPhase = {};
     navLinks.forEach(function (a) { byPhase[a.getAttribute('data-phase-link')] = a; });
-    var markers = entries.filter(function (e) { return e.id && e.id.indexOf('tx-') === 0; });
+    var markers = txGroups.filter(function (e) { return e.id && e.id.indexOf('tx-') === 0; });
     if ('IntersectionObserver' in window && markers.length) {
       var obs = new IntersectionObserver(function (es) {
         es.forEach(function (en) {
@@ -1267,10 +1297,10 @@ def render_runtime_page(run_dir: Path) -> str:
 <html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
-{render_runtime_headline(run_dir, report, health, leads)}
 <div class="layout">
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases)}
   <article class="content">
+    {render_runtime_headline(run_dir, report, health, leads)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}
