@@ -81,7 +81,7 @@ def render_judge_defender_summary(run_dir: Path) -> str:
     """
     return f"""
 <section id="sec-defender-summary" class="stage stage-defender">
-  <h2>§ Defender summary <span class="stage-sub">— what the judge graded</span></h2>
+  <h2>Defender summary <span class="stage-sub">— what the judge graded</span></h2>
 
   <h3>report.md</h3>
   {render_report_card(run_dir)}
@@ -102,7 +102,7 @@ def render_judge_actor_section(run_id: str) -> str:
         body = '<div class="empty">no actor_story.md</div>'
         return f"""
 <section id="sec-actor" class="stage stage-actor">
-  <h2>§ Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
+  <h2>Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
   {body}
 </section>
 """
@@ -120,7 +120,7 @@ def render_judge_actor_section(run_id: str) -> str:
 
     return f"""
 <section id="sec-actor" class="stage stage-actor">
-  <h2>§ Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
+  <h2>Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
   {meta_html}
   {menu_block}
   <h3>actor_story.md</h3>
@@ -133,7 +133,7 @@ def render_judge_judge_section(judge: dict | None) -> str:
     if not judge:
         return """
 <section id="sec-judge" class="stage stage-judge">
-  <h2>§ Judge <span class="stage-sub">— outcome + findings</span></h2>
+  <h2>Judge <span class="stage-sub">— outcome + findings</span></h2>
   <div class="empty">no judge_findings.yaml — learning loop did not run or aborted</div>
 </section>
 """
@@ -155,7 +155,7 @@ def render_judge_judge_section(judge: dict | None) -> str:
 
     return f"""
 <section id="sec-judge" class="stage stage-judge">
-  <h2>§ Judge <span class="stage-sub">— outcome + findings</span></h2>
+  <h2>Judge <span class="stage-sub">— outcome + findings</span></h2>
 
   <h3 id="sec-judge-outcome">Outcome</h3>
   <div class="judge-outcome out-{esc(outcome)}">
@@ -185,7 +185,7 @@ def render_judge_oracle_section(run_id: str) -> str:
         inner = '<div class="empty">no oracle artifacts</div>'
     return f"""
 <section id="sec-oracle" class="stage stage-oracle">
-  <h2>§ Oracle <span class="stage-sub">— projected telemetry (collapsed by default)</span></h2>
+  <h2>Oracle <span class="stage-sub">— projected telemetry (collapsed by default)</span></h2>
   {inner}
 </section>
 """
@@ -233,7 +233,7 @@ def render_judge_actor_benign_section(run_id: str) -> str:
     story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
     return f"""
 <section id="sec-actor-benign" class="stage stage-actor">
-  <h2>§ Actor (benign) <span class="stage-sub">— routine-operation counterfactual</span></h2>
+  <h2>Actor (benign) <span class="stage-sub">— routine-operation counterfactual</span></h2>
   <h3>actor_benign_story.md</h3>
   {story_html}
 </section>
@@ -272,7 +272,7 @@ def render_judge_benign_section(judge: dict | None) -> str:
 
     return f"""
 <section id="sec-judge-benign" class="stage stage-judge">
-  <h2>§ Judge (benign) <span class="stage-sub">— FP-direction outcome + findings</span></h2>
+  <h2>Judge (benign) <span class="stage-sub">— FP-direction outcome + findings</span></h2>
 
   <h3 id="sec-judge-benign-outcome">Outcome</h3>
   <div class="judge-outcome out-{esc(outcome)}">
@@ -305,7 +305,7 @@ def render_judge_oracle_benign_section(run_id: str) -> str:
         return ""
     return f"""
 <section id="sec-oracle-benign" class="stage stage-oracle">
-  <h2>§ Oracle (benign) <span class="stage-sub">— projected telemetry, FP direction (collapsed by default)</span></h2>
+  <h2>Oracle (benign) <span class="stage-sub">— projected telemetry, FP direction (collapsed by default)</span></h2>
   {inner}
 </section>
 """
@@ -329,7 +329,7 @@ def render_judge_raw_bundle(run_id: str) -> str:
         return ""
     return f"""
 <section id="sec-raw-bundle" class="stage stage-raw">
-  <h2>§ Raw bundle <span class="stage-sub">— learning-loop inputs &amp; fallbacks</span></h2>
+  <h2>Raw bundle <span class="stage-sub">— learning-loop inputs &amp; fallbacks</span></h2>
   {"".join(panels)}
 </section>
 """
@@ -353,17 +353,17 @@ def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> s
         if n_benign_findings == 0:
             benign_finding_links = '<li class="item muted">(none)</li>'
         benign_block = f"""
-    <li class="section">§ Actor (benign)</li>
+    <li class="section">Actor (benign)</li>
     <li class="item"><a href="#sec-actor-benign">routine-op story</a></li>
 
-    <li class="section">§ Judge (benign)</li>
+    <li class="section">Judge (benign)</li>
     <li class="item"><a href="#sec-judge-benign-outcome">outcome</a></li>
     <li class="item"><a href="#sec-judge-benign-findings">findings</a></li>
     {benign_finding_links}
     <li class="item"><a href="#sec-judge-benign-env">environment observations</a></li>
     <li class="item"><a href="#sec-judge-benign-encounter">encounter analysis</a></li>
 
-    <li class="section">§ Oracle (benign)</li>
+    <li class="section">Oracle (benign)</li>
     <li class="item"><a href="#sec-oracle-benign">projected telemetry</a></li>
 """
 
@@ -373,25 +373,25 @@ def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> s
     <li class="section">Headline</li>
     <li class="item"><a href="#top">summary tiles</a></li>
 
-    <li class="section">§ Alert</li>
+    <li class="section">Alert</li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
 
-    <li class="section">§ Defender summary</li>
+    <li class="section">Defender summary</li>
     <li class="item"><a href="#sec-defender-summary">report + leads</a></li>
 
-    <li class="section">§ Actor</li>
+    <li class="section">Actor</li>
     <li class="item"><a href="#sec-actor">archetype + story</a></li>
 
-    <li class="section">§ Judge</li>
+    <li class="section">Judge</li>
     <li class="item"><a href="#sec-judge-outcome">outcome</a></li>
     <li class="item"><a href="#sec-judge-findings">findings</a></li>
     {finding_links}
     <li class="item"><a href="#sec-judge-encounter">encounter analysis</a></li>
 
-    <li class="section">§ Oracle</li>
+    <li class="section">Oracle</li>
     <li class="item"><a href="#sec-oracle">projected telemetry</a></li>
     {benign_block}
-    <li class="section">§ Raw bundle</li>
+    <li class="section">Raw bundle</li>
     <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>
   </ul>
 </nav>

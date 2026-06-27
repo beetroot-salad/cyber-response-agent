@@ -72,7 +72,7 @@ def render_runtime_investigation(
         return (
             f"""
 <section id="sec-investigation" class="stage stage-defender">
-  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
   {body}
 </section>
 """,
@@ -88,7 +88,7 @@ def render_runtime_investigation(
     return (
         f"""
 <section id="sec-investigation" class="stage stage-defender">
-  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
   {"".join(blocks)}
 </section>
 """,
@@ -159,24 +159,12 @@ def render_runtime_transcript(
             '(older run, or the run is still in flight)</div>'
         )
     else:
-        seen_phase: set[str] = set()
-        rows: list[str] = []
-        for e in entries:
-            ph = e.get("phase")
-            anchor_attr = ""
-            if ph and ph not in seen_phase:
-                seen_phase.add(ph)
-                a = phase_anchor.get(ph)
-                if a:
-                    anchor_attr = f' id="tx-{esc(a)}"'
-                    anchored.add(ph)
-            rows.append(_render_tx_entry(e, anchor_attr))
-        rows_html = "".join(rows)
+        rows_html = _render_tx_groups(entries, phase_anchor, anchored)
 
     return (
         f"""
 <section id="sec-transcript" class="stage stage-defender">
-  <h2>§ Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
+  <h2>Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
   <div class="tx-toolbar">
     <input type="search" class="tx-search" placeholder="search transcript…" aria-label="search transcript">
     <select class="tx-type" aria-label="filter by type">
@@ -196,6 +184,51 @@ def render_runtime_transcript(
         len(entries),
         anchored,
     )
+
+
+def _render_tx_groups(
+    entries: list[dict], phase_anchor: dict[str, str], anchored: set[str]
+) -> str:
+    """Group the chronological entries into per-phase collapsible ``<details>``
+    blocks — the transcript's own expandable phase navigation, unified with the
+    sidebar's phases drop-down (both target the same ``tx-{anchor}`` group).
+
+    Groups are open by default (the stream reads as before) and run over
+    *contiguous* same-phase entries; the first group of each phase carries the
+    ``tx-{anchor}`` id + records the phase in ``anchored`` so the sidebar routes
+    to it (later groups of a recurring phase stay anchor-less, as before)."""
+    groups: list[tuple[str | None, list[dict]]] = []
+    for e in entries:
+        ph = e.get("phase")
+        if groups and groups[-1][0] == ph:
+            groups[-1][1].append(e)
+        else:
+            groups.append((ph, [e]))
+
+    blocks: list[str] = []
+    for ph, items in groups:
+        inner = "".join(_render_tx_entry(e) for e in items)
+        verb = phase_verb(ph or "")
+        tag = (
+            f'<span class="pn-tag" style="color:{phase_color(verb)}">{esc(_short_phase(ph))}</span>'
+            if ph
+            else ""
+        )
+        id_attr = ""
+        if ph and ph not in anchored:
+            a = phase_anchor.get(ph)
+            if a:
+                id_attr = f' id="tx-{esc(a)}"'
+                anchored.add(ph)
+        n = len(items)
+        blocks.append(
+            f'<details class="tx-group" open{id_attr} data-phase="{esc(ph or "")}">'
+            f'<summary class="tx-group-head">{tag}'
+            f'<span class="tx-group-name">{esc(ph or "(unphased)")}</span>'
+            f'<span class="tx-group-n">{n} turn{"" if n == 1 else "s"}</span></summary>'
+            f'<div class="tx-group-body">{inner}</div></details>'
+        )
+    return "".join(blocks)
 
 
 def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
@@ -277,7 +310,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
         return (
             f"""
 <section id="sec-leads" class="stage stage-defender">
-  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
+  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
   {body}
 </section>
 """,
@@ -288,7 +321,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
         qs = jl.queries
         lead_cell = (
-            f'<td class="lq-lead" rowspan="{max(1, len(qs))}">'
+            f'<td class="lq-lead" id="lead-{esc(jl.lead_id)}" rowspan="{max(1, len(qs))}">'
             f'<div class="lq-leadid">{esc(jl.lead_id)}</div>'
             f'<div class="lq-goal">{esc(goal)}</div></td>'
         )
@@ -324,7 +357,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     return (
         f"""
 <section id="sec-leads" class="stage stage-defender">
-  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
+  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
   {table}
 </section>
 """,
@@ -337,35 +370,74 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
 # ---------------------------------------------------------------------------
 
 
+def _toc_dropdown(section_id: str, label: str, sublinks: str, open_: bool = True) -> str:
+    """A nav entry that doubles as a drop-down: the label jumps to the section
+    (JS suppresses the summary toggle on the link), the body lists jump-links into
+    its subsections. Falls back to a plain link when there are no subsections.
+
+    ``open_`` controls the default expand state — the long lists (leads, the
+    transcript phases) start collapsed so the sidebar stays scannable."""
+    if not sublinks:
+        return f'<li class="item"><a href="#{section_id}">{label}</a></li>'
+    open_attr = " open" if open_ else ""
+    return (
+        f'<li class="item toc-dd"><details class="toc-dd-d"{open_attr}>'
+        f'<summary class="toc-dd-head"><a href="#{section_id}" class="toc-dd-link">{label}</a></summary>'
+        f'<ul class="toc-sublist">{sublinks}</ul></details></li>'
+    )
+
+
+def _phase_nav_li(ph: dict, href: str, data_attr: str = "") -> str:
+    return (
+        f'<li class="item phase-nav"><a href="{href}"{data_attr}>'
+        f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
+        f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
+    )
+
+
 def render_runtime_toc(
-    phases: list[dict], n_tx: int, n_leads: int, tx_phases: set[str] | None = None
+    phases: list[dict],
+    n_tx: int,
+    n_leads: int,
+    tx_phases: set[str] | None = None,
+    leads: list | None = None,
 ) -> str:
     tx_phases = tx_phases or set()
+    leads = leads or []
 
-    def _phase_target(ph: dict) -> str:
+    def _tx_target(ph: dict) -> str:
         # Jump into the transcript only for a phase that actually rendered a
         # tx-anchor; otherwise fall back to its investigation block (always
         # present), so phases the transcript skipped don't get a dead link.
         anchor = ph["anchor"]
         return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
-    phase_links = "".join(
-        f'<li class="item phase-nav"><a href="{_phase_target(ph)}" '
-        f'data-phase-link="{esc(ph["name"])}">'
-        f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
-        f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
-        for ph in phases
-    ) or '<li class="item muted">(no phases)</li>'
+    # Transcript → phase groups (scroll-spy tracked); investigation → its per-phase
+    # blocks; leads & queries → each lead row. Each section's nav item is itself
+    # the expandable drop-down listing those jump-links.
+    tx_links = "".join(
+        _phase_nav_li(ph, _tx_target(ph), f' data-phase-link="{esc(ph["name"])}"') for ph in phases
+    )
+    inv_links = "".join(_phase_nav_li(ph, f'#{esc(ph["anchor"])}') for ph in phases)
+    lead_links = "".join(
+        f'<li class="item phase-nav lead-nav"><a href="#lead-{esc(jl.lead_id)}">'
+        f'<span class="pn-tag pn-lead">{esc(jl.lead_id)}</span></a></li>'
+        for jl in leads
+    )
+
+    investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
+    leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links, open_=False)
+    transcript_item = _toc_dropdown("sec-transcript", f"transcript ({n_tx})", tx_links, open_=False)
     return f"""
 <nav class="toc">
   <ul>
-    <li class="section">Phases <span class="toc-hint">→ transcript</span></li>
-    {phase_links}
     <li class="section">Sections</li>
+    <li class="item"><a href="#top">↑ top</a></li>
+    <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
-    <li class="item"><a href="#sec-investigation">investigation</a></li>
-    <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>
-    <li class="item"><a href="#sec-leads">leads &amp; queries ({n_leads})</a></li>
+    {investigation_item}
+    {leads_item}
+    {transcript_item}
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>
 </nav>

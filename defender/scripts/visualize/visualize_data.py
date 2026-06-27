@@ -652,6 +652,42 @@ def gather_calls_by_phase(
     return out
 
 
+def _iter_gather_responses(run_dir: Path, messages: list[dict] | None):
+    """Yield ``(lead_id, record)`` for each gather subagent *response* message in
+    the log — the single filter shared by the three gather-message aggregations
+    (cost-by-phase, wall-by-phase, cost-by-model)."""
+    for rec in (load_messages(run_dir) if messages is None else messages):
+        if rec.get("kind") != "response":
+            continue
+        aid = rec.get("agent_id", "main")
+        if not aid.startswith("gather:"):
+            continue
+        yield aid.split(":", 1)[1], rec
+
+
+def _gather_phase_for(dispatch_phase: str | None, phase_order: list[str]) -> str | None:
+    """The GATHER phase that semantically owns a gather call dispatched in
+    ``dispatch_phase``.
+
+    The main agent issues the ``gather`` tool-call (and awaits its result) during
+    the PLAN turn — *before* it writes the ``## GATHER`` header — so by raw
+    tagging the gather cost and wall pile into PLAN and the GATHER bar renders
+    empty. Route them to the GATHER phase of the same loop instead; fall back to
+    the first GATHER phase, then to the dispatch phase itself."""
+    if dispatch_phase and phase_verb(dispatch_phase) == "GATHER":
+        return dispatch_phase
+    m = re.search(r"loop (\d+)", dispatch_phase or "")
+    if m:
+        n = m.group(1)
+        for p in phase_order:
+            if phase_verb(p) == "GATHER" and re.search(rf"loop {n}\b", p):
+                return p
+    for p in phase_order:
+        if phase_verb(p) == "GATHER":
+            return p
+    return dispatch_phase
+
+
 def gather_cost_by_phase(
     run_dir: Path,
     events: list[dict],
@@ -679,24 +715,19 @@ def gather_cost_by_phase(
     """
     out = {ph: 0.0 for ph in phase_order}
     per_lead: dict[str, float] = {}
-    for rec in (load_messages(run_dir) if messages is None else messages):
-        if rec.get("kind") != "response":
-            continue
-        aid = rec.get("agent_id", "main")
-        if not aid.startswith("gather:"):
-            continue
-        lead = aid.split(":", 1)[1]
+    for lead, rec in _iter_gather_responses(run_dir, messages):
         per_lead[lead] = per_lead.get(lead, 0.0) + usage_cost(
             rec.get("model") or "", rec.get("usage") or {}
         )
     if per_lead:
         gphase = gather_dispatch_phase(events, tags)
-        fallback = next(
-            (p for p in phase_order if phase_verb(p) == "GATHER"),
-            phase_order[0] if phase_order else None,
-        )
+        # When a lead's dispatch phase is untagged (gphase miss) *and* the run has
+        # no GATHER phase, _gather_phase_for can't place the cost — land it in the
+        # first phase rather than dropping it, so gather_total stays equal to the
+        # full gather cost (the per-model breakdown reads that same sum).
+        fallback = phase_order[0] if phase_order else None
         for lead, c in per_lead.items():
-            ph = gphase.get(lead, fallback)
+            ph = _gather_phase_for(gphase.get(lead), phase_order) or fallback
             if ph in out:
                 out[ph] += c
         return out, sum(out.values())
@@ -705,8 +736,63 @@ def gather_cost_by_phase(
     tot = sum(counts.values())
     if residual > 0 and tot > 0:
         for ph, n in counts.items():
-            out[ph] = residual * n / tot
+            tph = _gather_phase_for(ph, phase_order)
+            if tph in out:
+                out[tph] += residual * n / tot
     return out, sum(out.values())
+
+
+def gather_wall_by_phase(
+    run_dir: Path,
+    events: list[dict],
+    tags: list[str | None],
+    phase_order: list[str],
+    messages: list[dict] | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Per-lead gather subagent wall (seconds), grouped two ways.
+
+    Returns ``(to_gather, from_dispatch)``: ``to_gather`` lands each lead's gather
+    wall in the GATHER phase that owns it (``_gather_phase_for``); ``from_dispatch``
+    records the same seconds against the phase that actually dispatched the call
+    (PLAN). The gather run executes *inside* the dispatch turn's wall window, so
+    the caller moves these seconds out of the dispatch bar and into the GATHER bar.
+
+    Wall is summed from each gather message's ``duration_ms`` (the model-request
+    time). That undercounts true gather wall — the adapter/ES|QL calls between
+    model turns aren't timed here — so the move is conservative and never drives a
+    phase negative."""
+    per_lead_ms: dict[str, float] = {}
+    for lead, rec in _iter_gather_responses(run_dir, messages):
+        per_lead_ms[lead] = per_lead_ms.get(lead, 0.0) + (rec.get("duration_ms") or 0.0)
+
+    gphase = gather_dispatch_phase(events, tags)
+    to_gather = {ph: 0.0 for ph in phase_order}
+    from_dispatch = {ph: 0.0 for ph in phase_order}
+    for lead, ms in per_lead_ms.items():
+        disp = gphase.get(lead)
+        gph = _gather_phase_for(disp, phase_order)
+        sec = ms / 1000.0
+        if gph in to_gather:
+            to_gather[gph] += sec
+        if disp in from_dispatch:
+            from_dispatch[disp] += sec
+    return to_gather, from_dispatch
+
+
+def gather_cost_by_model(
+    run_dir: Path, messages: list[dict] | None = None
+) -> dict[str, float]:
+    """Gather subagent cost grouped by its (prettified) model name.
+
+    The metrics card's per-model breakdown reads this so the gather line carries
+    the model the gather agent *actually* ran on (Sonnet, today) rather than a
+    hardcoded guess. Empty when llm_requests.jsonl is absent (older runs)."""
+    out: dict[str, float] = {}
+    for _lead, rec in _iter_gather_responses(run_dir, messages):
+        raw = rec.get("model") or ""
+        pretty = _pretty_model(raw)
+        out[pretty] = out.get(pretty, 0.0) + usage_cost(raw, rec.get("usage") or {})
+    return out
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:

@@ -86,6 +86,42 @@ def pre_json(obj) -> str:
     return f'<pre class="json">{esc(rendered)}</pre>'
 
 
+# A JSON token: a string (optionally a key — a string followed by a colon), a
+# literal, or a number. Everything between tokens (braces, commas, whitespace)
+# is structural and HTML-safe, so it passes through unescaped.
+_JSON_TOKEN_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"(?:\s*:)?'
+    r'|\b(?:true|false|null)\b'
+    r'|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?'
+)
+
+
+def _json_token_class(tok: str) -> str:
+    if tok.startswith('"'):
+        return "j-key" if tok.rstrip().endswith(":") else "j-str"
+    if tok in ("true", "false"):
+        return "j-bool"
+    if tok == "null":
+        return "j-null"
+    return "j-num"
+
+
+def pretty_json_html(obj) -> str:
+    """Syntax-highlighted ``<pre>`` for a JSON-able object (keys / strings /
+    numbers / literals colored). Falls back to plain ``pre_text`` if the object
+    won't serialize."""
+    try:
+        text = json.dumps(obj, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return pre_text(str(obj))
+
+    def _wrap(m: re.Match) -> str:
+        tok = m.group(0)
+        return f'<span class="{_json_token_class(tok)}">{html.escape(tok)}</span>'
+
+    return f'<pre class="json-pretty">{_JSON_TOKEN_RE.sub(_wrap, text)}</pre>'
+
+
 def slugify(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
     return s or "section"
@@ -275,13 +311,12 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
         body = '<div class="empty">no alert.json</div>'
     else:
         try:
-            text = json.dumps(json.loads(p.read_text()), indent=2)
+            body = pretty_json_html(json.loads(p.read_text()))
         except json.JSONDecodeError:
-            text = p.read_text()
-        body = pre_text(text)
+            body = pre_text(p.read_text())
     return f"""
 <section id="{esc(anchor)}" class="stage stage-alert">
-  <h2>§ Alert <span class="stage-sub">— input to the defender runtime</span></h2>
+  <h2>Alert <span class="stage-sub">— input to the defender runtime</span></h2>
   {body}
 </section>
 """
