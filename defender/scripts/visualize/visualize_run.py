@@ -247,7 +247,7 @@ def render_runtime_headline(
     foot = f'loops {health["loops"]} · turns {health["turns"]} · {totals.get("tool_calls", 0)} tool calls'
 
     return f"""
-<section class="headline">
+<section class="headline headline-runtime">
   <div class="fold">
     <div class="fold-card card-analysis">
       <div class="card-label">analysis</div>
@@ -321,12 +321,9 @@ def _lead_summary(leads: list) -> str:
         dead = jl.orphan or not jl.queries
         goal = (jl.goal or ("orphan" if jl.orphan else "")).strip()
         mark = ' <span class="lead-dead">∅</span>' if dead else ""
-        # Full goal in the DOM; CSS clamps it and the click-to-expand JS unclamps.
-        goal_html = (
-            f'<span class="lead-mini-goal" title="click to expand">{esc(goal)}</span>'
-            if goal
-            else ""
-        )
+        # Full goal in the DOM; CSS clamps it to one line. The JS marks it `.clip`
+        # (and wires click-to-expand) only when it actually overflows.
+        goal_html = f'<span class="lead-mini-goal">{esc(goal)}</span>' if goal else ""
         rows.append(
             f'<div class="lead-mini"><span class="lead-mini-id">{esc(jl.lead_id)}</span>'
             f'{goal_html}{mark}</div>'
@@ -373,7 +370,7 @@ CSS = """
 
 html, body { margin: 0; padding: 0; }
 body {
-  font: 13px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--text);
   scroll-behavior: smooth;
@@ -424,6 +421,15 @@ section.headline {
   padding: 20px 24px;
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
+}
+/* Runtime fold fills the first screen; the rest of the page is below the scroll.
+   min-height (not height) so a long report/lead-list grows the section rather
+   than clipping; the fold centers in the leftover space. */
+section.headline-runtime {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tile {
@@ -863,19 +869,18 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .byline .bl-item { color: var(--text-dim); }
 
 /* ----- Top fold: ANALYSIS | METRICS ----- */
-.fold { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+/* start-aligned: each card is its own natural height, so the shorter metrics
+   card doesn't get stretched to match analysis (which left dead space below). */
+.fold { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 .fold-card {
   position: relative;
   padding: 14px 16px 12px;
   border: 1px solid var(--border);
-  border-left-width: 4px;
   border-radius: 6px;
   background: var(--bg-2);
   min-width: 0;
 }
-.card-analysis { border-left-color: var(--accent-defender); }
-.card-metrics { border-left-color: var(--accent-learning); }
-.card-label { position: absolute; top: 10px; right: 14px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.8px; color: var(--text-dim); }
+.card-label { position: absolute; top: 10px; right: 14px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.8px; color: var(--text-dim); }
 
 .an-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .disp-badge {
@@ -886,30 +891,33 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .disp-badge.disp-inconclusive { background: var(--warn); }
 .disp-badge.disp-malicious { background: var(--bad); }
 .disp-badge.disp-\\? { background: var(--text-dim); }
-.an-conf { font-size: 11px; color: var(--text-dim); }
-.an-health { font-size: 12px; margin-bottom: 10px; }
+.an-conf { font-size: 12px; color: var(--text-dim); }
+.an-health { font-size: 13px; margin-bottom: 10px; }
 .health { font-weight: 600; }
 .health-good { color: var(--good); }
 .health-warn { color: var(--warn); }
 .health-bad { color: var(--bad); }
 .health-detail { color: var(--text-dim); font-weight: 400; }
-.an-report { white-space: pre-wrap; line-height: 1.55; color: var(--text); font-size: 12.5px; margin-bottom: 10px; }
-.an-sublabel { text-transform: uppercase; font-size: 9px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }
-.lead-mini-list { display: flex; flex-direction: column; gap: 3px; }
-.lead-mini { display: flex; gap: 8px; font-size: 11px; align-items: baseline; }
+.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; margin-bottom: 10px; }
+.an-sublabel { text-transform: uppercase; font-size: 10px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }
+.lead-mini-list { display: flex; flex-direction: column; gap: 4px; }
+.lead-mini { display: flex; gap: 8px; font-size: 12.5px; align-items: baseline; }
 .lead-mini-id { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--code); flex-shrink: 0; }
-.lead-mini-goal { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; min-width: 0; }
-.lead-mini-goal:hover { color: var(--text); }
+.lead-mini-goal { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* `.clip` is added by JS only when the goal actually overflows its line, so the
+   expand affordance (pointer + click) appears for truncated goals only. */
+.lead-mini-goal.clip { cursor: pointer; }
+.lead-mini-goal.clip:hover { color: var(--text); }
 .lead-mini.expanded .lead-mini-goal { overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; }
 .lead-dead { color: var(--warn); font-weight: 700; }
 
 .me-top { display: flex; gap: 20px; align-items: baseline; margin-bottom: 2px; }
-.me-cost { font-size: 22px; font-weight: 700; color: var(--text-bright); font-family: 'SF Mono', Menlo, Consolas, monospace; }
-.me-wall { font-size: 16px; font-weight: 600; color: var(--text); font-family: 'SF Mono', Menlo, Consolas, monospace; }
-.me-models { font-size: 10px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-bottom: 8px; }
-.me-bar-row { display: grid; grid-template-columns: 38px 1fr; gap: 8px; align-items: center; margin-top: 6px; }
-.me-bar-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; text-align: right; font-family: 'SF Mono', Menlo, Consolas, monospace; }
-.me-foot { font-size: 11px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-top: 10px; }
+.me-cost { font-size: 24px; font-weight: 700; color: var(--text-bright); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.me-wall { font-size: 17px; font-weight: 600; color: var(--text); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.me-models { font-size: 12px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-bottom: 8px; }
+.me-bar-row { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; margin-top: 8px; }
+.me-bar-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; text-align: right; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.me-foot { font-size: 12px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; margin-top: 10px; }
 
 .phase-stats .ps-gather { color: var(--accent-learning); margin-left: 6px; }
 
@@ -1048,8 +1056,12 @@ RUNTIME_JS = """
       markers.forEach(function (m) { obs.observe(m); });
     }
   }
-  // Click a clamped lead goal (in the metrics/analysis fold) to expand it in place.
+  // Lead goals (in the analysis fold): only the ones actually truncated by the
+  // one-line clamp become click-to-expand — a short goal that fits stays inert.
   [].slice.call(document.querySelectorAll('.lead-mini-goal')).forEach(function (g) {
+    if (g.scrollWidth <= g.clientWidth) return;  // fits on its line — nothing to expand
+    g.classList.add('clip');
+    g.title = 'click to expand';
     g.addEventListener('click', function () {
       g.parentNode.classList.toggle('expanded');
     });
