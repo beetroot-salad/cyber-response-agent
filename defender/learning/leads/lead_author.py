@@ -425,31 +425,23 @@ def _is_in_scope(path: str) -> bool:
 
 def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
     """``[(XY, path)]`` from ``git status --porcelain --untracked-files=all -z`` at
-    ``repo_root`` (a batch worktree). The agent runs no git, so its edits sit
-    uncommitted in the working tree — this is the single read the scope gate verifies.
-    Renames aren't expected (the agent stages nothing — a "move" shows as a delete plus
-    an untracked add), but a defensive ``R``/``C`` branch consumes the paired source
-    record so the path keyed is always the destination/post-rename name.
+    ``repo_root`` (a batch worktree). The agent runs no git, so its edits sit uncommitted
+    in the working tree (``M`` / ``D`` / ``??``) — this is the single read the scope gate
+    verifies. The agent stages nothing, so no rename/copy (``R`` / ``C``) records arise (a
+    "move" shows as a delete + an untracked add): each ``-z`` field is therefore one
+    ``XY␣path`` record. A stray staged rename, were one ever to appear, fails safe — its
+    second (source) field reads as an out-of-corpus path and the gate quarantines rather
+    than mis-committing.
     """
     proc = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all", "-z"],
         cwd=repo_root, capture_output=True, text=True, check=True,
     )
     out: list[tuple[str, str]] = []
-    parts = proc.stdout.split("\0")
-    i = 0
-    while i < len(parts):
-        rec = parts[i]
+    for rec in proc.stdout.split("\0"):
         if not rec or len(rec) < 3:
-            i += 1
             continue
-        xy = rec[:2]
-        path = rec[3:] if rec[2] == " " else rec[2:]
-        if xy[0] in ("R", "C"):
-            i += 2  # consume the paired source record
-        else:
-            i += 1
-        out.append((xy, path))
+        out.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
     return out
 
 
@@ -753,9 +745,12 @@ def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str
     return sorted(changed)
 
 
-def _commit_message(run_dir: Path, changed: list[str]) -> str:
+def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
     """Deterministic loop-authored commit message — the agent runs no git and authors no
-    message. Title names the scope touched + the source run; body lists the changed paths."""
+    message. Title names the scope touched + the source run; body lists the changed paths.
+
+    (Distinct from ``_author_shared._commit_message``, which *extracts* the agent-authored
+    message for the lessons curators — opposite direction; named apart to avoid confusion.)"""
     has_catalog = any(_is_catalog_path(p) for p in changed)
     has_skill = any(_is_system_skill_md(p) or _is_system_skill_draft(p) for p in changed)
     if has_catalog and has_skill:
@@ -928,7 +923,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     changed = _verify_skills_state(repo_root, baseline_stray)
     sha = _author_shared.commit_corpus(
         repo_root, repo_root / "defender" / "skills", SKILLS_REL,
-        _commit_message(run_dir, changed),
+        _loop_commit_message(run_dir, changed),
     )
     _write_state(
         _done_sentinel(run_dir),

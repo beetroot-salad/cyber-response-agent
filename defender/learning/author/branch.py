@@ -142,12 +142,24 @@ class AuthorBranch:
 
         Prunes stale worktree registrations first so a crashed prior batch can't
         block the add. There is no refuse-if-dirty check: the dev checkout is never
-        touched and the new worktree is a clean checkout of ``origin/main``."""
+        touched and the new worktree is a clean checkout of ``origin/main``.
+
+        If ``worktree add`` fails *after* partially creating the leaf dir / branch ref,
+        we reclaim it here before re-raising — the caller's ``finally: cleanup`` only
+        runs once ``start_batch`` has returned ``wt``, and ``worktree prune`` won't
+        reclaim a dir that is *present* (only a missing one), so an un-handled partial
+        would leak."""
         self.git(["worktree", "prune"])  # best-effort; clears crashed-batch stragglers
         self._git_ok(["fetch", "origin"])
         self.worktree_base.mkdir(parents=True, exist_ok=True)
         wt = self._worktree_path(batch_id)
-        self._git_ok(["worktree", "add", "-B", self._branch(batch_id), str(wt), _BRANCH_BASE])
+        try:
+            self._git_ok(
+                ["worktree", "add", "-B", self._branch(batch_id), str(wt), _BRANCH_BASE]
+            )
+        except BranchError:
+            self.cleanup(wt)  # best-effort remove of the partial worktree
+            raise
         return wt
 
     def finish_batch(self, batch_id: str, wt: Path) -> str | None:

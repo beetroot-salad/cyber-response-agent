@@ -1271,6 +1271,28 @@ def test_author_branch_start_adds_worktree_off_origin_main(tmp_path: Path):
     assert ["worktree", "add", "-B", "lessons/abc123", str(wt), "origin/main"] in git.calls
 
 
+def test_author_branch_start_cleans_up_partial_worktree_on_add_failure(tmp_path: Path):
+    """If `worktree add` fails mid-create, start_batch reclaims the partial worktree and
+    re-raises — the caller's `finally: cleanup` only runs once `wt` has been returned, so
+    an un-handled partial would leak (prune won't reclaim a present-but-broken dir)."""
+    calls: list[list[str]] = []
+
+    def git(args):
+        a = list(args)
+        if a[:1] == ["-C"]:
+            a = a[2:]
+        calls.append(a)
+        if a[:2] == ["worktree", "add"]:
+            return _cp(returncode=1, stderr="disk full")
+        return _cp()
+
+    b = ab.AuthorBranch(git=git, gh=_gh_runner(), worktree_base=tmp_path / "wt")
+    with pytest.raises(ab.BranchError):
+        b.start_batch("abc123")
+    wt = tmp_path / "wt" / "lessons-abc123"
+    assert ["worktree", "remove", "--force", str(wt)] in calls  # partial reclaimed
+
+
 def test_author_branch_finish_no_commits_returns_none():
     git = _git_runner(ahead=0)
     gh = _gh_runner()
