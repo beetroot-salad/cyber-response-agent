@@ -266,16 +266,19 @@ def _executed_query(lead: ExecutedLead) -> str:
     return (arg0 or raw) if _is_esql(lead.system) else (raw or arg0)
 
 
-def extract(run_dir: Path) -> list[ExecutedLead]:
+def extract(run_dir: Path) -> tuple[list, list[ExecutedLead]]:
     """Join the two tables via ``lead_repository`` and emit one ExecutedLead
-    per executed query.
+    per executed query. Returns ``(joined_leads, executed)`` so a caller that
+    needs the raw join surface too (for handoff building) reuses this single
+    read instead of re-joining.
 
     Queries whose payload file is missing are dropped silently (the dispatch
     never landed). The payload status comes from the queries-table row
     (``record_query`` writes it deterministically); an out-of-vocabulary
     status is a loud failure — the loop refuses to author against it.
     """
-    return extract_from_joined(lead_repository.joined(run_dir))
+    joined = lead_repository.joined(run_dir)
+    return joined, extract_from_joined(joined)
 
 
 def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
@@ -803,7 +806,8 @@ class LeadAuthorDeps:
     monkeypatching lead_author's own functions (the SUT-patching #374 removes)."""
     paths: _loop_config.LoopPaths
     invoke_agent: Callable[..., int]
-    extract: Callable[[Path], list[ExecutedLead]]
+    extract: Callable[[Path], tuple[list, list[ExecutedLead]]]
+    synthesize: Callable[..., list[Path]]
     build_handoff: Callable[..., list[dict]]
     discover_system_drafts: Callable[[], list[Path]]
     acquire_queue_lock: Callable[[], Any]
@@ -822,6 +826,7 @@ def build_lead_author_deps(
         # so the spawn's cwd + rm matcher resolve there, not at the module REPO_ROOT.
         invoke_agent=functools.partial(invoke_agent, repo_root=paths.repo_root),
         extract=extract,
+        synthesize=synthesize_drafts,
         build_handoff=functools.partial(
             build_handoff, repo_root=paths.repo_root, catalog_dir=paths.catalog_dir
         ),
@@ -871,8 +876,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     # synthesis, handoff extraction, the composite classifier's entry view) —
     # the run dir is immutable by now, so re-joining would be pure repeated I/O.
     try:
-        joined_leads = lead_repository.joined(run_dir)
-        executed = extract_from_joined(joined_leads)
+        joined_leads, executed = deps.extract(run_dir)
     except (FileNotFoundError, ValueError) as e:
         _log(f"FATAL: cannot extract leads: {e}")
         return 2
@@ -880,7 +884,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     # Mint drafts for executed-but-uncatalogued verbs. They land under
     # {system}/_draft/ in the worktree corpus; the agent curates each (promote/
     # discard), and whatever survives is committed by the loop with the rest.
-    synth = synthesize_drafts(executed, catalog_dir=deps.paths.catalog_dir)
+    synth = deps.synthesize(executed, catalog_dir=deps.paths.catalog_dir)
     if synth:
         _log(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
@@ -969,7 +973,7 @@ def _prepare_handoffs(
 
     if executed is None:
         try:
-            executed = deps.extract(run_dir)
+            joined_leads, executed = deps.extract(run_dir)
         except (FileNotFoundError, ValueError) as e:
             _log(f"FATAL: cannot extract leads: {e}")
             return [], [], 2

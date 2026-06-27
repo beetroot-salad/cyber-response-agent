@@ -115,7 +115,7 @@ def catalog(tmp_path: Path) -> Path:
 def test_extract_single_query_per_entry(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "list auth events", ["src_ip", "user"])
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events", {"host": "h1", "window": "1h"})
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     assert len(leads) == 1
     lead = leads[0]
     assert lead.lead_id == "l-001"
@@ -133,7 +133,7 @@ def test_extract_multi_query_fans_out(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "fan out")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
     _write_query(run_dir, "l-001", 1, "wazuh.sudo-commands")
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     assert leads[0].query_index == 0
     assert leads[0].is_multi_query is True
@@ -147,7 +147,7 @@ def test_extract_skips_query_with_no_payload(run_dir: Path):
     # Query row present but payload write failed (payload_path null) — skipped.
     _write_lead_meta(run_dir, "l-001", "x")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload=None)
-    assert lead_author.extract(run_dir) == []
+    assert lead_author.extract(run_dir)[1] == []
 
 
 def test_extract_multi_query_skips_missing_payload(run_dir: Path):
@@ -155,7 +155,7 @@ def test_extract_multi_query_skips_missing_payload(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "partial fan-out")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
     _write_query(run_dir, "l-001", 1, "wazuh.sudo-commands", payload=None)
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     assert len(leads) == 1
     assert leads[0].query_id == "wazuh.auth-events"
 
@@ -187,7 +187,7 @@ def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
         _write_lead_meta(run_dir, lid, f"call {i}")
         _write_query(run_dir, lid, 0, "elastic.auth-events", {"host": f"h{i}"},
                      payload_digest=f"call-{i}")
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
@@ -212,7 +212,7 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
         payload_status="suspect_empty",
         payload_digest="0 events; data.srcip is IP-typed",
     )
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
@@ -237,7 +237,7 @@ def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path)
     pipe = 'FROM logs-system.auth-* | WHERE host.name == "db-1" | STATS c = COUNT(*)'
     _write_lead_meta(run_dir, "l-001", "x")
     _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"arg0": pipe})
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     inv = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )[0]["invocations"][0]
@@ -250,7 +250,7 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     _write_query(run_dir, "l-001", 0, "elastic.does-not-exist")
     _write_lead_meta(run_dir, "l-002", "real one")
     _write_query(run_dir, "l-002", 0, "elastic.auth-events")
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
@@ -263,7 +263,7 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
 def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "ad-hoc")
     _write_query(run_dir, "l-001", 0, "")
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert handoffs == []
 
@@ -273,7 +273,7 @@ def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path)
     _write_lead_meta(run_dir, "l-001", "cross-system")
     _write_query(run_dir, "l-001", 0, "elastic.auth-events")
     _write_query(run_dir, "l-001", 1, "host-state.process-list", {"pattern": "x"})
-    leads = lead_author.extract(run_dir)
+    _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
@@ -554,22 +554,23 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
 # ---------------------------------------------------------------------------
 
 
-def _bypass_tables(monkeypatch):
-    """Skip the real two-table read so the commit/gate flow can be exercised against a
-    seeded repo: the agent (faked below) is the only thing that touches the corpus."""
-    monkeypatch.setattr(lead_author.lead_repository, "joined", lambda rd: [])
-    monkeypatch.setattr(lead_author, "extract_from_joined", lambda jl: [object()])
-    monkeypatch.setattr(lead_author, "synthesize_drafts",
-                        lambda executed, catalog_dir: [])
+def _bypass_tables():
+    """Override the two-table read + draft synthesis so the commit/gate flow runs
+    against a seeded repo: extract yields one dummy lead, synthesis is a no-op.
+    Splatted into ``_deps(...)`` — the agent (faked below) is the only thing that
+    touches the corpus."""
+    return dict(
+        extract=lambda rd: ([], [object()]),
+        synthesize=lambda executed, catalog_dir: [],
+    )
 
 
-def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
     """End-to-end: the agent (faked) edits the worktree and runs no git; the loop
     verifies + commits exactly the skills delta with a generated message + writes done."""
     repo = tmp_git_repo
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
-    _bypass_tables(monkeypatch)
 
     def fake_agent(rd, handoffs, pending):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
@@ -580,6 +581,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path, monkey
 
     deps = _deps(
         repo,
+        **_bypass_tables(),
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
@@ -600,13 +602,12 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path, monkey
     assert (run_dir / "lead_author" / "done").is_file()
 
 
-def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_path: Path):
     """A stray edit makes the gate raise LeadAuthorError (the drain quarantines the
     marker); the loop commits nothing and writes no done sentinel."""
     repo = tmp_git_repo
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
-    _bypass_tables(monkeypatch)
 
     def fake_agent(rd, handoffs, pending):
         (repo / "defender" / "other").mkdir(parents=True, exist_ok=True)
@@ -615,6 +616,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
 
     deps = _deps(
         repo,
+        **_bypass_tables(),
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
@@ -650,7 +652,7 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(
         run_dir.parent,
-        extract=lambda rd: fake_executed,
+        extract=lambda rd: ([], fake_executed),
         build_handoff=lambda rd, ex, jl=None: fake_handoff,
         discover_system_drafts=lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
     )
@@ -682,7 +684,7 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "2")
     deps = _deps(
         tmp_path,
-        extract=lambda rd: [object()],
+        extract=lambda rd: ([], [object()]),
         build_handoff=lambda rd, ex, jl=None: fake_handoff,
         discover_system_drafts=lambda: drafts,
     )
