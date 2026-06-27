@@ -900,7 +900,10 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     run_dir = tmp_path / "tmprun" / "case-rc"
     run_dir.mkdir(parents=True)
     orch._enqueue_for_authoring(run_dir, paths)
-    monkeypatch.setattr(la, "run", lambda rd, paths=None: 2)
+    # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
+    # imports the curator via importlib, so its run has no DI seam (run_lead_author=
+    # would bypass the very _invoke_lead_author rc→signal mapping under test).
+    monkeypatch.setattr(la, "run", lambda rd, paths=None: 2)  # lint-monkeypatch: ok
     orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
     assert not (paths.author_queue_dir / "case-rc.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-rc.json"
@@ -925,7 +928,9 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     def boom(rd, paths=None):
         raise OSError("disk hiccup")
 
-    monkeypatch.setattr(la, "run", boom)
+    # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
+    # real _invoke_lead_author (no DI seam for the importlib-loaded curator.run).
+    monkeypatch.setattr(la, "run", boom)  # lint-monkeypatch: ok
     marker = paths.author_queue_dir / "case-transient.json"
     failed = paths.author_queue_dir / "failed" / "case-transient.json"
 
