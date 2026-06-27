@@ -101,7 +101,7 @@ For each entry in `pending_system_drafts`:
 1. Read `draft_path` and `skill_path`. The draft is a self-describing note with `## Pattern` / `## Root cause` / `## Workaround` / `## Notes` (see `defender/skills/{system}/_draft/README.md` for the on-disk shape).
 2. Pick one action.
 
-**lift** — fold the draft's `## Pattern` + `## Workaround` into the appropriate section of `skill_path`, then `rm` the draft. Reach for lift when:
+**lift** — fold the draft's `## Pattern` + `## Workaround` into the appropriate section of `skill_path`, then `rm {draft_path}` (the repo-relative path from the handoff — `rm` it by that exact path, not a catalog-relative or bare-name form). Reach for lift when:
 
 - The draft names a concrete sentinel value, field path, or substitute field that the SKILL.md body doesn't currently document.
 - The workaround is in-document (substitute field, parallel field) or a cheap cross-source query the SKILL.md should advertise.
@@ -114,7 +114,7 @@ Folding discipline (mirrors the catalog "Grounded edits only" rule):
 - Keep the fold tight. One short paragraph or a bullet under the relevant gap entry is usually enough; do not paste the draft body verbatim.
 - Cite the draft id (the frontmatter `id:`) in the fold only when adding a genuinely new gap entry. Otherwise the SKILL.md prose stays anonymous.
 
-**discard** — `rm` the draft without touching `skill_path`. Use when:
+**discard** — `rm {draft_path}` (the repo-relative path from the handoff) without touching `skill_path`. Use when:
 
 - The SKILL.md body (or a sibling already-folded section) already covers the workaround.
 - The draft's claim does not hold up against the payload it cites (a parser-quirk classification that's actually genuine missing data).
