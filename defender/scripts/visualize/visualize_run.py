@@ -698,9 +698,16 @@ section.stage-actor { border-left-color: var(--accent-actor); }
 section.stage-judge { border-left-color: var(--accent-judge); }
 section.stage-oracle { border-left-color: var(--accent-oracle); }
 section.stage-raw { border-left-color: var(--accent-raw); }
-/* Runtime page: no colored left accent on the section boxes — uniform border.
-   (The judge page keeps its stage color-coding.) */
-.content-runtime section.stage { border-left-width: 1px; border-left-color: var(--border); }
+/* Runtime page: sections aren't boxes — just content separated by a thin rule.
+   (The judge page keeps its boxed, color-coded stages.) */
+.content-runtime section.stage {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 28px 0 4px;
+  margin-bottom: 0;
+}
 
 /* ----- Report card ----- */
 .report-card {
