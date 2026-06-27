@@ -937,7 +937,7 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 /* Report beside the lead list (was stacked). Report takes the flexible column
    (capped ~90ch for readability — the full width ran lines past the comfortable
    ~50-75ch range); leads sit in a fixed side column. */
-.an-cols { display: grid; grid-template-columns: minmax(0, 90ch) minmax(240px, 360px); gap: 28px; align-items: start; justify-content: start; }
+.an-cols { display: grid; grid-template-columns: minmax(0, 90ch) minmax(360px, 560px); gap: 28px; align-items: start; justify-content: start; }
 .an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; }
 .an-leads { min-width: 0; }
 @media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
