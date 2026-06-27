@@ -366,6 +366,17 @@ def _under_draft(path: str) -> bool:
     return len(parts) >= 3 and parts[1] == "_draft"
 
 
+def _draft_twin(catalog_template: str) -> str:
+    """The ``_draft/{id}.md`` path a promote of an established catalog template must remove.
+
+    ``defender/skills/gather/queries/{system}/{id}.md`` →
+    ``defender/skills/gather/queries/{system}/_draft/{id}.md``. Used by the scope gate to
+    catch a half-promote (established written, draft never ``rm``'d).
+    """
+    p = Path(catalog_template)
+    return str(p.parent / "_draft" / p.name)
+
+
 def _is_catalog_path(path: str) -> bool:
     return path.startswith(CATALOG_REL)
 
@@ -633,11 +644,20 @@ def build_system_draft_handoffs(
 # the draft, fold/split/lift = Edit/Write. The loop's ``_verify_skills_state`` enforces the
 # fine scope (in-scope, no protected-surface mutation, draft-only deletion), so the
 # allowlist itself can be the coarse ``defender/skills/`` tree.
+#
+# Two matcher grammars, deliberately: ``**`` is the documented recursive glob for the
+# *file-path* tools (Edit/Write/Read), so it matches a nested draft path there. Claude
+# Code's *Bash* matcher is a different grammar — a single ``*`` over the raw command
+# string, which already crosses ``/`` — and ``**`` is undefined for it, so the ``rm`` grant
+# uses the documented ``:*`` prefix form (``Bash(rm defender/skills/:*)``) rather than an
+# undocumented ``**`` that only matches nested drafts by accident. The drain hands the agent
+# repo-relative paths and runs it with cwd at the worktree, so one repo-relative matcher
+# covers every removal — no worktree-absolute twin needed.
 _ALLOWLIST = (
     "Read,Glob,Grep,"
     f"Edit({SKILLS_REL}**),"
     f"Write({SKILLS_REL}**),"
-    f"Bash(rm {SKILLS_REL}**)"
+    f"Bash(rm {SKILLS_REL}:*)"
 )
 
 
@@ -656,8 +676,9 @@ def invoke_agent(
     runs no git and writes no result marker; its edits + ``rm``s sit in the working tree
     (the source of truth), so it uses the raw variant (no ``AUTHOR_RESULT:`` marker) and
     maps the runner's timeout to rc 124 so ``_run_locked`` returns rc=2 and the drain
-    quarantines the marker. ``repo_root`` is the batch worktree (the drain passes
-    ``deps.paths.repo_root``); the agent's cwd + ``rm`` matcher resolve under it."""
+    quarantines the marker. ``repo_root`` is the batch worktree (the drain
+    passes ``deps.paths.repo_root``) and becomes the agent's cwd, so its repo-relative
+    ``rm`` paths resolve under it — no worktree-absolute matcher is needed."""
     pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
@@ -670,12 +691,9 @@ def invoke_agent(
     )
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     _log(f"spawn claude (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
-    # Also permit the worktree-absolute form of the rm matcher, since the agent may pass
-    # an absolute path; the relative form covers cwd-relative `rm`.
-    allowed_tools = _ALLOWLIST + f",Bash(rm {repo_root / 'defender' / 'skills'}/**)"
     options = _author_runner.RunnerOptions(
         system_prompt_file=LEAD_AUTHOR_PROMPT,
-        allowed_tools=allowed_tools,
+        allowed_tools=_ALLOWLIST,
         model=LEAD_AUTHOR_MODEL,
         effort=None,
         timeout_seconds=LEAD_AUTHOR_TIMEOUT,
@@ -710,7 +728,11 @@ def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str
       * an in-skills change outside lead_author's scope (not catalog / system ``SKILL.md`` /
         ``_draft/``), or a ``_draft/README.md`` / catalog ``SCHEMA.md`` mutation;
       * a deletion of a non-draft established template or ``SKILL.md`` — delete-prohibition,
-        which also covers a demotion (rm-established + write-draft shows the ``D`` here).
+        which also covers a demotion (rm-established + write-draft shows the ``D`` here);
+      * a half-promote — an established catalog template written while its ``_draft/`` twin
+        still exists on disk (the promote's ``rm`` never happened). This one is invisible to
+        the records-only checks above: the surviving draft is *unchanged*, so it isn't in
+        ``git status`` at all — only a filesystem probe of the twin sees it.
     """
     records = _porcelain_records(repo_root)
 
@@ -741,6 +763,20 @@ def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str
                 f"agent deleted an established template / SKILL.md ({path}); refusing to "
                 "commit (delete-prohibition; a demotion is rejected the same way)"
             )
+        # Half-promote: an established catalog template was written (promote target, or an
+        # in-place fold of an existing template) but its ``_draft/`` twin still exists, so
+        # the promote's ``rm`` didn't happen and we'd commit both. (A delete already raised
+        # above, so this path is a non-delete write; a plain fold has no twin on disk, so it
+        # never trips.) The surviving draft is unchanged ⇒ not in ``records`` ⇒ the only
+        # signal is the filesystem.
+        if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
+            twin = _draft_twin(path)
+            if (repo_root / twin).exists():
+                raise LeadAuthorError(
+                    f"half-promote: established template {path} was written but its draft "
+                    f"twin {twin} still exists; refusing to commit (the promote's `rm` "
+                    "didn't happen — established + draft would both land)"
+                )
         changed.append(path)
     return sorted(changed)
 

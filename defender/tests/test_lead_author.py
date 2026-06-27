@@ -522,6 +522,19 @@ def test_verify_skills_state_accepts_draft_discard(tmp_git_repo: Path):
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/newthing.md"]
 
 
+def test_verify_skills_state_rejects_half_promote(tmp_git_repo: Path):
+    """A promote that writes the established template but never ``rm``s its ``_draft/`` twin
+    leaves both on disk. The surviving draft is unchanged ⇒ not in ``git status`` ⇒ the
+    records-only checks can't see it; the filesystem twin probe must catch the half-promote
+    rather than letting the loop commit established + draft together."""
+    (tmp_git_repo / _CATALOG / "wazuh" / "newthing.md").write_text(
+        "---\nid: wazuh.newthing\nstatus: established\n---\n"
+    )
+    # The promote's ``rm`` of _draft/newthing.md is deliberately omitted.
+    with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
+
+
 def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
     """A pre-existing stray captured in baseline_stray isn't blamed on the agent."""
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
@@ -636,6 +649,87 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
     assert not (run_dir / "lead_author" / "failure.txt").exists()
+
+
+def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_path: Path):
+    """The fake-LLM stand-in for the live ``--lead-author-drain`` check: the agent does a
+    discard (``rm`` a draft) AND a promote (write established + ``rm`` its draft) in the
+    worktree; after ``run`` the loop has committed and *both* draft files are actually gone
+    — neither left on disk nor tracked — with the promoted established template present and
+    no established+draft duplicate. This is what the live ``rm``-under-allowlist run was to
+    confirm; only the real Claude Code Bash matcher is out of frame here (the grant uses the
+    documented ``:*`` form), the loop's commit/clear logic is end-to-end."""
+    repo = tmp_git_repo
+    # A second catalog draft to discard — committed, so it stands in for a prior tick's
+    # tracked draft (the case the records-only gate can't see if its `rm` is skipped).
+    (repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md").write_text(
+        "---\nid: wazuh.olddraft\nstatus: draft\n---\n"
+    )
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "seed second draft")
+    run_dir = tmp_path / "lead-run"
+    run_dir.mkdir()
+
+    promoted_est = repo / _CATALOG / "wazuh" / "newthing.md"
+    promoted_draft = repo / _CATALOG / "wazuh" / "_draft" / "newthing.md"
+    discarded_draft = repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md"
+
+    def fake_agent(rd, handoffs, pending):
+        promoted_est.write_text("---\nid: wazuh.newthing\nstatus: established\n---\n")
+        promoted_draft.unlink()   # promote's rm
+        discarded_draft.unlink()  # discard's rm
+        return 0
+
+    deps = _deps(
+        repo,
+        **_bypass_tables(),
+        invoke_agent=fake_agent,
+        build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
+        discover_system_drafts=lambda: [],
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+    )
+    assert lead_author.run(run_dir, deps=deps) == 0
+    # Drafts actually gone (the live check's core assertion); established remains.
+    assert not promoted_draft.exists()
+    assert not discarded_draft.exists()
+    assert promoted_est.is_file()
+    tracked = _run_git(repo, "ls-files", "defender/skills/").stdout.split()
+    assert "defender/skills/gather/queries/wazuh/newthing.md" in tracked
+    assert "defender/skills/gather/queries/wazuh/_draft/newthing.md" not in tracked
+    assert "defender/skills/gather/queries/wazuh/_draft/olddraft.md" not in tracked
+    assert (run_dir / "lead_author" / "done").is_file()
+
+
+def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
+    """End-to-end: the agent writes a promote's established template but forgets the draft
+    ``rm`` (the silent-loss case A1's matcher fix can't prevent if the model omits it). The
+    loop's half-promote gate raises through ``run`` → no commit, no ``done`` → the drain
+    quarantines the marker instead of committing established + draft together."""
+    repo = tmp_git_repo
+    run_dir = tmp_path / "lead-run"
+    run_dir.mkdir()
+
+    def fake_agent(rd, handoffs, pending):
+        (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
+            "---\nid: wazuh.newthing\nstatus: established\n---\n"
+        )  # _draft/newthing.md deliberately left in place
+        return 0
+
+    deps = _deps(
+        repo,
+        **_bypass_tables(),
+        invoke_agent=fake_agent,
+        build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
+        discover_system_drafts=lambda: [],
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+    )
+    head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
+        lead_author.run(run_dir, deps=deps)
+    assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert not (run_dir / "lead_author" / "done").is_file()
 
 
 # ---------------------------------------------------------------------------
