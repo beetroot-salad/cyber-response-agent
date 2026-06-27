@@ -316,7 +316,7 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
             body = pre_text(p.read_text())
     return f"""
 <section id="{esc(anchor)}" class="stage stage-alert">
-  <h2>§ Alert <span class="stage-sub">— input to the defender runtime</span></h2>
+  <h2>Alert <span class="stage-sub">— input to the defender runtime</span></h2>
   {body}
 </section>
 """

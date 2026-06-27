@@ -72,7 +72,7 @@ def render_runtime_investigation(
         return (
             f"""
 <section id="sec-investigation" class="stage stage-defender">
-  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
   {body}
 </section>
 """,
@@ -88,7 +88,7 @@ def render_runtime_investigation(
     return (
         f"""
 <section id="sec-investigation" class="stage stage-defender">
-  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
   {"".join(blocks)}
 </section>
 """,
@@ -164,7 +164,7 @@ def render_runtime_transcript(
     return (
         f"""
 <section id="sec-transcript" class="stage stage-defender">
-  <h2>§ Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
+  <h2>Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
   <div class="tx-toolbar">
     <input type="search" class="tx-search" placeholder="search transcript…" aria-label="search transcript">
     <select class="tx-type" aria-label="filter by type">
@@ -310,7 +310,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
         return (
             f"""
 <section id="sec-leads" class="stage stage-defender">
-  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
+  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
   {body}
 </section>
 """,
@@ -357,7 +357,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     return (
         f"""
 <section id="sec-leads" class="stage stage-defender">
-  <h2>§ Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
+  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
   {table}
 </section>
 """,
@@ -370,14 +370,18 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
 # ---------------------------------------------------------------------------
 
 
-def _toc_dropdown(section_id: str, label: str, sublinks: str) -> str:
+def _toc_dropdown(section_id: str, label: str, sublinks: str, open_: bool = True) -> str:
     """A nav entry that doubles as a drop-down: the label jumps to the section
     (JS suppresses the summary toggle on the link), the body lists jump-links into
-    its subsections. Falls back to a plain link when there are no subsections."""
+    its subsections. Falls back to a plain link when there are no subsections.
+
+    ``open_`` controls the default expand state — the long lists (leads, the
+    transcript phases) start collapsed so the sidebar stays scannable."""
     if not sublinks:
         return f'<li class="item"><a href="#{section_id}">{label}</a></li>'
+    open_attr = " open" if open_ else ""
     return (
-        '<li class="item toc-dd"><details class="toc-dd-d" open>'
+        f'<li class="item toc-dd"><details class="toc-dd-d"{open_attr}>'
         f'<summary class="toc-dd-head"><a href="#{section_id}" class="toc-dd-link">{label}</a></summary>'
         f'<ul class="toc-sublist">{sublinks}</ul></details></li>'
     )
@@ -422,8 +426,8 @@ def render_runtime_toc(
     )
 
     investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
-    leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links)
-    transcript_item = _toc_dropdown("sec-transcript", f"transcript ({n_tx})", tx_links)
+    leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links, open_=False)
+    transcript_item = _toc_dropdown("sec-transcript", f"transcript ({n_tx})", tx_links, open_=False)
     return f"""
 <nav class="toc">
   <ul>

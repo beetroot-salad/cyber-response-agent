@@ -293,7 +293,7 @@ def render_runtime_metrics(
 
     return f"""
 <section id="sec-metrics" class="stage stage-defender">
-  <h2>§ Metrics <span class="stage-sub">— per-phase cost / wall + tool usage</span></h2>
+  <h2>Metrics <span class="stage-sub">— per-phase cost / wall + tool usage</span></h2>
   <div class="me-models">{model_bits}</div>
   <div class="me-bar-row"><span class="me-bar-label">cost</span><div class="cost-bar">{cost_bar}</div></div>
   <div class="me-bar-row"><span class="me-bar-label">wall</span><div class="cost-bar">{wall_bar}</div></div>
@@ -956,7 +956,7 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 /* Report capped for readability; leads take the *remaining* width (1fr) so the
    page never exceeds the viewport — a fixed lead column ran the goals (and the
    header tabs) off the right edge with no ellipsis. */
-.an-cols { display: grid; grid-template-columns: minmax(0, 80ch) minmax(320px, 1fr); gap: 48px; align-items: start; }
+.an-cols { display: grid; grid-template-columns: minmax(0, 80ch) minmax(320px, 1fr); gap: 32px; align-items: start; }
 .an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; }
 .an-leads { min-width: 0; }
 @media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
