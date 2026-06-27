@@ -323,10 +323,18 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
         pct = v / total * 100
         verb = phase_verb(ph)
         title = f"{ph} · {fmt(v)} · {pct:.1f}%"
+        # Slivers can't hold a label without clipping it to garble ("PLA $0.06" →
+        # "LA $0.0"); show text only when the segment is wide enough, and drop the
+        # value on the merely-narrow ones. Full detail stays in the hover title.
+        if pct >= 9:
+            inner = f'<span class="cb-label">{esc(verb[:3])}</span><span class="cb-pct">{esc(fmt(v))}</span>'
+        elif pct >= 4.5:
+            inner = f'<span class="cb-label">{esc(verb[:3])}</span>'
+        else:
+            inner = ""
         segs.append(
             f'<div class="cb-seg" style="width:{pct:.4f}%;background:{phase_color(verb)}" '
-            f'title="{esc(title)}"><span class="cb-label">{esc(verb[:3])}</span>'
-            f'<span class="cb-pct">{esc(fmt(v))}</span></div>'
+            f'title="{esc(title)}">{inner}</div>'
         )
     return "".join(segs)
 
@@ -945,7 +953,10 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 /* Report beside the lead list (was stacked). Report takes the flexible column
    (capped ~90ch for readability — the full width ran lines past the comfortable
    ~50-75ch range); leads sit in a fixed side column. */
-.an-cols { display: grid; grid-template-columns: minmax(0, 90ch) minmax(480px, 760px); gap: 56px; align-items: start; justify-content: start; }
+/* Report capped for readability; leads take the *remaining* width (1fr) so the
+   page never exceeds the viewport — a fixed lead column ran the goals (and the
+   header tabs) off the right edge with no ellipsis. */
+.an-cols { display: grid; grid-template-columns: minmax(0, 80ch) minmax(320px, 1fr); gap: 48px; align-items: start; }
 .an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; }
 .an-leads { min-width: 0; }
 @media (max-width: 900px) { .an-cols { grid-template-columns: 1fr; gap: 12px; } }
