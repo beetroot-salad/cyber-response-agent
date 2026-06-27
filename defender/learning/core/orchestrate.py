@@ -228,20 +228,34 @@ def _directions_for(disposition: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+class _LeadAuthorRetry(Exception):
+    """A transient, retryable lead-author failure (a swallowed ``SubprocessError``/
+    ``OSError`` surfaced by ``_run_curator_module`` as ``rc=None``): the run did not
+    complete, so the drain leaves the marker queued for a bounded number of retries
+    rather than unlinking it (success) or quarantining it (a hard failure)."""
+
+
 def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
     """Catalog/template refinement. Independent of disposition + actor/judge.
 
     ``paths`` is the batch worktree's layout (``LoopPaths(repo_root=<worktree>)``), so
     the lead author edits + the loop commits in the worktree, not the dev checkout.
 
-    A non-zero rc (the agent crashed / timed out) **raises** so the drain quarantines
-    the marker to ``failed/`` — the same surfacing the scope-gate path gets — instead of
-    dropping it. ``None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
-    ``_run_curator_module``) is left to retry on the next tick."""
+    Three per-marker outcomes, signalled to ``_drain_lead_author_markers``:
+      * ``rc == 0`` — success; returns normally and the drain unlinks the marker.
+      * ``rc not in (0, None)`` (the agent crashed / timed out) — raises ``LoopError`` so
+        the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
+        path gets.
+      * ``rc is None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
+        ``_run_curator_module`` — the run did not complete) — raises ``_LeadAuthorRetry``
+        so the drain leaves the marker queued for a bounded number of retries, then
+        quarantines (a persistent pseudo-transient can't retry forever unsurfaced)."""
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
         raise LoopError(f"lead-author returned rc={rc}")
+    if rc is None:
+        raise _LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
 
 def _maybe_trigger_author(
@@ -421,6 +435,15 @@ def run_one(
 # ---------------------------------------------------------------------------
 
 
+def _rewrite_marker(marker: Path, spec: dict) -> None:
+    """Rewrite a queue marker in place, atomically (tmp + replace) — same write shape as
+    ``_enqueue_marker`` — so bumping the transient-retry counter never leaves a window
+    where the marker is missing (a concurrent drainer would otherwise see it vanish)."""
+    tmp = marker.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(spec) + "\n")
+    os.replace(tmp, marker)
+
+
 def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -> None:
     """Move a marker we can't process to ``<queue_dir>/failed/`` — surfaced for a
     human, not silently dropped, and (crucially) not left to re-poison the queue
@@ -509,9 +532,15 @@ def _drain_lead_author_markers(
 
     The batch worktree is shared across markers, so after each marker we discard any
     uncommitted leftovers (``_discard_worktree_changes``) — a failed/quarantined marker
-    must not contaminate the next one's commit or gate."""
+    must not contaminate the next one's commit or gate.
+
+    Three per-marker outcomes (see ``_invoke_lead_author``): success unlinks the marker; a
+    hard failure quarantines it; a transient (``_LeadAuthorRetry``) leaves it queued with a
+    bumped attempt count, and is quarantined only once it has burned ``LEAD_AUTHOR_MAX_RETRIES``
+    attempts — so a genuine blip self-heals but a persistent pseudo-transient still surfaces."""
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
+    max_retries = int(os.environ.get("LEAD_AUTHOR_MAX_RETRIES", "3"))
     _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
     for marker in markers:
         try:
@@ -525,6 +554,25 @@ def _drain_lead_author_markers(
             continue
         try:
             run_lead_author(paths, run_dir)
+        except _LeadAuthorRetry as e:
+            # Transient (rc=None): the run did not complete. Leave the marker queued for a
+            # bounded number of retries — the attempt count rides in the marker, so it
+            # survives ticks and process restarts — then quarantine, so a persistent
+            # pseudo-transient can't retry forever unsurfaced.
+            attempts = int(spec.get("attempts", 0)) + 1
+            if attempts >= max_retries:
+                _quarantine_marker(
+                    spec, marker, paths.author_queue_dir,
+                    f"transient-exhausted after {attempts} attempt(s): {e!r}",
+                )
+            else:
+                spec["attempts"] = attempts
+                _rewrite_marker(marker, spec)
+                _log(
+                    f"lead_author_drain: transient on {spec.get('run_id')} "
+                    f"(attempt {attempts}/{max_retries}) — left queued for retry"
+                )
+            continue
         except Exception as e:  # noqa: BLE001 — one poison run dir must not wedge
             # the whole serial drain (and re-crash every tick on the same
             # marker): quarantine it and move on to the remaining work.

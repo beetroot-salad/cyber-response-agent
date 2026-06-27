@@ -907,6 +907,42 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
+def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeypatch):
+    """A *transient* lead-author failure (rc=None — a swallowed SubprocessError/OSError,
+    the run did not complete) is left queued with a bumped attempt count and quarantined
+    only after LEAD_AUTHOR_MAX_RETRIES attempts (issue #426 follow-up: a genuine blip
+    retries instead of being silently dropped, but a persistent pseudo-transient still
+    surfaces). Drives the real ``_invoke_lead_author``: ``la.run`` raising ``OSError`` is
+    swallowed by ``_run_curator_module`` → rc=None → ``_LeadAuthorRetry``."""
+    import defender.learning.leads.lead_author as la
+
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-transient"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
+
+    def boom(rd, paths=None):
+        raise OSError("disk hiccup")
+
+    monkeypatch.setattr(la, "run", boom)
+    marker = paths.author_queue_dir / "case-transient.json"
+    failed = paths.author_queue_dir / "failed" / "case-transient.json"
+
+    # Attempts 1 and 2 stay under the cap: marker preserved, attempt count bumped, not
+    # quarantined.
+    for expected in (1, 2):
+        orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+        assert marker.exists()
+        assert json.loads(marker.read_text())["attempts"] == expected
+        assert not failed.exists()
+
+    # Attempt 3 hits the cap → quarantined, gone from the queue.
+    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+    assert not marker.exists()
+    assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")
+
+
 def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     """End-to-end with fake git/gh: the lead-author drain branches off ``lead-author/``
     (NOT ``lessons/``) and opens its own PR."""
