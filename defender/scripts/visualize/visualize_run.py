@@ -455,15 +455,10 @@ section.headline {
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
 }
-/* Runtime fold fills the first screen; the rest of the page is below the scroll.
-   min-height (not height) so a long report/lead-list grows the section rather
-   than clipping; the fold centers in the leftover space. */
-section.headline-runtime {
-  min-height: calc(100vh - 64px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
+/* The runtime fold sits at natural content height — forcing it to 100vh and
+   centering left big dead bands above/below whenever the card didn't exactly
+   fill the screen. A content-rich analysis card fills most of the fold on its
+   own; § Metrics follows immediately, no padding. */
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tile {
   padding: 12px 16px;
