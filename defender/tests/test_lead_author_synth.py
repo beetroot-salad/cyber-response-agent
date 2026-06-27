@@ -26,7 +26,7 @@ def _lead(
         query_id=query_id, system=system, params=params or {}, raw_command=raw_command,
         goal_text="probe the thing",
         what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
-        payload_status="ok", payload_digest="2 bytes, 1 line(s)",
+        payload_status="ok", payload_digest="2 bytes, 1 line(s)", error_class=None,
     )
 
 

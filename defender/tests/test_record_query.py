@@ -273,6 +273,26 @@ def test_main_propagates_nonzero_exit_and_error_status(tmp_path):
     row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
     assert row["exit_code"] == 3
     assert row["payload_status"] == "error"
+    # exit 3 is not an infra code → an agent-fixable mistake.
+    assert row["error_class"] == "agent-fixable"
+
+
+def test_error_class_recorded_per_exit_code(tmp_path):
+    """The row carries the derived failure taxonomy: None on success, 'infra' for
+    a down system (2; and the synthesized 124 timeout), 'agent-fixable' for a
+    query error (1) or a CLI-usage error (64)."""
+    cases = {0: None, 1: "agent-fixable", 2: "infra", 64: "agent-fixable"}
+    for code, expected in cases.items():
+        run_dir = tmp_path / f"run{code}"
+        run_dir.mkdir()
+        cli = _fake_cli(tmp_path, f"cmdb_cli_{code}.py", "out\n", exit_code=code)
+        ge.main(["--run-dir", str(run_dir), "--lead", "l-001", "--system", "cmdb",
+                 "--query-id", "cmdb.host-lookup", "--",
+                 sys.executable, str(cli), "host-lookup", "x"])
+        row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
+        assert row["error_class"] == expected, (code, row["error_class"])
+    # capture() synthesizes rc=124 on a hung adapter → infra (the breaker forgives it).
+    assert ge.error_class_for_exit(124) == "infra"
 
 
 # --- size-safety: oversized pass-through is truncated, payload still persisted ---

@@ -56,6 +56,7 @@ from defender.learning import lead_repository
 from defender.learning.author import runner as _author_runner
 from defender.learning.author import shared as _author_shared
 from defender.learning.core import config as _loop_config
+from defender.learning.core import persist as _loop_persist
 from defender.learning.leads import lead_classifier
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
@@ -73,6 +74,7 @@ PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
+LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
 LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
@@ -86,6 +88,15 @@ def _lift_threshold() -> int:
     Read at call time so tests can monkeypatch via ``monkeypatch.setenv``.
     """
     return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
+
+
+def _pitfalls_threshold() -> int:
+    """Min count of queued general-failure pitfalls before the curation mode fires.
+
+    Mirrors the other drain thresholds: accumulate a worthwhile batch before
+    spawning the execution.md curator. Read at call time for test override.
+    """
+    return int(os.environ.get("LEARNING_PITFALLS_THRESHOLD", "5"))
 
 
 # Ids gather coins for one-off, no-template probes — never catalog candidates.
@@ -155,6 +166,34 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
     )
 
 
+def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str] | None:
+    """``(system, verb)`` if ``query_id`` is a mintable draft candidate, else None.
+
+    The single home for the candidacy rule the WARN-and-draft path applies, so
+    ``synthesize_drafts`` (which mints the draft) and ``collect_general_failures``
+    (which captures the residue that is *not* drafted) agree by construction — a
+    query_id is drafted XOR a general-failure candidate, never both, never neither
+    by accident. Returns None when:
+
+    - the id resolves to an existing catalog template (``by_id``) — not a draft;
+    - it carries no ``{system}.`` prefix (an ``ad-hoc`` probe);
+    - the verb is reserved (``esql`` / ``query`` / ``ad-hoc`` — an untagged call) —
+      drafting it would mint a junk catch-all;
+    - either segment is empty or not a single safe path component.
+
+    Path-containment (the ``_draft/`` clamp) stays at the write site in
+    ``synthesize_drafts``; this predicate decides candidacy only.
+    """
+    if not query_id or "." not in query_id or query_id in by_id:
+        return None
+    system, verb = query_id.split(".", 1)
+    if not system or not verb or verb in _NON_CANDIDATE_VERBS:
+        return None
+    if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(verb):
+        return None
+    return system, verb
+
+
 def synthesize_drafts(
     executed: list[ExecutedLead], *, catalog_dir: Path | None = None,
 ) -> list[Path]:
@@ -182,22 +221,16 @@ def synthesize_drafts(
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
-        if not qid or "." not in qid or qid in by_id:
+        # Candidacy (resolves to no template, real {system}.{verb}, safe segments)
+        # is the shared predicate; the non-candidate cases it rejects — empty
+        # segments, reserved verbs, unsafe path components — are exactly the ones
+        # that would mint junk or escape the catalog dir.
+        segs = _draft_candidate_segments(qid, by_id)
+        if segs is None:
             continue
-        system, verb = qid.split(".", 1)
-        # A malformed id with an empty system (``.verb``) or empty verb
-        # (``system.``) would write off the documented ``{system}/_draft/{kebab}``
-        # surface — ``.verb`` lands a draft at the catalog root ``_draft/`` (which
-        # then trips the dirty-protected preflight and bricks the tick), ``system.``
-        # mints a hidden ``_draft/.md`` dotfile. Drop both alongside reserved verbs.
-        if not system or not verb or verb in _NON_CANDIDATE_VERBS:
-            continue
-        # `system`/`verb` become path components — a `/`, `\`, or `..` segment
-        # from a model-coined id would escape the catalog (arbitrary `.md` write).
-        # Reject any non-single-component segment, then clamp the resolved draft
-        # under the system's `_draft/` dir as belt-and-suspenders.
-        if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(verb):
-            continue
+        system, verb = segs
+        # `system`/`verb` become path components — clamp the resolved draft under
+        # the system's `_draft/` dir as belt-and-suspenders over the segment check.
         draft = catalog_dir / system / "_draft" / f"{verb}.md"
         draft_root = (catalog_dir / system / "_draft").resolve()
         if not draft.resolve().is_relative_to(draft_root):
@@ -237,6 +270,7 @@ class ExecutedLead:
     raw_ref: Path | None          # this query's payload, by-ref
     payload_status: str           # from the queries table (record_query)
     payload_digest: str
+    error_class: str | None       # None / "infra" / "agent-fixable" (the failure taxonomy)
 
 
 _VALID_PAYLOAD_STATUSES = frozenset(
@@ -313,8 +347,60 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     raw_ref=q.raw_ref,
                     payload_status=q.payload_status,
                     payload_digest=str(q.payload_digest)[:200],
+                    error_class=q.error_class,
                 )
             )
+    return out
+
+
+def collect_general_failures(
+    executed: list[ExecutedLead], run_dir: Path, *, catalog_dir: Path | None = None,
+) -> list[dict]:
+    """The general-failure residue: agent-fixable errors that reach no curator.
+
+    A failed execution is the clearest pitfall signal — a labelled mistake with
+    intent (``goal``) and self-diagnosis (the stderr digest) attached. Three
+    homes split the signal; this collects the third:
+
+    - **template failure** (``query_id`` resolves to a catalog template) — folds
+      into that template's ``## Pitfalls`` via the existing handoff. Skipped here.
+    - **draft candidate** (a coined ``{system}.{verb}`` with no template) —
+      ``synthesize_drafts`` mints a ``_draft/`` skeleton the agent curates.
+      Skipped here (the shared ``_draft_candidate_segments`` predicate keeps the
+      two paths disjoint).
+    - **general failure** (the residue: a non-candidate verb like ``elastic.esql``
+      — a bad ES|QL pipe — or another agent-fixable error that resolves to
+      neither) — today ``build_handoff`` WARN-and-drops it and the signal
+      vanishes. We capture it instead, for the execution.md curation mode.
+
+    ``infra`` errors (a down system) and ``ok``/``empty`` rows are never
+    collected — only ``error_class == "agent-fixable"``. ``pitfall_id`` is
+    deterministic (``{run}:{lead}:{q_index}``) so a re-collection on the
+    failure-retry path dedups rather than double-counts.
+    """
+    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
+    by_id = {t.id for t in lead_neighbors.load_catalog(catalog_dir)}
+    out: list[dict] = []
+    for lead in executed:
+        if lead.error_class != "agent-fixable":          # skips None (ok) and infra
+            continue
+        if lead.query_id in by_id:                       # template failure → existing fold
+            continue
+        if _draft_candidate_segments(lead.query_id, by_id) is not None:  # → becomes a draft
+            continue
+        out.append(
+            {
+                "schema_version": 1,
+                "pitfall_id": f"{run_dir.name}:{lead.lead_id}:{lead.query_index}",
+                "source_run": run_dir.name,
+                "system": lead.system,
+                "query_id": lead.query_id,
+                "goal": lead.goal_text,
+                "executed_query": _executed_query(lead),
+                "stderr_digest": lead.payload_digest,    # "exit=N; <stderr[:160]>"
+                "error_class": lead.error_class,
+            }
+        )
     return out
 
 
@@ -393,6 +479,21 @@ def _is_system_skill_md(path: str) -> bool:
     rest = path[len(SKILLS_REL):]
     parts = rest.split("/")
     return len(parts) == 2 and parts[1] == "SKILL.md"
+
+
+def _is_system_execution_md(path: str) -> bool:
+    """True if ``path`` is exactly ``defender/skills/{system}/execution.md``.
+
+    The pitfalls curation mode's *sole* edit target. Kept out of ``_is_in_scope``
+    on purpose: the per-run lead-author agent must never touch execution.md, and
+    the pitfalls agent must never touch the catalog / SKILL.md / drafts. The two
+    modes' scopes are disjoint, enforced by their separate verify gates.
+    """
+    if not path.startswith(SKILLS_REL):
+        return False
+    rest = path[len(SKILLS_REL):]
+    parts = rest.split("/")
+    return len(parts) == 2 and parts[1] == "execution.md"
 
 
 def _is_system_skill_draft(path: str) -> bool:
@@ -805,6 +906,190 @@ def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Pitfalls curation mode (Stage 2) — fold general failures into execution.md
+# ---------------------------------------------------------------------------
+#
+# A second, cross-run, threshold-gated spawn that rides the SAME lead-author drain
+# (worktree / committer / PR). It drains the central pitfalls queue that the per-run
+# tick fills (`collect_general_failures`) into each system's `execution.md`
+# `## Common pitfalls` — the file gather reads at dispatch, so the mistake is
+# PREVENTED next time, not merely catalogued. Its edit scope is disjoint from the
+# per-run agent's (execution.md only), enforced by `_verify_pitfalls_state`.
+
+
+def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
+    """Group queued pitfalls by system → one handoff per system.
+
+    Carries the repo-relative ``execution.md`` path the curator edits plus the
+    failures to fold (query_id / goal / executed_query / stderr_digest). The
+    curator Reads the execution.md itself — the handoff is records + path only,
+    mirroring the system-draft handoff. Rows with no ``system`` are dropped.
+    """
+    by_system: dict[str, list[dict]] = {}
+    for r in rows:
+        system = str(r.get("system") or "").strip()
+        if system:
+            by_system.setdefault(system, []).append(r)
+    out: list[dict] = []
+    for system in sorted(by_system):
+        out.append(
+            {
+                "system": system,
+                "execution_md_path": f"{SKILLS_REL}{system}/execution.md",
+                "failures": [
+                    {
+                        "query_id": f.get("query_id", ""),
+                        "goal": f.get("goal", ""),
+                        "executed_query": f.get("executed_query", ""),
+                        "stderr_digest": f.get("stderr_digest", ""),
+                    }
+                    for f in by_system[system]
+                ],
+            }
+        )
+    return out
+
+
+def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
+    """Spawn the pitfalls curator via the shared runner. Mirrors ``invoke_agent``:
+    raw variant (no result marker), timeout → rc 124, cwd at the batch worktree.
+    The coarse ``_ALLOWLIST`` (Edit/Write ``defender/skills/**``) already covers
+    execution.md; the ``rm`` grant goes unused (the curator only edits)."""
+    user_prompt = (
+        f"skills_dir: {SKILLS_REL}\n"
+        f"pitfalls_handoffs ({len(handoffs)}):\n"
+        f"{json.dumps(handoffs, indent=2)}\n"
+    )
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    _log(f"spawn pitfalls curator (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
+    options = _author_runner.RunnerOptions(
+        system_prompt_file=LEAD_PITFALLS_PROMPT,
+        allowed_tools=_ALLOWLIST,
+        model=LEAD_AUTHOR_MODEL,
+        effort=None,
+        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
+        cwd=repo_root,
+        log_path=RUN_LOG_FILE,
+        result_marker=None,
+        batch_id="pitfalls",
+    )
+    try:
+        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
+    except _author_runner.RunnerError as e:
+        _log(f"pitfalls curator failed: {e}")
+        return 124
+    _log(f"pitfalls curator exited rc={rc}")
+    return rc
+
+
+def _verify_pitfalls_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+    """Verify the curator's working-tree edits before the loop commits. Narrower
+    than ``_verify_skills_state``: the ONLY in-corpus change permitted is an edit
+    to a system ``execution.md``. Returns the changed paths; raises
+    ``LeadAuthorError`` (the drain quarantines) on a stray outside
+    ``defender/skills/``*.md, any other skills path, or a deletion (execution.md
+    is pruned in place, never removed)."""
+    records = _porcelain_records(repo_root)
+
+    def _in_corpus(p: str) -> bool:
+        return p.startswith(SKILLS_REL) and p.endswith(".md")
+
+    new_stray = sorted({p for _, p in records if not _in_corpus(p)} - set(baseline_stray))
+    if new_stray:
+        raise LeadAuthorError(
+            f"pitfalls curator changed files outside {SKILLS_REL}*.md: {new_stray}; "
+            "refusing to commit"
+        )
+    changed: list[str] = []
+    for xy, path in records:
+        if not _in_corpus(path):
+            continue
+        if not _is_system_execution_md(path):
+            raise LeadAuthorError(
+                f"pitfalls curator edited a non-execution.md skills path ({path}); "
+                "refusing to commit (its scope is execution.md only)"
+            )
+        if "D" in xy:
+            raise LeadAuthorError(
+                f"pitfalls curator deleted {path}; refusing to commit "
+                "(execution.md is pruned in place, never removed)"
+            )
+        changed.append(path)
+    return sorted(changed)
+
+
+def _pitfalls_commit_message(changed: list[str]) -> str:
+    """Deterministic loop-authored message for the execution.md fold."""
+    body_paths = "\n".join(f"- {p}" for p in changed)
+    return (
+        "learning(lead-author): execution.md pitfalls\n\n"
+        "Folded agent-fixable general failures into per-system execution.md "
+        "## Common pitfalls; loop-committed (the agent runs no git).\n\n"
+        f"Paths:\n{body_paths}\n"
+    )
+
+
+def run_pitfalls(
+    *,
+    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    invoke: Callable[..., int] | None = None,
+) -> int:
+    """Curation mode: fold queued general failures into per-system ``execution.md``.
+
+    Cross-run + threshold-gated (unlike the per-run tick). Below threshold it is a
+    no-op with the queue intact. Otherwise: build per-system handoffs, spawn the
+    curator (edits execution.md, runs no git), verify the working tree, commit
+    pathspec-scoped, and — only on a real commit — rotate the curated batch out of
+    the central queue. Runs inside the lead-author drain's worktree
+    (``paths.repo_root``); the queue resolves to the shared state root.
+
+    ``invoke`` is injectable for tests. Returns 0 on success/no-op, 2 on a curator
+    failure (queue left intact); a scope violation raises ``LeadAuthorError`` for
+    the drain to quarantine.
+    """
+    rows = _loop_persist.read_pitfalls(paths)
+    threshold = _pitfalls_threshold()
+    if len(rows) < threshold:
+        if rows:
+            _log(
+                f"pitfalls queue below threshold (n={len(rows)}, "
+                f"threshold={threshold}) — skipping curation"
+            )
+        return 0
+    handoffs = _build_pitfalls_handoffs(rows)
+    if not handoffs:
+        _log(f"{len(rows)} queued pitfall(s) but none carried a system — skipping")
+        return 0
+    batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
+    repo_root = paths.repo_root
+    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
+    _log(f"pitfalls curation: {len(rows)} failure(s) across {len(handoffs)} system(s)")
+
+    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root)
+    if rc != 0:
+        _log(f"FATAL: pitfalls curator exited rc={rc}; leaving queue intact")
+        return 2
+
+    changed = _verify_pitfalls_state(repo_root, baseline_stray)
+    if not changed:
+        _log("pitfalls curator made no execution.md edits — leaving queue intact")
+        return 0
+    sha = _author_shared.commit_corpus(
+        repo_root, repo_root / "defender" / "skills", SKILLS_REL,
+        _pitfalls_commit_message(changed),
+    )
+    if sha is not None:
+        _loop_persist.rotate_pitfalls(batch_ids, sha, paths=paths)
+        _log(
+            f"pitfalls curation done; commit={sha[:12]}, "
+            f"rotated {len(batch_ids)} row(s) out of the queue"
+        )
+    else:
+        _log("pitfalls curation: commit_corpus made no commit; queue left intact")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Run dir state
 # ---------------------------------------------------------------------------
 
@@ -918,6 +1203,25 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
+
+    # Collect agent-fixable general failures into the cross-run pitfalls queue.
+    # MUST run here — before `_prepare_handoffs`, which writes the `done` sentinel
+    # and early-returns precisely in the "all extracted leads had unresolved
+    # query_ids" case (the very case that produces general failures). A dedicated
+    # `pitfalls_collected` sentinel makes it idempotent: a later rc=2 quarantines
+    # the marker without writing `done`, so a manual re-queue would re-enter here
+    # and the deterministic `pitfall_id` would otherwise re-append the same rows.
+    # `deps.paths` resolves the SHARED state root even from inside the drain
+    # worktree, so the append lands in the central queue, not the throwaway checkout.
+    collected_marker = _state_dir(run_dir) / "pitfalls_collected"
+    if not collected_marker.is_file():
+        failures = collect_general_failures(
+            executed, run_dir, catalog_dir=deps.paths.catalog_dir
+        )
+        if failures:
+            _loop_persist.append_pitfalls(failures, paths=deps.paths)
+            _log(f"collected {len(failures)} general-failure pitfall(s) into the queue")
+        _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
     # The agent edits + the loop commits at the injected repo root (the batch
     # worktree in prod; a tmp tree under test). The agent runs no git, so capture the
@@ -1062,6 +1366,9 @@ Environment
   LEAD_AUTHOR_TIMEOUT_SECONDS                spawn timeout (default 1800)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
                                              system-skill lift queue (default 5)
+  LEARNING_PITFALLS_THRESHOLD                min queued general-failure count to
+                                             fire the execution.md curation mode
+                                             (default 5)
 """
 
 

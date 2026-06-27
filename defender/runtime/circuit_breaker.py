@@ -68,6 +68,24 @@ def is_infra_failure(exit_code: int) -> bool:
     return exit_code in INFRA_EXIT_CODES
 
 
+def error_class_for_exit(exit_code: int) -> str | None:
+    """The learning-loop error class derived from an adapter exit code.
+
+    The single home for the failure taxonomy (reuses ``INFRA_EXIT_CODES`` so the
+    writer that stamps it into the queries table and any back-compat reader that
+    re-derives it from a legacy row's ``exit_code`` can't drift):
+
+    - ``None`` on success (0) — not a failure, no class.
+    - ``"infra"`` for the breaker's forgiven codes (2/124): the system was down,
+      never a learning candidate.
+    - ``"agent-fixable"`` otherwise (1, 64, …): a query/usage mistake the agent
+      could have avoided — the pitfall signal the learning loop acts on.
+    """
+    if exit_code == 0:
+        return None
+    return "infra" if exit_code in INFRA_EXIT_CODES else "agent-fixable"
+
+
 class RunAborted(Exception):
     """The run-wide kill switch tripped: too many connectivity/auth failures
     across the environment. Propagates out of the agent loop; the driver catches

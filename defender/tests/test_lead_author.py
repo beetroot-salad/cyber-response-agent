@@ -26,6 +26,20 @@ def _deps(tmp_path: Path, **overrides):
     return replace(lead_author.build_lead_author_deps(LoopPaths(repo_root=tmp_path)), **overrides)
 
 
+def _executed_lead(**kw):
+    """A minimal ``ExecutedLead`` for flow + collection tests. Defaults to an
+    ``ok`` lead (``error_class=None``) so ``collect_general_failures`` is a no-op
+    unless a test opts into a failure via ``error_class=`` / ``query_id=``."""
+    base = dict(
+        lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
+        query_id="elastic.esql", system="elastic", params={}, raw_command="cli",
+        goal_text="", what_to_summarize=(), raw_ref=None,
+        payload_status="ok", payload_digest="", error_class=None,
+    )
+    base.update(kw)
+    return lead_author.ExecutedLead(**base)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures — write the two live tables (leads sidecar + queries ledger)
 # ---------------------------------------------------------------------------
@@ -558,7 +572,7 @@ def _bypass_tables():
     Splatted into ``_deps(...)`` — the agent (faked below) is the only thing that
     touches the corpus."""
     return dict(
-        extract=lambda rd: ([], [object()]),
+        extract=lambda rd: ([], [_executed_lead()]),
         synthesize=lambda executed, catalog_dir: [],
     )
 
@@ -745,7 +759,7 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
     Stubs out the executed-flow primitives so this test exercises only the
     threshold gate, independent of which query templates exist in the catalog.
     """
-    fake_executed = [object()]
+    fake_executed = [_executed_lead()]
     fake_handoff = [{
         "query_id": "fake.lead", "status": "established",
         "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
@@ -786,7 +800,7 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "2")
     deps = _deps(
         tmp_path,
-        extract=lambda rd: ([], [object()]),
+        extract=lambda rd: ([], [_executed_lead()]),
         build_handoff=lambda rd, ex, jl=None: fake_handoff,
         discover_system_drafts=lambda: drafts,
     )
@@ -856,3 +870,176 @@ def test_invoke_agent_includes_pending_drafts_in_prompt(
     assert "pending_system_drafts (1)" in prompt
     assert "elastic/_draft/falco-na.md" in prompt
     assert "skills_dir: defender/skills/" in prompt
+
+
+# ---------------------------------------------------------------------------
+# General-failure collection (Stage 1) + execution.md curation mode (Stage 2)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_carries_error_class(run_dir: Path):
+    """An errored query's row back-fills error_class from exit_code, and extract
+    threads it onto the ExecutedLead."""
+    _write_lead_meta(run_dir, "l-001", "probe")
+    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")  # exit 1
+    _, leads = lead_author.extract(run_dir)
+    assert leads[0].error_class == "agent-fixable"
+
+
+def test_collect_general_failures_residue_only(tmp_path: Path, catalog: Path):
+    """Only agent-fixable errors that resolve to no template AND are not draft
+    candidates are collected — the residue build_handoff would silently drop."""
+    run_dir = tmp_path / "run-abc"
+    leads = [
+        _executed_lead(lead_id="l-001", query_index=0, query_id="elastic.esql",
+                       error_class="agent-fixable", payload_digest="exit=1; bad pipe"),
+        _executed_lead(lead_id="l-002", query_id="elastic.auth-events",
+                       error_class="agent-fixable"),        # template failure → existing fold
+        _executed_lead(lead_id="l-003", query_id="elastic.new-thing",
+                       error_class="agent-fixable"),        # draft candidate → becomes a draft
+        _executed_lead(lead_id="l-004", query_id="elastic.esql", error_class="infra"),  # down system
+        _executed_lead(lead_id="l-005", query_id="elastic.esql", error_class=None),     # ok
+    ]
+    out = lead_author.collect_general_failures(leads, run_dir, catalog_dir=catalog)
+    assert [r["query_id"] for r in out] == ["elastic.esql"]
+    r = out[0]
+    assert r["pitfall_id"] == "run-abc:l-001:0"
+    assert r["source_run"] == "run-abc"
+    assert r["system"] == "elastic"
+    assert r["error_class"] == "agent-fixable"
+    assert r["stderr_digest"] == "exit=1; bad pipe"
+
+
+def test_collect_and_synthesize_partition_disjointly(tmp_path: Path, catalog: Path):
+    """A coined query_id is drafted XOR collected as a general failure, never both
+    — the shared _draft_candidate_segments predicate keeps the paths disjoint."""
+    leads = [
+        _executed_lead(lead_id="l-001", query_id="elastic.new-thing", error_class="agent-fixable"),
+        _executed_lead(lead_id="l-002", query_id="elastic.esql", error_class="agent-fixable"),
+    ]
+    by_id = {t.id for t in lead_author.lead_neighbors.load_catalog(catalog)}
+    drafted = {ld.query_id for ld in leads
+               if lead_author._draft_candidate_segments(ld.query_id, by_id) is not None}
+    collected = {r["query_id"]
+                 for r in lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)}
+    assert drafted == {"elastic.new-thing"}
+    assert collected == {"elastic.esql"}
+    assert drafted.isdisjoint(collected)
+
+
+def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tmp_path: Path):
+    """The collection runs before _prepare_handoffs' done-sentinel early-return (the
+    all-unresolved case is the very source of general failures), lands in the central
+    queue, and the pitfalls_collected sentinel makes a re-run idempotent. repo_root is
+    a real git repo (the tick runs `git status` for its stray baseline); the queue
+    resolves to an out-of-repo state dir."""
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    deps = replace(
+        lead_author.build_lead_author_deps(paths),
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+        invoke_agent=lambda *a, **k: 0,
+    )
+    run_dir = tmp_path / "run-xyz"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    _write_lead_meta(run_dir, "l-001", "probe")
+    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")  # general failure
+
+    assert lead_author.run(run_dir, deps=deps) == 0
+    queue = deps.paths.pitfalls_pending_file
+    rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
+    assert [r["query_id"] for r in rows] == ["elastic.esql"]
+    assert rows[0]["error_class"] == "agent-fixable"
+    assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
+
+    # Idempotent: clear `done` and re-run — the collected sentinel blocks a re-append.
+    (run_dir / "lead_author" / "done").unlink()
+    assert lead_author.run(run_dir, deps=deps) == 0
+    rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
+    assert len(rows2) == 1
+
+
+def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
+        "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"
+    )
+    changed = lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+    assert changed == ["defender/skills/elastic/execution.md"]
+
+
+def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
+    """A SKILL.md edit is in lead-author scope but NOT pitfalls scope — rejected."""
+    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
+    skill.write_text(skill.read_text() + "\nedit\n")
+    with pytest.raises(lead_author.LeadAuthorError, match="non-execution.md"):
+        lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
+    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
+    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("x")
+    with pytest.raises(lead_author.LeadAuthorError, match="outside"):
+        lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
+    ex = tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md"
+    ex.write_text("# e\n")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "add exec")
+    ex.unlink()
+    with pytest.raises(lead_author.LeadAuthorError, match="deleted"):
+        lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+
+
+def _seed_pitfalls(paths, n: int) -> None:
+    from defender.learning.core import persist
+    persist.append_pitfalls(
+        [
+            {
+                "schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
+                "system": "elastic", "query_id": "elastic.esql", "goal": "g",
+                "executed_query": "bad pipe", "stderr_digest": "exit=1; mismatched input",
+                "error_class": "agent-fixable",
+            }
+            for i in range(n)
+        ],
+        paths=paths,
+    )
+
+
+def test_run_pitfalls_below_threshold_is_noop(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    _seed_pitfalls(paths, 2)
+    called = []
+    rc = lead_author.run_pitfalls(paths=paths, invoke=lambda *a, **k: called.append(1) or 0)
+    assert rc == 0
+    assert called == []                                   # no spawn
+    assert len(lead_author._loop_persist.read_pitfalls(paths)) == 2  # queue intact
+
+
+def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    _seed_pitfalls(paths, 2)
+
+    def fake_invoke(handoffs, *, repo_root):
+        # one handoff for `elastic`, carrying both failures
+        assert handoffs[0]["system"] == "elastic"
+        assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+        assert len(handoffs[0]["failures"]) == 2
+        p = repo_root / "defender" / "skills" / "elastic" / "execution.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n")
+        return 0
+
+    rc = lead_author.run_pitfalls(paths=paths, invoke=fake_invoke)
+    assert rc == 0
+    # committed to defender/skills/ in the worktree
+    log = _run_git(tmp_git_repo, "log", "--oneline", "-1").stdout
+    assert "execution.md pitfalls" in log
+    # queue drained, consumed file records the batch
+    assert lead_author._loop_persist.read_pitfalls(paths) == []
+    consumed = [json.loads(ln) for ln in paths.pitfalls_consumed_file.read_text().splitlines()]
+    assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}

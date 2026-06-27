@@ -31,7 +31,7 @@ from defender.learning import lead_repository as lr  # type: ignore[import-not-f
 def _qr(query_id, params=None, *, seq=0, raw_ref=None, lead_id="l-001"):
     return lr.QueryRow(
         lead_id=lead_id, seq=seq, system="", verb="", query_id=query_id,
-        params=params or {}, raw_command="", exit_code=0,
+        params=params or {}, raw_command="", exit_code=0, error_class=None,
         payload_status="ok", payload_digest="", raw_ref=raw_ref,
     )
 
@@ -799,6 +799,36 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     assert str(seen[0][0]).startswith("/tmp/wt-")
     assert not (paths.author_queue_dir / "case-b.json").exists()
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
+
+
+def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
+    """The drain folds general-failure pitfalls into execution.md after the per-run
+    catalog/skill markers, in the same worktree/PR."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-p"
+    run_dir.mkdir(parents=True)
+    orch._enqueue_for_authoring(run_dir, paths)
+    order: list[str] = []
+    orch.lead_author_drain(
+        paths,
+        run_lead_author=lambda wt_paths, rd: order.append("marker"),
+        run_pitfalls=lambda wt_paths: (order.append("pitfalls"), 0)[1],
+        branch=_FakeBranch(prefix="lead-author/"),
+    )
+    assert order == ["marker", "pitfalls"]
+
+
+def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkeypatch):
+    """Even with no run markers queued, the drain wakes once the cross-run pitfalls
+    queue reaches its curation threshold."""
+    from defender.learning.core import persist
+    paths, _ = _isolate(tmp_path)
+    assert orch._has_lead_author_work(paths) is False
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    persist.append_pitfalls(
+        [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], paths=paths
+    )
+    assert orch._has_lead_author_work(paths) is True
 
 
 def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):

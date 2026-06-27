@@ -104,6 +104,25 @@ class LoopPaths:
     def lead_pending_dir(self) -> Path:
         return self._state_root / "_pending_leads"
 
+    # --- general-failure pitfalls queue (cross-run; feeds the lead-author's
+    # execution.md curation mode). Lives under the shared state root so an append
+    # from inside a drain worktree lands centrally, like the other pending queues. ---
+    @property
+    def pitfalls_pending_dir(self) -> Path:
+        return self._state_root / "_pending_pitfalls"
+
+    @property
+    def pitfalls_pending_file(self) -> Path:
+        return self.pitfalls_pending_dir / "pitfalls.jsonl"
+
+    @property
+    def pitfalls_consumed_file(self) -> Path:
+        return self.pitfalls_pending_dir / "pitfalls.consumed.jsonl"
+
+    @property
+    def pitfalls_lock_file(self) -> Path:
+        return self.pitfalls_pending_dir / ".pitfalls.lock"
+
     @property
     def author_lock_file(self) -> Path:
         return self._state_root / "_author.lock"

@@ -60,6 +60,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Put the workspace root on sys.path so `defender.*` imports resolve whether this
+# file is imported in-process (tools._capture_adapter) or run as the standalone CLI.
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender.runtime.circuit_breaker import error_class_for_exit
+
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
 # and a gather_raw/ path segment. Grammar mirrors hooks/record_lead.py and the
 # invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
@@ -440,6 +447,7 @@ def capture(
         "raw_command": shlex.join(inner),
         "payload_path": payload_rel,
         "exit_code": rc,
+        "error_class": error_class_for_exit(rc),
         "payload_status": payload_status(rc, out),
         "payload_digest": payload_digest(out, err, rc),
     }
