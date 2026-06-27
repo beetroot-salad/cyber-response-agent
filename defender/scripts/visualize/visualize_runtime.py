@@ -355,18 +355,26 @@ def render_runtime_toc(
         f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
         f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'
         for ph in phases
-    ) or '<li class="item muted">(no phases)</li>'
+    )
+    # Phases hang off the transcript entry as a collapsible drop-down — they jump
+    # into the chronological transcript. Open by default so the scroll-spy
+    # highlight stays visible.
+    phases_dd = (
+        '<details class="toc-phases" open>'
+        '<summary>phases <span class="toc-hint">→ jump</span></summary>'
+        f'<ul class="toc-phaselist">{phase_links}</ul></details>'
+        if phases
+        else ""
+    )
     return f"""
 <nav class="toc">
   <ul>
-    <li class="section">Phases <span class="toc-hint">→ transcript</span></li>
-    <li class="item phase-nav phase-nav-top"><a href="#top"><span class="pn-tag">↑</span>top</a></li>
-    {phase_links}
     <li class="section">Sections</li>
+    <li class="item"><a href="#top">↑ top</a></li>
     <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
     <li class="item"><a href="#sec-investigation">investigation</a></li>
-    <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a></li>
+    <li class="item"><a href="#sec-transcript">transcript ({n_tx})</a>{phases_dd}</li>
     <li class="item"><a href="#sec-leads">leads &amp; queries ({n_leads})</a></li>
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>

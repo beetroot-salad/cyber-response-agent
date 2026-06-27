@@ -902,15 +902,13 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .fold { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 /* Single full-width card (the analysis fold, now that metrics moved below). */
 .fold-single { grid-template-columns: 1fr; }
+/* The analysis fold is borderless now — it reads as the page's opening content,
+   not a boxed card sitting inside the headline band. */
 .fold-card {
   position: relative;
-  padding: 14px 16px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-2);
   min-width: 0;
 }
-.card-label { position: absolute; top: 10px; right: 14px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.8px; color: var(--text-dim); }
+.card-label { position: absolute; top: 0; right: 0; text-transform: uppercase; font-size: 10px; letter-spacing: 0.8px; color: var(--text-dim); }
 
 .an-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .disp-badge {
@@ -928,7 +926,9 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .health-warn { color: var(--warn); }
 .health-bad { color: var(--bad); }
 .health-detail { color: var(--text-dim); font-weight: 400; }
-.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; margin-bottom: 10px; }
+/* Cap the measure (~90ch) — the full page width ran lines far past the
+   comfortable ~50-75ch reading range. */
+.an-report { white-space: pre-wrap; line-height: 1.6; color: var(--text); font-size: 14px; margin-bottom: 10px; max-width: 90ch; }
 .an-sublabel { text-transform: uppercase; font-size: 10px; letter-spacing: 0.7px; color: var(--text-dim); margin: 6px 0 4px; }
 .lead-mini-list { display: flex; flex-direction: column; gap: 4px; }
 .lead-mini { display: flex; gap: 8px; font-size: 12.5px; align-items: baseline; }
@@ -1017,6 +1017,11 @@ nav.toc .toc-hint { text-transform: none; font-weight: 400; font-style: italic; 
 nav.toc li.phase-nav a { display: flex; align-items: baseline; gap: 8px; }
 nav.toc li.phase-nav .pn-tag { font-family: 'SF Mono', Menlo, Consolas, monospace; font-weight: 700; font-size: 10px; flex-shrink: 0; min-width: 22px; }
 nav.toc li.phase-nav a.pn-active { color: var(--text-bright); border-left-color: var(--accent); background: var(--bg-2); }
+/* Phases drop-down nested under the transcript section entry. */
+nav.toc .toc-phases { margin: 2px 0 4px 12px; }
+nav.toc .toc-phases > summary { cursor: pointer; user-select: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); font-weight: 600; padding: 3px 0; }
+nav.toc .toc-phases > summary:hover { color: var(--text-bright); }
+nav.toc .toc-phaselist { list-style: none; padding: 0; margin: 2px 0 0; }
 """
 
 
