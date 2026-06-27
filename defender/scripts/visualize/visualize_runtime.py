@@ -60,8 +60,13 @@ def render_runtime_investigation(
     run_dir: Path,
     attribution: dict[str, dict] | None = None,
     wall_times: dict[str, dict] | None = None,
+    phases: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
-    phases = normalize_phase_names(split_investigation_phases(run_dir))
+    # ``phases`` may be passed by a caller that already split investigation.md
+    # (the same normalize_phase_names(split_investigation_phases(run_dir))), to
+    # avoid re-reading and re-parsing the file; ``None`` computes it here.
+    if phases is None:
+        phases = normalize_phase_names(split_investigation_phases(run_dir))
     if not phases:
         body = '<div class="empty">no investigation.md or empty</div>'
         return (
@@ -126,10 +131,18 @@ def render_runtime_transcript(
     entries: list[dict],
     tools: list[dict],
     phases: list[dict],
-) -> tuple[str, int]:
+) -> tuple[str, int, set[str]]:
     """The § Transcript section: a filter toolbar, the tool-usage filter chips,
-    and the chronological entry stream. Returns ``(html, n_entries)``."""
+    and the chronological entry stream.
+
+    Returns ``(html, n_entries, anchored_phases)`` — ``anchored_phases`` is the
+    set of phase names that actually received a ``tx-{anchor}`` target, so the
+    sidebar can route only those into the transcript and fall back to the
+    investigation block for phases the transcript never rendered (e.g. a
+    preamble, or a phase whose header-introducing turn was tagged to a later
+    phase by last-tag-wins)."""
     phase_anchor = {ph["name"]: ph["anchor"] for ph in phases}
+    anchored: set[str] = set()
 
     chips: list[str] = []
     for t in tools:
@@ -156,6 +169,7 @@ def render_runtime_transcript(
                 a = phase_anchor.get(ph)
                 if a:
                     anchor_attr = f' id="tx-{esc(a)}"'
+                    anchored.add(ph)
             rows.append(_render_tx_entry(e, anchor_attr))
         rows_html = "".join(rows)
 
@@ -180,6 +194,7 @@ def render_runtime_transcript(
 </section>
 """,
         len(entries),
+        anchored,
     )
 
 
@@ -200,10 +215,10 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
             meta += " · " + esc(e["model"])
         body: list[str] = []
         for t in e.get("texts") or []:
-            if t.strip():
+            if t and t.strip():
                 body.append(f'<div class="tx-text">{esc(t)}</div>')
         for th in e.get("thinks") or []:
-            if th.strip():
+            if th and th.strip():
                 body.append(block("tx-think", "thinking", pre_text(th)))
         for c in e.get("calls") or []:
             body.append(
@@ -229,7 +244,7 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
             else '<div class="empty">(empty result)</div>'
         )
         return (
-            f'<div class="tx-entry tx-result" data-kind="tool_result" '
+            f'<div class="tx-entry tx-result"{anchor_attr} data-kind="tool_result" '
             f'data-phase="{esc(phase)}" data-tool="{esc(e.get("tool", ""))}" data-tools="{esc(data_tools)}">'
             f'<div class="tx-gutter">{tag}</div>'
             f'<div class="tx-body"><div class="tx-head">{head}</div>{inner}</div></div>'
@@ -242,7 +257,7 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
         f' <span class="tx-meta">{esc(tool)}</span>' if tool else ""
     )
     return (
-        f'<div class="tx-entry tx-retry" data-kind="retry" '
+        f'<div class="tx-entry tx-retry"{anchor_attr} data-kind="retry" '
         f'data-phase="{esc(phase)}" data-tool="{esc(tool)}" data-tools="{esc(data_tools)}">'
         f'<div class="tx-gutter">{tag}</div>'
         f'<div class="tx-body"><div class="tx-head">{head}</div>{pre_text(content)}</div></div>'
@@ -254,8 +269,9 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_runtime_leads_queries(run_dir: Path) -> tuple[str, int]:
-    leads = lead_repository.joined(run_dir)
+def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tuple[str, int]:
+    if leads is None:
+        leads = lead_repository.joined(run_dir)
     if not leads:
         body = '<div class="empty">no leads recorded (monitor case — the agent ran no queries)</div>'
         return (
@@ -321,14 +337,20 @@ def render_runtime_leads_queries(run_dir: Path) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def render_runtime_toc(phases: list[dict], n_tx: int, n_leads: int) -> str:
-    def _phase_target(anchor: str) -> str:
-        # Jump into the transcript when it exists; else fall back to the
-        # investigation phase block.
-        return f"#tx-{esc(anchor)}" if n_tx else f"#{esc(anchor)}"
+def render_runtime_toc(
+    phases: list[dict], n_tx: int, n_leads: int, tx_phases: set[str] | None = None
+) -> str:
+    tx_phases = tx_phases or set()
+
+    def _phase_target(ph: dict) -> str:
+        # Jump into the transcript only for a phase that actually rendered a
+        # tx-anchor; otherwise fall back to its investigation block (always
+        # present), so phases the transcript skipped don't get a dead link.
+        anchor = ph["anchor"]
+        return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
     phase_links = "".join(
-        f'<li class="item phase-nav"><a href="{_phase_target(ph["anchor"])}" '
+        f'<li class="item phase-nav"><a href="{_phase_target(ph)}" '
         f'data-phase-link="{esc(ph["name"])}">'
         f'<span class="pn-tag" style="color:{phase_color(phase_verb(ph["name"]))}">'
         f'{esc(_short_phase(ph["name"]))}</span>{esc(ph["name"])}</a></li>'

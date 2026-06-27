@@ -212,6 +212,7 @@ def render_runtime_headline(
     phase_order: list[str],
     wall_times: dict[str, dict],
     totals: dict,
+    leads: list,
 ) -> str:
     """The top fold: an ANALYSIS card (disposition + execution health + report +
     lead summary) beside a METRICS card (total cost / wall + per-phase bars)."""
@@ -253,7 +254,7 @@ def render_runtime_headline(
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-report">{esc(body)}</div>
-      <div class="an-leads">{_lead_summary(run_dir)}</div>
+      <div class="an-leads">{_lead_summary(leads)}</div>
     </div>
     <div class="fold-card card-metrics">
       <div class="card-label">metrics</div>
@@ -298,13 +299,9 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
     return "".join(segs)
 
 
-def _lead_summary(run_dir: Path) -> str:
+def _lead_summary(leads: list) -> str:
     """The analysis card's compact lead list: id + truncated goal + a ∅ marker
     for dead-ends. The full queries live in § Leads & queries below."""
-    try:
-        leads = lead_repository.joined(run_dir)
-    except Exception:
-        leads = []
     if not leads:
         return '<span class="empty">no leads</span>'
     rows: list[str] = []
@@ -853,7 +850,7 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .disp-badge.disp-benign { background: var(--good); }
 .disp-badge.disp-inconclusive { background: var(--warn); }
 .disp-badge.disp-malicious { background: var(--bad); }
-.disp-badge.disp-\? { background: var(--text-dim); }
+.disp-badge.disp-\\? { background: var(--text-dim); }
 .an-conf { font-size: 11px; color: var(--text-dim); }
 .an-health { font-size: 12px; margin-bottom: 10px; }
 .health { font-weight: 600; }
@@ -1081,7 +1078,12 @@ def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = load_jsonl(run_dir / "tool_trace.jsonl")
     messages = load_messages(run_dir)
-    n_events, n_tool_calls, cost = _stats(events)
+    # _stats' n_events / cost are unused on this page; only the tool-call count
+    # and the result-event cost total (== _stats' cost) are. Read the lead/query
+    # join + report once here and thread them into the consumers below.
+    _, n_tool_calls, result_total = _stats(events)
+    report = parse_report(run_dir)
+    leads = lead_repository.joined(run_dir)
 
     # Drop "preamble" from the attribution order — agent work before the first
     # ## header is functionally ORIENT-bucket work. The phase still renders.
@@ -1091,11 +1093,10 @@ def render_runtime_page(run_dir: Path) -> str:
 
     # Per-phase cost: accurate per-message main cost (tagger fixed) + the nested
     # gather (Haiku) cost folded back in from the message log at its dispatch phase.
-    attribution = phase_attribution(events, phase_order)
+    attribution = phase_attribution(events, phase_order, tags)
     main_total = sum(b["cost"] for b in attribution.values())
-    result_total = sum(e.get("total_cost_usd") or 0 for e in events if e.get("type") == "result")
     gather_by_phase, gather_total = gather_cost_by_phase(
-        run_dir, events, tags, phase_order, main_total, result_total
+        run_dir, events, tags, phase_order, main_total, result_total, messages
     )
     for ph in phase_order:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
@@ -1105,28 +1106,30 @@ def render_runtime_page(run_dir: Path) -> str:
     msg_phase = msg_phase_map(events, tags)
     entries = build_transcript(messages, msg_phase, phase_order)
     tools = tool_usage(events, messages)
-    health = run_health(run_dir, events, messages, phase_order)
-    md = run_metadata(run_dir, events)
+    health = run_health(run_dir, events, messages, phase_order, leads=leads, report=report)
+    md = run_metadata(run_dir, events, messages)
 
-    report = parse_report(run_dir)
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
     if gather_total > 0:
         by_model["haiku"] = gather_total
-    # Headline total = main + gather so it always equals the sum of the per-phase
-    # bars. With llm_requests present that is the exact total; without it, gather
-    # is the (result - main) residual, so main + gather == result_total either way.
+    # Headline total = main + gather, which by gather_cost_by_phase's contract
+    # always equals the sum of the per-phase cost bars. With no phases there are
+    # no bars to reconcile against, so fall back to the run's reported total
+    # rather than the 0 an empty attribution would yield.
     totals = {
-        "cost": main_total + gather_total,
+        "cost": (main_total + gather_total) if phase_order else result_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
         "tool_calls": n_tool_calls,
     }
 
-    investigation_html, phases = render_runtime_investigation(run_dir, attribution, wall_times)
-    transcript_html, n_tx = render_runtime_transcript(entries, tools, phases)
-    leads_html, n_leads = render_runtime_leads_queries(run_dir)
+    investigation_html, phases = render_runtime_investigation(
+        run_dir, attribution, wall_times, raw_phases
+    )
+    transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
+    leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
 
     byline_parts = []
     if md["started"]:
@@ -1140,9 +1143,9 @@ def render_runtime_page(run_dir: Path) -> str:
 <html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="runtime", byline=byline)}
-{render_runtime_headline(run_dir, report, health, attribution, phase_order, wall_times, totals)}
+{render_runtime_headline(run_dir, report, health, attribution, phase_order, wall_times, totals, leads)}
 <div class="layout">
-  {render_runtime_toc(phases, n_tx, n_leads)}
+  {render_runtime_toc(phases, n_tx, n_leads, tx_phases)}
   <article class="content">
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}

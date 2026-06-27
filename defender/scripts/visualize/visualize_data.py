@@ -351,19 +351,6 @@ def _accumulate_usage(b: dict, msg: dict) -> None:
     b["cost"] += usage_cost(model, usage)
 
 
-def _build_msg_phase(events: list[dict], tags: list[str | None]) -> dict[str, str]:
-    """msg.id -> phase map from the *last* tag we saw for each id (so a message
-    whose final delta wrote "## ORIENT" lands in ORIENT, not the prior phase)."""
-    msg_phase: dict[str, str] = {}
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant" or ph is None:
-            continue
-        mid = ((ev.get("message") or {}).get("id")) or ev.get("uuid")
-        if mid:
-            msg_phase[mid] = ph
-    return msg_phase
-
-
 def _attribute_main_agent(
     deduped: list[dict],
     buckets: dict[str, dict],
@@ -422,6 +409,7 @@ def _attribute_subagents(
 def phase_attribution(
     events: list[dict],
     phase_order: list[str],
+    tags: list[str | None] | None = None,
 ) -> dict[str, dict]:
     """Bucket per-message usage, cost, and tool calls into phases.
 
@@ -431,6 +419,10 @@ def phase_attribution(
     are bucketed by that map; subagent merged messages (those with
     ``parent_tool_use_id``) are bucketed by whichever phase issued
     their parent ``Task`` tool_use.
+
+    ``tags`` may be passed by a caller that already tagged the events (the same
+    ``tag_events_by_phase(events, phase_order)`` walk), to avoid re-walking the
+    whole stream; ``None`` computes it here.
 
     Bucket shape: ``{turns, tool_calls, subagent_calls, tool_counts,
     in, out, cache_r, cache_w, cost}``.
@@ -446,10 +438,11 @@ def phase_attribution(
     if not phase_order:
         return buckets
 
-    tags = tag_events_by_phase(events, phase_order)
+    if tags is None:
+        tags = tag_events_by_phase(events, phase_order)
     deduped = merge_assistant_events(events)
 
-    msg_phase = _build_msg_phase(events, tags)
+    msg_phase = msg_phase_map(events, tags)
     task_phase = _attribute_main_agent(deduped, buckets, msg_phase, phase_order)
     _attribute_subagents(deduped, buckets, task_phase)
 
@@ -573,24 +566,33 @@ def _pretty_model(name: str) -> str:
     return n.removeprefix("claude-") or (name or "?")
 
 
-def run_metadata(run_dir: Path, events: list[dict]) -> dict:
+def run_metadata(
+    run_dir: Path, events: list[dict], messages: list[dict] | None = None
+) -> dict:
     """Stable 'where / when / with-what' for the header byline.
 
     ``started`` is the earliest event timestamp (ISO strings compare in order
     within one run's timezone); ``models`` are the distinct model names that
-    appeared, prettified.
+    appeared (the main agent from the trace, the nested gather agents from the
+    message log so the byline isn't missing the Haiku the metrics card prices),
+    prettified.
     """
     started = None
+    models: list[str] = []
+
+    def _note_model(m) -> None:
+        if m and m not in models:
+            models.append(m)
+
     for ev in events:
         ts = ev.get("timestamp")
         if ts and (started is None or ts < started):
             started = ts
-    models: list[str] = []
-    for ev in events:
         if ev.get("type") == "assistant":
-            m = (ev.get("message") or {}).get("model")
-            if m and m not in models:
-                models.append(m)
+            _note_model((ev.get("message") or {}).get("model"))
+    for rec in messages or []:
+        if rec.get("kind") == "response":
+            _note_model(rec.get("model"))
     return {
         "run_dir": str(run_dir),
         "started": started,
@@ -623,7 +625,11 @@ def _iter_gather_tool_uses(events: list[dict], tags: list[str | None]):
                 and blk.get("type") == "tool_use"
                 and blk.get("name") == "gather"
             ):
-                yield ph, (blk.get("input") or {})
+                # tool-call args reach the trace as whatever observe.py copied
+                # from the part (a dict, or a JSON string — see compaction.py);
+                # only a dict carries lead_id, so coerce anything else to {}.
+                inp = blk.get("input")
+                yield ph, (inp if isinstance(inp, dict) else {})
 
 
 def gather_dispatch_phase(events: list[dict], tags: list[str | None]) -> dict[str, str]:
@@ -653,18 +659,27 @@ def gather_cost_by_phase(
     phase_order: list[str],
     main_total: float,
     result_total: float,
+    messages: list[dict] | None = None,
 ) -> tuple[dict[str, float], float]:
     """Per-phase Haiku (gather) cost, attributed to each lead's dispatch phase.
 
     Exact when llm_requests.jsonl is present: sum each gather instance's
     per-message cost and land it in the phase that dispatched its lead. Falls
     back to spreading the ``result - main`` residual across phases by
-    gather-call count when the source log is absent (older runs), so the bars
-    still sum to the reported total either way. Returns ``(by_phase, total)``.
+    gather-call count when the source log is absent (older runs).
+
+    Returns ``(by_phase, total)`` where ``total`` is always ``sum(by_phase)`` —
+    not the raw per-lead/residual sum — so the headline (``main + total``) always
+    equals the sum of the per-phase cost bars. Cost we cannot place in a bar
+    (e.g. a legacy ``Task``/``Agent`` run whose residual maps to no ``gather``
+    call) is reported as 0 rather than fabricated into the headline.
+
+    ``messages`` may be passed by a caller that already loaded the log, to avoid
+    re-reading the largest file in the run dir; ``None`` reads it here.
     """
     out = {ph: 0.0 for ph in phase_order}
     per_lead: dict[str, float] = {}
-    for rec in load_messages(run_dir):
+    for rec in (load_messages(run_dir) if messages is None else messages):
         if rec.get("kind") != "response":
             continue
         aid = rec.get("agent_id", "main")
@@ -684,14 +699,14 @@ def gather_cost_by_phase(
             ph = gphase.get(lead, fallback)
             if ph in out:
                 out[ph] += c
-        return out, sum(per_lead.values())
+        return out, sum(out.values())
     residual = max(0.0, (result_total or 0.0) - (main_total or 0.0))
     counts = gather_calls_by_phase(events, tags, phase_order)
     tot = sum(counts.values())
     if residual > 0 and tot > 0:
         for ph, n in counts.items():
             out[ph] = residual * n / tot
-    return out, residual
+    return out, sum(out.values())
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:
@@ -708,7 +723,10 @@ def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[d
                 counts[name] = counts.get(name, 0) + 1
     retries: dict[str, int] = {}
     for rec in messages or []:
-        if rec.get("kind") != "request":
+        # Count MAIN-agent retries only: these chips sit over the main-only
+        # transcript, so folding nested gather-agent retries in here would pin
+        # gather friction onto main tool chips.
+        if rec.get("kind") != "request" or rec.get("agent_id", "main") != "main":
             continue
         for part in (rec.get("message") or {}).get("parts", []):
             if part.get("part_kind") == "retry-prompt":
@@ -721,23 +739,38 @@ def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[d
 
 
 def _count_retries(messages: list[dict]) -> int:
+    """MAIN-agent gate retries (the process page's friction signal); nested
+    gather-agent retries are that subagent's concern, not the main loop's."""
     return sum(
         1
         for rec in messages or []
-        if rec.get("kind") == "request"
+        if rec.get("kind") == "request" and rec.get("agent_id", "main") == "main"
         for part in (rec.get("message") or {}).get("parts", [])
         if part.get("part_kind") == "retry-prompt"
     )
 
 
-def _dead_end_count(run_dir: Path) -> int:
-    """Leads that ran no query (or reference no sidecar) — a planning/tooling gap."""
+def _is_dead_end(jl) -> bool:
+    """A lead that ran no query, or references a lead_id with no sidecar — a
+    planning/tooling gap. The single definition shared by the health count, the
+    fold's ∅ markers, and the leads table."""
+    return jl.orphan or not jl.queries
+
+
+def _safe_joined(run_dir: Path) -> list:
+    """``lead_repository.joined`` with a never-raise guard, for the standalone
+    callers (run_health) that don't get the already-joined list passed in."""
     try:
         from defender.learning import lead_repository
 
-        return sum(1 for jl in lead_repository.joined(run_dir) if jl.orphan or not jl.queries)
+        return lead_repository.joined(run_dir)
     except Exception:
-        return 0
+        return []
+
+
+def _dead_end_count(leads: list) -> int:
+    """How many of ``leads`` are dead-ends (see ``_is_dead_end``)."""
+    return sum(1 for jl in leads if _is_dead_end(jl))
 
 
 def _turn_count(events: list[dict]) -> int:
@@ -752,6 +785,8 @@ def run_health(
     events: list[dict],
     messages: list[dict],
     phase_order: list[str],
+    leads: list | None = None,
+    report: dict | None = None,
 ) -> dict:
     """Execution-quality signals for the top fold: did the run finish cleanly,
     how much gate friction (retries), and any structural dead-ends.
@@ -759,12 +794,15 @@ def run_health(
     ``runtime.html`` is the *process* page, so its headline quality signal is
     execution health (the *outcome* — was the disposition right — is the judge
     page's job, and needs ground truth this page does not have).
+
+    ``leads`` / ``report`` may be passed by a caller that already loaded them so
+    the joined tables and report.md aren't re-read; ``None`` reads them here.
     """
     retries = _count_retries(messages)
-    dead_ends = _dead_end_count(run_dir)
+    dead_ends = _dead_end_count(_safe_joined(run_dir) if leads is None else leads)
     loops = sum(1 for p in phase_order if phase_verb(p) == "PLAN")
     turns = _turn_count(events)
-    completed = bool(parse_report(run_dir).get("disposition"))
+    completed = bool((parse_report(run_dir) if report is None else report).get("disposition"))
 
     if not completed:
         level, label = "bad", "incomplete"
@@ -807,9 +845,9 @@ def _response_entry(rec: dict, phase: str | None, turn: int) -> dict:
     for p in (rec.get("message") or {}).get("parts") or []:
         pk = p.get("part_kind")
         if pk == "text":
-            texts.append(p.get("content", ""))
+            texts.append(p.get("content") or "")
         elif pk == "thinking":
-            thinks.append(p.get("content", ""))
+            thinks.append(p.get("content") or "")
         elif pk == "tool-call":
             calls.append({"tool": p.get("tool_name", "?"), "args": _part_text(p)})
     usage = rec.get("usage") or {}
