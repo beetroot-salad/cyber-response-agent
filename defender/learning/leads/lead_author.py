@@ -20,16 +20,13 @@ Lifecycle, per tick (one queued run dir):
   1. Acquire the per-author queue lock
      (``_pending_leads/.lock``). Non-blocking; another in-flight tick ⇒ return 0.
      (No shared repo lock — worktree isolation + the drain lock replace it.)
-  2. Preflight brakes (in order):
-       a. ``<run_dir>/lead_author/failure.txt`` ⇒ a prior tick aborted
-          mid-stream; refuse to retry until a human clears it.
-       b. ``<run_dir>/lead_author/done`` ⇒ already processed.
+  2. Preflight brake: ``<run_dir>/lead_author/done`` ⇒ already processed.
   3. Extract ``ExecutedLead`` records by joining the leads + queries tables;
      synthesize ``_draft/`` skeletons for executed-but-uncatalogued verbs.
   4. Capture the pre-agent stray baseline (paths outside ``defender/skills/``*.md).
   5. Build per-lead handoff blocks + pending system-skill drafts.
   6. Spawn ``claude -p`` with a no-git allowlist (Edit/Write ``defender/skills/`` +
-     ``rm`` drafts). Non-zero exit ⇒ write ``failure.txt`` and return rc=2.
+     ``rm`` drafts). Non-zero exit ⇒ return rc=2; the drain quarantines the marker.
   7. Loop-side scope gate (``_verify_skills_state``) over one ``git status`` read:
      no strays outside scope, no protected-surface mutation, no established/SKILL.md
      deletion. A violation raises ``LeadAuthorError`` (the drain quarantines the marker).
@@ -678,8 +675,8 @@ def invoke_agent(
     stdin, event teeing to the run log — instead of its own ``subprocess.run``. The agent
     runs no git and writes no result marker; its edits + ``rm``s sit in the working tree
     (the source of truth), so it uses the raw variant (no ``AUTHOR_RESULT:`` marker) and
-    maps the runner's timeout to rc 124 so ``_run_locked`` writes ``failure.txt`` and
-    refuses retry until a human clears it. ``repo_root`` is the batch worktree (the drain
+    maps the runner's timeout to rc 124 so ``_run_locked`` returns rc=2 and the drain
+    quarantines the marker. ``repo_root`` is the batch worktree (the drain
     passes ``deps.paths.repo_root``) and becomes the agent's cwd, so its repo-relative
     ``rm`` paths resolve under it — no worktree-absolute matcher is needed."""
     pending_drafts = pending_drafts or []
@@ -820,10 +817,6 @@ def _done_sentinel(run_dir: Path) -> Path:
     return _state_dir(run_dir) / "done"
 
 
-def _failure_marker(run_dir: Path) -> Path:
-    return _state_dir(run_dir) / "failure.txt"
-
-
 def _write_state(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
@@ -900,10 +893,9 @@ def run(
 
 
 def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
-    # Preflight brakes — failure first, then done sentinel.
-    if _failure_marker(run_dir).is_file():
-        _log(f"FATAL preflight: {_failure_marker(run_dir)} present — human cleanup required")
-        return 2
+    # Preflight brake: skip a run already processed in a prior tick. A *failed* run
+    # is surfaced by the drain (it quarantines the marker on the rc=2 / raised gate),
+    # so there is no per-run failure brake here to re-check.
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
@@ -947,14 +939,10 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
 
     rc = deps.invoke_agent(run_dir, handoffs, pending_drafts)
     if rc != 0:
-        _write_state(
-            _failure_marker(run_dir),
-            f"claude exited rc={rc} at {_loop_config.now_iso()}\n"
-            f"see {RUN_LOG_FILE} for stdout/stderr\n"
-            "Human action required: review the worktree edits, then remove this\n"
-            "failure.txt to opt in to a retry on the next tick.\n",
-        )
-        _log(f"FATAL: claude exited non-zero; wrote {_failure_marker(run_dir)}")
+        # The agent crashed / timed out (the worktree is a throwaway the drain discards).
+        # Return rc=2 — the drain quarantines the marker to failed/ for a human; the run
+        # log under _pending_leads/ is the diagnostic.
+        _log(f"FATAL: claude exited rc={rc}; see {RUN_LOG_FILE} (drain will quarantine)")
         return 2
 
     # Scope gate over the working tree, then the loop commits pathspec-scoped. A gate
@@ -1064,8 +1052,10 @@ Preconditions
 
 State files written under ``<run_dir>/lead_author/``
   done           sentinel on successful completion; makes the run a no-op.
-  failure.txt    written when ``claude`` exits non-zero; preflight refuses
-                 to retry until a human removes it.
+
+On a non-zero ``claude`` exit this returns rc=2 and the lead-author drain quarantines
+the run's marker to the author-queue's ``failed/`` dir (surfaced for a human, not
+dropped); the run log under ``_pending_leads/`` is the diagnostic.
 
 Environment
   LEAD_AUTHOR_MODEL                          claude model id (default claude-sonnet-4-6)
