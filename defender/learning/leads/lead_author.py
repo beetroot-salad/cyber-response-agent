@@ -368,7 +368,7 @@ def collect_general_failures(
       ``synthesize_drafts`` mints a ``_draft/`` skeleton the agent curates.
       Skipped here (the shared ``_draft_candidate_segments`` predicate keeps the
       two paths disjoint).
-    - **general failure** (the residue: a non-candidate verb like ``elastic.esql``
+    - **general failure** (the residue: a non-candidate verb like ``siem.esql``
       — a bad ES|QL pipe — or another agent-fixable error that resolves to
       neither) — today ``build_handoff`` WARN-and-drops it and the signal
       vanishes. We capture it instead, for the execution.md curation mode.

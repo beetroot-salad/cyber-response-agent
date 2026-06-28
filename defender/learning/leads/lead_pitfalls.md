@@ -13,11 +13,11 @@ You are NOT the lead-author (it curates the query catalog and system `SKILL.md`)
 
   ```jsonc
   {
-    "system": "elastic",
-    "execution_md_path": "defender/skills/elastic/execution.md",
+    "system": "siem",
+    "execution_md_path": "defender/skills/siem/execution.md",
     "failures": [
       {
-        "query_id": "elastic.esql",
+        "query_id": "siem.esql",
         "goal": "count failed ssh by source IP over 24h",
         "executed_query": "<the EXACT command/pipe that failed>",
         "stderr_digest": "exit=1; line 1:23: mismatched input '|' ..."
@@ -32,7 +32,7 @@ You are NOT the lead-author (it curates the query catalog and system `SKILL.md`)
 
 Process each handoff in order. For its system:
 
-1. **Read `execution_md_path`.** Note its sections and what is already documented (e.g. for an Elastic SIEM the surface is `## CLI` / `## Exit codes` / `## Query syntax` / `## Index-pattern selection`, plus `## Common pitfalls` if a prior tick created it).
+1. **Read `execution_md_path`.** Note its sections and what is already documented (e.g. for a SIEM the surface is `## CLI` / `## Exit codes` / `## Query syntax` / `## Index-pattern selection`, plus `## Common pitfalls` if a prior tick created it).
 2. For each failure, recover the **mistake** and the **fix** from `executed_query` + `stderr_digest`. The digest is `exit=N; <stderr>` — the adapter's own diagnosis. If the digest and query don't let you name a concrete mistake and a concrete fix, **skip that failure**; never invent one.
 3. **Decide where it goes.** Co-locate a failure that belongs to an existing surface by tightening that section's guidance (an index-syntax mistake under the index section, a query-language mistake under the query-syntax section). Otherwise add a one-line bullet under `## Common pitfalls`, creating that section near the other query guidance if it is absent.
 4. **Prune as you append.** Before adding, check whether the section already warns about this mistake. If a near-duplicate exists, merge into it (or leave it) rather than adding a second line. If you notice stale or redundant existing bullets while you are in the file, tighten them.
