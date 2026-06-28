@@ -39,8 +39,6 @@ import argparse
 import functools
 import json
 import os
-import re
-import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,13 +59,50 @@ from defender.learning.leads import lead_classifier
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 
+# Three cohesive leaf modules carry the draft-synthesis, lead-extraction, and
+# scope-gate-path-classifier groups; this driver re-exports the symbols they own so
+# orchestrate.py + the tests reach them on ``lead_author`` unchanged. The path
+# constants live in ``path_validation`` (the lowest leaf) and are imported back here,
+# so a leaf never imports them *from* this module (which would cycle).
+from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
+    CATALOG_DIR,
+    CATALOG_REL,
+    LEARNING_DIR,
+    REPO_ROOT,
+    SKILLS_DIR,
+    SKILLS_REL,
+    _draft_twin,
+    _is_catalog_path,
+    _is_draft_readme,
+    _is_in_scope,
+    _is_schema_md,
+    _is_system_execution_md,
+    _is_system_file,
+    _is_system_skill_draft,
+    _is_system_skill_md,
+    _porcelain_records,
+    _under_draft,
+)
+from defender.learning.leads.draft_synthesis import (  # noqa: F401  (re-exported)
+    _ESQL_SYSTEMS,
+    _NON_CANDIDATE_VERBS,
+    _SAFE_ID_SEGMENT,
+    _draft_candidate_segments,
+    _draft_skeleton,
+    _executed_query,
+    _is_esql,
+    synthesize_drafts,
+)
+from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exported)
+    _VALID_PAYLOAD_STATUSES,
+    ExecutedLead,
+    LeadAuthorError,
+    collect_general_failures,
+    extract,
+    extract_from_joined,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-CATALOG_DIR = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
-CATALOG_REL = "defender/skills/gather/queries/"
-SKILLS_DIR = REPO_ROOT / "defender" / "skills"
-SKILLS_REL = "defender/skills/"
+
 # Mutable lead-author queue state resolves from DEFAULT_PATHS so it honors
 # DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs).
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
@@ -95,337 +130,9 @@ def _lift_threshold() -> int:
 # can't disagree about whether the queue is at threshold (see that function's docstring).
 
 
-# Ids gather coins for one-off, no-template probes — never catalog candidates.
-# An *untagged* adapter call (no ``--query-id``) collapses to ``{system}.{verb}``
-# where ``{verb}`` is the adapter subcommand (e.g. an adapter exposing ``esql`` / ``query``)
-# or ``ad-hoc`` for a flags-only call; drafting any of those would mint a junk
-# catch-all template, so they are filtered alongside prefix-less ids.
-_NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
-
-# A `query_id` segment (`{system}` / `{verb}`) becomes a path component in the
-# `{system}/_draft/{verb}.md` draft path below. The id is model-coined (the
-# gather subagent passes it as `--query-id`), so an untrusted segment containing
-# `/`, `\`, or a leading `.` (e.g. `..`) would escape the catalog dir and write
-# an arbitrary `.md` file. Require each segment to be a single safe path
-# component: starts alphanumeric, then `[a-z0-9._-]` — which the real kebab ids
-# (`sshd-auth-baseline-7d`, `change-mgmt`) all satisfy while `..`, `a/b`, and
-# `/abs` are rejected. A containment clamp on the resolved path backs this up.
-_SAFE_ID_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-# Systems whose query body is a server-side ES|QL pipe — the whole query is one
-# positional (``params["arg0"]``) with the bindings inlined, not flag/positional
-# scalars. The one place the "this system speaks ES|QL" policy lives, so engine
-# shape (which field is the canonical query, draft frontmatter/fence) is decided
-# from the recorded ``system`` rather than re-split out of ``query_id`` or a
-# system literal scattered across call sites.
-_ESQL_SYSTEMS = frozenset({"elastic"})  # lint-shippable: ok — ES|QL system id matched against the queries-table system value (real config, not illustrative)
-
-
-def _is_esql(system: str) -> bool:
-    return system in _ESQL_SYSTEMS
-
-
-def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> str:
-    """Render a draft skeleton in the lean/ES|QL shape.
-
-    Built by concatenation rather than ``str.format`` because ``query_body``
-    is the literal executed query and may itself contain ``{`` / ``}`` (ES|QL
-    ``GROK`` patterns use ``%{WORD:field}``), which a format call would choke on.
-
-    Shape mirrors the migrated catalog (``## Goal`` / ``## Query`` / ``## Pitfalls``
-    + narrowing note) — no ``## What to summarize`` / ``## Baseline`` / KQL
-    placeholder. The ``## Query`` body is the *exact* query that ran (from the
-    queries table), so a promotion is one keyword-recall pass away, not a
-    "fill in the invocation" stub.
-    """
-    is_esql = _is_esql(system)
-    engine_fm = "\nengine: esql" if is_esql else ""
-    fence_lang = "esql" if is_esql else ""
-    goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
-    return (
-        f"---\nid: {query_id}\nstatus: draft{engine_fm}\n---\n\n"
-        "## Goal\n\n"
-        f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
-        f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
-        "**Before promoting**, check the handoff `neighbors`: if this is a "
-        "*narrowing*\nof an existing wide template (same measurement, fewer "
-        "filter/`BY` axes), discard\nthis draft and widen that template's `## Goal` "
-        "for keyword recall instead of\nminting a sibling. Promote only when this "
-        "names a genuinely new measurement.\n\n"
-        "## Query\n\n"
-        "The exact query that ran (narrow/widen on promote):\n\n"
-        f"```{fence_lang}\n{query_body}\n```\n\n"
-        "## Pitfalls\n\n"
-        "- (fill in any data-source quirk this query exposed — null-heavy field,\n"
-        "  renamed column, case-sensitive match — grounded in the executed payload)\n"
-    )
-
-
-def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str] | None:
-    """``(system, verb)`` if ``query_id`` is a mintable draft candidate, else None.
-
-    The single home for the candidacy rule the WARN-and-draft path applies, so
-    ``synthesize_drafts`` (which mints the draft) and ``collect_general_failures``
-    (which captures the residue that is *not* drafted) agree by construction — a
-    query_id is drafted XOR a general-failure candidate, never both, never neither
-    by accident. Returns None when:
-
-    - the id resolves to an existing catalog template (``by_id``) — not a draft;
-    - it carries no ``{system}.`` prefix (an ``ad-hoc`` probe);
-    - the verb is reserved (``esql`` / ``query`` / ``ad-hoc`` — an untagged call) —
-      drafting it would mint a junk catch-all;
-    - either segment is empty or not a single safe path component.
-
-    Path-containment (the ``_draft/`` clamp) stays at the write site in
-    ``synthesize_drafts``; this predicate decides candidacy only.
-    """
-    if not query_id or "." not in query_id or query_id in by_id:
-        return None
-    system, verb = query_id.split(".", 1)
-    if not system or not verb or verb in _NON_CANDIDATE_VERBS:
-        return None
-    if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(verb):
-        return None
-    return system, verb
-
-
-def synthesize_drafts(
-    executed: list[ExecutedLead], *, catalog_dir: Path | None = None,
-    catalog: list | None = None,
-) -> list[Path]:
-    """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
-    query_id that resolves to no catalog template.
-
-    This replaces the lead-author's WARN-and-drop on an unresolved verb
-    (`build_handoff`) with WARN-and-draft: the gather subagent ran a query
-    under a ``{system}.{verb}`` id that no template covers, so we
-    deterministically draft it and let the lead-author's existing
-    promote/discard/skip machinery curate it. ``query_id`` comes from the
-    dispatch contract via the wrapper (``--query-id``); ad-hoc leads
-    (``query_id`` with no ``{system}.`` prefix) and bare untagged verbs
-    (``{system}.esql`` / ``{system}.ad-hoc`` — what a call with no ``--query-id``
-    collapses to) are skipped: they are not catalog candidates. Idempotent —
-    skips drafts that already exist on disk or were minted earlier in this call.
-
-    The drafted ``## Query`` is the literal query that ran: under ES|QL the
-    bindings live inside the pipe (``params`` is just ``{"arg0": "<the pipe>"}``),
-    so the captured command — not a ``${param}`` re-render — is the canonical
-    record (see ``_executed_query``).
-    """
-    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
-    # Reuse the tick's once-loaded catalog when threaded; else load (the direct
-    # `catalog_dir`-only call path). This is the FIRST consumer, so the
-    # pre-synthesis catalog is exactly what a fresh load would return.
-    if catalog is None:
-        catalog = lead_neighbors.load_catalog(catalog_dir)
-    by_id = {t.id for t in catalog}
-    created: list[Path] = []
-    for lead in executed:
-        qid = lead.query_id
-        # Candidacy (resolves to no template, real {system}.{verb}, safe segments)
-        # is the shared predicate; the non-candidate cases it rejects — empty
-        # segments, reserved verbs, unsafe path components — are exactly the ones
-        # that would mint junk or escape the catalog dir.
-        segs = _draft_candidate_segments(qid, by_id)
-        if segs is None:
-            continue
-        system, verb = segs
-        # `system`/`verb` become path components — clamp the resolved draft under
-        # the system's `_draft/` dir as belt-and-suspenders over the segment check.
-        draft = catalog_dir / system / "_draft" / f"{verb}.md"
-        draft_root = (catalog_dir / system / "_draft").resolve()
-        if not draft.resolve().is_relative_to(draft_root):
-            continue
-        if draft.exists() or draft in created:
-            continue
-        query_body = _executed_query(lead) or "# (no command captured for this query)"
-        try:
-            draft.parent.mkdir(parents=True, exist_ok=True)
-            draft.write_text(
-                _draft_skeleton(qid, system, lead.goal_text, query_body)
-            )
-            created.append(draft)
-            by_id.add(qid)
-        except OSError:
-            continue
-    return created
-
-
-# ---------------------------------------------------------------------------
-# Lead extraction (inlined from PR-209's lead_extract.py)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ExecutedLead:
-    lead_id: str                  # the :L row id (FK), e.g. "l-001"
-    query_index: int              # positional index within this lead's queries
-    is_multi_query: bool          # parent lead had >1 query
-    entry_index: int              # index into the joined-leads list
-    query_id: str
-    system: str                   # adapter system (siem/cmdb/...), from the queries table
-    params: dict[str, Any]
-    raw_command: str              # verbatim executed command (the literal query)
-    goal_text: str
-    what_to_summarize: tuple[str, ...]
-    raw_ref: Path | None          # this query's payload, by-ref
-    payload_status: str           # from the queries table (record_query)
-    payload_digest: str
-    error_class: str | None       # None / "infra" / "agent-fixable" (the failure taxonomy)
-
-
-_VALID_PAYLOAD_STATUSES = frozenset(
-    {"ok", "empty", "suspect_empty", "error", "partial"}
-)
-
-
-def _executed_query(lead: ExecutedLead) -> str:
-    """The literal query that ran, as the canonical record.
-
-    Under ES|QL the whole pipe is a single positional captured as
-    ``params["arg0"]`` — the named bindings (`user`, `src`, window) live
-    *inside* the string, not as separate params — so the ``arg0`` body, not
-    a ``${param}`` re-render, is the canonical query. For other systems
-    ``arg0`` is just a bare positional *value* (an IP for ``cmdb.hostname-by-ip``
-    ``${ip}``, a CR id for ``change-mgmt.get-change`` ``${cr_id}``), not the
-    query — so the full ``raw_command`` is the faithful record there. Pick by
-    the recorded ``system`` (``_is_esql``), falling back to the other form when
-    the preferred one is absent.
-    """
-    arg0 = (lead.params or {}).get("arg0")
-    arg0 = arg0 if isinstance(arg0, str) and arg0.strip() else ""
-    raw = lead.raw_command or ""
-    return (arg0 or raw) if _is_esql(lead.system) else (raw or arg0)
-
-
-def extract(run_dir: Path) -> tuple[list, list[ExecutedLead]]:
-    """Join the two tables via ``lead_repository`` and emit one ExecutedLead
-    per executed query. Returns ``(joined_leads, executed)`` so a caller that
-    needs the raw join surface too (for handoff building) reuses this single
-    read instead of re-joining.
-
-    Queries whose payload file is missing are dropped silently (the dispatch
-    never landed). The payload status comes from the queries-table row
-    (``record_query`` writes it deterministically); an out-of-vocabulary
-    status is a loud failure — the loop refuses to author against it.
-    """
-    joined = lead_repository.joined(run_dir)
-    return joined, extract_from_joined(joined)
-
-
-def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
-    """``extract`` over an already-joined leads list (no disk I/O).
-
-    Lets a caller that already holds ``lead_repository.joined(run_dir)`` reuse
-    it instead of re-reading both tables. ``joined_leads`` is a list of
-    ``lead_repository.JoinedLead``.
-    """
-    out: list[ExecutedLead] = []
-    for entry_idx, jl in enumerate(joined_leads):
-        goal = jl.goal or ""
-        wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
-        is_multi = len(jl.queries) > 1
-        for q_idx, q in enumerate(jl.queries):
-            if q.raw_ref is None or not q.raw_ref.is_file():
-                continue
-            if q.payload_status not in _VALID_PAYLOAD_STATUSES:
-                raise LeadAuthorError(
-                    f"{jl.lead_id} seq {q.seq}: payload_status must be one of "
-                    f"{sorted(_VALID_PAYLOAD_STATUSES)}, got {q.payload_status!r}"
-                )
-            out.append(
-                ExecutedLead(
-                    lead_id=jl.lead_id,
-                    query_index=q_idx,
-                    is_multi_query=is_multi,
-                    entry_index=entry_idx,
-                    query_id=q.query_id,
-                    system=q.system,
-                    params=dict(q.params),
-                    raw_command=q.raw_command,
-                    goal_text=goal,
-                    what_to_summarize=wtc,
-                    raw_ref=q.raw_ref,
-                    payload_status=q.payload_status,
-                    payload_digest=str(q.payload_digest)[:200],
-                    error_class=q.error_class,
-                )
-            )
-    return out
-
-
-def collect_general_failures(
-    executed: list[ExecutedLead], run_dir: Path, *, catalog_dir: Path | None = None,
-    catalog: list | None = None,
-) -> list[dict]:
-    """The general-failure residue: agent-fixable errors that reach no curator.
-
-    A failed execution is the clearest pitfall signal — a labelled mistake with
-    intent (``goal``) and self-diagnosis (the stderr digest) attached. Three
-    homes split the signal; this collects the third:
-
-    - **template failure** (``query_id`` resolves to a catalog template) — folds
-      into that template's ``## Pitfalls`` via the existing handoff. Skipped here.
-    - **draft candidate** (a coined ``{system}.{verb}`` with no template) —
-      ``synthesize_drafts`` mints a ``_draft/`` skeleton the agent curates.
-      Skipped here (the shared ``_draft_candidate_segments`` predicate keeps the
-      two paths disjoint).
-    - **general failure** (the residue: a non-candidate verb like ``siem.esql``
-      — a bad ES|QL pipe — or another agent-fixable error that resolves to
-      neither) — today ``build_handoff`` WARN-and-drops it and the signal
-      vanishes. We capture it instead, for the execution.md curation mode.
-
-    ``infra`` errors (a down system) and ``ok``/``empty`` rows are never
-    collected — only ``error_class == "agent-fixable"``. ``pitfall_id`` is
-    deterministic (``{run}:{lead}:{q_index}``) so a re-collection on the
-    failure-retry path dedups rather than double-counts.
-
-    ``catalog`` reuses the tick's once-loaded catalog when threaded. The
-    pre-synthesis catalog is safe here: a freshly-minted draft id is omitted
-    either way — via the ``query_id in by_id`` (template) branch on a
-    post-synthesis reload, or the ``_draft_candidate_segments`` (draft) branch
-    on the pre-synthesis set — so the collected residue is identical.
-    """
-    # catalog_dir is only consumed by the fallback load (unlike synthesize_drafts,
-    # which also uses it for the draft write path), so normalize it inside the branch.
-    if catalog is None:
-        catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
-        catalog = lead_neighbors.load_catalog(catalog_dir)
-    by_id = {t.id for t in catalog}
-    out: list[dict] = []
-    for lead in executed:
-        if lead.error_class != "agent-fixable":          # skips None (ok) and infra
-            continue
-        if not (lead.system or "").strip():              # no {system} → no execution.md to fold into
-            continue
-        if lead.query_id in by_id:                       # template failure → existing fold
-            continue
-        if _draft_candidate_segments(lead.query_id, by_id) is not None:  # → becomes a draft
-            continue
-        out.append(
-            {
-                "schema_version": 1,
-                "pitfall_id": f"{run_dir.name}:{lead.lead_id}:{lead.query_index}",
-                "source_run": run_dir.name,
-                "system": lead.system,
-                "query_id": lead.query_id,
-                "goal": lead.goal_text,
-                "executed_query": _executed_query(lead),
-                "stderr_digest": lead.payload_digest,    # "exit=N; <stderr[:160]>"
-                "error_class": lead.error_class,
-            }
-        )
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Driver primitives
 # ---------------------------------------------------------------------------
-
-
-class LeadAuthorError(Exception):
-    """Fatal pre/post-flight error — caller should abort."""
 
 
 _log = _loop_config.make_logger("lead-author", flush=True)
@@ -451,128 +158,6 @@ def release_queue_lock(fh: Any) -> None:
         return
     _author_shared.release_flock(fh)
     _log("release queue-lock")
-
-
-# ---------------------------------------------------------------------------
-# Path classifiers — lead_author's edit scope (domain logic, not git lifecycle)
-# ---------------------------------------------------------------------------
-
-
-def _under_draft(path: str) -> bool:
-    """True if ``path`` lies under any catalog ``{system}/_draft/`` subdirectory."""
-    if not path.startswith(CATALOG_REL):
-        return False
-    rest = path[len(CATALOG_REL):]
-    parts = rest.split("/")
-    return len(parts) >= 3 and parts[1] == "_draft"
-
-
-def _draft_twin(catalog_template: str) -> str:
-    """The ``_draft/{id}.md`` path a promote of an established catalog template must remove.
-
-    ``defender/skills/gather/queries/{system}/{id}.md`` →
-    ``defender/skills/gather/queries/{system}/_draft/{id}.md``. Used by the scope gate to
-    catch a half-promote (established written, draft never ``rm``'d).
-    """
-    p = Path(catalog_template)
-    return str(p.parent / "_draft" / p.name)
-
-
-def _is_catalog_path(path: str) -> bool:
-    return path.startswith(CATALOG_REL)
-
-
-def _is_system_file(path: str, name: str) -> bool:
-    """True if ``path`` is exactly ``defender/skills/{system}/{name}`` (one segment
-    deep). Shared by the top-level per-system file checks so the SKILL.md and
-    execution.md scope gates classify the same path shape identically."""
-    if not path.startswith(SKILLS_REL):
-        return False
-    rest = path[len(SKILLS_REL):]
-    parts = rest.split("/")
-    return len(parts) == 2 and parts[1] == name
-
-
-def _is_system_skill_md(path: str) -> bool:
-    """True if ``path`` is exactly ``defender/skills/{system}/SKILL.md``.
-
-    Excludes ``gather/queries/SCHEMA.md`` and nested files like
-    ``skills/{system}/queries/foo.md`` — only the top-level system SKILL
-    is in lift scope.
-    """
-    return _is_system_file(path, "SKILL.md")
-
-
-def _is_system_execution_md(path: str) -> bool:
-    """True if ``path`` is exactly ``defender/skills/{system}/execution.md``.
-
-    The pitfalls curation mode's *sole* edit target. Kept out of ``_is_in_scope``
-    on purpose: the per-run lead-author agent must never touch execution.md, and
-    the pitfalls agent must never touch the catalog / SKILL.md / drafts. The two
-    modes' scopes are disjoint, enforced by their separate verify gates.
-    """
-    return _is_system_file(path, "execution.md")
-
-
-def _is_system_skill_draft(path: str) -> bool:
-    """True if ``path`` is under a system-skill ``_draft/`` (one segment deep).
-
-    Catalog drafts at ``skills/gather/queries/{system}/_draft/`` are NOT
-    system-skill drafts — they're handled by the catalog-side draft flow.
-    """
-    if not path.startswith(SKILLS_REL):
-        return False
-    rest = path[len(SKILLS_REL):]
-    parts = rest.split("/")
-    return len(parts) >= 3 and parts[1] == "_draft"
-
-
-def _is_draft_readme(path: str) -> bool:
-    """True if ``path`` is a ``_draft/README.md`` surface-declaration file."""
-    if not _is_system_skill_draft(path) and not _under_draft(path):
-        return False
-    return Path(path).name == "README.md"
-
-
-def _is_schema_md(path: str) -> bool:
-    """True if ``path`` is a catalog ``SCHEMA.md`` (the template-schema doc, not a
-    template). Loop-protected: the lead author curates templates, never the schema."""
-    return _is_catalog_path(path) and Path(path).name == "SCHEMA.md"
-
-
-def _is_in_scope(path: str) -> bool:
-    """True if ``path`` is within lead_author's edit scope.
-
-    Two scopes: the gather query catalog and the system-skill surface
-    (``SKILL.md`` + sibling ``_draft/``).
-    """
-    return (
-        _is_catalog_path(path)
-        or _is_system_skill_md(path)
-        or _is_system_skill_draft(path)
-    )
-
-
-def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
-    """``[(XY, path)]`` from ``git status --porcelain --untracked-files=all -z`` at
-    ``repo_root`` (a batch worktree). The agent runs no git, so its edits sit uncommitted
-    in the working tree (``M`` / ``D`` / ``??``) — this is the single read the scope gate
-    verifies. The agent stages nothing, so no rename/copy (``R`` / ``C``) records arise (a
-    "move" shows as a delete + an untracked add): each ``-z`` field is therefore one
-    ``XY␣path`` record. A stray staged rename, were one ever to appear, fails safe — its
-    second (source) field reads as an out-of-corpus path and the gate quarantines rather
-    than mis-committing.
-    """
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "-z"],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    out: list[tuple[str, str]] = []
-    for rec in proc.stdout.split("\0"):
-        if not rec or len(rec) < 3:
-            continue
-        out.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
-    return out
 
 
 # ---------------------------------------------------------------------------
