@@ -90,13 +90,9 @@ def _lift_threshold() -> int:
     return _loop_config.env_int("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", 5)
 
 
-def _pitfalls_threshold() -> int:
-    """Min count of queued general-failure pitfalls before the curation mode fires.
-
-    Mirrors the other drain thresholds: accumulate a worthwhile batch before
-    spawning the execution.md curator. Read at call time for test override.
-    """
-    return _loop_config.env_int("LEARNING_PITFALLS_THRESHOLD", 5)
+# The pitfalls-curation threshold is read from ``core.config.pitfalls_threshold`` — the
+# shared reader the lead-author drain's wake gate uses too, so the gate and this curator
+# can't disagree about whether the queue is at threshold (see that function's docstring).
 
 
 # Ids gather coins for one-off, no-template probes — never catalog candidates.
@@ -1086,7 +1082,7 @@ def run_pitfalls(
     no marker to quarantine on this cross-run path.
     """
     rows = _loop_persist.read_pitfalls(paths)
-    threshold = _pitfalls_threshold()
+    threshold = _loop_config.pitfalls_threshold()
     if len(rows) < threshold:
         if rows:
             _log(

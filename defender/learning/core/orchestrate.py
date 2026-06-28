@@ -33,6 +33,7 @@ from defender.learning.core.config import (
     RunDirs,
     _log,
     env_int,
+    pitfalls_threshold,
 )
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME, Direction
@@ -493,14 +494,19 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     catalog/skill curation, OR the cross-run pitfalls queue at its curation
     threshold. Lets the drain skip creating a worktree on empty ticks — but still
     fire on a markers-empty tick once enough general failures have accumulated."""
+    # Read the pitfalls threshold up front (before the markers short-circuit) so a
+    # non-numeric override fails loud here — outside any try/except — as the contracted
+    # exit 2. Deferring it to the markers-empty branch would let a bad value surface only
+    # deep inside run_pitfalls, where _drain_pitfalls's `except Exception` swallows it
+    # (exit 0, not exit 2). See #435.
+    threshold = pitfalls_threshold()
     qdir = paths.author_queue_dir
     if qdir.is_dir() and any(qdir.glob("*.json")):
         return True
     # Count parsed rows (not raw lines) against the curator's own threshold, so the
     # wake gate can't disagree with run_pitfalls — a malformed/partial line that
     # read_pitfalls drops must not wake the drain to a no-op (worktree churn).
-    from defender.learning.leads.lead_author import _pitfalls_threshold
-    return len(read_pitfalls(paths)) >= _pitfalls_threshold()
+    return len(read_pitfalls(paths)) >= threshold
 
 
 def _drain_curators(
@@ -556,7 +562,7 @@ def _drain_lead_author_markers(
     attempts — so a genuine blip self-heals but a persistent pseudo-transient still surfaces."""
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
-    max_retries = int(os.environ.get("LEAD_AUTHOR_MAX_RETRIES", "3"))
+    max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
     _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
     for marker in markers:
         try:
