@@ -33,11 +33,12 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import json
 import os
 import re
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -322,6 +323,26 @@ def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
     return not proc.stdout.strip()
 
 
+def assert_clean_corpus_dir(repo_root: Path, corpus_dir: Path, corpus_dir_rel: str) -> None:
+    """Pre-flight scope check — refuse to author if the corpus has uncommitted changes.
+
+    Atomicity assumes a clean baseline so a failed batch rolls back to it. ``mkdir``s the
+    corpus so a first-ever run on a not-yet-existing corpus passes rather than erroring on
+    a missing path. The raising twin of ``corpus_dir_clean``; both authors call it through
+    ``run_batch_envelope`` so the dirty-corpus refusal lives once (was the parallel
+    ``assert_clean_corpus_dir``/``assert_clean_lessons_dir`` pair)."""
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--", str(corpus_dir)],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    if proc.stdout.strip():
+        raise AuthorError(
+            f"{corpus_dir_rel} has uncommitted changes — refusing to author. "
+            f"Output:\n{proc.stdout}"
+        )
+
+
 def _result_list(result: dict, key: str) -> list[Any]:
     value = result.get(key, [])
     if value is None:
@@ -344,6 +365,64 @@ def _commit_message(result: dict, noun: str) -> str:
             "commit_message; refusing to commit"
         )
     return msg
+
+
+def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
+    """The id of a single AUTHOR_RESULT entry. ``committed`` entries are bare id strings
+    (the agent reports just the id it committed); every other bucket is an object carrying
+    ``id_key`` (+ a ``reason``/``skip_reason``). ``id_key`` is the corpus's id field
+    (``finding_id`` / ``observation_id``)."""
+    if bucket == "committed":
+        if not isinstance(entry, str) or not entry:
+            raise AuthorError(
+                f"AUTHOR_RESULT committed entries must be non-empty {id_key} strings"
+            )
+        return entry
+    if not isinstance(entry, dict):
+        raise AuthorError(f"AUTHOR_RESULT {bucket} entries must be objects")
+    rid = entry.get(id_key)
+    if not isinstance(rid, str) or not rid:
+        raise AuthorError(
+            f"AUTHOR_RESULT {bucket} entries must include a non-empty {id_key}"
+        )
+    return rid
+
+
+def validate_agent_result_partition(
+    result: dict,
+    to_author: list[dict],
+    *,
+    id_key: str,
+    buckets: tuple[str, ...],
+    noun: str,
+) -> None:
+    """Require each authored row to land in exactly one result bucket — no unknown, no
+    duplicate-across-buckets, none missing. Shared by both authors (was a parallel copy
+    per corpus); they differ only in ``id_key`` (``finding_id``/``observation_id``), the
+    ``buckets`` they expose (the findings author adds ``held_forward_bad``), and the
+    ``noun`` for error strings (``findings``/``observations``). ``expected`` is the id set
+    the agent was handed."""
+    expected = {row[id_key] for row in to_author}
+    occurrences: dict[str, list[str]] = {}
+    for bucket in buckets:
+        for entry in _result_list(result, bucket):
+            rid = _result_entry_id(bucket, entry, id_key)
+            occurrences.setdefault(rid, []).append(bucket)
+
+    unknown = sorted(rid for rid in occurrences if rid not in expected)
+    if unknown:
+        raise AuthorError(f"author result contains unknown {noun}: {unknown}")
+    repeated = {
+        rid: where for rid, where in sorted(occurrences.items()) if len(where) != 1
+    }
+    if repeated:
+        raise AuthorError(
+            f"author result classified {noun} more than once: "
+            + json.dumps(repeated, sort_keys=True)
+        )
+    unseen = sorted(expected - occurrences.keys())
+    if unseen:
+        raise AuthorError(f"author result missing {noun}: {unseen}")
 
 
 def commit_corpus(
@@ -453,3 +532,48 @@ def verify_agent_state(
             f"author reported no commits but left edits in {corpus_dir_rel}; "
             "refusing to rotate queue"
         )
+
+
+# ---------------------------------------------------------------------------
+# Batch lock envelope — the lock dance every author runs around its inner batch
+# ---------------------------------------------------------------------------
+
+
+def run_batch_envelope(
+    *,
+    queue_lock_file: Path,
+    repo_lock_file: Path,
+    repo_lock_wait_seconds: int,
+    repo_root: Path,
+    corpus_dir: Path,
+    corpus_dir_rel: str,
+    log: Callable[[str], None],
+    inner: Callable[[], int],
+) -> int:
+    """The lock skeleton shared by every author's ``run_batch``: take the non-blocking
+    per-author queue lock (skip the tick if contended), then the blocking-with-timeout
+    shared repo lock, clean-scope the corpus, and run ``inner`` under both. Returns
+    ``inner``'s rc, ``0`` on a skipped/un-acquirable lock (queue left intact for retry),
+    or ``2`` if the corpus is dirty.
+
+    Queue lock first, repo lock second; released in reverse (the repo lock by ``repo_lock``
+    on block exit, the queue lock in the ``finally``). The inner batch driver diverges per
+    corpus (different partition gate, result buckets, and queue concurrency model), so it
+    stays a per-author callable — only this envelope is shared."""
+    queue_lock = acquire_flock(queue_lock_file)
+    if queue_lock is None:
+        log("queue lock held by another process — skipping this tick")
+        return 0
+    try:
+        with repo_lock(repo_lock_file, timeout_seconds=repo_lock_wait_seconds):
+            try:
+                assert_clean_corpus_dir(repo_root, corpus_dir, corpus_dir_rel)
+            except AuthorError as e:
+                log(f"FATAL: {e}")
+                return 2
+            return inner()
+    except TimeoutError as e:
+        log(f"repo lock unavailable: {e}; queue intact")
+        return 0
+    finally:
+        release_flock(queue_lock)

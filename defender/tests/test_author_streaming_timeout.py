@@ -61,13 +61,14 @@ def _fake_claude_script(repo, *, behavior: str) -> str:
 def shim_claude(tmp_repo, monkeypatch):
     """Replace the `claude` invocation with a controllable python script.
 
-    Patches subprocess.Popen at the author module level: when the
-    command starts with ``claude``, swap it for ``[sys.executable, fake_script]``.
+    Patches ``subprocess.Popen`` on the runner module (``_runner``, which owns the
+    process spawn): when the command starts with ``claude``, swap it for
+    ``[sys.executable, fake_script]``.
     """
-    import subprocess as _sub
     import sys as _sys
 
-    real_popen = _sub.Popen
+    runner = tmp_repo.author._runner
+    real_popen = runner.subprocess.Popen
 
     def make(behavior: str):
         script_path = _fake_claude_script(tmp_repo.root, behavior=behavior)
@@ -78,7 +79,7 @@ def shim_claude(tmp_repo, monkeypatch):
             return real_popen(cmd, *args, **kwargs)
 
         monkeypatch.setattr(
-            tmp_repo.author.subprocess, "Popen", fake_popen, raising=True
+            runner.subprocess, "Popen", fake_popen, raising=True
         )
 
     return make

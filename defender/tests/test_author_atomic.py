@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from defender.learning.author import shared
+
 
 def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
@@ -20,9 +22,9 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     assert tmp_repo.paths.pending_file.read_text() == pre, "queue must survive agent failure"
 
     # Lock must have been released — a follow-up tick can run.
-    fh = a.acquire_lock(tmp_repo.cfg)
+    fh = shared.acquire_flock(tmp_repo.cfg.lock_file)
     assert fh is not None
-    a.release_lock(fh)
+    shared.release_flock(fh)
 
 
 def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):

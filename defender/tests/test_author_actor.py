@@ -260,7 +260,10 @@ def test_result_partition_rejects_unknown_observation():
         "commit_message": "m",
     }
     with pytest.raises(shared.AuthorError, match="unknown observations"):
-        curator.validate_agent_result_partition(result, to_author)
+        shared.validate_agent_result_partition(
+            result, to_author, id_key="observation_id",
+            buckets=("committed", "consumed_skip"), noun="observations",
+        )
 
 
 def test_result_partition_rejects_duplicate_across_buckets():
@@ -271,14 +274,20 @@ def test_result_partition_rejects_duplicate_across_buckets():
         "commit_message": "m",
     }
     with pytest.raises(shared.AuthorError, match="more than once"):
-        curator.validate_agent_result_partition(result, to_author)
+        shared.validate_agent_result_partition(
+            result, to_author, id_key="observation_id",
+            buckets=("committed", "consumed_skip"), noun="observations",
+        )
 
 
 def test_result_partition_rejects_missing_observation():
     to_author = [_row("a/0", "caught"), _row("b/0", "caught")]
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
     with pytest.raises(shared.AuthorError, match="missing observations"):
-        curator.validate_agent_result_partition(result, to_author)
+        shared.validate_agent_result_partition(
+            result, to_author, id_key="observation_id",
+            buckets=("committed", "consumed_skip"), noun="observations",
+        )
 
 
 def _head_files(repo: Path) -> list[str]:
@@ -397,18 +406,21 @@ def test_commit_failure_is_atomic_queue_intact(tmp_path: Path):
     assert not consumed_path.exists() or consumed_path.read_text().strip() == ""
 
 
-def test_verify_adapter_threads_observations_noun(tmp_path: Path):
-    """The curator ``verify_agent_state`` adapter delegates to the shared layer; this pins
-    that it threads *its* corpus noun (``observations``) and ``cfg`` corpus, not the author
-    side's ``findings``/``defender/lessons/``. ``committed`` non-empty but the corpus clean
-    is the inconsistent state the post-flight gate must reject — and the one branch whose
-    error string carries the noun, so a mis-threaded adapter arg would surface here. The
-    shared-layer branch logic itself is covered corpus-agnostically in test_author_shared."""
+def test_verify_threads_observations_noun(tmp_path: Path):
+    """The curator's ``_author_to_author`` calls ``shared.verify_agent_state`` with *its*
+    corpus noun (``observations``) and ``cfg`` corpus, not the author side's
+    ``findings``/``defender/lessons/``. ``committed`` non-empty but the corpus clean is the
+    inconsistent state the post-flight gate must reject — and the one branch whose error
+    string carries the noun, so a mis-threaded arg would surface here. The shared-layer
+    branch logic itself is covered corpus-agnostically in test_author_shared."""
     ctx = _isolate(tmp_path)
     cfg = _cfg(ctx, _consume_all)
     result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
     with pytest.raises(shared.AuthorError, match="committed observations but left"):
-        curator.verify_agent_state(result, cfg, [])
+        shared.verify_agent_state(
+            cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
+            "observations", [],
+        )
 
 
 # ---------------------------------------------------------------------------

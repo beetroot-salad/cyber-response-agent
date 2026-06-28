@@ -1,21 +1,17 @@
 {
   "//": "lint_duplicate_helpers baseline — module-level helper names defined in >=2 in-scope defender/ modules. Fingerprint is the bare name. CI fails on a dup name absent here. Regenerate: python scripts/lint/lint_duplicate_helpers.py --update-baseline. Shrink as dups are consolidated; annotate intentional entries, \"\" = un-triaged. Never hand-add to silence a new dup — fix it or use `# lint-dup: ok — <reason>`.",
   "entries": {
-    "_author_to_author": "debt: author.py parallel run+partition pending fold onto the curator engine — see #386",
+    "_author_to_author": "distinct-ok: curator (observations) vs lessons/run.py (findings) batch result-partitioners — curator commits with Generation/model trailers + 2 buckets, lessons commits trailer-free + the extra held_forward_bad forward-check bucket (#386)",
     "_json_safe": "distinct-ok: serialize.py coerces YAML scalars (dates/sets) for JSON; sql.py maps non-finite floats to null for DuckDB — different problems",
-    "_partition_pre_author": "debt: author.py parallel pre-flight partition pending fold onto the curator engine — see #386",
+    "_partition_pre_author": "distinct-ok: outcome-policy + held-out gate (curator, 3-tuple) vs ground-truth-disposition gate (lessons, 2-tuple) — different pre-author gating semantics (#386)",
     "_request": "distinct-ok: stub_transport returns dict|list and sys.exit(2) (adapter exit-code protocol); ticket_writer returns (status, body) non-fatally — different contracts",
     "_run": "distinct-ok: generic subprocess-runner name; the harness pair share one, but sql.py's _run is a DuckDB executor and validate_scaffold's is its own — distinct bodies",
-    "_run_batch_inner": "debt: author.py parallel batch driver pending fold onto the curator engine — see #386",
-    "acquire_queue_lock": "debt: queue-lock wrapper name-collision (curator + lead_author each wrap _shared.acquire_flock) — see #386",
+    "_run_batch_inner": "distinct-ok: curator vs lessons batch drivers — different partition shape, result buckets (held_forward_bad), and queue concurrency model; only the shared run_batch_envelope is unified (#386)",
     "capture": "distinct-ok: harness_lead writes eval result artifacts; record_query runs an adapter into the queries table — unrelated roles, same name",
     "invoke_agent": "distinct-ok: per-direction author agents (different prompt/allowed-tools); lead_author.invoke_agent is a different agent (lead curation)",
     "materialize": "distinct-ok: the two eval harnesses build tmp trees from different fixtures (findings/lessons vs query-catalog/run-dir)",
-    "read_batch": "debt: author.py parallel queue snapshot pending fold onto the curator engine — see #386",
-    "release_queue_lock": "debt: queue-lock wrapper name-collision (curator + lead_author each wrap _shared.release_flock) — see #386",
-    "rotate_queue": "debt: author.py parallel queue rotation pending fold onto the curator engine — see #386",
-    "run_batch": "debt: author.py parallel batch driver pending fold onto the _author_curator (CuratorConfig) engine — see #386",
-    "validate_agent_result_partition": "debt: author.py parallel partition validator pending fold onto the curator engine — see #386",
-    "verify_agent_state": "debt: author.py + curator parallel state check pending fold onto the curator engine — see #386"
+    "read_batch": "distinct-ok: lessons reads under the separate .findings.lock (live runs append concurrently); curator reads under the batch-held queue lock — different concurrency model (#386)",
+    "rotate_queue": "distinct-ok: lessons rotates merge_concurrent=True under .findings.lock; curator rotates merge_concurrent=False (queue lock held across the batch) (#386)",
+    "run_batch": "distinct-ok: per-direction public entrypoint — lessons + curator each wrap the shared run_batch_envelope with their own inner driver, and the actor/benign modules forward to curator.run_batch (#386)"
   }
 }
