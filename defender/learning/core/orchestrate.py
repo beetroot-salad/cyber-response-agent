@@ -41,6 +41,7 @@ from defender.learning.core.persist import (
     append_findings,
     derive_alert_rule_key,
     persist_run,
+    read_pitfalls,
 )
 from defender.learning.tickets.ticket_enrichment import enrich_case_ticket
 from defender.learning.core.subagents import ClaudePrintSubagents, Subagents, is_skip_story
@@ -481,10 +482,18 @@ def _has_curator_work(paths: LoopPaths) -> bool:
 
 
 def _has_lead_author_work(paths: LoopPaths) -> bool:
-    """Whether the lead-author drain would do anything — any run dir queued for
-    catalog/skill curation. Lets the drain skip creating a worktree on empty ticks."""
+    """Whether the lead-author drain would do anything: a run dir queued for
+    catalog/skill curation, OR the cross-run pitfalls queue at its curation
+    threshold. Lets the drain skip creating a worktree on empty ticks — but still
+    fire on a markers-empty tick once enough general failures have accumulated."""
     qdir = paths.author_queue_dir
-    return qdir.is_dir() and any(qdir.glob("*.json"))
+    if qdir.is_dir() and any(qdir.glob("*.json")):
+        return True
+    # Count parsed rows (not raw lines) against the curator's own threshold, so the
+    # wake gate can't disagree with run_pitfalls — a malformed/partial line that
+    # read_pitfalls drops must not wake the drain to a no-op (worktree churn).
+    from defender.learning.leads.lead_author import _pitfalls_threshold
+    return len(read_pitfalls(paths)) >= _pitfalls_threshold()
 
 
 def _drain_curators(
@@ -587,6 +596,45 @@ def _drain_lead_author_markers(
             _discard_worktree_changes(paths.repo_root)
 
 
+def _invoke_pitfalls(paths: LoopPaths) -> int:
+    """Run the cross-run execution.md pitfalls curation mode (lead_author.run_pitfalls),
+    committing in the batch worktree (``paths.repo_root``). The pitfalls queue resolves
+    off the shared state root, so it is drained from the original location."""
+    _log("step=pitfalls-curation")
+    rc = _run_curator_module("lead_author", lambda mod: mod.run_pitfalls(paths=paths))
+    return rc if rc is not None else 0
+
+
+def _drain_pitfalls(
+    paths: LoopPaths,
+    run_pitfalls: Callable[[LoopPaths], int],
+) -> None:
+    """The pitfalls curation phase of the lead-author drain: fold queued general
+    failures into per-system ``execution.md`` (once per drain; ``run_pitfalls`` is
+    cross-run + threshold-gated internally). A curation hiccup must not wedge the
+    drain, so any error is logged and swallowed; the shared worktree is then left
+    clean (a successful run already committed, so this is a no-op for it; a mid-edit
+    failure has its uncommitted edits discarded) and the queue stays intact for retry."""
+    try:
+        run_pitfalls(paths)
+    except Exception as e:  # noqa: BLE001 — a poison batch must not wedge the serial drain
+        _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")
+    finally:
+        _discard_worktree_changes(paths.repo_root)
+
+
+def _drain_lead_author(
+    paths: LoopPaths,
+    run_lead_author: Callable[[LoopPaths, Path], None],
+    run_pitfalls: Callable[[LoopPaths], int],
+) -> None:
+    """The lead-author drain's full work: per-run catalog/skill curation for each
+    queued marker, then the cross-run ``execution.md`` pitfalls curation. Both commit
+    into the same shared worktree and ride the one ``lead-author/`` PR."""
+    _drain_lead_author_markers(paths, run_lead_author)
+    _drain_pitfalls(paths, run_pitfalls)
+
+
 def _validate_merge_mode() -> None:
     """Validated at the author stage (not at config import) so an author-only
     misconfig fails loud for the drains without crashing the LEARN / run_one
@@ -666,8 +714,10 @@ def _lead_author_pr_title(batch_id: str) -> str:
 def _lead_author_pr_body(branch: str) -> str:
     return (
         "Automated gather-catalog / system-skill curation from the lead-author drain "
-        f"(branch `{branch}`, off freshly-fetched `origin/main`). Touches "
-        "`defender/skills/` only — distinct from the lessons PR."
+        f"(branch `{branch}`, off freshly-fetched `origin/main`). May also fold "
+        "agent-fixable execution failures into per-system `execution.md` "
+        "`## Common pitfalls`. Touches `defender/skills/` only — distinct from the "
+        "lessons PR."
     )
 
 
@@ -710,6 +760,7 @@ def lead_author_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
     run_lead_author: Callable[[LoopPaths, Path], None] | None = None,
+    run_pitfalls: Callable[[LoopPaths], int] | None = None,
     branch: AuthorBranch | None = None,
 ) -> int:
     """Lead-author AUTHOR stage: in a fresh ``lead-author/<id>`` worktree off
@@ -726,6 +777,8 @@ def lead_author_drain(
     _validate_merge_mode()
     if run_lead_author is None:
         run_lead_author = _invoke_lead_author
+    if run_pitfalls is None:
+        run_pitfalls = _invoke_pitfalls
     if branch is None:
         branch = AuthorBranch(
             branch_prefix="lead-author/",
@@ -741,7 +794,9 @@ def lead_author_drain(
         return _run_worktree_batch(
             paths, branch, label="lead_author_drain",
             has_work=_has_lead_author_work,
-            do_work=lambda wt_paths: _drain_lead_author_markers(wt_paths, run_lead_author),
+            do_work=lambda wt_paths: _drain_lead_author(
+                wt_paths, run_lead_author, run_pitfalls
+            ),
         )
 
 

@@ -44,10 +44,13 @@ dir; past ~15 templates, `Grep` the `## Goal` bodies for the concept terms an
 analyst would type (`sshd`, `sudo`, `/etc/passwd`, `listening port`).
 
 No template fits → **don't author one**; coin a descriptive id
-(`sshd-auth-failures-by-srcip`, not `query1`) and write the query yourself. The
-offline lead-author curates the catalog from the execution record — you never
-write to it. A lead may need more than one query (foreground + baseline, two
-systems compared); run each.
+(`sshd-auth-failures-by-srcip`, not `query1`) and write the query yourself. Before
+coining, if `{defender_dir}/skills/{system}/execution.md` exists, Read its
+`## Common pitfalls` section — prior coined-query mistakes on this system (bad index
+syntax, malformed pipes, wrong flags) are recorded there; don't repeat them. The
+offline lead-author curates
+the catalog from the execution record — you never write to it. A lead may need more
+than one query (foreground + baseline, two systems compared); run each.
 
 ### 3. EXECUTE — one server-side aggregating query
 

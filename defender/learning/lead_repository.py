@@ -40,6 +40,8 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from defender.runtime.circuit_breaker import error_class_for_exit
+
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
 
@@ -86,6 +88,11 @@ class QueryRow:
     params: dict
     raw_command: str
     exit_code: int
+    # The failure taxonomy, derived once at capture time (record_query) from the
+    # exit code: None on success, "infra" for a down system, "agent-fixable" for a
+    # query/usage mistake. Downstream keys on THIS, never the raw exit code. A
+    # legacy row written before the field existed back-fills it from `exit_code`.
+    error_class: str | None
     payload_status: str
     payload_digest: str
     raw_ref: Path | None
@@ -178,6 +185,12 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
         else:
             raw_ref = None
         params = rec.get("params")
+        exit_code = _as_int(rec.get("exit_code", 0))
+        # Prefer the recorded class; a legacy row written before the field existed
+        # has no `error_class` key, so back-fill it from the retained exit code via
+        # the one shared derivation (record_query stamps the same value live).
+        raw_ec = rec.get("error_class")
+        error_class = str(raw_ec) if raw_ec else error_class_for_exit(exit_code)
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
@@ -187,7 +200,8 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
                 query_id=str(rec.get("query_id", "")),
                 params=params if isinstance(params, dict) else {},
                 raw_command=str(rec.get("raw_command", "")),
-                exit_code=_as_int(rec.get("exit_code", 0)),
+                exit_code=exit_code,
+                error_class=error_class,
                 payload_status=str(rec.get("payload_status", "")),
                 payload_digest=str(rec.get("payload_digest", "")),
                 raw_ref=raw_ref,

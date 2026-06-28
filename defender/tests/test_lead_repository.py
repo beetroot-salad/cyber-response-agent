@@ -313,6 +313,23 @@ def test_load_queries_tolerates_null_and_non_numeric_seq_exit_code(tmp_path):
     assert [r.exit_code for r in rows] == [0, 0]
 
 
+def test_error_class_round_trips_and_back_fills_from_exit_code(tmp_path):
+    """A row that carries error_class round-trips verbatim; a legacy row written
+    before the field existed back-fills it from the retained exit_code via the one
+    shared derivation (0/missing → None, 1/64 → agent-fixable, 2 → infra)."""
+    run = tmp_path / "run"
+    _raw_row(run, {"lead_id": "l-001", "seq": 0, "query_id": "s.v",
+                   "exit_code": 1, "error_class": "agent-fixable"})   # recorded
+    _raw_row(run, {"lead_id": "l-002", "seq": 0, "query_id": "s.v", "exit_code": 1})  # legacy
+    _raw_row(run, {"lead_id": "l-003", "seq": 0, "query_id": "s.v", "exit_code": 2})  # legacy infra
+    _raw_row(run, {"lead_id": "l-004", "seq": 0, "query_id": "s.v", "exit_code": 64})  # legacy usage
+    _raw_row(run, {"lead_id": "l-005", "seq": 0, "query_id": "s.v"})  # legacy success (no exit)
+    rows = lr.load_queries(run)
+    assert [r.error_class for r in rows] == [
+        "agent-fixable", "agent-fixable", "infra", "agent-fixable", None,
+    ]
+
+
 def test_actor_view_tolerates_malformed_seq(tmp_path):
     run = tmp_path / "run"
     _raw_row(run, {"lead_id": "l-001", "seq": None, "query_id": "s.v", "params": {}})

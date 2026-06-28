@@ -376,6 +376,63 @@ def append_findings(
 
 
 # ---------------------------------------------------------------------------
+# Queue: general-failure pitfalls (cross-run; feeds execution.md curation)
+# ---------------------------------------------------------------------------
+
+
+def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
+    """Append general-failure pitfall rows to the cross-run pending queue.
+
+    Rows are pre-built by ``lead_author.collect_general_failures`` (one per
+    agent-fixable execution failure that resolved to no template and is not a
+    draft candidate). Each carries a deterministic ``pitfall_id`` so a
+    re-collected duplicate (the failure-retry path) dedups by id at rotate time
+    rather than double-counting. The lead-author curation mode (``run_pitfalls``)
+    drains it into each system's ``execution.md`` ``## Common pitfalls`` section.
+    Returns the number appended.
+    """
+    if not rows:
+        return 0
+    with _flock(paths.pitfalls_lock_file):
+        return _append_jsonl(paths.pitfalls_pending_file, rows)
+
+
+def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
+    """All queued pitfall rows (tolerant of blank/malformed lines)."""
+    return _read_jsonl_rows(paths.pitfalls_pending_file)
+
+
+def rotate_pitfalls(
+    batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS
+) -> None:
+    """Drain the curated batch out of the pending queue after a successful commit.
+
+    The fold is prose into ``execution.md`` with no per-id filter once merged, so
+    — unlike the findings queue's ``hold_committed`` — consumed rows are rotated
+    out *immediately* rather than held: a rejected PR loses them, recovered by
+    re-collection when the same failure recurs. ``merge_concurrent=True`` re-reads
+    under the lock so any row a concurrent collection tick appended while the
+    curator agent ran is preserved (dedup is by ``pitfall_id``).
+    """
+    ids = set(batch_ids)
+    consumed = [
+        {**r, "consumed_category": "consumed_committed"}
+        for r in _read_jsonl_rows(paths.pitfalls_pending_file)
+        if r.get("pitfall_id") in ids
+    ]
+    rotate_queue_locked(
+        pending_file=paths.pitfalls_pending_file,
+        consumed_file=paths.pitfalls_consumed_file,
+        lock_file=paths.pitfalls_lock_file,
+        id_key="pitfall_id",
+        held=[],
+        consumed=consumed,
+        commit_sha=commit_sha,
+        merge_concurrent=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Queue: per-direction observation streams
 # ---------------------------------------------------------------------------
 
