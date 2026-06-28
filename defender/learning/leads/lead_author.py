@@ -196,6 +196,7 @@ def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str]
 
 def synthesize_drafts(
     executed: list[ExecutedLead], *, catalog_dir: Path | None = None,
+    catalog: list | None = None,
 ) -> list[Path]:
     """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
     query_id that resolves to no catalog template.
@@ -217,7 +218,12 @@ def synthesize_drafts(
     record (see ``_executed_query``).
     """
     catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
-    by_id = {t.id for t in lead_neighbors.load_catalog(catalog_dir)}
+    # Reuse the tick's once-loaded catalog when threaded; else load (the direct
+    # `catalog_dir`-only call path). This is the FIRST consumer, so the
+    # pre-synthesis catalog is exactly what a fresh load would return.
+    if catalog is None:
+        catalog = lead_neighbors.load_catalog(catalog_dir)
+    by_id = {t.id for t in catalog}
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
@@ -355,6 +361,7 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
 
 def collect_general_failures(
     executed: list[ExecutedLead], run_dir: Path, *, catalog_dir: Path | None = None,
+    catalog: list | None = None,
 ) -> list[dict]:
     """The general-failure residue: agent-fixable errors that reach no curator.
 
@@ -377,9 +384,19 @@ def collect_general_failures(
     collected — only ``error_class == "agent-fixable"``. ``pitfall_id`` is
     deterministic (``{run}:{lead}:{q_index}``) so a re-collection on the
     failure-retry path dedups rather than double-counts.
+
+    ``catalog`` reuses the tick's once-loaded catalog when threaded. The
+    pre-synthesis catalog is safe here: a freshly-minted draft id is omitted
+    either way — via the ``query_id in by_id`` (template) branch on a
+    post-synthesis reload, or the ``_draft_candidate_segments`` (draft) branch
+    on the pre-synthesis set — so the collected residue is identical.
     """
-    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
-    by_id = {t.id for t in lead_neighbors.load_catalog(catalog_dir)}
+    # catalog_dir is only consumed by the fallback load (unlike synthesize_drafts,
+    # which also uses it for the draft write path), so normalize it inside the branch.
+    if catalog is None:
+        catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
+        catalog = lead_neighbors.load_catalog(catalog_dir)
+    by_id = {t.id for t in catalog}
     out: list[dict] = []
     for lead in executed:
         if lead.error_class != "agent-fixable":          # skips None (ok) and infra
@@ -570,6 +587,7 @@ def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
     *, repo_root: Path | None = None, catalog_dir: Path | None = None,
+    catalog: list | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
 
@@ -587,7 +605,12 @@ def build_handoff(
     # None ⇒ resolve the module global at call time (the production default); the
     # deps factory binds the injected paths so tests drive a tmp tree via LoopPaths.
     repo_root = repo_root if repo_root is not None else REPO_ROOT
-    catalog = lead_neighbors.load_catalog(catalog_dir)
+    # Reuse the tick's once-loaded catalog when threaded; else load. The caller
+    # threads it only when synthesis minted no drafts this tick — when drafts were
+    # minted, `catalog` is None here and we re-glob so a freshly-minted `_draft/`
+    # resolves into a handoff (the WARN-and-draft path) instead of WARN-and-drop.
+    if catalog is None:
+        catalog = lead_neighbors.load_catalog(catalog_dir)
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
     # Reconstruct dict-shaped entries from the join surface for the
@@ -1213,10 +1236,21 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
         _log(f"FATAL: cannot extract leads: {e}")
         return 2
 
+    # Likewise load the query catalog ONCE and thread it into the consumers below.
+    # `load_catalog` globs every `{system}/*.md` + read/parses each, so re-loading
+    # per consumer is real catalog-size-scaling I/O. Draft synthesis and
+    # general-failure collection both reuse this pre-synthesis snapshot (synthesis
+    # *writes* new `_draft/*.md` but reads the pre-synthesis set; collection wants the
+    # pre-synthesis set too — see its docstring). `build_handoff` needs the
+    # post-synthesis set, so the snapshot is refreshed below when drafts were minted.
+    catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
+
     # Mint drafts for executed-but-uncatalogued verbs. They land under
     # {system}/_draft/ in the worktree corpus; the agent curates each (promote/
     # discard), and whatever survives is committed by the loop with the rest.
-    synth = deps.synthesize(executed, catalog_dir=deps.paths.catalog_dir)
+    synth = deps.synthesize(
+        executed, catalog_dir=deps.paths.catalog_dir, catalog=catalog
+    )
     if synth:
         _log(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
@@ -1235,7 +1269,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     collected_marker = _state_dir(run_dir) / "pitfalls_collected"
     if not collected_marker.is_file():
         failures = collect_general_failures(
-            executed, run_dir, catalog_dir=deps.paths.catalog_dir
+            executed, run_dir, catalog_dir=deps.paths.catalog_dir, catalog=catalog
         )
         if failures:
             _loop_persist.append_pitfalls(failures, paths=deps.paths)
@@ -1250,8 +1284,15 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     repo_root = deps.paths.repo_root
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
 
+    # build_handoff needs the catalog INCLUDING any freshly-minted drafts. When
+    # synthesis minted nothing (the steady-state common case) the once-loaded snapshot
+    # is still current; when it minted drafts, refresh it so a just-minted `_draft/`
+    # resolves into a handoff (the WARN-and-draft path) instead of WARN-and-drop. After
+    # this point `catalog` is authoritative for any consumer of the post-synthesis set.
+    if synth:
+        catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
     handoffs, pending_drafts, rc = _prepare_handoffs(
-        run_dir, deps, executed, joined_leads
+        run_dir, deps, executed, joined_leads, catalog=catalog
     )
     if rc is not None:
         return rc
@@ -1287,6 +1328,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
 def _prepare_handoffs(
     run_dir: Path, deps: LeadAuthorDeps,
     executed: list | None = None, joined_leads: list | None = None,
+    *, catalog: list | None = None,
 ) -> tuple[list, list, int | None]:
     """Extract leads + build executed-template + system-draft handoffs.
 
@@ -1336,7 +1378,7 @@ def _prepare_handoffs(
         return [], pending_drafts, None
 
     try:
-        handoffs = deps.build_handoff(run_dir, executed, joined_leads)
+        handoffs = deps.build_handoff(run_dir, executed, joined_leads, catalog=catalog)
     except LeadAuthorError as e:
         _log(f"FATAL: cannot build handoffs: {e}")
         return [], [], 2
