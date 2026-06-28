@@ -356,6 +356,25 @@ class LoopError(Exception):
     """Fatal orchestrator error — caller should stop processing this run."""
 
 
+def env_int(name: str, default: int) -> int:
+    """Read an integer env override, failing loud on a non-numeric value.
+
+    The drain wake gates read their trigger thresholds at call time (so tests
+    override via ``monkeypatch.setenv``). A bad operator value (``=high``, ``=""``)
+    must surface as a ``LoopError`` — which the drain's ``_run_stage`` maps to the
+    contracted exit 2 — rather than an uncaught ``ValueError`` that crashes the
+    stage with a traceback and an uncontracted exit 1. Mirrors the fail-loud reads
+    for ``LEARNING_MERGE_MODE`` and ``ORACLE_MAX_CONCURRENCY``.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise LoopError(f"{name} must be an integer; got {raw!r}") from None
+
+
 def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
     """Build a stderr logger that prefixes every line with ``[prefix]``."""
     def _log(msg: str) -> None:

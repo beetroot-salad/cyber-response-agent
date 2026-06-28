@@ -87,7 +87,7 @@ def _lift_threshold() -> int:
     queue only once enough have accumulated to make the spawn worthwhile.
     Read at call time so tests can monkeypatch via ``monkeypatch.setenv``.
     """
-    return int(os.environ.get("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5"))
+    return _loop_config.env_int("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", 5)
 
 
 def _pitfalls_threshold() -> int:
@@ -96,7 +96,7 @@ def _pitfalls_threshold() -> int:
     Mirrors the other drain thresholds: accumulate a worthwhile batch before
     spawning the execution.md curator. Read at call time for test override.
     """
-    return int(os.environ.get("LEARNING_PITFALLS_THRESHOLD", "5"))
+    return _loop_config.env_int("LEARNING_PITFALLS_THRESHOLD", 5)
 
 
 # Ids gather coins for one-off, no-template probes — never catalog candidates.

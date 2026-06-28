@@ -32,6 +32,7 @@ from defender.learning.core.config import (
     LoopPaths,
     RunDirs,
     _log,
+    env_int,
 )
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME, Direction
@@ -270,12 +271,8 @@ def _maybe_trigger_author(
 
     ``paths`` is the batch worktree's layout, so ``run_batch`` resolves its corpus dir
     (and the loop commits) under the worktree while the pending/lock files stay shared."""
-    threshold = int(os.environ.get(threshold_env, "5"))
-    pending_count = 0
-    if pending_file.is_file():
-        pending_count = sum(
-            1 for line in pending_file.read_text().splitlines() if line.strip()
-        )
+    threshold = env_int(threshold_env, 5)
+    pending_count = _pending_queue_count(pending_file)
     if pending_count < threshold:
         _log(f"{pending_label}={pending_count} threshold={threshold} — {module_name} not invoked")
         return
@@ -469,16 +466,26 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     return checks
 
 
+def _pending_queue_count(pending_file: Path) -> int:
+    """Count of non-blank lines in a pending-queue file (0 if it doesn't exist).
+
+    The shared 'how full is this queue' primitive for the line-oriented curator
+    queues — the wake gate (``_has_curator_work``) and the per-queue trigger
+    (``_maybe_trigger_author``) read the same count against the same
+    ``env_int(<ENV>, 5)`` threshold, so they can't disagree about whether a queue
+    is at threshold."""
+    if not pending_file.is_file():
+        return 0
+    return sum(1 for line in pending_file.read_text().splitlines() if line.strip())
+
+
 def _has_curator_work(paths: LoopPaths) -> bool:
     """Whether the lessons drain would do anything — any findings/observation curator
     queue at threshold. Lets the drain skip creating a worktree on empty ticks."""
-    for pending_file, env in _curator_queue_checks(paths):
-        threshold = int(os.environ.get(env, "5"))
-        if pending_file.is_file():
-            n = sum(1 for line in pending_file.read_text().splitlines() if line.strip())
-            if n >= threshold:
-                return True
-    return False
+    return any(
+        _pending_queue_count(pending_file) >= env_int(env, 5)
+        for pending_file, env in _curator_queue_checks(paths)
+    )
 
 
 def _has_lead_author_work(paths: LoopPaths) -> bool:
