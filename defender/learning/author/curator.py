@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,30 +115,6 @@ class CuratorConfig:
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
-
-
-def acquire_queue_lock(cfg: CuratorConfig) -> Any:
-    return _shared.acquire_flock(cfg.lock_file)
-
-
-def release_queue_lock(fh: Any) -> None:
-    _shared.release_flock(fh)
-
-
-def assert_clean_corpus_dir(cfg: CuratorConfig) -> None:
-    cfg.corpus_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(cfg.corpus_dir)],
-        cwd=cfg.repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    if proc.stdout.strip():
-        raise AuthorError(
-            f"{cfg.corpus_dir_rel} has uncommitted changes — refusing to author. "
-            f"Output:\n{proc.stdout}"
-        )
 
 
 def read_batch(cfg: CuratorConfig) -> list[dict]:
@@ -314,64 +289,9 @@ def _result_list(result: dict, key: str) -> list[Any]:
     return _shared._result_list(result, key)
 
 
-def _result_observation_id(bucket: str, entry: Any) -> str:
-    if bucket == "committed":
-        if not isinstance(entry, str) or not entry:
-            raise AuthorError(
-                "AUTHOR_RESULT committed entries must be non-empty observation_id strings"
-            )
-        return entry
-    if not isinstance(entry, dict):
-        raise AuthorError(f"AUTHOR_RESULT {bucket} entries must be objects")
-    oid = entry.get("observation_id")
-    if not isinstance(oid, str) or not oid:
-        raise AuthorError(
-            f"AUTHOR_RESULT {bucket} entries must include a non-empty observation_id"
-        )
-    return oid
-
-
 def _commit_message(result: dict) -> str:
     """Curator adapter over ``_shared._commit_message`` (noun: ``observations``)."""
     return _shared._commit_message(result, "observations")
-
-
-def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None:
-    expected = {o["observation_id"] for o in to_author}
-    occurrences: dict[str, list[str]] = {}
-    for entry in _result_list(result, "committed"):
-        oid = _result_observation_id("committed", entry)
-        occurrences.setdefault(oid, []).append("committed")
-    for entry in _result_list(result, "consumed_skip"):
-        oid = _result_observation_id("consumed_skip", entry)
-        occurrences.setdefault(oid, []).append("consumed_skip")
-
-    unknown = sorted(oid for oid in occurrences if oid not in expected)
-    if unknown:
-        raise AuthorError(f"author result contains unknown observations: {unknown}")
-    repeated = {
-        oid: buckets for oid, buckets in sorted(occurrences.items())
-        if len(buckets) != 1
-    }
-    if repeated:
-        raise AuthorError(
-            "author result classified observations more than once: "
-            + json.dumps(repeated, sort_keys=True)
-        )
-    unseen = sorted(expected - occurrences.keys())
-    if unseen:
-        raise AuthorError(f"author result missing observations: {unseen}")
-
-
-def verify_agent_state(
-    result: dict, cfg: CuratorConfig, baseline_stray: list[str],
-) -> None:
-    """Curator adapter over ``_shared.verify_agent_state`` — pins the cfg corpus and the
-    ``observations`` noun for the post-flight working-tree cross-check."""
-    _shared.verify_agent_state(
-        cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel, "observations",
-        baseline_stray,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -418,26 +338,16 @@ def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
     unmerged PR branch — see ``author.run_batch`` for the rationale (a rejected PR
     must not strand them; a merged one filters them via ``existing_observation_ids``
     next batch)."""
-    log = make_logger(cfg.log_prefix)
-    queue_lock = acquire_queue_lock(cfg)
-    if queue_lock is None:
-        log("queue lock held by another process — skipping this tick")
-        return 0
-    try:
-        with _shared.repo_lock(
-            cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
-        ):
-            try:
-                assert_clean_corpus_dir(cfg)
-            except AuthorError as e:
-                log(f"FATAL: {e}")
-                return 2
-            return _run_batch_inner(hold_committed=hold_committed, cfg=cfg)
-    except TimeoutError as e:
-        log(f"repo lock unavailable: {e}; queue intact")
-        return 0
-    finally:
-        release_queue_lock(queue_lock)
+    return _shared.run_batch_envelope(
+        queue_lock_file=cfg.lock_file,
+        repo_lock_file=cfg.repo_lock_file,
+        repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
+        repo_root=cfg.repo_root,
+        corpus_dir=cfg.corpus_dir,
+        corpus_dir_rel=cfg.corpus_dir_rel,
+        log=make_logger(cfg.log_prefix),
+        inner=lambda: _run_batch_inner(hold_committed=hold_committed, cfg=cfg),
+    )
 
 
 def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
@@ -549,8 +459,14 @@ def _author_to_author(
         log(f"FATAL: {e}")
         return 2, None, [], []
     try:
-        verify_agent_state(result, cfg, baseline_stray)
-        validate_agent_result_partition(result, to_author)
+        _shared.verify_agent_state(
+            cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
+            "observations", baseline_stray,
+        )
+        _shared.validate_agent_result_partition(
+            result, to_author, id_key="observation_id",
+            buckets=("committed", "consumed_skip"), noun="observations",
+        )
         commit_sha: str | None = None
         if _result_list(result, "committed"):
             # The agent runs no git; the loop is the sole committer. Commit the

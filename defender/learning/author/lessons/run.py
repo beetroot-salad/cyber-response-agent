@@ -51,7 +51,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import uuid
 from collections.abc import Callable
@@ -147,30 +146,6 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
-
-
-def acquire_lock(cfg: AuthorConfig) -> Any:
-    return _shared.acquire_flock(cfg.lock_file)
-
-
-def release_lock(fh: Any) -> None:
-    _shared.release_flock(fh)
-
-
-def assert_clean_lessons_dir(cfg: AuthorConfig) -> None:
-    cfg.lessons_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(cfg.lessons_dir)],
-        cwd=cfg.repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    if proc.stdout.strip():
-        raise AuthorError(
-            "defender/lessons/ has uncommitted changes — refusing to author. "
-            f"Output:\n{proc.stdout}"
-        )
 
 
 def read_batch(cfg: AuthorConfig) -> list[dict]:
@@ -318,14 +293,6 @@ def _result_list(result: dict, key: str) -> list[Any]:
     return _shared._result_list(result, key)
 
 
-def verify_agent_state(cfg: AuthorConfig, result: dict, baseline_stray: list[str]) -> None:
-    """Author adapter over ``_shared.verify_agent_state`` — pins ``defender/lessons/`` and the
-    ``findings`` noun for the post-flight working-tree cross-check."""
-    _shared.verify_agent_state(
-        cfg.repo_root, result, cfg.lessons_dir, LESSONS_DIR_REL, "findings", baseline_stray,
-    )
-
-
 def _commit_message(result: dict) -> str:
     """Author adapter over ``_shared._commit_message`` (noun: ``findings``)."""
     return _shared._commit_message(result, "findings")
@@ -381,57 +348,6 @@ def write_held_report(
 _log = make_logger("author")
 
 
-def _result_finding_id(bucket: str, entry: Any) -> str:
-    if bucket == "committed":
-        if not isinstance(entry, str) or not entry:
-            raise AuthorError(
-                "AUTHOR_RESULT committed entries must be non-empty finding_id strings"
-            )
-        return entry
-
-    if not isinstance(entry, dict):
-        raise AuthorError(f"AUTHOR_RESULT {bucket} entries must be objects")
-    fid = entry.get("finding_id")
-    if not isinstance(fid, str) or not fid:
-        raise AuthorError(
-            f"AUTHOR_RESULT {bucket} entries must include a non-empty finding_id"
-        )
-    return fid
-
-
-def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None:
-    """Require each authored finding to appear in exactly one result bucket."""
-    expected = {f["finding_id"] for f in to_author}
-    occurrences: dict[str, list[str]] = {}
-
-    for entry in _result_list(result, "committed"):
-        fid = _result_finding_id("committed", entry)
-        occurrences.setdefault(fid, []).append("committed")
-    for bucket in ("held_forward_bad", "consumed_skip"):
-        for entry in _result_list(result, bucket):
-            fid = _result_finding_id(bucket, entry)
-            occurrences.setdefault(fid, []).append(bucket)
-
-    unknown = sorted(fid for fid in occurrences if fid not in expected)
-    if unknown:
-        raise AuthorError(f"author result contains unknown findings: {unknown}")
-
-    repeated = {
-        fid: buckets
-        for fid, buckets in sorted(occurrences.items())
-        if len(buckets) != 1
-    }
-    if repeated:
-        raise AuthorError(
-            "author result classified findings more than once: "
-            + json.dumps(repeated, sort_keys=True)
-        )
-
-    unseen = sorted(expected - occurrences.keys())
-    if unseen:
-        raise AuthorError(f"author result missing findings: {unseen}")
-
-
 def run_batch(
     *,
     hold_committed: bool = False,
@@ -452,25 +368,16 @@ def run_batch(
     ``invoke_agent`` (``dataclasses.replace``) to avoid spawning ``claude``."""
     if cfg is None:
         cfg = build_author_config(paths)
-    lock_fh = acquire_lock(cfg)
-    if lock_fh is None:
-        _log("lock held by another process — skipping this tick")
-        return 0
-    try:
-        with _shared.repo_lock(
-            cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
-        ):
-            try:
-                assert_clean_lessons_dir(cfg)
-            except AuthorError as e:
-                _log(f"FATAL: {e}")
-                return 2
-            return _run_batch_inner(cfg, hold_committed=hold_committed)
-    except TimeoutError as e:
-        _log(f"repo lock unavailable: {e}; queue intact")
-        return 0
-    finally:
-        release_lock(lock_fh)
+    return _shared.run_batch_envelope(
+        queue_lock_file=cfg.lock_file,
+        repo_lock_file=cfg.repo_lock_file,
+        repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
+        repo_root=cfg.repo_root,
+        corpus_dir=cfg.lessons_dir,
+        corpus_dir_rel=LESSONS_DIR_REL,
+        log=_log,
+        inner=lambda: _run_batch_inner(cfg, hold_committed=hold_committed),
+    )
 
 
 def _run_batch_inner(cfg: AuthorConfig, *, hold_committed: bool = False) -> int:
@@ -597,8 +504,15 @@ def _author_to_author(
         _log(f"FATAL: {e}")
         return 2, None, [], [], []
     try:
-        verify_agent_state(cfg, result, baseline_stray)
-        validate_agent_result_partition(result, to_author)
+        _shared.verify_agent_state(
+            cfg.repo_root, result, cfg.lessons_dir, LESSONS_DIR_REL,
+            "findings", baseline_stray,
+        )
+        _shared.validate_agent_result_partition(
+            result, to_author, id_key="finding_id",
+            buckets=("committed", "held_forward_bad", "consumed_skip"),
+            noun="findings",
+        )
         commit_sha: str | None = None
         if _result_list(result, "committed"):
             # The agent runs no git; the loop is the sole committer. Commit the

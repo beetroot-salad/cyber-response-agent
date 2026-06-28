@@ -6,21 +6,26 @@ from dataclasses import replace
 
 import pytest
 
+from defender.learning.author import shared
+
 
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
-    """A second author tick exits cleanly while the first holds the lock."""
-    a = tmp_repo.author
-    fh = a.acquire_lock(tmp_repo.cfg)
+    """A second author tick exits cleanly while the first holds the queue lock.
+
+    The author drives this through ``shared.run_batch_envelope``; the lock primitive
+    is ``shared.acquire_flock`` on the cfg's queue lock-file."""
+    lock_file = tmp_repo.cfg.lock_file
+    fh = shared.acquire_flock(lock_file)
     assert fh is not None
     try:
-        # Simulate a concurrent invocation: acquire_lock should return None.
-        second = a.acquire_lock(tmp_repo.cfg)
+        # Simulate a concurrent invocation: acquire_flock should return None.
+        second = shared.acquire_flock(lock_file)
         assert second is None
     finally:
-        a.release_lock(fh)
-    third = a.acquire_lock(tmp_repo.cfg)
+        shared.release_flock(fh)
+    third = shared.acquire_flock(lock_file)
     assert third is not None
-    a.release_lock(third)
+    shared.release_flock(third)
 
 
 def test_repo_lock_held_returns_zero(tmp_repo, helpers):
@@ -68,15 +73,15 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
 
 
 def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
-    a = tmp_repo.author
+    cfg = tmp_repo.cfg
     (tmp_repo.paths.lessons_dir / "drift.md").write_text("uncommitted\n")
-    with pytest.raises(a.AuthorError, match="uncommitted changes"):
-        a.assert_clean_lessons_dir(tmp_repo.cfg)
+    with pytest.raises(shared.AuthorError, match="uncommitted changes"):
+        shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")
 
 
 def test_clean_scope_passes_when_clean(tmp_repo):
-    a = tmp_repo.author
-    a.assert_clean_lessons_dir(tmp_repo.cfg)  # no raise
+    cfg = tmp_repo.cfg
+    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")  # no raise
 
 
 def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
