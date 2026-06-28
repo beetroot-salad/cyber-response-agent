@@ -573,7 +573,7 @@ def _bypass_tables():
     touches the corpus."""
     return dict(
         extract=lambda rd: ([], [_executed_lead()]),
-        synthesize=lambda executed, catalog_dir: [],
+        synthesize=lambda executed, catalog_dir=None, catalog=None: [],
     )
 
 
@@ -595,7 +595,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
         repo,
         **_bypass_tables(),
         invoke_agent=fake_agent,
-        build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
+        build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
@@ -630,7 +630,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
         repo,
         **_bypass_tables(),
         invoke_agent=fake_agent,
-        build_handoff=lambda rd, ex, jl=None: [{"query_id": "x.y"}],
+        build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
@@ -653,7 +653,7 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
         repo,
         **_bypass_tables(),
         invoke_agent=lambda rd, handoffs, pending: 124,
-        build_handoff=lambda rd, ex, jl=None: [{"query_id": "x.y"}],
+        build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
@@ -698,7 +698,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
         repo,
         **_bypass_tables(),
         invoke_agent=fake_agent,
-        build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
+        build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
@@ -734,7 +734,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
         repo,
         **_bypass_tables(),
         invoke_agent=fake_agent,
-        build_handoff=lambda rd, ex, jl=None: [{"query_id": "wazuh.newthing"}],
+        build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
@@ -769,7 +769,7 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
     deps = _deps(
         run_dir.parent,
         extract=lambda rd: ([], fake_executed),
-        build_handoff=lambda rd, ex, jl=None: fake_handoff,
+        build_handoff=lambda rd, ex, jl=None, **_: fake_handoff,
         discover_system_drafts=lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
     )
     handoffs, drafts, rc = lead_author._prepare_handoffs(run_dir, deps)
@@ -801,7 +801,7 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
     deps = _deps(
         tmp_path,
         extract=lambda rd: ([], [_executed_lead()]),
-        build_handoff=lambda rd, ex, jl=None: fake_handoff,
+        build_handoff=lambda rd, ex, jl=None, **_: fake_handoff,
         discover_system_drafts=lambda: drafts,
     )
 
