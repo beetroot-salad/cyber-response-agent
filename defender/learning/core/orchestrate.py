@@ -41,6 +41,7 @@ from defender.learning.core.persist import (
     append_findings,
     derive_alert_rule_key,
     persist_run,
+    read_pitfalls,
 )
 from defender.learning.tickets.ticket_enrichment import enrich_case_ticket
 from defender.learning.core.subagents import ClaudePrintSubagents, Subagents, is_skip_story
@@ -488,13 +489,11 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     qdir = paths.author_queue_dir
     if qdir.is_dir() and any(qdir.glob("*.json")):
         return True
-    f = paths.pitfalls_pending_file
-    if f.is_file():
-        threshold = int(os.environ.get("LEARNING_PITFALLS_THRESHOLD", "5"))
-        n = sum(1 for line in f.read_text().splitlines() if line.strip())
-        if n >= threshold:
-            return True
-    return False
+    # Count parsed rows (not raw lines) against the curator's own threshold, so the
+    # wake gate can't disagree with run_pitfalls — a malformed/partial line that
+    # read_pitfalls drops must not wake the drain to a no-op (worktree churn).
+    from defender.learning.leads.lead_author import _pitfalls_threshold
+    return len(read_pitfalls(paths)) >= _pitfalls_threshold()
 
 
 def _drain_curators(

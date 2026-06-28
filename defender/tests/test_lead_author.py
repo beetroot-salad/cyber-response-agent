@@ -1043,3 +1043,44 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
     assert lead_author._loop_persist.read_pitfalls(paths) == []
     consumed = [json.loads(ln) for ln in paths.pitfalls_consumed_file.read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
+
+
+def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+    """A curator that legitimately makes no edits (every failure already documented
+    / too thin to fix — a valid tick per the prompt) must still drain the batch.
+    Otherwise the queue stays >= threshold and re-spawns the curator forever."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    _seed_pitfalls(paths, 2)
+    rc = lead_author.run_pitfalls(paths=paths, invoke=lambda handoffs, *, repo_root: 0)
+    assert rc == 0
+    assert lead_author._loop_persist.read_pitfalls(paths) == []      # drained, not stuck
+    assert _run_git(tmp_git_repo, "status", "--porcelain").stdout == ""  # no commit/edits
+
+
+def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+    """A batch whose rows all carry no system can't be folded into any execution.md;
+    run_pitfalls drops it without spawning the curator instead of leaving it stuck at
+    threshold and re-waking the drain every tick."""
+    from defender.learning.core import persist
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    persist.append_pitfalls(
+        [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], paths=paths
+    )
+    called: list[int] = []
+    rc = lead_author.run_pitfalls(paths=paths, invoke=lambda *a, **k: called.append(1) or 0)
+    assert rc == 0
+    assert called == []                                              # no curator spawn
+    assert lead_author._loop_persist.read_pitfalls(paths) == []      # dropped, not stuck
+
+
+def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path):
+    """A failure with a blank system is never collected — it has no
+    defender/skills/{system}/execution.md to fold into."""
+    leads = [
+        _executed_lead(lead_id="l-001", query_id="elastic.esql", system="",
+                       error_class="agent-fixable"),
+    ]
+    out = lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)
+    assert out == []

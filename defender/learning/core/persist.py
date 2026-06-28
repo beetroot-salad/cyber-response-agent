@@ -393,11 +393,8 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
     """
     if not rows:
         return 0
-    paths.pitfalls_pending_dir.mkdir(parents=True, exist_ok=True)
-    with _flock(paths.pitfalls_lock_file), paths.pitfalls_pending_file.open("a") as fh:
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
-    return len(rows)
+    with _flock(paths.pitfalls_lock_file):
+        return _append_jsonl(paths.pitfalls_pending_file, rows)
 
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:

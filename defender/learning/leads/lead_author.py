@@ -384,6 +384,8 @@ def collect_general_failures(
     for lead in executed:
         if lead.error_class != "agent-fixable":          # skips None (ok) and infra
             continue
+        if not (lead.system or "").strip():              # no {system} → no execution.md to fold into
+            continue
         if lead.query_id in by_id:                       # template failure → existing fold
             continue
         if _draft_candidate_segments(lead.query_id, by_id) is not None:  # → becomes a draft
@@ -467,6 +469,17 @@ def _is_catalog_path(path: str) -> bool:
     return path.startswith(CATALOG_REL)
 
 
+def _is_system_file(path: str, name: str) -> bool:
+    """True if ``path`` is exactly ``defender/skills/{system}/{name}`` (one segment
+    deep). Shared by the top-level per-system file checks so the SKILL.md and
+    execution.md scope gates classify the same path shape identically."""
+    if not path.startswith(SKILLS_REL):
+        return False
+    rest = path[len(SKILLS_REL):]
+    parts = rest.split("/")
+    return len(parts) == 2 and parts[1] == name
+
+
 def _is_system_skill_md(path: str) -> bool:
     """True if ``path`` is exactly ``defender/skills/{system}/SKILL.md``.
 
@@ -474,11 +487,7 @@ def _is_system_skill_md(path: str) -> bool:
     ``skills/{system}/queries/foo.md`` — only the top-level system SKILL
     is in lift scope.
     """
-    if not path.startswith(SKILLS_REL):
-        return False
-    rest = path[len(SKILLS_REL):]
-    parts = rest.split("/")
-    return len(parts) == 2 and parts[1] == "SKILL.md"
+    return _is_system_file(path, "SKILL.md")
 
 
 def _is_system_execution_md(path: str) -> bool:
@@ -489,11 +498,7 @@ def _is_system_execution_md(path: str) -> bool:
     the pitfalls agent must never touch the catalog / SKILL.md / drafts. The two
     modes' scopes are disjoint, enforced by their separate verify gates.
     """
-    if not path.startswith(SKILLS_REL):
-        return False
-    rest = path[len(SKILLS_REL):]
-    parts = rest.split("/")
-    return len(parts) == 2 and parts[1] == "execution.md"
+    return _is_system_file(path, "execution.md")
 
 
 def _is_system_skill_draft(path: str) -> bool:
@@ -1039,13 +1044,23 @@ def run_pitfalls(
     Cross-run + threshold-gated (unlike the per-run tick). Below threshold it is a
     no-op with the queue intact. Otherwise: build per-system handoffs, spawn the
     curator (edits execution.md, runs no git), verify the working tree, commit
-    pathspec-scoped, and — only on a real commit — rotate the curated batch out of
-    the central queue. Runs inside the lead-author drain's worktree
-    (``paths.repo_root``); the queue resolves to the shared state root.
+    pathspec-scoped, and rotate the processed batch out of the central queue. Runs
+    inside the lead-author drain's worktree (``paths.repo_root``); the queue
+    resolves to the shared state root.
 
-    ``invoke`` is injectable for tests. Returns 0 on success/no-op, 2 on a curator
-    failure (queue left intact); a scope violation raises ``LeadAuthorError`` for
-    the drain to quarantine.
+    The batch rotates out once the curator has *processed* it (returned rc=0),
+    whether or not it produced a commit — a no-edit tick is a valid outcome (the
+    prompt blesses making no edits when every failure is already documented or too
+    thin to name a fix), and an all-system-less batch can't be folded at all.
+    Leaving such a batch queued would keep it at/above threshold and re-spawn the
+    curator on the same un-foldable rows every drain tick. Rotation is immediate by
+    design (no ``hold_committed``); a failure that recurs is re-collected.
+
+    ``invoke`` is injectable for tests. Returns 0 on success / no-op / no-edit, 2
+    on a curator spawn failure (queue left intact for retry). A scope violation
+    raises ``LeadAuthorError``, which the drain (``_drain_pitfalls``) logs and
+    swallows — discarding the worktree edits and leaving the queue intact; there is
+    no marker to quarantine on this cross-run path.
     """
     rows = _loop_persist.read_pitfalls(paths)
     threshold = _pitfalls_threshold()
@@ -1056,11 +1071,15 @@ def run_pitfalls(
                 f"threshold={threshold}) — skipping curation"
             )
         return 0
+    batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
     handoffs = _build_pitfalls_handoffs(rows)
     if not handoffs:
-        _log(f"{len(rows)} queued pitfall(s) but none carried a system — skipping")
+        # No row carried a system, so none maps to a defender/skills/{system}/
+        # execution.md to fold into. Drop the batch rather than leave it stuck at
+        # threshold re-waking the drain forever; an unfoldable row is dead weight.
+        _log(f"{len(rows)} queued pitfall(s) but none carried a system — dropping")
+        _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
         return 0
-    batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
     repo_root = paths.repo_root
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
     _log(f"pitfalls curation: {len(rows)} failure(s) across {len(handoffs)} system(s)")
@@ -1071,21 +1090,21 @@ def run_pitfalls(
         return 2
 
     changed = _verify_pitfalls_state(repo_root, baseline_stray)
-    if not changed:
-        _log("pitfalls curator made no execution.md edits — leaving queue intact")
-        return 0
-    sha = _author_shared.commit_corpus(
-        repo_root, repo_root / "defender" / "skills", SKILLS_REL,
-        _pitfalls_commit_message(changed),
-    )
-    if sha is not None:
-        _loop_persist.rotate_pitfalls(batch_ids, sha, paths=paths)
-        _log(
-            f"pitfalls curation done; commit={sha[:12]}, "
-            f"rotated {len(batch_ids)} row(s) out of the queue"
+    sha = None
+    if changed:
+        sha = _author_shared.commit_corpus(
+            repo_root, repo_root / "defender" / "skills", SKILLS_REL,
+            _pitfalls_commit_message(changed),
         )
     else:
-        _log("pitfalls curation: commit_corpus made no commit; queue left intact")
+        _log("pitfalls curator made no execution.md edits (valid no-edit tick)")
+    # Rotate whether or not a commit was made: the curator processed the batch, so
+    # leaving it queued would only re-spawn the curator on the same rows next tick.
+    _loop_persist.rotate_pitfalls(batch_ids, sha, paths=paths)
+    _log(
+        f"pitfalls curation done; commit={(sha or 'none')[:12]}, edits={len(changed)}, "
+        f"rotated {len(batch_ids)} row(s) out of the queue"
+    )
     return 0
 
 
