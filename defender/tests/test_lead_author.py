@@ -959,6 +959,37 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     assert len(rows2) == 1
 
 
+def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
+    tmp_git_repo: Path, tmp_path: Path
+):
+    """The reload-on-mint hinge: when synthesize_drafts mints a draft for an
+    uncatalogued verb this tick, `_run_locked` refreshes the once-loaded catalog so
+    build_handoff (the post-synthesis consumer) sees the new `_draft/` and the
+    just-minted query_id resolves into a handoff (the WARN-and-draft path) instead of
+    being dropped (WARN-and-drop). Uses production synthesize + build_handoff, so it
+    guards against a regression that reused the stale pre-synthesis snapshot — which
+    would silently drop every just-minted draft's handoff."""
+    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    seen: dict = {}
+    deps = replace(
+        lead_author.build_lead_author_deps(paths),
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+        invoke_agent=lambda rd, handoffs, pending: seen.update(handoffs=handoffs) or 0,
+    )
+    run_dir = tmp_path / "run-mint"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    _write_lead_meta(run_dir, "l-001", "probe a brand-new verb")
+    _write_query(run_dir, "l-001", 0, "wazuh.brandnew", payload_status="ok")
+
+    assert lead_author.run(run_dir, deps=deps) == 0
+    # synthesize minted the draft on disk this tick...
+    assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "brandnew.md").is_file()
+    # ...and build_handoff, seeing the refreshed (post-synthesis) catalog, resolved the
+    # just-minted id into a handoff rather than WARN-and-dropping it.
+    assert "wazuh.brandnew" in {h["query_id"] for h in seen["handoffs"]}
+
+
 def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
         "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"

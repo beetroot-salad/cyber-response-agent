@@ -391,8 +391,10 @@ def collect_general_failures(
     post-synthesis reload, or the ``_draft_candidate_segments`` (draft) branch
     on the pre-synthesis set — so the collected residue is identical.
     """
-    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
+    # catalog_dir is only consumed by the fallback load (unlike synthesize_drafts,
+    # which also uses it for the draft write path), so normalize it inside the branch.
     if catalog is None:
+        catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
         catalog = lead_neighbors.load_catalog(catalog_dir)
     by_id = {t.id for t in catalog}
     out: list[dict] = []
@@ -1236,9 +1238,11 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
 
     # Likewise load the query catalog ONCE and thread it into the consumers below.
     # `load_catalog` globs every `{system}/*.md` + read/parses each, so re-loading
-    # per consumer is real catalog-size-scaling I/O. The two read-only consumers
-    # (draft synthesis, general-failure collection) reuse this pre-synthesis catalog;
-    # `build_handoff` reuses it too UNLESS synthesis minted drafts (see `bh_catalog`).
+    # per consumer is real catalog-size-scaling I/O. Draft synthesis and
+    # general-failure collection both reuse this pre-synthesis snapshot (synthesis
+    # *writes* new `_draft/*.md` but reads the pre-synthesis set; collection wants the
+    # pre-synthesis set too — see its docstring). `build_handoff` needs the
+    # post-synthesis set, so the snapshot is refreshed below when drafts were minted.
     catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
 
     # Mint drafts for executed-but-uncatalogued verbs. They land under
@@ -1281,12 +1285,14 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
 
     # build_handoff needs the catalog INCLUDING any freshly-minted drafts. When
-    # synthesis minted nothing (the steady-state common case) the once-loaded
-    # catalog is still current and is reused; when it minted drafts, hand None so
-    # build_handoff re-globs and the minted-draft handoffs are preserved exactly.
-    bh_catalog = catalog if not synth else None
+    # synthesis minted nothing (the steady-state common case) the once-loaded snapshot
+    # is still current; when it minted drafts, refresh it so a just-minted `_draft/`
+    # resolves into a handoff (the WARN-and-draft path) instead of WARN-and-drop. After
+    # this point `catalog` is authoritative for any consumer of the post-synthesis set.
+    if synth:
+        catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
     handoffs, pending_drafts, rc = _prepare_handoffs(
-        run_dir, deps, executed, joined_leads, catalog=bh_catalog
+        run_dir, deps, executed, joined_leads, catalog=catalog
     )
     if rc is not None:
         return rc
