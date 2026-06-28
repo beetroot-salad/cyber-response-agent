@@ -99,6 +99,14 @@ import yaml
 # this file directly with importlib.
 # ---------------------------------------------------------------------------
 
+# Ensure evals/ is on sys.path so the _secondary_config / _generation /
+# _pipeline / _summary peers are importable regardless of how this module is
+# loaded — script, spec_from_file_location, or ``import defender.evals.secondary``.
+# The peers each carry the same guard; the orchestrator needs it too.
+_EVALS_DIR = Path(__file__).resolve().parent
+if str(_EVALS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EVALS_DIR))
+
 from _secondary_config import (  # noqa: E402
     REPO_ROOT,
     LEARNING_DIR,
