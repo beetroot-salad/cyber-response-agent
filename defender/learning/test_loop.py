@@ -24,6 +24,7 @@ from defender.learning.core import directions as directions  # type: ignore[impo
 from defender.learning.pipeline.oracle import sample as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
+from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.pipeline.judge import run as subagents  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
@@ -488,13 +489,13 @@ def _obs(i: int) -> dict:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    return persist.read_jsonl_rows(path)
+    return _io.read_jsonl_rows(path)
 
 
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
     """Return (paths, learning_run_dir) rooted at tmp_path — no monkeypatching.
 
-    The _pending dir is intentionally NOT pre-created: `_append_jsonl` mkdirs it on
+    The _pending dir is intentionally NOT pre-created: `append_jsonl` mkdirs it on
     demand, so empty-case assertions verify the producer doesn't touch disk when
     there are zero rows. learning_run_dir resolves under paths.repo_root so the
     source_run_dir formatter's relative_to() works.

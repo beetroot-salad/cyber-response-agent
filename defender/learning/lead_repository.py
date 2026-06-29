@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from defender.learning.core.persist import read_jsonl_rows
+from defender._io import read_jsonl_rows
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 if TYPE_CHECKING:

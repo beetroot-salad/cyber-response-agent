@@ -9,7 +9,6 @@ import contextlib
 import datetime as _dt
 import fcntl
 import json
-import os
 import shutil
 import threading
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from collections.abc import Callable
 
 import yaml
 
+from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
@@ -63,37 +63,6 @@ def _load_jsonl_ids(path: Path, key: str) -> set[str]:
     return ids
 
 
-def _append_jsonl(path: Path, rows: list[dict]) -> int:
-    if not rows:
-        return 0
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as fh:
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
-    return len(rows)
-
-
-def read_jsonl_rows(path: Path) -> list[dict]:
-    """All rows in a JSONL file (tolerant of blank/malformed lines).
-
-    The single tolerant JSONL reader for the pending/consumed queues: a torn
-    line from an interrupted append is skipped, not raised, so a drain that
-    reads its queue never crashes on a half-written record.
-    """
-    if not path.is_file():
-        return []
-    rows: list[dict] = []
-    for line in path.read_text().splitlines():  # lint-jsonl-read: ok — the canonical tolerant reader
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            rows.append(json.loads(s))
-        except json.JSONDecodeError:
-            continue
-    return rows
-
-
 def _rewrite_queue(
     pending_file: Path,
     consumed_file: Path,
@@ -116,20 +85,17 @@ def _rewrite_queue(
         survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
     else:
         survivors = list(held)
-    tmp = pending_file.with_suffix(pending_file.suffix + ".tmp")
-    with tmp.open("w") as fh:
-        for entry in survivors:
-            fh.write(json.dumps(entry) + "\n")
-    os.replace(tmp, pending_file)
+    write_atomic(pending_file, "".join(json.dumps(entry) + "\n" for entry in survivors))
     if consumed:
         now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-        with consumed_file.open("a") as fh:
-            for entry in consumed:
-                rec = dict(entry)
-                rec.setdefault("consumed_at", now)
-                if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                    rec["consumed_commit"] = commit_sha
-                fh.write(json.dumps(rec) + "\n")
+        rows = []
+        for entry in consumed:
+            rec = dict(entry)
+            rec.setdefault("consumed_at", now)
+            if rec.get("consumed_category") == "consumed_committed" and commit_sha:
+                rec["consumed_commit"] = commit_sha
+            rows.append(rec)
+        append_jsonl(consumed_file, rows)
 
 
 def rotate_queue_locked(
@@ -252,8 +218,8 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
         # The two live tables (queries JSONL + the gather_raw/ tree). Staged
         # via the single lead_repository helper so this and the secondary-eval
         # staging step share one definition of the on-disk table set. Imported
-        # here, not at module load, to avoid a cycle: lead_repository imports
-        # read_jsonl_rows from this module.
+        # here, not at module load, to keep the persist→repository edge lazy
+        # (lead_repository pulls in the full read/join layer).
         from defender.learning import lead_repository
 
         lead_repository.stage_tables(run_dir, learning_run_dir)
@@ -349,29 +315,27 @@ def append_findings(
         outcome = _outcome_keyword(judge_doc["outcome"])
         audit_only_types, namespace = ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES, ""
     src = _source_run_dir(learning_run_dir, paths.repo_root)
-    appended = 0
     paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    with _flock(paths.findings_lock_file), paths.pending_file.open("a") as fh:
-        for n, f in enumerate(judge_doc["defender_findings"]):
-            if f["type"] in audit_only_types:
-                continue
-            entry = {
-                "schema_version": 1,
-                "finding_id": f"{run_id}/{namespace}{n}",
-                "run_id": run_id,
-                "alert_rule_key": alert_rule_key,
-                "direction": direction,
-                "type": f["type"],
-                "subject_anchor": f["subject_anchor"],
-                "subject_topic": f["subject_topic"],
-                "finding": f["finding"],
-                "judge_outcome": outcome,
-                "citations": f["citations"],
-                "source_run_dir": src,
-            }
-            fh.write(json.dumps(entry) + "\n")
-            appended += 1
-    return appended
+    rows = [
+        {
+            "schema_version": 1,
+            "finding_id": f"{run_id}/{namespace}{n}",
+            "run_id": run_id,
+            "alert_rule_key": alert_rule_key,
+            "direction": direction,
+            "type": f["type"],
+            "subject_anchor": f["subject_anchor"],
+            "subject_topic": f["subject_topic"],
+            "finding": f["finding"],
+            "judge_outcome": outcome,
+            "citations": f["citations"],
+            "source_run_dir": src,
+        }
+        for n, f in enumerate(judge_doc["defender_findings"])
+        if f["type"] not in audit_only_types
+    ]
+    with _flock(paths.findings_lock_file):
+        return append_jsonl(paths.pending_file, rows)
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +357,7 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
     if not rows:
         return 0
     with _flock(paths.pitfalls_lock_file):
-        return _append_jsonl(paths.pitfalls_pending_file, rows)
+        return append_jsonl(paths.pitfalls_pending_file, rows)
 
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
@@ -465,7 +429,7 @@ def _append_observations(
             if obs_id in existing:
                 continue
             rows.append(build_row(i, obs, obs_id))
-        return _append_jsonl(queue_file, rows)
+        return append_jsonl(queue_file, rows)
 
 
 def append_actor_observations(

@@ -38,6 +38,7 @@ from defender.learning.core.config import (
     env_int,
     pitfalls_threshold,
 )
+from defender._io import write_atomic
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME, Direction
 from defender.learning.author.branch import AuthorBranch, BranchError
@@ -335,11 +336,10 @@ def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
     by the author and learn queues so the two stages can't drift in marker shape."""
     queue_dir.mkdir(parents=True, exist_ok=True)
     marker = queue_dir / f"{run_dir.name}.json"
-    tmp = marker.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n"
+    write_atomic(
+        marker,
+        json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n",
     )
-    os.replace(tmp, marker)
     _log(f"enqueued for {label}: {marker}")
 
 
@@ -446,9 +446,7 @@ def _rewrite_marker(marker: Path, spec: dict) -> None:
     """Rewrite a queue marker in place, atomically (tmp + replace) — same write shape as
     ``_enqueue_marker`` — so bumping the transient-retry counter never leaves a window
     where the marker is missing (a concurrent drainer would otherwise see it vanish)."""
-    tmp = marker.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(spec) + "\n")
-    os.replace(tmp, marker)
+    write_atomic(marker, json.dumps(spec) + "\n")
 
 
 def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -> None:

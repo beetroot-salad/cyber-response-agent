@@ -1,0 +1,4 @@
+{
+  "//": "lint_unsafe_jsonl_io baseline — hand-rolled per-line json.loads readers and json.dumps+newline appends under defender/ that bypass _io.read_jsonl_rows / _io.append_jsonl (a dedup smell + the #446 torn-line read crash). Fingerprint is file:function (':append' suffix for the append check; no line number). CI fails on a fingerprint absent here. Regenerate: python scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to route through the shared _io helpers.",
+  "entries": {}
+}

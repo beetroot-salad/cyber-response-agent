@@ -41,21 +41,6 @@ def esc(s) -> str:
     return html.escape(s if isinstance(s, str) else json.dumps(s, indent=2))
 
 
-def load_jsonl(path: Path) -> list[dict]:
-    if not path.is_file():
-        return []
-    events: list[dict] = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            events.append({"type": "_parse_error", "raw": line})
-    return events
-
-
 def load_yaml(path: Path) -> dict | list | None:
     if not path.is_file() or yaml is None:
         return None

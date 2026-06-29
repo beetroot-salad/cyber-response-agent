@@ -42,8 +42,9 @@ import yaml
 
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
+from defender._io import read_jsonl_rows
 from defender.learning.core.config import make_logger
-from defender.learning.core.persist import read_jsonl_rows, rotate_queue_locked
+from defender.learning.core.persist import rotate_queue_locked
 
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
