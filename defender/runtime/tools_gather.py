@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic_ai import RunContext
@@ -46,6 +47,28 @@ from defender.scripts.gather_tools.record_query import (
 
 
 # --- gather dispatch (slice 2): main agent → nested Haiku gather agent --------
+
+@dataclass(frozen=True)
+class GatherRequest:
+    """The one lead the model dispatches `gather` to measure: the four
+    model-supplied dimensions as a single value object, threaded by reference
+    through the dispatch chain (closure → `_run_gather` → `_gather_prompt`)
+    instead of four loose positional args.
+
+    Built INSIDE the `gather` tool closure from its params — the closure's
+    signature is the model-facing tool schema, so the model still emits the four
+    fields separately; this object never reaches the schema. `what_to_summarize`
+    is stored as a tuple (the schema's `list[str]`, frozen at the boundary) so the
+    value object is fully immutable + hashable, matching the lead value object in
+    `learning/leads/lead_extraction.py`. `GatherDeps.lead_id` (the gather
+    subagent's capture-path deps) is a distinct layer, constructed from `lead_id`
+    here."""
+
+    lead_id: str
+    system: str
+    goal: str
+    what_to_summarize: tuple[str, ...]
+
 
 def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
     """Pull a model-supplied ``--query-id <id>`` (or ``--query-id=<id>``) off an
@@ -184,33 +207,32 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
 
 
 def _gather_prompt(
-    deps: RunDeps, lead_id: str, system: str, goal: str,
-    what_to_summarize: list[str], catalog: str | None,
+    deps: RunDeps, request: GatherRequest, catalog: str | None,
 ) -> str:
     """The gather subagent's user prompt: the dispatch block its SKILL reads, plus
     the descriptor catalog (every data-source system + its one-line description) —
     the progressive-disclosure index. Gather confirms its target (`system:` above)
     from the catalog, then Reads that system's full SKILL.md + execution.md on
     demand. Falls back to no catalog when it can't be built."""
-    wts = "\n".join(f"  - {d}" for d in what_to_summarize) or "  - (unspecified)"
+    wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
     block = (
         "Begin gathering this lead.\n\n"
         "## Dispatch\n```yaml\n"
         f"defender_dir: {deps.defender_dir}\n"
         f"run_dir: {deps.run_dir}\n"
-        f"lead_id: {lead_id}\n"
-        f"system: {system}\n"
-        f"goal: {goal}\n"
+        f"lead_id: {request.lead_id}\n"
+        f"system: {request.system}\n"
+        f"goal: {request.goal}\n"
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )
     if catalog:
         block += (
             "\n## Systems of record (descriptor index — frontmatter only, "
-            f"progressive disclosure). Your target is `system: {system}` above; "
+            f"progressive disclosure). Your target is `system: {request.system}` above; "
             "confirm it here. These descriptions are usually enough to pick a "
             f"template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{system}/SKILL.md` (and execution.md if "
+            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
             "present) ONLY on demand, when you need field vocab or CLI specifics the "
             "descriptor lacks; not on every dispatch.\n\n"
             f"{catalog}\n"
@@ -243,13 +265,13 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 
 
 async def _run_gather(
-    deps: RunDeps, gather_factory, request_limit: int,
-    lead_id: str, system: str, goal: str, what_to_summarize: list[str],
+    deps: RunDeps, gather_factory, request_limit: int, request: GatherRequest,
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
     without the main model: claim the lead → inject the descriptor catalog → run
     the nested gather agent → wrap the summary. The single-agent gather
     (#340) auto-captures its own adapter calls; there is no finder/assay layer."""
+    lead_id, system = request.lead_id, request.system
     # 0. Fail fast on a malformed lead_id. claim_lead treats a bad id as a benign
     # skip (returns 0, no sidecar), which would otherwise half-dispatch the lead
     # (nested agent spawned, no leads-table row) until capture() later rejects the
@@ -260,9 +282,11 @@ async def _run_gather(
             "verbatim — it is the FK joining the leads and queries tables."
         )
     # 1. Claim the lead id (atomic O_EXCL); a reused id bounces back to PLAN.
+    # `claim_lead` requires a list (it guards `isinstance(wtc, list)` and skips
+    # otherwise), so unfreeze the request's tuple back to a list at this boundary.
     if _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
-        "goal": goal, "what_to_summarize": what_to_summarize,
+        "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
     }) == 2:
         raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
 
@@ -292,7 +316,7 @@ async def _run_gather(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         run_id=deps.run_id, salt=deps.salt, lead_id=lead_id,
     )
-    prompt = _gather_prompt(deps, lead_id, system, goal, what_to_summarize, catalog)
+    prompt = _gather_prompt(deps, request, catalog)
     try:
         result = await gagent.run(
             prompt, deps=gdeps,
@@ -338,10 +362,14 @@ def register_gather_tool(
         dimensions the summary must cover. Returns a measurements-only summary;
         the queries it runs are captured to the queries table automatically. Issue
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
+        # Bundle the four model-supplied params into the value object at the tool
+        # boundary; everything inward takes the one object (rationale: GatherRequest).
+        # `what_to_summarize` arrives as the schema's `list[str]`; freeze it to a
+        # tuple so the value object is fully immutable + hashable.
+        request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))
         # Resolve `_run_gather` through the `tools` module (not the bare name) so
         # the e2e replay test's `setattr(tools, "_run_gather", fake)` intercepts
         # this dispatch — the call site must read the patched module attribute.
         return await tools._run_gather(
-            ctx.deps, gather_factory, request_limit,
-            lead_id, system, goal, what_to_summarize,
+            ctx.deps, gather_factory, request_limit, request,
         )
