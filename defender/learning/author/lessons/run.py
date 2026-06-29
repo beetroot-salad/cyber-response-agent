@@ -67,6 +67,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
+from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     AUTHOR_EFFORT,
     AUTHOR_MODEL,
@@ -78,12 +79,10 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.persist import (
     _flock,
-    read_jsonl_rows,
     rotate_queue_locked,
 )
 
 
-LESSONS_DIR_REL = "defender/lessons/"  # the scope-gate prefix for the shared git layer
 
 
 # Unified with _author_curator via the shared module — all three raise the same
@@ -101,6 +100,7 @@ class AuthorConfig:
     DEFENDER_LEARNING_STATE_DIR via the paths; prompts/corpus stay repo-relative."""
     repo_root: Path
     lessons_dir: Path
+    lessons_dir_rel: str
     runs_dir: Path
     pending_dir: Path
     pending_file: Path
@@ -131,6 +131,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
     return AuthorConfig(
         repo_root=paths.repo_root,
         lessons_dir=paths.lessons_dir,
+        lessons_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
         pending_dir=paths.pending_dir,
         pending_file=paths.pending_file,
@@ -279,13 +280,13 @@ def git_head_sha(repo_root: Path) -> str:
 
 def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
     """Author adapter over ``_shared.changes_outside`` — scope gate for ``defender/lessons/``."""
-    return _shared.changes_outside(cfg.repo_root, LESSONS_DIR_REL)
+    return _shared.changes_outside(cfg.repo_root, cfg.lessons_dir_rel)
 
 
 def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
     """Author adapter over ``_shared.commit_corpus`` — pins ``defender/lessons/`` and passes
     no provenance trailers (unlike the actor/env curators, the findings corpus carries none)."""
-    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, LESSONS_DIR_REL, message)
+    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, cfg.lessons_dir_rel, message)
 
 
 def lessons_dir_clean(cfg: AuthorConfig) -> bool:
@@ -377,7 +378,7 @@ def run_batch(
         repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
         repo_root=cfg.repo_root,
         corpus_dir=cfg.lessons_dir,
-        corpus_dir_rel=LESSONS_DIR_REL,
+        corpus_dir_rel=cfg.lessons_dir_rel,
         log=_log,
         inner=lambda: _run_batch_inner(cfg, hold_committed=hold_committed),
     )
@@ -508,7 +509,7 @@ def _author_to_author(
         return 2, None, [], [], []
     try:
         _shared.verify_agent_state(
-            cfg.repo_root, result, cfg.lessons_dir, LESSONS_DIR_REL,
+            cfg.repo_root, result, cfg.lessons_dir, cfg.lessons_dir_rel,
             "findings", baseline_stray,
         )
         _shared.validate_agent_result_partition(

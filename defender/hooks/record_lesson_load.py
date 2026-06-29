@@ -26,6 +26,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 from defender._clock import now_iso
+from defender._io import append_jsonl
 from defender.hooks._run_dir import resolve_run_dir
 
 
@@ -58,8 +59,7 @@ def main(*, stdin=None) -> int:
         if run_dir is None:
             return 0
         row = {"lesson_name": name, "ts": now_iso()}
-        with (run_dir / "lessons_loaded.jsonl").open("a") as fh:
-            fh.write(json.dumps(row) + "\n")
+        append_jsonl(run_dir / "lessons_loaded.jsonl", [row])
     except Exception:  # noqa: BLE001 — best-effort; the contract is to always exit 0
         return 0
     return 0

@@ -43,10 +43,10 @@ from defender.learning.core.config import (
     BENIGN_ACTOR_MODEL,
     DEFAULT_PATHS,
     LoopPaths,
+    QueueChannel,
 )
 
 
-LESSONS_ENV_DIR_REL = "defender/lessons-environment/"
 VERIFY_SCRIPT_REL = "defender/learning/author/verify_forward/env.py"
 
 # All model/wiring constants come from core.config (one source per env var, no
@@ -90,9 +90,7 @@ def invoke_agent(
 def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field that varies
     paths: LoopPaths,
     *,
-    pending_file: Path,
-    consumed_file: Path,
-    lock_file: Path,
+    channel: QueueChannel,
     outcome_author: frozenset[str],
     outcome_skip: frozenset[str],
     trailer_label: str,
@@ -106,10 +104,8 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
         corpus_dir=paths.lessons_environment_dir,
-        corpus_dir_rel=LESSONS_ENV_DIR_REL,
-        pending_file=pending_file,
-        consumed_file=consumed_file,
-        lock_file=lock_file,
+        corpus_dir_rel=paths.lessons_environment_dir_rel,
+        channel=channel,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         outcome_author=outcome_author,
@@ -131,9 +127,7 @@ def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorCon
     story held against the evidence, so the standing facts it grounds are reliable."""
     return _env_config(
         paths,
-        pending_file=paths.environment_observations_file,
-        consumed_file=paths.environment_observations_consumed_file,
-        lock_file=paths.environment_observations_lock_file,
+        channel=paths.environment_observations,
         outcome_author=frozenset({"survived"}),
         outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
         trailer_label="Benign-Actor-Model",
@@ -149,9 +143,7 @@ def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.Curat
     ``caught``/``incoherent`` (the refutation cited real telemetry)."""
     return _env_config(
         paths,
-        pending_file=paths.actor_environment_observations_file,
-        consumed_file=paths.actor_environment_observations_consumed_file,
-        lock_file=paths.actor_environment_observations_lock_file,
+        channel=paths.actor_environment_observations,
         outcome_author=frozenset({"caught", "incoherent"}),
         outcome_skip=frozenset({"survived", "undecidable"}),
         trailer_label="Actor-Env-Model",

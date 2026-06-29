@@ -11,7 +11,6 @@ clean version of the `tag_tool_results` annotation.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +21,7 @@ from defender._clock import now_iso
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
+from defender._io import append_jsonl
 from . import bash_exec
 from . import permission
 from .agent_role import AgentRole
@@ -126,8 +126,7 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
         return
     try:
         row = {"lesson_name": name, "ts": now_iso()}
-        with (deps.run_dir / "lessons_loaded.jsonl").open("a") as fh:
-            fh.write(json.dumps(row) + "\n")
+        append_jsonl(deps.run_dir / "lessons_loaded.jsonl", [row])
     except Exception:  # noqa: BLE001 — best-effort observability
         pass
 

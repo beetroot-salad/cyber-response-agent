@@ -26,6 +26,9 @@ REPO_ROOT = DEFENDER_DIR.parent
 # (the learning modules are imported lazily below); see tests/conftest.py.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from defender._run_paths import RunPaths  # noqa: E402
+
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
 # The single home for the runtime runs-base literal + its env resolution. Every
@@ -51,12 +54,12 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     run_dir = runs_base / run_id
     if run_dir.exists():
         sys.exit(f"run dir already exists: {run_dir}")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    shutil.copy(alert, run_dir / "alert.json")
+    RunPaths(run_dir).gather_raw.mkdir(parents=True)
+    shutil.copy(alert, RunPaths(run_dir).alert)
     # Per-run salt consumed by the tag_tool_results tagging to wrap untrusted
     # data-source output in unguessable delimiters. Stable across the run,
     # regenerated per run.
-    (run_dir / "meta.json").write_text(
+    RunPaths(run_dir).meta.write_text(
         json.dumps({"run_id": run_dir.name, "salt": secrets.token_hex(8)}, indent=2)
         + "\n"
     )
@@ -113,7 +116,7 @@ def cross_check_tables(run_dir: Path) -> None:
     the oracle/judge; leads with no queries are an informational MONITOR note.
     Never raises — a diagnostic must not abort the post-steps.
     """
-    if not (run_dir / "investigation.md").is_file():
+    if not RunPaths(run_dir).investigation.is_file():
         return
     try:
         from defender.learning import lead_repository

@@ -1,4 +1,0 @@
-{
-  "//": "lint_unsafe_jsonl_read baseline — hand-rolled per-line json.loads file readers in defender/learning/ that bypass core.persist.read_jsonl_rows (a dedup smell + the #446 torn-line crash class). Fingerprint is file:function (no line number). CI fails on a file:function absent here. Regenerate: python scripts/lint/lint_unsafe_jsonl_read.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to route through read_jsonl_rows.",
-  "entries": {}
-}

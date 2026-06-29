@@ -616,8 +616,8 @@ def test_read_batch_skips_torn_line(tmp_path):
     stays processable."""
     ctx = _isolate(tmp_path)
     cfg = _cfg(ctx, _consume_all)
-    cfg.pending_file.parent.mkdir(parents=True, exist_ok=True)
-    cfg.pending_file.write_text(
+    cfg.channel.file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.channel.file.write_text(
         json.dumps(_row("r1/0", "survived")) + "\n"
         + "\n"  # blank line
         + json.dumps(_row("r2/0", "survived")) + "\n"
@@ -630,6 +630,6 @@ def test_read_batch_skips_torn_line(tmp_path):
 def test_read_batch_missing_file_is_empty(tmp_path):
     ctx = _isolate(tmp_path)
     cfg = _cfg(ctx, _consume_all)
-    if cfg.pending_file.exists():
-        cfg.pending_file.unlink()
+    if cfg.channel.file.exists():
+        cfg.channel.file.unlink()
     assert curator.read_batch(cfg) == []

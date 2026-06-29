@@ -32,8 +32,9 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
-from defender.learning.core.persist import read_jsonl_rows
+from defender._io import read_jsonl_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
@@ -97,7 +98,8 @@ class CaseHit:
 
 
 def _report_disposition(run_dir: Path) -> str:
-    fm = parse_frontmatter_or_none((run_dir / "report.md").read_text()) or {} if (run_dir / "report.md").is_file() else {}
+    report = RunPaths(run_dir).report
+    fm = parse_frontmatter_or_none(report.read_text()) or {} if report.is_file() else {}
     return str(fm.get("disposition") or "?")
 
 

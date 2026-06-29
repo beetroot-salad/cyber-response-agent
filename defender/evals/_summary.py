@@ -6,12 +6,16 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Ensure evals/ is on sys.path so _secondary_config / _pipeline are importable
-# regardless of how this module is loaded.
+# Ensure evals/ is on sys.path so _secondary_config / _pipeline are importable,
+# and the repo root so `defender.*` resolves, regardless of how this module loads.
 _EVALS_DIR = Path(__file__).resolve().parent
 if str(_EVALS_DIR) not in sys.path:
     sys.path.insert(0, str(_EVALS_DIR))
+_REPO_ROOT = _EVALS_DIR.parents[1]  # defender/evals → repo root
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
+from defender._io import append_jsonl  # noqa: E402
 from _secondary_config import CATCH_OUTCOMES, SKIP_OUTCOME  # noqa: E402
 from _pipeline import AlertResult  # noqa: E402
 
@@ -138,7 +142,5 @@ def write_summary(summary: SecondarySummary, out_dir: Path) -> Path:
     for r in summary.results:
         (detail_dir / f"{r.slug}.json").write_text(json.dumps(r.to_dict(), indent=2))
 
-    index = out_dir / "index.jsonl"
-    with index.open("a") as fh:
-        fh.write(json.dumps(summary.to_index_row()) + "\n")
+    append_jsonl(out_dir / "index.jsonl", [summary.to_index_row()])
     return md

@@ -165,13 +165,14 @@ jobs:
       - name: Duplicate-helper gate (cross-module dup names — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_duplicate_helpers.py
 
-      # Hand-rolled per-line json.loads file readers in defender/learning/ that
-      # bypass core.persist.read_jsonl_rows — both a dedup smell and the #446
-      # torn-line crash class (a JSONDecodeError escapes every drain guard and
-      # crashes the worker every tick). New sites must route through the shared
-      # tolerant reader; the canonical reader is suppressed inline.
-      - name: Unsafe JSONL-read gate (tolerant-reader dedup + #446 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unsafe_jsonl_read.py
+      # Hand-rolled per-line json.loads readers + json.dumps+newline appends under
+      # defender/ that bypass defender._io.read_jsonl_rows / append_jsonl — both a
+      # dedup smell and the #446 torn-line read crash (a JSONDecodeError escapes
+      # every drain guard and crashes the worker every tick). New sites must route
+      # through the shared _io helpers; the canonical reader/appender are
+      # suppressed inline.
+      - name: Unsafe JSONL-io gate (tolerant-reader/appender dedup + #446 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unsafe_jsonl_io.py
 
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each

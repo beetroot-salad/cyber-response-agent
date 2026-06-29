@@ -13,7 +13,8 @@ runtime/observe.py documents.
 Shared helpers imported here:
   ``phase_verb``          — from ``visualize_data`` (phase-name verb accessor)
   ``usage_cost``          — from ``defender.scripts.pricing``
-  ``load_jsonl``, ``parse_report`` — from ``visualize_primitives``
+  ``read_jsonl_rows``     — from ``defender._io`` (the tolerant JSONL reader)
+  ``parse_report``        — from ``visualize_primitives``
 """
 from __future__ import annotations
 
@@ -21,9 +22,10 @@ import json
 import re
 from pathlib import Path
 
+from defender._io import read_jsonl_rows
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
-from defender.scripts.visualize.visualize_primitives import load_jsonl, parse_report
+from defender.scripts.visualize.visualize_primitives import parse_report
 
 
 LLM_REQUESTS = "llm_requests.jsonl"
@@ -31,7 +33,7 @@ LLM_REQUESTS = "llm_requests.jsonl"
 
 def load_messages(run_dir: Path) -> list[dict]:
     """Read llm_requests.jsonl → the per-message records. Missing file → []."""
-    return load_jsonl(run_dir / LLM_REQUESTS)
+    return read_jsonl_rows(run_dir / LLM_REQUESTS)
 
 
 def _pretty_model(name: str) -> str:

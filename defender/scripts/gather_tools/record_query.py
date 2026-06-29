@@ -66,6 +66,8 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._env import env_int
+from defender._io import append_jsonl, read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
@@ -335,25 +337,21 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     null``, so the next query won't reuse the seq and collide on
     ``(lead_id, seq)``.
     """
-    log = run_dir / "executed_queries.jsonl"
-    if not log.is_file():
-        return 0
+    log = RunPaths(run_dir).executed_queries
     try:
-        text = log.read_text()
+        rows = read_jsonl_rows(log)
     except OSError:
+        # A read error after the is_file() check (TOCTOU delete, permission,
+        # ENOSPC) degrades to seq 0 — the pre-_io behavior. read_jsonl_rows
+        # tolerates torn lines but not a failed read, and neither capture()
+        # call site (CLI main / in-process _capture_query) catches OSError, so
+        # letting it propagate would abort the whole gather instead.
         return 0
-    n = 0
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(rec, dict) and rec.get("lead_id") == lead:
-            n += 1
-    return n
+    return sum(
+        1
+        for rec in rows
+        if isinstance(rec, dict) and rec.get("lead_id") == lead
+    )
 
 
 def _derive_verb(inner: list[str]) -> str | None:
@@ -427,7 +425,7 @@ def capture(
         # A hung adapter must not hang the investigation — record it as an error.
         rc, out, err = 124, "", f"adapter timed out after {timeout}s"
 
-    lead_dir = run_dir / "gather_raw" / lead
+    lead_dir = RunPaths(run_dir).gather_raw / lead
     seq = _next_seq(run_dir, lead)
     payload_path = lead_dir / f"{seq}.json"
     payload_rel = None
@@ -453,9 +451,7 @@ def capture(
         "payload_digest": payload_digest(out, err, rc),
     }
     try:
-        log = run_dir / "executed_queries.jsonl"
-        with log.open("a") as fh:  # append is atomic for one short line
-            fh.write(json.dumps(record) + "\n")
+        append_jsonl(RunPaths(run_dir).executed_queries, [record])
     except OSError as e:
         print(f"record_query: could not append record: {e}", file=sys.stderr)
 

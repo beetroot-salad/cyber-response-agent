@@ -40,6 +40,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import run_common as _run  # noqa: E402
+from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
@@ -177,12 +178,12 @@ def main(argv: list[str]) -> int:
         _tw.open_case_ticket(run_dir)
         ticket_writer = _tw
 
-    salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
+    salt = json.loads(RunPaths(run_dir).meta.read_text()).get("salt", "")
     model = driver.resolve_main_model(ns.model)
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
     summary = asyncio.run(driver.run_investigation(
-        alert_path=run_dir / "alert.json",
+        alert_path=RunPaths(run_dir).alert,
         run_dir=run_dir,
         run_id=run_dir.name,
         defender_dir=DEFENDER_DIR,

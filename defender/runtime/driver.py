@@ -40,6 +40,7 @@ from .tools import (
 )
 
 from defender._env import env_bool
+from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     check_budgets,
@@ -284,7 +285,7 @@ def _compact_messages(messages: list, run_dir: Path) -> list:
     marker). The trimmed frontier is byte-stable while the active loop runs — its
     growing rows are excluded — so the prefix caches within a loop. Returns the
     original objects on passthrough; never raises (the caller guards too)."""
-    inv = run_dir / "investigation.md"
+    inv = RunPaths(run_dir).investigation
     inv_text = inv.read_text() if inv.is_file() else ""
     fold = compaction.fold_boundary(inv_text)
     marker = _frontier_index(messages)

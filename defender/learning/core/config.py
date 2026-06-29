@@ -25,19 +25,26 @@ from pathlib import Path
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
 from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in orchestrate
+# RunPaths is a neutral top-level value object (no learning dependency, so the
+# runtime/hooks/scripts can import it without coupling to the loop — #317).
+# Re-exported here so learning-side code keeps importing it off core.config.
+from defender._run_paths import RunPaths  # noqa: F401 — re-export
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
-class RunDirs:
-    """The two directories a direction leg threads together: the source ``run_dir``
-    (the finished investigation, read) and the per-case ``learning_run_dir`` (this
-    leg's artifacts, written)."""
+class QueueChannel:
+    """One _pending observation stream as a unit: its queue ``file``, the
+    ``consumed`` sink rows rotate into, and the ``lock`` serializing both. Always
+    consumed together, so callers take the channel instead of rebuilding the
+    triple by hand. (The ``findings`` stream is deliberately *not* a channel — it
+    has a queue + lock but no consumed sink.)"""
 
-    run_dir: Path
-    learning_run_dir: Path
+    file: Path
+    consumed: Path
+    lock: Path
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,21 @@ class LoopPaths:
     @property
     def lessons_environment_dir(self) -> Path:
         return self.repo_root / "defender" / "lessons-environment"
+
+    # Repo-relative twins of the three corpus dirs, used as git pathspec prefixes
+    # by the author commit/scope-gate. The trailing slash is significant (prefix
+    # match), so keep it. Repo-root-independent — these are the on-disk layout.
+    @property
+    def lessons_dir_rel(self) -> str:
+        return "defender/lessons/"
+
+    @property
+    def lessons_actor_dir_rel(self) -> str:
+        return "defender/lessons-actor/"
+
+    @property
+    def lessons_environment_dir_rel(self) -> str:
+        return "defender/lessons-environment/"
 
     @property
     def catalog_dir(self) -> Path:
@@ -123,16 +145,12 @@ class LoopPaths:
         return self._state_root / "_pending_pitfalls"
 
     @property
-    def pitfalls_pending_file(self) -> Path:
-        return self.pitfalls_pending_dir / "pitfalls.jsonl"
-
-    @property
-    def pitfalls_consumed_file(self) -> Path:
-        return self.pitfalls_pending_dir / "pitfalls.consumed.jsonl"
-
-    @property
-    def pitfalls_lock_file(self) -> Path:
-        return self.pitfalls_pending_dir / ".pitfalls.lock"
+    def pitfalls(self) -> QueueChannel:
+        return QueueChannel(
+            file=self.pitfalls_pending_dir / "pitfalls.jsonl",
+            consumed=self.pitfalls_pending_dir / "pitfalls.consumed.jsonl",
+            lock=self.pitfalls_pending_dir / ".pitfalls.lock",
+        )
 
     @property
     def author_lock_file(self) -> Path:
@@ -175,28 +193,20 @@ class LoopPaths:
         return self.pending_dir / ".findings.lock"
 
     @property
-    def actor_observations_file(self) -> Path:
-        return self.pending_dir / "actor_observations.jsonl"
+    def actor_observations(self) -> QueueChannel:
+        return QueueChannel(
+            file=self.pending_dir / "actor_observations.jsonl",
+            consumed=self.pending_dir / "actor_observations.consumed.jsonl",
+            lock=self.pending_dir / ".actor.lock",
+        )
 
     @property
-    def actor_observations_consumed_file(self) -> Path:
-        return self.pending_dir / "actor_observations.consumed.jsonl"
-
-    @property
-    def actor_observations_lock_file(self) -> Path:
-        return self.pending_dir / ".actor.lock"
-
-    @property
-    def environment_observations_file(self) -> Path:
-        return self.pending_dir / "environment_observations.jsonl"
-
-    @property
-    def environment_observations_consumed_file(self) -> Path:
-        return self.pending_dir / "environment_observations.consumed.jsonl"
-
-    @property
-    def environment_observations_lock_file(self) -> Path:
-        return self.pending_dir / ".environment.lock"
+    def environment_observations(self) -> QueueChannel:
+        return QueueChannel(
+            file=self.pending_dir / "environment_observations.jsonl",
+            consumed=self.pending_dir / "environment_observations.consumed.jsonl",
+            lock=self.pending_dir / ".environment.lock",
+        )
 
     # Adversarial env-fact stream — a second source for the SHARED
     # lessons-environment/ corpus (issue #298). Separate queue from the benign
@@ -204,16 +214,12 @@ class LoopPaths:
     # (clean per-commit trailers + per-direction outcome policy); both authors
     # commit into defender/lessons-environment/.
     @property
-    def actor_environment_observations_file(self) -> Path:
-        return self.pending_dir / "actor_environment_observations.jsonl"
-
-    @property
-    def actor_environment_observations_consumed_file(self) -> Path:
-        return self.pending_dir / "actor_environment_observations.consumed.jsonl"
-
-    @property
-    def actor_environment_observations_lock_file(self) -> Path:
-        return self.pending_dir / ".actor_environment.lock"
+    def actor_environment_observations(self) -> QueueChannel:
+        return QueueChannel(
+            file=self.pending_dir / "actor_environment_observations.jsonl",
+            consumed=self.pending_dir / "actor_environment_observations.consumed.jsonl",
+            lock=self.pending_dir / ".actor_environment.lock",
+        )
 
 
 def _env_state_dir() -> Path | None:
@@ -241,6 +247,17 @@ def learning_state_root() -> Path:
     which the off-process worker invokes after setting the env) call this so they
     mirror ``LoopPaths.runs_dir`` from one source instead of re-reading the env."""
     return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
+
+
+def learning_run_paths(run_id: str) -> RunPaths:
+    """A learning-leg ``RunPaths`` for ``run_id``, deriving ``learning_run_dir`` from
+    the call-time ``learning_state_root()`` so a separately-spawned renderer honors
+    ``DEFENDER_LEARNING_STATE_DIR``. The single source for the
+    ``<state_root>/runs/<run_id>`` path that ``orchestrate`` and the visualizers both
+    need — no parallel re-derivation (the latent "renders an empty judge page" bug).
+    Rooted at ``learning_run_dir`` so the copied artifact accessors resolve there."""
+    learning_run_dir = learning_state_root() / "runs" / run_id
+    return RunPaths(run_dir=learning_run_dir, learning_run_dir=learning_run_dir)
 
 
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
