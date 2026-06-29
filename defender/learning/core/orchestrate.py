@@ -28,6 +28,7 @@ from defender.learning.core.config import (
     GROUND_TRUTH_FILE,
     MERGE_MODE,
     VALID_MERGE_MODES,
+    FatalConfigError,
     LoopError,
     LoopPaths,
     RunDirs,
@@ -246,17 +247,22 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
 
     Three per-marker outcomes, signalled to ``_drain_lead_author_markers``:
       * ``rc == 0`` — success; returns normally and the drain unlinks the marker.
-      * ``rc not in (0, None)`` (the agent crashed / timed out) — raises ``LoopError`` so
-        the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
-        path gets.
+      * ``rc not in (0, None)`` (the agent crashed / timed out) — raises ``LeadAuthorError``
+        so the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
+        path gets. It is deliberately ``LeadAuthorError`` (a plain ``Exception``, *not* a
+        ``LoopError``): an agent crash dooms only *this* marker, so it must keep quarantining
+        even if a future audit adds an ``except LoopError: raise`` to this drain — only the
+        systemic ``FatalConfigError`` re-raises to exit 2.
       * ``rc is None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
         ``_run_curator_module`` — the run did not complete) — raises ``_LeadAuthorRetry``
         so the drain leaves the marker queued for a bounded number of retries, then
         quarantines (a persistent pseudo-transient can't retry forever unsurfaced)."""
+    from defender.learning.leads.lead_extraction import LeadAuthorError
+
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths))
     if rc not in (0, None):
-        raise LoopError(f"lead-author returned rc={rc}")
+        raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
     if rc is None:
         raise _LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
@@ -576,6 +582,13 @@ def _drain_lead_author_markers(
             continue
         try:
             run_lead_author(paths, run_dir)
+        except FatalConfigError:
+            # Systemic misconfig (e.g. a non-numeric LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read
+            # deep inside run() -> _prepare_handoffs): it dooms every marker, not just this
+            # one. Re-raise past the broad quarantine guard below so it propagates to
+            # _run_stage as the contracted exit 2 — the marker stays queued (not quarantined)
+            # and the operator gets "fix your config," not a mislabeled lead-author-error.
+            raise
         except _LeadAuthorRetry as e:
             # Transient (rc=None): the run did not complete. Leave the marker queued for a
             # bounded number of retries — the attempt count rides in the marker, so it
@@ -630,6 +643,13 @@ def _drain_pitfalls(
     failure has its uncommitted edits discarded) and the queue stays intact for retry."""
     try:
         run_pitfalls(paths)
+    except FatalConfigError:
+        # Defense-in-depth, no current trigger: the only fatal config run_pitfalls reads
+        # (the pitfalls threshold) is already validated up front at the _has_lead_author_work
+        # wake gate (#437), so a bad value aborts before this runs. This re-raise mirrors
+        # _drain_lead_author_markers and guards any *future* fatal-config read added inside
+        # run_pitfalls from being swallowed (exit 0) by the broad guard below.
+        raise
     except Exception as e:  # noqa: BLE001 — a poison batch must not wedge the serial drain
         _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")
     finally:
@@ -651,9 +671,9 @@ def _drain_lead_author(
 def _validate_merge_mode() -> None:
     """Validated at the author stage (not at config import) so an author-only
     misconfig fails loud for the drains without crashing the LEARN / run_one
-    importers that never read it. main() maps LoopError→rc 2."""
+    importers that never read it. main() maps FatalConfigError (a LoopError)→rc 2."""
     if MERGE_MODE not in VALID_MERGE_MODES:
-        raise LoopError(
+        raise FatalConfigError(
             f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
         )
 
@@ -858,6 +878,13 @@ def _process_marker(
     try:
         run_one_fn(run_dir)
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
+        # NB asymmetry vs. the lead-author drain: this guard deliberately has NO
+        # `except FatalConfigError: raise` clause. run_one reads no operator config, so
+        # nothing fatal-config reaches here; its LoopErrors are per-run *data* failures
+        # (malformed report.md / judge YAML, missing keys — ~30 sites in core/validate.py)
+        # that MUST keep quarantining. Adding the fatal re-raise here would turn every
+        # corrupt-data run into a worker-killing exit 2 — a regression a future audit
+        # must not "fix" in.
         _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
         return False
     try:
