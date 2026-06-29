@@ -84,6 +84,10 @@ class CuratorConfig:
     # Commit-message trailer key (no colon) + its generation counter.
     trailer_label: str
     generation_fn: Callable[[], int]
+    # Actor model stamped into the {trailer_label}: provenance trailer — commit
+    # metadata, NOT authoring input (the curator agent never sees it). Sourced from
+    # core.config's ACTOR_MODEL/BENIGN_ACTOR_MODEL, the same constants the real actor
+    # invocation reads, so the recorded model matches the model the actor ran at (#449).
     actor_model: str
     log_prefix: str
     # Curator agent (claude -p) wiring.

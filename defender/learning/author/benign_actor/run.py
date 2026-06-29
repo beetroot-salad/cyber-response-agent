@@ -36,21 +36,27 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import curator as _curator
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
-from defender.learning.core.config import DEFAULT_PATHS, LoopPaths
+from defender.learning.core.config import (
+    ACTOR_MODEL,
+    BENIGN_ACTOR_MODEL,
+    DEFAULT_PATHS,
+    LoopPaths,
+)
 
 
 LESSONS_ENV_DIR_REL = "defender/lessons-environment/"
 VERIFY_SCRIPT_REL = "defender/learning/author/verify_forward/env.py"
 
 # The curator *agent* model/effort/timeout are shared across directions — only the
-# *actor* model (recorded in the commit trailer + handed to the curator as context)
-# differs per source.
+# *actor* model differs per source. The actor model is NOT authoring input (the
+# curator agent never sees it): it is commit provenance, stamped into the per-source
+# trailer (Benign-Actor-Model: / Actor-Env-Model:). ACTOR_MODEL/BENIGN_ACTOR_MODEL
+# are imported from core.config — the SAME constants the real actor invocations read
+# (pipeline/*_actor/run.py) — so the recorded model can't diverge from the model the
+# actor actually ran at via a second env read (issue #449).
 AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
 AUTHOR_ENV_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", "1800"))
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
-
-BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
-ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 
 # Re-exported for callers/tests that referenced the curator's fatal error type here.
 AuthorError = _curator.AuthorError
