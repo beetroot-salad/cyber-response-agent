@@ -76,7 +76,7 @@ AUTH_KINDS: tuple[str, ...] = (
 STRONG_AUTH_KINDS: frozenset[str] = frozenset(
     {"siem-event", "runtime-audit", "authoritative-source"}
 )
-assert STRONG_AUTH_KINDS <= set(AUTH_KINDS), (
+assert STRONG_AUTH_KINDS.issubset(AUTH_KINDS), (
     "STRONG_AUTH_KINDS must be a subset of AUTH_KINDS"
 )
 
