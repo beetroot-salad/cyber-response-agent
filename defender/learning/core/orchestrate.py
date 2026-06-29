@@ -695,7 +695,8 @@ def _drain_pitfalls(
     """The pitfalls curation phase of the lead-author drain: fold queued general
     failures into per-system ``execution.md`` (once per drain; ``run_pitfalls`` is
     cross-run + threshold-gated internally). A curation hiccup must not wedge the
-    drain, so any error is logged and swallowed; the shared worktree is then left
+    drain, so a curation error is logged and swallowed (a systemic ``StageAbort`` still
+    propagates to the contracted exit 2 — see the body); the shared worktree is then left
     clean (a successful run already committed, so this is a no-op for it; a mid-edit
     failure has its uncommitted edits discarded) and the queue stays intact for retry."""
     try:
