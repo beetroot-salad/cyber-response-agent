@@ -373,14 +373,18 @@ def _lead_summary(leads: list) -> str:
 # ---------------------------------------------------------------------------
 
 _ASSETS = Path(__file__).resolve().parent / "assets"
-CSS = (_ASSETS / "styles.css").read_text()
+# encoding pinned to utf-8: the assets carry non-ASCII bytes (em-dashes, §, ·, →)
+# and the old inline literals were always decoded as utf-8 (PEP 3120). A bare
+# read_text() would instead use the locale encoding, so importing this module
+# under a C/POSIX locale (utf-8 mode off) would raise UnicodeDecodeError.
+CSS = (_ASSETS / "styles.css").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
 # Runtime-page interactivity: transcript search / filter + phase scroll-spy
 # ---------------------------------------------------------------------------
 
-RUNTIME_JS = (_ASSETS / "runtime.js").read_text()
+RUNTIME_JS = (_ASSETS / "runtime.js").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
