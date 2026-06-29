@@ -9,6 +9,8 @@ the drain to `_run_stage`, which maps it to rc 2.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from defender.learning.core import config  # type: ignore[import-not-found]
@@ -180,6 +182,161 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
 
     with pytest.raises(FatalConfigError):
         orchestrate._drain_pitfalls(paths, _run_pitfalls)
+
+
+# --- #442: the drain CALL SITES wire the primitive correctly -----------------
+#
+# _run_or_dead_letter's own unit tests (below) pin the primitive's contract in isolation;
+# these pin that _drain_lead_author_markers / _drain_pitfalls actually route through it —
+# the success unlink, the dead-letter quarantine, the `propagate=(_LeadAuthorRetry,)` retry
+# hand-off, and the pitfalls swallow. A primitive that is correct in isolation can still be
+# mis-wired at the call site (a dropped `propagate=` would turn every transient into a
+# silent quarantine), and the success path is the PR's core change (`else:`/`if drained:`).
+
+
+def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
+    """A clean lead-author run drains the marker: success makes `if drained:` unlink it, so
+    it is neither left queued (re-authored every tick) nor quarantined."""
+    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
+    paths = LoopPaths(repo_root=tmp_path)
+    run_dir = tmp_path / "run-ok"
+    run_dir.mkdir()
+    orchestrate._enqueue_for_authoring(run_dir, paths)
+
+    orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
+
+    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
+    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+
+
+def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
+    """A plain (non-systemic) failure is dead-lettered: the marker moves to failed/ with a
+    lead-author-error reason and is NOT unlinked as if it had succeeded."""
+    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
+    paths = LoopPaths(repo_root=tmp_path)
+    run_dir = tmp_path / "run-boom"
+    run_dir.mkdir()
+    orchestrate._enqueue_for_authoring(run_dir, paths)
+
+    def _run_lead_author(_paths, _run_dir):
+        raise RuntimeError("poison run dir")
+
+    orchestrate._drain_lead_author_markers(paths, _run_lead_author)
+
+    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
+    failed = paths.author_queue_dir / "failed" / f"{run_dir.name}.json"
+    assert failed.exists()
+    assert "lead-author-error" in json.loads(failed.read_text())["failed"]
+
+
+def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, monkeypatch):
+    """A _LeadAuthorRetry must reach the drain's retry handler via `propagate=`, NOT the
+    dead-letter branch: the marker stays queued with a bumped attempt count. This is the
+    regression guard for the `propagate=(_LeadAuthorRetry,)` wiring — drop that argument and
+    the transient is silently quarantined instead of retried."""
+    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
+    paths = LoopPaths(repo_root=tmp_path)
+    run_dir = tmp_path / "run-transient"
+    run_dir.mkdir()
+    orchestrate._enqueue_for_authoring(run_dir, paths)
+
+    def _run_lead_author(_paths, _run_dir):
+        raise orchestrate._LeadAuthorRetry("rc=None transient")
+
+    orchestrate._drain_lead_author_markers(paths, _run_lead_author)
+
+    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    assert marker.exists()  # left queued for retry, not quarantined
+    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+    assert json.loads(marker.read_text())["attempts"] == 1
+
+
+def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
+    """The dead-letter branch of _drain_pitfalls: a plain curation hiccup must not wedge the
+    drain — it is logged and swallowed, so the call returns normally (the systemic StageAbort
+    path is the sibling reraise test)."""
+    paths = LoopPaths(repo_root=tmp_path)
+
+    def _run_pitfalls(_paths):
+        raise RuntimeError("curation hiccup")
+
+    orchestrate._drain_pitfalls(paths, _run_pitfalls)  # must not raise
+
+
+# --- #442: the dead-letter contract is enforced by one primitive, not per-site discipline ---
+#
+# _run_or_dead_letter is the single place "re-raise StageAbort, dead-letter the rest"
+# lives, so the invariant has one regression guard instead of one hand-copied clause per
+# swallow site (the #438 footgun: a new drain that forgets the re-raise silently regresses).
+
+
+def test_run_or_dead_letter_returns_true_on_success():
+    """A clean run reports success (so the caller can unlink the marker) and never
+    invokes the dead-letter callback."""
+    calls: list[Exception] = []
+    ok = orchestrate._run_or_dead_letter(lambda: None, calls.append)
+    assert ok is True
+    assert calls == []
+
+
+def test_run_or_dead_letter_dead_letters_a_plain_exception():
+    """A per-item failure is dead-lettered: the callback fires with the exception and the
+    helper reports failure (no re-raise) so the serial drain keeps going."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise RuntimeError("poison item")
+
+    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    assert ok is False
+    assert len(calls) == 1
+    assert isinstance(calls[0], RuntimeError)
+
+
+def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
+    """A RunUnprocessable is a per-run *data* failure (the ~30 validate.py sites): it must
+    dead-letter like any other Exception — only the StageAbort family is special."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise RunUnprocessable("malformed report.md")
+
+    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    assert ok is False
+    assert len(calls) == 1
+    assert isinstance(calls[0], RunUnprocessable)
+
+
+def test_run_or_dead_letter_reraises_stage_abort():
+    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it
+    reaches _run_stage as the contracted exit 2. The callback must not fire. Both a bare
+    StageAbort and its FatalConfigError subclass must escape (the primitive catches the
+    base, so a future systemic-fault type is covered for free — #443/#445)."""
+    for exc in (StageAbort("systemic fault"), FatalConfigError("non-numeric threshold")):
+        calls: list[Exception] = []
+
+        def _boom(exc=exc):
+            raise exc
+
+        with pytest.raises(StageAbort):
+            orchestrate._run_or_dead_letter(_boom, calls.append)
+        assert calls == []
+
+
+def test_run_or_dead_letter_propagates_declared_control_flow():
+    """A type in `propagate` is drain-specific control flow (e.g. _LeadAuthorRetry's
+    bounded retry), not a dead-letter: it escapes the guard for the caller to handle,
+    and the callback must not fire."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise orchestrate._LeadAuthorRetry("transient")
+
+    with pytest.raises(orchestrate._LeadAuthorRetry):
+        orchestrate._run_or_dead_letter(
+            _boom, calls.append, propagate=(orchestrate._LeadAuthorRetry,)
+        )
+    assert calls == []
 
 
 class _StubBranch:

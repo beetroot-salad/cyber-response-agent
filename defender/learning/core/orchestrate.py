@@ -8,6 +8,7 @@ instead of monkeypatching module globals.
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib
 import json
 import os
@@ -465,6 +466,49 @@ def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -
     _log(f"quarantined {spec.get('run_id')} — {reason}")
 
 
+def _run_or_dead_letter(
+    fn: Callable[[], object],
+    on_dead_letter: Callable[[Exception], None],
+    *,
+    propagate: tuple[type[BaseException], ...] = (),
+) -> bool:
+    """Run ``fn`` under the author drains' dead-letter contract; return ``True`` on
+    success, ``False`` if it was dead-lettered.
+
+    This is the **one** place the systemic-vs-quarantine invariant lives, so a drain
+    can't hand-roll a broad ``except Exception`` that silently swallows a systemic
+    fault (the #438 regression):
+
+      * ``StageAbort`` is **always re-raised** — a systemic fault (e.g.
+        ``FatalConfigError``, a misconfig that dooms every item, not just this one)
+        must reach ``_run_stage`` as the contracted ``exit 2`` rather than being
+        mislabeled as a per-item failure. (It can't be caught in an outer wrapper
+        instead: the broad guard below is *inside* the drain, so an outer ``except``
+        can never recatch what this one already swallowed.) Catching the ``StageAbort``
+        base — not ``FatalConfigError`` — keeps any future systemic-fault type
+        re-raising here for free (#443/#445).
+      * any type in ``propagate`` is re-raised too — drain-specific control flow
+        (e.g. ``_LeadAuthorRetry``'s bounded retry) that the caller handles itself;
+        it is *not* a dead-letter and must escape this guard.
+      * every other ``Exception`` is dead-lettered: ``on_dead_letter(e)`` is invoked
+        (quarantine the marker, or just log for a marker-less phase) and the drain
+        keeps going. ``RunUnprocessable`` per-run *data* failures land here and
+        quarantine, exactly as before — only the ``StageAbort`` family is special.
+
+    A new drain that routes its swallow site through this helper is systemic-fault-safe
+    for free; one that hand-rolls ``except Exception`` is the visible odd-one-out.
+    """
+    reraise: tuple[type[BaseException], ...] = (StageAbort, *propagate)
+    try:
+        fn()
+    except reraise:
+        raise
+    except Exception as e:  # noqa: BLE001 — the sole dead-letter guard for the drains
+        on_dead_letter(e)
+        return False
+    return True
+
+
 def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     """The (pending_file, threshold_env) pairs the three curators drain."""
     checks = [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
@@ -550,6 +594,15 @@ def _discard_worktree_changes(repo_root: Path) -> None:
         )
 
 
+def _quarantine_lead_author_failure(
+    spec: dict, marker: Path, queue_dir: Path, e: Exception
+) -> None:
+    """The lead-author drain's dead-letter action: quarantine the marker with a
+    lead-author-error reason. Bound (via ``functools.partial``) to the per-marker
+    spec/marker so it satisfies ``_run_or_dead_letter``'s ``Callable[[Exception], None]``."""
+    _quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[[LoopPaths, Path], None],
@@ -582,16 +635,22 @@ def _drain_lead_author_markers(
             _quarantine_marker(spec, marker, paths.author_queue_dir, "artifact-missing")
             continue
         try:
-            run_lead_author(paths, run_dir)
-        except StageAbort:
-            # A systemic failure (e.g. a non-numeric LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read
-            # deep inside run() -> _prepare_handoffs, surfaced as FatalConfigError): it dooms
-            # every marker, not just this one. Re-raise past the broad quarantine guard below
-            # so it propagates to _run_stage as the contracted exit 2 — the marker stays queued
-            # (not quarantined) and the operator gets "fix your config," not a mislabeled
-            # lead-author-error. (Catching the StageAbort base, not FatalConfigError, keeps any
-            # future systemic-fault type re-raising here for free.)
-            raise
+            # The dead-letter contract (re-raise StageAbort -> exit 2; quarantine any
+            # other poison run dir so it can't wedge the serial drain or re-crash every
+            # tick) lives in _run_or_dead_letter. A systemic fault here — e.g. a non-numeric
+            # LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read deep inside run() -> _prepare_handoffs,
+            # surfaced as FatalConfigError (a StageAbort) — dooms every marker, so the
+            # primitive propagates it past the broad quarantine guard to the contracted
+            # exit 2. _LeadAuthorRetry is drain-specific control flow, not a dead-letter, so
+            # it's propagated out and handled below. (functools.partial binds run_dir/spec/marker
+            # eagerly, so each call closes over *this* iteration's values, not the loop's last.)
+            drained = _run_or_dead_letter(
+                functools.partial(run_lead_author, paths, run_dir),
+                functools.partial(
+                    _quarantine_lead_author_failure, spec, marker, paths.author_queue_dir
+                ),
+                propagate=(_LeadAuthorRetry,),
+            )
         except _LeadAuthorRetry as e:
             # Transient (rc=None): the run did not complete. Leave the marker queued for a
             # bounded number of retries — the attempt count rides in the marker, so it
@@ -611,18 +670,13 @@ def _drain_lead_author_markers(
                     f"(attempt {attempts}/{max_retries}) — left queued for retry"
                 )
             continue
-        except Exception as e:  # noqa: BLE001 — one poison run dir must not wedge
-            # the whole serial drain (and re-crash every tick on the same
-            # marker): quarantine it and move on to the remaining work.
-            _quarantine_marker(spec, marker, paths.author_queue_dir, f"lead-author-error: {e!r}")
-            continue
-        else:
-            with contextlib.suppress(OSError):
-                marker.unlink()
         finally:
             # Always leave the shared worktree clean for the next marker — committed work
             # survives, uncommitted leftovers (a quarantined or rc!=0 marker) are dropped.
             _discard_worktree_changes(paths.repo_root)
+        if drained:
+            with contextlib.suppress(OSError):
+                marker.unlink()
 
 
 def _invoke_pitfalls(paths: LoopPaths) -> int:
@@ -641,20 +695,23 @@ def _drain_pitfalls(
     """The pitfalls curation phase of the lead-author drain: fold queued general
     failures into per-system ``execution.md`` (once per drain; ``run_pitfalls`` is
     cross-run + threshold-gated internally). A curation hiccup must not wedge the
-    drain, so any error is logged and swallowed; the shared worktree is then left
+    drain, so a curation error is logged and swallowed (a systemic ``StageAbort`` still
+    propagates to the contracted exit 2 — see the body); the shared worktree is then left
     clean (a successful run already committed, so this is a no-op for it; a mid-edit
     failure has its uncommitted edits discarded) and the queue stays intact for retry."""
     try:
-        run_pitfalls(paths)
-    except StageAbort:
-        # Defense-in-depth, no current trigger: the only fatal config run_pitfalls reads
-        # (the pitfalls threshold) is already validated up front at the _has_lead_author_work
-        # wake gate (#437), so a bad value aborts before this runs. This re-raise mirrors
-        # _drain_lead_author_markers and guards any *future* systemic fault added inside
-        # run_pitfalls from being swallowed (exit 0) by the broad guard below.
-        raise
-    except Exception as e:  # noqa: BLE001 — a poison batch must not wedge the serial drain
-        _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")
+        # Dead-letter contract via the shared primitive (re-raise StageAbort -> exit 2,
+        # swallow the rest). There's no marker here — pitfalls is a queue-file curation — so
+        # the dead-letter action just logs; the finally discards any mid-edit leftovers.
+        # The StageAbort re-raise is defense-in-depth, no current trigger: the only fatal
+        # config run_pitfalls reads (the pitfalls threshold) is already validated up front at
+        # the _has_lead_author_work wake gate (#437), so a bad value aborts before this runs.
+        # It guards any *future* systemic fault added inside run_pitfalls from being swallowed
+        # (exit 0).
+        _run_or_dead_letter(
+            lambda: run_pitfalls(paths),
+            lambda e: _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits"),
+        )
     finally:
         _discard_worktree_changes(paths.repo_root)
 
@@ -881,14 +938,17 @@ def _process_marker(
     try:
         run_one_fn(run_dir)
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
-        # NB asymmetry vs. the lead-author drain: this guard deliberately has NO
-        # `except StageAbort: raise` clause. run_one reads no operator config, so nothing
-        # systemic (no FatalConfigError, no StageAbort) reaches here; its failures are
-        # RunUnprocessable — per-run *data* failures (malformed report.md / judge YAML,
-        # missing keys — ~30 sites in core/validate.py) that MUST keep quarantining. Adding
-        # a StageAbort re-raise here would be harmless (run_one raises none), but adding a
-        # RunUnprocessable re-raise would turn every corrupt-data run into a worker-killing
-        # exit 2 — a regression a future audit must not "fix" in.
+        # NB asymmetry vs. the lead-author drain: this guard is deliberately hand-rolled and
+        # does NOT route through _run_or_dead_letter — i.e. it has no `except StageAbort: raise`.
+        # run_one reads no operator config, so nothing systemic (no FatalConfigError, no
+        # StageAbort) reaches here; its failures are RunUnprocessable — per-run *data* failures
+        # (malformed report.md / judge YAML, missing keys — ~30 sites in core/validate.py) that
+        # MUST keep quarantining. Routing through the primitive would be behavior-neutral *today*
+        # (the StageAbort re-raise it adds would fire on a fault that never arrives), but the
+        # absence is the point: this is the one swallow site whose disposition is "quarantine
+        # everything," and a future audit must not "fix" a StageAbort/RunUnprocessable re-raise
+        # in — a RunUnprocessable re-raise would turn every corrupt-data run into a worker-killing
+        # exit 2. See #442/#443.
         _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
         return False
     try:
