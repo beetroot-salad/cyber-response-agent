@@ -154,6 +154,54 @@ def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unp
     assert not issubclass(RunUnprocessable, StageAbort)
 
 
+def test_every_stage_abort_except_clause_in_orchestrate_also_names_fatal_config():
+    """The structural guard for #468's cause/response split. FatalConfigError is no
+    longer a StageAbort *subclass*, so the exit-2 contract rests on it being NAMED
+    alongside StageAbort at every systemic catch site rather than inherited — the type
+    system no longer enforces it, so this test does.
+
+    It parses orchestrate.py's AST and asserts every literal ``except`` clause that
+    catches ``StageAbort`` also catches ``FatalConfigError``. The risk this defends: the
+    drain-design contract is "route the swallow site through _run_or_dead_letter and be
+    systemic-fault-safe for free; a hand-rolled ``except`` is the odd-one-out" — and a
+    hand-rolled ``except StageAbort: raise`` in a future drain would silently DROP a
+    FatalConfigError to per-marker quarantine (exit 0) instead of the contracted exit 2
+    (the #438 class of bug). Such a clause fails here.
+
+    Note the two existing sites are covered without overlap: _run_stage's literal
+    ``except (StageAbort, FatalConfigError)`` is checked here; _run_or_dead_letter's
+    ``except reraise:`` indirection (reraise = (StageAbort, FatalConfigError, *propagate))
+    is opaque to the AST and is pinned behaviorally by
+    test_run_or_dead_letter_reraises_systemic_faults. A future maintainer who genuinely
+    wants a StageAbort-only catch (not a known need) must update this test deliberately."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(orchestrate.__file__).read_text())
+
+    def _caught_names(node: ast.expr | None) -> set[str]:
+        """The exception types a handler names: a bare Name, or a tuple of Names.
+        An ``except <var>:`` indirection yields just the var name (e.g. 'reraise')."""
+        if node is None:
+            return set()
+        elts = node.elts if isinstance(node, ast.Tuple) else [node]
+        return {e.id for e in elts if isinstance(e, ast.Name)}
+
+    orphans = [
+        handler.lineno
+        for handler in ast.walk(tree)
+        if isinstance(handler, ast.ExceptHandler)
+        and "StageAbort" in _caught_names(handler.type)
+        and "FatalConfigError" not in _caught_names(handler.type)
+    ]
+    assert not orphans, (
+        f"orchestrate.py has `except StageAbort` clause(s) at line(s) {orphans} that "
+        "do not also name FatalConfigError. Since #468 FatalConfigError is enrolled "
+        "(not subclassed), so it must ride along at every systemic catch site or a "
+        "config misconfig is silently dead-lettered instead of mapped to exit 2."
+    )
+
+
 def test_env_int_raises_fatal_config_error_on_non_numeric(monkeypatch):
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     with pytest.raises(FatalConfigError, match="LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD"):
