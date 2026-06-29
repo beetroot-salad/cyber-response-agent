@@ -29,7 +29,7 @@ def read_jsonl_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     rows: list[dict] = []
-    for line in path.read_text().splitlines():  # lint-jsonl-read: ok — the canonical tolerant reader
+    for line in path.read_text().splitlines():  # lint-jsonl-io: ok — the canonical tolerant reader
         s = line.strip()
         if not s:
             continue
@@ -50,7 +50,7 @@ def append_jsonl(path: Path, rows: list[dict]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as fh:
         for row in rows:
-            fh.write(json.dumps(row) + "\n")
+            fh.write(json.dumps(row) + "\n")  # lint-jsonl-io: ok — the canonical JSONL appender
     return len(rows)
 
 

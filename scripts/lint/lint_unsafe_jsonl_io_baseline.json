@@ -1,0 +1,8 @@
+{
+  "//": "lint_unsafe_jsonl_io baseline — hand-rolled per-line json.loads readers and json.dumps+newline appends under defender/ that bypass _io.read_jsonl_rows / _io.append_jsonl (a dedup smell + the #446 torn-line read crash). Fingerprint is file:function (':append' suffix for the append check; no line number). CI fails on a fingerprint absent here. Regenerate: python scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to route through the shared _io helpers.",
+  "entries": {
+    "defender/evals/_summary.py:write_summary:append": "debt: researcher-cadence eval tooling, outside the #447 _io migration; route through append_jsonl when next touched",
+    "defender/hooks/record_lesson_load.py:main:append": "debt: the retired claude -p hook entrypoint (the in-process twin in runtime/tools.py was already migrated); route through append_jsonl when next touched",
+    "defender/learning/core/persist.py:append_findings:append": "debt: the findings pending-queue writer; a filter+count flock'd append, migratable to append_jsonl (build rows, append under the flock) — left for a focused, test-covered change"
+  }
+}
