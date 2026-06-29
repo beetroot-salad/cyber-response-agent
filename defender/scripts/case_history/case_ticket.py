@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._run_paths import RunPaths
 
 # Mirrors defender.learning.core.config.DISPOSITION_ENUM. Defined locally so the
 # write path carries no `defender.learning` import (the runtime/learning decoupling
@@ -177,7 +178,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
 
     Raises `CaseTicketError` if `report.md` is absent/malformed or the disposition
     is out of enum — the caller (ticket_writer) treats that as "leave it open"."""
-    report = run_dir / "report.md"
+    report = RunPaths(run_dir).report
     if not report.is_file():
         raise CaseTicketError(f"report.md not found: {report}")
     fm, body = _parse_frontmatter(report.read_text())
@@ -198,7 +199,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
 
     mapping = _load_mapping()
     signature_id = _SIGNATURE_FALLBACK
-    alert_path = run_dir / "alert.json"
+    alert_path = RunPaths(run_dir).alert
     if alert_path.is_file():
         # signature stays fallback on a malformed/unreadable alert; non-fatal,
         # the disposition still records

@@ -513,7 +513,7 @@ def test_append_actor_observations_writes_one_row_per_observation(tmp_path: Path
     n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
 
     assert n == 2
-    rows = _read_jsonl(paths.actor_observations_file)
+    rows = _read_jsonl(paths.actor_observations.file)
     assert [r["observation_id"] for r in rows] == ["case-x/0", "case-x/1"]
     assert [r["observation_index"] for r in rows] == [0, 1]
     assert all(r["run_id"] == "case-x" for r in rows)
@@ -533,7 +533,7 @@ def test_append_actor_observations_dedupes_on_observation_id(tmp_path: Path):
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
     # Replay — same case_id + same indices.
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert len(_read_jsonl(paths.actor_observations_file)) == 2
+    assert len(_read_jsonl(paths.actor_observations.file)) == 2
 
 
 def test_append_actor_observations_creates_lock_file(tmp_path: Path):
@@ -542,7 +542,7 @@ def test_append_actor_observations_creates_lock_file(tmp_path: Path):
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 1
     # The append serializes concurrent legs under an flock on this file.
-    assert paths.actor_observations_lock_file.is_file()
+    assert paths.actor_observations.lock.is_file()
 
 
 def test_append_actor_observations_skips_passthrough_outcome(tmp_path: Path):
@@ -550,7 +550,7 @@ def test_append_actor_observations_skips_passthrough_outcome(tmp_path: Path):
     doc = _judge_doc("skip-passthrough", [_obs(0)])
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert _read_jsonl(paths.actor_observations_file) == []
+    assert _read_jsonl(paths.actor_observations.file) == []
 
 
 def test_append_actor_observations_no_key_is_zero_rows(tmp_path: Path):
@@ -558,7 +558,7 @@ def test_append_actor_observations_no_key_is_zero_rows(tmp_path: Path):
     doc = _judge_doc("caught", None)  # actor_observations omitted entirely
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert not paths.actor_observations_file.exists()
+    assert not paths.actor_observations.file.exists()
     assert not paths.pending_dir.exists()
 
 
@@ -567,7 +567,7 @@ def test_append_actor_observations_empty_list_is_zero_rows(tmp_path: Path):
     doc = _judge_doc("caught", [])
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert not paths.actor_observations_file.exists()
+    assert not paths.actor_observations.file.exists()
     assert not paths.pending_dir.exists()
 
 
@@ -579,14 +579,14 @@ def test_append_actor_observations_dedupes_against_consumed_history(tmp_path: Pa
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
     # Simulate author rotation: move both rows into consumed and clear active.
-    paths.actor_observations_consumed_file.write_text(
-        paths.actor_observations_file.read_text()
+    paths.actor_observations.consumed.write_text(
+        paths.actor_observations.file.read_text()
     )
-    paths.actor_observations_file.write_text("")
+    paths.actor_observations.file.write_text("")
 
     # Replay — same case_id + same indices; producer must see consumed.
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert _read_jsonl(paths.actor_observations_file) == []
+    assert _read_jsonl(paths.actor_observations.file) == []
 
 
 def test_append_actor_observations_queues_survived_outcomes(tmp_path: Path):
@@ -598,7 +598,7 @@ def test_append_actor_observations_queues_survived_outcomes(tmp_path: Path):
     n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
 
     assert n == 1
-    rows = _read_jsonl(paths.actor_observations_file)
+    rows = _read_jsonl(paths.actor_observations.file)
     assert rows[0]["judge_outcome"] == "survived"
 
 

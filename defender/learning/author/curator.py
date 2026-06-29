@@ -43,7 +43,7 @@ import yaml
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
-from defender.learning.core.config import make_logger
+from defender.learning.core.config import QueueChannel, make_logger
 from defender.learning.core.persist import rotate_queue_locked
 
 
@@ -70,10 +70,9 @@ class CuratorConfig:
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
-    # Queue files (honor DEFENDER_LEARNING_STATE_DIR via DEFAULT_PATHS).
-    pending_file: Path
-    consumed_file: Path
-    lock_file: Path
+    # Queue channel — file/consumed/lock for the stream this curator drains
+    # (honors DEFENDER_LEARNING_STATE_DIR via DEFAULT_PATHS).
+    channel: QueueChannel
     # Shared repo lock every curator serializes on + its wait ceiling, threaded
     # from the LoopPaths so tests inject a tmp lock instead of patching
     # _author_shared module globals (issue #389).
@@ -104,13 +103,13 @@ class CuratorConfig:
     def pending_file_rel(self) -> str:
         """Repo-relative queue path for the forward-check ``--pending`` arg.
 
-        Derived from ``pending_file`` so a relocated ``DEFENDER_LEARNING_STATE_DIR``
+        Derived from ``channel.file`` so a relocated ``DEFENDER_LEARNING_STATE_DIR``
         queue and the forward-check stay in sync — an out-of-repo queue falls back
         to its absolute path (which the verifier resolves directly)."""
         try:
-            return str(self.pending_file.relative_to(self.repo_root))
+            return str(self.channel.file.relative_to(self.repo_root))
         except ValueError:
-            return str(self.pending_file)
+            return str(self.channel.file)
 
     @property
     def run_log(self) -> Path:
@@ -126,7 +125,7 @@ def read_batch(cfg: CuratorConfig) -> list[dict]:
     # Tolerant read: a torn last line from an interrupted append is skipped, not
     # raised — a JSONDecodeError here would escape every drain guard and crash
     # the author_drain every tick until the queue was hand-fixed (#446).
-    return read_jsonl_rows(cfg.pending_file)
+    return read_jsonl_rows(cfg.channel.file)
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
@@ -314,9 +313,9 @@ def rotate_queue(
     no observation can arrive mid-batch — a held-only rewrite cannot lose data, and
     re-taking the lock here would self-deadlock (hence ``merge_concurrent=False``)."""
     rotate_queue_locked(
-        pending_file=cfg.pending_file,
-        consumed_file=cfg.consumed_file,
-        lock_file=cfg.lock_file,
+        pending_file=cfg.channel.file,
+        consumed_file=cfg.channel.consumed,
+        lock_file=cfg.channel.lock,
         id_key="observation_id",
         held=held,
         consumed=consumed,
@@ -339,7 +338,7 @@ def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
     must not strand them; a merged one filters them via ``existing_observation_ids``
     next batch)."""
     return _shared.run_batch_envelope(
-        queue_lock_file=cfg.lock_file,
+        queue_lock_file=cfg.channel.lock,
         repo_lock_file=cfg.repo_lock_file,
         repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
         repo_root=cfg.repo_root,

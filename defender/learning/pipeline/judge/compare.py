@@ -28,6 +28,7 @@ from pathlib import Path
 
 import yaml
 
+from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.learning.pipeline.oracle.sample import real_sample_text
 
@@ -51,7 +52,7 @@ def parse_investigation_companion(run_dir: Path) -> dict:
     A parse failure must never abort the judge — the judge can still ground against
     the actuals via jq; it just loses the defender's recorded reasoning.
     """
-    inv = Path(run_dir) / "investigation.md"
+    inv = RunPaths(Path(run_dir)).investigation
     if not inv.is_file():
         return {}
     try:

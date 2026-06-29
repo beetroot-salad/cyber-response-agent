@@ -41,14 +41,13 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
 
 
-GATHER_DIR = "gather_raw"
-QUERIES_LOG = "executed_queries.jsonl"
 _LEAD_SUFFIX = ".lead.json"
 # A `:L` row id: `l-` + alphanumerics. Used to filter the parsed companion's
 # findings down to actual lead rows — the parser also surfaces `:R` resolution
@@ -124,7 +123,7 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
     dispatched lead stays visible to the narration cross-check;
     `what_to_summarize` defaults to `[]` when absent or non-list.
     """
-    gather = Path(run_dir) / GATHER_DIR
+    gather = RunPaths(Path(run_dir)).gather_raw
     if not gather.is_dir():
         return {}
     leads: dict[str, dict] = {}
@@ -155,7 +154,7 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
     → `[]`.
     """
     run_dir = Path(run_dir)
-    log = run_dir / QUERIES_LOG
+    log = RunPaths(run_dir).executed_queries
     rows: list[QueryRow] = []
     try:
         raw_rows = read_jsonl_rows(log)
@@ -314,13 +313,12 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
-    for flat in (QUERIES_LOG,):
-        src = src_run_dir / flat
-        if src.is_file():
-            shutil.copy2(src, dst_dir / src.name)
-    gather_src = src_run_dir / GATHER_DIR
+    queries_src = RunPaths(src_run_dir).executed_queries
+    if queries_src.is_file():
+        shutil.copy2(queries_src, RunPaths(dst_dir).executed_queries)
+    gather_src = RunPaths(src_run_dir).gather_raw
     if gather_src.is_dir():
-        shutil.copytree(gather_src, dst_dir / GATHER_DIR, dirs_exist_ok=True)
+        shutil.copytree(gather_src, RunPaths(dst_dir).gather_raw, dirs_exist_ok=True)
 
 
 # --------------------------------------------------------------------------
@@ -403,7 +401,7 @@ def narration_crosscheck_from_run(run_dir: Path) -> dict:
     run_dir = Path(run_dir)
     from defender.skills.invlang.parser import parse_dense_companion
 
-    text = (run_dir / "investigation.md").read_text()
+    text = RunPaths(run_dir).investigation.read_text()
     companion, _ = parse_dense_companion(text)
     return narration_crosscheck(run_dir, _lead_ids_from_companion(companion))
 

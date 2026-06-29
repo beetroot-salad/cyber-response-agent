@@ -36,6 +36,7 @@ from pathlib import Path
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
+from defender.learning.core.config import LoopPaths, RunPaths
 from defender.learning.core.prologue import extract_case_entities
 from defender.learning.author.verify_forward.shared import (
     load_observation as _load_observation,
@@ -45,8 +46,11 @@ from defender.learning.author.verify_forward.shared import (
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
 RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
-DEFAULT_PENDING = HERE.parents[1] / "_pending" / "environment_observations.jsonl"
-DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
+# Sourced from the shared layout so the corpus + benign env-queue defaults can't
+# drift from LoopPaths (the absolute paths are identical to the prior literals).
+_PATHS = LoopPaths(repo_root=REPO_ROOT)
+DEFAULT_PENDING = _PATHS.environment_observations.file
+DEFAULT_CORPUS = _PATHS.lessons_environment_dir
 
 
 def case_entities_arg(row: dict, repo_root: Path) -> str:
@@ -60,7 +64,7 @@ def case_entities_arg(row: dict, repo_root: Path) -> str:
     src = (row.get("source_run_dir") or "").strip()
     if not src:
         return ""
-    return extract_case_entities(repo_root / src / "investigation.md")
+    return extract_case_entities(RunPaths(repo_root / src).investigation)
 
 
 def _rule_ids_arg(rule_ids: object) -> str:

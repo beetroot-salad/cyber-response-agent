@@ -946,7 +946,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")  # general failure
 
     assert lead_author.run(run_dir, deps=deps) == 0
-    queue = deps.paths.pitfalls_pending_file
+    queue = deps.paths.pitfalls.file
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"
@@ -1072,7 +1072,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
     assert "execution.md pitfalls" in log
     # queue drained, consumed file records the batch
     assert lead_author._loop_persist.read_pitfalls(paths) == []
-    consumed = [json.loads(ln) for ln in paths.pitfalls_consumed_file.read_text().splitlines()]
+    consumed = [json.loads(ln) for ln in paths.pitfalls.consumed.read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
 
 

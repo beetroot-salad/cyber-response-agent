@@ -33,7 +33,7 @@ from defender.learning.core.config import (
     RunUnprocessable,
     StageAbort,
     LoopPaths,
-    RunDirs,
+    RunPaths,
     _log,
     env_int,
     pitfalls_threshold,
@@ -134,7 +134,7 @@ def _validate_judge_yaml(
 
 def run_direction(
     spec: Direction,
-    dirs: RunDirs,
+    dirs: RunPaths,
     disposition: str,
     alert_rule_key: str,
     run_id: str,
@@ -148,6 +148,7 @@ def run_direction(
     Returns True if queue rows were appended (i.e. worth triggering the curators).
     """
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
+    assert learning_run_dir is not None, "run_direction requires a learning leg dir"
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key)
     # Write the story now so oracle + judge can read it from disk downstream; the
@@ -371,10 +372,11 @@ def run_one(
 
     run_id = run_dir.name
     _log(f"run_id={run_id} step=normalize")
-    disposition = normalize_disposition(run_dir / "report.md")
+    src = RunPaths(run_dir)
+    disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
 
-    alert = json.loads((run_dir / "alert.json").read_text())
+    alert = json.loads(src.alert.read_text())
     alert_rule_key = derive_alert_rule_key(alert)
     learning_run_dir = paths.runs_dir / run_id
     learning_run_dir.mkdir(parents=True, exist_ok=True)
@@ -391,7 +393,7 @@ def run_one(
     # findings/observation writes on a flock (cross-process safe). subprocess.run
     # releases the GIL while the claude child runs, so threads give real wall-time
     # overlap. Within a leg, actor→oracle→judge stays serial.
-    dirs = RunDirs(run_dir, learning_run_dir)
+    dirs = RunPaths(run_dir, learning_run_dir)
     errors: list[tuple[str, BaseException]] = []
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures: dict[Any, str] = {}

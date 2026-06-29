@@ -25,7 +25,8 @@ from defender.learning.core.config import (
     DEFAULT_PATHS,
     RunUnprocessable,
     LoopPaths,
-    RunDirs,
+    QueueChannel,
+    RunPaths,
 )
 from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -187,11 +188,11 @@ def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Hard-required flat inputs. The two lead/query tables
-# (executed_queries.jsonl + the gather_raw/ directory) are copied separately
-# and are best-effort — a query-less run has neither, which is a monitor case,
-# not a persist failure.
-PERSIST_COPY_FILES = ("alert.json", "report.md", "investigation.md")
+# Hard-required flat inputs, named as RunPaths accessors. The two lead/query
+# tables (executed_queries.jsonl + the gather_raw/ directory) are copied
+# separately and are best-effort — a query-less run has neither, which is a
+# monitor case, not a persist failure.
+_SHARED_COPY_ARTIFACTS = ("alert", "report", "investigation")
 
 # Both directions write the same disposition-level shared artifacts (copied inputs
 # + source_refs.yaml). When the legs run concurrently these truncating writes target
@@ -202,14 +203,15 @@ _SHARED_INPUTS_LOCK = threading.Lock()
 
 def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
+    src_paths, dst_paths = RunPaths(run_dir), RunPaths(learning_run_dir)
     with _SHARED_INPUTS_LOCK:
-        for name in PERSIST_COPY_FILES:
-            src = run_dir / name
+        for name in _SHARED_COPY_ARTIFACTS:
+            src = getattr(src_paths, name)
             if not src.is_file():
                 raise RunUnprocessable(f"missing source artifact for persist: {src}")
-            shutil.copy2(src, learning_run_dir / name)
+            shutil.copy2(src, getattr(dst_paths, name))
         # Best-effort: the lesson-load trace (record_lesson_load hook). Optional —
-        # a run that loaded no lesson has none — so it is NOT in PERSIST_COPY_FILES;
+        # a run that loaded no lesson has none — so it is NOT in _SHARED_COPY_ARTIFACTS;
         # copy it when present so trace_lesson survives the ephemeral run dir being
         # swept (it scans this durable dir, which also carries report.md above).
         loaded = run_dir / "lessons_loaded.jsonl"
@@ -228,14 +230,15 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
 def _write_source_refs(
     run_dir: Path, learning_run_dir: Path, disposition: str, alert_rule_key: str
 ) -> None:
+    rp = RunPaths(run_dir)
     source_refs = {
         "paths": {
             "source_run_dir": str(run_dir),
-            "alert": str(run_dir / "alert.json"),
-            "report": str(run_dir / "report.md"),
-            "investigation": str(run_dir / "investigation.md"),
-            "executed_queries": str(run_dir / "executed_queries.jsonl"),
-            "gather_raw": str(run_dir / "gather_raw"),
+            "alert": str(rp.alert),
+            "report": str(rp.report),
+            "investigation": str(rp.investigation),
+            "executed_queries": str(rp.executed_queries),
+            "gather_raw": str(rp.gather_raw),
         },
         "normalized_disposition": disposition,
         "alert_rule_key": alert_rule_key,
@@ -259,7 +262,7 @@ class DirectionArtifacts:
 
 
 def persist_run(
-    dirs: RunDirs,
+    dirs: RunPaths,
     *,
     artifacts: DirectionArtifacts,
     disposition: str,
@@ -273,6 +276,7 @@ def persist_run(
     YAML — caller-side raw text (if any) belongs in a ``*.raw.txt`` companion.
     """
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
+    assert learning_run_dir is not None, "persist_run requires a learning leg dir"
     actor_story, story_name = artifacts.actor_story, artifacts.story_name
     judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
     telemetry_yaml, telemetry_name = artifacts.telemetry_yaml, artifacts.telemetry_name
@@ -356,13 +360,13 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
     """
     if not rows:
         return 0
-    with _flock(paths.pitfalls_lock_file):
-        return append_jsonl(paths.pitfalls_pending_file, rows)
+    with _flock(paths.pitfalls.lock):
+        return append_jsonl(paths.pitfalls.file, rows)
 
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
     """All queued pitfall rows (tolerant of blank/malformed lines)."""
-    return read_jsonl_rows(paths.pitfalls_pending_file)
+    return read_jsonl_rows(paths.pitfalls.file)
 
 
 def rotate_pitfalls(
@@ -380,13 +384,13 @@ def rotate_pitfalls(
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": "consumed_committed"}
-        for r in read_jsonl_rows(paths.pitfalls_pending_file)
+        for r in read_jsonl_rows(paths.pitfalls.file)
         if r.get("pitfall_id") in ids
     ]
     rotate_queue_locked(
-        pending_file=paths.pitfalls_pending_file,
-        consumed_file=paths.pitfalls_consumed_file,
-        lock_file=paths.pitfalls_lock_file,
+        pending_file=paths.pitfalls.file,
+        consumed_file=paths.pitfalls.consumed,
+        lock_file=paths.pitfalls.lock,
         id_key="pitfall_id",
         held=[],
         consumed=consumed,
@@ -467,10 +471,9 @@ def append_actor_observations(
             "source_run_dir": src,
         }
 
+    ch = paths.actor_observations
     return _append_observations(
-        paths.actor_observations_file,
-        paths.actor_observations_consumed_file,
-        paths.actor_observations_lock_file,
+        ch.file, ch.consumed, ch.lock,
         run_id, observations, build_row,
     )
 
@@ -497,9 +500,7 @@ class _EnvFactStream:
     once in ``_append_env_fact_observations`` so the shared corpus can't drift."""
 
     outcome_keyword: Callable[[Any], str]
-    queue_file: Path
-    consumed_file: Path
-    lock_file: Path
+    channel: QueueChannel
     id_prefix: str
     provenance: str
 
@@ -519,8 +520,7 @@ def _append_env_fact_observations(
     row shape (the retrieval keys the curator and ``verify_forward_env.py`` read) is
     one definition here so the streams can't drift apart in the shared corpus."""
     outcome_keyword = stream.outcome_keyword
-    queue_file, consumed_file = stream.queue_file, stream.consumed_file
-    lock_file, id_prefix, provenance = stream.lock_file, stream.id_prefix, stream.provenance
+    ch, id_prefix, provenance = stream.channel, stream.id_prefix, stream.provenance
     outcome = outcome_keyword(judge_doc["outcome"])
     if outcome == "skip-passthrough":
         return 0
@@ -554,7 +554,7 @@ def _append_env_fact_observations(
         return row
 
     return _append_observations(
-        queue_file, consumed_file, lock_file,
+        ch.file, ch.consumed, ch.lock,
         run_id, observations, build_row,
         id_prefix=id_prefix,
     )
@@ -576,9 +576,7 @@ def append_environment_observations(
         paths=paths,
         stream=_EnvFactStream(
             outcome_keyword=_benign_outcome_keyword,
-            queue_file=paths.environment_observations_file,
-            consumed_file=paths.environment_observations_consumed_file,
-            lock_file=paths.environment_observations_lock_file,
+            channel=paths.environment_observations,
             id_prefix="",
             provenance="benign",
         ),
@@ -606,9 +604,7 @@ def append_actor_environment_observations(
         paths=paths,
         stream=_EnvFactStream(
             outcome_keyword=_outcome_keyword,
-            queue_file=paths.actor_environment_observations_file,
-            consumed_file=paths.actor_environment_observations_consumed_file,
-            lock_file=paths.actor_environment_observations_lock_file,
+            channel=paths.actor_environment_observations,
             id_prefix="adv-env/",
             provenance="adversarial",
         ),

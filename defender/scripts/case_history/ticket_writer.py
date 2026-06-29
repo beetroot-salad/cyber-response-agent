@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._run_paths import RunPaths
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport  # shared transport (adapter family)
 
@@ -124,7 +125,7 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
         config = deps.load_config()
         if config is None:
             return
-        alert_path = run_dir / "alert.json"
+        alert_path = RunPaths(run_dir).alert
         if not alert_path.is_file():
             _warn(f"alert.json not found in {run_dir}; skipping open")
             return

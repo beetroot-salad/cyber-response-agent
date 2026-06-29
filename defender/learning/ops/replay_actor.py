@@ -54,6 +54,8 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._run_paths import RunPaths  # noqa: E402 — after the sys.path bootstrap
+
 
 def _load_sibling(modname: str, path: Path):
     spec = importlib.util.spec_from_file_location(modname, path)
@@ -77,11 +79,12 @@ def main(argv: list[str]) -> int:
     ns = p.parse_args(argv)
 
     staging = Path(ns.staging_dir).resolve()
-    alert = staging / "alert.json"
+    staging_paths = RunPaths(staging)
+    alert = staging_paths.alert
     if not alert.is_file():
         print(f"missing {alert}", file=sys.stderr)
         return 2
-    if not (staging / "gather_raw").is_dir() and not (staging / "executed_queries.jsonl").is_file():
+    if not staging_paths.gather_raw.is_dir() and not staging_paths.executed_queries.is_file():
         print(f"missing the lead/query tables under {staging} "
               "(gather_raw/ + executed_queries.jsonl)", file=sys.stderr)
         return 2

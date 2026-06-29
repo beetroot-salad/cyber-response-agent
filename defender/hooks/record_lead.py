@@ -41,6 +41,8 @@ import re
 import sys
 from pathlib import Path
 
+from defender._run_paths import RunPaths
+
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 
@@ -122,7 +124,7 @@ def claim_lead(dispatch: dict) -> int:
     if not LEAD_ID_RE.match(str(lead_id)):
         return 0
 
-    sidecar_dir = Path(run_dir) / "gather_raw"
+    sidecar_dir = RunPaths(Path(run_dir)).gather_raw
     try:
         sidecar_dir.mkdir(parents=True, exist_ok=True)
     except OSError:

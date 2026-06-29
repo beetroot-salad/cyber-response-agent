@@ -29,6 +29,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from defender._run_paths import RunPaths
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
 
@@ -99,7 +100,7 @@ def split_investigation_phases(run_dir: Path) -> list[dict]:
     before the first ``## `` (preamble / frontmatter) is included as a
     leading entry named "preamble" if non-empty.
     """
-    p = run_dir / "investigation.md"
+    p = RunPaths(run_dir).investigation
     if not p.is_file():
         return []
     text = p.read_text()

@@ -37,8 +37,6 @@ from defender.learning.core.config import (
 )
 
 
-LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
-
 # All four model/wiring constants come from core.config (one source per env var,
 # no duplicated defaults — cf. #449). ACTOR_MODEL is the actor *stage* model the real
 # actor invocation reads (pipeline/malicious_actor/run.py); this curator only stamps
@@ -87,10 +85,8 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
         corpus_dir=paths.lessons_actor_dir,
-        corpus_dir_rel=LESSONS_ACTOR_DIR_REL,
-        pending_file=paths.actor_observations_file,
-        consumed_file=paths.actor_observations_consumed_file,
-        lock_file=paths.actor_observations_lock_file,
+        corpus_dir_rel=paths.lessons_actor_dir_rel,
+        channel=paths.actor_observations,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         outcome_author=frozenset({"caught", "incoherent"}),

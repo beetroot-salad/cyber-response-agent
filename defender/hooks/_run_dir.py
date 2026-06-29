@@ -19,6 +19,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from defender._run_paths import RunPaths
+
 
 def update_json_locked(
     path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
@@ -63,7 +65,7 @@ def read_meta_salt() -> str:
     run dir as degraded."""
     run_dir = resolve_run_dir()
     if run_dir is not None:
-        meta_path = run_dir / "meta.json"
+        meta_path = RunPaths(run_dir).meta
         if meta_path.exists():
             try:
                 salt = json.loads(meta_path.read_text()).get("salt", "")

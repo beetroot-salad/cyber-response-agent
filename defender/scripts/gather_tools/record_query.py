@@ -66,6 +66,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import append_jsonl, read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
@@ -335,7 +336,7 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     null``, so the next query won't reuse the seq and collide on
     ``(lead_id, seq)``.
     """
-    log = run_dir / "executed_queries.jsonl"
+    log = RunPaths(run_dir).executed_queries
     try:
         rows = read_jsonl_rows(log)
     except OSError:
@@ -423,7 +424,7 @@ def capture(
         # A hung adapter must not hang the investigation — record it as an error.
         rc, out, err = 124, "", f"adapter timed out after {timeout}s"
 
-    lead_dir = run_dir / "gather_raw" / lead
+    lead_dir = RunPaths(run_dir).gather_raw / lead
     seq = _next_seq(run_dir, lead)
     payload_path = lead_dir / f"{seq}.json"
     payload_rel = None
@@ -449,7 +450,7 @@ def capture(
         "payload_digest": payload_digest(out, err, rc),
     }
     try:
-        append_jsonl(run_dir / "executed_queries.jsonl", [record])
+        append_jsonl(RunPaths(run_dir).executed_queries, [record])
     except OSError as e:
         print(f"record_query: could not append record: {e}", file=sys.stderr)
 
