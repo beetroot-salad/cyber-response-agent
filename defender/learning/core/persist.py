@@ -88,13 +88,14 @@ def _rewrite_queue(
     write_atomic(pending_file, "".join(json.dumps(entry) + "\n" for entry in survivors))
     if consumed:
         now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-        with consumed_file.open("a") as fh:
-            for entry in consumed:
-                rec = dict(entry)
-                rec.setdefault("consumed_at", now)
-                if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                    rec["consumed_commit"] = commit_sha
-                fh.write(json.dumps(rec) + "\n")
+        rows = []
+        for entry in consumed:
+            rec = dict(entry)
+            rec.setdefault("consumed_at", now)
+            if rec.get("consumed_category") == "consumed_committed" and commit_sha:
+                rec["consumed_commit"] = commit_sha
+            rows.append(rec)
+        append_jsonl(consumed_file, rows)
 
 
 def rotate_queue_locked(

@@ -59,6 +59,8 @@ def write_atomic(path: Path, text: str) -> None:
 
     A concurrent reader sees either the old file or the whole new one, never a
     partial write. Caller owns serialization; the replace itself is atomic on POSIX.
+    The parent dir must already exist — unlike ``append_jsonl`` this does not
+    ``mkdir``, since atomic-rewrite callers target a file that's already there.
     """
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text)

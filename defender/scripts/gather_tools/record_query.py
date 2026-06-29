@@ -65,7 +65,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import read_jsonl_rows
+from defender._io import append_jsonl, read_jsonl_rows
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
@@ -336,9 +336,18 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     ``(lead_id, seq)``.
     """
     log = run_dir / "executed_queries.jsonl"
+    try:
+        rows = read_jsonl_rows(log)
+    except OSError:
+        # A read error after the is_file() check (TOCTOU delete, permission,
+        # ENOSPC) degrades to seq 0 — the pre-_io behavior. read_jsonl_rows
+        # tolerates torn lines but not a failed read, and neither capture()
+        # call site (CLI main / in-process _capture_query) catches OSError, so
+        # letting it propagate would abort the whole gather instead.
+        return 0
     return sum(
         1
-        for rec in read_jsonl_rows(log)
+        for rec in rows
         if isinstance(rec, dict) and rec.get("lead_id") == lead
     )
 
@@ -440,9 +449,7 @@ def capture(
         "payload_digest": payload_digest(out, err, rc),
     }
     try:
-        log = run_dir / "executed_queries.jsonl"
-        with log.open("a") as fh:  # append is atomic for one short line
-            fh.write(json.dumps(record) + "\n")
+        append_jsonl(run_dir / "executed_queries.jsonl", [record])
     except OSError as e:
         print(f"record_query: could not append record: {e}", file=sys.stderr)
 
