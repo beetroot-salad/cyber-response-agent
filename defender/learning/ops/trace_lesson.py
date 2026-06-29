@@ -33,7 +33,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.learning.core.config import DEFAULT_PATHS
-from defender.learning.core.persist import read_jsonl_rows
+from defender._io import read_jsonl_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"

@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 from collections.abc import Callable
 
-from defender.learning.core.persist import read_jsonl_rows
+from defender._io import read_jsonl_rows
 
 
 def render_prompt(template_path: Path, **subs: str) -> str:

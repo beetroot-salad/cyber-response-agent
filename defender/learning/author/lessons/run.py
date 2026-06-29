@@ -67,6 +67,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
+from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     AUTHOR_EFFORT,
     AUTHOR_MODEL,
@@ -78,7 +79,6 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.persist import (
     _flock,
-    read_jsonl_rows,
     rotate_queue_locked,
 )
 

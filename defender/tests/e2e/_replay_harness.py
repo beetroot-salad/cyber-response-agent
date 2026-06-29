@@ -38,6 +38,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
+from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 
@@ -195,10 +196,7 @@ def load_turns_from_trace(
     replay of the nested gather subagent additionally needs stubbed adapter deps.
     """
     turns: list[Turn] = []
-    for line in Path(trace_path).read_text().splitlines():
-        if not line.strip():
-            continue
-        rec = json.loads(line)
+    for rec in read_jsonl_rows(Path(trace_path)):
         if rec.get("type") == "assistant":
             turns.append(_turn_from_record(rec, old_run_dir, new_run_dir))
     return turns

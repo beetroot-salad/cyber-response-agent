@@ -51,6 +51,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._io import read_jsonl_rows
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
@@ -84,7 +85,6 @@ from defender.scripts.visualize.visualize_judge import (
 from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
-    load_jsonl,
     load_judge_benign_findings,
     load_judge_findings,
     parse_report,
@@ -407,7 +407,7 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
 
 def render_judge_page(run_dir: Path) -> str:
     case_id = run_dir.name
-    events = load_jsonl(run_dir / "tool_trace.jsonl")
+    events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
     judge = load_judge_findings(case_id)
     n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
@@ -448,7 +448,7 @@ def render_judge_page(run_dir: Path) -> str:
 
 def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
-    events = load_jsonl(run_dir / "tool_trace.jsonl")
+    events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     messages = load_messages(run_dir)
     # _stats' n_events / cost are unused on this page; only the tool-call count
     # and the result-event cost total (== _stats' cost) are. Read the lead/query

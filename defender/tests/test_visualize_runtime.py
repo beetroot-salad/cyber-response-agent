@@ -20,8 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from defender._io import read_jsonl_rows
 from defender.scripts.visualize import visualize_data as d
-from defender.scripts.visualize.visualize_primitives import load_jsonl
 from defender.scripts.visualize.visualize_run import render_runtime_page
 
 # A four-phase run. Each assistant turn writes investigation.md, introducing one
@@ -128,7 +128,7 @@ def test_tagger_advances_on_write_file(tmp_path):
     """write_file/edit_file writes introducing ## headers advance the cursor —
     so cost lands in multiple phases, not all in phase[0] (the migration bug)."""
     run = _build_run(tmp_path)
-    events = load_jsonl(run / "tool_trace.jsonl")
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
     tags = d.tag_events_by_phase(events, order)
 
@@ -146,7 +146,7 @@ def test_gather_dispatch_phase_and_cost(tmp_path):
     before writing the ``## GATHER`` header, so raw tagging would bury the cost in
     PLAN and leave the GATHER bar empty."""
     run = _build_run(tmp_path)
-    events = load_jsonl(run / "tool_trace.jsonl")
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
     tags = d.tag_events_by_phase(events, order)
 
@@ -167,7 +167,7 @@ def test_gather_wall_and_model_reattribution(tmp_path):
     """Gather wall moves from its PLAN dispatch window into the GATHER bar, and
     gather cost is reported under the model the gather agent actually ran on."""
     run = _build_run(tmp_path)
-    events = load_jsonl(run / "tool_trace.jsonl")
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
     tags = d.tag_events_by_phase(events, order)
 
@@ -207,7 +207,7 @@ def test_transcript_from_messages(tmp_path):
     """The transcript is built from llm_requests.jsonl with full content +
     retries, one entry per assistant turn / tool-return / retry, phase-tagged."""
     run = _build_run(tmp_path)
-    events = load_jsonl(run / "tool_trace.jsonl")
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
     tags = d.tag_events_by_phase(events, order)
     messages = d.load_messages(run)
@@ -229,7 +229,7 @@ def test_transcript_from_messages(tmp_path):
 
 def test_run_health(tmp_path):
     run = _build_run(tmp_path)
-    events = load_jsonl(run / "tool_trace.jsonl")
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
     health = d.run_health(run, events, d.load_messages(run), order)
 

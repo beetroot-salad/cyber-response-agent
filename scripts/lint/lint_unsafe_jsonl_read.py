@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unsafe JSONL-read smell — flag hand-rolled per-line ``json.loads`` file readers
-in ``defender/learning/`` that bypass the shared tolerant reader.
+under ``defender/`` that bypass the shared tolerant reader.
 
 A JSONL queue (``_pending/findings.jsonl``, ``actor_observations.jsonl``,
 ``executed_queries.jsonl``, ``lessons_loaded.jsonl`` …) is appended to live and
@@ -14,8 +14,8 @@ is BOTH a dedup smell (it copies the parse/skip skeleton) AND a safety bug: a
 ``json.JSONDecodeError`` is neither ``RunUnprocessable``, ``StageAbort`` nor
 ``AuthorError``, so it escapes every drain guard and crashes the worker every
 tick until the queue is hand-fixed (#446). The fix is to route every file-line
-JSON read through the single tolerant reader,
-``defender.learning.core.persist.read_jsonl_rows``, which skips torn/blank lines.
+JSON read through the single tolerant reader, ``defender._io.read_jsonl_rows``,
+which skips torn/blank lines.
 
 What this flags: a ``for`` loop whose iterable is derived from reading a file
 (``<p>.read_text().splitlines()`` / ``.split(...)``, ``open(...)``/``<p>.open()``,
@@ -28,9 +28,10 @@ document, not line-delimited) and ``for raw in stdout.splitlines(): json.loads``
 (parsing an in-memory subprocess stream, not a file) — neither has the torn-file
 failure mode, and the latter cannot use the Path-based shared reader.
 
-The one sanctioned file-line reader is ``read_jsonl_rows`` itself; mark it (and
-any other deliberate exception) with ``# lint-jsonl-read: ok — <reason>`` on the
-``for`` line. Pre-existing sites are ratcheted via
+The one sanctioned file-line reader is ``read_jsonl_rows`` itself (in
+``defender/_io.py``); mark it (and any other deliberate exception) with
+``# lint-jsonl-read: ok — <reason>`` on the ``for`` line. Pre-existing sites are
+ratcheted via
 ``lint_unsafe_jsonl_read_baseline.json`` (see scripts/lint/_baseline.py); the
 gate fails only on a NEW file+function pair.
 
@@ -47,7 +48,7 @@ from pathlib import Path
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCOPE = REPO_ROOT / "defender" / "learning"
+SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_unsafe_jsonl_read_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
@@ -230,7 +231,7 @@ def _scan() -> list[Finding]:
 
 HEADER = (
     "lint_unsafe_jsonl_read baseline — hand-rolled per-line json.loads file "
-    "readers in defender/learning/ that bypass core.persist.read_jsonl_rows (a "
+    "readers under defender/ that bypass _io.read_jsonl_rows (a "
     "dedup smell + the #446 torn-line crash class). Fingerprint is file:function "
     "(no line number). CI fails on a file:function absent here. Regenerate: "
     "python scripts/lint/lint_unsafe_jsonl_read.py --update-baseline. Annotate "
@@ -240,13 +241,13 @@ HEADER = (
 
 def main(argv: list[str]) -> int:
     if not SCOPE.is_dir():
-        print(f"defender/learning/ not found at {SCOPE}", file=sys.stderr)
+        print(f"defender/ not found at {SCOPE}", file=sys.stderr)
         return 2
     findings = _scan()
     print(
-        "Route file-line JSON reads through "
-        "defender.learning.core.persist.read_jsonl_rows (tolerant of torn/blank "
-        "lines); a bare json.loads(line) crashes the drains on a torn append (#446)."
+        "Route file-line JSON reads through defender._io.read_jsonl_rows "
+        "(tolerant of torn/blank lines); a bare json.loads(line) crashes the "
+        "drains on a torn append (#446)."
     )
     print("Mark the sanctioned reader with `# lint-jsonl-read: ok — <reason>`.")
     return gate(

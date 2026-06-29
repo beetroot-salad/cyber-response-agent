@@ -65,6 +65,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._io import read_jsonl_rows
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
@@ -335,24 +336,11 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     ``(lead_id, seq)``.
     """
     log = run_dir / "executed_queries.jsonl"
-    if not log.is_file():
-        return 0
-    try:
-        text = log.read_text()
-    except OSError:
-        return 0
-    n = 0
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(rec, dict) and rec.get("lead_id") == lead:
-            n += 1
-    return n
+    return sum(
+        1
+        for rec in read_jsonl_rows(log)
+        if isinstance(rec, dict) and rec.get("lead_id") == lead
+    )
 
 
 def _derive_verb(inner: list[str]) -> str | None:
