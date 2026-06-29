@@ -59,7 +59,7 @@ def test_validate_benign_doc_accepts_valid() -> None:
 def test_validate_benign_doc_rejects_adversarial_outcome() -> None:
     doc = _valid_benign_doc()
     doc["outcome"] = "caught"  # adversarial enum, not benign
-    with pytest.raises(loop.LoopError, match="outcome keyword"):
+    with pytest.raises(loop.RunUnprocessable, match="outcome keyword"):
         loop.validate_judge_benign_doc(doc)
 
 
@@ -75,7 +75,7 @@ def test_validate_benign_doc_accepts_refuted_and_skip() -> None:
 def test_validate_benign_doc_rejects_bad_finding_type() -> None:
     doc = _valid_benign_doc()
     doc["defender_findings"][0]["type"] = "detection-confirmed"  # adversarial-only
-    with pytest.raises(loop.LoopError, match="not in"):
+    with pytest.raises(loop.RunUnprocessable, match="not in"):
         loop.validate_judge_benign_doc(doc)
 
 
@@ -88,14 +88,14 @@ def test_validate_benign_doc_accepts_disposition_confirmed() -> None:
 def test_validate_benign_doc_rejects_empty_rule_anchor() -> None:
     doc = _valid_benign_doc()
     doc["environment_observations"][0]["alert_rule_ids"] = []
-    with pytest.raises(loop.LoopError, match="alert_rule_ids"):
+    with pytest.raises(loop.RunUnprocessable, match="alert_rule_ids"):
         loop.validate_judge_benign_doc(doc)
 
 
 def test_validate_benign_doc_rejects_malformed_entity_selector() -> None:
     doc = _valid_benign_doc()
     doc["environment_observations"][0]["entities"] = [{"type": "process"}]
-    with pytest.raises(loop.LoopError, match="type, class"):
+    with pytest.raises(loop.RunUnprocessable, match="type, class"):
         loop.validate_judge_benign_doc(doc)
 
 
@@ -250,14 +250,14 @@ def test_validate_judge_doc_accepts_environment_observations() -> None:
 def test_validate_judge_doc_rejects_empty_env_rule_anchor() -> None:
     doc = _valid_adversarial_doc_with_env()
     doc["environment_observations"][0]["alert_rule_ids"] = []
-    with pytest.raises(loop.LoopError, match="alert_rule_ids"):
+    with pytest.raises(loop.RunUnprocessable, match="alert_rule_ids"):
         loop.validate_judge_doc(doc)
 
 
 def test_validate_judge_doc_rejects_malformed_env_selector() -> None:
     doc = _valid_adversarial_doc_with_env()
     doc["environment_observations"][0]["entities"] = [{"type": "process"}]
-    with pytest.raises(loop.LoopError, match="type, class"):
+    with pytest.raises(loop.RunUnprocessable, match="type, class"):
         loop.validate_judge_doc(doc)
 
 
@@ -541,14 +541,14 @@ def test_validate_judge_doc_optional_resolution_method() -> None:
 def test_validate_judge_doc_rejects_empty_resolution_method() -> None:
     doc = _valid_adversarial_doc_with_env()
     doc["resolution_method"] = "   "
-    with pytest.raises(loop.LoopError, match="resolution_method"):
+    with pytest.raises(loop.RunUnprocessable, match="resolution_method"):
         loop.validate_judge_doc(doc)
 
 
 def test_validate_judge_doc_rejects_non_string_resolution_method() -> None:
     doc = _valid_adversarial_doc_with_env()
     doc["resolution_method"] = ["a", "b"]
-    with pytest.raises(loop.LoopError, match="resolution_method"):
+    with pytest.raises(loop.RunUnprocessable, match="resolution_method"):
         loop.validate_judge_doc(doc)
 
 

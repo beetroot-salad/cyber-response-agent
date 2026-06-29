@@ -24,7 +24,7 @@ from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
     DEFAULT_PATHS,
-    LoopError,
+    RunUnprocessable,
     LoopPaths,
     RunDirs,
 )
@@ -245,7 +245,7 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
         for name in PERSIST_COPY_FILES:
             src = run_dir / name
             if not src.is_file():
-                raise LoopError(f"missing source artifact for persist: {src}")
+                raise RunUnprocessable(f"missing source artifact for persist: {src}")
             shutil.copy2(src, learning_run_dir / name)
         # Best-effort: the lesson-load trace (record_lesson_load hook). Optional —
         # a run that loaded no lesson has none — so it is NOT in PERSIST_COPY_FILES;

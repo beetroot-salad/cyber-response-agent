@@ -29,7 +29,8 @@ from defender.learning.core.config import (
     MERGE_MODE,
     VALID_MERGE_MODES,
     FatalConfigError,
-    LoopError,
+    RunUnprocessable,
+    StageAbort,
     LoopPaths,
     RunDirs,
     _log,
@@ -72,9 +73,9 @@ def read_ground_truth(run_dir: Path) -> dict | None:
     try:
         doc = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError as e:
-        raise LoopError(f"{path}: malformed YAML: {e}") from e
+        raise RunUnprocessable(f"{path}: malformed YAML: {e}") from e
     if not isinstance(doc, dict):
-        raise LoopError(f"{path}: expected a mapping at top level")
+        raise RunUnprocessable(f"{path}: expected a mapping at top level")
     return doc
 
 
@@ -116,9 +117,9 @@ def _validate_judge_yaml(
     stripped = strip_yaml_fence(judge_raw)
     try:
         doc = validate(yaml.safe_load(stripped))
-    except (yaml.YAMLError, LoopError) as e:
+    except (yaml.YAMLError, RunUnprocessable) as e:
         raw_path.write_text(judge_raw)
-        raise LoopError(f"judge YAML invalid: {e}") from e
+        raise RunUnprocessable(f"judge YAML invalid: {e}") from e
     if stripped != judge_raw:
         raw_path.write_text(judge_raw)
     return doc, stripped
@@ -250,9 +251,9 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
       * ``rc not in (0, None)`` (the agent crashed / timed out) — raises ``LeadAuthorError``
         so the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
         path gets. It is deliberately ``LeadAuthorError`` (a plain ``Exception``, *not* a
-        ``LoopError``): an agent crash dooms only *this* marker, so it must keep quarantining
-        even if a future audit adds an ``except LoopError: raise`` to this drain — only the
-        systemic ``FatalConfigError`` re-raises to exit 2.
+        ``StageAbort``): an agent crash dooms only *this* marker, so it must keep quarantining
+        even if a future audit adds an ``except StageAbort: raise`` to this drain — only the
+        systemic ``FatalConfigError`` (a ``StageAbort``) re-raises to exit 2.
       * ``rc is None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
         ``_run_curator_module`` — the run did not complete) — raises ``_LeadAuthorRetry``
         so the drain leaves the marker queued for a bounded number of retries, then
@@ -582,12 +583,14 @@ def _drain_lead_author_markers(
             continue
         try:
             run_lead_author(paths, run_dir)
-        except FatalConfigError:
-            # Systemic misconfig (e.g. a non-numeric LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read
-            # deep inside run() -> _prepare_handoffs): it dooms every marker, not just this
-            # one. Re-raise past the broad quarantine guard below so it propagates to
-            # _run_stage as the contracted exit 2 — the marker stays queued (not quarantined)
-            # and the operator gets "fix your config," not a mislabeled lead-author-error.
+        except StageAbort:
+            # A systemic failure (e.g. a non-numeric LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read
+            # deep inside run() -> _prepare_handoffs, surfaced as FatalConfigError): it dooms
+            # every marker, not just this one. Re-raise past the broad quarantine guard below
+            # so it propagates to _run_stage as the contracted exit 2 — the marker stays queued
+            # (not quarantined) and the operator gets "fix your config," not a mislabeled
+            # lead-author-error. (Catching the StageAbort base, not FatalConfigError, keeps any
+            # future systemic-fault type re-raising here for free.)
             raise
         except _LeadAuthorRetry as e:
             # Transient (rc=None): the run did not complete. Leave the marker queued for a
@@ -643,11 +646,11 @@ def _drain_pitfalls(
     failure has its uncommitted edits discarded) and the queue stays intact for retry."""
     try:
         run_pitfalls(paths)
-    except FatalConfigError:
+    except StageAbort:
         # Defense-in-depth, no current trigger: the only fatal config run_pitfalls reads
         # (the pitfalls threshold) is already validated up front at the _has_lead_author_work
         # wake gate (#437), so a bad value aborts before this runs. This re-raise mirrors
-        # _drain_lead_author_markers and guards any *future* fatal-config read added inside
+        # _drain_lead_author_markers and guards any *future* systemic fault added inside
         # run_pitfalls from being swallowed (exit 0) by the broad guard below.
         raise
     except Exception as e:  # noqa: BLE001 — a poison batch must not wedge the serial drain
@@ -671,7 +674,7 @@ def _drain_lead_author(
 def _validate_merge_mode() -> None:
     """Validated at the author stage (not at config import) so an author-only
     misconfig fails loud for the drains without crashing the LEARN / run_one
-    importers that never read it. main() maps FatalConfigError (a LoopError)→rc 2."""
+    importers that never read it. main() maps FatalConfigError (a StageAbort)→rc 2."""
     if MERGE_MODE not in VALID_MERGE_MODES:
         raise FatalConfigError(
             f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
@@ -719,7 +722,7 @@ def _run_worktree_batch(
         except BranchError as e:
             # push / `gh pr create` failed (auth, network, branch already on origin).
             # Work was held (hold_committed) / re-authored next tick — don't crash the
-            # drainer (BranchError is not a LoopError, so main() would not catch it).
+            # drainer (BranchError is not a StageAbort, so main() would not catch it).
             _log(f"{label}: finish_batch failed: {e} — work stays queued, retry next tick")
     finally:
         # Always remove the batch worktree. Unlike the old in-place restore, a failed
@@ -879,12 +882,13 @@ def _process_marker(
         run_one_fn(run_dir)
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
         # NB asymmetry vs. the lead-author drain: this guard deliberately has NO
-        # `except FatalConfigError: raise` clause. run_one reads no operator config, so
-        # nothing fatal-config reaches here; its LoopErrors are per-run *data* failures
-        # (malformed report.md / judge YAML, missing keys — ~30 sites in core/validate.py)
-        # that MUST keep quarantining. Adding the fatal re-raise here would turn every
-        # corrupt-data run into a worker-killing exit 2 — a regression a future audit
-        # must not "fix" in.
+        # `except StageAbort: raise` clause. run_one reads no operator config, so nothing
+        # systemic (no FatalConfigError, no StageAbort) reaches here; its failures are
+        # RunUnprocessable — per-run *data* failures (malformed report.md / judge YAML,
+        # missing keys — ~30 sites in core/validate.py) that MUST keep quarantining. Adding
+        # a StageAbort re-raise here would be harmless (run_one raises none), but adding a
+        # RunUnprocessable re-raise would turn every corrupt-data run into a worker-killing
+        # exit 2 — a regression a future audit must not "fix" in.
         _quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
         return False
     try:
@@ -991,16 +995,37 @@ run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --lear
 (running this LEARN stage + re-rendering each transcript). `python3
 defender/learning/loop.py <run_dir>` runs LEARN directly for a single run (re-processing).
 
-Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 LoopError / 1 usage.
+Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 StageAbort (systemic
+fault — fix the deployment) / 2 RunUnprocessable on a direct single run (bad run data) /
+1 usage. On a drain, a RunUnprocessable is a bug (the per-item guards should have caught
+it), so it propagates uncaught rather than masquerading as a clean exit 2.
 """
 
 
-def _run_stage(stage: Callable[[], int]) -> int:
-    """Run one stage entrypoint, mapping a LoopError to the FATAL exit-2 contract."""
+def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> int:
+    """Run one stage entrypoint, mapping a systemic fault to the FATAL exit-2 contract.
+
+    A ``StageAbort`` (the systemic-fault base, e.g. ``FatalConfigError``) always maps to
+    exit 2 — the whole stage is doomed. A ``RunUnprocessable`` (this-run's-data-is-bad) is
+    handled by ``allow_run_error``:
+
+    * The **direct single-run** path (``loop.py <run_dir>``) passes ``allow_run_error=True``:
+      there is no queue to quarantine into, so a bad run maps to the contracted exit 2.
+    * The **drain** paths pass it as False (the default). A ``RunUnprocessable`` reaching a
+      drain's boundary did *not* pass the per-item quarantine guard — it is a bug, not a
+      clean abort — so it propagates uncaught (a loud exit-1 + traceback) rather than
+      masquerading as exit 2. This is the #443 structural guard: the per-run type can no
+      longer be silently read as a stage-kill.
+    """
     try:
         return stage()
-    except LoopError as e:
+    except StageAbort as e:
         print(f"[loop] FATAL: {e}", file=sys.stderr)
+        return 2
+    except RunUnprocessable as e:
+        if not allow_run_error:
+            raise
+        print(f"[loop] FATAL: unprocessable run: {e}", file=sys.stderr)
         return 2
 
 
@@ -1072,4 +1097,6 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    return _run_stage(lambda: run_one(run_dir))
+    # Direct single-run: no queue to quarantine into, so a RunUnprocessable (bad run data)
+    # maps to the contracted exit 2 rather than propagating.
+    return _run_stage(lambda: run_one(run_dir), allow_run_error=True)

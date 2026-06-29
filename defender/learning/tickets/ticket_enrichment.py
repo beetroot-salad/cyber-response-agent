@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from defender.learning.core.directions import ADVERSARIAL
-from defender.learning.core.config import LoopError, make_logger
+from defender.learning.core.config import RunUnprocessable, make_logger
 from defender.learning.core.validate import _outcome_keyword
 from defender.scripts.case_history import case_ticket
 from defender.scripts.case_history.ticket_writer import (
@@ -49,7 +49,7 @@ def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:
                  "skipping enrichment")
             return None
         return _outcome_keyword(doc.get("outcome"))
-    except (yaml.YAMLError, OSError, LoopError) as e:
+    except (yaml.YAMLError, OSError, RunUnprocessable) as e:
         _log(f"unusable adversarial verdict ({e}); skipping enrichment")
         return None
 

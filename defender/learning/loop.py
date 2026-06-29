@@ -3,7 +3,7 @@
 
 Per-run-dir API: ``loop.py <run_dir>``. One case at a time. The orchestration lives
 in the ``_loop_*`` sibling modules; this file is the venv re-exec shim, the CLI entry,
-and the stable import surface (`loop.run_one`, `loop.LoopError`, …).
+and the stable import surface (`loop.run_one`, `loop.RunUnprocessable`, `loop.StageAbort`, …).
 
 Pipeline (per direction): normalize disposition → actor (gray-box story) → telemetry
 oracle (per-lead synthesized events) → judge (outcome + findings) → persist → queue →
@@ -35,7 +35,8 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     DEFAULT_PATHS,
-    LoopError,
+    RunUnprocessable,
+    StageAbort,
     LoopPaths,
 )
 from defender.learning.core.directions import (  # noqa: E402
@@ -81,7 +82,7 @@ from defender.learning.core.validate import (  # noqa: E402
 from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
-    "DEFAULT_PATHS", "LoopError", "LoopPaths", "ClaudePrintSubagents", "Subagents",
+    "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "ClaudePrintSubagents", "Subagents",
     "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
     "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence",

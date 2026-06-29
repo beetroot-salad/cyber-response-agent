@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 from defender.learning.core.config import (
-    LoopError,
+    RunUnprocessable,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
     _log,
@@ -75,7 +75,7 @@ def _run_claude(
         env=subscription_env(),
     )
     if proc.returncode != 0:
-        raise LoopError(
+        raise RunUnprocessable(
             f"claude -p failed (rc={proc.returncode}):\nstderr: {proc.stderr[-2000:]}"
         )
     return "\n\n".join(_extract_assistant_text_parts(proc.stdout))

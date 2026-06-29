@@ -81,13 +81,13 @@ def test_is_held_out_false_when_no_file(run_dir: Path) -> None:
 
 def test_read_ground_truth_rejects_non_mapping(run_dir: Path) -> None:
     (run_dir / "ground_truth.yaml").write_text("- not\n- a\n- mapping\n")
-    with pytest.raises(loop.LoopError):
+    with pytest.raises(loop.RunUnprocessable):
         loop.read_ground_truth(run_dir)
 
 
 def test_read_ground_truth_rejects_malformed_yaml(run_dir: Path) -> None:
     (run_dir / "ground_truth.yaml").write_text("held_out: true\n: bad indent\n  - [\n")
-    with pytest.raises(loop.LoopError, match="malformed YAML"):
+    with pytest.raises(loop.RunUnprocessable, match="malformed YAML"):
         loop.read_ground_truth(run_dir)
 
 
@@ -160,11 +160,11 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path) ->
     then fail loud. Enqueue happens before the re-raise, so the run isn't
     stranded with no author-work marker."""
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=False)
-    # Malformed judge YAML → the adversarial leg raises LoopError.
+    # Malformed judge YAML → the adversarial leg raises RunUnprocessable.
     agents = FakeSubagents(judge="outcome: [unterminated\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
 
-    with pytest.raises(loop.LoopError):
+    with pytest.raises(loop.RunUnprocessable):
         loop.run_one(run_dir, paths=paths, agents=agents)
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists(), "a failed leg must still enqueue the run for authoring"

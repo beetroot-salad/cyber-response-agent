@@ -19,7 +19,7 @@ from defender.learning.core.config import (
     BENIGN_ALL_FINDING_TYPES,
     BENIGN_OUTCOME_ENUM,
     DISPOSITION_ENUM,
-    LoopError,
+    RunUnprocessable,
     OUTCOME_ENUM,
 )
 
@@ -31,16 +31,16 @@ from defender.learning.core.config import (
 
 def normalize_disposition(report_path: Path) -> str:
     if not report_path.is_file():
-        raise LoopError(f"report.md not found: {report_path}")
+        raise RunUnprocessable(f"report.md not found: {report_path}")
     text = report_path.read_text()
     try:
         fm, _ = parse_frontmatter(text)
     except FrontmatterError as e:
         head = "\n".join(text.splitlines()[:30])
-        raise LoopError(f"report.md {e}\n--- {report_path} (head) ---\n{head}") from e
+        raise RunUnprocessable(f"report.md {e}\n--- {report_path} (head) ---\n{head}") from e
     disp = fm.get("disposition")
     if disp not in DISPOSITION_ENUM:
-        raise LoopError(
+        raise RunUnprocessable(
             f"report.md disposition={disp!r} not in {sorted(DISPOSITION_ENUM)}"
         )
     return disp
@@ -92,12 +92,12 @@ def strip_yaml_fence(text: str) -> str:
 
 def _outcome_keyword_in(outcome_value: Any, enum: set[str]) -> str:
     if not isinstance(outcome_value, str):
-        raise LoopError(f"judge `outcome` is not a string: {type(outcome_value)}")
+        raise RunUnprocessable(f"judge `outcome` is not a string: {type(outcome_value)}")
     # Tolerate the model fusing the keyword with a rationale clause
     # ("survived. The defender's investigation…"): take the head token.
     first = re.split(r"[\s.,;:]", outcome_value.strip(), maxsplit=1)[0]
     if first not in enum:
-        raise LoopError(f"judge outcome keyword {first!r} not in {sorted(enum)}")
+        raise RunUnprocessable(f"judge outcome keyword {first!r} not in {sorted(enum)}")
     return first
 
 
@@ -160,7 +160,7 @@ def _validate_judge_actor_observations(doc: dict[str, Any]) -> None:
         return
     observations = doc["actor_observations"]
     if not isinstance(observations, list):
-        raise LoopError("judge `actor_observations` is not a list")
+        raise RunUnprocessable("judge `actor_observations` is not a list")
     for i, o in enumerate(observations):
         _validate_actor_observation(i, o)
 
@@ -174,7 +174,7 @@ def _validate_judge_environment_observations(doc: dict[str, Any]) -> None:
         return
     obs = doc["environment_observations"]
     if not isinstance(obs, list):
-        raise LoopError("judge `environment_observations` is not a list")
+        raise RunUnprocessable("judge `environment_observations` is not a list")
     for i, o in enumerate(obs):
         _validate_environment_observation(i, o)
 
@@ -188,16 +188,16 @@ def _validate_judge_resolution_method(doc: dict[str, Any]) -> None:
         return
     rm = doc["resolution_method"]
     if not isinstance(rm, str) or not rm.strip():
-        raise LoopError("judge `resolution_method` must be a non-empty string")
+        raise RunUnprocessable("judge `resolution_method` must be a non-empty string")
 
 
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
-        raise LoopError("judge YAML did not parse to a mapping")
+        raise RunUnprocessable("judge YAML did not parse to a mapping")
     _require_judge_keys(doc, _outcome_keyword)
     findings = doc["defender_findings"]
     if not isinstance(findings, list):
-        raise LoopError("judge `defender_findings` is not a list")
+        raise RunUnprocessable("judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         _validate_finding(i, f, ALL_FINDING_TYPES)
     _validate_judge_actor_observations(doc)
@@ -212,39 +212,39 @@ def _require_judge_keys(doc: dict, outcome_keyword) -> None:
     # emit — the loop never parsed them. Required output is the machine-consumed core.
     for key in ("outcome", "defender_findings"):
         if key not in doc:
-            raise LoopError(f"judge YAML missing required key: {key}")
+            raise RunUnprocessable(f"judge YAML missing required key: {key}")
     outcome_keyword(doc["outcome"])  # raises on an unknown keyword
 
 
 def _validate_finding(i: int, f: Any, allowed_types: set[str]) -> None:
     if not isinstance(f, dict):
-        raise LoopError(f"finding[{i}] is not a mapping")
+        raise RunUnprocessable(f"finding[{i}] is not a mapping")
     for k in ("type", "subject_anchor", "subject_topic", "finding", "citations"):
         if k not in f:
-            raise LoopError(f"finding[{i}] missing key: {k}")
+            raise RunUnprocessable(f"finding[{i}] missing key: {k}")
     for k in ("subject_anchor", "subject_topic"):
         v = f[k]
         if not isinstance(v, str) or not v.strip():
-            raise LoopError(f"finding[{i}].{k} must be a non-empty string")
+            raise RunUnprocessable(f"finding[{i}].{k} must be a non-empty string")
     if f["type"] not in allowed_types:
-        raise LoopError(
+        raise RunUnprocessable(
             f"finding[{i}].type={f['type']!r} not in {sorted(allowed_types)}"
         )
     if not isinstance(f["citations"], list):
-        raise LoopError(f"finding[{i}].citations is not a list")
+        raise RunUnprocessable(f"finding[{i}].citations is not a list")
 
 
 def _validate_actor_observation(i: int, o: Any) -> None:
     if not isinstance(o, dict):
-        raise LoopError(f"actor_observations[{i}] is not a mapping")
+        raise RunUnprocessable(f"actor_observations[{i}] is not a mapping")
     for k in ("type", "subject_anchor", "subject_topic", "observation"):
         if k not in o:
-            raise LoopError(f"actor_observations[{i}] missing key: {k}")
+            raise RunUnprocessable(f"actor_observations[{i}] missing key: {k}")
         v = o[k]
         if not isinstance(v, str) or not v.strip():
-            raise LoopError(f"actor_observations[{i}].{k} must be a non-empty string")
+            raise RunUnprocessable(f"actor_observations[{i}].{k} must be a non-empty string")
     if o["type"] not in ACTOR_OBSERVATION_TYPES:
-        raise LoopError(
+        raise RunUnprocessable(
             f"actor_observations[{i}].type={o['type']!r} not in "
             f"{sorted(ACTOR_OBSERVATION_TYPES)}"
         )
@@ -257,17 +257,17 @@ def _validate_actor_observation(i: int, o: Any) -> None:
 
 def validate_judge_benign_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
-        raise LoopError("benign judge YAML did not parse to a mapping")
+        raise RunUnprocessable("benign judge YAML did not parse to a mapping")
     _require_judge_keys(doc, _benign_outcome_keyword)
     findings = doc["defender_findings"]
     if not isinstance(findings, list):
-        raise LoopError("benign judge `defender_findings` is not a list")
+        raise RunUnprocessable("benign judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         _validate_finding(i, f, BENIGN_ALL_FINDING_TYPES)
     if "environment_observations" in doc:
         obs = doc["environment_observations"]
         if not isinstance(obs, list):
-            raise LoopError("benign judge `environment_observations` is not a list")
+            raise RunUnprocessable("benign judge `environment_observations` is not a list")
         for i, o in enumerate(obs):
             _validate_environment_observation(i, o)
     return doc
@@ -275,26 +275,26 @@ def validate_judge_benign_doc(doc: Any) -> dict[str, Any]:
 
 def _validate_environment_observation(i: int, o: Any) -> None:
     if not isinstance(o, dict):
-        raise LoopError(f"environment_observations[{i}] is not a mapping")
+        raise RunUnprocessable(f"environment_observations[{i}] is not a mapping")
     for k in ("alert_rule_ids", "relevance_criteria", "fact"):
         if k not in o:
-            raise LoopError(f"environment_observations[{i}] missing key: {k}")
+            raise RunUnprocessable(f"environment_observations[{i}] missing key: {k}")
     rule_ids = o["alert_rule_ids"]
     if not isinstance(rule_ids, list) or not rule_ids:
-        raise LoopError(
+        raise RunUnprocessable(
             f"environment_observations[{i}].alert_rule_ids must be a non-empty "
             "list (the retrieval anchor)"
         )
     for k in ("relevance_criteria", "fact"):
         if not isinstance(o[k], str) or not o[k].strip():
-            raise LoopError(
+            raise RunUnprocessable(
                 f"environment_observations[{i}].{k} must be a non-empty string"
             )
     # ``entities`` is optional, but each selector must carry type + class. The
     # no-identity discipline is the curator's + forward-check's job, not this gate.
     for sel in o.get("entities") or []:
         if not isinstance(sel, dict) or "type" not in sel or "class" not in sel:
-            raise LoopError(
+            raise RunUnprocessable(
                 f"environment_observations[{i}].entities selectors must be "
                 "{type, class} mappings"
             )

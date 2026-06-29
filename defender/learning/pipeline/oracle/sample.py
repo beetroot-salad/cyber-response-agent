@@ -22,7 +22,7 @@ import re
 
 import yaml
 
-from defender.learning.core.config import LoopError
+from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import strip_yaml_fence
 
 
@@ -251,7 +251,7 @@ def parse_lead_events(raw: str, lead_id) -> list:
     The reply is a single YAML doc whose only key is ``events`` (a list of event mappings,
     or a single-item marker list, or ``[]``). Tolerates a stray fence/envelope via
     ``strip_yaml_fence`` and an unquoted suppression marker via ``_quote_unquoted_markers``.
-    Raises ``LoopError`` (with the raw reply embedded for debuggability — a per-lead failure
+    Raises ``RunUnprocessable`` (with the raw reply embedded for debuggability — a per-lead failure
     otherwise leaves nothing on disk) on anything that is not an ``events`` list; item-level
     shape (mapping vs marker string) is the validator's job downstream.
     """
@@ -259,13 +259,13 @@ def parse_lead_events(raw: str, lead_id) -> list:
     try:
         doc = yaml.safe_load(cleaned)
     except yaml.YAMLError as e:
-        raise LoopError(
+        raise RunUnprocessable(
             f"oracle lead {lead_id}: reply is not valid YAML: {e}\n"
             f"--- raw reply ---\n{raw[:2000]}"
         ) from e
     events = doc.get("events") if isinstance(doc, dict) else None
     if not isinstance(events, list):
-        raise LoopError(
+        raise RunUnprocessable(
             f"oracle lead {lead_id}: reply has no `events` list "
             f"(got {type(events).__name__})\n--- raw reply ---\n{raw[:2000]}"
         )
