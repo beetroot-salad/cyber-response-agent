@@ -36,6 +36,7 @@ from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
     pre_text,
+    section,
 )
 
 
@@ -67,17 +68,10 @@ def render_runtime_investigation(
     # avoid re-reading and re-parsing the file; ``None`` computes it here.
     if phases is None:
         phases = normalize_phase_names(split_investigation_phases(run_dir))
+    subtitle = "— investigation.md split by phase"
     if not phases:
         body = '<div class="empty">no investigation.md or empty</div>'
-        return (
-            f"""
-<section id="sec-investigation" class="stage stage-defender">
-  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
-  {body}
-</section>
-""",
-            [],
-        )
+        return (section("sec-investigation", "defender", "Investigation", subtitle, body), [])
     blocks: list[str] = []
     for ph in phases:
         stats = (attribution or {}).get(ph["name"])
@@ -85,15 +79,7 @@ def render_runtime_investigation(
         stats_html = _phase_stats_html(stats, wall) if stats else ""
         body_html = stats_html + f'<pre class="text invlang">{esc(ph["body"])}</pre>'
         blocks.append(block("phase", ph["name"], body_html, open_=True, anchor=ph["anchor"]))
-    return (
-        f"""
-<section id="sec-investigation" class="stage stage-defender">
-  <h2>Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
-  {"".join(blocks)}
-</section>
-""",
-        phases,
-    )
+    return (section("sec-investigation", "defender", "Investigation", subtitle, "".join(blocks)), phases)
 
 
 def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
@@ -161,11 +147,7 @@ def render_runtime_transcript(
     else:
         rows_html = _render_tx_groups(entries, phase_anchor, anchored)
 
-    return (
-        f"""
-<section id="sec-transcript" class="stage stage-defender">
-  <h2>Transcript <span class="stage-sub">— main-agent turns, tool calls + results (llm_requests.jsonl)</span></h2>
-  <div class="tx-toolbar">
+    body = f"""<div class="tx-toolbar">
     <input type="search" class="tx-search" placeholder="search transcript…" aria-label="search transcript">
     <select class="tx-type" aria-label="filter by type">
       <option value="">all types</option>
@@ -178,9 +160,12 @@ def render_runtime_transcript(
   </div>
   <div class="tx-chips">{chips_html}</div>
   <div class="tx-stream">{rows_html}</div>
-  <div class="tx-noresults empty" hidden>no entries match the current filter</div>
-</section>
-""",
+  <div class="tx-noresults empty" hidden>no entries match the current filter</div>"""
+    return (
+        section(
+            "sec-transcript", "defender", "Transcript",
+            "— main-agent turns, tool calls + results (llm_requests.jsonl)", body,
+        ),
         len(entries),
         anchored,
     )
@@ -305,17 +290,10 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
 def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tuple[str, int]:
     if leads is None:
         leads = lead_repository.joined(run_dir)
+    subtitle = "— the two-table data trail (lead_repository.joined)"
     if not leads:
         body = '<div class="empty">no leads recorded (monitor case — the agent ran no queries)</div>'
-        return (
-            f"""
-<section id="sec-leads" class="stage stage-defender">
-  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
-  {body}
-</section>
-""",
-            0,
-        )
+        return (section("sec-leads", "defender", "Leads &amp; queries", subtitle, body), 0)
     rows: list[str] = []
     for jl in leads:
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
@@ -354,15 +332,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
         "<th>lead</th><th>query_id</th><th>sys</th><th>params</th><th>exit</th><th>payload</th>"
         f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
     )
-    return (
-        f"""
-<section id="sec-leads" class="stage stage-defender">
-  <h2>Leads &amp; queries <span class="stage-sub">— the two-table data trail (lead_repository.joined)</span></h2>
-  {table}
-</section>
-""",
-        len(leads),
-    )
+    return (section("sec-leads", "defender", "Leads &amp; queries", subtitle, table), len(leads))
 
 
 # ---------------------------------------------------------------------------

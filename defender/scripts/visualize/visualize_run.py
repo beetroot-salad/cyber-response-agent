@@ -89,6 +89,7 @@ from defender.scripts.visualize.visualize_primitives import (
     load_judge_findings,
     parse_report,
     render_alert_block,
+    section,
 )
 from defender.scripts.visualize.visualize_runtime import (
     render_footer,
@@ -291,17 +292,13 @@ def render_runtime_metrics(
     else:
         tools_html = '<div class="empty">(no tool calls)</div>'
 
-    return f"""
-<section id="sec-metrics" class="stage stage-defender">
-  <h2>Metrics <span class="stage-sub">— per-phase cost / wall + tool usage</span></h2>
-  <div class="me-models">{model_bits}</div>
+    body = f"""<div class="me-models">{model_bits}</div>
   <div class="me-bar-row"><span class="me-bar-label">cost</span><div class="cost-bar">{cost_bar}</div></div>
   <div class="me-bar-row"><span class="me-bar-label">wall</span><div class="cost-bar">{wall_bar}</div></div>
   <h3>tool usage</h3>
   {tools_html}
-  <div class="me-foot">{esc(foot)}</div>
-</section>
-"""
+  <div class="me-foot">{esc(foot)}</div>"""
+    return section("sec-metrics", "defender", "Metrics", "— per-phase cost / wall + tool usage", body)
 
 
 # ---------------------------------------------------------------------------

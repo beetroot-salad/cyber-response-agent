@@ -74,6 +74,23 @@ def block(kind: str, title: str, body: str, *, open_: bool = False, anchor: str 
     )
 
 
+def section(anchor: str, stage: str, title: str, subtitle: str, body: str) -> str:
+    """The stage-section shell: ``<section><h2>Title <sub></h2>{body}</section>``.
+
+    Sibling of :func:`block`. ``title`` and ``subtitle`` are raw HTML (they may
+    carry entities like ``&amp;``); ``anchor`` is escaped and ``stage`` names the
+    ``stage-{stage}`` color class. Each stage renderer computes its body once —
+    empty-state or populated — and returns ``section(...)``, so the ``<h2>`` is
+    written in exactly one place.
+    """
+    return f"""
+<section id="{esc(anchor)}" class="stage stage-{stage}">
+  <h2>{title} <span class="stage-sub">{subtitle}</span></h2>
+  {body}
+</section>
+"""
+
+
 def pre_text(text: str) -> str:
     return f'<pre class="text">{esc(text)}</pre>'
 
@@ -314,12 +331,7 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
             body = pretty_json_html(json.loads(p.read_text()))
         except json.JSONDecodeError:
             body = pre_text(p.read_text())
-    return f"""
-<section id="{esc(anchor)}" class="stage stage-alert">
-  <h2>Alert <span class="stage-sub">— input to the defender runtime</span></h2>
-  {body}
-</section>
-"""
+    return section(anchor, "alert", "Alert", "— input to the defender runtime", body)
 
 
 def render_lead_sequence_compact(run_dir: Path) -> str:
