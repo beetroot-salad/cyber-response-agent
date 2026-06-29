@@ -178,7 +178,7 @@ def main(argv: list[str]) -> int:
         ticket_writer = _tw
 
     salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
-    model = ns.model or os.environ.get("DEFENDER_MODEL") or driver.DEFAULT_MODEL
+    model = driver.resolve_main_model(ns.model)
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
     summary = asyncio.run(driver.run_investigation(

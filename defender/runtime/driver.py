@@ -172,10 +172,18 @@ def _make_default_factory(main_model_name: str) -> ModelFactory:
     return make
 
 
+def resolve_main_model(explicit: str | None = None) -> str:
+    """The MAIN-agent model name: an explicit override (run.py's ``--model``), else
+    ``$DEFENDER_MODEL``, else ``DEFAULT_MODEL``. The single read of ``DEFENDER_MODEL`` —
+    every entry point (run.py, ``_env_make_model``, ``run_investigation``) routes through
+    here so the env var and its default don't get re-read with drifting fallbacks."""
+    return explicit or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
+
+
 # Default for direct `build_*` callers without an explicit main-model override:
 # resolve the main model from the environment (run.py's flagless path).
 def _env_make_model(role: AgentRole) -> Model:
-    return _make_default_factory(os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL)(role)
+    return _make_default_factory(resolve_main_model())(role)
 
 
 def _build_subagent(
@@ -368,7 +376,7 @@ async def run_investigation(
     make_model: ModelFactory | None = None,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary."""
-    model_name = model_name or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
+    model_name = resolve_main_model(model_name)
     make_model = make_model or _make_default_factory(model_name)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     agent = build_agent(defender_dir, logger, make_model)

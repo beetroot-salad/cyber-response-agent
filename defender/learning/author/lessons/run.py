@@ -49,7 +49,6 @@ corpus and pass no provenance trailers (issue #330).
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import uuid
@@ -68,7 +67,15 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
-from defender.learning.core.config import DEFAULT_PATHS, LoopPaths, make_logger, now_iso
+from defender.learning.core.config import (
+    AUTHOR_EFFORT,
+    AUTHOR_MODEL,
+    AUTHOR_TIMEOUT,
+    DEFAULT_PATHS,
+    LoopPaths,
+    make_logger,
+    now_iso,
+)
 from defender.learning.core.persist import (
     _flock,
     read_jsonl_rows,
@@ -77,10 +84,6 @@ from defender.learning.core.persist import (
 
 
 LESSONS_DIR_REL = "defender/lessons/"  # the scope-gate prefix for the shared git layer
-
-AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
-AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
 
 
 # Unified with _author_curator via the shared module — all three raise the same

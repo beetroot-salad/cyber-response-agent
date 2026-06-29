@@ -222,6 +222,16 @@ def _env_state_dir() -> Path | None:
     return Path(raw).resolve()
 
 
+def learning_state_root() -> Path:
+    """The learning-state root resolved **at call time** from the live environment:
+    the out-of-repo ``DEFENDER_LEARNING_STATE_DIR`` when set, else the in-repo
+    ``defender/learning``. ``DEFAULT_PATHS`` below freezes this at import time for the
+    loop; renderers that run in a separately-spawned process (e.g. the visualizer,
+    which the off-process worker invokes after setting the env) call this so they
+    mirror ``LoopPaths.runs_dir`` from one source instead of re-reading the env."""
+    return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
+
+
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
 
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
@@ -340,6 +350,44 @@ class JudgeWiring:
 
 
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
+
+# --- Author / verifier / lead-author wiring -------------------------------------
+# The curator-AGENT model/effort/timeout per author direction (distinct from the
+# ACTOR/ORACLE/JUDGE *stage* models above), plus the forward-check verifier and the
+# repo lock. Centralized here so each module reads ONE source instead of re-deriving
+# the same env var + default from os.environ — the duplicated-default divergence #449
+# fixed for the actor model, generalized to every stage knob.
+
+# Forward-check Haiku gate — shared by both verify_forward entry points
+# (verify_forward/actor.py and forward.py), which previously each re-read these with
+# their own copy of the default.
+VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
+VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
+# Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
+# single-check VERIFIER_TIMEOUT so a child reports BAD/ERROR rather than being killed.
+VERIFY_BATCH_WORKERS = int(os.environ.get("LEARNING_VERIFY_BATCH_WORKERS", "8"))
+VERIFY_BATCH_TIMEOUT = int(os.environ.get("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", "240"))
+
+# Findings (lessons/) curator agent. AUTHOR_EFFORT has no default (None = inherit the
+# global effort) — preserved exactly from the prior lessons/run.py behavior.
+AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
+AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
+AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
+# Actor-tradecraft (lessons-actor/) curator agent.
+AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
+AUTHOR_ACTOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", "1800"))
+AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
+# Environment-lessons (lessons-environment/) curator agent — both env directions share it.
+AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
+AUTHOR_ENV_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", "1800"))
+AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
+# Offline lead-author (skills/ catalog) agent.
+LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
+LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
+
+# Repo lock wait ceiling — the single location every curator serializes on. Lives here
+# (not author/shared.py) so the value has one home; shared.py re-exports it.
+REPO_LOCK_WAIT_SECONDS = int(os.environ.get("LEARNING_REPO_LOCK_WAIT_SECONDS", "1800"))
 
 # Author merge gating (platform-design §4.4). The serial author always opens a PR
 # (audit trail); this knob decides whether it auto-merges on a green bar or waits

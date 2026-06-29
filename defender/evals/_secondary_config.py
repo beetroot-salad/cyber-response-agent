@@ -6,7 +6,6 @@ without creating a circular dependency back to secondary.py.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -28,7 +27,9 @@ EVAL_OUT_DIR = REPO_ROOT / "defender" / "evals" / "results" / "secondary"
 FIXTURES_DIR = REPO_ROOT / "defender" / "fixtures" / "held-out"
 WORKTREES_DIR = REPO_ROOT / ".claude" / "worktrees"
 
-DEFAULT_RUNS_BASE = Path(os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs"))
+from defender.run_common import resolve_runs_base  # noqa: E402 — needs REPO_ROOT on sys.path
+
+DEFAULT_RUNS_BASE = resolve_runs_base()
 
 ELIGIBLE_DISPOSITIONS = {"benign", "inconclusive"}
 ESCALATED_DISPOSITION = "malicious"

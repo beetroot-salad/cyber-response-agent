@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import html
 import json
-import os
 import re
 from pathlib import Path
 
@@ -23,11 +22,14 @@ except ImportError:  # pragma: no cover — yaml is in defender deps
     yaml = None
 
 
+# Repo root — re-exported for the git-backed renderers (visualize_runtime uses it as
+# the `git -C` cwd). The learning-state run dir is resolved via config, not from here.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# The two-table read/join surface lives in defender/learning/ — reached via the
-# `defender.learning` namespace package (callers put the repo root on sys.path).
+# The two-table read/join surface + loop config live in defender/learning/ — reached
+# via the `defender.learning` namespace package (callers put the repo root on sys.path).
 from defender.learning import lead_repository  # noqa: E402
+from defender.learning.core import config as _loop_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -295,16 +297,14 @@ def _learning_run_dir(run_id: str) -> Path:
     """The learning-state run dir for ``run_id``, honoring
     ``DEFENDER_LEARNING_STATE_DIR``.
 
-    Must mirror ``LoopPaths.runs_dir`` (``_loop_config``): the LEARN stage
-    persists ``judge_findings.yaml`` under ``<state_root>/runs/<run_id>/`` where
-    ``state_root`` is the out-of-repo state dir when set, else the in-repo
-    ``defender/learning``. The off-process worker runs in exactly that
-    out-of-repo mode, so a renderer that assumed the in-repo path would re-render
-    an empty judge page wherever the findings actually landed.
+    Mirrors ``LoopPaths.runs_dir`` via the shared ``config.learning_state_root()``
+    (call-time, so the off-process worker's env is honored): the LEARN stage persists
+    ``judge_findings.yaml`` under ``<state_root>/runs/<run_id>/`` where ``state_root``
+    is the out-of-repo state dir when set, else the in-repo ``defender/learning``. A
+    renderer that re-derived the path would re-render an empty judge page wherever the
+    findings actually landed.
     """
-    raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
-    state_root = Path(raw).resolve() if raw else REPO_ROOT / "defender" / "learning"
-    return state_root / "runs" / run_id
+    return _loop_config.learning_state_root() / "runs" / run_id
 
 
 def load_judge_findings(run_id: str) -> dict | None:

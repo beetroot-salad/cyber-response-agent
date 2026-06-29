@@ -16,7 +16,6 @@ here. Commits carry ``Generation: N`` + ``Actor-Model:`` trailers.
 from __future__ import annotations
 
 import functools
-import os
 import sys
 from pathlib import Path
 
@@ -28,19 +27,23 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import curator as _curator
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
-from defender.learning.core.config import ACTOR_MODEL, DEFAULT_PATHS, LoopPaths
+from defender.learning.core.config import (
+    ACTOR_MODEL,
+    AUTHOR_ACTOR_EFFORT,
+    AUTHOR_ACTOR_MODEL,
+    AUTHOR_ACTOR_TIMEOUT,
+    DEFAULT_PATHS,
+    LoopPaths,
+)
 
 
 LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
 
-# ACTOR_MODEL is imported from core.config — the SAME constant the real actor
-# invocation reads (pipeline/malicious_actor/run.py) — so the Actor-Model: commit
-# trailer this curator stamps records the model the actor actually ran at, not a
-# coincidentally-matching second env read (issue #449). It is commit provenance
-# metadata, not authoring input.
-AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_ACTOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", "1800"))
-AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
+# All four model/wiring constants come from core.config (one source per env var,
+# no duplicated defaults — cf. #449). ACTOR_MODEL is the actor *stage* model the real
+# actor invocation reads (pipeline/malicious_actor/run.py); this curator only stamps
+# it into the Actor-Model: commit trailer as provenance, never as authoring input.
+# AUTHOR_ACTOR_* is the curator agent's own model/timeout/effort.
 
 # Re-exported for callers/tests that referenced the curator's fatal error type here.
 AuthorError = _curator.AuthorError

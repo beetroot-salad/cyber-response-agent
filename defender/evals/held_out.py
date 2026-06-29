@@ -17,7 +17,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -31,6 +30,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.learning.core.config import DISPOSITION_ENUM
+from defender.run_common import resolve_runs_base
 
 
 def _read_frontmatter(report_path: Path) -> dict | None:
@@ -106,7 +106,7 @@ def report(runs_dir: Path) -> int:
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    default = os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs")
+    default = str(resolve_runs_base())
     p.add_argument("runs_dir", nargs="?", default=default,
                    help=f"directory of run dirs (default: {default})")
     ns = p.parse_args(argv)

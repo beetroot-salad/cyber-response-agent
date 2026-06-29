@@ -31,7 +31,11 @@ REPO_ROOT = HERE.parents[3]
 # block — the author drives it as a `claude -p` Bash subprocess).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from defender.learning.core.config import subscription_env  # noqa: E402
+from defender.learning.core.config import (  # noqa: E402
+    VERIFIER_MODEL,
+    VERIFIER_TIMEOUT,
+    subscription_env,
+)
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
     call_haiku as _call_haiku,
     load_observation as _load_observation,
@@ -41,9 +45,6 @@ from defender.learning.author.verify_forward.shared import (  # noqa: E402
 
 PENDING_FILE = HERE.parents[1] / "_pending" / "actor_observations.jsonl"
 PROMPT_PATH = HERE / "actor.md"
-
-VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
-VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
 
 
 def load_story(source_run_dir: str) -> str:
