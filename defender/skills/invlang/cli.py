@@ -39,6 +39,13 @@ from .queries import (
 )
 from . import vocab
 
+# Weight buckets best -> worst with the unassessed (None) bucket keyed "null",
+# derived from the vocab ladder so the shape-lookup histogram order can't drift.
+_WEIGHT_DISPLAY: tuple[str, ...] = tuple(
+    b if b is not None else "null"
+    for b in sorted(vocab.WEIGHT_ORDER, key=lambda w: vocab.WEIGHT_ORDER[w], reverse=True)
+)
+
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="defender.skills.invlang.cli")
@@ -330,13 +337,12 @@ def _render_shape(out: dict) -> str:
         return header + "\n_no past hypotheses match this shape_\n"
     body = [
         "",
-        "| ?name | n | weights (++/+/0/-/--) | dispositions | example case(s) |",
+        f"| ?name | n | weights ({'/'.join(_WEIGHT_DISPLAY)}) | dispositions | example case(s) |",
         "|---|---:|---|---|---|",
     ]
     for h in out["hits"]:
         w = h["final_weight_distribution"]
-        wstr = (f"{w.get('++', 0)}/{w.get('+', 0)}/{w.get('null', 0)}"
-                f"/{w.get('-', 0)}/{w.get('--', 0)}")
+        wstr = "/".join(str(w.get(b, 0)) for b in _WEIGHT_DISPLAY)
         dstr = ", ".join(f"{k}:{v}" for k, v in h["dispositions"].items())
         cases = h["cases"][:3]
         if len(h["cases"]) > 3:

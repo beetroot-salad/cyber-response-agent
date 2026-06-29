@@ -16,8 +16,9 @@ has no dependency on `corpus`.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
+from . import vocab
 from .schema import (
     CompanionBody,
     EdgeRecord,
@@ -27,8 +28,8 @@ from .schema import (
 )
 
 # `--` (strongly refuted) is the only weight that takes a hypothesis out of
-# contention. The full ++/+/-/-- ladder lives in `vocab`.
-REFUTED_WEIGHT = "--"
+# contention. Sourced from `vocab` so the ladder has one definition.
+REFUTED_WEIGHT = vocab.REFUTED_WEIGHT
 
 
 def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
@@ -90,28 +91,27 @@ def iter_resolutions(
                 yield lid, res
 
 
-def iter_authz_resolutions(
-    companion: CompanionBody,
+def _iter_outcome_rows(
+    companion: CompanionBody, field: str,
 ) -> Iterator[dict[str, Any]]:
+    """Yield every dict row under ``findings[].outcome[field]``, all leads in order."""
+    for lead in companion.get("findings") or []:
+        if not isinstance(lead, dict):
+            continue
+        outcome = cast("dict[str, Any]", lead.get("outcome") or {})
+        for row in outcome.get(field) or []:
+            if isinstance(row, dict):
+                yield row
+
+
+def iter_authz_resolutions(companion: CompanionBody) -> Iterator[dict[str, Any]]:
     """Yield every `:R authz` resolution row across all leads, in order."""
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
-        for row in (lead.get("outcome") or {}).get("authorization_resolutions") or []:
-            if isinstance(row, dict):
-                yield row
+    return _iter_outcome_rows(companion, "authorization_resolutions")
 
 
-def iter_attr_updates(
-    companion: CompanionBody,
-) -> Iterator[dict[str, Any]]:
+def iter_attr_updates(companion: CompanionBody) -> Iterator[dict[str, Any]]:
     """Yield every `:R attr_updates` row across all leads, in order."""
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
-        for row in (lead.get("outcome") or {}).get("attribute_updates") or []:
-            if isinstance(row, dict):
-                yield row
+    return _iter_outcome_rows(companion, "attribute_updates")
 
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:

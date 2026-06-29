@@ -71,6 +71,9 @@ from .schema import CompanionBody, EdgeRecord, VertexRecord
 # strong-authority subset and the ladder endpoints have one definition.
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
+# Human-readable rendering of the strong-authority set for error messages, so
+# the kinds aren't re-typed as prose where they'd drift from STRONG_AUTH_KINDS.
+_STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 # A ```yaml / ```yml fence in investigation.md is the spec-rejected
 # surface (the on-disk surface is ```invlang). Caught explicitly so a
@@ -212,7 +215,7 @@ def _check_edge_authority(companion: CompanionBody) -> list[str]:
             errors.append(
                 f"lead {lid}: resolution of {hyp} to {after!r} cites no "
                 f"supporting edge — a strong (++/--) resolution must cite at "
-                f"least one siem-event / runtime-audit / authoritative-source edge"
+                f"least one {_STRONG_AUTH_KINDS_STR} edge"
             )
             continue
         if not any(auth_by_edge.get(s) in STRONG_AUTH_KINDS for s in supporting):
@@ -220,8 +223,7 @@ def _check_edge_authority(companion: CompanionBody) -> list[str]:
             errors.append(
                 f"lead {lid}: resolution of {hyp} to {after!r} cites "
                 f"{supporting} but none carry strong observational authority "
-                f"(found: {seen}); ++/-- needs siem-event / runtime-audit / "
-                f"authoritative-source"
+                f"(found: {seen}); ++/-- needs {_STRONG_AUTH_KINDS_STR}"
             )
     return errors
 

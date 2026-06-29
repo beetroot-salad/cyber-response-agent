@@ -38,6 +38,15 @@ WEIGHT_ORDER: dict[str | None, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4
 # The two endpoints — only a strong resolution moves disposition, and only
 # strong observational authority may carry one.
 STRONG_WEIGHTS: frozenset[str] = frozenset({"++", "--"})
+# The single refuted endpoint — `--` (strongly refuted), the only weight that
+# takes a hypothesis out of contention (see `_walkers.live_hypothesis_ids`).
+REFUTED_WEIGHT: str = "--"
+# Guard the ladder endpoints against a bucket rename the same way
+# STRONG_AUTH_KINDS guards the authority subset: a desync fails loud at import.
+assert STRONG_WEIGHTS.issubset(WEIGHT_BUCKETS), (
+    "STRONG_WEIGHTS must be a subset of WEIGHT_BUCKETS"
+)
+assert REFUTED_WEIGHT in STRONG_WEIGHTS, "REFUTED_WEIGHT must be a strong weight"
 
 
 TYPES: tuple[str, ...] = (
