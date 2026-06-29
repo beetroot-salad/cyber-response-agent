@@ -30,8 +30,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._frontmatter import parse_frontmatter_or_none
-
-DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
+from defender.learning.core.config import DISPOSITION_ENUM
 
 
 def _read_frontmatter(report_path: Path) -> dict | None:
