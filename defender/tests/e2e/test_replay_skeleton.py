@@ -110,9 +110,8 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # without re-driving the nested agent. Signature mirrors tools._run_gather.
     # The nested gather + its capture path are exercised by test_nested_gather_
     # capture; this test deliberately isolates the MAIN loop.
-    async def _fake_run_gather(deps, gather_factory, request_limit,
-                               lead_id, system, goal, what_to_summarize):
-        return f"[replayed gather summary: lead={lead_id} system={system}]"
+    async def _fake_run_gather(deps, gather_factory, request_limit, request):
+        return f"[replayed gather summary: lead={request.lead_id} system={request.system}]"
 
     # Boundary fake of the gather subagent's return contract — isolates the MAIN
     # loop; the nested gather + capture path are covered by test_nested_gather_capture.

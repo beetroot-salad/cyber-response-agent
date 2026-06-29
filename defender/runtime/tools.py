@@ -304,6 +304,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
 # foundation is defined, so the tools_gather → tools import resolves without a
 # cycle.
 from .tools_gather import (  # noqa: E402, F401  (re-exported — public surface)
+    GatherRequest,
     _capture_adapter,
     _capture_adapter_sql,
     _capture_query,
