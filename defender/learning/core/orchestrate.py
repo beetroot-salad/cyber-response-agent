@@ -252,8 +252,11 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
         so the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
         path gets. It is deliberately ``LeadAuthorError`` (a plain ``Exception``, *not* a
         ``StageAbort``): an agent crash dooms only *this* marker, so it must keep quarantining
-        even if a future audit adds an ``except StageAbort: raise`` to this drain — only the
-        systemic ``FatalConfigError`` (a ``StageAbort``) re-raises to exit 2.
+        even if a future audit adds an ``except StageAbort: raise`` to this drain. The systemic
+        ``FatalConfigError`` (a ``ValueError``, **not** a ``StageAbort`` since #468) re-raises to
+        exit 2 only because it is named explicitly alongside ``StageAbort`` in
+        ``_run_or_dead_letter``'s reraise tuple — a hand-rolled ``except StageAbort`` here would
+        *miss* it.
       * ``rc is None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
         ``_run_curator_module`` — the run did not complete) — raises ``_LeadAuthorRetry``
         so the drain leaves the marker queued for a bounded number of retries, then
@@ -642,7 +645,9 @@ def _drain_lead_author_markers(
             # other poison run dir so it can't wedge the serial drain or re-crash every
             # tick) lives in _run_or_dead_letter. A systemic fault here — e.g. a non-numeric
             # LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read deep inside run() -> _prepare_handoffs,
-            # surfaced as FatalConfigError (a StageAbort) — dooms every marker, so the
+            # surfaced as FatalConfigError (the layer-neutral misconfig condition — a ValueError,
+            # enrolled alongside StageAbort in _run_or_dead_letter's reraise tuple, not a subclass
+            # of it since #468) — dooms every marker, so the
             # primitive propagates it past the broad quarantine guard to the contracted
             # exit 2. _LeadAuthorRetry is drain-specific control flow, not a dead-letter, so
             # it's propagated out and handled below. (functools.partial binds run_dir/spec/marker

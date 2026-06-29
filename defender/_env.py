@@ -45,7 +45,10 @@ def env_int(name: str, default: int) -> int:
 
 # Bool tokens are deliberately closed sets: an unrecognized value is a typo we
 # surface, not silently coerce to False (the old hand-rolled behavior). The empty
-# string counts as false so ``NAME=`` and an unset NAME behave alike.
+# string counts as false (so ``NAME=`` reads as a False toggle, matching the old
+# hand-rolled ``os.environ.get(NAME, "")`` behavior) — note this coincides with an
+# unset ``NAME`` only when ``default`` is False; an unset ``NAME`` always returns
+# ``default``.
 _TRUE_TOKENS = frozenset({"1", "on", "true", "yes"})
 _FALSE_TOKENS = frozenset({"", "0", "off", "false", "no"})
 

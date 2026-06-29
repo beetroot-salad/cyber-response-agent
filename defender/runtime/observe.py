@@ -56,7 +56,9 @@ def _max_chars() -> int:
     A single oversized message (e.g. a huge tool-return) can still bloat the
     on-disk log; set DEFENDER_LLM_LOG_MAX_CHARS to bound that when debugging.
     A non-numeric value fails loud (FatalConfigError) rather than silently
-    falling back to 0 — an operator typo on the knob should surface, not vanish."""
+    falling back to 0 — an operator typo on the knob should surface, not vanish.
+    Called once from RequestLogger.__init__ (run startup), not per-request, so
+    that surfacing isn't swallowed by the driver's per-request logging guard."""
     return env_int("DEFENDER_LLM_LOG_MAX_CHARS", 0)
 
 
@@ -112,6 +114,14 @@ class RequestLogger:
     def __init__(self, path: Path):
         self.path = path
         self._fh = path.open("w")
+        # Read + validate the on-disk cap ONCE, here at construction. The driver
+        # builds the logger at run startup (driver.run → RequestLogger(...)),
+        # outside the per-request `except Exception` that guards log(). Reading it
+        # inside log() instead would let a typo'd DEFENDER_LLM_LOG_MAX_CHARS be
+        # swallowed on every request, silently disabling ALL logging for the run;
+        # read here, a bad value fails loud at startup — the surfacing _max_chars()
+        # promises.
+        self._cap = _max_chars()
         self.messages: list[dict] = []   # the message stream (all instances)
         self._seen: dict[str, int] = {}  # agent_id → history messages already emitted
         self._seq: dict[str, int] = {}   # agent_id → next per-instance message index
@@ -142,7 +152,7 @@ class RequestLogger:
         self, *, request_messages: list[Any], response: Any, run_step: int = 0,
         duration_ms: float = 0.0, agent_id: str = "main",
     ) -> None:
-        cap = _max_chars()
+        cap = self._cap
         # Delta of the request history: everything appended since this agent's
         # previous request (its prior response — already emitted — is skipped by
         # the +1 below, so this is the new request message(s), typically the
