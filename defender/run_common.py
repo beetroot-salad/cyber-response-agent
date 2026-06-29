@@ -31,7 +31,7 @@ VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 # The single home for the runtime runs-base literal + its env resolution. Every
 # other reader (evals/_secondary_config.py, evals/held_out.py) calls
 # resolve_runs_base() instead of re-reading DEFENDER_RUNS_BASE with its own copy of
-# the "/tmp/defender-runs" default.
+# the DEFAULT_RUNS_BASE default below.
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
 
 
