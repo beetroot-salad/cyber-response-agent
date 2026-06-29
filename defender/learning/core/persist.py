@@ -6,7 +6,6 @@ so tests pass `paths=LoopPaths(repo_root=tmp_path)` instead of monkeypatching gl
 from __future__ import annotations
 
 import contextlib
-import datetime as _dt
 import fcntl
 import json
 import shutil
@@ -18,6 +17,7 @@ from collections.abc import Callable
 
 import yaml
 
+from defender._clock import now_iso
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
@@ -88,7 +88,7 @@ def _rewrite_queue(
         survivors = list(held)
     write_atomic(pending_file, "".join(json.dumps(entry) + "\n" for entry in survivors))
     if consumed:
-        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+        now = now_iso()
         rows = []
         for entry in consumed:
             rec = dict(entry)

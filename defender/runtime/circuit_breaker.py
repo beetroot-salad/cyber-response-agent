@@ -37,11 +37,11 @@ via the shared `_run_dir.update_json_locked` helper (the same primitive behind
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 # Shared locked-JSON helper. The workspace root is on sys.path via the
 # entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
+from defender._clock import now_iso
 from defender.hooks._run_dir import update_json_locked
 
 # A system trips after this many connectivity/auth failures; the run aborts after
@@ -135,7 +135,7 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         sysrec["failures"] += 1
         state["total_failures"] = state.get("total_failures", 0) + 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
-            sysrec["tripped_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+            sysrec["tripped_at"] = now_iso()
 
     state = update_json_locked(_path(run_dir), _mutate, default=_blank)
 

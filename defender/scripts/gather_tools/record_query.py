@@ -65,6 +65,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._env import env_int
 from defender._io import append_jsonl, read_jsonl_rows
 from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import error_class_for_exit
@@ -93,7 +94,7 @@ _NON_ADAPTER = frozenset({"record-query", "invlang"})
 def _passthrough_max_bytes() -> int:
     """The pass-through byte ceiling, read at call time so an env override set
     after import (e.g. a test's ``monkeypatch.setenv``) takes effect."""
-    return int(os.environ.get("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", "65536"))
+    return env_int("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", 65536)
 
 
 PASSTHROUGH_SAMPLE_COUNT = 3
@@ -362,7 +363,7 @@ def _derive_verb(inner: list[str]) -> str | None:
     return None
 
 
-_ADAPTER_TIMEOUT_S = int(os.environ.get("DEFENDER_ADAPTER_TIMEOUT_SEC", "120"))
+_ADAPTER_TIMEOUT_S = env_int("DEFENDER_ADAPTER_TIMEOUT_SEC", 120)
 
 
 def capture(

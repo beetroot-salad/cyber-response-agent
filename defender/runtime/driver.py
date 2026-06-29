@@ -39,6 +39,7 @@ from .tools import (
     register_tools,
 )
 
+from defender._env import env_bool
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
@@ -241,8 +242,9 @@ def build_gather_agent(
 
 
 def _compaction_enabled() -> bool:
-    return os.environ.get("DEFENDER_COMPACTION", "").strip().lower() in (
-        "1", "on", "true", "yes")
+    # An unrecognized DEFENDER_COMPACTION token fails loud (FatalConfigError) rather
+    # than silently disabling — an operator typo on the toggle should surface.
+    return env_bool("DEFENDER_COMPACTION", False)
 
 
 def _summary_pointers(run_dir: Path) -> dict[str, str]:

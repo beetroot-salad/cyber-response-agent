@@ -27,8 +27,6 @@ from defender.learning.core.config import (
     BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
     GROUND_TRUTH_FILE,
-    MERGE_MODE,
-    VALID_MERGE_MODES,
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
@@ -36,6 +34,7 @@ from defender.learning.core.config import (
     RunPaths,
     _log,
     env_int,
+    merge_mode,
     pitfalls_threshold,
 )
 from defender._io import write_atomic
@@ -255,8 +254,11 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path) -> None:
         so the drain quarantines the marker to ``failed/``, the same surfacing the scope-gate
         path gets. It is deliberately ``LeadAuthorError`` (a plain ``Exception``, *not* a
         ``StageAbort``): an agent crash dooms only *this* marker, so it must keep quarantining
-        even if a future audit adds an ``except StageAbort: raise`` to this drain — only the
-        systemic ``FatalConfigError`` (a ``StageAbort``) re-raises to exit 2.
+        even if a future audit adds an ``except StageAbort: raise`` to this drain. The systemic
+        ``FatalConfigError`` (a ``ValueError``, **not** a ``StageAbort`` since #468) re-raises to
+        exit 2 only because it is named explicitly alongside ``StageAbort`` in
+        ``_run_or_dead_letter``'s reraise tuple — a hand-rolled ``except StageAbort`` here would
+        *miss* it.
       * ``rc is None`` (a swallowed-transient ``SubprocessError``/``OSError`` from
         ``_run_curator_module`` — the run did not complete) — raises ``_LeadAuthorRetry``
         so the drain leaves the marker queued for a bounded number of retries, then
@@ -479,26 +481,30 @@ def _run_or_dead_letter(
     can't hand-roll a broad ``except Exception`` that silently swallows a systemic
     fault (the #438 regression):
 
-      * ``StageAbort`` is **always re-raised** — a systemic fault (e.g.
-        ``FatalConfigError``, a misconfig that dooms every item, not just this one)
-        must reach ``_run_stage`` as the contracted ``exit 2`` rather than being
-        mislabeled as a per-item failure. (It can't be caught in an outer wrapper
-        instead: the broad guard below is *inside* the drain, so an outer ``except``
-        can never recatch what this one already swallowed.) Catching the ``StageAbort``
-        base — not ``FatalConfigError`` — keeps any future systemic-fault type
-        re-raising here for free (#443/#445).
+      * ``StageAbort`` is **always re-raised** — a systemic fault must reach
+        ``_run_stage`` as the contracted ``exit 2`` rather than being mislabeled as
+        a per-item failure. (It can't be caught in an outer wrapper instead: the
+        broad guard below is *inside* the drain, so an outer ``except`` can never
+        recatch what this one already swallowed.) Catching the ``StageAbort`` base
+        keeps any future learning-internal systemic-fault type re-raising here for
+        free (#443/#445).
+      * ``FatalConfigError`` (a misconfig that dooms every item, not just this one)
+        is re-raised **alongside** ``StageAbort``. It is the layer-neutral *condition*
+        shared with runtime/ (``defender._env``), enrolled here rather than subclassed
+        because the exit-2 *response* is learning-only — so it must be named explicitly
+        in this set, not inherited via ``StageAbort``.
       * any type in ``propagate`` is re-raised too — drain-specific control flow
         (e.g. ``_LeadAuthorRetry``'s bounded retry) that the caller handles itself;
         it is *not* a dead-letter and must escape this guard.
       * every other ``Exception`` is dead-lettered: ``on_dead_letter(e)`` is invoked
         (quarantine the marker, or just log for a marker-less phase) and the drain
         keeps going. ``RunUnprocessable`` per-run *data* failures land here and
-        quarantine, exactly as before — only the ``StageAbort`` family is special.
+        quarantine, exactly as before — only the systemic family is special.
 
     A new drain that routes its swallow site through this helper is systemic-fault-safe
     for free; one that hand-rolls ``except Exception`` is the visible odd-one-out.
     """
-    reraise: tuple[type[BaseException], ...] = (StageAbort, *propagate)
+    reraise: tuple[type[BaseException], ...] = (StageAbort, FatalConfigError, *propagate)
     try:
         fn()
     except reraise:
@@ -639,7 +645,9 @@ def _drain_lead_author_markers(
             # other poison run dir so it can't wedge the serial drain or re-crash every
             # tick) lives in _run_or_dead_letter. A systemic fault here — e.g. a non-numeric
             # LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD read deep inside run() -> _prepare_handoffs,
-            # surfaced as FatalConfigError (a StageAbort) — dooms every marker, so the
+            # surfaced as FatalConfigError (the layer-neutral misconfig condition — a ValueError,
+            # enrolled alongside StageAbort in _run_or_dead_letter's reraise tuple, not a subclass
+            # of it since #468) — dooms every marker, so the
             # primitive propagates it past the broad quarantine guard to the contracted
             # exit 2. _LeadAuthorRetry is drain-specific control flow, not a dead-letter, so
             # it's propagated out and handled below. (functools.partial binds run_dir/spec/marker
@@ -729,13 +737,12 @@ def _drain_lead_author(
 
 
 def _validate_merge_mode() -> None:
-    """Validated at the author stage (not at config import) so an author-only
-    misconfig fails loud for the drains without crashing the LEARN / run_one
-    importers that never read it. main() maps FatalConfigError (a StageAbort)→rc 2."""
-    if MERGE_MODE not in VALID_MERGE_MODES:
-        raise FatalConfigError(
-            f"LEARNING_MERGE_MODE must be one of {VALID_MERGE_MODES}; got {MERGE_MODE!r}"
-        )
+    """Fail fast on a bad ``LEARNING_MERGE_MODE`` at drain entry, before any curation
+    work. ``merge_mode()`` reads + validates against ``VALID_MERGE_MODES`` at call
+    time (not config import) so an author-only misconfig fails loud for the drains
+    without crashing the LEARN / run_one importers that never merge; the raised
+    ``FatalConfigError`` is enrolled alongside ``StageAbort``, so main() maps it→rc 2."""
+    merge_mode()
 
 
 def _run_worktree_batch(
@@ -792,7 +799,7 @@ def _run_worktree_batch(
         _log(f"{label}: batch produced no commits — no PR opened")
         return 0
     _log(f"{label}: opened PR {pr}")
-    if MERGE_MODE == "auto_on_green":
+    if merge_mode() == "auto_on_green":
         # PR C wires the green bar + `gh pr merge --auto` here; until then the PR
         # falls through to human review even under auto_on_green.
         _log(f"{label}: merge_mode=auto_on_green — green-bar auto-merge not yet "
@@ -1065,9 +1072,10 @@ it), so it propagates uncaught rather than masquerading as a clean exit 2.
 def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> int:
     """Run one stage entrypoint, mapping a systemic fault to the FATAL exit-2 contract.
 
-    A ``StageAbort`` (the systemic-fault base, e.g. ``FatalConfigError``) always maps to
-    exit 2 — the whole stage is doomed. A ``RunUnprocessable`` (this-run's-data-is-bad) is
-    handled by ``allow_run_error``:
+    A ``StageAbort`` (the learning systemic-fault base) or a ``FatalConfigError`` (the
+    layer-neutral misconfig condition from ``defender._env``, enrolled alongside it)
+    always maps to exit 2 — the whole stage is doomed. A ``RunUnprocessable``
+    (this-run's-data-is-bad) is handled by ``allow_run_error``:
 
     * The **direct single-run** path (``loop.py <run_dir>``) passes ``allow_run_error=True``:
       there is no queue to quarantine into, so a bad run maps to the contracted exit 2.
@@ -1079,7 +1087,7 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
     """
     try:
         return stage()
-    except StageAbort as e:
+    except (StageAbort, FatalConfigError) as e:
         print(f"[loop] FATAL: {e}", file=sys.stderr)
         return 2
     except RunUnprocessable as e:
