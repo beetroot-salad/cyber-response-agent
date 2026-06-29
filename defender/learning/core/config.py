@@ -356,15 +356,33 @@ class LoopError(Exception):
     """Fatal orchestrator error — caller should stop processing this run."""
 
 
+class FatalConfigError(LoopError):
+    """A systemic misconfiguration — the whole stage must abort with the
+    contracted ``exit 2``, not quarantine the item it was reading config for.
+
+    The drains' broad ``except Exception`` guards quarantine per-item failures
+    (a corrupt marker) and keep draining; a ``LoopError`` raised deep in a
+    per-marker flow is caught by those guards and quarantined — the right
+    disposition for the per-run data failures ``LoopError`` overwhelmingly
+    marks. A bad operator override (a non-numeric threshold, an invalid merge
+    mode) is the opposite: it dooms *every* item, so the drains re-raise this
+    subclass *before* the broad guard. Subclassing ``LoopError`` keeps
+    ``_run_stage``'s ``except LoopError → exit 2`` mapping unchanged.
+    """
+
+
 def env_int(name: str, default: int) -> int:
     """Read an integer env override, failing loud on a non-numeric value.
 
     The drain wake gates read their trigger thresholds at call time (so tests
     override via ``monkeypatch.setenv``). A bad operator value (``=high``, ``=""``)
-    must surface as a ``LoopError`` — which the drain's ``_run_stage`` maps to the
-    contracted exit 2 — rather than an uncaught ``ValueError`` that crashes the
-    stage with a traceback and an uncontracted exit 1. Mirrors the fail-loud reads
-    for ``LEARNING_MERGE_MODE`` and ``ORACLE_MAX_CONCURRENCY``.
+    must surface as a ``FatalConfigError`` — which the drain's ``_run_stage`` maps
+    to the contracted exit 2 — rather than an uncaught ``ValueError`` that crashes
+    the stage with a traceback and an uncontracted exit 1. The ``FatalConfigError``
+    subtype (vs. a bare ``LoopError``) lets a drain re-raise it past the broad
+    quarantine guard even when the read happens deep in a per-marker flow (e.g.
+    ``LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`` inside ``_prepare_handoffs``). Mirrors
+    the fail-loud reads for ``LEARNING_MERGE_MODE`` and ``ORACLE_MAX_CONCURRENCY``.
     """
     raw = os.environ.get(name)
     if raw is None:
@@ -372,7 +390,7 @@ def env_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        raise LoopError(f"{name} must be an integer; got {raw!r}") from None
+        raise FatalConfigError(f"{name} must be an integer; got {raw!r}") from None
 
 
 def pitfalls_threshold() -> int:
