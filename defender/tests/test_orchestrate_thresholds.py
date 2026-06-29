@@ -182,6 +182,82 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
         orchestrate._drain_pitfalls(paths, _run_pitfalls)
 
 
+# --- #442: the dead-letter contract is enforced by one primitive, not per-site discipline ---
+#
+# _run_or_dead_letter is the single place "re-raise StageAbort, dead-letter the rest"
+# lives, so the invariant has one regression guard instead of one hand-copied clause per
+# swallow site (the #438 footgun: a new drain that forgets the re-raise silently regresses).
+
+
+def test_run_or_dead_letter_returns_true_on_success():
+    """A clean run reports success (so the caller can unlink the marker) and never
+    invokes the dead-letter callback."""
+    calls: list[Exception] = []
+    ok = orchestrate._run_or_dead_letter(lambda: None, calls.append)
+    assert ok is True
+    assert calls == []
+
+
+def test_run_or_dead_letter_dead_letters_a_plain_exception():
+    """A per-item failure is dead-lettered: the callback fires with the exception and the
+    helper reports failure (no re-raise) so the serial drain keeps going."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise RuntimeError("poison item")
+
+    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    assert ok is False
+    assert len(calls) == 1
+    assert isinstance(calls[0], RuntimeError)
+
+
+def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
+    """A RunUnprocessable is a per-run *data* failure (the ~30 validate.py sites): it must
+    dead-letter like any other Exception — only the StageAbort family is special."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise RunUnprocessable("malformed report.md")
+
+    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    assert ok is False
+    assert len(calls) == 1
+    assert isinstance(calls[0], RunUnprocessable)
+
+
+def test_run_or_dead_letter_reraises_stage_abort():
+    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it
+    reaches _run_stage as the contracted exit 2. The callback must not fire. Both a bare
+    StageAbort and its FatalConfigError subclass must escape (the primitive catches the
+    base, so a future systemic-fault type is covered for free — #443/#445)."""
+    for exc in (StageAbort("systemic fault"), FatalConfigError("non-numeric threshold")):
+        calls: list[Exception] = []
+
+        def _boom(exc=exc):
+            raise exc
+
+        with pytest.raises(StageAbort):
+            orchestrate._run_or_dead_letter(_boom, calls.append)
+        assert calls == []
+
+
+def test_run_or_dead_letter_propagates_declared_control_flow():
+    """A type in `propagate` is drain-specific control flow (e.g. _LeadAuthorRetry's
+    bounded retry), not a dead-letter: it escapes the guard for the caller to handle,
+    and the callback must not fire."""
+    calls: list[Exception] = []
+
+    def _boom():
+        raise orchestrate._LeadAuthorRetry("transient")
+
+    with pytest.raises(orchestrate._LeadAuthorRetry):
+        orchestrate._run_or_dead_letter(
+            _boom, calls.append, propagate=(orchestrate._LeadAuthorRetry,)
+        )
+    assert calls == []
+
+
 class _StubBranch:
     """A git-free AuthorBranch stand-in for the full-stage exit-2 assertion. do_work
     raises before finish_batch, so only these three methods are exercised; start_batch
