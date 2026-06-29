@@ -357,9 +357,8 @@ def register_gather_tool(
         dimensions the summary must cover. Returns a measurements-only summary;
         the queries it runs are captured to the queries table automatically. Issue
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
-        # Build the request object HERE, at the model-facing boundary: the four
-        # params above are the tool schema the model fills in, so they stay
-        # separate; everything inward takes the one object.
+        # Bundle the four model-supplied params into the value object at the tool
+        # boundary; everything inward takes the one object (rationale: GatherRequest).
         request = GatherRequest(lead_id, system, goal, what_to_summarize)
         # Resolve `_run_gather` through the `tools` module (not the bare name) so
         # the e2e replay test's `setattr(tools, "_run_gather", fake)` intercepts
