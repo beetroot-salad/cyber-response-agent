@@ -441,7 +441,7 @@ def hypothesis_shape_match(
                 continue
             entry = agg.setdefault(name, {
                 "n": 0,
-                "weights": {**{b: 0 for b in vocab.WEIGHT_BUCKETS}, "null": 0},
+                "weights": {**_empty_bucket(), "null": 0},
                 "dispositions": {},
                 "cases": set(),
             })
