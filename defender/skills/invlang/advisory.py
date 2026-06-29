@@ -30,6 +30,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from . import vocab
 from .corpus import Companion, LoadReport, load_corpus
 from .queries import (
     hypothesis_name_wildcard,
@@ -51,8 +52,6 @@ CAVEAT = (
     "Caveat: precedent only. Use to choose what to gather; only current "
     "observations can support or refute hypotheses in this case."
 )
-
-_WEIGHT_BUCKETS: tuple[str, ...] = ("++", "+", "-", "--")
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +251,7 @@ def _build_hypothesis_vocab(
         weight = hit["final_weight"]
         rec = by_name[name]
         rec["n"] += 1
-        if weight in _WEIGHT_BUCKETS:
+        if weight in vocab.WEIGHT_BUCKETS:
             rec["buckets"][weight] += 1
         else:
             rec["unresolved"] += 1
@@ -262,7 +261,7 @@ def _build_hypothesis_vocab(
             {
                 "name": name,
                 "n": rec["n"],
-                "buckets": {b: rec["buckets"].get(b, 0) for b in _WEIGHT_BUCKETS},
+                "buckets": {b: rec["buckets"].get(b, 0) for b in vocab.WEIGHT_BUCKETS},
                 "unresolved": rec["unresolved"],
             }
             for name, rec in by_name.items()
@@ -352,7 +351,7 @@ def _render_section_body(section: AdvisorySection) -> list[str]:
             for hyp, bucket in lead["per_hypothesis_effect"].items():
                 lines.append(
                     f"  {hyp}: "
-                    + " ".join(f"{b}:{bucket[b]}" for b in _WEIGHT_BUCKETS)
+                    + " ".join(f"{b}:{bucket[b]}" for b in vocab.WEIGHT_BUCKETS)
                 )
         return lines
     return []
@@ -360,6 +359,6 @@ def _render_section_body(section: AdvisorySection) -> list[str]:
 
 def _render_hypothesis_vocab_row(h: dict) -> str:
     buckets = h["buckets"]
-    histogram = ", ".join(f"{b}:{buckets[b]}" for b in _WEIGHT_BUCKETS)
+    histogram = ", ".join(f"{b}:{buckets[b]}" for b in vocab.WEIGHT_BUCKETS)
     unresolved = f" (unresolved: {h['unresolved']})" if h["unresolved"] else ""
     return f"{h['name']}: {h['n']}× (final: {histogram}){unresolved}"

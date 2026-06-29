@@ -26,9 +26,8 @@ from .schema import (
     VertexRecord,
 )
 
-# Numeric ladder for resolution weights, worst → best. `--` (strongly
-# refuted) is the only weight that takes a hypothesis out of contention.
-WEIGHT_ORDER: dict[Any, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4}
+# `--` (strongly refuted) is the only weight that takes a hypothesis out of
+# contention. The full ++/+/-/-- ladder lives in `vocab`.
 REFUTED_WEIGHT = "--"
 
 
@@ -99,6 +98,18 @@ def iter_authz_resolutions(
         if not isinstance(lead, dict):
             continue
         for row in (lead.get("outcome") or {}).get("authorization_resolutions") or []:
+            if isinstance(row, dict):
+                yield row
+
+
+def iter_attr_updates(
+    companion: CompanionBody,
+) -> Iterator[dict[str, Any]]:
+    """Yield every `:R attr_updates` row across all leads, in order."""
+    for lead in companion.get("findings") or []:
+        if not isinstance(lead, dict):
+            continue
+        for row in (lead.get("outcome") or {}).get("attribute_updates") or []:
             if isinstance(row, dict):
                 yield row
 

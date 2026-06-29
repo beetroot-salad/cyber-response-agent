@@ -29,18 +29,9 @@ import fnmatch
 from typing import Any
 from collections.abc import Iterable
 
-from . import _walkers
+from . import _walkers, vocab
 from .corpus import Companion
 from .schema import Conclude, FindingRecord, HypothesisRecord
-
-
-# ---------------------------------------------------------------------------
-# Weight / ordering tables
-# ---------------------------------------------------------------------------
-
-_WEIGHT_NUMERIC: dict[Any, int] = {None: 0, "++": 2, "+": 1, "-": -1, "--": -2}
-_FINAL_WEIGHT_SORT: dict[Any, int] = {"++": 4, "+": 3, None: 2, "-": 1, "--": 0}
-_WEIGHT_BUCKETS = ("++", "+", "-", "--")
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +160,7 @@ def hypothesis_name_wildcard(
             continue
         if signature_id is not None and c.signature_id != signature_id:
             continue
-        final: dict[str, Any] = {h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h}
-        for lead in c.leads:
-            for r in lead.get("resolutions", []) or []:
-                h_id = r.get("hypothesis")
-                if h_id:
-                    final[h_id] = r.get("after")
+        final = _compute_final_weights(c)
         for h in _all_hypotheses(c):
             name = _hypothesis_name(h)
             if not fnmatch.fnmatchcase(name, pattern):
@@ -190,7 +176,7 @@ def hypothesis_name_wildcard(
                 "disposition": c.conclude.get("disposition"),
                 "status": h.get("status", "active"),
             })
-    hits.sort(key=lambda r: (_FINAL_WEIGHT_SORT.get(r["final_weight"], 2), r["case_id"]), reverse=True)
+    hits.sort(key=lambda r: (vocab.WEIGHT_ORDER.get(r["final_weight"], 2), r["case_id"]), reverse=True)
     return {"hits": hits, "count": len(hits), "pattern": pattern}
 
 
@@ -199,7 +185,7 @@ def hypothesis_name_wildcard(
 # ---------------------------------------------------------------------------
 
 def _empty_bucket() -> dict[str, int]:
-    return {b: 0 for b in _WEIGHT_BUCKETS}
+    return {b: 0 for b in vocab.WEIGHT_BUCKETS}
 
 
 def lead_branch_effects(
@@ -300,7 +286,7 @@ def _accumulate_lead_effects(
         if not hn or (patterns_active and not _hyp_pattern_matches(hn, hypothesis_patterns)):
             continue
         shift = r.get("after")
-        if shift not in _WEIGHT_BUCKETS:
+        if shift not in vocab.WEIGHT_BUCKETS:
             continue
         per_hyp[name][hn][shift] += 1
 
@@ -455,13 +441,13 @@ def hypothesis_shape_match(
                 continue
             entry = agg.setdefault(name, {
                 "n": 0,
-                "weights": {**{b: 0 for b in _WEIGHT_BUCKETS}, "null": 0},
+                "weights": {**{b: 0 for b in vocab.WEIGHT_BUCKETS}, "null": 0},
                 "dispositions": {},
                 "cases": set(),
             })
             entry["n"] += 1
             w = final.get(h.get("id") or "")
-            entry["weights"][w if w in _WEIGHT_BUCKETS else "null"] += 1
+            entry["weights"][w if w in vocab.WEIGHT_BUCKETS else "null"] += 1
             entry["dispositions"][disp] = entry["dispositions"].get(disp, 0) + 1
             entry["cases"].add(c.case_id)
 

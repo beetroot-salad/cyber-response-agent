@@ -28,6 +28,18 @@ Slot naming uses dot-separated namespacing:
 from __future__ import annotations
 
 
+# The assessment ladder — belief-weight buckets, best → worst. The single
+# source for the ++/+/-/-- vocabulary shared by the validator, corpus queries,
+# advisory rendering, and the CLI. SKILL.md §Core blocks restates the
+# strong/weak authority split in prose — keep that paragraph in sync by hand.
+WEIGHT_BUCKETS: tuple[str, ...] = ("++", "+", "-", "--")
+# Numeric ordering, worst → best; `None`/unassessed sorts in the middle.
+WEIGHT_ORDER: dict[str | None, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4}
+# The two endpoints — only a strong resolution moves disposition, and only
+# strong observational authority may carry one.
+STRONG_WEIGHTS: frozenset[str] = frozenset({"++", "--"})
+
+
 TYPES: tuple[str, ...] = (
     "compute", "process", "thread", "memory-region", "module",
     "session", "identity", "storage", "database", "network-device",
@@ -56,6 +68,16 @@ ANCHOR_KINDS: tuple[str, ...] = (
 AUTH_KINDS: tuple[str, ...] = (
     "siem-event", "runtime-audit", "authoritative-source",
     "client-asserted", "inferred-structural",
+)
+
+# Strong observational authority (validator rule 3): the auth_kinds that may
+# carry a ++/-- resolution. A named subset of AUTH_KINDS; the assertion makes a
+# vocab rename fail loud instead of silently desyncing the authority check.
+STRONG_AUTH_KINDS: frozenset[str] = frozenset(
+    {"siem-event", "runtime-audit", "authoritative-source"}
+)
+assert STRONG_AUTH_KINDS <= set(AUTH_KINDS), (
+    "STRONG_AUTH_KINDS must be a subset of AUTH_KINDS"
 )
 
 COMPUTE_ROLE: tuple[str, ...] = (

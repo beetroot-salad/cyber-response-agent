@@ -53,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p6 = sub.add_parser("hypotheses", help="Class 6: hypothesis name wildcard")
     p6.add_argument("pattern")
-    p6.add_argument("--final-weight", choices=["++", "+", "-", "--"])
+    p6.add_argument("--final-weight", choices=list(vocab.WEIGHT_BUCKETS))
     p6.add_argument("--disposition")
     p6.add_argument("--signature")
 

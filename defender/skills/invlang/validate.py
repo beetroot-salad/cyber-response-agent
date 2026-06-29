@@ -67,12 +67,10 @@ from .parser import INVLANG_FENCE_RE, parse_dense_companion
 from .schema import CompanionBody, EdgeRecord, VertexRecord
 
 # Only these observational-authority kinds can carry a ``++``/``--``
-# resolution (defender SKILL §Core blocks). Mirrors soc-agent edge
-# authority.
-STRONG_AUTH_KINDS = frozenset(
-    {"siem-event", "runtime-audit", "authoritative-source"}
-)
-STRONG_WEIGHTS = frozenset({"++", "--"})
+# resolution (defender SKILL §Core blocks). Sourced from `vocab` so the
+# strong-authority subset and the ladder endpoints have one definition.
+STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
+STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
 
 # A ```yaml / ```yml fence in investigation.md is the spec-rejected
 # surface (the on-disk surface is ```invlang). Caught explicitly so a
@@ -324,21 +322,16 @@ def _check_attr_update_keys(companion: CompanionBody) -> list[str]:
     dropped by the resolver, so reject it at write time rather than let it
     land as a no-op refinement."""
     errors: list[str] = []
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
-        for upd in (lead.get("outcome") or {}).get("attribute_updates") or []:
-            if not isinstance(upd, dict):
+    for upd in _walkers.iter_attr_updates(companion):
+        tgt = upd.get("target", "?")
+        for key in (upd.get("updates") or {}):
+            if key == "class" or (isinstance(key, str) and key.startswith("attrs.")):
                 continue
-            tgt = upd.get("target", "?")
-            for key in (upd.get("updates") or {}):
-                if key == "class" or (isinstance(key, str) and key.startswith("attrs.")):
-                    continue
-                errors.append(
-                    f":R attr_updates on {tgt}: key {key!r} is not a valid "
-                    f"refinement key — use `class` (class refinement) or "
-                    f"`attrs.<name>` (attribute); a bare key is dropped silently"
-                )
+            errors.append(
+                f":R attr_updates on {tgt}: key {key!r} is not a valid "
+                f"refinement key — use `class` (class refinement) or "
+                f"`attrs.<name>` (attribute); a bare key is dropped silently"
+            )
     return errors
 
 
@@ -404,22 +397,17 @@ def _apply_attr_updates(
     """Second pass — layer `:R attr_updates` on top of the baseline. Key
     ``class`` overrides classification; key ``attrs.<name>`` overrides an
     attribute."""
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
+    for upd in _walkers.iter_attr_updates(companion):
+        tgt = upd.get("target")
+        updates = upd.get("updates") or {}
+        if not isinstance(tgt, str) or not isinstance(updates, dict):
             continue
-        for upd in (lead.get("outcome") or {}).get("attribute_updates") or []:
-            if not isinstance(upd, dict):
-                continue
-            tgt = upd.get("target")
-            updates = upd.get("updates") or {}
-            if not isinstance(tgt, str) or not isinstance(updates, dict):
-                continue
-            st = state.setdefault(tgt, {"classification": "", "attributes": {}})
-            for key, val in updates.items():
-                if key == "class":
-                    st["classification"] = val
-                elif isinstance(key, str) and key.startswith("attrs."):
-                    st["attributes"][key[len("attrs."):]] = val
+        st = state.setdefault(tgt, {"classification": "", "attributes": {}})
+        for key, val in updates.items():
+            if key == "class":
+                st["classification"] = val
+            elif isinstance(key, str) and key.startswith("attrs."):
+                st["attributes"][key[len("attrs."):]] = val
 
 
 def _effective_vertex_state(
