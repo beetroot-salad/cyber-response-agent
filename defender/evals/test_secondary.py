@@ -315,7 +315,7 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     captured: dict = {}
 
     class FakeLoop:
-        class LoopError(Exception):
+        class RunUnprocessable(Exception):
             pass
 
         @staticmethod
@@ -384,7 +384,7 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
 
     loop._run_claude wraps subprocess.run with a timeout, so a hung
     oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
-    LoopError). Earlier rev only caught LoopError; one timeout
+    RunUnprocessable). Earlier rev only caught RunUnprocessable; one timeout
     aborted the whole harness and prevented the summary from being
     written. This test pins the conversion.
     """
@@ -400,7 +400,7 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
     class FakeLoop:
-        class LoopError(Exception):
+        class RunUnprocessable(Exception):
             pass
 
         @staticmethod
@@ -432,7 +432,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return "leads: []\n"
 
     class FakeLoop:
-        class LoopError(Exception):
+        class RunUnprocessable(Exception):
             pass
 
         lead_repository = _FakeLR

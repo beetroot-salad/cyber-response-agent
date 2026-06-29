@@ -352,22 +352,48 @@ VALID_MERGE_MODES = ("auto_on_green", "human_review")
 MERGE_MODE = os.environ.get("LEARNING_MERGE_MODE", "human_review")
 
 
-class LoopError(Exception):
-    """Fatal orchestrator error — caller should stop processing this run."""
+class StageAbort(Exception):
+    """A systemic failure — the whole stage must abort with the contracted
+    ``exit 2``. This is the type ``_run_stage`` maps to exit 2 on every stage
+    (drains and the direct single-run path alike), and the type the drains
+    re-raise *before* their broad per-item quarantine guard so a deployment-wide
+    fault dooms the stage rather than being mislabeled as one corrupt item.
+
+    Distinct from ``RunUnprocessable``: ``StageAbort`` is "the deployment is
+    broken, stop everything"; ``RunUnprocessable`` is "this one run's data is
+    bad, skip it." Keeping them disjoint (not one subclassing the other) is the
+    point of #443 — the disposition is now carried by the *type*, not by which
+    ``except`` happens to catch it.
+    """
 
 
-class FatalConfigError(LoopError):
-    """A systemic misconfiguration — the whole stage must abort with the
-    contracted ``exit 2``, not quarantine the item it was reading config for.
+class FatalConfigError(StageAbort):
+    """A systemic misconfiguration (a non-numeric threshold, an invalid merge
+    mode) — a ``StageAbort`` cause. It dooms *every* item, so the drains
+    re-raise it (via ``except StageAbort``) past their broad quarantine guard,
+    and ``_run_stage`` maps it to the contracted ``exit 2``.
+    """
 
-    The drains' broad ``except Exception`` guards quarantine per-item failures
-    (a corrupt marker) and keep draining; a ``LoopError`` raised deep in a
-    per-marker flow is caught by those guards and quarantined — the right
-    disposition for the per-run data failures ``LoopError`` overwhelmingly
-    marks. A bad operator override (a non-numeric threshold, an invalid merge
-    mode) is the opposite: it dooms *every* item, so the drains re-raise this
-    subclass *before* the broad guard. Subclassing ``LoopError`` keeps
-    ``_run_stage``'s ``except LoopError → exit 2`` mapping unchanged.
+
+class RunUnprocessable(Exception):
+    """This run's data/content is unprocessable — stop processing THIS run.
+
+    The per-run data failures the loop overwhelmingly raises: a malformed
+    ``report.md`` / judge YAML, a missing artifact, a ``claude -p`` non-zero rc.
+    Raised only inside ``run_one``'s call graph (the per-run pipeline + its
+    validators). Its disposition depends on the unit of work:
+
+    * On the **queue path** (``learn_drain`` → ``_process_marker``) a drain's
+      broad ``except Exception`` quarantines this one run and keeps draining.
+    * On the **direct single-run path** (``loop.py <run_dir>``) there is no
+      queue, so ``_run_stage`` (called with ``allow_run_error=True``) maps it to
+      the contracted ``exit 2``.
+
+    It is **not** a ``StageAbort`` and is never raised on an author-drain path —
+    those use ``AuthorError`` / ``LeadAuthorError`` (quarantine) or
+    ``StageAbort`` (abort). A ``RunUnprocessable`` reaching a *drain's*
+    ``_run_stage`` is therefore a bug: it propagates uncaught (a loud
+    exit-1 + traceback) rather than masquerading as a clean exit 2. See #443.
     """
 
 
@@ -378,8 +404,8 @@ def env_int(name: str, default: int) -> int:
     override via ``monkeypatch.setenv``). A bad operator value (``=high``, ``=""``)
     must surface as a ``FatalConfigError`` — which the drain's ``_run_stage`` maps
     to the contracted exit 2 — rather than an uncaught ``ValueError`` that crashes
-    the stage with a traceback and an uncontracted exit 1. The ``FatalConfigError``
-    subtype (vs. a bare ``LoopError``) lets a drain re-raise it past the broad
+    the stage with a traceback and an uncontracted exit 1. Being a ``StageAbort``
+    (vs. a per-run ``RunUnprocessable``) lets a drain re-raise it past the broad
     quarantine guard even when the read happens deep in a per-marker flow (e.g.
     ``LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`` inside ``_prepare_handoffs``). Mirrors
     the fail-loud reads for ``LEARNING_MERGE_MODE`` and ``ORACLE_MAX_CONCURRENCY``.

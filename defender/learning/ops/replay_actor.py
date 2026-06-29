@@ -120,7 +120,7 @@ def main(argv: list[str]) -> int:
     sub._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
     try:
         story = sub.invoke_actor(alert, actor_input, staging)
-    except sub.LoopError as e:
+    except sub.RunUnprocessable as e:
         print(f"actor invocation failed: {e}", file=sys.stderr)
         return 2
     finally:

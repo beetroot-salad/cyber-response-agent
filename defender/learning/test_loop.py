@@ -14,7 +14,7 @@ import pytest
 
 from defender.learning import loop
 
-LoopError = loop.LoopError
+RunUnprocessable = loop.RunUnprocessable
 LoopPaths = loop.LoopPaths
 dump_oracle_doc = loop.dump_oracle_doc
 append_actor_observations = loop.append_actor_observations
@@ -168,7 +168,7 @@ def test_parse_lead_events_keeps_single_field_placeholder_event():
 
 
 def test_parse_lead_events_embeds_raw_reply_on_failure():
-    with pytest.raises(LoopError, match="UNPARSEABLE-MARKER"):
+    with pytest.raises(RunUnprocessable, match="UNPARSEABLE-MARKER"):
         oracle_mod.parse_lead_events("events:\n  not-a-list: UNPARSEABLE-MARKER\n", 0)
 
 
@@ -177,7 +177,7 @@ def test_parse_lead_events_strips_fence():
 
 
 def test_parse_lead_events_rejects_missing_events_list():
-    with pytest.raises(LoopError, match="no `events` list"):
+    with pytest.raises(RunUnprocessable, match="no `events` list"):
         oracle_mod.parse_lead_events("projections: []\n", 0)
 
 
@@ -261,12 +261,12 @@ def test_outcome_keyword_tolerates_block_scalar_newline_form():
 
 
 def test_outcome_keyword_rejects_unknown_first_token():
-    with pytest.raises(LoopError, match="not in"):
+    with pytest.raises(RunUnprocessable, match="not in"):
         loop._outcome_keyword("definitely-survived. lots of detail")
 
 
 def test_outcome_keyword_rejects_non_string():
-    with pytest.raises(LoopError, match="not a string"):
+    with pytest.raises(RunUnprocessable, match="not a string"):
         loop._outcome_keyword({"survived": True})
 
 
@@ -320,7 +320,7 @@ def test_validate_judge_doc_requires_subject_anchor_and_topic():
     for missing in ("subject_anchor", "subject_topic"):
         doc = _full_judge_doc()
         del doc["defender_findings"][0][missing]
-        with pytest.raises(LoopError, match=missing):
+        with pytest.raises(RunUnprocessable, match=missing):
             loop.validate_judge_doc(doc)
 
 
@@ -355,14 +355,14 @@ def test_validate_judge_doc_accepts_well_formed_actor_observations():
 def test_validate_judge_doc_rejects_non_list_actor_observations():
     doc = _full_judge_doc()
     doc["actor_observations"] = {"type": "misprediction"}
-    with pytest.raises(LoopError, match="actor_observations.*is not a list"):
+    with pytest.raises(RunUnprocessable, match="actor_observations.*is not a list"):
         loop.validate_judge_doc(doc)
 
 
 def test_validate_judge_doc_rejects_non_mapping_observation():
     doc = _full_judge_doc()
     doc["actor_observations"] = ["a bare string"]
-    with pytest.raises(LoopError, match=r"actor_observations\[0\] is not a mapping"):
+    with pytest.raises(RunUnprocessable, match=r"actor_observations\[0\] is not a mapping"):
         loop.validate_judge_doc(doc)
 
 
@@ -377,7 +377,7 @@ def test_validate_judge_doc_rejects_observation_missing_split_field():
         }
         del obs[missing]
         doc["actor_observations"] = [obs]
-        with pytest.raises(LoopError, match=missing):
+        with pytest.raises(RunUnprocessable, match=missing):
             loop.validate_judge_doc(doc)
 
 
@@ -391,7 +391,7 @@ def test_validate_judge_doc_rejects_empty_observation_field():
             "observation": "underweighted reuse risk.",
         }
     ]
-    with pytest.raises(LoopError, match="subject_topic must be a non-empty string"):
+    with pytest.raises(RunUnprocessable, match="subject_topic must be a non-empty string"):
         loop.validate_judge_doc(doc)
 
 
@@ -405,7 +405,7 @@ def test_validate_judge_doc_rejects_unknown_observation_type():
             "observation": "underweighted reuse risk.",
         }
     ]
-    with pytest.raises(LoopError, match="actor_observations\\[0\\].type="):
+    with pytest.raises(RunUnprocessable, match="actor_observations\\[0\\].type="):
         loop.validate_judge_doc(doc)
 
 

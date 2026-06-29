@@ -5,7 +5,7 @@ lead sequence + a per-run MITRE menu + archetype) and shells out via the shared
 ``claude -p`` transport. ``ops/replay_actor.py`` drives this function directly against
 a frozen generation, monkeypatching ``_actor_seed`` to pin the menu/archetype to a
 stable case id; keep ``_actor_seed`` and ``invoke_actor`` colocated so that override
-resolves at call time. ``LoopError`` is re-exported for that replay path's except-clause.
+resolves at call time. ``RunUnprocessable`` is re-exported for that replay path's except-clause.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from defender.learning.core.config import (
     ACTOR_SETTINGS,
     LESSONS_ACTOR_DIR,
     LESSONS_ENVIRONMENT_DIR,
-    LoopError,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.LoopError`
+    RunUnprocessable,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.RunUnprocessable`
 )
 from defender.learning.core.persist import derive_alert_rule_key
 from defender.learning.core.runner import _copy_transcript, _run_claude, _section

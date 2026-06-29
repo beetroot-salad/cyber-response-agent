@@ -185,16 +185,16 @@ def run_head_oracle_and_judge(
     if loop_mod.is_skip_story(actor_story):
         return SKIP_OUTCOME
 
-    # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
+    # Wrap invoke_oracle/invoke_judge themselves — they raise RunUnprocessable
     # on subprocess rc!=0 / timeout, which would otherwise escape the
     # per-alert handler in run_secondary() and abort the harness
     # mid-loop with no summary written. invoke_oracle now fans one claude -p
     # per lead and reassembles; a per-lead hang surfaces the same way.
     try:
         oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path)
-    except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
+    except (loop_mod.RunUnprocessable, subprocess.TimeoutExpired) as e:
         # _run_claude wraps subprocess.run with a timeout that raises TimeoutExpired
-        # (not LoopError); catch both so a single per-lead hang doesn't abort the harness.
+        # (not RunUnprocessable); catch both so a single per-lead hang doesn't abort the harness.
         raise SecondaryError(f"oracle invocation failed: {e}") from e
     # The oracle doc is assembled by our own code (one projection per lead, lead_ids
     # from the join); the only model-authored content is each lead's events list, read
@@ -210,14 +210,14 @@ def run_head_oracle_and_judge(
             projected_path,
             staging_dir,
         )
-    except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
+    except (loop_mod.RunUnprocessable, subprocess.TimeoutExpired) as e:
         raise SecondaryError(f"judge invocation failed: {e}") from e
     judge_stripped = loop_mod.strip_yaml_fence(judge_yaml)
     (staging_dir / "judge_findings.yaml").write_text(judge_stripped)
     try:
         judge_doc = yaml.safe_load(judge_stripped)
         loop_mod.validate_judge_doc(judge_doc)
-    except (yaml.YAMLError, loop_mod.LoopError) as e:
+    except (yaml.YAMLError, loop_mod.RunUnprocessable) as e:
         raise SecondaryError(f"judge YAML invalid: {e}") from e
     outcome = loop_mod._outcome_keyword(judge_doc["outcome"])
     return outcome

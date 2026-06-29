@@ -2,9 +2,10 @@
 not crash the author-drain stage with an uncaught ValueError (issue #435).
 
 The drain wake gates (`_has_curator_work` / `_has_lead_author_work`) read their
-trigger thresholds with `config.env_int`, which raises `LoopError` on a bad value.
-The gate runs at the top of `_run_worktree_batch`, before any git/PR work, so the
-`LoopError` propagates out of the drain to `_run_stage`, which maps it to rc 2.
+trigger thresholds with `config.env_int`, which raises `FatalConfigError` (a
+`StageAbort` — the systemic-fault base) on a bad value. The gate runs at the top of
+`_run_worktree_batch`, before any git/PR work, so the `StageAbort` propagates out of
+the drain to `_run_stage`, which maps it to rc 2.
 """
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from defender.learning.core import config  # type: ignore[import-not-found]
 from defender.learning.core import orchestrate  # type: ignore[import-not-found]
 from defender.learning.core.config import (  # type: ignore[import-not-found]
     FatalConfigError,
-    LoopError,
+    RunUnprocessable,
+    StageAbort,
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
@@ -33,9 +35,9 @@ def test_env_int_parses_a_numeric_override(monkeypatch):
 
 
 @pytest.mark.parametrize("bad", ["high", "", "5o"])
-def test_env_int_raises_loop_error_on_non_numeric(monkeypatch, bad):
+def test_env_int_raises_stage_abort_on_non_numeric(monkeypatch, bad):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", bad)
-    with pytest.raises(LoopError, match="LEARNING_AUTHOR_THRESHOLD must be an integer"):
+    with pytest.raises(StageAbort, match="LEARNING_AUTHOR_THRESHOLD must be an integer"):
         config.env_int("LEARNING_AUTHOR_THRESHOLD", 5)
 
 
@@ -43,13 +45,13 @@ def test_env_int_raises_loop_error_on_non_numeric(monkeypatch, bad):
 
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
-    with pytest.raises(LoopError):
+    with pytest.raises(StageAbort):
         orchestrate._has_curator_work(LoopPaths(repo_root=tmp_path))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    with pytest.raises(LoopError):
+    with pytest.raises(StageAbort):
         orchestrate._has_lead_author_work(LoopPaths(repo_root=tmp_path))
 
 
@@ -58,7 +60,7 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
 ):
     """The markers-present path: a queued run marker must NOT let a non-numeric
     LEARNING_PITFALLS_THRESHOLD slip past the gate. If the gate short-circuited to True
-    on the marker before reading the threshold, the LoopError would only surface later
+    on the marker before reading the threshold, the StageAbort would only surface later
     inside run_pitfalls, where _drain_pitfalls' broad `except Exception` swallows it
     (exit 0, not the contracted exit 2). The gate reads the threshold up front (#435)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
@@ -66,21 +68,21 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
-    with pytest.raises(LoopError, match="LEARNING_PITFALLS_THRESHOLD"):
+    with pytest.raises(StageAbort, match="LEARNING_PITFALLS_THRESHOLD"):
         orchestrate._has_lead_author_work(paths)
 
 
-def test_lead_author_max_retries_bad_value_raises_loop_error(tmp_path, monkeypatch):
+def test_lead_author_max_retries_bad_value_raises_stage_abort(tmp_path, monkeypatch):
     """LEAD_AUTHOR_MAX_RETRIES is read inside the lead-author drain (past the wake gate,
-    before the per-marker loop). A non-numeric value must fail loud as LoopError — which
+    before the per-marker loop). A non-numeric value must fail loud as StageAbort — which
     _run_stage maps to the contracted exit 2 — not a raw ValueError that escapes the
-    LoopError-only catch as an uncontracted exit-1 traceback (#435, same class)."""
+    StageAbort catch as an uncontracted exit-1 traceback (#435, same class)."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
-    with pytest.raises(LoopError, match="LEAD_AUTHOR_MAX_RETRIES"):
+    with pytest.raises(StageAbort, match="LEAD_AUTHOR_MAX_RETRIES"):
         orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
 
 
@@ -118,7 +120,7 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 0
 
 
-# --- #438: FatalConfigError punches through the per-marker quarantine guards ---
+# --- #438 / #443: StageAbort punches through the per-marker quarantine guards ---
 #
 # The lift threshold is read DEEP in the per-marker flow (run() -> _prepare_handoffs
 # -> _lift_threshold), under _drain_lead_author_markers' broad `except Exception`.
@@ -127,11 +129,14 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
 # one fatal-config path #437's wake-gate reads did NOT cover.
 
 
-def test_fatal_config_error_is_a_loop_error():
-    """Subclassing LoopError is the contract: _run_stage's `except LoopError -> exit 2`
-    must catch FatalConfigError unchanged, while the new type still lets a drain
-    distinguish 'abort the stage' from 'quarantine this item'."""
-    assert issubclass(FatalConfigError, LoopError)
+def test_fatal_config_error_is_a_stage_abort_not_run_unprocessable():
+    """The #443 type contract: FatalConfigError is a StageAbort (so _run_stage's
+    `except StageAbort -> exit 2` catches it on every stage) and is NOT a
+    RunUnprocessable — the two dispositions are disjoint types, so a systemic fault
+    can never be mis-read as a per-run 'quarantine this item' (or vice versa)."""
+    assert issubclass(FatalConfigError, StageAbort)
+    assert not issubclass(FatalConfigError, RunUnprocessable)
+    assert not issubclass(RunUnprocessable, StageAbort)
 
 
 def test_env_int_raises_fatal_config_error_on_non_numeric(monkeypatch):
@@ -219,3 +224,43 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
         )
     )
     assert rc == 2
+
+
+# --- #443: the _run_stage disposition split (the structural guard) -----------
+#
+# StageAbort (systemic) -> exit 2 on every stage. RunUnprocessable (this run's data
+# is bad) -> exit 2 ONLY on the direct single-run path (allow_run_error=True); on a
+# drain it PROPAGATES, because a RunUnprocessable reaching a drain's boundary did not
+# pass the per-item quarantine guard and is therefore a bug — it must fail loud (a
+# traceback), not masquerade as a clean contracted exit 2.
+
+
+def _raise(exc):
+    """A zero-arg stage that raises ``exc`` (closure dodges lambda's no-raise limit)."""
+    def _stage():
+        raise exc
+    return _stage
+
+
+def test_run_stage_maps_stage_abort_to_exit_two():
+    # Both modes: a systemic fault always aborts the stage.
+    assert orchestrate._run_stage(_raise(StageAbort("systemic"))) == 2
+    assert orchestrate._run_stage(_raise(FatalConfigError("bad cfg"))) == 2
+    assert orchestrate._run_stage(
+        _raise(StageAbort("systemic")), allow_run_error=True
+    ) == 2
+
+
+def test_run_stage_propagates_run_unprocessable_on_a_drain():
+    """The guard: on a drain path (allow_run_error=False, the default) a leaked
+    RunUnprocessable propagates uncaught rather than being mapped to a clean exit 2."""
+    with pytest.raises(RunUnprocessable, match="bad run"):
+        orchestrate._run_stage(_raise(RunUnprocessable("bad run")))
+
+
+def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
+    """The direct single-run path (loop.py <run_dir>) has no queue to quarantine into,
+    so a bad run maps to the contracted exit 2 — the behavior main() preserves."""
+    assert orchestrate._run_stage(
+        _raise(RunUnprocessable("bad run")), allow_run_error=True
+    ) == 2
