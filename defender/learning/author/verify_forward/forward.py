@@ -41,7 +41,12 @@ REPO_ROOT = HERE.parents[3]
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from defender.learning.core.config import DEFAULT_PATHS, subscription_env  # noqa: E402
+from defender.learning.core.config import (  # noqa: E402
+    DEFAULT_PATHS,
+    VERIFIER_MODEL,
+    VERIFIER_TIMEOUT,
+    subscription_env,
+)
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
     call_haiku as _call_haiku,
     parse_verdict as _parse_verdict,
@@ -49,9 +54,6 @@ from defender.learning.author.verify_forward.shared import (  # noqa: E402
 )
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "forward.md"
-
-VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
-VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
 
 # Scoped, closed-only read of the cited covering policy for a benign forward-check
 # (issue #338) — same read-only adapter the seed sampler uses, kept pyyaml-free.

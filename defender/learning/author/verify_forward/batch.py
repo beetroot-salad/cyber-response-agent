@@ -35,18 +35,27 @@ Verdict handling — keep GOOD, rewrite+recheck BAD — stays with the agent.
 from __future__ import annotations
 
 import concurrent.futures
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[3]
+# Resolve `defender.*` imports whether run directly (the curator drives this as a
+# `claude -p` Bash subprocess) or imported — mirrors actor.py/forward.py. core.config
+# is stdlib-only, so importing it here adds no pyyaml dependency to the orchestrator.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from defender.learning.core.config import (  # noqa: E402
+    VERIFY_BATCH_TIMEOUT,
+    VERIFY_BATCH_WORKERS,
+)
 
 # Cap concurrency so a large batch does not fan out unbounded claude children.
-MAX_WORKERS = int(os.environ.get("LEARNING_VERIFY_BATCH_WORKERS", "8"))
-# Per-check ceiling; slightly above the single-check 180s default so a child
-# that hits its own timeout reports BAD/ERROR rather than being killed here.
-CHILD_TIMEOUT = int(os.environ.get("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", "240"))
+MAX_WORKERS = VERIFY_BATCH_WORKERS
+# Per-check ceiling; above the single-check VERIFIER_TIMEOUT so a child that hits its
+# own timeout reports BAD/ERROR rather than being killed here.
+CHILD_TIMEOUT = VERIFY_BATCH_TIMEOUT
 
 
 def _parse_pair(arg: str) -> tuple[str, str, str | None]:

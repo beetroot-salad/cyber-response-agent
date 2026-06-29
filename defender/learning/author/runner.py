@@ -178,6 +178,12 @@ def resolve_verifier_python(repo_root: Path) -> Path:
     Preference order: env override → ``defender/.venv/bin/python3`` next
     to repo root → walking up the parents (so a git-worktree without its
     own venv resolves to the parent checkout's) → ``sys.executable``.
+
+    The ``$LEARNING_VERIFIER_PYTHON`` override read here is deliberately NOT shared
+    with the eval harness's ``_harness_util.find_venv_py``: that module runs
+    standalone and never imports ``defender.*`` (see its docstring), and its walk is
+    a documented superset. The env var has no default literal, so there is no
+    duplicated-default divergence (cf. #449) to collapse.
     """
     env = os.environ.get("LEARNING_VERIFIER_PYTHON")
     if env:

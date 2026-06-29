@@ -28,13 +28,23 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
+# The single home for the runtime runs-base literal + its env resolution. Every
+# other reader (evals/_secondary_config.py, evals/held_out.py) calls
+# resolve_runs_base() instead of re-reading DEFENDER_RUNS_BASE with its own copy of
+# the DEFAULT_RUNS_BASE default below.
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
+
+
+def resolve_runs_base() -> Path:
+    """The runtime runs base from ``$DEFENDER_RUNS_BASE`` (call time), else the
+    default. Resolved here so the env var + default literal have one source."""
+    return Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
 
 
 def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
-    runs_base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
+    runs_base = resolve_runs_base()
     if run_id is None:
         ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{ts}-{alert.stem}"

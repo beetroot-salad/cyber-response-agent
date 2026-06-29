@@ -38,7 +38,6 @@ from __future__ import annotations
 import argparse
 import functools
 import json
-import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -111,8 +110,9 @@ RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
-LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
-LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
+# Sourced from core.config (single env-read site, no duplicated default — cf. #449).
+LEAD_AUTHOR_MODEL = _loop_config.LEAD_AUTHOR_MODEL
+LEAD_AUTHOR_TIMEOUT = _loop_config.LEAD_AUTHOR_TIMEOUT
 
 
 def _lift_threshold() -> int:

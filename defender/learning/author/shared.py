@@ -34,7 +34,6 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
-import os
 import re
 import subprocess
 import time
@@ -42,18 +41,17 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
+
 LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
 
-# Default repo-lock wait — the env-derived ceiling each curator config sources as
-# its ``repo_lock_wait_seconds``. The lock file and repo root are no longer module
-# globals: every caller threads them from its ``LoopPaths``/config so a test rooted
-# at a tmp tree injects instead of patching (issue #389). The lock path itself is
-# ``LoopPaths.author_lock_file``, which honors DEFENDER_LEARNING_STATE_DIR
-# (out-of-repo under concurrent runs) — the single location every curator
-# serializes on.
-REPO_LOCK_WAIT_SECONDS = int(
-    os.environ.get("LEARNING_REPO_LOCK_WAIT_SECONDS", "1800")
-)
+# REPO_LOCK_WAIT_SECONDS (the env-derived ceiling each curator config sources as its
+# ``repo_lock_wait_seconds``) now lives in core.config and is re-exported here so the
+# existing ``_shared.REPO_LOCK_WAIT_SECONDS`` consumers are unchanged. The lock file
+# and repo root are not module globals: every caller threads them from its
+# ``LoopPaths``/config so a test rooted at a tmp tree injects instead of patching
+# (issue #389). The lock path itself is ``LoopPaths.author_lock_file``, which honors
+# DEFENDER_LEARNING_STATE_DIR — the single location every curator serializes on.
 
 
 class AuthorError(Exception):
