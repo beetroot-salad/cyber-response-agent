@@ -53,7 +53,7 @@ class BashExecError(Exception):
 
 
 @dataclass(frozen=True)
-class _Stage:
+class Stage:
     """One command in a pipeline: its argv plus how its stderr is wired.
     `stderr` is "capture" (default), "devnull" (`2>/dev/null`), or "stdout"
     (`2>&1`, merge into this stage's stdout)."""
@@ -63,37 +63,41 @@ class _Stage:
 
 
 @dataclass
-class _Pipeline:
+class Pipeline:
     """A `|`-chain of stages, plus the connector relating it to the PREVIOUS
-    pipeline: "first" | "&&" | "||" | ";" (newline is treated as ";")."""
+    pipeline: "first" | "&&" | "||" | ";" (newline is treated as ";").
+
+    `Stage`/`Pipeline` are the public parsed representation `parse()` returns —
+    the single decomposition the gate validates and the executor runs (#379), so
+    a command is decomposed exactly once per tool call (#456)."""
 
     connector: str
-    stages: list[_Stage] = field(default_factory=list)
+    stages: list[Stage] = field(default_factory=list)
 
 
 @dataclass
 class _PipelineBuilder:
-    """Accumulates the `_Pipeline` structure token by token. Holds the in-progress
+    """Accumulates the `Pipeline` structure token by token. Holds the in-progress
     stage/pipeline + the pending inter-pipeline connector — the nonlocal state the
     original `end_stage`/`end_pipeline` closures mutated, made explicit so the
     per-token dispatch stays under the complexity gate."""
 
-    pipelines: list[_Pipeline] = field(default_factory=list)
+    pipelines: list[Pipeline] = field(default_factory=list)
     pending_connector: str = "first"
-    cur_stages: list[_Stage] = field(default_factory=list)
+    cur_stages: list[Stage] = field(default_factory=list)
     cur_argv: list[str] = field(default_factory=list)
     cur_stderr: str = "capture"
 
     def end_stage(self) -> None:
         if self.cur_argv:
-            self.cur_stages.append(_Stage(self.cur_argv, self.cur_stderr))
+            self.cur_stages.append(Stage(self.cur_argv, self.cur_stderr))
         self.cur_argv = []
         self.cur_stderr = "capture"
 
     def end_pipeline(self, next_connector: str) -> None:
         self.end_stage()
         if self.cur_stages:
-            self.pipelines.append(_Pipeline(self.pending_connector, self.cur_stages))
+            self.pipelines.append(Pipeline(self.pending_connector, self.cur_stages))
             self.cur_stages = []
             self.pending_connector = next_connector
         # If nothing flushed, KEEP pending_connector — preserves a line-trailing
@@ -130,9 +134,18 @@ class _PipelineBuilder:
         return i + 1
 
 
-def _build_pipelines(inner: str) -> list[_Pipeline]:
-    """Decompose an already-unwrapped, already-validated command into the pipeline
-    structure to execute. Shares `tokenize` with the gate, so word boundaries match."""
+def parse(inner: str) -> list[Pipeline]:
+    """Decompose an already-unwrapped command into the `Pipeline` structure to run.
+
+    The single public seam shared by the gate and the executor (#379): the gate
+    parses once to validate, hands the result into the BashDecision, and the
+    executor runs that same structure via `run_parsed` — so a command is never
+    re-decomposed (#456). The structure preserves the `|`-vs-`&&`/`||`/`;`/newline
+    boundary (`a | b` is one pipeline of two stages, `a ; b` is two pipelines) so
+    the gate can tell the sanctioned single `|` pipe apart from a sequence/
+    short-circuit compound. Shares `tokenize` with the gate, so word boundaries
+    match. Raises `BashExecError` on any operator/redirect the executor does not
+    model, which the gate maps to a fail-closed deny."""
     builder = _PipelineBuilder()
     # Tokenize per physical line so an unquoted newline stays a command boundary.
     # A quote spanning a newline makes the line untokenizable → fail closed.
@@ -145,28 +158,6 @@ def _build_pipelines(inner: str) -> list[_Pipeline]:
             i = builder.feed_token(toks, i)
         builder.end_pipeline(";")  # the physical newline ends the current command
     return builder.pipelines
-
-
-def pipeline_argvs(inner: str) -> list[list[list[str]]]:
-    """Public seam for the permission gate: the per-PIPELINE lists of stage argvs
-    the executor would run for an already-unwrapped command. Preserves the `|`
-    vs `&&`/`||`/`;`/newline boundary that the flattened `stage_argvs` discards —
-    `a | b` is one pipeline of two stages, `a ; b` is two pipelines of one stage —
-    so the gate can tell the sanctioned single `|` pipe apart from a sequence/
-    short-circuit compound (#379). Same `_build_pipelines`, so it still validates
-    EXACTLY the structure the executor runs. Raises `BashExecError` on any operator/
-    redirect the executor does not model, which the gate maps to a fail-closed deny."""
-    return [[st.argv for st in pl.stages if st.argv] for pl in _build_pipelines(inner)]
-
-
-def stage_argvs(inner: str) -> list[list[str]]:
-    """Public seam for the permission gate: the flat list of per-stage argvs the
-    executor would run for an already-unwrapped command. Shares `_build_pipelines`,
-    so the gate validates EXACTLY the structure the executor runs — there is no
-    validator/executor differential to bypass (#379). Raises `BashExecError` on any
-    operator/redirect the executor does not model, which the gate maps to a
-    fail-closed deny. Use `pipeline_argvs` when the `|`-vs-`;`/`&&` boundary matters."""
-    return [argv for pl in pipeline_argvs(inner) for argv in pl]
 
 
 def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, str]:
@@ -192,7 +183,7 @@ def _kill_all(procs: list[subprocess.Popen]) -> None:
         p.wait()
 
 
-def _stage_stderr(stage: _Stage, errfile):
+def _stage_stderr(stage: Stage, errfile):
     """Map a stage's stderr wiring to its Popen `stderr` target: `2>/dev/null` →
     DEVNULL, `2>&1` → STDOUT (merge into this stage's stdout pipe), otherwise the
     shared capture file."""
@@ -222,7 +213,7 @@ def _reap_upstream(
 
 
 def _run_one_pipeline(
-    stages: list[_Stage], *, env: dict[str, str], cwd: Path, timeout: float, command: str
+    stages: list[Stage], *, env: dict[str, str], cwd: Path, timeout: float, command: str
 ) -> tuple[int, str, str]:
     """Spawn a `|`-chain with shell=False, wiring each stdout into the next stdin.
     Only the last stage's stdout is captured; all non-merged stderr lands in one
@@ -304,6 +295,10 @@ def run_pipeline(
     honoring `&&`/`||`/`;` short-circuiting and a shared wall-clock `timeout`.
     Returns (returncode, stdout, stderr). Raises `subprocess.TimeoutExpired` so the
     caller's existing timeout handling is unchanged.
+
+    The string-in entrypoint: it parses, then delegates to `run_parsed`. Callers
+    that already hold the parsed `Pipeline` list (the gate did the parse) should
+    call `run_parsed` directly to avoid re-decomposing the command (#456).
     """
     stripped = command.strip()
     if not stripped:
@@ -313,8 +308,22 @@ def run_pipeline(
         # The gate denies un-unwrappable commands; reaching here means a caller
         # skipped validation. Fail closed rather than guess.
         raise BashExecError("command could not be unwrapped for execution")
+    return run_parsed(parse(inner), command=command, env=env, cwd=cwd, timeout=timeout)
 
-    pipelines = _build_pipelines(inner)
+
+def run_parsed(
+    pipelines: list[Pipeline], *, command: str, env: dict[str, str], cwd: str | Path,
+    timeout: float,
+) -> tuple[int, str, str]:
+    """Execute an already-parsed `Pipeline` list (from `parse`) without a shell.
+
+    The execution half of `run_pipeline`, split out so the gate's single parse can
+    flow straight into execution (#456). `command` is the original string, used
+    only as the label in `TimeoutExpired`/error messages. An empty `pipelines`
+    (e.g. an empty command) is a no-op → `(0, "", "")`. Honors `&&`/`||`/`;`
+    short-circuiting and a shared wall-clock `timeout`; raises
+    `subprocess.TimeoutExpired`.
+    """
     cwd = Path(cwd)
     out_parts: list[str] = []
     err_parts: list[str] = []

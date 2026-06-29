@@ -145,6 +145,11 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
+    # The gate parsed the command exactly once and stashed everything on the
+    # decision (#456): the adapter/pipe routing the gather capture path needs and
+    # the `Pipeline` list the executor runs — so neither dispatch nor execution
+    # re-decomposes the string.
+    #
     # Gather subagent (not the main session): a standalone adapter call is
     # captured transparently (the queries table + payload are written by the
     # harness), so the model never wraps it in record-query — it just runs the
@@ -152,31 +157,29 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     # query_id `_capture_adapter` records, so the isinstance narrow is both the
     # not-main-session test and the type evidence the capture path needs.
     if isinstance(deps, GatherDeps):
-        argv = permission.adapter_argv(command)
-        if argv is not None:
-            tripped = _tripped_message(deps, _derive_system(argv))
+        if decision.adapter_argv is not None:
+            tripped = _tripped_message(deps, _derive_system(decision.adapter_argv))
             if tripped is not None:
                 return tripped
-            return _capture_adapter(deps, argv)
+            return _capture_adapter(deps, decision.adapter_argv)
         # The sanctioned `adapter --raw | defender-sql '<SQL>'` aggregation pipe:
         # capture the adapter payload (queries table + by-ref file), then run the
         # captured bytes through the sandboxed defender-sql.
-        pipe = permission.adapter_sql_pipe(command)
-        if pipe is not None:
-            adapter_av, sql_av = pipe
+        if decision.sql_pipe is not None:
+            adapter_av, sql_av = decision.sql_pipe
             tripped = _tripped_message(deps, _derive_system(adapter_av))
             if tripped is not None:
                 return tripped
             return _capture_adapter_sql(deps, adapter_av, sql_av)
-    # Execute the *validated* command without a shell: the gate already
-    # decomposed it with shlex, so run that token structure directly
-    # (shell=False) instead of re-handing the string to bash. This collapses
-    # the validator/executor parser differential — `$VAR`, globs, `$(...)`,
-    # and fused redirects never expand, because bash never re-parses. See
-    # bash_exec for the rationale.
+    # Execute the *validated* command without a shell: run the token structure the
+    # gate already decomposed (shell=False) instead of re-handing the string to
+    # bash. This collapses the validator/executor parser differential — `$VAR`,
+    # globs, `$(...)`, and fused redirects never expand, because bash never
+    # re-parses. See bash_exec for the rationale.
     try:
-        rc, out, err = bash_exec.run_pipeline(
-            command,
+        rc, out, err = bash_exec.run_parsed(
+            list(decision.pipelines or ()),
+            command=command,
             env=_bash_env(deps),
             cwd=deps.defender_dir.parent,
             timeout=_BASH_TIMEOUT_S,

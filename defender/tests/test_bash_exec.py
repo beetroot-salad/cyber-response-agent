@@ -240,3 +240,27 @@ def test_unexpected_redirect_fails_closed(tmp_path):
     with pytest.raises(bash_exec.BashExecError):
         _run(f"echo hi > {target}")
     assert not target.exists()
+
+
+# --- run_parsed: the parse-once seam (#456) --------------------------------
+
+@pytest.mark.parametrize("cmd", [
+    "echo hello",
+    "echo a | tr a A",
+    "false && echo skipped",
+    "false || echo ran",
+    "echo one ; echo two",
+    "echo x 2>/dev/null",
+])
+def test_run_parsed_matches_run_pipeline(cmd):
+    # The gate parses once and hands the Pipeline list to run_parsed; that path
+    # must produce exactly what the string-in run_pipeline does (which now itself
+    # delegates to run_parsed after parsing).
+    from defender.hooks._cmd_segments import unwrap
+    parsed = bash_exec.parse(unwrap(cmd))
+    direct = bash_exec.run_parsed(parsed, command=cmd, env=_env(), cwd="/", timeout=10.0)
+    assert direct == _run(cmd)
+
+
+def test_run_parsed_empty_is_noop():
+    assert bash_exec.run_parsed([], command="", env=_env(), cwd="/", timeout=10.0) == (0, "", "")
