@@ -57,14 +57,17 @@ class GatherRequest:
 
     Built INSIDE the `gather` tool closure from its params — the closure's
     signature is the model-facing tool schema, so the model still emits the four
-    fields separately; this object never reaches the schema. `GatherDeps.lead_id`
-    (the gather subagent's capture-path deps) is a distinct layer, constructed
-    from `lead_id` here."""
+    fields separately; this object never reaches the schema. `what_to_summarize`
+    is stored as a tuple (the schema's `list[str]`, frozen at the boundary) so the
+    value object is fully immutable + hashable, matching the lead value object in
+    `learning/leads/lead_extraction.py`. `GatherDeps.lead_id` (the gather
+    subagent's capture-path deps) is a distinct layer, constructed from `lead_id`
+    here."""
 
     lead_id: str
     system: str
     goal: str
-    what_to_summarize: list[str]
+    what_to_summarize: tuple[str, ...]
 
 
 def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
@@ -359,7 +362,9 @@ def register_gather_tool(
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
         # Bundle the four model-supplied params into the value object at the tool
         # boundary; everything inward takes the one object (rationale: GatherRequest).
-        request = GatherRequest(lead_id, system, goal, what_to_summarize)
+        # `what_to_summarize` arrives as the schema's `list[str]`; freeze it to a
+        # tuple so the value object is fully immutable + hashable.
+        request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))
         # Resolve `_run_gather` through the `tools` module (not the bare name) so
         # the e2e replay test's `setattr(tools, "_run_gather", fake)` intercepts
         # this dispatch — the call site must read the patched module attribute.

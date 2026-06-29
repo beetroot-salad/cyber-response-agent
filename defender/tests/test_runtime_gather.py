@@ -84,7 +84,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     def factory(agent_id):
         return driver.build_gather_agent(sb, logger, agent_id)
 
-    request = tools.GatherRequest(lead_id, system, params["goal"], params["what_to_summarize"])
+    request = tools.GatherRequest(lead_id, system, params["goal"], tuple(params["what_to_summarize"]))
     out = asyncio.run(tools._run_gather(
         deps, factory, driver.GATHER_REQUEST_LIMIT, request,
     ))
