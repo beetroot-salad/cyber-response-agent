@@ -264,3 +264,35 @@ def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
     assert orchestrate._run_stage(
         _raise(RunUnprocessable("bad run")), allow_run_error=True
     ) == 2
+
+
+# main()'s argv -> allow_run_error routing is the load-bearing wiring of the #443 guard:
+# the direct <run_dir> path must pass allow_run_error=True (bad run -> exit 2) and every
+# drain must pass the default False (a leaked RunUnprocessable propagates). The
+# _run_stage tests above pass the flag explicitly, so they can't catch a regression that
+# routes the wrong flag to the wrong stage; these drive main() end to end to pin it.
+
+
+def test_main_direct_run_maps_run_unprocessable_to_exit_two(tmp_path, monkeypatch):
+    """`loop.py <run_dir>` wires allow_run_error=True, so a bad run's RunUnprocessable
+    maps to the contracted exit 2 rather than an uncontracted exit-1 + traceback."""
+    def boom(_run_dir):
+        raise RunUnprocessable("bad run data")
+    # main() is the CLI dispatch entrypoint; it resolves the module-global stage by argv,
+    # so patching the global is the only seam for the wiring under test.
+    monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves stage by argv
+        orchestrate, "run_one", boom
+    )
+    assert orchestrate.main(["loop.py", str(tmp_path)]) == 2
+
+
+def test_main_drain_propagates_run_unprocessable(monkeypatch):
+    """The drains wire the default allow_run_error=False, so a RunUnprocessable leaking
+    to a drain's boundary (a bug that escaped the per-item quarantine guard) propagates
+    uncaught rather than masquerading as a clean exit 2."""
+    # Same CLI-dispatch seam: main() resolves the drain global by argv.
+    monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves drain by argv
+        orchestrate, "learn_drain", _raise(RunUnprocessable("leaked"))
+    )
+    with pytest.raises(RunUnprocessable, match="leaked"):
+        orchestrate.main(["loop.py", "--learn-drain"])
