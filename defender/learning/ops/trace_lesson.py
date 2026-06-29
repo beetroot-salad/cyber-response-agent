@@ -21,7 +21,6 @@ Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, UTC
@@ -34,6 +33,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.learning.core.config import DEFAULT_PATHS
+from defender.learning.core.persist import read_jsonl_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
@@ -108,14 +108,7 @@ def _earliest_load(
     ``lesson_name`` at/after ``created_at`` (the lesson's current incarnation),
     or None if it was never qualifyingly loaded."""
     earliest: str | None = None
-    for line in loaded.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for row in read_jsonl_rows(loaded):
         if row.get("lesson_name") != lesson_name:
             continue
         ts = _parse_dt(row.get("ts"))

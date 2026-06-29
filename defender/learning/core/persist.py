@@ -19,7 +19,6 @@ from collections.abc import Callable
 
 import yaml
 
-from defender.learning import lead_repository
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
@@ -54,19 +53,10 @@ def _flock(lock_path: Path):
 def _load_jsonl_ids(path: Path, key: str) -> set[str]:
     """Set of ``entry[key]`` strings in a JSONL file; missing file → empty set.
 
-    Malformed lines are skipped, matching ``read_jsonl_rows``'s tolerance.
+    Reads via ``read_jsonl_rows`` so blank/malformed lines are skipped, not raised.
     """
-    if not path.is_file():
-        return set()
     ids: set[str] = set()
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except json.JSONDecodeError:
-            continue
+    for obj in read_jsonl_rows(path):
         v = obj.get(key)
         if isinstance(v, str):
             ids.add(v)
@@ -261,7 +251,11 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
         # The two live tables (queries JSONL + the gather_raw/ tree). Staged
         # via the single lead_repository helper so this and the secondary-eval
-        # staging step share one definition of the on-disk table set.
+        # staging step share one definition of the on-disk table set. Imported
+        # here, not at module load, to avoid a cycle: lead_repository imports
+        # read_jsonl_rows from this module.
+        from defender.learning import lead_repository
+
         lead_repository.stage_tables(run_dir, learning_run_dir)
 
 

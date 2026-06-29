@@ -160,7 +160,7 @@ def test_render_prompt_substitutes_cited_policy(tmp_path):
 
 
 def test_load_observation_skips_torn_line(tmp_path):
-    # A torn final line (interrupted append) before the target row must be
+    # A torn line (interrupted append) before the target row must be
     # skipped, not raised — load_observation reads via the shared tolerant
     # reader, so a half-written record never crashes the forward-check (#446).
     pending = tmp_path / "actor_observations.jsonl"
