@@ -18,6 +18,7 @@ from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — 
     pre_text,
     render_lead_sequence_compact,
     render_report_card,
+    section,
 )
 
 
@@ -79,17 +80,12 @@ def render_judge_defender_summary(run_dir: Path) -> str:
     is grading whether the disposition is supportable given the leads
     that ran — those two pieces (report + lead list) are sufficient.
     """
-    return f"""
-<section id="sec-defender-summary" class="stage stage-defender">
-  <h2>Defender summary <span class="stage-sub">— what the judge graded</span></h2>
-
-  <h3>report.md</h3>
+    body = f"""<h3>report.md</h3>
   {render_report_card(run_dir)}
 
   <h3>lead sequence ({_lead_count(run_dir)} lead(s))</h3>
-  {render_lead_sequence_compact(run_dir)}
-</section>
-"""
+  {render_lead_sequence_compact(run_dir)}"""
+    return section("sec-defender-summary", "defender", "Defender summary", "— what the judge graded", body)
 
 
 def render_judge_actor_section(run_id: str) -> str:
@@ -98,14 +94,9 @@ def render_judge_actor_section(run_id: str) -> str:
     menu = learn_dir / "actor_menu.txt"
     story = learn_dir / "actor_story.md"
 
+    subtitle = "— adversarial counterfactual"
     if not story.is_file():
-        body = '<div class="empty">no actor_story.md</div>'
-        return f"""
-<section id="sec-actor" class="stage stage-actor">
-  <h2>Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
-  {body}
-</section>
-"""
+        return section("sec-actor", "actor", "Actor", subtitle, '<div class="empty">no actor_story.md</div>')
     arch = archetype.read_text().strip() if archetype.is_file() else "?"
     menu_txt = menu.read_text().strip() if menu.is_file() else ""
     meta_html = (
@@ -118,25 +109,20 @@ def render_judge_actor_section(run_id: str) -> str:
 
     story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
 
-    return f"""
-<section id="sec-actor" class="stage stage-actor">
-  <h2>Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
-  {meta_html}
+    body = f"""{meta_html}
   {menu_block}
   <h3>actor_story.md</h3>
-  {story_html}
-</section>
-"""
+  {story_html}"""
+    return section("sec-actor", "actor", "Actor", subtitle, body)
 
 
 def render_judge_judge_section(judge: dict | None) -> str:
+    subtitle = "— outcome + findings"
     if not judge:
-        return """
-<section id="sec-judge" class="stage stage-judge">
-  <h2>Judge <span class="stage-sub">— outcome + findings</span></h2>
-  <div class="empty">no judge_findings.yaml — learning loop did not run or aborted</div>
-</section>
-"""
+        return section(
+            "sec-judge", "judge", "Judge", subtitle,
+            '<div class="empty">no judge_findings.yaml — learning loop did not run or aborted</div>',
+        )
     outcome = str(judge.get("outcome", "?"))
     rationale = str(judge.get("outcome_rationale", "")).strip()
     encounter = str(judge.get("encounter_analysis", "")).strip()
@@ -153,11 +139,7 @@ def render_judge_judge_section(judge: dict | None) -> str:
         else '<div class="empty">no encounter_analysis</div>'
     )
 
-    return f"""
-<section id="sec-judge" class="stage stage-judge">
-  <h2>Judge <span class="stage-sub">— outcome + findings</span></h2>
-
-  <h3 id="sec-judge-outcome">Outcome</h3>
+    body = f"""<h3 id="sec-judge-outcome">Outcome</h3>
   <div class="judge-outcome out-{esc(outcome)}">
     <div class="outcome-value">{esc(outcome)}</div>
     <div class="outcome-rationale">{esc(rationale)}</div>
@@ -167,9 +149,8 @@ def render_judge_judge_section(judge: dict | None) -> str:
   <div class="findings-grid">{cards}</div>
 
   <h3 id="sec-judge-encounter">Encounter analysis</h3>
-  {encounter_html}
-</section>
-"""
+  {encounter_html}"""
+    return section("sec-judge", "judge", "Judge", subtitle, body)
 
 
 def render_judge_oracle_section(run_id: str) -> str:
@@ -183,12 +164,7 @@ def render_judge_oracle_section(run_id: str) -> str:
         inner += block("oracle-raw", "projected_telemetry.raw.txt (raw fallback)", pre_text(proj_raw.read_text()))
     if not inner:
         inner = '<div class="empty">no oracle artifacts</div>'
-    return f"""
-<section id="sec-oracle" class="stage stage-oracle">
-  <h2>Oracle <span class="stage-sub">— projected telemetry (collapsed by default)</span></h2>
-  {inner}
-</section>
-"""
+    return section("sec-oracle", "oracle", "Oracle", "— projected telemetry (collapsed by default)", inner)
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +207,9 @@ def render_judge_actor_benign_section(run_id: str) -> str:
     if not story.is_file():
         return ""
     story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
-    return f"""
-<section id="sec-actor-benign" class="stage stage-actor">
-  <h2>Actor (benign) <span class="stage-sub">— routine-operation counterfactual</span></h2>
-  <h3>actor_benign_story.md</h3>
-  {story_html}
-</section>
-"""
+    body = f"""<h3>actor_benign_story.md</h3>
+  {story_html}"""
+    return section("sec-actor-benign", "actor", "Actor (benign)", "— routine-operation counterfactual", body)
 
 
 def render_judge_benign_section(judge: dict | None) -> str:
@@ -270,11 +242,7 @@ def render_judge_benign_section(judge: dict | None) -> str:
         else '<div class="empty">no encounter_analysis</div>'
     )
 
-    return f"""
-<section id="sec-judge-benign" class="stage stage-judge">
-  <h2>Judge (benign) <span class="stage-sub">— FP-direction outcome + findings</span></h2>
-
-  <h3 id="sec-judge-benign-outcome">Outcome</h3>
+    body = f"""<h3 id="sec-judge-benign-outcome">Outcome</h3>
   <div class="judge-outcome out-{esc(outcome)}">
     <div class="outcome-value">{esc(outcome)}</div>
     <div class="outcome-rationale">{esc(rationale)}</div>
@@ -287,9 +255,8 @@ def render_judge_benign_section(judge: dict | None) -> str:
   <div class="findings-grid">{env_cards}</div>
 
   <h3 id="sec-judge-benign-encounter">Encounter analysis</h3>
-  {encounter_html}
-</section>
-"""
+  {encounter_html}"""
+    return section("sec-judge-benign", "judge", "Judge (benign)", "— FP-direction outcome + findings", body)
 
 
 def render_judge_oracle_benign_section(run_id: str) -> str:
@@ -303,12 +270,10 @@ def render_judge_oracle_benign_section(run_id: str) -> str:
         inner += block("oracle-raw", "projected_telemetry_benign.raw.txt (raw fallback)", pre_text(proj_raw.read_text()))
     if not inner:
         return ""
-    return f"""
-<section id="sec-oracle-benign" class="stage stage-oracle">
-  <h2>Oracle (benign) <span class="stage-sub">— projected telemetry, FP direction (collapsed by default)</span></h2>
-  {inner}
-</section>
-"""
+    return section(
+        "sec-oracle-benign", "oracle", "Oracle (benign)",
+        "— projected telemetry, FP direction (collapsed by default)", inner,
+    )
 
 
 def render_judge_raw_bundle(run_id: str) -> str:
@@ -327,12 +292,7 @@ def render_judge_raw_bundle(run_id: str) -> str:
         panels.append(block("artifact", "actor_trace.jsonl", pre_text(trace.read_text())))
     if not panels:
         return ""
-    return f"""
-<section id="sec-raw-bundle" class="stage stage-raw">
-  <h2>Raw bundle <span class="stage-sub">— learning-loop inputs &amp; fallbacks</span></h2>
-  {"".join(panels)}
-</section>
-"""
+    return section("sec-raw-bundle", "raw", "Raw bundle", "— learning-loop inputs &amp; fallbacks", "".join(panels))
 
 
 def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> str:
