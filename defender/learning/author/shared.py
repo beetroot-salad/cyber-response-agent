@@ -43,8 +43,6 @@ from typing import Any
 
 from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
-LESSONS_ACTOR_DIR_REL = "defender/lessons-actor/"
-
 # REPO_LOCK_WAIT_SECONDS (the env-derived ceiling each curator config sources as its
 # ``repo_lock_wait_seconds``) now lives in core.config and is re-exported here so the
 # existing ``_shared.REPO_LOCK_WAIT_SECONDS`` consumers are unchanged. The lock file

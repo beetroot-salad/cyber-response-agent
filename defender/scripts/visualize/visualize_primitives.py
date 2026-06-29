@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The two-table read/join surface + loop config live in defender/learning/ — reached
 # via the `defender.learning` namespace package (callers put the repo root on sys.path).
+from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core import config as _loop_config  # noqa: E402
 
@@ -256,7 +257,7 @@ def render_event(event: dict) -> str:
 
 
 def parse_report(run_dir: Path) -> dict:
-    p = run_dir / "report.md"
+    p = RunPaths(run_dir).report
     if not p.is_file():
         return {}
     text = p.read_text()
@@ -282,14 +283,12 @@ def _learning_run_dir(run_id: str) -> Path:
     """The learning-state run dir for ``run_id``, honoring
     ``DEFENDER_LEARNING_STATE_DIR``.
 
-    Mirrors ``LoopPaths.runs_dir`` via the shared ``config.learning_state_root()``
-    (call-time, so the off-process worker's env is honored): the LEARN stage persists
-    ``judge_findings.yaml`` under ``<state_root>/runs/<run_id>/`` where ``state_root``
-    is the out-of-repo state dir when set, else the in-repo ``defender/learning``. A
-    renderer that re-derived the path would re-render an empty judge page wherever the
-    findings actually landed.
+    Delegates to ``config.learning_run_paths`` — the single derivation of
+    ``<state_root>/runs/<run_id>`` shared with the LEARN stage (call-time, so the
+    off-process worker's env is honored). A renderer re-deriving the path itself
+    would re-render an empty judge page wherever the findings actually landed.
     """
-    return _loop_config.learning_state_root() / "runs" / run_id
+    return _loop_config.learning_run_paths(run_id).run_dir
 
 
 def load_judge_findings(run_id: str) -> dict | None:
@@ -308,7 +307,7 @@ def load_judge_benign_findings(run_id: str) -> dict | None:
 
 
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:
-    p = run_dir / "alert.json"
+    p = RunPaths(run_dir).alert
     if not p.is_file():
         body = '<div class="empty">no alert.json</div>'
     else:

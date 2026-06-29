@@ -41,6 +41,7 @@ REPO_ROOT = HERE.parents[3]
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     DEFAULT_PATHS,
     VERIFIER_MODEL,
@@ -66,7 +67,7 @@ _NO_CITED_POLICY = (
 
 def load_run_context(run_id: str, runs_dir: Path = RUNS_DIR) -> tuple[str, str]:
     run_dir = runs_dir / run_id
-    investigation = run_dir / "investigation.md"
+    investigation = RunPaths(run_dir).investigation
     refs = run_dir / "source_refs.yaml"
     if not investigation.is_file():
         raise SystemExit(f"verify_forward: missing investigation.md at {investigation}")

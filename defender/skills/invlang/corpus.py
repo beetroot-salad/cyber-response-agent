@@ -21,6 +21,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from defender._run_paths import RunPaths
+
 from .parser import ParseWarning, parse_dense_companion
 from .schema import (
     CompanionBody,
@@ -123,7 +125,7 @@ def _load_one(
         return None, f"missing top-level keys: {sorted(missing)}", warnings
 
     run_dir = path.parent
-    alert_path = run_dir / "alert.json"
+    alert_path = RunPaths(run_dir).alert
     companion = Companion(
         case_id=run_dir.name or path.stem,
         source_path=path,

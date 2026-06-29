@@ -24,6 +24,8 @@ from _secondary_config import (  # noqa: E402
 )
 from _generation import GenerationPin, replay_script_path  # noqa: E402
 
+from defender._run_paths import RunPaths  # noqa: E402
+
 
 # DI seam for the real `subprocess.run` (the test injects a fake). Forward-ref the
 # return so the alias never subscripts CompletedProcess at runtime.
@@ -97,7 +99,7 @@ def run_head_defender(
 
 def read_head_disposition(run_dir: Path) -> str | None:
     """Parse ``report.md`` frontmatter, return disposition or None."""
-    report = run_dir / "report.md"
+    report = RunPaths(run_dir).report
     if not report.is_file():
         return None
     text = report.read_text()
@@ -135,7 +137,7 @@ def run_frozen_actor(
     """
     import shutil
     staging_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(head_run_dir / "alert.json", staging_dir / "alert.json")
+    shutil.copy2(RunPaths(head_run_dir).alert, RunPaths(staging_dir).alert)
     # Stage the two tables (the actor replays off them via lead_repository),
     # through the single shared staging helper so this and the persist stage
     # share one definition of the on-disk table set.

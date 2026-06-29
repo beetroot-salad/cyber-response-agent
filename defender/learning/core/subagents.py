@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 from defender.learning import lead_repository
+from defender._run_paths import RunPaths
 from defender.learning.core.config import JudgeWiring
 from defender.learning.core.prologue import extract_case_entities
 from defender.learning.pipeline.benign_actor.run import invoke_actor_benign
@@ -42,13 +43,13 @@ class ClaudePrintSubagents:
         # written as a real side-artifact for transcripts/visualizers.
         actor_input_path = learning_run_dir / "actor_input.yaml"
         actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir))
-        return invoke_actor(run_dir / "alert.json", actor_input_path, learning_run_dir)
+        return invoke_actor(RunPaths(run_dir).alert, actor_input_path, learning_run_dir)
 
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str:
-        case_entities = extract_case_entities(run_dir / "investigation.md")
+        case_entities = extract_case_entities(RunPaths(run_dir).investigation)
         return invoke_actor_benign(
-            run_dir / "alert.json", case_entities, alert_rule_key, learning_run_dir
+            RunPaths(run_dir).alert, case_entities, alert_rule_key, learning_run_dir
         )
 
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str:

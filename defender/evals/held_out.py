@@ -29,6 +29,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._run_paths import RunPaths
 from defender.learning.core.config import DISPOSITION_ENUM
 from defender.run_common import resolve_runs_base
 
@@ -41,7 +42,7 @@ def _read_frontmatter(report_path: Path) -> dict | None:
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
-    fm = _read_frontmatter(run_dir / "report.md")
+    fm = _read_frontmatter(RunPaths(run_dir).report)
     if fm is None:
         return None
     disp = fm.get("disposition")

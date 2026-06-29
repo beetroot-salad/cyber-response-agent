@@ -47,8 +47,8 @@ def test_configs_are_distinct() -> None:
     b, a = aenv.BENIGN_CONFIG, aenv.ADVERSARIAL_CONFIG
     assert b.trailer_label == "Benign-Actor-Model"
     assert a.trailer_label == "Actor-Env-Model"
-    assert b.pending_file != a.pending_file
-    assert b.lock_file != a.lock_file
+    assert b.channel.file != a.channel.file
+    assert b.channel.lock != a.channel.lock
     assert b.outcome_author == frozenset({"survived"})
     assert a.outcome_author == frozenset({"caught", "incoherent"})
     # the adversarial entry point delegates with the adversarial config.

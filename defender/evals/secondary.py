@@ -139,6 +139,8 @@ from _summary import (  # noqa: E402
     write_summary,
 )
 
+from defender._run_paths import RunPaths  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # loop.py shims — load on demand so tests can import this module without
@@ -182,7 +184,7 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
     for child in sorted(fixtures_dir.iterdir()):
         if not child.is_dir():
             continue
-        alert = child / "alert.json"
+        alert = RunPaths(child).alert
         gt = child / "ground_truth.yaml"
         if not (alert.is_file() and gt.is_file()):
             continue

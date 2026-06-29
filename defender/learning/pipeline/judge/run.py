@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender.learning import lead_repository
+from defender._run_paths import RunPaths
 from defender.learning.core.config import JudgeWiring, _log
 from defender.learning.core.runner import _copy_transcript, _run_claude, _section
 from defender.learning.pipeline.judge.compare import (
@@ -94,7 +95,7 @@ def _cited_policy_read_section(
     Best-effort: a thin alert / absent menu degrades the hint, never the section."""
     inflight_key = learning_run_dir.name
     try:
-        alert = json.loads((run_dir / "alert.json").read_text())
+        alert = json.loads(RunPaths(run_dir).alert.read_text())
         sig_label = case_ticket.signature_label(alert) or "<sig:RULE_ID>"
     except Exception:  # noqa: BLE001 — the label is a convenience hint only
         sig_label = "<sig:RULE_ID>"
@@ -148,7 +149,7 @@ def build_judge_invocation(
     """
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
-    gather_raw = run_dir / "gather_raw"
+    gather_raw = RunPaths(run_dir).gather_raw
     comparison_dir = learning_run_dir / comparison_dirname
 
     companion = parse_investigation_companion(run_dir)
@@ -168,9 +169,9 @@ def build_judge_invocation(
     )
     add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
 
-    report = run_dir / "report.md"
+    report = RunPaths(run_dir).report
     user = (
-        _section("alert", (run_dir / "alert.json").read_text())
+        _section("alert", RunPaths(run_dir).alert.read_text())
         + _section(
             "report", report.read_text() if report.is_file() else "(report.md missing)",
             "the defender's disposition + rationale — the claim you are scoring",
