@@ -2,10 +2,13 @@
 not crash the author-drain stage with an uncaught ValueError (issue #435).
 
 The drain wake gates (`_has_curator_work` / `_has_lead_author_work`) read their
-trigger thresholds with `config.env_int`, which raises `FatalConfigError` (a
-`StageAbort` — the systemic-fault base) on a bad value. The gate runs at the top of
-`_run_worktree_batch`, before any git/PR work, so the `StageAbort` propagates out of
-the drain to `_run_stage`, which maps it to rc 2.
+trigger thresholds with `config.env_int`, which raises `FatalConfigError` (the
+layer-neutral misconfig condition from `defender._env`, a `ValueError` subclass) on
+a bad value. `FatalConfigError` is *enrolled alongside* `StageAbort` at the drain
+catch sites — not a `StageAbort` subclass, since the exit-2 *response* is
+learning-only while the *condition* is shared with runtime/. The gate runs at the
+top of `_run_worktree_batch`, before any git/PR work, so the `FatalConfigError`
+propagates out of the drain to `_run_stage`, which maps it to rc 2.
 """
 from __future__ import annotations
 
@@ -37,23 +40,26 @@ def test_env_int_parses_a_numeric_override(monkeypatch):
 
 
 @pytest.mark.parametrize("bad", ["high", "", "5o"])
-def test_env_int_raises_stage_abort_on_non_numeric(monkeypatch, bad):
+def test_env_int_raises_fatal_config_on_non_numeric(monkeypatch, bad):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", bad)
-    with pytest.raises(StageAbort, match="LEARNING_AUTHOR_THRESHOLD must be an integer"):
+    with pytest.raises(FatalConfigError, match="LEARNING_AUTHOR_THRESHOLD must be an integer"):
         config.env_int("LEARNING_AUTHOR_THRESHOLD", 5)
 
 
 # --- wake gates raise (not crash) on a bad threshold -------------------------
+# The gate propagates the FatalConfigError that env_int raises; it is enrolled
+# alongside StageAbort at the drain catch sites, so it still maps to rc 2 (the
+# end-to-end `_run_stage(...) == 2` assertions below pin that).
 
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
-    with pytest.raises(StageAbort):
+    with pytest.raises(FatalConfigError):
         orchestrate._has_curator_work(LoopPaths(repo_root=tmp_path))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    with pytest.raises(StageAbort):
+    with pytest.raises(FatalConfigError):
         orchestrate._has_lead_author_work(LoopPaths(repo_root=tmp_path))
 
 
@@ -62,29 +68,29 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
 ):
     """The markers-present path: a queued run marker must NOT let a non-numeric
     LEARNING_PITFALLS_THRESHOLD slip past the gate. If the gate short-circuited to True
-    on the marker before reading the threshold, the StageAbort would only surface later
-    inside run_pitfalls, where _drain_pitfalls' broad `except Exception` swallows it
+    on the marker before reading the threshold, the FatalConfigError would only surface
+    later inside run_pitfalls, where _drain_pitfalls' broad `except Exception` swallows it
     (exit 0, not the contracted exit 2). The gate reads the threshold up front (#435)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
-    with pytest.raises(StageAbort, match="LEARNING_PITFALLS_THRESHOLD"):
+    with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
         orchestrate._has_lead_author_work(paths)
 
 
-def test_lead_author_max_retries_bad_value_raises_stage_abort(tmp_path, monkeypatch):
+def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeypatch):
     """LEAD_AUTHOR_MAX_RETRIES is read inside the lead-author drain (past the wake gate,
-    before the per-marker loop). A non-numeric value must fail loud as StageAbort — which
-    _run_stage maps to the contracted exit 2 — not a raw ValueError that escapes the
-    StageAbort catch as an uncontracted exit-1 traceback (#435, same class)."""
+    before the per-marker loop). A non-numeric value must fail loud as FatalConfigError —
+    enrolled alongside StageAbort so _run_stage maps it to the contracted exit 2 — not a
+    raw ValueError that escapes the catch as an uncontracted exit-1 traceback (#435)."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
-    with pytest.raises(StageAbort, match="LEAD_AUTHOR_MAX_RETRIES"):
+    with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
         orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
 
 
@@ -131,12 +137,19 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
 # one fatal-config path #437's wake-gate reads did NOT cover.
 
 
-def test_fatal_config_error_is_a_stage_abort_not_run_unprocessable():
-    """The #443 type contract: FatalConfigError is a StageAbort (so _run_stage's
-    `except StageAbort -> exit 2` catches it on every stage) and is NOT a
-    RunUnprocessable — the two dispositions are disjoint types, so a systemic fault
-    can never be mis-read as a per-run 'quarantine this item' (or vice versa)."""
-    assert issubclass(FatalConfigError, StageAbort)
+def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unprocessable():
+    """The cause/response split: FatalConfigError is the layer-neutral *condition*
+    (a ValueError subclass shared with runtime/ via defender._env), NOT a StageAbort —
+    the exit-2 *response* is learning-only, so the type is enrolled alongside StageAbort
+    at the catch sites rather than inheriting from it. It stays disjoint from
+    RunUnprocessable, so a systemic misconfig can never be mis-read as a per-run
+    'quarantine this item' (or vice versa). The exit-2 mapping is pinned behaviorally by
+    the `_run_stage(...) == 2` tests, not by a subclass relationship."""
+    from defender._env import FatalConfigError as SharedFatalConfigError
+
+    assert FatalConfigError is SharedFatalConfigError  # config re-exports the shared type
+    assert issubclass(FatalConfigError, ValueError)
+    assert not issubclass(FatalConfigError, StageAbort)
     assert not issubclass(FatalConfigError, RunUnprocessable)
     assert not issubclass(RunUnprocessable, StageAbort)
 
@@ -307,18 +320,20 @@ def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
     assert isinstance(calls[0], RunUnprocessable)
 
 
-def test_run_or_dead_letter_reraises_stage_abort():
+def test_run_or_dead_letter_reraises_systemic_faults():
     """The systemic family is NEVER dead-lettered — it re-raises past the guard so it
     reaches _run_stage as the contracted exit 2. The callback must not fire. Both a bare
-    StageAbort and its FatalConfigError subclass must escape (the primitive catches the
-    base, so a future systemic-fault type is covered for free — #443/#445)."""
+    StageAbort (the learning base — catching it covers any future learning-internal
+    systemic type for free) and the enrolled FatalConfigError (the shared misconfig
+    condition, named explicitly in the reraise set since it is not a StageAbort) must
+    escape — #443/#445."""
     for exc in (StageAbort("systemic fault"), FatalConfigError("non-numeric threshold")):
         calls: list[Exception] = []
 
         def _boom(exc=exc):
             raise exc
 
-        with pytest.raises(StageAbort):
+        with pytest.raises((StageAbort, FatalConfigError)):
             orchestrate._run_or_dead_letter(_boom, calls.append)
         assert calls == []
 

@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
+
+from defender._clock import now_iso
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
@@ -124,7 +125,7 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
     if name is None:
         return
     try:
-        row = {"lesson_name": name, "ts": datetime.now(UTC).isoformat(timespec="seconds")}
+        row = {"lesson_name": name, "ts": now_iso()}
         with (deps.run_dir / "lessons_loaded.jsonl").open("a") as fh:
             fh.write(json.dumps(row) + "\n")
     except Exception:  # noqa: BLE001 — best-effort observability

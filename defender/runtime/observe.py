@@ -37,11 +37,12 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+from defender._env import env_int
 
 # scripts/ holds the shared price table. The workspace root is on sys.path via
 # the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
@@ -53,11 +54,10 @@ from defender.scripts.pricing import usage_cost
 def _max_chars() -> int:
     """Per-string cap for logged message content; 0 (default) = full fidelity.
     A single oversized message (e.g. a huge tool-return) can still bloat the
-    on-disk log; set DEFENDER_LLM_LOG_MAX_CHARS to bound that when debugging."""
-    try:
-        return int(os.environ.get("DEFENDER_LLM_LOG_MAX_CHARS", "0"))
-    except ValueError:
-        return 0
+    on-disk log; set DEFENDER_LLM_LOG_MAX_CHARS to bound that when debugging.
+    A non-numeric value fails loud (FatalConfigError) rather than silently
+    falling back to 0 — an operator typo on the knob should surface, not vanish."""
+    return env_int("DEFENDER_LLM_LOG_MAX_CHARS", 0)
 
 
 def _trim(obj: Any, cap: int) -> Any:

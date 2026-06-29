@@ -8,33 +8,26 @@ enums) that tests never need to override.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+# The env-coercion + clock primitives live at the ``defender.`` namespace root so
+# every layer (runtime/, scripts/, learning/) shares one source instead of each
+# re-deriving a crash-prone ``int(os.environ.get(...))`` with its own default.
+# Re-exported below (``env_int``, ``now_iso``, ``FatalConfigError``) so existing
+# ``core.config`` importers are unchanged; the import-time constants in this module
+# call ``env_int`` directly. ``FatalConfigError`` (the layer-neutral *condition*)
+# is enrolled into this loop's ``StageAbort``/exit-2 *response* at the drain catch
+# sites in ``orchestrate`` — see that module and ``StageAbort`` below.
+from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
+from defender._env import env_int, env_str
+from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in orchestrate
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def _int_env(name: str, default: int) -> int:
-    """Read an integer env override at **import time**, failing with a clear message
-    (not a bare ``ValueError`` traceback) on a non-numeric operator value — the
-    fail-loud contract already used for ``ORACLE_MAX_CONCURRENCY``. The call-time
-    sibling for in-stage reads is ``env_int`` below, which raises ``FatalConfigError``
-    so a drain maps it to the contracted exit 2; at import there is no stage to abort,
-    so a plain ``ValueError`` (surfaced at the import that misconfigured the knob) is
-    the right signal. Centralizing the parse here means a typo'd tuning knob names
-    itself instead of crashing every core.config importer with an opaque traceback."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        raise ValueError(f"{name} must be an integer; got {raw!r}") from None
 
 
 @dataclass(frozen=True)
@@ -326,7 +319,7 @@ BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
 # ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
-ORACLE_MAX_CONCURRENCY = _int_env("ORACLE_MAX_CONCURRENCY", 8)
+ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already
@@ -361,7 +354,7 @@ class JudgeWiring:
     closed_ticket_read: bool = False
 
 
-SUBAGENT_TIMEOUT = _int_env("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
+SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
 # --- Author / verifier / lead-author wiring -------------------------------------
 # The curator-AGENT model/effort/timeout per author direction (distinct from the
@@ -374,42 +367,51 @@ SUBAGENT_TIMEOUT = _int_env("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 # (verify_forward/actor.py and forward.py), which previously each re-read these with
 # their own copy of the default.
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
-VERIFIER_TIMEOUT = _int_env("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
+VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 # Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
 # single-check VERIFIER_TIMEOUT so a child reports BAD/ERROR rather than being killed.
-VERIFY_BATCH_WORKERS = _int_env("LEARNING_VERIFY_BATCH_WORKERS", 8)
-VERIFY_BATCH_TIMEOUT = _int_env("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
+VERIFY_BATCH_WORKERS = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
+VERIFY_BATCH_TIMEOUT = env_int("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
 
 # Findings (lessons/) curator agent. AUTHOR_EFFORT has no default (None = inherit the
 # global effort) — preserved exactly from the prior lessons/run.py behavior.
 AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_TIMEOUT = _int_env("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
+AUTHOR_TIMEOUT = env_int("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
 # Actor-tradecraft (lessons-actor/) curator agent.
 AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_ACTOR_TIMEOUT = _int_env("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
+AUTHOR_ACTOR_TIMEOUT = env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
 # Environment-lessons (lessons-environment/) curator agent — both env directions share it.
 AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
-AUTHOR_ENV_TIMEOUT = _int_env("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
+AUTHOR_ENV_TIMEOUT = env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
 # Offline lead-author (skills/ catalog) agent.
 LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
-LEAD_AUTHOR_TIMEOUT = _int_env("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
+LEAD_AUTHOR_TIMEOUT = env_int("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
 
 # Repo lock wait ceiling — the single location every curator serializes on. Lives here
 # (not author/shared.py) so the value has one home; shared.py re-exports it.
-REPO_LOCK_WAIT_SECONDS = _int_env("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
+REPO_LOCK_WAIT_SECONDS = env_int("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
 
 # Author merge gating (platform-design §4.4). The serial author always opens a PR
 # (audit trail); this knob decides whether it auto-merges on a green bar or waits
 # for human review. Default `human_review` until the revert + lesson→outcome
 # traceability surface lands (PR D) — see docs/decisions/ephemeral-run-worktree-isolation.md.
-# Validated lazily at the author stage (see _loop_orchestrate.author_drain), NOT
-# here: this module is imported by every learning stage (LEARN, run_one, run.py's
-# post-step), and a typo'd author-only knob must not crash stages that never merge.
 VALID_MERGE_MODES = ("auto_on_green", "human_review")
-MERGE_MODE = os.environ.get("LEARNING_MERGE_MODE", "human_review")
+
+
+def merge_mode() -> str:
+    """The author merge gate, read + validated at **call time** (not import).
+
+    A function, not a module constant, so the ``choices`` validation runs lazily at
+    the author stage (``orchestrate.author_drain``) — this module is imported by
+    every learning stage (LEARN, run_one, run.py's post-step), and a typo'd
+    author-only knob must not crash stages that never merge. ``env_str`` raises
+    ``FatalConfigError`` on an out-of-set value, which the drain maps to exit 2.
+    Call-time read also lets tests override via ``monkeypatch.setenv`` (the env_int
+    threshold pattern)."""
+    return env_str("LEARNING_MERGE_MODE", "human_review", choices=VALID_MERGE_MODES)
 
 
 class StageAbort(Exception):
@@ -419,19 +421,17 @@ class StageAbort(Exception):
     re-raise *before* their broad per-item quarantine guard so a deployment-wide
     fault dooms the stage rather than being mislabeled as one corrupt item.
 
+    The layer-neutral ``FatalConfigError`` (imported from ``defender._env``, a
+    misconfig *condition* runtime/ shares) is **enrolled alongside** ``StageAbort``
+    at those two catch sites — it is no longer a subclass, since the exit-2
+    *response* is learning-only while the *condition* is universal. See the
+    ``except (StageAbort, FatalConfigError)`` seams in ``orchestrate``.
+
     Distinct from ``RunUnprocessable``: ``StageAbort`` is "the deployment is
     broken, stop everything"; ``RunUnprocessable`` is "this one run's data is
     bad, skip it." Keeping them disjoint (not one subclassing the other) is the
     point of #443 — the disposition is now carried by the *type*, not by which
     ``except`` happens to catch it.
-    """
-
-
-class FatalConfigError(StageAbort):
-    """A systemic misconfiguration (a non-numeric threshold, an invalid merge
-    mode) — a ``StageAbort`` cause. It dooms *every* item, so the drains
-    re-raise it (via ``except StageAbort``) past their broad quarantine guard,
-    and ``_run_stage`` maps it to the contracted ``exit 2``.
     """
 
 
@@ -457,28 +457,6 @@ class RunUnprocessable(Exception):
     """
 
 
-def env_int(name: str, default: int) -> int:
-    """Read an integer env override, failing loud on a non-numeric value.
-
-    The drain wake gates read their trigger thresholds at call time (so tests
-    override via ``monkeypatch.setenv``). A bad operator value (``=high``, ``=""``)
-    must surface as a ``FatalConfigError`` — which the drain's ``_run_stage`` maps
-    to the contracted exit 2 — rather than an uncaught ``ValueError`` that crashes
-    the stage with a traceback and an uncontracted exit 1. Being a ``StageAbort``
-    (vs. a per-run ``RunUnprocessable``) lets a drain re-raise it past the broad
-    quarantine guard even when the read happens deep in a per-marker flow (e.g.
-    ``LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`` inside ``_prepare_handoffs``). Mirrors
-    the fail-loud reads for ``LEARNING_MERGE_MODE`` and ``ORACLE_MAX_CONCURRENCY``.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        raise FatalConfigError(f"{name} must be an integer; got {raw!r}") from None
-
-
 def pitfalls_threshold() -> int:
     """Min count of queued general-failure pitfalls before the curation mode fires.
 
@@ -497,11 +475,6 @@ def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
     def _log(msg: str) -> None:
         print(f"[{prefix}] {msg}", file=sys.stderr, flush=flush)
     return _log
-
-
-def now_iso() -> str:
-    """UTC timestamp, seconds precision (the loop's canonical clock string)."""
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
 
 
 _log = make_logger("loop")  # this module's own logger

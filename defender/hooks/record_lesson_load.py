@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 # Sibling-import the shared run-dir helper. defender/hooks/<this>.py → parents[2]
 # is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
+from defender._clock import now_iso
 from defender.hooks._run_dir import resolve_run_dir
 
 
@@ -57,7 +57,7 @@ def main(*, stdin=None) -> int:
         run_dir = resolve_run_dir()
         if run_dir is None:
             return 0
-        row = {"lesson_name": name, "ts": datetime.now(UTC).isoformat(timespec="seconds")}
+        row = {"lesson_name": name, "ts": now_iso()}
         with (run_dir / "lessons_loaded.jsonl").open("a") as fh:
             fh.write(json.dumps(row) + "\n")
     except Exception:  # noqa: BLE001 — best-effort; the contract is to always exit 0
