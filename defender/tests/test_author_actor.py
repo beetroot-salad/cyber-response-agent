@@ -599,3 +599,37 @@ def test_index_cli_hides_stale_lessons_by_default(tmp_path: Path):
     out2 = _run(["--include-stale"])
     assert "live-claim" in out2
     assert "stale-claim" in out2
+
+
+# ---------------------------------------------------------------------------
+# read_batch — reads the pending queue tolerantly (#446)
+# ---------------------------------------------------------------------------
+
+
+def test_read_batch_skips_torn_line(tmp_path):
+    """A torn last line from an interrupted append is skipped, not raised.
+
+    Before #446 ``read_batch`` re-rolled ``json.loads`` with no try/except, so a
+    half-written record raised ``JSONDecodeError`` — a type that escapes every
+    drain guard and crashed the ``author_drain`` every tick. It now delegates to
+    the shared tolerant reader, so the valid rows come through and the queue
+    stays processable."""
+    ctx = _isolate(tmp_path)
+    cfg = _cfg(ctx, _consume_all)
+    cfg.pending_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.pending_file.write_text(
+        json.dumps(_row("r1/0", "survived")) + "\n"
+        + "\n"  # blank line
+        + json.dumps(_row("r2/0", "survived")) + "\n"
+        + '{"observation_id": "r3/0"'  # torn final append, no closing brace
+    )
+    batch = curator.read_batch(cfg)
+    assert [r["observation_id"] for r in batch] == ["r1/0", "r2/0"]
+
+
+def test_read_batch_missing_file_is_empty(tmp_path):
+    ctx = _isolate(tmp_path)
+    cfg = _cfg(ctx, _consume_all)
+    if cfg.pending_file.exists():
+        cfg.pending_file.unlink()
+    assert curator.read_batch(cfg) == []

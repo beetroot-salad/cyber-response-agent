@@ -19,7 +19,6 @@ from collections.abc import Callable
 
 import yaml
 
-from defender.learning import lead_repository
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
@@ -54,19 +53,10 @@ def _flock(lock_path: Path):
 def _load_jsonl_ids(path: Path, key: str) -> set[str]:
     """Set of ``entry[key]`` strings in a JSONL file; missing file → empty set.
 
-    Malformed lines are skipped, matching ``author.read_batch``'s tolerance.
+    Reads via ``read_jsonl_rows`` so blank/malformed lines are skipped, not raised.
     """
-    if not path.is_file():
-        return set()
     ids: set[str] = set()
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except json.JSONDecodeError:
-            continue
+    for obj in read_jsonl_rows(path):
         v = obj.get(key)
         if isinstance(v, str):
             ids.add(v)
@@ -83,12 +73,17 @@ def _append_jsonl(path: Path, rows: list[dict]) -> int:
     return len(rows)
 
 
-def _read_jsonl_rows(path: Path) -> list[dict]:
-    """All rows in a JSONL file (tolerant of blank/malformed lines)."""
+def read_jsonl_rows(path: Path) -> list[dict]:
+    """All rows in a JSONL file (tolerant of blank/malformed lines).
+
+    The single tolerant JSONL reader for the pending/consumed queues: a torn
+    line from an interrupted append is skipped, not raised, so a drain that
+    reads its queue never crashes on a half-written record.
+    """
     if not path.is_file():
         return []
     rows: list[dict] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text().splitlines():  # lint-jsonl-read: ok — the canonical tolerant reader
         s = line.strip()
         if not s:
             continue
@@ -117,7 +112,7 @@ def _rewrite_queue(
     """
     if merge:
         processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
-        current = _read_jsonl_rows(pending_file)
+        current = read_jsonl_rows(pending_file)
         survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
     else:
         survivors = list(held)
@@ -256,7 +251,11 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
         # The two live tables (queries JSONL + the gather_raw/ tree). Staged
         # via the single lead_repository helper so this and the secondary-eval
-        # staging step share one definition of the on-disk table set.
+        # staging step share one definition of the on-disk table set. Imported
+        # here, not at module load, to avoid a cycle: lead_repository imports
+        # read_jsonl_rows from this module.
+        from defender.learning import lead_repository
+
         lead_repository.stage_tables(run_dir, learning_run_dir)
 
 
@@ -399,7 +398,7 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
     """All queued pitfall rows (tolerant of blank/malformed lines)."""
-    return _read_jsonl_rows(paths.pitfalls_pending_file)
+    return read_jsonl_rows(paths.pitfalls_pending_file)
 
 
 def rotate_pitfalls(
@@ -417,7 +416,7 @@ def rotate_pitfalls(
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": "consumed_committed"}
-        for r in _read_jsonl_rows(paths.pitfalls_pending_file)
+        for r in read_jsonl_rows(paths.pitfalls_pending_file)
         if r.get("pitfall_id") in ids
     ]
     rotate_queue_locked(

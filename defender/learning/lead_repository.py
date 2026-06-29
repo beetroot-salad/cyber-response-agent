@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from defender.learning.core.persist import read_jsonl_rows
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 if TYPE_CHECKING:
@@ -155,21 +156,12 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
     """
     run_dir = Path(run_dir)
     log = run_dir / QUERIES_LOG
-    if not log.is_file():
-        return []
     rows: list[QueryRow] = []
     try:
-        text = log.read_text()
+        raw_rows = read_jsonl_rows(log)
     except OSError:
         return []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
+    for rec in raw_rows:
         if not isinstance(rec, dict):
             continue
         lead_id = rec.get("lead_id")
