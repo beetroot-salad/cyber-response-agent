@@ -282,9 +282,11 @@ async def _run_gather(
             "verbatim — it is the FK joining the leads and queries tables."
         )
     # 1. Claim the lead id (atomic O_EXCL); a reused id bounces back to PLAN.
+    # `claim_lead` requires a list (it guards `isinstance(wtc, list)` and skips
+    # otherwise), so unfreeze the request's tuple back to a list at this boundary.
     if _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
-        "goal": request.goal, "what_to_summarize": request.what_to_summarize,
+        "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
     }) == 2:
         raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
 
