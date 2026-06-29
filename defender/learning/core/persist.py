@@ -83,7 +83,7 @@ def read_jsonl_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     rows: list[dict] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text().splitlines():  # lint-jsonl-read: ok — the canonical tolerant reader
         s = line.strip()
         if not s:
             continue
