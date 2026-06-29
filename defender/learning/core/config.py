@@ -19,6 +19,24 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _int_env(name: str, default: int) -> int:
+    """Read an integer env override at **import time**, failing with a clear message
+    (not a bare ``ValueError`` traceback) on a non-numeric operator value — the
+    fail-loud contract already used for ``ORACLE_MAX_CONCURRENCY``. The call-time
+    sibling for in-stage reads is ``env_int`` below, which raises ``FatalConfigError``
+    so a drain maps it to the contracted exit 2; at import there is no stage to abort,
+    so a plain ``ValueError`` (surfaced at the import that misconfigured the knob) is
+    the right signal. Centralizing the parse here means a typo'd tuning knob names
+    itself instead of crashing every core.config importer with an opaque traceback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer; got {raw!r}") from None
+
+
 @dataclass(frozen=True)
 class RunDirs:
     """The two directories a direction leg threads together: the source ``run_dir``
@@ -308,13 +326,7 @@ BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
 # ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
-_oracle_concurrency_raw = os.environ.get("ORACLE_MAX_CONCURRENCY", "8")
-try:
-    ORACLE_MAX_CONCURRENCY = int(_oracle_concurrency_raw)
-except ValueError:
-    raise ValueError(
-        f"ORACLE_MAX_CONCURRENCY must be an integer; got {_oracle_concurrency_raw!r}"
-    ) from None
+ORACLE_MAX_CONCURRENCY = _int_env("ORACLE_MAX_CONCURRENCY", 8)
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 # The judges do 0 tool calls and follow a heavily-scaffolded prompt that already
@@ -349,7 +361,7 @@ class JudgeWiring:
     closed_ticket_read: bool = False
 
 
-SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
+SUBAGENT_TIMEOUT = _int_env("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
 # --- Author / verifier / lead-author wiring -------------------------------------
 # The curator-AGENT model/effort/timeout per author direction (distinct from the
@@ -362,32 +374,32 @@ SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"
 # (verify_forward/actor.py and forward.py), which previously each re-read these with
 # their own copy of the default.
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
-VERIFIER_TIMEOUT = int(os.environ.get("LEARNING_VERIFIER_TIMEOUT_SECONDS", "180"))
+VERIFIER_TIMEOUT = _int_env("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 # Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
 # single-check VERIFIER_TIMEOUT so a child reports BAD/ERROR rather than being killed.
-VERIFY_BATCH_WORKERS = int(os.environ.get("LEARNING_VERIFY_BATCH_WORKERS", "8"))
-VERIFY_BATCH_TIMEOUT = int(os.environ.get("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", "240"))
+VERIFY_BATCH_WORKERS = _int_env("LEARNING_VERIFY_BATCH_WORKERS", 8)
+VERIFY_BATCH_TIMEOUT = _int_env("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
 
 # Findings (lessons/) curator agent. AUTHOR_EFFORT has no default (None = inherit the
 # global effort) — preserved exactly from the prior lessons/run.py behavior.
 AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
+AUTHOR_TIMEOUT = _int_env("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
 # Actor-tradecraft (lessons-actor/) curator agent.
 AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
-AUTHOR_ACTOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", "1800"))
+AUTHOR_ACTOR_TIMEOUT = _int_env("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
 # Environment-lessons (lessons-environment/) curator agent — both env directions share it.
 AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
-AUTHOR_ENV_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", "1800"))
+AUTHOR_ENV_TIMEOUT = _int_env("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
 # Offline lead-author (skills/ catalog) agent.
 LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
-LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
+LEAD_AUTHOR_TIMEOUT = _int_env("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
 
 # Repo lock wait ceiling — the single location every curator serializes on. Lives here
 # (not author/shared.py) so the value has one home; shared.py re-exports it.
-REPO_LOCK_WAIT_SECONDS = int(os.environ.get("LEARNING_REPO_LOCK_WAIT_SECONDS", "1800"))
+REPO_LOCK_WAIT_SECONDS = _int_env("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
 
 # Author merge gating (platform-design §4.4). The serial author always opens a PR
 # (audit trail); this knob decides whether it auto-merges on a green bar or waits
