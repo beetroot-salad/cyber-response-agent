@@ -71,7 +71,7 @@ from defender.learning.author import shared as _shared
 from defender.learning.core.config import DEFAULT_PATHS, LoopPaths, make_logger, now_iso
 from defender.learning.core.persist import (
     _flock,
-    _read_jsonl_rows,
+    read_jsonl_rows,
     rotate_queue_locked,
 )
 
@@ -161,7 +161,7 @@ def read_batch(cfg: AuthorConfig) -> list[dict]:
     if not cfg.pending_file.is_file():
         return []
     with _flock(cfg.findings_lock_file):
-        return _read_jsonl_rows(cfg.pending_file)
+        return read_jsonl_rows(cfg.pending_file)
 
 
 def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:

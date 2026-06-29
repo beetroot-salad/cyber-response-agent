@@ -54,7 +54,7 @@ def _flock(lock_path: Path):
 def _load_jsonl_ids(path: Path, key: str) -> set[str]:
     """Set of ``entry[key]`` strings in a JSONL file; missing file → empty set.
 
-    Malformed lines are skipped, matching ``author.read_batch``'s tolerance.
+    Malformed lines are skipped, matching ``read_jsonl_rows``'s tolerance.
     """
     if not path.is_file():
         return set()
@@ -83,8 +83,13 @@ def _append_jsonl(path: Path, rows: list[dict]) -> int:
     return len(rows)
 
 
-def _read_jsonl_rows(path: Path) -> list[dict]:
-    """All rows in a JSONL file (tolerant of blank/malformed lines)."""
+def read_jsonl_rows(path: Path) -> list[dict]:
+    """All rows in a JSONL file (tolerant of blank/malformed lines).
+
+    The single tolerant JSONL reader for the pending/consumed queues: a torn
+    line from an interrupted append is skipped, not raised, so a drain that
+    reads its queue never crashes on a half-written record.
+    """
     if not path.is_file():
         return []
     rows: list[dict] = []
@@ -117,7 +122,7 @@ def _rewrite_queue(
     """
     if merge:
         processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
-        current = _read_jsonl_rows(pending_file)
+        current = read_jsonl_rows(pending_file)
         survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
     else:
         survivors = list(held)
@@ -399,7 +404,7 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
     """All queued pitfall rows (tolerant of blank/malformed lines)."""
-    return _read_jsonl_rows(paths.pitfalls_pending_file)
+    return read_jsonl_rows(paths.pitfalls_pending_file)
 
 
 def rotate_pitfalls(
@@ -417,7 +422,7 @@ def rotate_pitfalls(
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": "consumed_committed"}
-        for r in _read_jsonl_rows(paths.pitfalls_pending_file)
+        for r in read_jsonl_rows(paths.pitfalls_pending_file)
         if r.get("pitfall_id") in ids
     ]
     rotate_queue_locked(

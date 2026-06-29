@@ -43,7 +43,7 @@ import yaml
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import make_logger
-from defender.learning.core.persist import rotate_queue_locked
+from defender.learning.core.persist import read_jsonl_rows, rotate_queue_locked
 
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
@@ -118,15 +118,10 @@ class CuratorConfig:
 
 
 def read_batch(cfg: CuratorConfig) -> list[dict]:
-    if not cfg.pending_file.is_file():
-        return []
-    out: list[dict] = []
-    for line in cfg.pending_file.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        out.append(json.loads(s))
-    return out
+    # Tolerant read: a torn last line from an interrupted append is skipped, not
+    # raised — a JSONDecodeError here would escape every drain guard and crash
+    # the author_drain every tick until the queue was hand-fixed (#446).
+    return read_jsonl_rows(cfg.pending_file)
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)

@@ -15,10 +15,11 @@ in-line copies this replaced.
 """
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 from collections.abc import Callable
+
+from defender.learning.core.persist import read_jsonl_rows
 
 
 def render_prompt(template_path: Path, **subs: str) -> str:
@@ -79,16 +80,14 @@ def parse_verdict(text: str, *, error_prefix: str) -> str:
 
 
 def load_observation(observation_id: str, pending: Path, *, error_prefix: str) -> dict:
+    # Keep the explicit missing-file SystemExit: read_jsonl_rows would return []
+    # and lose that contracted error. Reading via the shared tolerant reader
+    # means a torn line elsewhere in the queue is skipped, not raised (#446).
     if not pending.is_file():
         raise SystemExit(f"{error_prefix}: pending queue not found at {pending}")
-    with pending.open() as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            if row.get("observation_id") == observation_id:
-                return row
+    for row in read_jsonl_rows(pending):
+        if row.get("observation_id") == observation_id:
+            return row
     raise SystemExit(
         f"{error_prefix}: observation_id {observation_id!r} not found in {pending}"
     )

@@ -1,6 +1,7 @@
 """verify_forward.py verdict parser + run-context loader."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -151,3 +152,34 @@ def test_render_prompt_substitutes_cited_policy(tmp_path):
         cited_policy=vf._NO_CITED_POLICY,
     )
     assert vf._NO_CITED_POLICY in out2
+
+
+# ---------------------------------------------------------------------------
+# load_observation — reads the pending queue tolerantly (#446)
+# ---------------------------------------------------------------------------
+
+
+def test_load_observation_skips_torn_line(tmp_path):
+    # A torn final line (interrupted append) before the target row must be
+    # skipped, not raised — load_observation reads via the shared tolerant
+    # reader, so a half-written record never crashes the forward-check (#446).
+    pending = tmp_path / "actor_observations.jsonl"
+    pending.write_text(
+        '{"observation_id": "torn"'  # torn: no closing brace
+        + "\n\n"  # + a blank line
+        + json.dumps({"observation_id": "o-2", "v": 7}) + "\n"
+    )
+    row = vfs.load_observation("o-2", pending, error_prefix=_PREFIX)
+    assert row == {"observation_id": "o-2", "v": 7}
+
+
+def test_load_observation_missing_file_raises(tmp_path):
+    with pytest.raises(SystemExit, match="pending queue not found"):
+        vfs.load_observation("o-1", tmp_path / "absent.jsonl", error_prefix=_PREFIX)
+
+
+def test_load_observation_missing_id_raises(tmp_path):
+    pending = tmp_path / "actor_observations.jsonl"
+    pending.write_text(json.dumps({"observation_id": "o-1"}) + "\n")
+    with pytest.raises(SystemExit, match="not found"):
+        vfs.load_observation("o-9", pending, error_prefix=_PREFIX)

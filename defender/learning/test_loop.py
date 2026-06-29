@@ -488,14 +488,7 @@ def _obs(i: int) -> dict:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    if not path.is_file():
-        return []
-    out = []
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if s:
-            out.append(json.loads(s))
-    return out
+    return persist.read_jsonl_rows(path)
 
 
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
