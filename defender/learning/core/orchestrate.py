@@ -58,6 +58,16 @@ from defender.learning.core.validate import (
 )
 
 
+# The layer-neutral systemic-fault set: a fault that dooms the whole stage and maps to the
+# contracted exit 2, never a per-item dead-letter. Named once so enrolling a future type is
+# one edit, not N — both the in-drain dead-letter guard (``_run_or_dead_letter``) and the
+# stage boundary (``_run_stage``) must reraise the *same* set, or a fault re-raised past the
+# quarantine would still fall through to a bare exit-1 traceback at the boundary.
+# ``FatalConfigError``/``GitError`` are enrolled (not subclassed) because the exit-2 response
+# is learning-only; see ``_run_or_dead_letter`` for the rationale.
+_SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (StageAbort, FatalConfigError, GitError)
+
+
 # ---------------------------------------------------------------------------
 # Ground-truth (held-out) gate
 # ---------------------------------------------------------------------------
@@ -510,9 +520,7 @@ def _run_or_dead_letter(
     A new drain that routes its swallow site through this helper is systemic-fault-safe
     for free; one that hand-rolls ``except Exception`` is the visible odd-one-out.
     """
-    reraise: tuple[type[BaseException], ...] = (
-        StageAbort, FatalConfigError, GitError, *propagate
-    )
+    reraise: tuple[type[BaseException], ...] = (*_SYSTEMIC_FAULTS, *propagate)
     try:
         fn()
     except reraise:
@@ -1092,7 +1100,7 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
     """
     try:
         return stage()
-    except (StageAbort, FatalConfigError, GitError) as e:
+    except _SYSTEMIC_FAULTS as e:
         print(f"[loop] FATAL: {e}", file=sys.stderr)
         return 2
     except RunUnprocessable as e:

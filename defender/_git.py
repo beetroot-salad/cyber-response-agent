@@ -35,13 +35,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class GitError(RuntimeError):
-    """An expected git command exited nonzero (and ``check`` was on). Carries the
-    argv, return code, and stderr so the failure is named, not an opaque traceback.
-    Layer-neutral and loud-by-default; the learning drains map it to the contracted
-    exit 2 by enrolling it alongside ``StageAbort``."""
+    """An expected git command exited nonzero (and ``check`` was on). Names the argv in
+    its message and carries the return code and stderr as attributes, so the failure is
+    named, not an opaque traceback. Layer-neutral and loud-by-default; the learning drains
+    map it to the contracted exit 2 by enrolling it alongside ``StageAbort``."""
 
     def __init__(self, args: Sequence[str], returncode: int, stderr: str) -> None:
-        self.args_ = list(args)
         self.returncode = returncode
         self.stderr = stderr.strip()
         super().__init__(
@@ -59,12 +58,21 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """The single ``subprocess.run(["git", …])`` site. Raises ``GitError`` on a nonzero
     return when ``check`` (the default). Returns the completed process so the typed
-    helpers below can read ``stdout``/``returncode`` without re-stripping ``-z`` output."""
+    helpers below can read ``stdout``/``returncode`` without re-stripping ``-z`` output.
+
+    Decodes with ``errors="surrogateescape"``: ``git status … -z`` emits raw, *unquoted*
+    pathname bytes (the ``-z`` form turns off ``core.quotePath``), so a strict UTF-8 decode
+    would crash on a non-UTF-8 filename (e.g. a stray latin-1 untracked file) anywhere in
+    the tree — taking the author scope gate (``git_status``) down with it. Surrogate-escape
+    round-trips arbitrary bytes the way ``os.fsdecode`` does; a mangled path simply reads as
+    out-of-corpus and the scope gate quarantines it (fail-safe). The non-``-z`` reader this
+    replaced was immune because git quoted such paths to pure ASCII."""
     proc = subprocess.run(
         ["git", *args],
         cwd=cwd,
         capture_output=True,
         text=True,
+        errors="surrogateescape",
         timeout=timeout,
         input=input,
     )
@@ -110,7 +118,7 @@ def git_status(cwd: Path, *, pathspec: Path | str | None = None) -> list[tuple[s
     out = _run(args, cwd=cwd).stdout  # raw — do NOT strip; a leading " M" status would lose its space
     records: list[tuple[str, str]] = []
     for rec in out.split("\0"):
-        if not rec or len(rec) < 3:
+        if len(rec) < 3:  # subsumes the empty trailing field after the final NUL
             continue
         records.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
     return records
@@ -132,7 +140,9 @@ def git_rev_list_count(
     if grep is not None:
         args.append(f"--grep={grep}")
     args.append(rev_range)
-    return int(git(args, cwd=cwd) or "0")
+    # check=True guarantees a successful exit here, and `rev-list --count` always prints an
+    # integer line on success, so git() is never empty — int() can take it directly.
+    return int(git(args, cwd=cwd))
 
 
 def git_commit(

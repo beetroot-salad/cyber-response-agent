@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# The repo root — sourced from the git facade this seam is paired with, rather than
+# re-deriving a hand-counted parents[N] that drifts if the module moves.
+from defender._git import REPO_ROOT
 
 
 class ForgeError(Exception):
