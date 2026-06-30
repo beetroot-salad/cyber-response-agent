@@ -697,7 +697,7 @@ def run_pitfalls(
     sha = None
     if changed:
         sha = _author_shared.commit_corpus(
-            repo_root, repo_root / "defender" / "skills", SKILLS_REL,
+            repo_root, repo_root / "defender" / "skills",
             _pitfalls_commit_message(changed),
         )
     else:
@@ -890,12 +890,13 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
         _log(f"FATAL: claude exited rc={rc}; see {RUN_LOG_FILE} (drain will quarantine)")
         return 2
 
-    # Scope gate over the working tree, then the loop commits pathspec-scoped. A gate
-    # or commit failure raises (LeadAuthorError / AuthorError), which the drain catches
-    # and quarantines the marker for a human — no auto-reset.
+    # Scope gate over the working tree, then the loop commits pathspec-scoped. A scope-gate
+    # violation raises LeadAuthorError, which the drain catches and quarantines the marker
+    # for a human; a git commit failure raises GitError — a systemic fault the drain maps to
+    # exit 2 (a broken tree, not a poison marker) — no auto-reset.
     changed = _verify_skills_state(repo_root, baseline_stray)
     sha = _author_shared.commit_corpus(
-        repo_root, repo_root / "defender" / "skills", SKILLS_REL,
+        repo_root, repo_root / "defender" / "skills",
         _loop_commit_message(run_dir, changed),
     )
     _write_state(

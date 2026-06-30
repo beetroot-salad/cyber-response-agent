@@ -39,6 +39,8 @@ from pathlib import Path
 # sys.path[0]. Shared with harness_lead.py.
 from _harness_util import find_venv_py, init_git, run as _run
 
+from defender import _git  # _harness_util put the repo root on sys.path
+
 
 HERE = Path(__file__).resolve().parent      # .../defender/evals
 REAL_LEARNING = HERE.parent / "learning"    # .../defender/learning
@@ -121,11 +123,10 @@ def capture_results(tmp: Path, scenario_name: str,
             shutil.copy(path, pending_out / path.name)
 
     # Git log of the scenario commits.
-    log_proc = _run(
-        ["git", "log", "--all", "--format=%H %s%n%b%n----"],
-        cwd=tmp, check=False,
+    git_log = _git.git(
+        ["log", "--all", "--format=%H %s%n%b%n----"], cwd=tmp, check=False
     )
-    (out / "git_log.txt").write_text(log_proc.stdout)
+    (out / "git_log.txt").write_text(git_log)
 
     # Author stdout/stderr.
     (out / "author.stdout").write_text(proc.stdout)

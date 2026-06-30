@@ -35,12 +35,12 @@ import contextlib
 import fcntl
 import json
 import re
-import subprocess
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+from defender import _git
 from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
 # REPO_LOCK_WAIT_SECONDS (the env-derived ceiling each curator config sources as its
@@ -200,14 +200,7 @@ def _generation_count(trailer_label: str, *, repo_root: Path) -> int:
     a counter never crosses streams (``^Actor-Model:`` cannot match a
     ``Benign-Actor-Model:`` line, which starts with ``Benign-``).
     """
-    proc = subprocess.run(
-        ["git", "rev-list", "--count", f"--grep=^{trailer_label}:", "HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return int(proc.stdout.strip() or "0") + 1
+    return _git.git_rev_list_count(repo_root, grep=f"^{trailer_label}:") + 1
 
 
 def actor_generation_count(repo_root: Path) -> int:
@@ -275,11 +268,7 @@ def partition_committed(
 
 
 def git_head_sha(repo_root: Path) -> str:
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    return proc.stdout.strip()
+    return _git.git_head_sha(repo_root)
 
 
 def changes_outside(repo_root: Path, prefix: str) -> list[str]:
@@ -291,32 +280,19 @@ def changes_outside(repo_root: Path, prefix: str) -> list[str]:
     outside the corpus is caught. ``--untracked-files=all`` lists each untracked file
     individually rather than collapsing whole untracked directories, so a single stray
     file is reported as itself (and a fresh corpus file isn't mis-collapsed to its dir).
-    The caller diffs against a pre-agent baseline so unrelated leftovers (a sibling
-    author's uncommitted work earlier in the same batch) aren't blamed on the curator
-    agent."""
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    stray: list[str] = []
-    for line in proc.stdout.splitlines():
-        if not line.strip():
-            continue
-        path = line[3:]
-        if " -> " in path:  # rename: XY orig -> new
-            path = path.split(" -> ", 1)[1]
-        path = path.strip().strip('"')
-        if not (path.startswith(prefix) and path.endswith(".md")):
-            stray.append(path)
-    return stray
+    The ``-z`` reader (``_git.git_status``) is correct for spaced paths and needs no
+    ``" -> "`` rename split — a staged rename's source field reads as its own record. The
+    caller diffs against a pre-agent baseline so unrelated leftovers (a sibling author's
+    uncommitted work earlier in the same batch) aren't blamed on the curator agent."""
+    return [
+        path
+        for _xy, path in _git.git_status(repo_root)
+        if not (path.startswith(prefix) and path.endswith(".md"))
+    ]
 
 
 def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(corpus_dir)],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    return not proc.stdout.strip()
+    return not _git.git_status(repo_root, pathspec=corpus_dir)
 
 
 def assert_clean_corpus_dir(repo_root: Path, corpus_dir: Path, corpus_dir_rel: str) -> None:
@@ -328,14 +304,12 @@ def assert_clean_corpus_dir(repo_root: Path, corpus_dir: Path, corpus_dir_rel: s
     ``run_batch_envelope`` so the dirty-corpus refusal lives once (was the parallel
     ``assert_clean_corpus_dir``/``assert_clean_lessons_dir`` pair)."""
     corpus_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", str(corpus_dir)],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    if proc.stdout.strip():
+    records = _git.git_status(repo_root, pathspec=corpus_dir)
+    if records:
+        listing = "\n".join(f"{xy} {path}" for xy, path in records)
         raise AuthorError(
             f"{corpus_dir_rel} has uncommitted changes — refusing to author. "
-            f"Output:\n{proc.stdout}"
+            f"Output:\n{listing}"
         )
 
 
@@ -424,7 +398,6 @@ def validate_agent_result_partition(
 def commit_corpus(
     repo_root: Path,
     corpus_dir: Path,
-    corpus_dir_rel: str,
     message: str,
     *,
     trailers: list[tuple[str, str]] | None = None,
@@ -447,8 +420,12 @@ def commit_corpus(
     already carries one of those trailer keys: ``git --trailer`` *appends*, so a
     hand-written one would survive alongside ours and shadow it for first-match readers
     (``evals/secondary.py`` ``parse_trailers``). ``author.py`` passes no trailers — the findings
-    corpus carries none — so neither the guard nor the ``--trailer`` args apply."""
-    trailers = trailers or []  # normalize None→[] once; both the guard and args below
+    corpus carries none — so neither the guard nor the ``--trailer`` args apply.
+
+    The trailer-duplicate guard is a domain refusal (``AuthorError`` — queue intact for
+    retry); the staging/commit themselves go through ``_git.git_commit``, so a git failure
+    there raises ``GitError`` (a systemic fault → the drain's exit 2), not an ``AuthorError``."""
+    trailers = trailers or []  # normalize None→[] once; both the guard and the helper below
     if trailers:
         keys = "|".join(re.escape(key) for key, _ in trailers)
         if re.search(rf"(?m)^(?:{keys}):", message):
@@ -458,36 +435,7 @@ def commit_corpus(
                 "trailers; the loop owns provenance and git --trailer would append "
                 "duplicates — refusing to commit (queue intact for retry)"
             )
-    add = subprocess.run(
-        ["git", "add", "--", str(corpus_dir)],
-        cwd=repo_root, capture_output=True, text=True,
-    )
-    if add.returncode != 0:
-        raise AuthorError(
-            f"failed to stage {corpus_dir_rel} batch: {add.stderr.strip()}"
-        )
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--quiet", "--", str(corpus_dir)],
-        cwd=repo_root, capture_output=True, text=True,
-    )
-    if staged.returncode == 0:
-        return None  # nothing staged — no commit
-    if staged.returncode != 1:  # 0=no diff, 1=diff, >1=git error (don't commit blind)
-        raise AuthorError(
-            f"git diff --cached failed for {corpus_dir_rel}: {staged.stderr.strip()}"
-        )
-    trailer_args: list[str] = []
-    for key, val in trailers:
-        trailer_args += ["--trailer", f"{key}: {val}"]
-    proc = subprocess.run(
-        ["git", "commit", "-F", "-", *trailer_args, "--", str(corpus_dir)],
-        cwd=repo_root, input=message, capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        raise AuthorError(
-            f"failed to commit {corpus_dir_rel} batch: {proc.stderr.strip()}"
-        )
-    return git_head_sha(repo_root)
+    return _git.git_commit(repo_root, corpus_dir, message, trailers=trailers)
 
 
 def verify_agent_state(

@@ -9,8 +9,9 @@ so a leaf never has to import them back *from* ``lead_author`` (which would cycl
 """
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from defender import _git
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -117,22 +118,12 @@ def _is_in_scope(path: str) -> bool:
 
 
 def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
-    """``[(XY, path)]`` from ``git status --porcelain --untracked-files=all -z`` at
-    ``repo_root`` (a batch worktree). The agent runs no git, so its edits sit uncommitted
-    in the working tree (``M`` / ``D`` / ``??``) — this is the single read the scope gate
-    verifies. The agent stages nothing, so no rename/copy (``R`` / ``C``) records arise (a
-    "move" shows as a delete + an untracked add): each ``-z`` field is therefore one
-    ``XY␣path`` record. A stray staged rename, were one ever to appear, fails safe — its
-    second (source) field reads as an out-of-corpus path and the gate quarantines rather
-    than mis-committing.
+    """``[(XY, path)]`` working-tree status records at ``repo_root`` (a batch worktree).
+
+    Thin alias over the shared ``-z`` reader (``defender._git.git_status``). The agent runs
+    no git, so its edits sit uncommitted (``M`` / ``D`` / ``??``) — this is the single read
+    the scope gate verifies. The agent stages nothing, so no rename/copy (``R`` / ``C``)
+    records arise; a stray staged rename, were one ever to appear, fails safe — its second
+    (source) field reads as an out-of-corpus record the gate quarantines.
     """
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "-z"],
-        cwd=repo_root, capture_output=True, text=True, check=True,
-    )
-    out: list[tuple[str, str]] = []
-    for rec in proc.stdout.split("\0"):
-        if not rec or len(rec) < 3:
-            continue
-        out.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
-    return out
+    return _git.git_status(repo_root)

@@ -973,30 +973,35 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
 
 
 def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
-    """End-to-end with fake git/gh: the lead-author drain branches off ``lead-author/``
-    (NOT ``lessons/``) and opens its own PR."""
+    """End-to-end with a real git worktree + a fake forge: the lead-author drain branches
+    off ``lead-author/`` (NOT ``lessons/``) and opens its own PR."""
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-pr"
     run_dir.mkdir(parents=True)
     orch._enqueue_for_authoring(run_dir, paths)
-    git = _git_runner(ahead=1)
-    gh = _gh_runner(create_out="https://github.com/o/r/pull/77")
+    _, work = _origin_work(tmp_path)
+    forge = _FakeForge(create_ref="https://github.com/o/r/pull/77")
     branch = ab.AuthorBranch(
-        git=git, gh=gh, branch_prefix="lead-author/",
+        forge=forge, repo_root=work, branch_prefix="lead-author/",
         pr_title=orch._lead_author_pr_title, pr_body=orch._lead_author_pr_body,
         worktree_base=tmp_path / "wt",
     )
-    rc = orch.lead_author_drain(
-        paths, run_lead_author=lambda wt_paths, rd: None, branch=branch
-    )
+
+    def _author(wt_paths, rd):
+        # The loop is the sole committer in production; here the stub stands in, leaving a
+        # committed edit on the worktree branch so finish_batch sees commits and opens a PR.
+        f = wt_paths.repo_root / "defender" / "skills" / "note.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("edit\n")
+        _real(wt_paths.repo_root, "add", "-A")
+        _real(wt_paths.repo_root, "commit", "-q", "-m", "lead edit")
+
+    rc = orch.lead_author_drain(paths, run_lead_author=_author, branch=branch)
     assert rc == 0
-    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
-    head = create[create.index("--head") + 1]
-    assert head.startswith("lead-author/")
-    assert not head.startswith("lessons/")
+    assert forge.open_calls[0]["head"].startswith("lead-author/")
+    assert not forge.open_calls[0]["head"].startswith("lessons/")
     # lease search was scoped to the lead-author prefix, not lessons
-    lease = next(c for c in gh.calls if c[:2] == ["pr", "list"])
-    assert "head:lead-author/" in lease
+    assert forge.list_calls == ["lead-author/"]
 
 
 def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
@@ -1268,188 +1273,168 @@ def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# author_branch — git/gh helpers for the in-place-branch + PR discipline
-# (injected runners; no real git/gh is ever invoked)
+# author_branch — the per-batch git-worktree + PR discipline. Git runs for real
+# against a tmp repo (repo_root injected); only the forge (gh) is faked.
 # ---------------------------------------------------------------------------
 
 import subprocess as _subprocess  # noqa: E402
 
 from defender.learning.author import branch as ab  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning.author import forge as _forge  # type: ignore[import-not-found]  # noqa: E402
 
 
-def _cp(stdout: str = "", returncode: int = 0, stderr: str = ""):
-    return _subprocess.CompletedProcess([], returncode, stdout, stderr)
+class _FakeForge:
+    """In-memory forge for the branch tests — records list/open calls, never shells out
+    to ``gh`` (the one injected seam). ``git`` is exercised for real against a tmp repo."""
 
+    def __init__(self, *, pr_rows=None, create_ref="https://pr/1", raises=False):
+        self.pr_rows = pr_rows or []
+        self.create_ref = create_ref
+        self.raises = raises
+        self.list_calls: list[str] = []
+        self.open_calls: list[dict] = []
 
-def _git_runner(*, dirty: bool = False, ref: str = "main", ahead: int = 1,
-                lesson_on_base: bool = True):
-    def run(args):
-        a = list(args)
-        if a[:1] == ["-C"]:
-            a = a[2:]  # strip the `git -C <worktree>` cwd redirect before matching
-        run.calls.append(a)
-        if a[:1] == ["status"]:
-            return _cp(stdout=" M file\n" if dirty else "")
-        if a[:1] == ["symbolic-ref"]:
-            return _cp(stdout=ref)
-        if a[:2] == ["rev-list", "--count"]:
-            return _cp(stdout=str(ahead))
-        if a[:2] == ["cat-file", "-e"]:  # revert existence check vs origin/main
-            return _cp(returncode=0 if lesson_on_base else 1)
-        return _cp()  # fetch / worktree add|remove|prune / checkout / push succeed silently
+    def list_open_prs(self, head_prefix: str) -> list[dict]:
+        self.list_calls.append(head_prefix)
+        return self.pr_rows
 
-    run.calls = []
-    return run
-
-
-def _gh_runner(*, pr_list_json: str = "[]", create_out: str = "https://pr/1",
-               create_rc: int = 0):
-    def run(args):
-        run.calls.append(list(args))
-        a = list(args)
-        if a[:2] == ["pr", "list"]:
-            return _cp(stdout=pr_list_json)
-        if a[:2] == ["pr", "create"]:
-            return _cp(stdout=create_out, returncode=create_rc,
-                       stderr="" if create_rc == 0 else "gh boom")
-        return _cp()
-
-    run.calls = []
-    return run
-
-
-def test_author_branch_lease_true_on_open_pr():
-    gh = _gh_runner(pr_list_json='[{"number":1,"headRefName":"lessons/abc"}]')
-    b = ab.AuthorBranch(git=_git_runner(), gh=gh)
-    assert b.open_pr_exists() is True
-    call = gh.calls[0]
-    # prefix-search, NOT the exact --head glob (which would match nothing)
-    assert "--search" in call
-    assert "head:lessons/" in call
-    assert "--head" not in call
-
-
-def test_author_branch_lease_false_when_no_matching_pr():
-    gh = _gh_runner(pr_list_json='[{"number":2,"headRefName":"feature/x"}]')
-    b = ab.AuthorBranch(git=_git_runner(), gh=gh)
-    assert b.open_pr_exists() is False
-
-
-def test_author_branch_lease_keyed_on_prefix():
-    """A lessons PR does NOT hold the lead-author lease (per-prefix lease)."""
-    gh = _gh_runner(pr_list_json='[{"number":3,"headRefName":"lessons/abc"}]')
-    b = ab.AuthorBranch(git=_git_runner(), gh=gh, branch_prefix="lead-author/")
-    assert b.open_pr_exists() is False
-    assert "head:lead-author/" in gh.calls[0]
-
-
-def test_author_branch_start_adds_worktree_off_origin_main(tmp_path: Path):
-    git = _git_runner()
-    b = ab.AuthorBranch(git=git, gh=_gh_runner(), worktree_base=tmp_path / "wt")
-    wt = b.start_batch("abc123")
-    assert wt == tmp_path / "wt" / "lessons-abc123"
-    assert ["worktree", "prune"] in git.calls  # stale-batch cleanup first
-    assert ["fetch", "origin"] in git.calls
-    assert ["worktree", "add", "-B", "lessons/abc123", str(wt), "origin/main"] in git.calls
-
-
-def test_author_branch_start_cleans_up_partial_worktree_on_add_failure(tmp_path: Path):
-    """If `worktree add` fails mid-create, start_batch reclaims the partial worktree and
-    re-raises — the caller's `finally: cleanup` only runs once `wt` has been returned, so
-    an un-handled partial would leak (prune won't reclaim a present-but-broken dir)."""
-    calls: list[list[str]] = []
-
-    def git(args):
-        a = list(args)
-        if a[:1] == ["-C"]:
-            a = a[2:]
-        calls.append(a)
-        if a[:2] == ["worktree", "add"]:
-            return _cp(returncode=1, stderr="disk full")
-        return _cp()
-
-    b = ab.AuthorBranch(git=git, gh=_gh_runner(), worktree_base=tmp_path / "wt")
-    with pytest.raises(ab.BranchError):
-        b.start_batch("abc123")
-    wt = tmp_path / "wt" / "lessons-abc123"
-    assert ["worktree", "remove", "--force", str(wt)] in calls  # partial reclaimed
-
-
-def test_author_branch_finish_no_commits_returns_none():
-    git = _git_runner(ahead=0)
-    gh = _gh_runner()
-    b = ab.AuthorBranch(git=git, gh=gh)
-    assert b.finish_batch("abc123", Path("/tmp/wt")) is None
-    assert not any(c[:1] == ["push"] for c in git.calls)
-    assert not any(c[:2] == ["pr", "create"] for c in gh.calls)
-
-
-def test_author_branch_finish_pushes_and_opens_pr():
-    git = _git_runner(ahead=2)
-    gh = _gh_runner(create_out="https://github.com/o/r/pull/9")
-    b = ab.AuthorBranch(git=git, gh=gh)
-    pr = b.finish_batch("abc123", Path("/tmp/wt"))
-    assert pr == "https://github.com/o/r/pull/9"
-    # push is worktree-scoped (git -C wt …); _git_runner strips the -C prefix
-    assert ["push", "--set-upstream", "origin", "lessons/abc123"] in git.calls
-    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
-    assert "--base" in create
-    assert "main" in create
-    assert "--head" in create
-    assert "lessons/abc123" in create
-
-
-def test_author_branch_finish_raises_on_gh_failure():
-    b = ab.AuthorBranch(git=_git_runner(ahead=1), gh=_gh_runner(create_rc=1))
-    with pytest.raises(ab.BranchError):
-        b.finish_batch("abc123", Path("/tmp/wt"))
-
-
-def test_author_branch_cleanup_removes_worktree():
-    git = _git_runner()
-    ab.AuthorBranch(git=git, gh=_gh_runner()).cleanup(Path("/tmp/wt-x"))
-    assert ["worktree", "remove", "--force", "/tmp/wt-x"] in git.calls
-
-
-def test_author_branch_worktree_lifecycle_real_git(tmp_path: Path):
-    """Real git: start_batch adds a worktree on a lead-author/<id> branch off
-    origin/main and finish/cleanup leave the dev checkout's HEAD untouched."""
-    origin = tmp_path / "origin.git"
-    work = tmp_path / "work"
-    _real(origin.parent, "init", "--bare", "-q", str(origin), "-b", "main")
-    _real(tmp_path, "clone", "-q", str(origin), str(work))
-    _real(work, "config", "user.email", "t@e.com")
-    _real(work, "config", "user.name", "T")
-    (work / "seed.md").write_text("seed\n")
-    _real(work, "add", "-A")
-    _real(work, "commit", "-q", "-m", "seed")
-    _real(work, "push", "-q", "origin", "main")
-
-    def real_git(args):
-        return _subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-
-    gh = _gh_runner(create_out="https://pr/lead/1")
-    b = ab.AuthorBranch(
-        git=real_git, gh=gh, branch_prefix="lead-author/",
-        worktree_base=tmp_path / "wt",
-    )
-    head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
-    wt = b.start_batch("xyz789")
-    assert wt.is_dir()  # a real worktree checkout exists
-    # a commit on the worktree's branch — the dev checkout never moves
-    (wt / "defender").mkdir(exist_ok=True)
-    (wt / "added.md").write_text("from worktree\n")
-    _real(wt, "add", "-A")
-    _real(wt, "commit", "-q", "-m", "wt edit")
-    pr = b.finish_batch("xyz789", wt)
-    assert pr == "https://pr/lead/1"
-    b.cleanup(wt)
-    assert not wt.exists()  # worktree removed
-    assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before
+    def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
+        self.open_calls.append({"base": base, "head": head, "title": title, "body": body})
+        if self.raises:
+            raise _forge.ForgeError("gh boom")
+        return self.create_ref
 
 
 def _real(cwd: Path, *args: str):
     return _subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+def _origin_work(tmp_path: Path, *, lessons: dict[str, str] | None = None) -> tuple[Path, Path]:
+    """A bare ``origin`` + a ``work`` clone with a seed commit pushed to ``origin/main``.
+    ``lessons`` seeds repo-relative files (e.g. a lesson to later revert). Returns
+    ``(origin, work)``; ``work`` is the repo root the AuthorBranch operates on."""
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    _real(tmp_path, "init", "--bare", "-q", str(origin), "-b", "main")
+    _real(tmp_path, "clone", "-q", str(origin), str(work))
+    _real(work, "config", "user.email", "t@e.com")
+    _real(work, "config", "user.name", "T")
+    (work / "seed.md").write_text("seed\n")
+    for rel, content in (lessons or {}).items():
+        p = work / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    _real(work, "add", "-A")
+    _real(work, "commit", "-q", "-m", "seed")
+    _real(work, "push", "-q", "origin", "main")
+    return origin, work
+
+
+def test_author_branch_lease_true_on_open_pr():
+    forge = _FakeForge(pr_rows=[{"number": 1, "headRefName": "lessons/abc"}])
+    assert ab.AuthorBranch(forge=forge).open_pr_exists() is True
+    assert forge.list_calls == ["lessons/"]  # searched on the prefix
+
+
+def test_author_branch_lease_false_when_no_matching_pr():
+    forge = _FakeForge(pr_rows=[{"number": 2, "headRefName": "feature/x"}])
+    assert ab.AuthorBranch(forge=forge).open_pr_exists() is False
+
+
+def test_author_branch_lease_keyed_on_prefix():
+    """A lessons PR does NOT hold the lead-author lease (per-prefix lease)."""
+    forge = _FakeForge(pr_rows=[{"number": 3, "headRefName": "lessons/abc"}])
+    b = ab.AuthorBranch(forge=forge, branch_prefix="lead-author/")
+    assert b.open_pr_exists() is False
+    assert forge.list_calls == ["lead-author/"]
+
+
+def test_author_branch_start_adds_worktree_off_origin_main(tmp_path: Path):
+    _, work = _origin_work(tmp_path)
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work, worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")
+    assert wt == tmp_path / "wt" / "lessons-abc123"
+    assert wt.is_dir()  # a real worktree checkout
+    assert _real(wt, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "lessons/abc123"
+    assert (_real(wt, "rev-parse", "HEAD").stdout.strip()
+            == _real(work, "rev-parse", "origin/main").stdout.strip())  # off origin/main
+
+
+def test_author_branch_start_cleans_up_partial_worktree_on_add_failure(tmp_path: Path):
+    """If `worktree add` fails (its target is already occupied), start_batch re-raises as
+    BranchError rather than leaving a half-created worktree registered."""
+    _, work = _origin_work(tmp_path)
+    wt_base = tmp_path / "wt"
+    occupied = wt_base / "lessons-abc123"
+    occupied.mkdir(parents=True)
+    (occupied / "in_the_way.txt").write_text("x")  # non-empty → `git worktree add` refuses
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work, worktree_base=wt_base)
+    with pytest.raises(ab.BranchError):
+        b.start_batch("abc123")
+    assert "lessons-abc123" not in _real(work, "worktree", "list").stdout  # never registered
+
+
+def test_author_branch_finish_no_commits_returns_none(tmp_path: Path):
+    origin, work = _origin_work(tmp_path)
+    forge = _FakeForge()
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")  # no commit on the branch → nothing ahead of origin/main
+    assert b.finish_batch("abc123", wt) is None
+    assert forge.open_calls == []  # no PR opened
+    assert not _real(work, "ls-remote", "--heads", "origin", "lessons/abc123").stdout.strip()
+
+
+def test_author_branch_finish_pushes_and_opens_pr(tmp_path: Path):
+    _, work = _origin_work(tmp_path)
+    forge = _FakeForge(create_ref="https://github.com/o/r/pull/9")
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")
+    (wt / "added.md").write_text("from worktree\n")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "wt edit")
+    assert b.finish_batch("abc123", wt) == "https://github.com/o/r/pull/9"
+    assert forge.open_calls[0]["base"] == "main"
+    assert forge.open_calls[0]["head"] == "lessons/abc123"
+    # the branch reached origin
+    assert _real(work, "ls-remote", "--heads", "origin", "lessons/abc123").stdout.strip()
+
+
+def test_author_branch_finish_raises_on_gh_failure(tmp_path: Path):
+    _, work = _origin_work(tmp_path)
+    b = ab.AuthorBranch(forge=_FakeForge(raises=True), repo_root=work,
+                        worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")
+    (wt / "added.md").write_text("x\n")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "edit")
+    with pytest.raises(ab.BranchError):
+        b.finish_batch("abc123", wt)
+
+
+def test_author_branch_cleanup_removes_worktree(tmp_path: Path):
+    _, work = _origin_work(tmp_path)
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work, worktree_base=tmp_path / "wt")
+    wt = b.start_batch("abc123")
+    assert wt.is_dir()
+    b.cleanup(wt)
+    assert not wt.exists()  # worktree removed
+
+
+def test_author_branch_worktree_lifecycle_real_git(tmp_path: Path):
+    """The full lifecycle leaves the dev checkout's HEAD untouched (lead-author prefix)."""
+    _, work = _origin_work(tmp_path)
+    forge = _FakeForge(create_ref="https://pr/lead/1")
+    b = ab.AuthorBranch(forge=forge, repo_root=work, branch_prefix="lead-author/",
+                        worktree_base=tmp_path / "wt")
+    head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
+    wt = b.start_batch("xyz789")
+    (wt / "added.md").write_text("from worktree\n")
+    _real(wt, "add", "-A")
+    _real(wt, "commit", "-q", "-m", "wt edit")
+    assert b.finish_batch("xyz789", wt) == "https://pr/lead/1"
+    b.cleanup(wt)
+    assert not wt.exists()
+    assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before  # dev HEAD unmoved
 
 
 # ---------------------------------------------------------------------------
@@ -1457,45 +1442,48 @@ def _real(cwd: Path, *args: str):
 # ---------------------------------------------------------------------------
 
 
-def test_author_branch_revert_lesson_pr_removes_and_opens_pr():
-    git = _git_runner(ref="main")
-    gh = _gh_runner(create_out="https://github.com/o/r/pull/42")
-    b = ab.AuthorBranch(git=git, gh=gh)
-    pr = b.revert_lesson_pr("defender/lessons/bad.md", "bad")
-    assert pr == "https://github.com/o/r/pull/42"
-    assert ["checkout", "-B", "lessons/revert-bad", "origin/main"] in git.calls
-    assert ["rm", "defender/lessons/bad.md"] in git.calls
-    assert ["commit", "-m", "revert lesson: bad"] in git.calls
-    assert ["checkout", "main"] in git.calls  # HEAD restored
-    create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
-    assert "revert lesson: bad" in create
+def test_author_branch_revert_lesson_pr_removes_and_opens_pr(tmp_path: Path):
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad lesson\n"})
+    forge = _FakeForge(create_ref="https://github.com/o/r/pull/42")
+    b = ab.AuthorBranch(forge=forge, repo_root=work)
+    ref_before = _real(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://github.com/o/r/pull/42"
+    assert forge.open_calls[0]["head"] == "lessons/revert-bad"
+    assert forge.open_calls[0]["title"] == "revert lesson: bad"
+    # the revert branch reached origin and HEAD was restored to the original ref
+    assert _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
+    assert _real(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == ref_before
 
 
-def test_author_branch_revert_refuses_dirty_tree():
-    b = ab.AuthorBranch(git=_git_runner(dirty=True), gh=_gh_runner())
+def test_author_branch_revert_refuses_dirty_tree(tmp_path: Path):
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    (work / "dirty.txt").write_text("uncommitted\n")  # working tree no longer clean
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work)
     with pytest.raises(ab.BranchError):
         b.revert_lesson_pr("defender/lessons/bad.md", "bad")
 
 
-def test_author_branch_revert_refuses_missing_lesson_on_base():
+def test_author_branch_revert_refuses_missing_lesson_on_base(tmp_path: Path):
     """Existence is checked against origin/main, not the local tree — a lesson absent
     from the base raises before any branch churn (no stray local revert branch)."""
-    git = _git_runner(ref="main", lesson_on_base=False)
-    b = ab.AuthorBranch(git=git, gh=_gh_runner())
+    _, work = _origin_work(tmp_path)  # no lesson seeded
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work)
+    head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(ab.BranchError):
         b.revert_lesson_pr("defender/lessons/ghost.md", "ghost")
-    assert ["cat-file", "-e", "origin/main:defender/lessons/ghost.md"] in git.calls
-    assert not any(c[:2] == ["checkout", "-B"] for c in git.calls)  # no branch churn
+    assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before  # HEAD unmoved
+    assert not _real(work, "branch", "--list", "lessons/revert-ghost").stdout.strip()  # no churn
 
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
     """revert() acquires the author-drain flock, then opens the revert PR."""
     from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
-    git = _git_runner(ref="main")
-    b = ab.AuthorBranch(git=git, gh=_gh_runner(create_out="https://pr/7"))
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    forge = _FakeForge(create_ref="https://pr/7")
+    b = ab.AuthorBranch(forge=forge, repo_root=work)
     assert rl.revert("bad", branch=b, paths=paths) == 0
-    assert ["rm", "defender/lessons/bad.md"] in git.calls
+    assert forge.open_calls[0]["head"] == "lessons/revert-bad"  # PR opened through the lock
 
 
 def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
@@ -1510,10 +1498,10 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     holder = lock.open("a+")
     _fcntl.flock(holder.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
     try:
-        git = _git_runner(ref="main")
-        b = ab.AuthorBranch(git=git, gh=_gh_runner())
+        forge = _FakeForge()
+        b = ab.AuthorBranch(forge=forge, repo_root=tmp_path)  # git/forge never reached
         assert rl.revert("bad", branch=b, paths=paths) == 3
-        assert git.calls == []  # never reached revert_lesson_pr
+        assert forge.open_calls == []  # never reached revert_lesson_pr
     finally:
         _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
         holder.close()

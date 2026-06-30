@@ -43,6 +43,8 @@ from pathlib import Path
 # sys.path[0]. Shared with harness.py.
 from _harness_util import find_venv_py, init_git, run as _run
 
+from defender import _git  # _harness_util put the repo root on sys.path
+
 
 HERE = Path(__file__).resolve().parent      # .../defender/evals
 REAL_DEFENDER = HERE.parent                 # .../defender
@@ -158,11 +160,11 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
         # mislabel it "untouched". Gate on a second commit, and match the path exactly
         # against the name-only lines (not a substring, which a longer sibling path
         # would spuriously satisfy).
-        count = _run(["git", "rev-list", "--count", "HEAD"], cwd=tmp, check=False)
-        ncommits = int(count.stdout.strip()) if count.stdout.strip().isdigit() else 0
+        count = _git.git(["rev-list", "--count", "HEAD"], cwd=tmp, check=False)
+        ncommits = int(count) if count.isdigit() else 0
         if ncommits >= 2:
-            diff = _run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], cwd=tmp, check=False)
-            touched = widened in diff.stdout.split()
+            diff = _git.git(["diff", "--name-only", "HEAD~1", "HEAD"], cwd=tmp, check=False)
+            touched = widened in diff.split()
             notes.append(f"prefer_widened {'TOUCHED' if touched else 'untouched'}: {widened}")
         else:
             notes.append(f"prefer_widened untouched (no loop commit): {widened}")
@@ -181,10 +183,10 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     (out / "lead_author.stdout").write_text(proc.stdout)
     (out / "lead_author.stderr").write_text(proc.stderr)
     (out / "rc.txt").write_text(str(proc.returncode))
-    log = _run(["git", "log", "--format=%H %s%n%b%n----", "-n", "5"], cwd=tmp, check=False)
-    (out / "git_log.txt").write_text(log.stdout)
-    show = _run(["git", "show", "--stat", "HEAD"], cwd=tmp, check=False)
-    (out / "head_show.txt").write_text(show.stdout)
+    log = _git.git(["log", "--format=%H %s%n%b%n----", "-n", "5"], cwd=tmp, check=False)
+    (out / "git_log.txt").write_text(log)
+    show = _git.git(["show", "--stat", "HEAD"], cwd=tmp, check=False)
+    (out / "head_show.txt").write_text(show)
     (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n")
     # Snapshot the post-run catalog so the disposition is inspectable.
     shutil.copytree(
