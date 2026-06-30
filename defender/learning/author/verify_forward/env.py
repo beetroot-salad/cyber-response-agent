@@ -36,8 +36,8 @@ from pathlib import Path
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
-from defender.learning.core.config import DEFAULT_PATHS, LoopPaths, RunPaths
-from defender.learning.core.persist import resolve_run_bundle
+from defender._run_paths import resolve_run_bundle
+from defender.learning.core.config import DEFAULT_PATHS, RunPaths
 from defender.learning.core.prologue import extract_case_entities
 from defender.learning.author.verify_forward.shared import (
     load_observation as _load_observation,
@@ -47,11 +47,12 @@ from defender.learning.author.verify_forward.shared import (
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
 RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
-# Sourced from the shared layout so the corpus + benign env-queue defaults can't
-# drift from LoopPaths (the absolute paths are identical to the prior literals).
-_PATHS = LoopPaths(repo_root=REPO_ROOT)
-DEFAULT_PENDING = _PATHS.environment_observations.file
-DEFAULT_CORPUS = _PATHS.lessons_environment_dir
+# Sourced from DEFAULT_PATHS (one shared LoopPaths) so the corpus + benign env-queue
+# defaults can't drift from the layout and honor DEFENDER_LEARNING_STATE_DIR like the
+# rest of the verifier (#425) — production overrides both via --corpus/--pending, but
+# the bare-default path then stays worktree-immune too.
+DEFAULT_PENDING = DEFAULT_PATHS.environment_observations.file
+DEFAULT_CORPUS = DEFAULT_PATHS.lessons_environment_dir
 
 
 def case_entities_arg(row: dict, runs_dir: Path) -> str:

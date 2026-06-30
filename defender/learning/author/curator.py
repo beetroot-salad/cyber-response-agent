@@ -43,8 +43,9 @@ import yaml
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
+from defender._run_paths import resolve_run_bundle
 from defender.learning.core.config import QueueChannel, curator_agent_env, make_logger
-from defender.learning.core.persist import resolve_run_bundle, rotate_queue_locked
+from defender.learning.core.persist import rotate_queue_locked
 
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"

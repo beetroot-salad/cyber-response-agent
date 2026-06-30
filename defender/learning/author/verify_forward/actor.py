@@ -37,7 +37,7 @@ from defender.learning.core.config import (  # noqa: E402
     VERIFIER_TIMEOUT,
     subscription_env,
 )
-from defender.learning.core.persist import resolve_run_bundle  # noqa: E402
+from defender._run_paths import resolve_run_bundle  # noqa: E402
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
     call_haiku as _call_haiku,
     load_observation as _load_observation,
@@ -49,7 +49,7 @@ from defender.learning.author.verify_forward.shared import (  # noqa: E402
 # DEFENDER_LEARNING_STATE_DIR) rather than this file's worktree ``__file__``: the
 # author drains run this in a throwaway ``git worktree`` that has no runs/_pending, and
 # the curator agent pins the state root in our env (curator_agent_env, #425).
-PENDING_FILE = DEFAULT_PATHS.pending_dir / "actor_observations.jsonl"
+PENDING_FILE = DEFAULT_PATHS.actor_observations.file
 PROMPT_PATH = HERE / "actor.md"
 
 
