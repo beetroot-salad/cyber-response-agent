@@ -143,7 +143,7 @@ def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str]
 
 
 def synthesize_drafts(
-    executed: list[ExecutedLead], *, catalog_dir: Path | None = None,
+    executed: list[ExecutedLead], *, catalog_dir: Path = CATALOG_DIR,
     catalog: list | None = None,
 ) -> list[Path]:
     """Mint a ``{system}/_draft/{verb}.md`` skeleton for each executed
@@ -165,7 +165,6 @@ def synthesize_drafts(
     so the captured command — not a ``${param}`` re-render — is the canonical
     record (see ``_executed_query``).
     """
-    catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
     # Reuse the tick's once-loaded catalog when threaded; else load (the direct
     # `catalog_dir`-only call path). This is the FIRST consumer, so the
     # pre-synthesis catalog is exactly what a fresh load would return.

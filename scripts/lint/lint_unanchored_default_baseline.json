@@ -1,0 +1,4 @@
+{
+  "//": "lint_unanchored_default baseline — a parameter re-defaulted in-body via a self-referential None-coalesce to a named/called fallback (the `x = x if x is not None else DEFAULT` smell: an Optional that's immediately made non-None, with the default knowledge duplicated across call sites). Anchor the default in the signature (`x: T = DEFAULT`) or resolve it once at the boundary. Fingerprint is file:function:param (no line number). CI fails on a triple absent here. Regenerate: python scripts/lint/lint_unanchored_default.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to anchor.",
+  "entries": {}
+}

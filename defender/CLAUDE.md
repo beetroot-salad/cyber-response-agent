@@ -363,6 +363,27 @@ breaking changes through the PoC phase.
 | Lessons corpus | `defender/lessons/*.md` (authored by the curator; hand-edits fine if they match `author.md`'s schema) |
 | Eval metrics / loop-eval scenarios | `defender/evals/` (`held_out.py`, `secondary.py`, the `harness*.py` + `scenarios*/`) |
 
+## Code conventions
+
+**Anchor a default in one place — don't re-default in the body.** Resolve an
+optional input to a concrete value *once*, at the boundary (the entry function,
+the deps factory, the composition root), then thread it inward as a
+non-`Optional`. Don't re-coalesce a parameter in the body with
+`x = x if x is not None else DEFAULT`: it makes the `Optional` signature a lie
+(the value is non-None one line later) and duplicates the "what's the default"
+knowledge across every call site, where it drifts. Anchor it instead — either a
+signature default that references the constant (`repo_root: Path = REPO_ROOT`),
+or defer to the single callee that already owns the default (`load_catalog`
+resolves `None → CATALOG_ROOT`, so forward `None` straight through rather than
+pre-resolving it). Prefer `is not None` over `or` — `or` mis-fires on
+valid-falsy values (`0` / `""` / `[]`). Two shapes are fine and *not* the smell:
+a literal/empty-container default for a mutable arg (`items = items if items is
+not None else []`, the only correct fix for `def f(items=[])`), and a single
+DI/test seam that *owns* its default (`_spawn = spawn if spawn is not None else
+subprocess.Popen`). The `lint_unanchored_default` gate (`scripts/lint/`) enforces
+the in-body case under `defender/`; suppress a deliberate site with
+`# lint-default: ok — <reason>`.
+
 ## Out of scope here
 
 The dev/eval environment itself — the `playground-v2/` stack (elastic,
