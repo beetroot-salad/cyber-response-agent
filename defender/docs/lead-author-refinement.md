@@ -11,6 +11,15 @@ the code disagree, the code wins. The handoff schema and prompt
 structure described below are the target; the as-shipped state is
 single-handoff-per-invocation with `goal_text + params + neighbors`.
 
+> **Update 2026-06-30 — `composite_kind` / `co_dispatched_with` removed.**
+> These two fields (and the `lead_classifier` module) shipped, but an ablation
+> (`experiments/lead-classifier-ablation/`, N=10×2 arms×4 fixtures incl. sweep /
+> join / baseline_shift) found they had **zero** effect on the lead-author's
+> discard/promote decisions — the `neighbors`/narrowing check already prevents
+> underfolding, and the signal only ever rides the skip-defaulted established
+> handoff. They were deleted (supersedes #457, which proposed refactoring them).
+> Ignore the `composite_kind` / `co_dispatched_with` mentions below.
+
 ## Scope
 
 The lead-author is the offline curator of the executed-side query

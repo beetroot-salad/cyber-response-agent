@@ -282,8 +282,8 @@ def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     assert handoffs == []
 
 
-def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path):
-    """Cross-system join: each invocation lists its sibling template path."""
+def test_build_handoff_one_handoff_per_template_cross_system(run_dir: Path, catalog: Path):
+    """A multi-query, cross-system lead yields one handoff per executed template."""
     _write_lead_meta(run_dir, "l-001", "cross-system")
     _write_query(run_dir, "l-001", 0, "elastic.auth-events")
     _write_query(run_dir, "l-001", 1, "host-state.process-list", {"pattern": "x"})
@@ -291,12 +291,11 @@ def test_build_handoff_co_dispatched_with_for_join(run_dir: Path, catalog: Path)
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
-    # Two handoffs (one per template).
+    # Two handoffs (one per template), each carrying its single invocation.
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
-    auth_inv = by_id["elastic.auth-events"]["invocations"][0]
-    assert auth_inv["composite_kind"] == "join"
-    assert any("host-state/process-list.md" in p for p in auth_inv["co_dispatched_with"])
+    assert set(by_id) == {"elastic.auth-events", "host-state.process-list"}
+    assert len(by_id["elastic.auth-events"]["invocations"]) == 1
 
 
 # ---------------------------------------------------------------------------

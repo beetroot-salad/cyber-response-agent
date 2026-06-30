@@ -34,14 +34,13 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
         "executed_query": "<the EXACT query that ran — canonical>",
         "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
         "payload_digest": "847 events; 12 distinct user.name; ...",
-        "result_refs": ["gather_raw/l-001/0.json"],
-        "composite_kind": "atomic"          // atomic|sweep|join|baseline_shift
+        "result_refs": ["gather_raw/l-001/0.json"]
       }
     ]
   }
   ```
 
-  `executed_template_path`, `neighbors`, `executed_query`, `payload_status`, `payload_digest`, and `composite_kind` are pre-computed by the driver (see Hard rules). Read the payload at `result_refs` only when the digest leaves a question it can't answer.
+  `executed_template_path`, `neighbors`, `executed_query`, `payload_status`, and `payload_digest` are pre-computed by the driver (see Hard rules). Read the payload at `result_refs` only when the digest leaves a question it can't answer.
 
   **`executed_query` is the verbatim query that ran — the canonical record.** Some systems inline the whole query as a single positional — e.g. an ES|QL-style language puts the entire pipe in `params.arg0` with the bindings (user, source, time window) inside it — so `params` carries only that raw positional, not the named filters; read `executed_query`, not `params`.
 
@@ -72,7 +71,6 @@ Process the handoffs **in order**. For each, read `executed_template_path` plus 
 - **Union of `goal_text` + `executed_query`** — does `## Goal` cover the keywords a future analyst would type for the measurement this run actually ran?
 - **Narrowing check (the load-bearing one)** — is `executed_query` a *subset* of a high-scoring neighbor's `## Query` (same index, same core aggregation, fewer filters / `BY` keys)? If so this is a narrowing, not a new capability — fold toward the wide neighbor (see below), don't keep a sibling.
 - **`payload_status` distribution** — are there `error` or `suspect_empty` invocations? (Strongest fold signal — a quirk for `## Pitfalls`.)
-- **`composite_kind` distribution** — `baseline_shift` (the *same wide template* run over two windows), `sweep` (one axis swept across values), and `join` (co-dispatched with a sibling) all show the template already serving inside a multi-query pattern: evidence it's a wide capability, not a cue to mint a per-pattern sibling. `atomic` is the single-shot case.
 
 Then pick one action.
 
@@ -151,7 +149,7 @@ You commit nothing. Make your edits and `rm`s in the working tree; when you fini
 - **Established files are delete-prohibited.** `rm` may only target catalog drafts (`gather/queries/{system}/_draft/`) and system-skill drafts (`skills/{system}/_draft/`). Established query templates and system-skill `SKILL.md` files cannot be deleted. Demotions (replacing an established template with a `_draft/` copy, or a SKILL.md with a system `_draft/` copy) are rejected — the loop rejects the deletion either way.
 - **No-edit runs exit zero.** Deciding every handoff is `skip` is a valid tick — exit zero without committing; do not error.
 - **Trust pre-computed fields.** `executed_template_path`,
-  `neighbors`, `executed_query`, `payload_status`, `payload_digest`,
-  and `composite_kind` were computed by the driver — read them, don't
+  `neighbors`, `executed_query`, `payload_status`, and `payload_digest`
+  were computed by the driver — read them, don't
   recompute. Their content carries the same measurement discipline as
   the catalog (see above).
