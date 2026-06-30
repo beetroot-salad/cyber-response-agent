@@ -43,8 +43,8 @@ import yaml
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
-from defender.learning.core.config import QueueChannel, make_logger
-from defender.learning.core.persist import rotate_queue_locked
+from defender.learning.core.config import QueueChannel, curator_agent_env, make_logger
+from defender.learning.core.persist import resolve_run_bundle, rotate_queue_locked
 
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
@@ -67,6 +67,11 @@ class CuratorConfig:
     # engine reads no import-time module globals.
     repo_root: Path
     pending_dir: Path
+    # Run-bundle dir for the held-out double-check. Resolved from the injected
+    # ``LoopPaths.runs_dir``, which ``with_repo_root`` keeps pinned to the shared state
+    # root — so it stays correct even though ``repo_root`` moves to a batch worktree
+    # (#425). Do NOT resolve the bundle off ``repo_root``.
+    runs_dir: Path
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
@@ -175,17 +180,18 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     return ids
 
 
-def is_held_out_source(repo_root: Path, source_run_dir: str) -> bool:
-    """True if ``{source_run_dir}/ground_truth.yaml`` declares held-out.
+def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
+    """True if the source run's ``ground_truth.yaml`` declares held-out.
 
-    ``source_run_dir`` follows ``_loop_persist._source_run_dir``: repo-relative
-    in-repo, absolute when the run lives out-of-repo under
-    DEFENDER_LEARNING_STATE_DIR. ``repo_root / src`` resolves both (pathlib lets an
-    absolute right-hand side win). Missing file or malformed YAML → False (defense
-    in depth, not enforcement)."""
+    Resolve the bundle via ``resolve_run_bundle`` off ``runs_dir`` — which must be the
+    shared-state ``LoopPaths.runs_dir`` (worktree-immune), NOT ``repo_root /
+    source_run_dir``: under a batch author worktree the latter resolves into the
+    worktree's empty ``runs/`` and the held-out net silently lets a held-out case leak
+    into the corpus (#425). Missing file or malformed YAML → False (defense in depth, not
+    enforcement)."""
     if not source_run_dir:
         return False
-    path = repo_root / source_run_dir.rstrip("/") / GROUND_TRUTH_FILE
+    path = resolve_run_bundle(runs_dir, source_run_dir) / GROUND_TRUTH_FILE
     if not path.is_file():
         return False
     try:
@@ -245,6 +251,10 @@ def invoke_curator_agent(
         log_path=cfg.run_log,
         result_marker="AUTHOR_RESULT:",
         batch_id=batch_id,
+        # Pin the shared state root so the agent's forward-check Bash subprocesses
+        # (verify_forward/actor.py, verify_forward/env.py) resolve the run bundle off it,
+        # not the worktree they run in (#425). cfg.runs_dir.parent == the _state_root.
+        env=curator_agent_env(cfg.runs_dir.parent),
     )
     try:
         return _runner.invoke_claude_print(options, user_prompt, make_logger(cfg.log_prefix))
@@ -426,7 +436,7 @@ def _partition_pre_author(
             rec["skip_reason"] = f"outcome_policy:{outcome}"
             consumed_pre.append(rec)
             continue
-        if is_held_out_source(cfg.repo_root, entry.get("source_run_dir", "")):
+        if is_held_out_source(cfg.runs_dir, entry.get("source_run_dir", "")):
             # Producer should have dropped held-out runs; defense-in-depth hold
             # so a held-out observation can never seed a lesson.
             rec = dict(entry)

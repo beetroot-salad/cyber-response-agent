@@ -168,19 +168,31 @@ def derive_alert_rule_key(alert: dict) -> str:
 
 
 def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
-    """Path to the run bundle, as consumers resolve it (``repo_root / src``).
+    """Path to the run bundle, as ``resolve_run_bundle`` resolves it.
 
     Repo-relative when the run lives in-repo (the default); absolute when it
     lives out-of-repo under ``DEFENDER_LEARNING_STATE_DIR`` (no repo-relative
-    form exists). Both resolve correctly via ``repo_root / src`` — pathlib lets
-    an absolute right-hand side win — so the consumers (the authors' held-out
-    double-check, the forward-checkers) need no special-casing. Trailing slash
-    preserved for the existing string contract.
+    form exists). Trailing slash preserved for the existing string contract.
     """
     try:
         return str(learning_run_dir.relative_to(repo_root)) + "/"
     except ValueError:
         return str(learning_run_dir) + "/"
+
+
+def resolve_run_bundle(runs_dir: Path, source_run_dir: str) -> Path:
+    """Resolve a recorded ``source_run_dir`` to its on-disk bundle dir.
+
+    The canonical consumer side of ``_source_run_dir``. An **absolute**
+    ``source_run_dir`` (out-of-repo, under ``DEFENDER_LEARNING_STATE_DIR``) is used
+    as-is; a **repo-relative** one (in-repo) resolves as ``runs_dir / <run_id>`` (its
+    last path component). ``runs_dir`` must be the shared-state ``LoopPaths.runs_dir``,
+    NOT ``repo_root / source_run_dir`` — under a batch author worktree (#420/#423) the
+    latter resolves into the worktree's empty ``runs/`` and the bundle goes missing,
+    breaking the forward-check and the held-out double-check (#425).
+    """
+    src = Path(source_run_dir.rstrip("/"))
+    return src if src.is_absolute() else runs_dir / src.name
 
 
 # ---------------------------------------------------------------------------

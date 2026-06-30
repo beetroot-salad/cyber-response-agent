@@ -454,10 +454,11 @@ def test_verify_env_case_entities_from_prologue_not_row(tmp_path: Path) -> None:
         "source_run_dir": str(run) + "/",
         "entities": [{"type": "process", "class": "process:nc"}],
     }
-    # repo_root is ignored because source_run_dir is absolute.
-    assert verify_forward_env.case_entities_arg(row, tmp_path) == "process:nc"
+    # Resolved off runs_dir / <run_id> (the basename of source_run_dir), so it stays
+    # correct even when the drain runs in a worktree (#425).
+    assert verify_forward_env.case_entities_arg(row, tmp_path / "runs") == "process:nc"
     # Empty / missing source → empty entities.
-    assert verify_forward_env.case_entities_arg({}, tmp_path) == ""
+    assert verify_forward_env.case_entities_arg({}, tmp_path / "runs") == ""
 
 
 def _run_verify_env(lesson: Path, obs_id: str, corpus: Path, pending: Path) -> str:

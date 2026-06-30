@@ -84,6 +84,7 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
     return _curator.CuratorConfig(
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
+        runs_dir=paths.runs_dir,
         corpus_dir=paths.lessons_actor_dir,
         corpus_dir_rel=paths.lessons_actor_dir_rel,
         channel=paths.actor_observations,

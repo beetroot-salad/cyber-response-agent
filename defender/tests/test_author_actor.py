@@ -247,6 +247,30 @@ def test_held_out_double_check_holds_observation(tmp_path: Path):
     assert rows_left[0]["held_reason"] == "held_out_double_check"
 
 
+def test_held_out_double_check_worktree_immune(tmp_path: Path):
+    """#425: under a batch worktree the held-out double-check must resolve the bundle
+    off the shared state root (cfg.runs_dir), not the worktree repo_root — else a
+    held-out case silently leaks into the corpus."""
+    orig = tmp_path / "checkout"
+    (orig / "defender" / "learning").mkdir(parents=True)
+    worktree = tmp_path / "worktree"  # fresh origin/main checkout: no runs/
+    worktree.mkdir()
+    # The held-out bundle lives under the ORIGINAL state root, never the worktree.
+    src = orig / "defender" / "learning" / "runs" / "held"
+    src.mkdir(parents=True)
+    (src / "ground_truth.yaml").write_text("held_out: true\n")
+
+    # The drain re-roots the layout at the worktree but keeps the shared state dir.
+    cfg = aa.build_actor_config(LoopPaths(repo_root=orig).with_repo_root(worktree))
+    assert cfg.repo_root == worktree
+    assert cfg.runs_dir == orig / "defender" / "learning" / "runs"
+
+    src_rel = "defender/learning/runs/held/"
+    assert curator.is_held_out_source(cfg.runs_dir, src_rel) is True
+    # The pre-#425 join (repo_root / source_run_dir) would miss it in the worktree.
+    assert not (cfg.repo_root / src_rel / "ground_truth.yaml").is_file()
+
+
 # ---------------------------------------------------------------------------
 # Result partition + post-flight
 # ---------------------------------------------------------------------------

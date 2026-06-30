@@ -74,6 +74,7 @@ from defender.learning.core.config import (
     AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
     LoopPaths,
+    curator_agent_env,
     make_logger,
     now_iso,
 )
@@ -262,6 +263,10 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         log_path=cfg.author_run_log,
         result_marker="AUTHOR_RESULT:",
         batch_id=batch_id,
+        # Pin the shared state root so the agent's forward-check Bash subprocesses
+        # (verify_forward/forward.py) resolve the run bundle off it, not the worktree
+        # they run in (#425). cfg.runs_dir.parent == the resolved _state_root.
+        env=curator_agent_env(cfg.runs_dir.parent),
     )
     try:
         return _runner.invoke_claude_print(options, user_prompt, _log)

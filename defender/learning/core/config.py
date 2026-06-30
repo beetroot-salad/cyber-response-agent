@@ -504,3 +504,23 @@ def subscription_env() -> dict[str, str]:
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)
     return env
+
+
+def curator_agent_env(state_root: Path) -> dict[str, str]:
+    """``subscription_env`` with ``DEFENDER_LEARNING_STATE_DIR`` pinned to the
+    drain's resolved state root, for spawning a curator ``claude -p`` agent.
+
+    The author drains run in a throwaway ``git worktree`` off ``origin/main``
+    (#420/#423), which has no ``runs/``/``_pending/`` (gitignored). The curator
+    agent's forward-check verifiers (``verify_forward/*.py``) run as Bash
+    subprocesses that re-derive their paths from ``DEFAULT_PATHS`` — i.e. from
+    their own worktree ``__file__`` — so under the default in-repo state they
+    resolve the (empty) worktree bundle and fail. Pinning the env var here hands
+    them the shared state root the same way the off-process worker hands it to a
+    separately-spawned renderer (see ``learning_state_root``); a freshly-imported
+    verifier then honors it via ``_env_state_dir``. Idempotent under out-of-repo
+    state, where ``state_root`` is already the value the parent inherited (#425).
+    """
+    env = subscription_env()
+    env["DEFENDER_LEARNING_STATE_DIR"] = str(state_root)
+    return env

@@ -229,6 +229,11 @@ class RunnerOptions:
     # result from disk (lead_author) and use ``invoke_claude_print_raw``.
     result_marker: str | None
     batch_id: str
+    # Subprocess environment for the ``claude -p`` agent. None ⇒ ``subscription_env()``
+    # (today's behavior). The author drains pass ``curator_agent_env(state_root)`` so the
+    # agent's forward-check Bash subprocesses resolve the run bundle off the shared state
+    # root, not the throwaway worktree they run in (#425).
+    env: dict[str, str] | None = None
     # Test seam for the process spawn. None ⇒ resolve ``subprocess.Popen`` at call
     # time, so a module-attr monkeypatch (test_author_streaming_timeout's shim) still
     # takes; a direct unit test can inject a fake Popen here instead.
@@ -261,7 +266,7 @@ def invoke_claude_print(
         rc, full_text, stderr_tail = _drive_subprocess(
             cmd, options.cwd, user_prompt.encode(),
             options.timeout_seconds, options.log_path, log_fh, log_fn,
-            spawn=options.spawn,
+            spawn=options.spawn, env=options.env,
         )
 
     if rc != 0:
@@ -303,7 +308,7 @@ def invoke_claude_print_raw(
         rc, full_text, _stderr_tail = _drive_subprocess(
             cmd, options.cwd, user_prompt.encode(),
             options.timeout_seconds, options.log_path, log_fh, log_fn,
-            spawn=options.spawn,
+            spawn=options.spawn, env=options.env,
         )
     return (rc if rc is not None else 1), full_text
 
@@ -331,6 +336,7 @@ def _drive_subprocess(  # noqa: PLR0913 — per-call I/O state; bundling would n
     log_fh,
     log_fn: Callable[[str], None],
     spawn: Callable | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[int | None, str, str]:
     """Spawn the subprocess and run the select-loop until exit or deadline.
 
@@ -356,7 +362,7 @@ def _drive_subprocess(  # noqa: PLR0913 — per-call I/O state; bundling would n
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         bufsize=0,
-        env=subscription_env(),
+        env=env if env is not None else subscription_env(),
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
