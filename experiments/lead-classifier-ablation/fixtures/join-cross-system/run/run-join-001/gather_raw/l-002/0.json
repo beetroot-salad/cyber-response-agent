@@ -1,0 +1,35 @@
+{
+  "columns": [
+    {
+      "name": "user.name",
+      "type": "keyword"
+    },
+    {
+      "name": "source.ip",
+      "type": "ip"
+    },
+    {
+      "name": "failed",
+      "type": "long"
+    },
+    {
+      "name": "last_seen",
+      "type": "date"
+    }
+  ],
+  "values": [
+    [
+      "dev.dana",
+      "203.0.113.7",
+      128,
+      "2026-05-25T13:52:00Z"
+    ],
+    [
+      "svc.deploy",
+      "203.0.113.7",
+      11,
+      "2026-05-25T13:49:00Z"
+    ]
+  ],
+  "row_count": 2
+}

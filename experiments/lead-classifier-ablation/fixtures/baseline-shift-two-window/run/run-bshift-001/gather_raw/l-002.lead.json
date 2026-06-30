@@ -1,0 +1,6 @@
+{
+  "goal": "dev.dana's ssh auth against db-1 over the prior 7-day baseline",
+  "what_to_summarize": [
+    "accepted/failed by auth method for dev.dana@db-1 over the baseline week"
+  ]
+}

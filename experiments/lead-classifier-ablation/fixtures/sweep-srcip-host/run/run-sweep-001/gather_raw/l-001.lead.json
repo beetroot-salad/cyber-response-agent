@@ -1,0 +1,7 @@
+{
+  "goal": "SSH auth history for each of the three external IPs that hit db-1 during the incident window",
+  "what_to_summarize": [
+    "accepted/failed per source IP against db-1",
+    "first/last seen per IP"
+  ]
+}

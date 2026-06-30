@@ -1,0 +1,29 @@
+{
+  "columns": [
+    {
+      "name": "auth_method",
+      "type": "keyword"
+    },
+    {
+      "name": "accepted",
+      "type": "long"
+    },
+    {
+      "name": "failed",
+      "type": "long"
+    },
+    {
+      "name": "source.ip",
+      "type": "ip"
+    }
+  ],
+  "values": [
+    [
+      "publickey",
+      19,
+      0,
+      "10.0.0.5"
+    ]
+  ],
+  "row_count": 1
+}

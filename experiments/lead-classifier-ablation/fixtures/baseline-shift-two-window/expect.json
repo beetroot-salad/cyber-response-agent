@@ -1,0 +1,7 @@
+{
+  "synthesized_draft": "defender/skills/gather/queries/elastic/_draft/sshd-failed-burst-profile.md",
+  "forbid_promoted": [
+    "defender/skills/gather/queries/elastic/sshd-failed-burst-profile.md"
+  ],
+  "prefer_widened": "defender/skills/gather/queries/elastic/sshd-auth-history.md"
+}
