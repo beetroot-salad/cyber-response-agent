@@ -39,7 +39,7 @@ def main():
             c = counts.get((variant, fixture))
             if not c:
                 continue
-            n = sum(c.get(l, 0) for l in LEVELS)
+            n = sum(c.get(lvl, 0) for lvl in LEVELS)
             fail, weak, pas = c.get("FAIL", 0), c.get("WEAK-PASS", 0), c.get("PASS", 0)
             uf = fail / n if n else 0.0
             dr = pas / n if n else 0.0
@@ -49,7 +49,7 @@ def main():
     for fixture in fixtures:
         def rate(v):
             c = counts.get((v, fixture), {})
-            n = sum(c.get(l, 0) for l in LEVELS)
+            n = sum(c.get(lvl, 0) for lvl in LEVELS)
             return (c.get("FAIL", 0) / n) if n else None
         cur, prop = rate("current"), rate("proposed")
         if cur is None or prop is None:
