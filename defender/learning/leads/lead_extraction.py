@@ -27,7 +27,6 @@ from defender.learning.leads.draft_synthesis import (
     _draft_candidate_segments,
     _executed_query,
 )
-from defender.learning.leads.path_validation import CATALOG_DIR
 
 
 class LeadAuthorError(Exception):
@@ -145,10 +144,9 @@ def collect_general_failures(
     post-synthesis reload, or the ``_draft_candidate_segments`` (draft) branch
     on the pre-synthesis set — so the collected residue is identical.
     """
-    # catalog_dir is only consumed by the fallback load (unlike synthesize_drafts,
-    # which also uses it for the draft write path), so normalize it inside the branch.
+    # catalog_dir is only consumed by this fallback load; load_catalog owns the
+    # None→default, so forward it straight through rather than re-defaulting here.
     if catalog is None:
-        catalog_dir = catalog_dir if catalog_dir is not None else CATALOG_DIR
         catalog = lead_neighbors.load_catalog(catalog_dir)
     by_id = {t.id for t in catalog}
     out: list[dict] = []

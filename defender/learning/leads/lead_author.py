@@ -165,7 +165,7 @@ def release_queue_lock(fh: Any) -> None:
 
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
-    *, repo_root: Path | None = None, catalog_dir: Path | None = None,
+    *, repo_root: Path = REPO_ROOT, catalog_dir: Path | None = None,
     catalog: list | None = None,
 ) -> list[dict]:
     """Build per-*template* handoff blocks for the agent prompt.
@@ -181,9 +181,6 @@ def build_handoff(
     contract violation worth surfacing in the log but not worth taking
     the catalog out for.
     """
-    # None ⇒ resolve the module global at call time (the production default); the
-    # deps factory binds the injected paths so tests drive a tmp tree via LoopPaths.
-    repo_root = repo_root if repo_root is not None else REPO_ROOT
     # Reuse the tick's once-loaded catalog when threaded; else load. The caller
     # threads it only when synthesis minted no drafts this tick — when drafts were
     # minted, `catalog` is None here and we re-glob so a freshly-minted `_draft/`
@@ -266,7 +263,7 @@ def build_handoff(
 _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
 
 
-def discover_system_drafts(*, skills_dir: Path | None = None) -> list[Path]:
+def discover_system_drafts(*, skills_dir: Path = SKILLS_DIR) -> list[Path]:
     """Pending drafts under ``defender/skills/{system}/_draft/`` (one level).
 
     Excludes the surface-declaration README and any template skeletons.
@@ -274,7 +271,6 @@ def discover_system_drafts(*, skills_dir: Path | None = None) -> list[Path]:
     ``defender/skills/gather/queries/{system}/_draft/`` — those are
     handled by the executed-template handoff stream.
     """
-    skills_dir = skills_dir if skills_dir is not None else SKILLS_DIR
     out: list[Path] = []
     if not skills_dir.is_dir():
         return out
@@ -296,10 +292,9 @@ def discover_system_drafts(*, skills_dir: Path | None = None) -> list[Path]:
 
 
 def build_system_draft_handoffs(
-    drafts: list[Path], *, repo_root: Path | None = None,
+    drafts: list[Path], *, repo_root: Path = REPO_ROOT,
 ) -> list[dict]:
     """One handoff per pending draft. ``{draft_path, system, skill_path}`` (repo-relative)."""
-    repo_root = repo_root if repo_root is not None else REPO_ROOT
     out: list[dict] = []
     for draft in drafts:
         rel = draft.relative_to(repo_root)

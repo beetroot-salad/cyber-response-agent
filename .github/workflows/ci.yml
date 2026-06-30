@@ -182,6 +182,15 @@ jobs:
       - name: Raw git-subprocess gate (defender._git facade dedup, #460 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_raw_git_subprocess.py
 
+      # A parameter re-defaulted in-body via `x = x if x is not None else DEFAULT`
+      # to a named/called fallback: an Optional immediately made non-None, with the
+      # default knowledge duplicated across call sites (and prone to drift). Anchor
+      # the default in ONE place — a signature default (`x: T = DEFAULT`) or a single
+      # boundary resolution. Literal fallbacks (`else []`) and new-name DI seams are
+      # not flagged; suppress a deliberate site with `# lint-default: ok — <reason>`.
+      - name: Unanchored-default gate (single-source param defaults — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unanchored_default.py
+
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.
