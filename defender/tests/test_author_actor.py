@@ -314,6 +314,20 @@ def test_missing_source_bundle_is_held_not_authored(tmp_path: Path):
     assert rows_left[0]["held_reason"] == "source_bundle_missing"
 
 
+def test_curator_allowed_tools_scopes_read(tmp_path: Path):
+    """The curator's Read grant is scoped to the corpus + checked-in docs, never the run
+    bundles at the state root (#425 follow-up)."""
+    cfg = _cfg(_isolate(tmp_path), lambda *a: {})
+    tools = curator.curator_allowed_tools(cfg, extra_tools="Bash(echo:*),")
+    assert "Read," not in tools  # no bare/unrestricted Read
+    assert f"Read({cfg.corpus_dir_rel}**)" in tools
+    assert "Read(defender/docs/**)" in tools
+    assert "runs/" not in tools  # the run bundles are unreadable
+    # Corpus edit/write + the injected verifier grant survive.
+    assert f"Edit({cfg.corpus_dir_rel}**)" in tools
+    assert "Bash(echo:*)" in tools
+
+
 # ---------------------------------------------------------------------------
 # Result partition + post-flight
 # ---------------------------------------------------------------------------
