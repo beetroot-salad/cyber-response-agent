@@ -13,8 +13,8 @@ Consumers:
   - ``block_main_loop_raw_access`` — the main-loop adapter/raw deny reasons.
 
 The argv-stage decomposition the gate validates against now lives with the
-executor (`bash_exec.stage_argvs`), so validator and executor share one
-decomposition (#379) — this module no longer splits commands into segments.
+executor (`bash_exec.parse`), so validator and executor share one decomposition
+(#379) — this module no longer splits commands into segments.
 
 This module is pure (parsing + a cheap ``bin/`` dir read); no IO beyond
 listing ``defender/bin``.

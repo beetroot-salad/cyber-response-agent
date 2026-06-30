@@ -1,4 +1,4 @@
-"""Pure unit tests for the runtime permission gate (runtime/permission.py).
+"""Pure unit tests for the runtime permission gate (runtime/permission/).
 
 No model call, no API key — these run in CI. They assert the in-process gate
 makes the same allow/deny decisions as the four Claude Code PreToolUse hooks it
@@ -76,20 +76,24 @@ def test_gather_denies_arbitrary_shell(cmd):
     assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
 
 
-def test_adapter_argv_extracts_standalone():
-    assert permission.adapter_argv("defender-elastic query foo --raw") == [
+def test_decision_exposes_standalone_adapter_argv():
+    # The gate stashes the standalone-adapter argv on the decision so dispatch
+    # routes capture off the single parse, no re-parse (#456).
+    assert permission.decide_bash(
+        "defender-elastic query foo --raw", role=AgentRole.GATHER).adapter_argv == [
         "defender-elastic", "query", "foo", "--raw"]
-    assert permission.adapter_argv("timeout 60 defender-cmdb host-lookup web-1") == [
+    assert permission.decide_bash(
+        "timeout 60 defender-cmdb host-lookup web-1", role=AgentRole.GATHER).adapter_argv == [
         "defender-cmdb", "host-lookup", "web-1"]
 
 
 @pytest.mark.parametrize("cmd", [
-    "defender-elastic query foo | jq '.'",  # compound → not captured here
+    "defender-elastic query foo | jq '.'",  # compound → not a standalone capture
     "jq '.' x.json",                        # not an adapter
     "defender-invlang enum types",          # non-adapter shim
 ])
-def test_adapter_argv_none_for_non_standalone_adapter(cmd):
-    assert permission.adapter_argv(cmd) is None
+def test_decision_no_adapter_argv_for_non_standalone(cmd):
+    assert permission.decide_bash(cmd, role=AgentRole.GATHER).adapter_argv is None
 
 
 # --- jq comparison operators are not redirects (quote-aware unsafe scan) -----
@@ -199,16 +203,16 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
 
 @pytest.mark.parametrize("cmd", [
     # A quote spanning a newline is unparseable → the shared executor decomposition
-    # (bash_exec.stage_argvs) raises, so _decompose returns None. It must fail
-    # CLOSED, not be mistaken for an adapter (its head "starts with defender-") and
-    # routed to the capture path.
+    # (bash_exec.parse) raises, so the gate fails CLOSED, not mistaking it for an
+    # adapter (its head "starts with defender-") and routing it to the capture path.
     "defender-elastic query 'unterminated\nrest'",
     "jq '.a\n.b' f.json",
 ])
 def test_unparseable_quote_spanning_newline_fails_closed(cmd):
-    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    assert not d.allow
     assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
-    assert permission.adapter_argv(cmd) is None  # not routed to capture
+    assert d.adapter_argv is None  # not routed to capture
 
 
 # --- read: deny-by-default allowlist over {run_dir, defender_dir} -----------
@@ -342,15 +346,17 @@ def test_gather_allows_adapter_sql_pipe():
     # adapter stage is captured, defender-sql is a local transform over its payload.
     cmd = ("defender-elastic query 'x' --raw | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    # The split is exposed for the bash tool to route capture + aggregation.
-    pipe = permission.adapter_sql_pipe(cmd)
+    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    assert d.allow
+    # The split is exposed on the decision for the bash tool to route capture +
+    # aggregation off the single parse.
+    pipe = d.sql_pipe
     assert pipe is not None
     adapter_av, sql_av = pipe
     assert adapter_av == ["defender-elastic", "query", "x", "--raw"]
     assert sql_av[0] == "defender-sql"
     # adapter_argv must NOT claim it (it's a pipe, not a standalone capture).
-    assert permission.adapter_argv(cmd) is None
+    assert d.adapter_argv is None
     # Main loop never gets the adapter, pipe or not.
     assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
     # A non-sql consumer downstream of an adapter stays denied (not the exception).
@@ -369,8 +375,8 @@ def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     d = permission.decide_bash(cmd, role=AgentRole.GATHER)
     assert not d.allow, cmd
     assert "standalone" in d.reason
-    assert permission.adapter_sql_pipe(cmd) is None
-    assert permission.adapter_argv(cmd) is None
+    assert d.sql_pipe is None
+    assert d.adapter_argv is None
     assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
 
 
@@ -384,8 +390,9 @@ def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     "defender-elastic query 'cmd:`id`' --raw",
 ])
 def test_gather_allows_adapter_query_with_inert_shell_metachars(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow, cmd
-    argv = permission.adapter_argv(cmd)
+    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    assert d.allow, cmd
+    argv = d.adapter_argv
     assert argv is not None, cmd
     assert argv[0] == "defender-elastic", cmd
     # The metachar survives verbatim in the captured argv (one shlex-resolved token).
@@ -403,3 +410,45 @@ def test_gather_drops_residual_reduce_by_hand_tools():
         assert not permission.decide_bash(
             cmd, role=AgentRole.GATHER,
         ).allow, cmd
+
+
+# --- command_shape: pure classifiers over parsed pipelines (#456) ----------
+# The classification half, shared between the gate and dispatch. It operates on
+# the parsed bash_exec.Pipeline structure (no parsing of its own); the gate parses
+# once and routes off these, so a command is decomposed exactly once per tool call.
+
+from defender.runtime import bash_exec  # noqa: E402 — grouped with its test section
+from defender.runtime.permission import command_shape  # noqa: E402
+
+
+def _shape(cmd):
+    from defender.hooks._cmd_segments import unwrap
+    return bash_exec.parse(unwrap(cmd))
+
+
+def test_command_shape_is_adapter_stage():
+    assert command_shape.is_adapter_stage(["defender-elastic", "query", "x"])
+    assert command_shape.is_adapter_stage(["python3", "scripts/adapters/elastic_cli.py", "q"])
+    assert not command_shape.is_adapter_stage(["defender-invlang", "enum"])  # non-adapter shim
+    assert not command_shape.is_adapter_stage(["jq", ".x"])
+    assert not command_shape.is_adapter_stage([])
+    # adapter name as an ARGUMENT, not the command, is not an adapter stage
+    assert not command_shape.is_adapter_stage(["which", "defender-elastic"])
+
+
+def test_command_shape_standalone_and_split():
+    standalone = _shape("defender-elastic query foo --raw")
+    assert command_shape.standalone_adapter_argv(standalone) == [
+        "defender-elastic", "query", "foo", "--raw"]
+    assert command_shape.adapter_sql_split(standalone) is None
+
+    pipe = _shape("defender-elastic query x --raw | defender-sql 'SELECT 1'")
+    assert command_shape.standalone_adapter_argv(pipe) is None
+    split = command_shape.adapter_sql_split(pipe)
+    assert split == (["defender-elastic", "query", "x", "--raw"], ["defender-sql", "SELECT 1"])
+
+    # a `;` SEQUENCE is two pipelines, never the sanctioned single-`|` pipe
+    seq = _shape("defender-elastic query x --raw ; defender-sql 'SELECT 1'")
+    assert command_shape.adapter_sql_split(seq) is None
+    # a non-sql consumer downstream is not the sanctioned split
+    assert command_shape.adapter_sql_split(_shape("defender-elastic query x --raw | cat")) is None

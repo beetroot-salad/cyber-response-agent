@@ -12,6 +12,7 @@ import subprocess
 
 import pytest
 
+from defender.hooks._cmd_segments import unwrap
 from defender.runtime import bash_exec
 
 
@@ -22,7 +23,20 @@ def _env(**extra: str) -> dict[str, str]:
 
 
 def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
-    return bash_exec.run_pipeline(cmd, env=env or _env(), cwd=cwd, timeout=timeout)
+    # String-in driver for the executor's unit tests: replicate the unwrap + parse
+    # the gate does in production, then run the result through the production seam
+    # `run_parsed`. Production enters at `run_parsed` directly (the gate already
+    # parsed); this gate-free path is what lets us exercise the executor on commands
+    # the gate would reject (raw redirects, `cd`, arbitrary programs).
+    stripped = cmd.strip()
+    if not stripped:
+        return 0, "", ""
+    inner = unwrap(stripped)
+    if inner is None:
+        raise bash_exec.BashExecError("command could not be unwrapped for execution")
+    return bash_exec.run_parsed(
+        bash_exec.parse(inner), command=cmd, env=env or _env(), cwd=cwd, timeout=timeout,
+    )
 
 
 # --- ordinary shapes execute correctly ------------------------------------
@@ -221,7 +235,7 @@ def test_timeout_bounds_nonterminating_upstream():
 
 def test_non_utf8_output_does_not_crash():
     # A read-only viewer that emits non-UTF-8 bytes must not raise UnicodeDecodeError
-    # out of run_pipeline (tools.py only catches TimeoutExpired); the bytes are
+    # out of the executor (tools.py only catches TimeoutExpired); the bytes are
     # decoded with replacement instead of crashing the run.
     import shlex
     import sys
@@ -240,3 +254,12 @@ def test_unexpected_redirect_fails_closed(tmp_path):
     with pytest.raises(bash_exec.BashExecError):
         _run(f"echo hi > {target}")
     assert not target.exists()
+
+
+# --- run_parsed: the parse-once seam (#456) --------------------------------
+# Every `_run(...)` test above already drives run_parsed through the string-in
+# path (unwrap + parse + run_parsed) — the same composition production uses. This
+# section covers run_parsed's own edge contract directly.
+
+def test_run_parsed_empty_is_noop():
+    assert bash_exec.run_parsed([], command="", env=_env(), cwd="/", timeout=10.0) == (0, "", "")
