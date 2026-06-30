@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -109,10 +110,19 @@ def _row(observation_id: str, outcome: str, source_run_dir: str = "") -> dict:
 
 def _write_queue(pending: Path, rows: list[dict]) -> None:
     pending.mkdir(parents=True, exist_ok=True)
+    # Model production: persist always creates the durable run-bundle dir under runs/ for
+    # every persisted run (``_copy_shared_inputs`` mkdirs ``learning_run_dir``), so a
+    # queued observation always has its bundle on disk. Create it here so the curator's
+    # source-bundle-missing guard (#425) sees the realistic layout; a test that wants the
+    # missing-bundle anomaly removes a specific bundle after writing the queue.
+    runs = pending.parent / "runs"
     path = pending / "actor_observations.jsonl"
     with path.open("w") as fh:
         for r in rows:
             fh.write(json.dumps(r) + "\n")
+            src = (r.get("source_run_dir") or "").rstrip("/")
+            if src:
+                (runs / Path(src).name).mkdir(parents=True, exist_ok=True)
 
 
 def _write_lesson(
@@ -269,6 +279,39 @@ def test_held_out_double_check_worktree_immune(tmp_path: Path):
     assert curator.is_held_out_source(cfg.runs_dir, src_rel) is True
     # The pre-#425 join (repo_root / source_run_dir) would miss it in the worktree.
     assert not (cfg.repo_root / src_rel / "ground_truth.yaml").is_file()
+
+
+def test_missing_source_bundle_is_held_not_authored(tmp_path: Path):
+    """#425 follow-up: a non-empty source_run_dir whose bundle dir is *absent* is an
+    anomaly (a resolution regression / deleted bundle), so it is held loudly as
+    ``source_bundle_missing`` instead of being silently read as not-held-out and authored.
+    A *present* bundle with no ground_truth.yaml is a genuine not-held-out run and still
+    authors — the guard must not fire on it."""
+    ctx = _isolate(tmp_path)
+    # _write_queue models production: it creates the durable bundle dir for both rows
+    # (no ground_truth.yaml → genuinely not held out).
+    _write_queue(ctx["pending"], [_row("present/0", "caught"), _row("gone/0", "caught")])
+    # Simulate the anomaly: the durable bundle LEARN created is gone at author time.
+    shutil.rmtree(ctx["learning"] / "runs" / "gone")
+
+    captured: list[list[dict]] = []
+
+    def fake_invoke(observations, batch_id, cfg):
+        captured.append(observations)
+        return _consume_all(observations, batch_id, cfg)
+
+    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
+    assert rc == 0
+    # Only the present-bundle observation reaches the agent; the missing one is held.
+    assert {o["observation_id"] for o in captured[0]} == {"present/0"}
+
+    rows_left = [
+        json.loads(line)
+        for line in (ctx["pending"] / "actor_observations.jsonl").read_text().splitlines()
+    ]
+    assert len(rows_left) == 1
+    assert rows_left[0]["observation_id"] == "gone/0"
+    assert rows_left[0]["held_reason"] == "source_bundle_missing"
 
 
 # ---------------------------------------------------------------------------

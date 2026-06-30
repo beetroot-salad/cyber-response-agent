@@ -192,8 +192,11 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
     shared-state ``LoopPaths.runs_dir`` (worktree-immune), NOT ``repo_root /
     source_run_dir``: under a batch author worktree the latter resolves into the
     worktree's empty ``runs/`` and the held-out net silently lets a held-out case leak
-    into the corpus (#425). Missing file or malformed YAML → False (defense in depth, not
-    enforcement)."""
+    into the corpus (#425). A *present* bundle with a missing/malformed ``ground_truth.yaml``
+    → False: that's a genuinely not-held-out run. The anomalous case — a non-empty
+    ``source_run_dir`` whose bundle dir is *absent* — is caught loudly upstream in
+    ``_partition_pre_author`` (held as ``source_bundle_missing``), so a resolution
+    regression can't reach here and silently read a missing file as not-held-out."""
     if not source_run_dir:
         return False
     path = resolve_run_bundle(runs_dir, source_run_dir) / GROUND_TRUTH_FILE
@@ -212,6 +215,27 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def curator_allowed_tools(cfg: CuratorConfig, extra_tools: str) -> str:
+    """The curator agent's tool allowlist.
+
+    Read is scoped to the corpus + the checked-in schema docs — NOT the run bundles,
+    which live at the shared state root outside the corpus. The row JSON carries the
+    authoring payload and ``_partition_pre_author`` validates the source case exists
+    (holding a missing bundle), so the agent never needs to read case data; denying it
+    also matches prod OS-confinement, where a read outside the corpus would fail anyway
+    (follow-up to #425). Glob/Grep stay open for corpus navigation (search, not
+    full-content reads). ``extra_tools`` carries the direction's verifier ``Bash(...)``
+    grants; the ``rm`` grant stays for dev iteration (prod confines writes to the corpus
+    at the OS layer — ``docs/platform-design.md`` §4.7)."""
+    return (
+        f"Read({cfg.corpus_dir_rel}**),Read(defender/docs/**),Glob,Grep,"
+        f"Edit({cfg.corpus_dir_rel}**),Write({cfg.corpus_dir_rel}**),"
+        f"{extra_tools}"
+        f"Bash(rm {cfg.corpus_dir_rel}*.md),"
+        f"Bash(rm {cfg.corpus_dir}/*.md)"
+    )
+
+
 def invoke_curator_agent(
     cfg: CuratorConfig,
     observations: list[dict],
@@ -225,12 +249,10 @@ def invoke_curator_agent(
     ``extra_prompt`` carries the direction's forward-check command line(s); it is
     spliced between the standard header and the observations. ``extra_tools`` carries
     the direction's verifier ``Bash(...)`` allowances, spliced into the corpus-scoped
-    edit allowlist. The agent runs **no git**: it authors lesson content (+ a commit
-    message it returns as data), and the loop is the sole committer (``commit_corpus``)
-    — so the agent is handed neither the generation nor the model, and there is no
-    intermediate un-stamped commit it could leave behind (issue #321). The ``rm`` grant
-    stays for dev iteration; in prod the writable set is confined to the corpus at the OS
-    layer (see ``docs/platform-design.md`` §4.7)."""
+    allowlist (``curator_allowed_tools``). The agent runs **no git**: it authors lesson
+    content (+ a commit message it returns as data), and the loop is the sole committer
+    (``commit_corpus``) — so the agent is handed neither the generation nor the model,
+    and there is no intermediate un-stamped commit it could leave behind (issue #321)."""
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {cfg.corpus_dir_rel}\n"
@@ -238,13 +260,7 @@ def invoke_curator_agent(
         f"observations ({len(observations)}):\n"
         f"{json.dumps(observations, indent=2)}\n"
     )
-    allowed_tools = (
-        "Read,Glob,Grep,"
-        f"Edit({cfg.corpus_dir_rel}**),Write({cfg.corpus_dir_rel}**),"
-        f"{extra_tools}"
-        f"Bash(rm {cfg.corpus_dir_rel}*.md),"
-        f"Bash(rm {cfg.corpus_dir}/*.md)"
-    )
+    allowed_tools = curator_allowed_tools(cfg, extra_tools)
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     options = _runner.RunnerOptions(
         system_prompt_file=cfg.author_prompt,
@@ -421,9 +437,10 @@ def _partition_pre_author(
     """Split the queue into (held, consumed_pre, to_author) before the agent runs.
 
     consumed_pre bundles already-authored (idempotent) observations and
-    skip-by-policy outcomes. held covers held-out double-checks and unexpected
-    outcomes (kept for human review)."""
+    skip-by-policy outcomes. held covers held-out double-checks, a missing source
+    bundle, and unexpected outcomes (kept for human review)."""
     existing = existing_observation_ids(cfg.corpus_dir)
+    log = make_logger(cfg.log_prefix)
     held: list[dict] = []
     consumed_pre: list[dict] = []
     to_author: list[dict] = []
@@ -441,7 +458,23 @@ def _partition_pre_author(
             rec["skip_reason"] = f"outcome_policy:{outcome}"
             consumed_pre.append(rec)
             continue
-        if is_held_out_source(cfg.runs_dir, entry.get("source_run_dir", "")):
+        src = entry.get("source_run_dir", "")
+        if src and not resolve_run_bundle(cfg.runs_dir, src).is_dir():
+            # The durable learning-leg bundle is copied under runs_dir at LEARN time
+            # precisely so it outlives the ephemeral run dir, so for a queued observation
+            # it should always exist. A missing bundle dir is therefore an anomaly — a
+            # #425-class resolution regression or a deleted bundle — NOT a normal
+            # not-held-out run. Fail SAFE + LOUD: hold it (an unverifiable case must never
+            # seed a lesson) and surface it, rather than letting is_held_out_source read a
+            # missing ground_truth.yaml and silently return False — the exact silent mode
+            # #425 exploited.
+            log(f"source bundle missing for observation {oid} "
+                f"(source_run_dir={src!r} → {resolve_run_bundle(cfg.runs_dir, src)}) — holding")
+            rec = dict(entry)
+            rec["held_reason"] = "source_bundle_missing"
+            held.append(rec)
+            continue
+        if is_held_out_source(cfg.runs_dir, src):
             # Producer should have dropped held-out runs; defense-in-depth hold
             # so a held-out observation can never seed a lesson.
             rec = dict(entry)
