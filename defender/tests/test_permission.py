@@ -1,4 +1,4 @@
-"""Pure unit tests for the runtime permission gate (runtime/permission.py).
+"""Pure unit tests for the runtime permission gate (runtime/permission/).
 
 No model call, no API key — these run in CI. They assert the in-process gate
 makes the same allow/deny decisions as the four Claude Code PreToolUse hooks it
