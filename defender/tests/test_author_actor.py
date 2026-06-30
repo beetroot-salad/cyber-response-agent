@@ -22,6 +22,7 @@ import yaml
 # Each resolves to one module instance, and the engine's repo root, repo lock, and
 # generation counters all flow through the injected ``CuratorConfig`` — no ``shared.*``
 # module globals to patch (#389).
+from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import curator as curator  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 from defender.learning.author.malicious_actor import run as aa  # type: ignore[import-not-found]
@@ -472,8 +473,10 @@ def test_commit_failure_is_atomic_queue_intact(tmp_path: Path):
             "commit_message": f"defender/actor: lesson batch {batch_id}",
         }
 
-    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
-    assert rc == 2
+    # Post-migration the commit failure is a systemic ``GitError`` (a broken git op, not an
+    # AuthorError), which propagates out of run_batch — the drain enrolls it as exit 2.
+    with pytest.raises(_git.GitError):
+        curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
     # No un-stamped (or any) lesson commit on HEAD — the failure is atomic.
     assert curator.git_head_sha(ctx["repo"]) == head_before
     # The observation stays in the active queue; nothing rotated out.

@@ -516,3 +516,30 @@ def test_main_drain_propagates_run_unprocessable(monkeypatch):
     )
     with pytest.raises(RunUnprocessable, match="leaked"):
         orchestrate.main(["loop.py", "--learn-drain"])
+
+
+# --- GitError is a systemic fault (enrolled alongside StageAbort, #460) -------
+
+def test_run_or_dead_letter_reraises_giterror_not_quarantine():
+    """A ``GitError`` (a broken local-state git op) dooms the whole batch, so it must
+    re-raise out of the dead-letter guard — never be quarantined as a per-marker failure."""
+    from defender import _git  # type: ignore[import-not-found]
+
+    dead_lettered: list[Exception] = []
+
+    def boom():
+        raise _git.GitError(["status"], 128, "not a git repository")
+
+    with pytest.raises(_git.GitError):
+        orchestrate._run_or_dead_letter(boom, dead_lettered.append)
+    assert dead_lettered == []  # systemic, not dead-lettered
+
+
+def test_run_stage_maps_giterror_to_exit_2():
+    """At the stage boundary a ``GitError`` becomes the contracted FATAL exit 2."""
+    from defender import _git  # type: ignore[import-not-found]
+
+    def stage() -> int:
+        raise _git.GitError(["commit"], 1, "pre-commit hook rejected")
+
+    assert orchestrate._run_stage(stage) == 2

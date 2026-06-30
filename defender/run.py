@@ -19,7 +19,6 @@ which takes precedence over the ambient value.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +38,7 @@ import json  # noqa: E402
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _git  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -75,11 +75,8 @@ def _main_repo_root() -> Path:
     Falls back to `_run.REPO_ROOT` outside a git tree.
     """
     try:
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=_run.REPO_ROOT, text=True, stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
+        out = _git.git(["rev-parse", "--git-common-dir"], cwd=_run.REPO_ROOT)
+    except (OSError, _git.GitError):
         return _run.REPO_ROOT
     if not out:
         return _run.REPO_ROOT

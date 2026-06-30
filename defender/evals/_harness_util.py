@@ -16,6 +16,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Put the workspace root on sys.path so the absolute ``defender._git`` import below
+# resolves when the harnesses run directly (evals/ is sys.path[0], not the repo root).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from defender import _git  # noqa: E402 — needs REPO_ROOT on sys.path
+
 
 def run(cmd: list[str], cwd: Path, env: dict | None = None,
         input_: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -31,11 +39,11 @@ def init_git(tmp: Path) -> None:
     """git-init a throwaway repo and commit the scenario baseline, so the author's
     `git status --porcelain` sees a clean tree (the symlinks the harness lays down
     would otherwise show as untracked)."""
-    run(["git", "init", "-q", "-b", "main"], cwd=tmp)
-    run(["git", "config", "user.email", "eval@local"], cwd=tmp)
-    run(["git", "config", "user.name", "eval"], cwd=tmp)
-    run(["git", "add", "-A"], cwd=tmp)
-    run(["git", "commit", "-q", "-m", "scenario baseline"], cwd=tmp)
+    _git.git(["init", "-q", "-b", "main"], cwd=tmp)
+    _git.git(["config", "user.email", "eval@local"], cwd=tmp)
+    _git.git(["config", "user.name", "eval"], cwd=tmp)
+    _git.git(["add", "-A"], cwd=tmp)
+    _git.git(["commit", "-q", "-m", "scenario baseline"], cwd=tmp)
 
 
 def find_venv_py(repo_root: Path) -> Path:

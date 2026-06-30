@@ -37,6 +37,8 @@ from defender.learning.core.config import (
     merge_mode,
     pitfalls_threshold,
 )
+from defender import _git
+from defender._git import GitError
 from defender._io import write_atomic
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME, Direction
@@ -54,6 +56,16 @@ from defender.learning.core.validate import (
     normalize_disposition,
     strip_yaml_fence,
 )
+
+
+# The layer-neutral systemic-fault set: a fault that dooms the whole stage and maps to the
+# contracted exit 2, never a per-item dead-letter. Named once so enrolling a future type is
+# one edit, not N — both the in-drain dead-letter guard (``_run_or_dead_letter``) and the
+# stage boundary (``_run_stage``) must reraise the *same* set, or a fault re-raised past the
+# quarantine would still fall through to a bare exit-1 traceback at the boundary.
+# ``FatalConfigError``/``GitError`` are enrolled (not subclassed) because the exit-2 response
+# is learning-only; see ``_run_or_dead_letter`` for the rationale.
+_SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (StageAbort, FatalConfigError, GitError)
 
 
 # ---------------------------------------------------------------------------
@@ -488,11 +500,15 @@ def _run_or_dead_letter(
         recatch what this one already swallowed.) Catching the ``StageAbort`` base
         keeps any future learning-internal systemic-fault type re-raising here for
         free (#443/#445).
-      * ``FatalConfigError`` (a misconfig that dooms every item, not just this one)
-        is re-raised **alongside** ``StageAbort``. It is the layer-neutral *condition*
-        shared with runtime/ (``defender._env``), enrolled here rather than subclassed
-        because the exit-2 *response* is learning-only — so it must be named explicitly
-        in this set, not inherited via ``StageAbort``.
+      * ``FatalConfigError`` and ``GitError`` are re-raised **alongside** ``StageAbort``.
+        Both are layer-neutral *conditions* shared with other layers (``defender._env`` /
+        ``defender._git``), enrolled here rather than subclassed because the exit-2
+        *response* is learning-only — so they must be named explicitly, not inherited via
+        ``StageAbort``. ``GitError`` is a failed local-state git op (status/commit/worktree)
+        — a broken tree that dooms the whole batch, not one marker — so it fails loud (exit
+        2), not a silent dead-letter quarantine. The remote/forge retry lane
+        (``branch.py`` push + ``Forge`` → ``BranchError``) is caught separately and is *not*
+        in this set.
       * any type in ``propagate`` is re-raised too — drain-specific control flow
         (e.g. ``_LeadAuthorRetry``'s bounded retry) that the caller handles itself;
         it is *not* a dead-letter and must escape this guard.
@@ -504,7 +520,7 @@ def _run_or_dead_letter(
     A new drain that routes its swallow site through this helper is systemic-fault-safe
     for free; one that hand-rolls ``except Exception`` is the visible odd-one-out.
     """
-    reraise: tuple[type[BaseException], ...] = (StageAbort, FatalConfigError, *propagate)
+    reraise: tuple[type[BaseException], ...] = (*_SYSTEMIC_FAULTS, *propagate)
     try:
         fn()
     except reraise:
@@ -594,10 +610,7 @@ def _discard_worktree_changes(repo_root: Path) -> None:
     if not (repo_root / ".git").exists():
         return  # no real worktree here (e.g. the _FakeBranch test path) — nothing to reset
     for args in (["reset", "--hard", "--quiet"], ["clean", "-fdq"]):
-        subprocess.run(
-            ["git", "-C", str(repo_root), *args],
-            capture_output=True, text=True, check=False,
-        )
+        _git.git(args, cwd=repo_root, check=False)
 
 
 def _quarantine_lead_author_failure(
@@ -1087,7 +1100,7 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
     """
     try:
         return stage()
-    except (StageAbort, FatalConfigError) as e:
+    except _SYSTEMIC_FAULTS as e:
         print(f"[loop] FATAL: {e}", file=sys.stderr)
         return 2
     except RunUnprocessable as e:

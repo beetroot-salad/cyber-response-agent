@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 
 # Reference ``shared.AuthorError`` live (not a module-level alias): a sibling test's
@@ -84,7 +85,7 @@ def test_commit_corpus_commits_only_corpus(tmp_path):
     returned, the working tree left clean, and no provenance trailer is stamped."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")  # agent edit, uncommitted
-    sha = shared.commit_corpus(repo, _corpus(repo), CORPUS_REL, "lesson batch")
+    sha = shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     assert sha == shared.git_head_sha(repo)
     assert _head_files(repo) == ["defender/lessons/x.md"]
     assert shared.changes_outside(repo, CORPUS_REL) == []
@@ -100,7 +101,7 @@ def test_commit_corpus_stages_only_corpus(tmp_path):
     (repo / "stray.txt").write_text("stray\n")  # outside the corpus
     subprocess.run(["git", "-C", str(repo), "add", "stray.txt"], check=True)
 
-    shared.commit_corpus(repo, _corpus(repo), CORPUS_REL, "lesson batch")
+    shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     files = _head_files(repo)
     assert files == ["defender/lessons/x.md"]
     assert "stray.txt" not in files
@@ -112,7 +113,7 @@ def test_commit_corpus_no_op_when_nothing_authored(tmp_path):
     """Empty index ⇒ no commit, returns None (the all-skip batch); HEAD unchanged."""
     repo = _repo(tmp_path)
     head_before = shared.git_head_sha(repo)
-    assert shared.commit_corpus(repo, _corpus(repo), CORPUS_REL, "msg") is None
+    assert shared.commit_corpus(repo, _corpus(repo), "msg") is None
     assert shared.git_head_sha(repo) == head_before
 
 
@@ -122,7 +123,7 @@ def test_commit_corpus_appends_trailers(tmp_path):
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     shared.commit_corpus(
-        repo, _corpus(repo), CORPUS_REL, "lesson batch",
+        repo, _corpus(repo), "lesson batch",
         trailers=[("Generation", "3"), ("Actor-Model", "claude-x")],
     )
     msg = _head_message(repo)
@@ -141,7 +142,7 @@ def test_commit_corpus_rejects_message_carrying_trailers(tmp_path):
     head_before = shared.git_head_sha(repo)
     with pytest.raises(shared.AuthorError, match="already carries"):
         shared.commit_corpus(
-            repo, _corpus(repo), CORPUS_REL,
+            repo, _corpus(repo),
             "batch\n\nGeneration: 99\nActor-Model: wrong",
             trailers=[("Generation", "3"), ("Actor-Model", "claude-x")],
         )
@@ -155,15 +156,15 @@ def test_commit_corpus_no_trailers_skips_the_dup_guard(tmp_path):
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     sha = shared.commit_corpus(
-        repo, _corpus(repo), CORPUS_REL, "batch\n\nGeneration: not-a-trailer",
+        repo, _corpus(repo), "batch\n\nGeneration: not-a-trailer",
     )
     assert sha == shared.git_head_sha(repo)
 
 
 def test_commit_corpus_commit_failure_is_atomic(tmp_path):
     """#321: a failing commit (here a rejecting pre-commit hook, the issue's exact trigger)
-    raises ``AuthorError`` and leaves HEAD untouched — no un-stamped lesson commit lands,
-    so the caller can keep the queue intact for retry."""
+    raises ``GitError`` (a systemic git fault, post-migration) and leaves HEAD untouched —
+    no un-stamped lesson commit lands, so the caller can keep the queue intact for retry."""
     repo = _repo(tmp_path)
     hooks = repo / ".git" / "hooks"
     hooks.mkdir(parents=True, exist_ok=True)
@@ -172,8 +173,8 @@ def test_commit_corpus_commit_failure_is_atomic(tmp_path):
     hook.chmod(0o755)
     (_corpus(repo) / "x.md").write_text("hello\n")
     head_before = shared.git_head_sha(repo)
-    with pytest.raises(shared.AuthorError, match="failed to commit"):
-        shared.commit_corpus(repo, _corpus(repo), CORPUS_REL, "lesson batch")
+    with pytest.raises(_git.GitError):
+        shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     assert shared.git_head_sha(repo) == head_before
 
 

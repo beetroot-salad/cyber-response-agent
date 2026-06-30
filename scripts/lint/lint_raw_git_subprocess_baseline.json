@@ -1,0 +1,4 @@
+{
+  "//": "lint_raw_git_subprocess baseline — hand-rolled git subprocess calls under defender/ that bypass the defender._git facade (a ~8× dedup smell + the spaced-path porcelain bug, #460). Fingerprint is file:function (no line number). CI fails on a fingerprint absent here. Regenerate: python scripts/lint/lint_raw_git_subprocess.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to route through defender._git.",
+  "entries": {}
+}

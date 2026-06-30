@@ -305,7 +305,6 @@ def commit_corpus(
     return _shared.commit_corpus(
         cfg.repo_root,
         cfg.corpus_dir,
-        cfg.corpus_dir_rel,
         message,
         trailers=[("Generation", str(generation)), (cfg.trailer_label, model)],
     )

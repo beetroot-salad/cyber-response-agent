@@ -296,7 +296,7 @@ def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
 def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
     """Author adapter over ``_shared.commit_corpus`` — pins ``defender/lessons/`` and passes
     no provenance trailers (unlike the actor/env curators, the findings corpus carries none)."""
-    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, cfg.lessons_dir_rel, message)
+    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, message)
 
 
 def lessons_dir_clean(cfg: AuthorConfig) -> bool:

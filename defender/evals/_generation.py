@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from defender import _git
 
 # Ensure evals/ is on sys.path so _secondary_config is importable regardless
 # of how this module is loaded (via secondary.py, spec_from_file_location, etc.).
@@ -48,20 +49,12 @@ def list_actor_commits(repo_root: Path) -> list[GenerationPin]:
     skipped with a stderr warning (defensive — the actor author
     asserts both, but malformed history shouldn't crash the harness).
     """
-    proc = subprocess.run(
-        [
-            "git", "log",
-            "--grep=^Actor-Model: ",
-            "--format=__SHA__%H%n%B%n__END__",
-            "HEAD",
-        ],
+    log_out = _git.git(
+        ["log", "--grep=^Actor-Model: ", "--format=__SHA__%H%n%B%n__END__", "HEAD"],
         cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
     )
     out: list[GenerationPin] = []
-    for chunk in proc.stdout.split("__SHA__"):
+    for chunk in log_out.split("__SHA__"):
         chunk = chunk.strip()
         if not chunk:
             continue
@@ -110,13 +103,9 @@ def worktree_path_for(pin: GenerationPin, worktrees_dir: Path | None = None) -> 
 
 
 def _worktree_head_sha(path: Path) -> str | None:
-    proc = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        return None
-    return proc.stdout.strip() or None
+    # Tolerant: a missing/un-added worktree returns None rather than raising, so
+    # ``ensure_worktree`` can decide whether to (re)create it.
+    return _git.git(["rev-parse", "HEAD"], cwd=path, check=False) or None
 
 
 def ensure_worktree(pin: GenerationPin, repo_root: Path, worktrees_dir: Path | None = None) -> Path:
@@ -138,18 +127,9 @@ def ensure_worktree(pin: GenerationPin, repo_root: Path, worktrees_dir: Path | N
             f"warning: worktree {path} at {head} != pin {pin.sha}; recreating",
             file=sys.stderr,
         )
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(path)],
-            cwd=repo_root, check=True, capture_output=True, text=True,
-        )
+        _git.git_worktree_remove(repo_root, path, force=True)
     path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(path), pin.sha],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _git.git_worktree_add(repo_root, path, pin.sha, detach=True)
     return path
 
 

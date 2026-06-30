@@ -23,6 +23,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from defender import _git
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
@@ -427,21 +428,21 @@ def _lesson_changes(run_dir: Path, run_id: str) -> dict:
         _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.UTC).isoformat()
     )
     try:
-        log = subprocess.run(
+        log_out = _git.git(
             [
-                "git", "-C", str(REPO_ROOT), "log",
+                "log",
                 f"--since={since_iso}",
                 "--pretty=format:%H%x09%cI%x09%s",
                 "--name-status",
                 "--", "defender/lessons/",
             ],
-            capture_output=True, text=True, timeout=10,
+            cwd=REPO_ROOT, timeout=10,
         )
+    except _git.GitError as e:
+        return {"available": False, "reason": e.stderr or "git log failed"}
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return {"available": False, "reason": f"git unavailable: {e}"}
-    if log.returncode != 0:
-        return {"available": False, "reason": log.stderr.strip() or "git log failed"}
-    commits = _parse_git_log_records(log.stdout)
+    commits = _parse_git_log_records(log_out)
     for c in commits:
         c["diff"] = _git_show_lessons_diff(c["sha"])
     return {"available": True, "since": since_iso, "commits": commits, "run_id": run_id}
@@ -469,12 +470,12 @@ def _parse_git_log_records(stdout: str) -> list[dict]:
 
 
 def _git_show_lessons_diff(sha: str) -> str:
-    diff = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "show", sha,
-         "--pretty=format:", "--", "defender/lessons/"],
-        capture_output=True, text=True,
-    )
-    return diff.stdout if diff.returncode == 0 else ""
+    try:
+        return _git.git(
+            ["show", sha, "--pretty=format:", "--", "defender/lessons/"], cwd=REPO_ROOT
+        )
+    except _git.GitError:
+        return ""
 
 
 def render_footer(run_dir: Path, run_id: str) -> str:
