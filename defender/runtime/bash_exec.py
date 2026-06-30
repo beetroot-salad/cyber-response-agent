@@ -24,9 +24,11 @@ pipelines joined by `&&`/`||`/`;`/newline, each pipeline a chain of
 there is no general redirect engine here — an unexpected operator token means
 the validator and this executor have diverged, and we fail closed.
 
-Tokenization reuses the SAME `tokenize`/`unwrap` the gate validates against
+Tokenization reuses the SAME `tokenize` the gate validates against
 (`defender.hooks._cmd_segments`), so validator and executor share one lexer and
-cannot disagree about word boundaries.
+cannot disagree about word boundaries. Unwrapping a leading `timeout`/`bash -c`
+happens in the gate (`permission/bash.py`), which then hands its parse here — so
+this module never unwraps a raw string itself.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from defender.hooks._cmd_segments import tokenize, unwrap
+from defender.hooks._cmd_segments import tokenize
 
 # Shell-operator characters. After splitting on the separators below, the only
 # operator tokens a *validated* command can still carry are the two benign stderr
@@ -285,44 +287,20 @@ def _is_cd_pipeline(pl) -> bool:
     return len(pl.stages) == 1 and bool(pl.stages[0].argv) and pl.stages[0].argv[0] == "cd"
 
 
-def run_pipeline(
-    command: str, *, env: dict[str, str], cwd: str | Path, timeout: float
-) -> tuple[int, str, str]:
-    """Execute an already-gate-approved Bash command without a shell.
-
-    Unwraps a leading `timeout`/`bash -c` (the same `unwrap` the gate validates
-    against), decomposes the inner into pipelines, and runs them with shell=False
-    honoring `&&`/`||`/`;` short-circuiting and a shared wall-clock `timeout`.
-    Returns (returncode, stdout, stderr). Raises `subprocess.TimeoutExpired` so the
-    caller's existing timeout handling is unchanged.
-
-    The string-in entrypoint: it parses, then delegates to `run_parsed`. Callers
-    that already hold the parsed `Pipeline` list (the gate did the parse) should
-    call `run_parsed` directly to avoid re-decomposing the command (#456).
-    """
-    stripped = command.strip()
-    if not stripped:
-        return 0, "", ""
-    inner = unwrap(stripped)
-    if inner is None:
-        # The gate denies un-unwrappable commands; reaching here means a caller
-        # skipped validation. Fail closed rather than guess.
-        raise BashExecError("command could not be unwrapped for execution")
-    return run_parsed(parse(inner), command=command, env=env, cwd=cwd, timeout=timeout)
-
-
 def run_parsed(
     pipelines: list[Pipeline], *, command: str, env: dict[str, str], cwd: str | Path,
     timeout: float,
 ) -> tuple[int, str, str]:
     """Execute an already-parsed `Pipeline` list (from `parse`) without a shell.
 
-    The execution half of `run_pipeline`, split out so the gate's single parse can
-    flow straight into execution (#456). `command` is the original string, used
-    only as the label in `TimeoutExpired`/error messages. An empty `pipelines`
-    (e.g. an empty command) is a no-op → `(0, "", "")`. Honors `&&`/`||`/`;`
-    short-circuiting and a shared wall-clock `timeout`; raises
-    `subprocess.TimeoutExpired`.
+    The executor entrypoint: the gate parses once and `tools._tool_bash` hands
+    that `BashDecision.pipelines` straight here, so the command is decomposed
+    exactly once per tool call (#456). To run a raw string with no pre-parse,
+    unwrap then `parse` it first: `run_parsed(parse(unwrap(s)), command=s, …)`.
+    `command` is the original string, used only as the label in
+    `TimeoutExpired`/error messages. An empty `pipelines` (e.g. an empty command)
+    is a no-op → `(0, "", "")`. Honors `&&`/`||`/`;` short-circuiting and a shared
+    wall-clock `timeout`; raises `subprocess.TimeoutExpired`.
     """
     cwd = Path(cwd)
     out_parts: list[str] = []
