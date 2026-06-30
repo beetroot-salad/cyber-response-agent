@@ -1,0 +1,7 @@
+{
+  "goal": "Profile the failed-ssh burst against db-1 in the incident window \u2014 volume and source spread per user",
+  "what_to_summarize": [
+    "failed count + distinct source IPs per user against db-1 in the incident window",
+    "first/last failure per user"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "columns": [
+    {
+      "name": "accepted",
+      "type": "long"
+    },
+    {
+      "name": "failed",
+      "type": "long"
+    },
+    {
+      "name": "source.ip",
+      "type": "ip"
+    },
+    {
+      "name": "host.name",
+      "type": "keyword"
+    }
+  ],
+  "values": [
+    [
+      0,
+      3,
+      "203.0.113.40",
+      "db-1"
+    ]
+  ],
+  "row_count": 1
+}

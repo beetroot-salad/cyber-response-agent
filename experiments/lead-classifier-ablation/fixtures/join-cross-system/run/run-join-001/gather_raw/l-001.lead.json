@@ -1,0 +1,7 @@
+{
+  "goal": "Did 203.0.113.7 succeed against db-1, and is dev.dana even authorized on db-1?",
+  "what_to_summarize": [
+    "accepted/failed for 203.0.113.7 against db-1",
+    "whether dev.dana is authorized on db-1"
+  ]
+}

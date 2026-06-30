@@ -1,0 +1,7 @@
+{
+  "goal": "Failed ssh against db-1 for the two suspect users, broken out by user and source IP",
+  "what_to_summarize": [
+    "failed count per (user, source IP) for dev.dana and svc.deploy against db-1",
+    "last-seen per pair"
+  ]
+}

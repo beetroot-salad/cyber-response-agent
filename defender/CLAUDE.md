@@ -144,7 +144,7 @@ defender/
       runner.py         # the claude -p transport (shared by every stage)
       subagents.py      # the Subagents port + ClaudePrintSubagents adapter (composes the pipeline invoke_* fns)
       orchestrate.py config.py persist.py validate.py directions.py prologue.py
-    leads/              # offline lead-author sub-loop: lead_author.{py,md}, lead_classifier/neighbors/render.py
+    leads/              # offline lead-author sub-loop: lead_author.{py,md}, lead_neighbors.py, lead_render.py
     tickets/            # ticket_seeds.py + ticket_enrichment.py (case-history seeding/enrichment)
     ops/                # trace_lesson.py (lesson→outcome) + revert_lesson.py (one-click revert PR) + replay_actor.py (frozen-gen replay)
     frontend/           # read-only posture view (build.py → self-contained lessons.html); see frontend/README.md

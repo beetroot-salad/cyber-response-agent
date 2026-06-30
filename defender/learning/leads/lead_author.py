@@ -49,12 +49,10 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning import lead_repository
 from defender.learning.author import runner as _author_runner
 from defender.learning.author import shared as _author_shared
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
-from defender.learning.leads import lead_classifier
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 
@@ -194,20 +192,6 @@ def build_handoff(
         catalog = lead_neighbors.load_catalog(catalog_dir)
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
-    # Reconstruct dict-shaped entries from the join surface for the
-    # (dict-based) composite classifier — one entry per joined lead, in the
-    # same order as the entry_index ExecutedLead carries. Reuse the caller's
-    # already-joined list when given, rather than re-reading both tables.
-    if joined_leads is None:
-        joined_leads = lead_repository.joined(run_dir)
-    entries = [
-        {"queries": [{"id": q.query_id, "params": dict(q.params)} for q in jl.queries]}
-        for jl in joined_leads
-    ]
-    template_path_by_id = {
-        tid: str(tpl.path.relative_to(repo_root))
-        for tid, tpl in by_id.items()
-    }
 
     # Group invocations by the executed template path. Preserve
     # first-seen order so the handoff stream is deterministic.
@@ -235,15 +219,6 @@ def build_handoff(
         )
         invocations: list[dict] = []
         for lead in invocations_raw:
-            entry = entries[lead.entry_index] if lead.entry_index < len(entries) else {}
-            query = (entry.get("queries") or [])[lead.query_index] \
-                if isinstance(entry.get("queries"), list) else {}
-            composite_kind = lead_classifier.infer_composite_kind(
-                entry, query, entries,
-            )
-            co_dispatched = lead_classifier.co_dispatched_template_paths(
-                entry, lead.query_index, template_path_by_id,
-            )
             try:
                 rendered_query = lead_render.render_query(tpl.path, lead.params)
             except OSError as e:
@@ -263,8 +238,6 @@ def build_handoff(
                     "result_refs": (
                         [str(lead.raw_ref.relative_to(run_dir))] if lead.raw_ref else []
                     ),
-                    "composite_kind": composite_kind,
-                    "co_dispatched_with": co_dispatched,
                 }
             )
         handoffs.append(

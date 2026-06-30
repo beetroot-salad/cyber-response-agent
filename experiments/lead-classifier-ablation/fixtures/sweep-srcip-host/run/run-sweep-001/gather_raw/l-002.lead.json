@@ -1,0 +1,7 @@
+{
+  "goal": "Failed-ssh rate against db-1 broken out per source IP per hour \u2014 is there a burst?",
+  "what_to_summarize": [
+    "hourly failed-auth count per source IP against db-1",
+    "which hour the failures peak"
+  ]
+}

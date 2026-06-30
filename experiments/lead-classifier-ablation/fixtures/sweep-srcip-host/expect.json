@@ -1,0 +1,7 @@
+{
+  "synthesized_draft": "defender/skills/gather/queries/elastic/_draft/sshd-failed-rate-by-srcip.md",
+  "forbid_promoted": [
+    "defender/skills/gather/queries/elastic/sshd-failed-rate-by-srcip.md"
+  ],
+  "prefer_widened": "defender/skills/gather/queries/elastic/sshd-auth-history.md"
+}

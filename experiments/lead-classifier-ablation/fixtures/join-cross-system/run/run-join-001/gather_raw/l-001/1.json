@@ -1,0 +1,10 @@
+{
+  "user": "dev.dana",
+  "enabled": true,
+  "realm_role": "developer",
+  "authorized_hosts": [
+    "web-1",
+    "web-2"
+  ],
+  "sudo_hosts": []
+}
