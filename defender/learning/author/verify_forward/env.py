@@ -47,10 +47,12 @@ from defender.learning.author.verify_forward.shared import (
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
 RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
-# Sourced from DEFAULT_PATHS (one shared LoopPaths) so the corpus + benign env-queue
-# defaults can't drift from the layout and honor DEFENDER_LEARNING_STATE_DIR like the
-# rest of the verifier (#425) — production overrides both via --corpus/--pending, but
-# the bare-default path then stays worktree-immune too.
+# Sourced from DEFAULT_PATHS (one shared LoopPaths) so the defaults can't drift from the
+# layout. The two differ on purpose: DEFAULT_PENDING is state-relative, so it honors
+# DEFENDER_LEARNING_STATE_DIR and stays worktree-immune (#425); DEFAULT_CORPUS is
+# repo-relative by design (lessons corpora never relocate with the state dir — see
+# LoopPaths) so it follows the worktree, which is what we want — the lesson being checked
+# is the one the curator just edited there. Production overrides both via --corpus/--pending.
 DEFAULT_PENDING = DEFAULT_PATHS.environment_observations.file
 DEFAULT_CORPUS = DEFAULT_PATHS.lessons_environment_dir
 

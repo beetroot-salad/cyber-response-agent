@@ -114,7 +114,13 @@ class LoopPaths:
         return self.repo_root / ".worktrees"
 
     @property
-    def _state_root(self) -> Path:
+    def state_root(self) -> Path:
+        """The resolved mutable-state root: out-of-repo ``state_dir`` when set, else the
+        in-repo ``learning_dir``. The authoritative source for ``runs_dir`` / the queues
+        AND for the ``DEFENDER_LEARNING_STATE_DIR`` value pinned into curator-agent
+        subprocesses (#425) — derive the state root from this, never by inverting
+        ``runs_dir`` (e.g. ``runs_dir.parent``), which silently breaks if the runs layout
+        ever gains a level."""
         return self.state_dir if self.state_dir is not None else self.learning_dir
 
     def with_repo_root(self, repo_root: Path) -> LoopPaths:
@@ -123,26 +129,26 @@ class LoopPaths:
         to the worktree (where the curator edits + the loop commits) while the queues,
         locks, and pending files stay at the shared original location — the markers
         being drained live there, not in the throwaway worktree."""
-        return LoopPaths(repo_root=repo_root, state_dir=self._state_root)
+        return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
 
     @property
     def runs_dir(self) -> Path:
-        return self._state_root / "runs"
+        return self.state_root / "runs"
 
     @property
     def pending_dir(self) -> Path:
-        return self._state_root / "_pending"
+        return self.state_root / "_pending"
 
     @property
     def lead_pending_dir(self) -> Path:
-        return self._state_root / "_pending_leads"
+        return self.state_root / "_pending_leads"
 
     # --- general-failure pitfalls queue (cross-run; feeds the lead-author's
     # execution.md curation mode). Lives under the shared state root so an append
     # from inside a drain worktree lands centrally, like the other pending queues. ---
     @property
     def pitfalls_pending_dir(self) -> Path:
-        return self._state_root / "_pending_pitfalls"
+        return self.state_root / "_pending_pitfalls"
 
     @property
     def pitfalls(self) -> QueueChannel:
@@ -154,7 +160,7 @@ class LoopPaths:
 
     @property
     def author_lock_file(self) -> Path:
-        return self._state_root / "_author.lock"
+        return self.state_root / "_author.lock"
 
     @property
     def learn_queue_dir(self) -> Path:
@@ -163,18 +169,18 @@ class LoopPaths:
         # author_queue_dir, one stage upstream. No drain lock: learning is
         # concurrent (§4.3), so cross-worker safety is the per-marker
         # rename-claim into learn-queue/inflight/, not a one-at-a-time lock.
-        return self._state_root / "learn-queue"
+        return self.state_root / "learn-queue"
 
     @property
     def author_queue_dir(self) -> Path:
-        return self._state_root / "author-queue"
+        return self.state_root / "author-queue"
 
     @property
     def author_drain_lock_file(self) -> Path:
         # Distinct from author_lock_file (the curators' repo lock): the drainer
         # holds this so a second drainer exits, while the curators it calls can
         # still take author_lock_file without a same-process deadlock.
-        return self._state_root / ".author-drain.lock"
+        return self.state_root / ".author-drain.lock"
 
     @property
     def lead_author_drain_lock_file(self) -> Path:
@@ -182,7 +188,7 @@ class LoopPaths:
         # author_drain_lock_file so the lessons drain and the lead-author drain
         # are independently scheduled. Each drain runs in its own git worktree,
         # so they need no cross-drain lock — this only serializes same-type ticks.
-        return self._state_root / ".lead-author-drain.lock"
+        return self.state_root / ".lead-author-drain.lock"
 
     @property
     def pending_file(self) -> Path:

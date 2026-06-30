@@ -104,6 +104,7 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
         runs_dir=paths.runs_dir,
+        state_root=paths.state_root,
         corpus_dir=paths.lessons_environment_dir,
         corpus_dir_rel=paths.lessons_environment_dir_rel,
         channel=channel,

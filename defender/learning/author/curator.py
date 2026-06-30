@@ -73,6 +73,10 @@ class CuratorConfig:
     # root — so it stays correct even though ``repo_root`` moves to a batch worktree
     # (#425). Do NOT resolve the bundle off ``repo_root``.
     runs_dir: Path
+    # Shared mutable-state root (``LoopPaths.state_root``) — the value pinned as
+    # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocesses
+    # (#425). A first-class field, not ``runs_dir.parent``: see ``LoopPaths.state_root``.
+    state_root: Path
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
@@ -254,8 +258,8 @@ def invoke_curator_agent(
         batch_id=batch_id,
         # Pin the shared state root so the agent's forward-check Bash subprocesses
         # (verify_forward/actor.py, verify_forward/env.py) resolve the run bundle off it,
-        # not the worktree they run in (#425). cfg.runs_dir.parent == the _state_root.
-        env=curator_agent_env(cfg.runs_dir.parent),
+        # not the worktree they run in (#425).
+        env=curator_agent_env(cfg.state_root),
     )
     try:
         return _runner.invoke_claude_print(options, user_prompt, make_logger(cfg.log_prefix))
