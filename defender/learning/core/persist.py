@@ -168,14 +168,12 @@ def derive_alert_rule_key(alert: dict) -> str:
 
 
 def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
-    """Path to the run bundle, as consumers resolve it (``repo_root / src``).
+    """Path to the run bundle, as ``resolve_run_bundle`` (in ``defender._run_paths``)
+    resolves it.
 
     Repo-relative when the run lives in-repo (the default); absolute when it
     lives out-of-repo under ``DEFENDER_LEARNING_STATE_DIR`` (no repo-relative
-    form exists). Both resolve correctly via ``repo_root / src`` — pathlib lets
-    an absolute right-hand side win — so the consumers (the authors' held-out
-    double-check, the forward-checkers) need no special-casing. Trailing slash
-    preserved for the existing string contract.
+    form exists). Trailing slash preserved for the existing string contract.
     """
     try:
         return str(learning_run_dir.relative_to(repo_root)) + "/"

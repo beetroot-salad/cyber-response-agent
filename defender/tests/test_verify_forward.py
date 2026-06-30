@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 HERE = Path(__file__).resolve().parent
+# Workspace root (parent of ``defender/``) so a freshly-spawned subprocess can
+# ``import defender.*``; in a worktree this is the worktree root (#425).
+_WS_ROOT = HERE.parents[1]
 
 from defender.learning.author.verify_forward import forward as vf  # type: ignore[import-not-found]
 from defender.learning.author.verify_forward import shared as vfs  # type: ignore[import-not-found]
@@ -183,3 +190,98 @@ def test_load_observation_missing_id_raises(tmp_path):
     pending.write_text(json.dumps({"observation_id": "o-1"}) + "\n")
     with pytest.raises(SystemExit, match="not found"):
         vfs.load_observation("o-9", pending, error_prefix=_PREFIX)
+
+
+# ---------------------------------------------------------------------------
+# #425 — the forward-check verifiers resolve the run bundle off the shared
+# state root (DEFENDER_LEARNING_STATE_DIR), not the worktree they run in.
+# The verifiers freeze their paths from DEFAULT_PATHS at import, so each case
+# is driven in a fresh subprocess with the env var pinned (the curator agent
+# pins it via curator_agent_env; here we set it directly).
+# ---------------------------------------------------------------------------
+
+
+def _run_with_state(snippet: str, state_dir: Path, cwd: Path) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env["DEFENDER_LEARNING_STATE_DIR"] = str(state_dir)
+    env["PYTHONPATH"] = str(_WS_ROOT)
+    return subprocess.run(
+        [sys.executable, "-c", snippet],
+        env=env, cwd=str(cwd), capture_output=True, text=True,
+    )
+
+
+def test_curator_agent_env_pins_state_root():
+    from defender.learning.core.config import curator_agent_env
+
+    env = curator_agent_env(Path("/shared/state"))
+    assert env["DEFENDER_LEARNING_STATE_DIR"] == "/shared/state"
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+def test_forward_resolves_bundle_off_state_root(tmp_path: Path):
+    """forward.RUNS_DIR + load_run_context follow DEFENDER_LEARNING_STATE_DIR, so the
+    bundle is found from a worktree cwd that has no runs/ of its own (#425)."""
+    state = tmp_path / "state"
+    run = state / "runs" / "run-X"
+    run.mkdir(parents=True)
+    (run / "investigation.md").write_text("TRANSCRIPT-BODY\n")
+    (run / "source_refs.yaml").write_text(yaml.safe_dump({"normalized_disposition": "benign"}))
+    worktree = tmp_path / "worktree"  # fresh checkout: no runs/
+    worktree.mkdir()
+
+    snippet = (
+        "from defender.learning.author.verify_forward import forward as vf;"
+        "t, d = vf.load_run_context('run-X');"
+        "print('RUNS_DIR', vf.RUNS_DIR);"
+        "print('OK' if ('TRANSCRIPT-BODY' in t and d == 'benign') else 'MISS')"
+    )
+    proc = _run_with_state(snippet, state, worktree)
+    assert proc.returncode == 0, proc.stderr
+    assert str(state / "runs") in proc.stdout
+    assert "OK" in proc.stdout
+
+
+def test_actor_resolves_story_and_pending_off_state_root(tmp_path: Path):
+    """actor.load_story + actor.PENDING_FILE follow the state root (#425)."""
+    state = tmp_path / "state"
+    run = state / "runs" / "run-Y"
+    run.mkdir(parents=True)
+    (run / "actor_story.md").write_text("ACTOR-STORY-BODY\n")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    snippet = (
+        "from defender.learning.author.verify_forward import actor as a;"
+        "print('PENDING', a.PENDING_FILE);"
+        "print(a.load_story('defender/learning/runs/run-Y/'))"
+    )
+    proc = _run_with_state(snippet, state, worktree)
+    assert proc.returncode == 0, proc.stderr
+    assert str(state / "_pending" / "actor_observations.jsonl") in proc.stdout
+    assert "ACTOR-STORY-BODY" in proc.stdout
+
+
+def test_env_case_entities_off_state_root(tmp_path: Path):
+    """env.case_entities_arg(row, DEFAULT_PATHS.runs_dir) reads the source-case
+    prologue off the state root, the path main() uses (#425)."""
+    state = tmp_path / "state"
+    run = state / "runs" / "run-Z"
+    run.mkdir(parents=True)
+    (run / "investigation.md").write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|process|process:nc|nc[1]|\n"
+        "```\n"
+    )
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    snippet = (
+        "from defender.learning.author.verify_forward import env as e;"
+        "row = {'source_run_dir': 'defender/learning/runs/run-Z/'};"
+        "print('ENTITIES', e.case_entities_arg(row, e.DEFAULT_PATHS.runs_dir))"
+    )
+    proc = _run_with_state(snippet, state, worktree)
+    assert proc.returncode == 0, proc.stderr
+    assert "ENTITIES process:nc" in proc.stdout

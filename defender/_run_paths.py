@@ -58,3 +58,24 @@ class RunPaths:
         if self.learning_run_dir is None:
             raise ValueError("RunPaths has no learning_run_dir")
         return RunPaths(self.learning_run_dir)
+
+
+def resolve_run_bundle(runs_dir: Path, source_run_dir: str) -> Path:
+    """Resolve a recorded ``source_run_dir`` to its on-disk bundle dir.
+
+    The canonical consumer side of ``persist._source_run_dir``. An **absolute**
+    ``source_run_dir`` (out-of-repo, under ``DEFENDER_LEARNING_STATE_DIR``) is used
+    as-is; a **repo-relative** one (in-repo) resolves as ``runs_dir / <run_id>`` (its
+    last path component). ``runs_dir`` must be the shared-state ``LoopPaths.runs_dir``,
+    NOT ``repo_root / source_run_dir`` — under a batch author worktree (#420/#423) the
+    latter resolves into the worktree's empty ``runs/`` and the bundle goes missing,
+    breaking the forward-check and the held-out double-check (#425).
+
+    Lives here (pure pathlib, stdlib-only) rather than in ``core.persist`` so the lean
+    forward-check verifiers (``verify_forward/actor.py`` / ``env.py``) can import it
+    without dragging in ``persist``'s module-level ``yaml`` — they are spawned as
+    short-lived Bash subprocesses and stay import-light by design (cf. ``forward.py``,
+    which regex-parses YAML to avoid the dependency).
+    """
+    src = Path(source_run_dir.rstrip("/"))
+    return src if src.is_absolute() else runs_dir / src.name

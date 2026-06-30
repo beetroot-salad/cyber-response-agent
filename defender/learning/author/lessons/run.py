@@ -74,6 +74,7 @@ from defender.learning.core.config import (
     AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
     LoopPaths,
+    curator_agent_env,
     make_logger,
     now_iso,
 )
@@ -102,6 +103,10 @@ class AuthorConfig:
     lessons_dir: Path
     lessons_dir_rel: str
     runs_dir: Path
+    # Shared mutable-state root (``LoopPaths.state_root``) pinned as
+    # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
+    # (#425) — a first-class field, not ``runs_dir.parent``.
+    state_root: Path
     pending_dir: Path
     pending_file: Path
     consumed_file: Path
@@ -133,6 +138,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
+        state_root=paths.state_root,
         pending_dir=paths.pending_dir,
         pending_file=paths.pending_file,
         consumed_file=paths.pending_dir / "consumed.jsonl",
@@ -262,6 +268,10 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         log_path=cfg.author_run_log,
         result_marker="AUTHOR_RESULT:",
         batch_id=batch_id,
+        # Pin the shared state root so the agent's forward-check Bash subprocesses
+        # (verify_forward/forward.py) resolve the run bundle off it, not the worktree
+        # they run in (#425).
+        env=curator_agent_env(cfg.state_root),
     )
     try:
         return _runner.invoke_claude_print(options, user_prompt, _log)

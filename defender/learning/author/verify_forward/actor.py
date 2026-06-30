@@ -32,10 +32,12 @@ REPO_ROOT = HERE.parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.core.config import (  # noqa: E402
+    DEFAULT_PATHS,
     VERIFIER_MODEL,
     VERIFIER_TIMEOUT,
     subscription_env,
 )
+from defender._run_paths import resolve_run_bundle  # noqa: E402
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
     call_haiku as _call_haiku,
     load_observation as _load_observation,
@@ -43,12 +45,16 @@ from defender.learning.author.verify_forward.shared import (  # noqa: E402
     render_prompt,
 )
 
-PENDING_FILE = HERE.parents[1] / "_pending" / "actor_observations.jsonl"
+# Resolve the run bundle + queue off DEFAULT_PATHS (which honors
+# DEFENDER_LEARNING_STATE_DIR) rather than this file's worktree ``__file__``: the
+# author drains run this in a throwaway ``git worktree`` that has no runs/_pending, and
+# the curator agent pins the state root in our env (curator_agent_env, #425).
+PENDING_FILE = DEFAULT_PATHS.actor_observations.file
 PROMPT_PATH = HERE / "actor.md"
 
 
 def load_story(source_run_dir: str) -> str:
-    path = (REPO_ROOT / source_run_dir / "actor_story.md").resolve()
+    path = (resolve_run_bundle(DEFAULT_PATHS.runs_dir, source_run_dir) / "actor_story.md").resolve()
     if not path.is_file():
         raise SystemExit(
             f"verify_forward_actor: actor_story.md missing at {path}"

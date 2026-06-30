@@ -143,9 +143,15 @@ def test_runner_spawn_seam_is_honored(tmp_path):
 
     def fake_spawn(cmd, **kwargs):
         seen["cmd"] = cmd  # the runner-built `claude …` argv
+        seen["env"] = kwargs.get("env")  # the env threaded through to the spawn
         script = "import sys; sys.stdin.read()"  # consume prompt, exit 0
         return subprocess.Popen([_sys.executable, "-c", script], **kwargs)
 
+    # A full env plus a sentinel: the load-bearing #425 wiring is that RunnerOptions.env
+    # reaches subprocess spawn(env=...) verbatim, so the curator agent's forward-check
+    # subprocesses inherit the pinned DEFENDER_LEARNING_STATE_DIR.
+    import os as _os
+    pinned_env = {**_os.environ, "DEFENDER_LEARNING_STATE_DIR": "/sentinel/state"}
     options = runner.RunnerOptions(
         system_prompt_file=tmp_path / "prompt.md",
         allowed_tools="Read",
@@ -156,9 +162,13 @@ def test_runner_spawn_seam_is_honored(tmp_path):
         log_path=tmp_path / "run.jsonl",
         result_marker=None,
         batch_id="t",
+        env=pinned_env,
         spawn=fake_spawn,
     )
     rc, _text = runner.invoke_claude_print_raw(options, "the prompt", lambda _m: None)
     assert rc == 0
     assert seen["cmd"][0] == "claude"
     assert "--allowed-tools" in seen["cmd"]
+    # The pinned env threads through unchanged (RunnerOptions.env → _drive_subprocess → spawn).
+    assert seen["env"] is not None
+    assert seen["env"]["DEFENDER_LEARNING_STATE_DIR"] == "/sentinel/state"
