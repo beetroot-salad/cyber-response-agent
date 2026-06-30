@@ -30,8 +30,10 @@ shared/external state, the drift-prone kind.
 What it deliberately does NOT flag:
 
 - *Literal* fallbacks (``x = x if x is not None else []`` / ``{}`` / ``""`` /
-  ``0``). The None-sentinel into an empty container is the sanctioned idiom for a
-  mutable default (``def f(items=[])`` is the famous bug); a literal carries no
+  ``0``), and the empty-container *constructors* that have no literal form
+  (``set()`` / ``dict()`` / ``list()`` / ``tuple()`` / ``frozenset()``). The
+  None-sentinel into an empty container is the sanctioned idiom for a mutable
+  default (``def f(items=[])`` is the famous bug); it carries no
   single-source-of-truth concern.
 - Binding to a *new* name (``_spawn = spawn if spawn is not None else
   subprocess.Popen``). Resolving an optional param into a fresh local is the DI/
@@ -46,8 +48,10 @@ at all) is NOT flagged — that is the anchored single source this gate pushes
 toward.
 
 Pre-existing sites are ratcheted via ``lint_unanchored_default_baseline.json``
-(see scripts/lint/_baseline.py); the gate fails only on a NEW file+function+param
-triple. Suppress a deliberate site with ``# lint-default: ok — <reason>`` on the
+(see scripts/lint/_baseline.py); the gate fails only on a NEW
+file+function+param triple, where *function* is the dotted path of enclosing
+classes/defs (``Class.method``) so two same-named siblings stay distinct.
+Suppress a deliberate site with ``# lint-default: ok — <reason>`` on the
 assignment.
 
 Run from repo root:  python scripts/lint/lint_unanchored_default.py
@@ -123,9 +127,32 @@ def _assign_target(node: ast.AST) -> str | None:
     return None
 
 
+_EMPTY_CONTAINER_BUILTINS = frozenset(
+    {"list", "dict", "set", "tuple", "frozenset", "bytearray", "bytes"}
+)
+
+
+def _is_empty_container_call(node: ast.expr) -> bool:
+    """A no-arg call to a built-in container constructor (``set()`` / ``dict()`` /
+    ``list()`` …) — the literal-less form of the sanctioned empty-container
+    mutable-default idiom (a ``set`` has no literal). It carries no drift-prone
+    default knowledge, so it is exempt just like ``[]`` / ``{}`` / ``""``."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _EMPTY_CONTAINER_BUILTINS
+        and not node.args
+        and not node.keywords
+    )
+
+
 def _is_named_fallback(fallback: ast.expr) -> bool:
     """Fallback references shared/external state (the drift-prone kind), not a
-    literal/empty-container (the sanctioned mutable-default idiom)."""
+    literal/empty-container (the sanctioned mutable-default idiom). An empty
+    container built via its constructor (``set()`` / ``dict()`` / ``list()``) is
+    the literal-less form of that idiom and is likewise exempt."""
+    if _is_empty_container_call(fallback):
+        return False
     return isinstance(fallback, (ast.Name, ast.Attribute, ast.Call))
 
 
@@ -141,10 +168,18 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()
 
-    def visit(node: ast.AST, func_name: str, params: set[str]) -> None:
+    def visit(node: ast.AST, scope: tuple[str, ...], params: set[str]) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            func_name = node.name
+            scope = (*scope, node.name)
             params = _param_names(node)
+        elif isinstance(node, ast.ClassDef):
+            # A class body is its own namespace: ``x = ...`` binds a class
+            # attribute, not the enclosing function's param. Drop params so a
+            # same-named class attribute isn't misread as an in-body re-default
+            # (the new-name shape the gate exempts), and push the class name so
+            # two ``Class.method`` siblings don't share one fingerprint.
+            scope = (*scope, node.name)
+            params = set()
         target = _assign_target(node)
         if target is not None and target in params:
             value = node.value  # AnnAssign without a RHS (`x: T`) has value None
@@ -154,7 +189,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
                 and _is_named_fallback(fallback)
                 and not _suppressed(node, lines)
             ):
-                fp = f"{rel}:{func_name}:{target}"
+                qual = ".".join(scope)
+                fp = f"{rel}:{qual}:{target}"
                 if fp not in seen:
                     seen.add(fp)
                     findings.append(
@@ -162,16 +198,16 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
                             fingerprint=fp,
                             display=(
                                 f"{rel}:{node.lineno}: parameter {target!r} re-defaulted "
-                                f"in-body in {func_name}() — anchor the default in the "
+                                f"in-body in {qual}() — anchor the default in the "
                                 f"signature ({target}: T = DEFAULT) or resolve it at the "
                                 f"boundary"
                             ),
                         )
                     )
         for child in ast.iter_child_nodes(node):
-            visit(child, func_name, params)
+            visit(child, scope, params)
 
-    visit(tree, "<module>", set())
+    visit(tree, (), set())
     return findings
 
 
@@ -196,7 +232,8 @@ HEADER = (
     "`x = x if x is not None else DEFAULT` smell: an Optional that's immediately "
     "made non-None, with the default knowledge duplicated across call sites). "
     "Anchor the default in the signature (`x: T = DEFAULT`) or resolve it once at "
-    "the boundary. Fingerprint is file:function:param (no line number). CI fails "
+    "the boundary. Fingerprint is file:function:param, function qualified by its "
+    "enclosing classes/defs (no line number). CI fails "
     "on a triple absent here. Regenerate: python "
     "scripts/lint/lint_unanchored_default.py --update-baseline. Annotate "
     'intentional entries; "" = un-triaged debt to anchor.'
