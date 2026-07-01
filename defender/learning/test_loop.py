@@ -1497,6 +1497,55 @@ def test_author_branch_revert_refuses_missing_lesson_on_base(tmp_path: Path):
     assert not _real(work, "branch", "--list", "lessons/revert-ghost").stdout.strip()  # no churn
 
 
+def test_author_branch_revert_returns_existing_open_pr_idempotently(tmp_path: Path):
+    """A second revert of the same lesson, while a revert PR for the exact head is already
+    open, hands that PR's ref back — no fresh commit, no push, no new PR (#482). This is the
+    case that used to non-ff-crash on the stale remote branch."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    forge = _FakeForge(
+        pr_rows=[{"number": 3, "headRefName": "lessons/revert-bad", "url": "https://pr/existing"}],
+        create_ref="https://pr/new",
+    )
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/existing"
+    assert forge.open_calls == []  # opened nothing new
+    # pushed nothing — origin never got the revert branch
+    assert not _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
+
+
+def test_author_branch_revert_ignores_unrelated_open_lessons_pr(tmp_path: Path):
+    """The idempotent preflight keys on the EXACT revert head, not the ``lessons/`` prefix —
+    an unrelated open lessons *batch* PR must not make the revert look 'in flight' (the revert
+    is deliberately not lease-gated). A prefix match would have wrongly short-circuited."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    forge = _FakeForge(
+        pr_rows=[{"number": 5, "headRefName": "lessons/abc123batch", "url": "https://pr/batch"}],
+        create_ref="https://pr/1",
+    )
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/1"
+    assert forge.open_calls[0]["head"] == "lessons/revert-bad"  # proceeded to open a real PR
+    assert _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
+
+
+def test_author_branch_revert_fails_fast_on_stranded_remote_branch(tmp_path: Path):
+    """A stale revert branch on origin with no open PR (a prior revert pushed but ``open_pr``
+    then failed) diverges from the fresh revert commit, so the plain push is rejected non-ff.
+    The operator gets an actionable message, not the raw git rejection (#482)."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    # Strand a diverging lessons/revert-bad on origin, leaving no local branch behind.
+    _real(work, "checkout", "-q", "-b", "tmp-div", "origin/main")
+    (work / "divergent.txt").write_text("stranded prior revert\n")
+    _real(work, "add", "-A")
+    _real(work, "commit", "-q", "-m", "divergent")
+    _real(work, "push", "-q", "origin", "tmp-div:lessons/revert-bad")
+    _real(work, "checkout", "-q", "main")
+    _real(work, "branch", "-q", "-D", "tmp-div")
+    b = ab.AuthorBranch(forge=_FakeForge(pr_rows=[]), repo_root=work, worktree_base=tmp_path / "wt")
+    with pytest.raises(ab.BranchError, match="stale revert branch"):
+        b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+
+
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
     """revert() acquires the author-drain flock, then opens the revert PR."""
     from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]

@@ -34,7 +34,8 @@ class Forge(Protocol):
 
     def list_open_prs(self, head_prefix: str) -> list[dict]:
         """Open PRs whose head branch matches ``head_prefix`` (a substring search the
-        caller prefix-confirms). Each row carries at least ``number`` + ``headRefName``."""
+        caller prefix-confirms). Each row carries at least ``number`` + ``headRefName``
+        (+ ``url``, so a caller that exact-matches a head can return the PR's ref)."""
         ...
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
@@ -51,7 +52,7 @@ class GhForge:
     def list_open_prs(self, head_prefix: str) -> list[dict]:
         proc = subprocess.run(
             ["gh", "pr", "list", "--search", f"head:{head_prefix}", "--state", "open",
-             "--json", "number,headRefName"],
+             "--json", "number,headRefName,url"],
             cwd=self.cwd, capture_output=True, text=True,
         )
         if proc.returncode != 0:
