@@ -1,10 +1,11 @@
-"""Unit tests for the GLM-5.2-via-Fireworks integration (feat/glm-fireworks).
+"""Unit tests for the Fireworks model integration (feat/glm-fireworks): GLM 5.2 as
+the MAIN default, Kimi K2.5 as the GATHER default.
 
 Hermetic — no API key, no network. Model construction only builds the provider
-client (no request is made), so these run in the default suite. Covers the
-provider seam (`build_model` / `model_provider` / aliases), the per-provider
-model settings + GLM `reasoning_effort` default, the GLM price table, and
-run.py's provider-keyed `FIREWORKS_API_KEY` sourcing.
+client (no request is made), so these run in the default suite. Covers the provider
+seam (`build_model` / `model_provider` / aliases), the role model defaults, the
+per-role `reasoning_effort` settings, the price table, and run.py's provider-keyed
+`FIREWORKS_API_KEY` sourcing.
 """
 from __future__ import annotations
 
@@ -29,6 +30,16 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p2"
+_KIMI_ID = "accounts/fireworks/models/kimi-k2p5"
+
+
+# --- role model defaults ----------------------------------------------------
+
+def test_role_model_defaults(monkeypatch):
+    for k in ("DEFENDER_MODEL", "DEFENDER_GATHER_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    assert driver.resolve_main_model() == "glm-5.2"   # MAIN: flagship GLM
+    assert driver.gather_model() == "kimi-k2.5"        # GATHER: cheaper Kimi
 
 
 # --- provider classification ------------------------------------------------
@@ -38,6 +49,7 @@ _GLM_ID = "accounts/fireworks/models/glm-5p2"
     ("claude-haiku-4-5", "anthropic"),
     ("glm-5.2", "fireworks"),
     ("glm-5p2", "fireworks"),
+    ("kimi-k2.5", "fireworks"),
     (f"fireworks:{_GLM_ID}", "fireworks"),
 ])
 def test_model_provider_classifies_by_name(name, provider):
@@ -66,7 +78,14 @@ def test_build_model_fireworks_requires_key(monkeypatch):
         driver.build_model("glm-5.2")
 
 
-# --- per-provider model settings + GLM reasoning-effort default -------------
+def test_build_model_kimi_alias(monkeypatch):
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+    m = driver.build_model("kimi-k2.5")
+    assert isinstance(m, OpenAIChatModel)
+    assert m.model_name == _KIMI_ID
+
+
+# --- per-role reasoning-effort settings -------------------------------------
 
 def test_settings_for_anthropic_keeps_cache(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -74,37 +93,38 @@ def test_settings_for_anthropic_keeps_cache(monkeypatch):
     assert driver._settings_for(m, AgentRole.MAIN) is driver._CACHE_SETTINGS
 
 
-def test_settings_for_glm_main_defaults_to_low(monkeypatch):
+def test_settings_for_main_defaults_to_low(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.delenv("DEFENDER_GLM_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     m = driver.build_model("glm-5.2")
     assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
 
 
-def test_settings_for_glm_gather_defaults_to_none(monkeypatch):
+def test_settings_for_gather_defaults_to_none_on_kimi(monkeypatch):
+    # The gather default is Kimi — reasoning off, proving the mechanism is model-agnostic.
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.delenv("DEFENDER_GLM_GATHER_REASONING_EFFORT", raising=False)
-    m = driver.build_model("glm-5.2")
+    monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
+    m = driver.build_model("kimi-k2.5")
     assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
 
 
-def test_settings_for_glm_main_effort_override(monkeypatch):
+def test_settings_for_main_effort_override(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("DEFENDER_GLM_REASONING_EFFORT", "high")
+    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "high")
     m = driver.build_model("glm-5.2")
     assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
 
 
-def test_settings_for_glm_gather_effort_override(monkeypatch):
+def test_settings_for_gather_effort_override(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("DEFENDER_GLM_GATHER_REASONING_EFFORT", "low")
-    m = driver.build_model("glm-5.2")
+    monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "low")
+    m = driver.build_model("kimi-k2.5")
     assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
 
 
-def test_settings_for_glm_default_sentinel_disables_the_param(monkeypatch):
+def test_settings_for_default_sentinel_disables_the_param(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("DEFENDER_GLM_REASONING_EFFORT", "default")
+    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
     m = driver.build_model("glm-5.2")
     assert driver._settings_for(m, AgentRole.MAIN) is None
 
@@ -114,6 +134,8 @@ def test_settings_for_glm_default_sentinel_disables_the_param(monkeypatch):
 @pytest.mark.parametrize(("model", "key"), [
     (_GLM_ID, "glm-5.2"),                          # Fireworks accounts/.../ path
     ("glm-5p2", "glm-5.2"),
+    (_KIMI_ID, "kimi-k2.5"),
+    ("kimi-k2p5", "kimi-k2.5"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
     ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),  # date suffix
     ("", "claude-sonnet-4-6"),
@@ -130,6 +152,12 @@ def test_pricing_glm_uses_fireworks_rates():
         "cache_read_input_tokens": 1_000_000,
     })
     assert cost == pytest.approx(1.40 + 4.40 + 0.14)
+
+
+def test_pricing_kimi_uses_fireworks_rates():
+    # 1M input + 1M output at $0.60 / $3.00 (gather model).
+    cost = pricing.usage_cost("kimi-k2p5", {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+    assert cost == pytest.approx(0.60 + 3.00)
 
 
 # --- run.py: FIREWORKS_API_KEY sourcing -------------------------------------
