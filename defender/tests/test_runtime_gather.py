@@ -77,6 +77,9 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
 
     sb, run_dir, params, fx = _build_sandbox(tmp_path, "V2_sparse_in_band")
     monkeypatch.setenv("STUB_ELASTIC_PAYLOAD", str(fx / "elastic_payload.json"))
+    # The gather default is now GLM (needs FIREWORKS_API_KEY); this test is gated on
+    # ANTHROPIC_API_KEY, so pin the gather to Anthropic or it errors instead of running.
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-sonnet-4-6")
     lead_id, system = "l-007", params["system"]
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     deps = tools.RunDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt")

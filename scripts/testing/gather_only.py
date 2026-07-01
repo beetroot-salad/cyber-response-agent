@@ -17,7 +17,7 @@ Usage:
 - [lead_key]  picks a canned lead from LEADS below (default: baseline-7d).
               Representative A/B cells: `ip-host-baseline` (templated, one-shot)
               and `process-db1` (coined).
-- Runs the gather (SKILL.md) on `_gather_model()` (Sonnet);
+- Runs the gather (SKILL.md) on `gather_model()` (Kimi K2.5 by default);
   set DEFENDER_GATHER_MODEL to A/B a different model.
 
 Requirements (this is a LIVE, BILLED call against real infrastructure — run it
