@@ -1,27 +1,36 @@
-"""Anthropic token pricing — the one place the price table lives.
+"""Model token pricing — the one place the price table lives.
 
 Token counts in `tool_trace.jsonl` are exact; cost is *computed* from them
 (the first-party Anthropic API does not return a cost the way `claude -p` did).
 This module is the single source for that computation — imported by the runtime
 observability layer (to fill the `result` event's `total_cost_usd`) and by the
-visualizer's data layer. Update prices from anthropic.com/pricing.
+visualizer's data layer. Anthropic prices from anthropic.com/pricing; the
+Fireworks-served GLM prices from fireworks.ai/pricing.
 """
 
 from __future__ import annotations
 
-# Per-million-token prices, USD. Matches Anthropic's published pricing for
-# claude-sonnet-4-6 / claude-haiku-4-5.
+# Per-million-token prices, USD. Anthropic pricing for claude-sonnet-4-6 /
+# claude-haiku-4-5; Fireworks serverless pricing for GLM 5.2 (glm-5p2), from
+# fireworks.ai/models/fireworks/glm-5p2: $1.40 in / $0.14 cached-in / $4.40 out.
+# Fireworks caches automatically — reads are discounted and it does not bill cache
+# writes separately (it reports zero cache-write tokens), so `cache_w` mirrors `in`
+# and is inert while `cache_r` carries the published cached-read rate.
 PRICING = {
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_w": 3.75, "cache_r": 0.30},
     "claude-haiku-4-5":  {"in": 1.0, "out":  5.0, "cache_w": 1.25, "cache_r": 0.10},
+    "glm-5.2":           {"in": 1.4, "out":  4.4, "cache_w": 1.40, "cache_r": 0.14},
 }
 
 
 def model_key(model: str) -> str:
-    """Normalize a model id (which may carry a date suffix) to a PRICING key."""
+    """Normalize a model id (which may carry a date suffix or a Fireworks
+    `accounts/.../` path) to a PRICING key."""
     if not model:
         return "claude-sonnet-4-6"
     m = model.lower()
+    if "glm" in m:
+        return "glm-5.2"
     if "haiku" in m:
         return "claude-haiku-4-5"
     return "claude-sonnet-4-6"

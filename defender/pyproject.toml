@@ -11,10 +11,11 @@ dependencies = [
 # Runtime investigation loop (PydanticAI migration off `claude -p`; see
 # docs/runtime-pydanticai-migration.md). Kept out of the core deps so
 # learning-loop / CI installs (which are SIEM- and runtime-free) don't pull
-# the Anthropic + MCP stack. Slim variant + extras only — no other model
-# providers. Install with: uv pip install -e '.[runtime]'.
+# the Anthropic + MCP stack. Slim variant + extras: anthropic is the default
+# provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.2, selected
+# via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
-    "pydantic-ai-slim[anthropic,mcp]>=1.107",
+    "pydantic-ai-slim[anthropic,mcp,openai]>=1.107",
     # duckdb — the engine behind the `defender-sql` shim
     # (scripts/gather_tools/sql.py), the gather subagent's aggregation
     # fallback for filter-only sources (no server-side aggregation of their

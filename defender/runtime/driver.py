@@ -25,6 +25,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from . import compaction
@@ -79,6 +80,35 @@ _CACHE_SETTINGS = AnthropicModelSettings(
     anthropic_cache_tool_definitions="1h",
     anthropic_cache="5m",
 )
+
+
+# GLM 5.2 reasons by default and bills that thinking as output tokens — the main
+# cost/latency driver on the OpenAI-compatible path — so the runtime defaults it to
+# `low` effort (measured ~−50% cost / −75% wall vs full reasoning on the sshd-auth
+# fixture, disposition unchanged). Override with DEFENDER_GLM_REASONING_EFFORT ∈
+# {low, medium, high, none}, or the sentinel `default` to send no reasoning_effort
+# and fall back to the provider's own (full-reasoning) default.
+_DEFAULT_GLM_REASONING_EFFORT = "low"
+
+
+def _settings_for(model: Model) -> ModelSettings | None:
+    """Per-provider model settings. The AnthropicModel gets the three-part
+    `anthropic_cache_*` prompt-cache settings (meaningless on any other provider).
+    A Fireworks/GLM model gets `reasoning_effort` — defaulting to
+    `_DEFAULT_GLM_REASONING_EFFORT` (`low`), overridable via
+    `DEFENDER_GLM_REASONING_EFFORT` (`low`|`medium`|`high`|`none`, or `default` to
+    disable the param). Fireworks does its own automatic prefix caching, so no
+    explicit cache breakpoints are needed here. A test FunctionModel → None."""
+    if isinstance(model, AnthropicModel):
+        return _CACHE_SETTINGS
+    effort = os.environ.get("DEFENDER_GLM_REASONING_EFFORT", _DEFAULT_GLM_REASONING_EFFORT)
+    if effort and effort != "default":
+        from pydantic_ai.models.openai import OpenAIChatModelSettings
+        # Fireworks honors the OpenAI-standard `reasoning_effort` for GLM (verified it
+        # scales thinking length); sent via extra_body so it round-trips as a raw
+        # request param regardless of the profile pydantic-ai infers for the model id.
+        return OpenAIChatModelSettings(extra_body={"reasoning_effort": effort})
+    return None
 
 
 def _main_instructions(defender_dir: Path) -> str:
@@ -144,13 +174,72 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
     return hooks
 
 
-def _gather_model() -> str:
+def gather_model() -> str:
     """The production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
     overrides. Validated (#340) as the right tier for the single agent: the
     pinned context is tiny (the gather SKILL is ~1K words vs the split's ~6K), so
     Sonnet's per-token rate is fully offset by ~half the turns / a third fewer
     queries / no KQL↔ES|QL confusion — same cost as Haiku, fewer failures."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
+
+
+# --- Model construction: Anthropic by default, Fireworks (OpenAI-compatible) for
+# GLM. The model *name* is the provider discriminator, so the existing selectors
+# (`--model` / `$DEFENDER_MODEL` / `$DEFENDER_GATHER_MODEL`) reach either provider
+# unchanged: an Anthropic id builds an AnthropicModel (the prior default); a
+# `fireworks:<id>` name — or a `glm-*` convenience alias — builds an OpenAIChatModel
+# pointed at Fireworks' OpenAI-compatible endpoint, keyed off FIREWORKS_API_KEY.
+_FIREWORKS_PREFIX = "fireworks:"
+_FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
+
+# Friendly aliases → the canonical `fireworks:<model-id>` form. GLM 5.2 is the
+# Opus-class open-weight model Fireworks serves day-zero; `glm-5p2` mirrors
+# Fireworks' own id spelling, `glm-5.2` the human one.
+_MODEL_ALIASES = {
+    "glm-5.2": _FIREWORKS_PREFIX + "accounts/fireworks/models/glm-5p2",
+    "glm-5p2": _FIREWORKS_PREFIX + "accounts/fireworks/models/glm-5p2",
+}
+
+
+def _resolve_alias(name: str) -> str:
+    return _MODEL_ALIASES.get(name, name)
+
+
+def model_provider(name: str) -> str:
+    """`"fireworks"` if `name` selects the Fireworks (OpenAI-compatible) path, else
+    `"anthropic"`. The single classifier — run.py reads it to require the matching
+    API key before a run, so a Fireworks model never 401s mid-investigation."""
+    return "fireworks" if _resolve_alias(name).startswith(_FIREWORKS_PREFIX) else "anthropic"
+
+
+def build_model(name: str) -> Model:
+    """Construct the pydantic-ai model for a resolved model name. A `fireworks:`
+    prefix (or a `glm-*` alias) builds an OpenAIChatModel on Fireworks' OpenAI-
+    compatible endpoint (GLM 5.2 et al.), keyed off `FIREWORKS_API_KEY`; anything
+    else is an AnthropicModel — the prior, byte-identical default. The openai extra
+    is imported lazily, so the Anthropic path never requires it installed."""
+    name = _resolve_alias(name)
+    if not name.startswith(_FIREWORKS_PREFIX):
+        return AnthropicModel(name)
+    model_id = name[len(_FIREWORKS_PREFIX):]
+    api_key = os.environ.get("FIREWORKS_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            f"model {name!r} needs FIREWORKS_API_KEY — set it in <repo>/.env or "
+            "$DEFENDER_ENV_FILE (Fireworks bills its OpenAI-compatible API)."
+        )
+    try:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+    except ImportError as e:  # the openai extra isn't installed
+        raise RuntimeError(
+            "the Fireworks/GLM path needs the openai extra — reinstall defender with "
+            "`uv pip install --python .venv/bin/python -e '.[openai]'`."
+        ) from e
+    return OpenAIChatModel(
+        model_id,
+        provider=OpenAIProvider(base_url=_FIREWORKS_BASE_URL, api_key=api_key),
+    )
 
 
 # Model-construction seam: tests inject fake models (pydantic-ai's FunctionModel)
@@ -166,11 +255,12 @@ ModelFactory = Callable[[AgentRole], Model]
 def _make_default_factory(main_model_name: str) -> ModelFactory:
     """The production model factory: MAIN runs `main_model_name` (run.py's
     `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
-    gather model (`_gather_model()`; Sonnet, `$DEFENDER_GATHER_MODEL` overrides).
-    Tests replace the whole factory; production is the prior AnthropicModel build."""
+    gather model (`gather_model()`; Sonnet, `$DEFENDER_GATHER_MODEL` overrides).
+    `build_model` picks the provider from the name (Anthropic, or Fireworks for a
+    `fireworks:`/`glm-*` id); tests replace the whole factory."""
     def make(role: AgentRole) -> Model:
-        name = main_model_name if role is AgentRole.MAIN else _gather_model()
-        return AnthropicModel(name)
+        name = main_model_name if role is AgentRole.MAIN else gather_model()
+        return build_model(name)
     return make
 
 
@@ -199,12 +289,13 @@ def _build_subagent(
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
     the lead/measurement. The system prompt (`instructions`) + the factory's
     GATHER-role model specialize the instance into the gather (Sonnet)."""
+    model = make_model(GatherDeps.role)
     agent = Agent(
-        make_model(GatherDeps.role),
+        model,
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
-        model_settings=_CACHE_SETTINGS,
+        model_settings=_settings_for(model),
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent, writers=False)
@@ -223,7 +314,7 @@ def build_gather_agent(
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
     split). Loads `skills/gather/SKILL.md`. The factory resolves the GATHER-role
-    model (`_gather_model()`; Sonnet, `DEFENDER_GATHER_MODEL` overrides)."""
+    model (`gather_model()`; Sonnet, `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _gather_instructions(defender_dir),
         make_model,
@@ -337,13 +428,14 @@ def build_agent(
         capabilities.append(ProcessHistory(_make_compaction_processor()))
         print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
-    print(f"[run.py] gather model: {_gather_model()}{_override}", file=sys.stderr)
+    print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
+    model = make_model(RunDeps.role)
     agent = Agent(
-        make_model(RunDeps.role),
+        model,
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,
-        model_settings=_CACHE_SETTINGS,
+        model_settings=_settings_for(model),
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)
