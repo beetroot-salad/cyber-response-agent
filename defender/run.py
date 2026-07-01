@@ -42,6 +42,7 @@ from defender import _git  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import driver  # noqa: E402
+from defender.runtime import providers  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -147,47 +148,51 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _source_provider_keys(main_model: str, gather_model: str) -> int:
-    """Source + require the API key for every provider this run will call. The MAIN
-    and gather models each pick a provider from their name (Anthropic default;
-    Fireworks for a `fireworks:`/`glm-*` id), so a mixed run (e.g. GLM main + Sonnet
-    gather) needs *both* keys. Sets the sourced keys into `os.environ`; returns a
-    non-zero exit code if a required key is missing, else 0."""
-    providers = {driver.model_provider(main_model), driver.model_provider(gather_model)}
-
-    if "anthropic" in providers:
-        # The .env key overrides the ambient subscription credential a Claude Code
-        # session exports (it 401s against the first-party REST API). See docstring.
-        key, src = resolve_first_party_key()
-        if key:
-            os.environ["ANTHROPIC_API_KEY"] = key
-            print(f"[run.py] first-party API key sourced from {src} "
-                  "(overrides the ambient subscription credential)", file=sys.stderr)
-        elif os.environ.get("ANTHROPIC_API_KEY"):
+def _source_one_provider_key(prov: providers.Provider) -> int:
+    """Source + require one provider's billable API key into `os.environ`. Prefers a
+    `.env` key over the ambient value; returns exit code 2 if neither is present."""
+    var = prov.api_key_var
+    key, src = resolve_first_party_key(var=var)
+    if key:
+        # The .env key overrides the ambient value a Claude Code session exports —
+        # for Anthropic that's the subscription credential, which 401s against the
+        # first-party REST API this engine calls.
+        os.environ[var] = key
+        note = " (overrides the ambient subscription credential)" if prov.id == "anthropic" else ""
+        print(f"[run.py] {var} sourced from {src}{note}", file=sys.stderr)
+        return 0
+    if os.environ.get(var):
+        if prov.id == "anthropic":
             print("[run.py] WARNING: no .env key found; using the ambient "
                   "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
                   "subscription credential and will 401 against the first-party API.",
                   file=sys.stderr)
         else:
-            print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
-                  "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI "
-                  "engine bills the first-party Anthropic API).", file=sys.stderr)
-            return 2
+            print(f"[run.py] using the ambient {var} for the {prov.id} model",
+                  file=sys.stderr)
+        return 0
+    if prov.id == "anthropic":
+        print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
+              "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI engine bills the "
+              "first-party Anthropic API).", file=sys.stderr)
+    else:
+        print(f"[run.py] ERROR: a {prov.id} model is selected but no {var} — set it "
+              f"in <repo>/.env or $DEFENDER_ENV_FILE ({prov.id} bills its "
+              "OpenAI-compatible API).", file=sys.stderr)
+    return 2
 
-    if "fireworks" in providers:
-        fw_key, fw_src = resolve_first_party_key(var="FIREWORKS_API_KEY")
-        if fw_key:
-            os.environ["FIREWORKS_API_KEY"] = fw_key
-            print(f"[run.py] FIREWORKS_API_KEY sourced from {fw_src}", file=sys.stderr)
-        elif os.environ.get("FIREWORKS_API_KEY"):
-            print("[run.py] using the ambient FIREWORKS_API_KEY for the Fireworks/GLM "
-                  "model", file=sys.stderr)
-        else:
-            print("[run.py] ERROR: a Fireworks/GLM model is selected but no "
-                  "FIREWORKS_API_KEY — set it in <repo>/.env or $DEFENDER_ENV_FILE "
-                  "(Fireworks bills its OpenAI-compatible API).", file=sys.stderr)
-            return 2
 
+def _source_provider_keys(main_model: str, gather_model: str) -> int:
+    """Source + require the API key for every provider this run will call. The MAIN
+    and gather models each pick a provider from their name (`providers.provider_for`),
+    so a mixed run (e.g. GLM main + Sonnet gather) needs *both* keys. Sets the sourced
+    keys into `os.environ`; returns a non-zero exit code if a required key is missing,
+    else 0."""
+    used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
+    for prov in sorted(used, key=lambda p: p.id):  # deterministic: anthropic before fireworks
+        rc = _source_one_provider_key(prov)
+        if rc:
+            return rc
     return 0
 
 

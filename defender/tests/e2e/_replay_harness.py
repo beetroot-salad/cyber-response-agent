@@ -41,6 +41,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.providers import BuiltModel  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]  # tests/e2e/ -> tests/ -> defender/
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
@@ -225,11 +226,12 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None):
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
     plumbing-free. `make_model` is the driver's DI seam; it dispatches on the
-    agent's `AgentRole` so the main loop and a nested gather get distinct fakes.
-    `override_allow_model_requests(False)` makes any real provider call raise, so
-    the run is provably hermetic."""
-    main_model = FunctionModel(main)
-    gather_model = FunctionModel(gather) if gather is not None else None
+    agent's `AgentRole` so the main loop and a nested gather get distinct fakes,
+    each returned as a `BuiltModel` (settings=None — a FunctionModel needs no
+    provider settings). `override_allow_model_requests(False)` makes any real
+    provider call raise, so the run is provably hermetic."""
+    main_model = BuiltModel(FunctionModel(main), None)
+    gather_model = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
     def make_model(role):
         if gather_model is not None and role is not AgentRole.MAIN:

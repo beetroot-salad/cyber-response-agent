@@ -78,12 +78,18 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     path, or compound wrapping; the run-dir anchors the budget/tag accounting and
     the invlang corpus root (`DEFENDER_RUNS_BASE == run_dir.parent`).
 
-    `ANTHROPIC_API_KEY` is stripped: the bash tool runs data-source shims, never
-    LLM calls, so the billable first-party key has no business in its environment
-    (the PydanticAI engine authenticates in-process from `os.environ`, which this
-    copy leaves untouched). Returns a fresh dict — never mutates `os.environ`."""
+    Every billable provider key (`providers.api_key_vars()` — `ANTHROPIC_API_KEY`,
+    `FIREWORKS_API_KEY`, …) is stripped: the bash tool runs data-source shims, never
+    LLM calls, so no billable key has any business in its environment (the PydanticAI
+    engine authenticates in-process from `os.environ`, which this copy leaves
+    untouched). Returns a fresh dict — never mutates `os.environ`."""
+    # Local import keeps this module engine-agnostic to import; providers' heavy
+    # backends are lazy, so this pulls in no pydantic-ai.
+    from defender.runtime import providers
+
     env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
+    for var in providers.api_key_vars():
+        env.pop(var, None)
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)

@@ -99,6 +99,7 @@ defender/
     driver.py           # the main-agent loop (agent.iter); installs in-process budget + observability Hooks
     tools.py            # the four generic tools + gather dispatch; in-process adapter capture; imports claim_lead/descriptor_catalog/tag/lesson-load
     permission/         # the single in-process gate (package): bash.py (gate→BashDecision) / command_shape.py (adapter classifiers, shared w/ dispatch) / files.py (read+write) — raises ModelRetry on deny
+    providers/          # LLM serving-infra abstraction (package): one provider per infra (anthropic native / fireworks OpenAI-compatible → GLM, Kimi). Owns build_model + per-role ModelSettings + api_key_var; provider_for(name) routes by name. Driver/run stay provider-neutral.
     bash_exec.py        # shell=False executor for the read-only Bash lane; parse() is the shared decomposition the gate validates against (#379), run_parsed() runs the gate's parse (#456)
     bash_policy.json    # declarative deny-by-default allowlist: read-only viewers + per-agent adapter capability + the read denylist
     bash_policy.py      # loader for bash_policy.json (fails closed to built-in defaults if unreadable)

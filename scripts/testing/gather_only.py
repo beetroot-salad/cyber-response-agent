@@ -28,7 +28,6 @@ elastic leads).
 from __future__ import annotations
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -37,7 +36,7 @@ sys.path.insert(0, str(DEFENDER_DIR.parent))
 
 from defender import run_common as _run  # noqa: E402
 from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.tools import RunDeps, _run_gather  # noqa: E402
+from defender.runtime.tools import GatherRequest, RunDeps, _run_gather  # noqa: E402
 from defender import run as _entry  # noqa: E402
 
 # Canned leads taken verbatim from the gsplit-haiku-1 crash run's leads table.
@@ -115,11 +114,11 @@ async def main() -> int:
     run_id = sys.argv[1]
     lead = LEADS[sys.argv[2] if len(sys.argv) > 2 else "baseline-7d"]
 
-    key, src = _entry.resolve_first_party_key()
-    if not key:
-        print("[gather_only] no first-party key", file=sys.stderr)
-        return 2
-    os.environ["ANTHROPIC_API_KEY"] = key
+    # Source the billable key for whichever provider the gather model selects
+    # (Fireworks for the Kimi default; Anthropic for a claude-* override).
+    rc = _entry._source_provider_keys(driver.gather_model(), driver.gather_model())
+    if rc:
+        return rc
 
     alert = DEFENDER_DIR / "fixtures/v2-cross-tier-ssh-pivot/alert.json"
     run_dir = _run.materialize_run_dir(alert, run_id)
@@ -134,11 +133,12 @@ async def main() -> int:
         return driver.build_gather_agent(DEFENDER_DIR, logger, agent_id)
 
     print(f"[gather_only] engine=gather run_dir={run_dir} "
-          f"gather_model={driver._gather_model()}", file=sys.stderr)
+          f"gather_model={driver.gather_model()}", file=sys.stderr)
     try:
-        out = await _run_gather(deps, factory, driver.GATHER_REQUEST_LIMIT,
-                                "l-001", lead["system"], lead["goal"],
-                                lead["what_to_summarize"])
+        request = GatherRequest(
+            "l-001", lead["system"], lead["goal"], tuple(lead["what_to_summarize"]),
+        )
+        out = await _run_gather(deps, factory, driver.GATHER_REQUEST_LIMIT, request)
         print("=== GATHER SUMMARY (unwrapped head) ===")
         print(out[:1200])
         print("[gather_only] OK", run_id)
