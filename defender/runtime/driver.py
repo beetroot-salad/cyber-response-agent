@@ -48,7 +48,11 @@ from defender.hooks.budget_enforcer import (
     update_budget_locked,
 )
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# The default model for BOTH roles (main + gather), so a flagless production run is
+# single-provider GLM with no Anthropic dependency. Override per role via --model /
+# $DEFENDER_MODEL (main) and $DEFENDER_GATHER_MODEL (gather) — e.g. set the gather to
+# `claude-sonnet-4-6` for the more turn-efficient gather tier (#340).
+DEFAULT_MODEL = "glm-5.2"
 DEFAULT_REQUEST_LIMIT = 60
 GATHER_REQUEST_LIMIT = 40  # the gather's per-lead loop; large multi-dimension
 # leads need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
@@ -175,20 +179,21 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
 
 
 def gather_model() -> str:
-    """The production gather model — **Sonnet** by default; `DEFENDER_GATHER_MODEL`
-    overrides. Validated (#340) as the right tier for the single agent: the
-    pinned context is tiny (the gather SKILL is ~1K words vs the split's ~6K), so
-    Sonnet's per-token rate is fully offset by ~half the turns / a third fewer
-    queries / no KQL↔ES|QL confusion — same cost as Haiku, fewer failures."""
+    """The production gather model — **GLM** by default (`DEFAULT_MODEL`), so a
+    production run is single-provider with no Anthropic dependency;
+    `DEFENDER_GATHER_MODEL` overrides. Note (#340): Sonnet is the more turn-efficient
+    gather tier — its per-token rate is offset by ~half the turns / a third fewer
+    queries / no KQL↔ES|QL confusion — so set `DEFENDER_GATHER_MODEL=claude-sonnet-4-6`
+    to trade single-provider ops for that efficiency."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_MODEL
 
 
-# --- Model construction: Anthropic by default, Fireworks (OpenAI-compatible) for
-# GLM. The model *name* is the provider discriminator, so the existing selectors
-# (`--model` / `$DEFENDER_MODEL` / `$DEFENDER_GATHER_MODEL`) reach either provider
-# unchanged: an Anthropic id builds an AnthropicModel (the prior default); a
-# `fireworks:<id>` name — or a `glm-*` convenience alias — builds an OpenAIChatModel
-# pointed at Fireworks' OpenAI-compatible endpoint, keyed off FIREWORKS_API_KEY.
+# --- Model construction: routes by model name. The name is the provider
+# discriminator, so the selectors (`--model` / `$DEFENDER_MODEL` /
+# `$DEFENDER_GATHER_MODEL`) reach either provider: a `claude-*` id builds an
+# AnthropicModel; a `fireworks:<id>` name — or a `glm-*` convenience alias — builds
+# an OpenAIChatModel on Fireworks' OpenAI-compatible endpoint, keyed off
+# FIREWORKS_API_KEY, which is now the default (`DEFAULT_MODEL = "glm-5.2"`).
 _FIREWORKS_PREFIX = "fireworks:"
 _FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
 
@@ -255,7 +260,7 @@ ModelFactory = Callable[[AgentRole], Model]
 def _make_default_factory(main_model_name: str) -> ModelFactory:
     """The production model factory: MAIN runs `main_model_name` (run.py's
     `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
-    gather model (`gather_model()`; Sonnet, `$DEFENDER_GATHER_MODEL` overrides).
+    gather model (`gather_model()`; GLM, `$DEFENDER_GATHER_MODEL` overrides).
     `build_model` picks the provider from the name (Anthropic, or Fireworks for a
     `fireworks:`/`glm-*` id); tests replace the whole factory."""
     def make(role: AgentRole) -> Model:
@@ -288,7 +293,7 @@ def _build_subagent(
     summary — it never authors investigation.md/report.md, so denying it
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
     the lead/measurement. The system prompt (`instructions`) + the factory's
-    GATHER-role model specialize the instance into the gather (Sonnet)."""
+    GATHER-role model specialize the instance into the gather (GLM by default)."""
     model = make_model(GatherDeps.role)
     agent = Agent(
         model,
@@ -314,7 +319,7 @@ def build_gather_agent(
     PydanticAI engine. One agent runs find→execute(one server-side ES|QL
     aggregation)→verify and auto-captures its own adapter calls (no finder/executor
     split). Loads `skills/gather/SKILL.md`. The factory resolves the GATHER-role
-    model (`gather_model()`; Sonnet, `DEFENDER_GATHER_MODEL` overrides)."""
+    model (`gather_model()`; GLM, `DEFENDER_GATHER_MODEL` overrides)."""
     return _build_subagent(
         defender_dir, logger, agent_id, _gather_instructions(defender_dir),
         make_model,

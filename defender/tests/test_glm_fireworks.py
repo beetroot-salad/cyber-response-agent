@@ -45,7 +45,7 @@ def test_model_provider_classifies_by_name(name, provider):
 
 # --- build_model routing ----------------------------------------------------
 
-def test_build_model_anthropic_is_the_default(monkeypatch):
+def test_build_model_routes_claude_to_anthropic(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     assert isinstance(driver.build_model("claude-sonnet-4-6"), AnthropicModel)
 
