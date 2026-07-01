@@ -35,10 +35,10 @@ from pathlib import Path
 from collections.abc import Callable
 
 from defender import _git
-from defender._git import GitError
+from defender._git import REPO_ROOT, GitError
+from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_BRANCH_PREFIX = "lessons/"
 # The PR always targets main; we branch off origin/main so the base is the latest
 # merged corpus, never the dev's possibly-stale local main.
@@ -64,23 +64,37 @@ def _lessons_pr_body(branch: str) -> str:
 
 @dataclass
 class AuthorBranch:
-    # Only the forge is injected (the network/auth boundary); git is direct.
+    # ``forge`` is the one explicit injection seam (the network/auth boundary); git is
+    # direct. Left at its default, its cwd follows ``repo_root`` (resolved in
+    # ``__post_init__``) so ``gh`` runs where the branch was pushed from, not a stale
+    # module global (#479).
     forge: Forge = field(default_factory=GhForge)
-    # The checkout the repo-level git ops (fetch / worktree add+remove+prune, for both the
-    # batch lifecycle and the revert) run against. Defaults to the real repo root in
-    # production; threaded from a config / pointed at a tmp repo in tests (the #389
-    # inject-the-root, not-a-module-global pattern), so tests exercise real git without
-    # touching the dev checkout. Worktree-scoped ops (push / commits_ahead) take the
-    # worktree path.
+    # The one injected root: the checkout the repo-level git ops (fetch / worktree
+    # add+remove+prune, for both the batch lifecycle and the revert) run against. The
+    # other two roots (``worktree_base``, ``forge.cwd``) derive from it when left at their
+    # default, so a caller threading only ``repo_root`` can't get worktrees/PRs pointed at
+    # a different repo (#479). Defaults to the real repo root in production; threaded from
+    # a config / pointed at a tmp repo in tests (#389 inject-the-root). Worktree-scoped ops
+    # (push / commits_ahead) take the worktree path, not this root.
     repo_root: Path = REPO_ROOT
     # Per-author identity: lessons defaults keep existing callers unchanged; the
     # lead author passes ``branch_prefix="lead-author/"`` + its own PR text.
     branch_prefix: str = LESSONS_BRANCH_PREFIX
     pr_title: Callable[[str], str] = _lessons_pr_title  # (batch_id) -> title
     pr_body: Callable[[str], str] = _lessons_pr_body    # (branch)   -> body
-    # Where batch worktrees are created (one leaf dir per batch). Repo-local
-    # scratch; the orchestrator passes ``LoopPaths.worktree_base``.
+    # Where batch worktrees are created (one leaf dir per batch). Left at its module
+    # default it derives ``repo_root/.worktrees`` (via ``DefenderPaths``, the single owner
+    # of that offset) in ``__post_init__``; pass explicitly to place the leaf elsewhere.
     worktree_base: Path = field(default_factory=lambda: REPO_ROOT / ".worktrees")
+
+    def __post_init__(self) -> None:
+        # #479: tie the other two roots to the single injected ``repo_root``. A field left
+        # at its module-root default (the caller didn't override it) is re-derived from
+        # ``repo_root`` so the three can't drift; an explicitly-passed value is preserved.
+        if self.worktree_base == REPO_ROOT / ".worktrees":
+            self.worktree_base = DefenderPaths(self.repo_root).worktree_base
+        if self.forge == GhForge(cwd=REPO_ROOT):
+            self.forge = GhForge(cwd=self.repo_root)
 
     # -- naming -------------------------------------------------------------
 

@@ -856,7 +856,7 @@ def author_drain(
     if trigger_author is None:
         trigger_author = _maybe_trigger_author
     if branch is None:
-        branch = AuthorBranch(worktree_base=paths.worktree_base)
+        branch = AuthorBranch(repo_root=paths.repo_root)
 
     with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
         if not locked:
@@ -894,10 +894,10 @@ def lead_author_drain(
         run_pitfalls = _invoke_pitfalls
     if branch is None:
         branch = AuthorBranch(
+            repo_root=paths.repo_root,
             branch_prefix="lead-author/",
             pr_title=_lead_author_pr_title,
             pr_body=_lead_author_pr_body,
-            worktree_base=paths.worktree_base,
         )
 
     with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
