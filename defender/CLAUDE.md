@@ -374,8 +374,8 @@ non-`Optional`. Don't re-coalesce a parameter in the body with
 knowledge across every call site, where it drifts. Anchor it instead — either a
 signature default that references the constant (`repo_root: Path = REPO_ROOT`),
 or defer to the single callee that already owns the default (`load_catalog`
-resolves `None → CATALOG_ROOT`, so forward `None` straight through rather than
-pre-resolving it). Prefer `is not None` over `or` — `or` mis-fires on
+resolves `None → PATHS.catalog_dir`, so forward `None` straight through rather
+than pre-resolving it). Prefer `is not None` over `or` — `or` mis-fires on
 valid-falsy values (`0` / `""` / `[]`). Two shapes are fine and *not* the smell:
 a literal/empty-container default for a mutable arg (`items = items if items is
 not None else []`, the only correct fix for `def f(items=[])`), and a single

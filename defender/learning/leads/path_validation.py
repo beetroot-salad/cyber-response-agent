@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """Scope-gate path classifiers — lead_author's edit scope (domain logic, not git
-lifecycle), plus the shared module-level path constants they key off.
+lifecycle), plus the leads-facing aliases of the shared repo layout they key off.
 
-These constants live here, the lowest leaf of the lead-author module group, so the
-sibling leaves (``draft_synthesis`` / ``lead_extraction``) and ``lead_author`` itself
-import them from one place rather than each redefining the catalog/skills layout — and
-so a leaf never has to import them back *from* ``lead_author`` (which would cycle).
+The catalog/skills layout is owned by ``defender._paths.DefenderPaths`` (the single
+source, #476); this module re-exports the absolute forms + the ``_rel`` string twins so
+the sibling leaves (``draft_synthesis`` / ``lead_extraction``) and ``lead_author`` keep
+importing them from here — one leads-facing home, but the offsets are defined once, in
+``DefenderPaths``, not redeclared per module. A leaf never imports them back *from*
+``lead_author`` (which would cycle); ``_paths`` is a lower leaf still.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 from defender import _git
+from defender._paths import PATHS, DefenderPaths
 
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-LEARNING_DIR = REPO_ROOT / "defender" / "learning"
-CATALOG_DIR = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
-CATALOG_REL = "defender/skills/gather/queries/"
-SKILLS_DIR = REPO_ROOT / "defender" / "skills"
-SKILLS_REL = "defender/skills/"
+# Aliases of the single owner (``defender._paths``): the absolute forms off the
+# resolved ``PATHS`` singleton, the ``_rel`` string twins off its class constants.
+# The classifiers below key off the ``_rel`` prefixes (repo-root-independent).
+REPO_ROOT = PATHS.repo_root
+LEARNING_DIR = PATHS.learning_dir
+CATALOG_DIR = PATHS.catalog_dir
+CATALOG_REL = DefenderPaths.catalog_rel
+SKILLS_DIR = PATHS.skills_dir
+SKILLS_REL = DefenderPaths.skills_rel
 
 
 def _under_draft(path: str) -> bool:

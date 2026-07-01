@@ -32,9 +32,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-CATALOG_ROOT = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
+from defender._paths import PATHS
 
 
 PLUMBING_TOKENS = frozenset(
@@ -142,10 +140,11 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
     distinguishes them; for compatibility with pre-refinement templates
     the field defaults to ``"established"`` when absent.
 
-    ``catalog_dir`` defaults to module-level ``CATALOG_ROOT`` resolved
-    lazily so tests can rebind it.
+    ``catalog_dir`` defaults to ``PATHS.catalog_dir`` — this function stays the
+    single owner of the ``None → default`` catalog-dir resolution (#475/#476), so
+    callers forward ``None`` through rather than pre-resolving it.
     """
-    root = catalog_dir if catalog_dir is not None else CATALOG_ROOT
+    root = catalog_dir if catalog_dir is not None else PATHS.catalog_dir
     out: list[Template] = []
     paths = sorted(list(root.glob("*/*.md")) + list(root.glob("*/_draft/*.md")))
     for path in paths:
@@ -351,8 +350,8 @@ def main(argv: list[str]) -> int:
     p.add_argument(
         "--catalog",
         type=Path,
-        default=CATALOG_ROOT,
-        help=f"Catalog dir (defaults to {CATALOG_ROOT}).",
+        default=PATHS.catalog_dir,
+        help=f"Catalog dir (defaults to {PATHS.catalog_dir}).",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
 

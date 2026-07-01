@@ -12,6 +12,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 # The env-coercion + clock primitives live at the ``defender.`` namespace root so
@@ -29,6 +30,11 @@ from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled
 # runtime/hooks/scripts can import it without coupling to the loop — #317).
 # Re-exported here so learning-side code keeps importing it off core.config.
 from defender._run_paths import RunPaths  # noqa: F401 — re-export
+# DefenderPaths is the repo-relative layout primitive (defender/_paths.py, another
+# neutral top-level value object): the single owner of every ``<repo>/defender/...``
+# offset. LoopPaths composes it below (its repo-relative properties delegate), and it
+# is re-exported here so learning-side code imports it off core.config like RunPaths.
+from defender._paths import DefenderPaths  # noqa: F401 — used by LoopPaths + re-export
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -63,55 +69,64 @@ class LoopPaths:
     repo_root: Path
     state_dir: Path | None = None
 
+    @cached_property
+    def defender(self) -> DefenderPaths:
+        """The repo-relative layout, composed. The offset strings live in
+        ``DefenderPaths`` (``defender/_paths.py``); the repo-relative properties
+        below delegate here so there is one owner per offset. ``LoopPaths`` keeps
+        ``repo_root`` as its field, so every caller constructs it unchanged.
+
+        ``cached_property``: ``repo_root`` is frozen, so the composed value never
+        changes — resolve it once instead of allocating a fresh ``DefenderPaths`` on
+        every delegated property read."""
+        return DefenderPaths(self.repo_root)
+
+    # Repo-relative corpora + catalog + skills roots (read-only at runtime; never
+    # relocate with DEFENDER_LEARNING_STATE_DIR). Delegated to ``self.defender`` so
+    # the author family + scope-gate share one layout owner; a test rooted at a tmp
+    # tree still resolves them with one ``LoopPaths(repo_root=tmp)``.
     @property
     def learning_dir(self) -> Path:
-        return self.repo_root / "defender" / "learning"
+        return self.defender.learning_dir
 
-    # Repo-relative corpora + catalog roots (read-only at runtime; never
-    # relocate with DEFENDER_LEARNING_STATE_DIR). The author family reads these
-    # off ``paths`` instead of import-time module globals so a test rooted at a
-    # tmp tree resolves them with one ``LoopPaths(repo_root=tmp)``.
     @property
     def lessons_dir(self) -> Path:
-        return self.repo_root / "defender" / "lessons"
+        return self.defender.lessons_dir
 
     @property
     def lessons_actor_dir(self) -> Path:
-        return self.repo_root / "defender" / "lessons-actor"
+        return self.defender.lessons_actor_dir
 
     @property
     def lessons_environment_dir(self) -> Path:
-        return self.repo_root / "defender" / "lessons-environment"
+        return self.defender.lessons_environment_dir
 
     # Repo-relative twins of the three corpus dirs, used as git pathspec prefixes
-    # by the author commit/scope-gate. The trailing slash is significant (prefix
-    # match), so keep it. Repo-root-independent — these are the on-disk layout.
+    # by the author commit/scope-gate. Trailing slash significant; repo-root-
+    # independent class constants on ``DefenderPaths``.
     @property
     def lessons_dir_rel(self) -> str:
-        return "defender/lessons/"
+        return DefenderPaths.lessons_dir_rel
 
     @property
     def lessons_actor_dir_rel(self) -> str:
-        return "defender/lessons-actor/"
+        return DefenderPaths.lessons_actor_dir_rel
 
     @property
     def lessons_environment_dir_rel(self) -> str:
-        return "defender/lessons-environment/"
+        return DefenderPaths.lessons_environment_dir_rel
 
     @property
     def catalog_dir(self) -> Path:
-        return self.repo_root / "defender" / "skills" / "gather" / "queries"
+        return self.defender.catalog_dir
 
     @property
     def skills_dir(self) -> Path:
-        return self.repo_root / "defender" / "skills"
+        return self.defender.skills_dir
 
     @property
     def worktree_base(self) -> Path:
-        # Repo-local scratch where each author drain creates its throwaway batch
-        # worktree (one leaf dir per batch; see author/branch.py). Repo-relative
-        # so a tmp-tree test resolves it under its own root.
-        return self.repo_root / ".worktrees"
+        return self.defender.worktree_base
 
     @property
     def state_root(self) -> Path:
