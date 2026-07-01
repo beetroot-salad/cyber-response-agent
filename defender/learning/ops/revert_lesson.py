@@ -5,8 +5,8 @@ Lessons are recommend-only and reversible: the post-merge control is not pre-mer
 sign-off but visibility (``trace_lesson.py``) + this one-click revert. Given a lesson
 slug, opens a PR that ``git rm``s ``defender/lessons/<name>.md`` off freshly-fetched
 ``origin/main`` — reusing ``author_branch.AuthorBranch`` for the branch/PR machinery
-(dirty-tree guard, HEAD restore). Not lease-gated: a revert may need to land while
-another lessons PR is open.
+(its own throwaway worktree, so the dev checkout is never touched). Not lease-gated: a
+revert may need to land while another lessons PR is open.
 
 Usage:
   revert_lesson.py <lesson_name>

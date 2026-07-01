@@ -1463,8 +1463,26 @@ def test_author_branch_revert_succeeds_with_dirty_dev_tree(tmp_path: Path):
     (work / "dirty.txt").write_text("uncommitted\n")  # dev tree dirty — must not matter
     b = ab.AuthorBranch(forge=_FakeForge(create_ref="https://pr/1"),
                         repo_root=work, worktree_base=tmp_path / "wt")
+    head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
     assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/1"
     assert (work / "dirty.txt").read_text() == "uncommitted\n"  # dev tree left alone
+    assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before  # dev HEAD never moved
+
+
+def test_author_branch_revert_reclaims_leftover_nonworktree_dir(tmp_path: Path):
+    """The revert worktree path is deterministic per lesson, so a crashed prior revert can
+    leave a plain (unregistered) directory there. `git worktree remove`/`prune` don't clear
+    such a dir, so the reclaim must `rmtree` it — else `worktree add` wedges on "already
+    exists" for every future revert of that lesson."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    wt_base = tmp_path / "wt"
+    stale = wt_base / "lessons-revert-bad"  # the deterministic leaf for lesson "bad"
+    stale.mkdir(parents=True)
+    (stale / "leftover.txt").write_text("crashed-revert debris\n")  # non-empty, unregistered
+    b = ab.AuthorBranch(forge=_FakeForge(create_ref="https://pr/9"),
+                        repo_root=work, worktree_base=wt_base)
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/9"
+    assert _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
 
 
 def test_author_branch_revert_refuses_missing_lesson_on_base(tmp_path: Path):

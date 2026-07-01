@@ -99,8 +99,8 @@ stderr. Layer-neutral, loud-by-default — the `FatalConfigError(ValueError)`
 shape exactly. The disposition lives at the catch site, not in `_git.py`.
 
 **Deliberate precondition checks keep their domain error.** Validated states — a
-dirty corpus (`assert_clean_corpus_dir` → the envelope's `return 2`), a dirty
-tree before a revert (`BranchError`) — are semantic guards, not subprocess
+dirty corpus (`assert_clean_corpus_dir` → the envelope's `return 2`), a lesson missing
+from `origin/main` before a revert (`BranchError`) — are semantic guards, not subprocess
 failures; they keep raising `AuthorError` / `BranchError` with their existing
 messages.
 

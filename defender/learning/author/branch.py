@@ -29,6 +29,7 @@ envelope's ``except BranchError`` skip/retry path is unchanged.
 from __future__ import annotations
 
 import contextlib
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
@@ -65,11 +66,12 @@ def _lessons_pr_body(branch: str) -> str:
 class AuthorBranch:
     # Only the forge is injected (the network/auth boundary); git is direct.
     forge: Forge = field(default_factory=GhForge)
-    # The checkout the repo-level git ops (fetch / worktree add+remove+prune / the
-    # in-place revert) run against. Defaults to the real repo root in production;
-    # threaded from a config / pointed at a tmp repo in tests (the #389 inject-the-root,
-    # not-a-module-global pattern), so tests exercise real git without touching the
-    # dev checkout. Worktree-scoped ops (push / commits_ahead) take the worktree path.
+    # The checkout the repo-level git ops (fetch / worktree add+remove+prune, for both the
+    # batch lifecycle and the revert) run against. Defaults to the real repo root in
+    # production; threaded from a config / pointed at a tmp repo in tests (the #389
+    # inject-the-root, not-a-module-global pattern), so tests exercise real git without
+    # touching the dev checkout. Worktree-scoped ops (push / commits_ahead) take the
+    # worktree path.
     repo_root: Path = REPO_ROOT
     # Per-author identity: lessons defaults keep existing callers unchanged; the
     # lead author passes ``branch_prefix="lead-author/"`` + its own PR text.
@@ -182,11 +184,18 @@ class AuthorBranch:
         (``defender/lessons/<name>.md``)."""
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
         wt = self.worktree_base / branch.replace("/", "-")  # branch↔worktree correspond
-        with contextlib.suppress(GitError):
-            _git.git_worktree_prune(self.repo_root)  # clear crashed-revert stragglers
         # The revert worktree path is deterministic (per lesson), so unlike the random
-        # batch id it can collide with a crashed prior revert's leaf — reclaim it first.
+        # batch id it can collide with a crashed prior revert's leaf — in any of the three
+        # shapes that leaf can take. Reclaim each before ``worktree add``, or every future
+        # revert of this lesson wedges: ``cleanup`` removes a *registered* worktree; the
+        # ``rmtree`` clears a *non-registered* leftover dir (which ``worktree remove`` won't
+        # touch, so ``worktree add`` would fail "already exists"); the trailing ``prune``
+        # then drops any registration the rmtree orphaned.
         self.cleanup(wt)
+        with contextlib.suppress(OSError):
+            shutil.rmtree(wt)
+        with contextlib.suppress(GitError):
+            _git.git_worktree_prune(self.repo_root)
         try:
             _git.git_fetch(self.repo_root)
             # Existence is checked against ``origin/main`` — the base we branch off — NOT
@@ -198,10 +207,6 @@ class AuthorBranch:
                 raise BranchError(f"no such lesson on {_BRANCH_BASE}: {lesson_rel_path}")
             self.worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(self.repo_root, wt, _BRANCH_BASE, branch=branch)
-        except GitError as e:
-            self.cleanup(wt)  # best-effort remove of any partial worktree
-            raise BranchError(str(e)) from e
-        try:
             _git.git(["rm", lesson_rel_path], cwd=wt)
             _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
             _git.git_push(wt, branch)
