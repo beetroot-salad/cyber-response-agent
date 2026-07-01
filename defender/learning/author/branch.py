@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
 
@@ -65,36 +65,43 @@ def _lessons_pr_body(branch: str) -> str:
 @dataclass
 class AuthorBranch:
     # ``forge`` is the one explicit injection seam (the network/auth boundary); git is
-    # direct. Left at its default, its cwd follows ``repo_root`` (resolved in
-    # ``__post_init__``) so ``gh`` runs where the branch was pushed from, not a stale
-    # module global (#479).
-    forge: Forge = field(default_factory=GhForge)
+    # direct. ``None`` (the default) means "derive from ``repo_root``": the ``_forge``
+    # property resolves it to ``GhForge(cwd=repo_root)`` so ``gh`` runs where the branch
+    # was pushed from, not a stale module global (#479). Pass a forge to inject one.
+    forge: Forge | None = None
     # The one injected root: the checkout the repo-level git ops (fetch / worktree
     # add+remove+prune, for both the batch lifecycle and the revert) run against. The
     # other two roots (``worktree_base``, ``forge.cwd``) derive from it when left at their
-    # default, so a caller threading only ``repo_root`` can't get worktrees/PRs pointed at
-    # a different repo (#479). Defaults to the real repo root in production; threaded from
-    # a config / pointed at a tmp repo in tests (#389 inject-the-root). Worktree-scoped ops
-    # (push / commits_ahead) take the worktree path, not this root.
+    # ``None`` default, so a caller threading only ``repo_root`` can't get worktrees/PRs
+    # pointed at a different repo (#479). Defaults to the real repo root in production;
+    # threaded from a config / pointed at a tmp repo in tests (#389 inject-the-root).
+    # Worktree-scoped ops (push / commits_ahead) take the worktree path, not this root.
     repo_root: Path = REPO_ROOT
     # Per-author identity: lessons defaults keep existing callers unchanged; the
     # lead author passes ``branch_prefix="lead-author/"`` + its own PR text.
     branch_prefix: str = LESSONS_BRANCH_PREFIX
     pr_title: Callable[[str], str] = _lessons_pr_title  # (batch_id) -> title
     pr_body: Callable[[str], str] = _lessons_pr_body    # (branch)   -> body
-    # Where batch worktrees are created (one leaf dir per batch). Left at its module
-    # default it derives ``repo_root/.worktrees`` (via ``DefenderPaths``, the single owner
-    # of that offset) in ``__post_init__``; pass explicitly to place the leaf elsewhere.
-    worktree_base: Path = field(default_factory=lambda: REPO_ROOT / ".worktrees")
+    # Where batch worktrees are created (one leaf dir per batch). ``None`` (the default)
+    # derives ``repo_root/.worktrees`` via ``DefenderPaths`` (the single owner of that
+    # offset) in the ``_worktree_base`` property; pass a path to place the leaf elsewhere.
+    worktree_base: Path | None = None
 
-    def __post_init__(self) -> None:
-        # #479: tie the other two roots to the single injected ``repo_root``. A field left
-        # at its module-root default (the caller didn't override it) is re-derived from
-        # ``repo_root`` so the three can't drift; an explicitly-passed value is preserved.
-        if self.worktree_base == REPO_ROOT / ".worktrees":
-            self.worktree_base = DefenderPaths(self.repo_root).worktree_base
-        if self.forge == GhForge(cwd=REPO_ROOT):
-            self.forge = GhForge(cwd=self.repo_root)
+    # ``forge``/``worktree_base`` are injected-or-``None``; resolve the ``None`` default
+    # from ``repo_root`` at the point of use — the ``state_dir``→``state_root`` idiom in
+    # ``core.config``. ``is not None`` distinguishes "injected" from "derive", so an
+    # explicit override that happens to equal the derived value is never clobbered (the
+    # value-equality sentinel it replaces silently would), and ``.worktrees`` stays owned
+    # once by ``DefenderPaths`` (#476/#479).
+    @property
+    def _forge(self) -> Forge:
+        return self.forge if self.forge is not None else GhForge(cwd=self.repo_root)
+
+    @property
+    def _worktree_base(self) -> Path:
+        if self.worktree_base is not None:
+            return self.worktree_base
+        return DefenderPaths(self.repo_root).worktree_base
 
     # -- naming -------------------------------------------------------------
 
@@ -103,7 +110,7 @@ class AuthorBranch:
 
     def _worktree_path(self, batch_id: str) -> Path:
         slug = self.branch_prefix.rstrip("/").replace("/", "-") or "author"
-        return self.worktree_base / f"{slug}-{batch_id}"
+        return self._worktree_base / f"{slug}-{batch_id}"
 
     def commits_ahead(self, wt: Path) -> int:
         return _git.git_rev_list_count(wt, rev_range=f"{_BRANCH_BASE}..HEAD")
@@ -118,7 +125,7 @@ class AuthorBranch:
         head actually *starts with* the prefix so an unrelated PR can't hold the lease.
         """
         try:
-            rows = self.forge.list_open_prs(self.branch_prefix)
+            rows = self._forge.list_open_prs(self.branch_prefix)
         except ForgeError as e:
             raise BranchError(str(e)) from e
         return any(
@@ -145,7 +152,7 @@ class AuthorBranch:
         wt = self._worktree_path(batch_id)
         try:
             _git.git_fetch(self.repo_root)
-            self.worktree_base.mkdir(parents=True, exist_ok=True)
+            self._worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(
                 self.repo_root, wt, _BRANCH_BASE, branch=self._branch(batch_id)
             )
@@ -166,7 +173,7 @@ class AuthorBranch:
         branch = self._branch(batch_id)
         try:
             _git.git_push(wt, branch)
-            ref = self.forge.open_pr(
+            ref = self._forge.open_pr(
                 base=_PR_BASE, head=branch,
                 title=self.pr_title(batch_id), body=self.pr_body(branch),
             )
@@ -197,7 +204,7 @@ class AuthorBranch:
         Returns the PR ref. ``lesson_rel_path`` is repo-relative
         (``defender/lessons/<name>.md``)."""
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
-        wt = self.worktree_base / branch.replace("/", "-")  # branch↔worktree correspond
+        wt = self._worktree_base / branch.replace("/", "-")  # branch↔worktree correspond
         # The revert worktree path is deterministic (per lesson), so unlike the random
         # batch id it can collide with a crashed prior revert's leaf — in any of the three
         # shapes that leaf can take. Reclaim each before ``worktree add``, or every future
@@ -219,12 +226,12 @@ class AuthorBranch:
                 ["cat-file", "-e", f"{_BRANCH_BASE}:{lesson_rel_path}"], cwd=self.repo_root
             ):
                 raise BranchError(f"no such lesson on {_BRANCH_BASE}: {lesson_rel_path}")
-            self.worktree_base.mkdir(parents=True, exist_ok=True)
+            self._worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(self.repo_root, wt, _BRANCH_BASE, branch=branch)
             _git.git(["rm", lesson_rel_path], cwd=wt)
             _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
             _git.git_push(wt, branch)
-            return self.forge.open_pr(
+            return self._forge.open_pr(
                 base=_PR_BASE, head=branch,
                 title=f"revert lesson: {lesson_name}",
                 body=(

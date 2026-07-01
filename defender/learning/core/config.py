@@ -12,6 +12,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 # The env-coercion + clock primitives live at the ``defender.`` namespace root so
@@ -68,12 +69,16 @@ class LoopPaths:
     repo_root: Path
     state_dir: Path | None = None
 
-    @property
+    @cached_property
     def defender(self) -> DefenderPaths:
         """The repo-relative layout, composed. The offset strings live in
         ``DefenderPaths`` (``defender/_paths.py``); the repo-relative properties
         below delegate here so there is one owner per offset. ``LoopPaths`` keeps
-        ``repo_root`` as its field, so every caller constructs it unchanged."""
+        ``repo_root`` as its field, so every caller constructs it unchanged.
+
+        ``cached_property``: ``repo_root`` is frozen, so the composed value never
+        changes — resolve it once instead of allocating a fresh ``DefenderPaths`` on
+        every delegated property read."""
         return DefenderPaths(self.repo_root)
 
     # Repo-relative corpora + catalog + skills roots (read-only at runtime; never
