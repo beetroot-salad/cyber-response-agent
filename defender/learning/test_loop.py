@@ -1445,29 +1445,33 @@ def test_author_branch_worktree_lifecycle_real_git(tmp_path: Path):
 def test_author_branch_revert_lesson_pr_removes_and_opens_pr(tmp_path: Path):
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad lesson\n"})
     forge = _FakeForge(create_ref="https://github.com/o/r/pull/42")
-    b = ab.AuthorBranch(forge=forge, repo_root=work)
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
     ref_before = _real(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://github.com/o/r/pull/42"
     assert forge.open_calls[0]["head"] == "lessons/revert-bad"
     assert forge.open_calls[0]["title"] == "revert lesson: bad"
-    # the revert branch reached origin and HEAD was restored to the original ref
+    # the revert branch reached origin; the dev checkout's HEAD is never moved (worktree model)
     assert _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
     assert _real(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == ref_before
+    assert not (tmp_path / "wt" / "lessons-revert-bad").exists()  # worktree removed after
 
 
-def test_author_branch_revert_refuses_dirty_tree(tmp_path: Path):
+def test_author_branch_revert_succeeds_with_dirty_dev_tree(tmp_path: Path):
+    """The revert runs in its own worktree, so a dirty dev checkout no longer blocks it
+    (the #477 HEAD-safety win) and the dev tree is left untouched."""
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
-    (work / "dirty.txt").write_text("uncommitted\n")  # working tree no longer clean
-    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work)
-    with pytest.raises(ab.BranchError):
-        b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+    (work / "dirty.txt").write_text("uncommitted\n")  # dev tree dirty — must not matter
+    b = ab.AuthorBranch(forge=_FakeForge(create_ref="https://pr/1"),
+                        repo_root=work, worktree_base=tmp_path / "wt")
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/1"
+    assert (work / "dirty.txt").read_text() == "uncommitted\n"  # dev tree left alone
 
 
 def test_author_branch_revert_refuses_missing_lesson_on_base(tmp_path: Path):
     """Existence is checked against origin/main, not the local tree — a lesson absent
     from the base raises before any branch churn (no stray local revert branch)."""
     _, work = _origin_work(tmp_path)  # no lesson seeded
-    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work)
+    b = ab.AuthorBranch(forge=_FakeForge(), repo_root=work, worktree_base=tmp_path / "wt")
     head_before = _real(work, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(ab.BranchError):
         b.revert_lesson_pr("defender/lessons/ghost.md", "ghost")
@@ -1481,14 +1485,14 @@ def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
     paths = LoopPaths(repo_root=tmp_path)
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
     forge = _FakeForge(create_ref="https://pr/7")
-    b = ab.AuthorBranch(forge=forge, repo_root=work)
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
     assert rl.revert("bad", branch=b, paths=paths) == 0
     assert forge.open_calls[0]["head"] == "lessons/revert-bad"  # PR opened through the lock
 
 
 def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     """A revert run while an author drain holds the lock fails fast (rc 3), without
-    touching git — no racing checkout -B against the in-flight batch."""
+    touching git — the flock still serializes the revert against the in-flight batch."""
     import fcntl as _fcntl
 
     from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]

@@ -179,6 +179,24 @@ def git_commit(
     return git_head_sha(cwd)
 
 
+def git_fetch(cwd: Path) -> None:
+    """``git fetch origin`` at ``cwd`` — refresh the remote-tracking refs the author
+    drains branch off (``origin/main``). Raises ``GitError`` on failure."""
+    git(["fetch", "origin"], cwd=cwd)
+
+
+def git_push(cwd: Path, branch: str) -> None:
+    """``git push --set-upstream origin <branch>`` from the checkout at ``cwd`` — the
+    first push of a fresh author batch/revert branch (sets the upstream). Raises
+    ``GitError`` on failure.
+
+    The remote (``origin``) and ``--set-upstream`` are fixed: both call sites push a
+    brand-new batch/revert branch. A ``remote=`` / flag knob earns its place only once a
+    second caller varies it (the same "no speculative parameter" bar that kept
+    ``git_checkout`` out — its sites are migrating to ``git_worktree_add``, #477/#478)."""
+    git(["push", "--set-upstream", "origin", branch], cwd=cwd)
+
+
 def git_worktree_add(
     cwd: Path,
     path: Path | str,

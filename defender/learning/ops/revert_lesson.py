@@ -33,9 +33,11 @@ def revert(
 ) -> int:
     """Open a one-click revert PR for ``defender/lessons/<lesson_name>.md``.
 
-    Holds the author-drain flock for the duration so an in-flight ``author_drain``
-    batch can't move the shared checkout out from under the ``checkout -B`` (and vice
-    versa). Existence is verified against ``origin/main`` inside ``revert_lesson_pr``."""
+    ``revert_lesson_pr`` is now HEAD-safe on its own (it runs in a throwaway worktree off
+    ``origin/main``, never the dev checkout), so this flock is belt-and-suspenders — it
+    serializes the revert against an in-flight ``author_drain`` at the process level
+    rather than being the sole guard it was under the old in-place ``checkout -B``.
+    Existence is verified against ``origin/main`` inside ``revert_lesson_pr``."""
     if branch is None:
         branch = AuthorBranch()
     rel = f"{LESSONS_REL}/{lesson_name}.md"

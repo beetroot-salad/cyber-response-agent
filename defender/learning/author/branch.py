@@ -128,7 +128,7 @@ class AuthorBranch:
             _git.git_worktree_prune(self.repo_root)  # best-effort; clears crashed-batch stragglers
         wt = self._worktree_path(batch_id)
         try:
-            _git.git(["fetch", "origin"], cwd=self.repo_root)
+            _git.git_fetch(self.repo_root)
             self.worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(
                 self.repo_root, wt, _BRANCH_BASE, branch=self._branch(batch_id)
@@ -149,7 +149,7 @@ class AuthorBranch:
             return None
         branch = self._branch(batch_id)
         try:
-            _git.git(["push", "--set-upstream", "origin", branch], cwd=wt)
+            _git.git_push(wt, branch)
             ref = self.forge.open_pr(
                 base=_PR_BASE, head=branch,
                 title=self.pr_title(batch_id), body=self.pr_body(branch),
@@ -167,55 +167,44 @@ class AuthorBranch:
         with contextlib.suppress(GitError):
             _git.git_worktree_remove(self.repo_root, wt, force=True)
 
-    # -- one-click revert (in-place; not on the concurrent-drain path) ------
-
-    def working_tree_dirty(self) -> bool:
-        return bool(_git.git_status(self.repo_root))
-
-    def current_ref(self) -> str:
-        """The branch name if on one, else the detached HEAD sha — what to restore."""
-        # ``symbolic-ref --quiet`` prints the branch (rc 0) or nothing (rc 1, detached);
-        # empty stdout is the detached signal, so no return-code inspection is needed.
-        on_branch = _git.git(
-            ["symbolic-ref", "--quiet", "--short", "HEAD"], cwd=self.repo_root, check=False
-        )
-        return on_branch or _git.git_head_sha(self.repo_root)
-
-    def restore_ref(self, ref: str) -> None:
-        """Check the dev's original ref back out — best-effort, always called in a
-        ``finally`` so the revert never strands them on the revert branch."""
-        _git.git(["checkout", ref], cwd=self.repo_root, check=False)
+    # -- one-click revert (own worktree; HEAD-safe) -------------------------
 
     def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:
         """Open a PR that removes one lesson file — the one-click revert (§4.4).
 
-        Kept in-place (it moves the dev checkout onto a revert branch and restores
-        it): it is a rare, manually-triggered corrective action (``ops/
-        revert_lesson.py``), not part of the concurrent author drains, so it does
-        not need worktree isolation. Branches off freshly-fetched ``origin/main``
-        (NOT lease-gated — a revert may need to land while another PR is open),
-        ``git rm`` + commit + PR, and always restores the dev's HEAD. Returns the PR
-        ref. ``lesson_rel_path`` is repo-relative (``defender/lessons/<name>.md``)."""
-        if self.working_tree_dirty():
-            raise BranchError("working tree is dirty — refusing to start a revert branch")
-        original_ref = self.current_ref()
+        Runs in its **own throwaway worktree** off freshly-fetched ``origin/main`` — the
+        same HEAD-safe model as the batch lifecycle, so it never touches the dev checkout
+        and can land while an author drain runs concurrently. NOT lease-gated (a revert
+        may need to land while another PR is open). Verifies the lesson exists on
+        ``origin/main`` *before* cutting the worktree (a missing lesson leaves no stray
+        branch), then ``git rm`` + commit + push + PR, and always removes the worktree.
+        Returns the PR ref. ``lesson_rel_path`` is repo-relative
+        (``defender/lessons/<name>.md``)."""
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
+        wt = self.worktree_base / branch.replace("/", "-")  # branch↔worktree correspond
+        with contextlib.suppress(GitError):
+            _git.git_worktree_prune(self.repo_root)  # clear crashed-revert stragglers
+        # The revert worktree path is deterministic (per lesson), so unlike the random
+        # batch id it can collide with a crashed prior revert's leaf — reclaim it first.
+        self.cleanup(wt)
         try:
-            _git.git(["fetch", "origin"], cwd=self.repo_root)
+            _git.git_fetch(self.repo_root)
             # Existence is checked against ``origin/main`` — the base we branch off — NOT
-            # the dev's local tree (which may lag or lead it). Done before any branch
-            # churn, so a missing lesson leaves HEAD where it was.
+            # the dev's local tree. Done before any worktree churn, so a missing lesson
+            # creates no branch/worktree.
             if not _git.git_ok(
                 ["cat-file", "-e", f"{_BRANCH_BASE}:{lesson_rel_path}"], cwd=self.repo_root
             ):
                 raise BranchError(f"no such lesson on {_BRANCH_BASE}: {lesson_rel_path}")
-            _git.git(["checkout", "-B", branch, _BRANCH_BASE], cwd=self.repo_root)
+            self.worktree_base.mkdir(parents=True, exist_ok=True)
+            _git.git_worktree_add(self.repo_root, wt, _BRANCH_BASE, branch=branch)
         except GitError as e:
+            self.cleanup(wt)  # best-effort remove of any partial worktree
             raise BranchError(str(e)) from e
         try:
-            _git.git(["rm", lesson_rel_path], cwd=self.repo_root)
-            _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=self.repo_root)
-            _git.git(["push", "--set-upstream", "origin", branch], cwd=self.repo_root)
+            _git.git(["rm", lesson_rel_path], cwd=wt)
+            _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
+            _git.git_push(wt, branch)
             return self.forge.open_pr(
                 base=_PR_BASE, head=branch,
                 title=f"revert lesson: {lesson_name}",
@@ -228,4 +217,4 @@ class AuthorBranch:
         except (GitError, ForgeError) as e:
             raise BranchError(str(e)) from e
         finally:
-            self.restore_ref(original_ref)
+            self.cleanup(wt)
