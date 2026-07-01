@@ -127,3 +127,42 @@ def test_git_worktree_add_branch(tmp_path):
     wt = tmp_path / "wt"
     _git.git_worktree_add(repo, wt, "HEAD", branch="feature/x")
     assert _git.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=wt) == "feature/x"
+
+
+def _repo_with_origin(tmp_path: Path) -> Path:
+    """A seeded work repo whose ``origin`` is a local bare remote carrying ``main`` —
+    the fixture for the remote-lifecycle helpers (fetch/push need a real remote)."""
+    origin = tmp_path / "origin.git"
+    _git.git(["init", "-q", "--bare", "-b", "main", str(origin)], cwd=tmp_path)
+    work = _repo(tmp_path)
+    _git.git(["remote", "add", "origin", str(origin)], cwd=work)
+    _git.git(["push", "-q", "origin", "main"], cwd=work)
+    return work
+
+
+def test_git_push_sets_upstream(tmp_path):
+    work = _repo_with_origin(tmp_path)
+    _git.git(["checkout", "-q", "-b", "feature/x"], cwd=work)
+    (work / "f.md").write_text("f\n")
+    _git.git(["add", "-A"], cwd=work)
+    _git.git(["commit", "-q", "-m", "feat"], cwd=work)
+    _git.git_push(work, "feature/x")
+    assert _git.git(["ls-remote", "--heads", "origin", "feature/x"], cwd=work)  # reached origin
+    assert (
+        _git.git(["rev-parse", "--abbrev-ref", "feature/x@{upstream}"], cwd=work)
+        == "origin/feature/x"  # upstream was set
+    )
+
+
+def test_git_fetch_advances_tracking_ref(tmp_path):
+    work = _repo_with_origin(tmp_path)
+    other = tmp_path / "other"
+    _git.git(["clone", "-q", str(tmp_path / "origin.git"), str(other)], cwd=tmp_path)
+    _git.git(["config", "user.email", "t@t"], cwd=other)
+    _git.git(["config", "user.name", "t"], cwd=other)
+    (other / "new.md").write_text("x\n")
+    _git.git(["add", "-A"], cwd=other)
+    _git.git(["commit", "-q", "-m", "second"], cwd=other)
+    _git.git(["push", "-q", "origin", "main"], cwd=other)
+    _git.git_fetch(work)  # work's origin/main should now point at the other clone's HEAD
+    assert _git.git(["rev-parse", "origin/main"], cwd=work) == _git.git_head_sha(other)

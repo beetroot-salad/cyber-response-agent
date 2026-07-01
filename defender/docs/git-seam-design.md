@@ -61,8 +61,8 @@ layering inversion or `sys.path` dance.
 returning `[(XY, path)]` records. This is a **correctness upgrade**, not just a
 move: today's `changes_outside` parses non-`-z` output and mishandles spaced
 paths. The three call shapes reduce to it — `changes_outside` filters the
-records, the boolean predicates (`corpus_dir_clean`, `working_tree_dirty`) become
-`bool(git_status(...))`, and `path_validation._porcelain_records` *is* it.
+records, the boolean predicate `corpus_dir_clean` becomes `bool(git_status(...))`,
+and `path_validation._porcelain_records` *is* it.
 
 The worktree helpers cover both existing managers with one signature:
 `author/branch.py`'s branch worktree (`-B <branch> ... origin/main`) via
@@ -99,8 +99,8 @@ stderr. Layer-neutral, loud-by-default — the `FatalConfigError(ValueError)`
 shape exactly. The disposition lives at the catch site, not in `_git.py`.
 
 **Deliberate precondition checks keep their domain error.** Validated states — a
-dirty corpus (`assert_clean_corpus_dir` → the envelope's `return 2`), a dirty
-tree before a revert (`BranchError`) — are semantic guards, not subprocess
+dirty corpus (`assert_clean_corpus_dir` → the envelope's `return 2`), a lesson missing
+from `origin/main` before a revert (`BranchError`) — are semantic guards, not subprocess
 failures; they keep raising `AuthorError` / `BranchError` with their existing
 messages.
 
