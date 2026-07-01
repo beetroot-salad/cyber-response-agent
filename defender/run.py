@@ -87,15 +87,17 @@ def _main_repo_root() -> Path:
 
 
 def resolve_first_party_key(
-    *, root: Path | None = None, main_repo_root: Path | None = None
+    *, root: Path | None = None, main_repo_root: Path | None = None,
+    var: str = "ANTHROPIC_API_KEY",
 ) -> tuple[str | None, Path | None]:
-    """The billable first-party API key for the PydanticAI engine, sourced from a
-    `.env` file rather than the ambient ANTHROPIC_API_KEY.
+    """The billable provider API key for the PydanticAI engine, sourced from a
+    `.env` file rather than the ambient environment. Defaults to the first-party
+    ANTHROPIC_API_KEY; pass ``var="FIREWORKS_API_KEY"`` for the Fireworks/GLM path.
 
-    Inside a Claude Code session the ambient key is the *subscription* credential
-    (the session's nested `claude -p` rides it; it 401s against the first-party
-    REST API this engine calls), so the `.env` key takes precedence. First existing
-    file with an ANTHROPIC_API_KEY wins:
+    Inside a Claude Code session the ambient ANTHROPIC key is the *subscription*
+    credential (the session's nested `claude -p` rides it; it 401s against the
+    first-party REST API this engine calls), so the `.env` key takes precedence.
+    First existing file that defines ``var`` wins:
 
       1. ``$DEFENDER_ENV_FILE``        — explicit override
       2. ``<repo_root>/.env``
@@ -123,7 +125,7 @@ def resolve_first_party_key(
             continue
         seen.add(path)
         if path.is_file():
-            key = _read_env_key(path)
+            key = _read_env_key(path, var)
             if key:
                 return key, path
     return None, None
@@ -139,30 +141,63 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-learn", action="store_true", help="Skip enqueuing for learning")
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
-    p.add_argument("--model", default=None, help="model id (overrides $DEFENDER_MODEL)")
+    p.add_argument("--model", default=None,
+                   help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
+                        "or 'glm-5.2' / 'fireworks:<id>' for the Fireworks-served GLM")
     return p.parse_args(argv)
+
+
+def _source_provider_keys(main_model: str, gather_model: str) -> int:
+    """Source + require the API key for every provider this run will call. The MAIN
+    and gather models each pick a provider from their name (Anthropic default;
+    Fireworks for a `fireworks:`/`glm-*` id), so a mixed run (e.g. GLM main + Sonnet
+    gather) needs *both* keys. Sets the sourced keys into `os.environ`; returns a
+    non-zero exit code if a required key is missing, else 0."""
+    providers = {driver.model_provider(main_model), driver.model_provider(gather_model)}
+
+    if "anthropic" in providers:
+        # The .env key overrides the ambient subscription credential a Claude Code
+        # session exports (it 401s against the first-party REST API). See docstring.
+        key, src = resolve_first_party_key()
+        if key:
+            os.environ["ANTHROPIC_API_KEY"] = key
+            print(f"[run.py] first-party API key sourced from {src} "
+                  "(overrides the ambient subscription credential)", file=sys.stderr)
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            print("[run.py] WARNING: no .env key found; using the ambient "
+                  "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
+                  "subscription credential and will 401 against the first-party API.",
+                  file=sys.stderr)
+        else:
+            print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
+                  "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI "
+                  "engine bills the first-party Anthropic API).", file=sys.stderr)
+            return 2
+
+    if "fireworks" in providers:
+        fw_key, fw_src = resolve_first_party_key(var="FIREWORKS_API_KEY")
+        if fw_key:
+            os.environ["FIREWORKS_API_KEY"] = fw_key
+            print(f"[run.py] FIREWORKS_API_KEY sourced from {fw_src}", file=sys.stderr)
+        elif os.environ.get("FIREWORKS_API_KEY"):
+            print("[run.py] using the ambient FIREWORKS_API_KEY for the Fireworks/GLM "
+                  "model", file=sys.stderr)
+        else:
+            print("[run.py] ERROR: a Fireworks/GLM model is selected but no "
+                  "FIREWORKS_API_KEY — set it in <repo>/.env or $DEFENDER_ENV_FILE "
+                  "(Fireworks bills its OpenAI-compatible API).", file=sys.stderr)
+            return 2
+
+    return 0
 
 
 def main(argv: list[str]) -> int:
     ns = parse_args(argv)
 
-    # Source the billable first-party key from .env (overrides the ambient
-    # subscription credential a Claude Code session exports). See module docstring.
-    key, src = resolve_first_party_key()
-    if key:
-        os.environ["ANTHROPIC_API_KEY"] = key
-        print(f"[run.py] first-party API key sourced from {src} "
-              "(overrides the ambient subscription credential)", file=sys.stderr)
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        print("[run.py] WARNING: no .env key found; using the ambient "
-              "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
-              "subscription credential and will 401 against the first-party API.",
-              file=sys.stderr)
-    else:
-        print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
-              "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI "
-              "engine bills the first-party Anthropic API).", file=sys.stderr)
-        return 2
+    model = driver.resolve_main_model(ns.model)
+    rc = _source_provider_keys(model, driver.gather_model())
+    if rc:
+        return rc
 
     alert = ns.alert.resolve()
     run_dir = _run.materialize_run_dir(alert, ns.run_id)
@@ -176,7 +211,6 @@ def main(argv: list[str]) -> int:
         ticket_writer = _tw
 
     salt = json.loads(RunPaths(run_dir).meta.read_text()).get("salt", "")
-    model = driver.resolve_main_model(ns.model)
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
     summary = asyncio.run(driver.run_investigation(

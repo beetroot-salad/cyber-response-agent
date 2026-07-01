@@ -201,6 +201,22 @@ def _main_messages(messages: list[dict]) -> list[dict]:
     return [m for m in messages if m.get("agent_id", "main") == "main"]
 
 
+def _tool_args(part: dict) -> dict:
+    """A tool-call's arguments as a dict. pydantic-ai's Anthropic path records
+    `args` already parsed (dict); the OpenAI-compatible path (Fireworks/GLM) records
+    the raw JSON *string*. Normalize to a dict here — the single projection boundary
+    — so every `tool_trace` consumer (the phase tagger, input rendering) sees one
+    shape regardless of provider. A non-JSON/None value degrades to `{}` rather than
+    crashing the post-run render on `.get()`."""
+    args = part.get("args")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return args if isinstance(args, dict) else {}
+
+
 def _assistant_event(rec: dict) -> dict:
     """A `response` message record → an `assistant` trace event (text / tool_use /
     thinking), carrying the per-instance id + model + usage the visualizer keys on."""
@@ -215,7 +231,7 @@ def _assistant_event(rec: dict) -> dict:
                 "type": "tool_use",
                 "name": part.get("tool_name", ""),
                 "id": part.get("tool_call_id", ""),
-                "input": part.get("args"),
+                "input": _tool_args(part),
             })
         elif pk == "thinking":
             content.append({"type": "thinking"})

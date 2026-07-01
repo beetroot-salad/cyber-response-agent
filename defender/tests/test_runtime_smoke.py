@@ -47,9 +47,15 @@ def _materialize(tmp_path: Path) -> Path:
     return run_dir
 
 
-def test_runtime_smoke(tmp_path):
+def test_runtime_smoke(tmp_path, monkeypatch):
     run_dir = _materialize(tmp_path)
     salt = json.loads((run_dir / "meta.json").read_text())["salt"]
+
+    # Pin both roles to Anthropic: the default is now GLM (needs FIREWORKS_API_KEY),
+    # but this test is gated on ANTHROPIC_API_KEY, so it must exercise the Anthropic
+    # path — else it errors (RuntimeError: needs FIREWORKS_API_KEY) instead of running.
+    monkeypatch.setenv("DEFENDER_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-sonnet-4-6")
 
     asyncio.run(driver.run_investigation(
         alert_path=run_dir / "alert.json",
