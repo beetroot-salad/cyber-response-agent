@@ -87,25 +87,33 @@ _CACHE_SETTINGS = AnthropicModelSettings(
 
 
 # GLM 5.2 reasons by default and bills that thinking as output tokens — the main
-# cost/latency driver on the OpenAI-compatible path — so the runtime defaults it to
-# `low` effort (measured ~−50% cost / −75% wall vs full reasoning on the sshd-auth
-# fixture, disposition unchanged). Override with DEFENDER_GLM_REASONING_EFFORT ∈
-# {low, medium, high, none}, or the sentinel `default` to send no reasoning_effort
-# and fall back to the provider's own (full-reasoning) default.
-_DEFAULT_GLM_REASONING_EFFORT = "low"
+# cost/latency driver on the OpenAI-compatible path — so the runtime caps effort by
+# role. The MAIN loop gets `low` (measured ~−50% cost / −75% wall vs full reasoning,
+# disposition unchanged); the GATHER subagent gets `none` — its ES|QL
+# find→execute→verify loop is mechanical, so reasoning bought only extra tokens (the
+# fully-GLM smoke: gather-with-thinking ran ~2.4x the queries for the same result).
+# Override per role via DEFENDER_GLM_REASONING_EFFORT / DEFENDER_GLM_GATHER_REASONING_EFFORT
+# ∈ {low, medium, high, none}, or the sentinel `default` to omit reasoning_effort
+# (the provider's own full-reasoning default).
+_DEFAULT_GLM_REASONING_EFFORT = "low"           # MAIN loop
+_DEFAULT_GLM_GATHER_REASONING_EFFORT = "none"   # GATHER subagent — mechanical ES|QL
 
 
-def _settings_for(model: Model) -> ModelSettings | None:
-    """Per-provider model settings. The AnthropicModel gets the three-part
-    `anthropic_cache_*` prompt-cache settings (meaningless on any other provider).
-    A Fireworks/GLM model gets `reasoning_effort` — defaulting to
-    `_DEFAULT_GLM_REASONING_EFFORT` (`low`), overridable via
-    `DEFENDER_GLM_REASONING_EFFORT` (`low`|`medium`|`high`|`none`, or `default` to
-    disable the param). Fireworks does its own automatic prefix caching, so no
-    explicit cache breakpoints are needed here. A test FunctionModel → None."""
+def _settings_for(model: Model, role: AgentRole) -> ModelSettings | None:
+    """Per-provider, per-role model settings. The AnthropicModel gets the three-part
+    `anthropic_cache_*` prompt-cache settings (meaningless on any other provider). A
+    Fireworks/GLM model gets `reasoning_effort`, defaulting by role — `low` for MAIN,
+    `none` for GATHER — each overridable via `DEFENDER_GLM_REASONING_EFFORT` /
+    `DEFENDER_GLM_GATHER_REASONING_EFFORT` (`low`|`medium`|`high`|`none`, or `default`
+    to omit the param). Fireworks auto-caches its prefix, so no explicit cache
+    breakpoints are needed here. A test FunctionModel → None."""
     if isinstance(model, AnthropicModel):
         return _CACHE_SETTINGS
-    effort = os.environ.get("DEFENDER_GLM_REASONING_EFFORT", _DEFAULT_GLM_REASONING_EFFORT)
+    if role is AgentRole.GATHER:
+        env, default = "DEFENDER_GLM_GATHER_REASONING_EFFORT", _DEFAULT_GLM_GATHER_REASONING_EFFORT
+    else:
+        env, default = "DEFENDER_GLM_REASONING_EFFORT", _DEFAULT_GLM_REASONING_EFFORT
+    effort = os.environ.get(env, default)
     if effort and effort != "default":
         from pydantic_ai.models.openai import OpenAIChatModelSettings
         # Fireworks honors the OpenAI-standard `reasoning_effort` for GLM (verified it
@@ -300,7 +308,7 @@ def _build_subagent(
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
-        model_settings=_settings_for(model),
+        model_settings=_settings_for(model, GatherDeps.role),
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent, writers=False)
@@ -440,7 +448,7 @@ def build_agent(
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,
-        model_settings=_settings_for(model),
+        model_settings=_settings_for(model, RunDeps.role),
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)

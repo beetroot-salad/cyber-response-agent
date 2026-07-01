@@ -25,6 +25,7 @@ from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 
 import run  # noqa: E402
 from defender.runtime import driver  # noqa: E402
+from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p2"
@@ -70,28 +71,42 @@ def test_build_model_fireworks_requires_key(monkeypatch):
 def test_settings_for_anthropic_keeps_cache(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     m = driver.build_model("claude-sonnet-4-6")
-    assert driver._settings_for(m) is driver._CACHE_SETTINGS
+    assert driver._settings_for(m, AgentRole.MAIN) is driver._CACHE_SETTINGS
 
 
-def test_settings_for_glm_defaults_to_low(monkeypatch):
+def test_settings_for_glm_main_defaults_to_low(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_GLM_REASONING_EFFORT", raising=False)
     m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m) == {"extra_body": {"reasoning_effort": "low"}}
+    assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
 
 
-def test_settings_for_glm_effort_override(monkeypatch):
+def test_settings_for_glm_gather_defaults_to_none(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("DEFENDER_GLM_REASONING_EFFORT", "none")
+    monkeypatch.delenv("DEFENDER_GLM_GATHER_REASONING_EFFORT", raising=False)
     m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m) == {"extra_body": {"reasoning_effort": "none"}}
+    assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
+
+
+def test_settings_for_glm_main_effort_override(monkeypatch):
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+    monkeypatch.setenv("DEFENDER_GLM_REASONING_EFFORT", "high")
+    m = driver.build_model("glm-5.2")
+    assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
+
+
+def test_settings_for_glm_gather_effort_override(monkeypatch):
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+    monkeypatch.setenv("DEFENDER_GLM_GATHER_REASONING_EFFORT", "low")
+    m = driver.build_model("glm-5.2")
+    assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
 
 
 def test_settings_for_glm_default_sentinel_disables_the_param(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("DEFENDER_GLM_REASONING_EFFORT", "default")
     m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m) is None
+    assert driver._settings_for(m, AgentRole.MAIN) is None
 
 
 # --- pricing ----------------------------------------------------------------
