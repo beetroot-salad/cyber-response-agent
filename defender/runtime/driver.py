@@ -23,16 +23,15 @@ from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
-from pydantic_ai.models import Model
-from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
-from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from . import compaction
 from . import observe
 from . import orient
+from . import providers
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
+from .providers import BuiltModel
 from .tools import (
     GatherDeps,
     RunDeps,
@@ -40,7 +39,7 @@ from .tools import (
     register_tools,
 )
 
-from defender._env import env_bool, env_str
+from defender._env import env_bool
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
@@ -55,7 +54,7 @@ DEFAULT_MODEL = "glm-5.2"
 # The GATHER-subagent default — a CHEAPER Fireworks model than MAIN, since the ES|QL
 # find→execute→verify loop is mechanical and flagship reasoning is overkill. Kimi K2.5
 # (~$0.60/$3.00 vs GLM 5.2's $1.40/$4.40) generates correct ES|QL + reliable
-# tool-calls, run with reasoning off (see `_settings_for`). Override via
+# tool-calls, run with reasoning off (see `runtime/providers/openai_compat.py`). Override via
 # $DEFENDER_GATHER_MODEL (e.g. `glm-5.2` to match MAIN, or `claude-sonnet-4-6` for #340).
 DEFAULT_GATHER_MODEL = "kimi-k2.5"
 DEFAULT_REQUEST_LIMIT = 60
@@ -71,74 +70,9 @@ GATHER_REQUEST_LIMIT = 40  # the gather's per-lead loop; large multi-dimension
 # back gate denial — far too brittle for a gate used as feedback.
 DEFAULT_TOOL_RETRIES = 10
 
-# Three-part caching. The byte-stable preamble — the SKILL system prompt (~9K
-# tokens, re-sent every request) and the tool schemas — is cached at 1h: it's
-# written ~once and must survive the one gap that can exceed 5m (a long gather
-# sub-run blocks the main loop while no main request refreshes its cache). The
-# growing message tail uses `anthropic_cache` — a top-level breakpoint the server
-# moves forward as the conversation grows — at 5m: the tail is re-read on the very
-# next turn (max main-loop gap is bash's 120s timeout, always < 5m, and each read
-# slides the TTL), and each turn writes only the new delta, so 5m's 1.25x write
-# beats 1h's 2x on every one of up to DEFAULT_REQUEST_LIMIT turns. Budget: the
-# automatic breakpoint claims one of Anthropic's 4 cache-point slots, leaving 3
-# for explicit ones; instructions(1) + tools(1) = 2, within budget (pydantic-ai
-# trims excess newest-first if it's ever exceeded). Verify via the per-response
-# cache_read/creation token counts already logged in observe.py.
-_CACHE_SETTINGS = AnthropicModelSettings(
-    anthropic_cache_instructions="1h",
-    anthropic_cache_tool_definitions="1h",
-    anthropic_cache="5m",
-)
-
-
-# Fireworks reasoning models (GLM, Kimi, …) reason by default and bill that thinking
-# as output tokens — a big cost/latency driver — so the runtime caps effort by ROLE.
-# The MAIN loop (GLM 5.2) gets `low` (measured ~−50% cost / −75% wall vs full reasoning,
-# disposition unchanged); the GATHER subagent (Kimi K2.5) gets `none` — its ES|QL
-# find→execute→verify loop is mechanical, so reasoning bought only extra tokens.
-# Override per role via DEFENDER_MAIN_REASONING_EFFORT / DEFENDER_GATHER_REASONING_EFFORT
-# ∈ {low, medium, high, none}, or the sentinel `default` to omit reasoning_effort
-# (the provider's own full-reasoning default). Verified honored by both GLM and Kimi.
-_DEFAULT_MAIN_REASONING_EFFORT = "low"       # MAIN loop
-_DEFAULT_GATHER_REASONING_EFFORT = "none"    # GATHER subagent — mechanical ES|QL
-# reasoning_effort is a closed enum; the sentinel `default` omits the param (falls
-# back to the provider's own full-reasoning default). Read via env_str(choices=…) so
-# a typo'd or empty operator value fails loud at startup, not silently forwarded.
-_REASONING_EFFORT_CHOICES = ("low", "medium", "high", "none", "default")
-
-
-def _settings_for(model: Model, role: AgentRole) -> ModelSettings | None:
-    """Per-provider, per-role model settings. The AnthropicModel gets the three-part
-    `anthropic_cache_*` prompt-cache settings (meaningless on any other provider). A
-    Fireworks model (OpenAIChatModel — GLM, Kimi, …) gets `reasoning_effort`, defaulting
-    by role — `low` for MAIN, `none` for GATHER — each overridable via
-    `DEFENDER_MAIN_REASONING_EFFORT` / `DEFENDER_GATHER_REASONING_EFFORT`
-    (`low`|`medium`|`high`|`none`, or `default` to omit the param). Fireworks
-    auto-caches its prefix, so no explicit cache breakpoints are needed here. Any other
-    model — a test FunctionModel, or an Anthropic-only install lacking the openai
-    extra — → None."""
-    if isinstance(model, AnthropicModel):
-        return _CACHE_SETTINGS
-    try:
-        from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
-    except ImportError:
-        return None  # openai extra absent → no Fireworks model can be live here
-    if not isinstance(model, OpenAIChatModel):
-        return None  # e.g. a test FunctionModel — reasoning_effort is Fireworks-only
-    if role is AgentRole.GATHER:
-        env, default = "DEFENDER_GATHER_REASONING_EFFORT", _DEFAULT_GATHER_REASONING_EFFORT
-    else:
-        env, default = "DEFENDER_MAIN_REASONING_EFFORT", _DEFAULT_MAIN_REASONING_EFFORT
-    # env_str fails loud (FatalConfigError) on a typo'd or empty value: an operator
-    # knob misconfig should surface at startup, not silently forward a bad
-    # reasoning_effort to the API — nor, on an empty string, drop the cost cap.
-    effort = env_str(env, default, choices=_REASONING_EFFORT_CHOICES)
-    if effort == "default":
-        return None
-    # Fireworks honors the OpenAI-standard `reasoning_effort` (verified it scales
-    # thinking length for GLM and Kimi); sent via extra_body so it round-trips as a raw
-    # request param regardless of the profile pydantic-ai infers for the model id.
-    return OpenAIChatModelSettings(extra_body={"reasoning_effort": effort})
+# Per-provider model construction + per-role ModelSettings (Anthropic prompt cache /
+# Fireworks reasoning_effort) live in `runtime/providers/`. The driver stays
+# provider-neutral: the factory calls `providers.build(name, role)` → a BuiltModel.
 
 
 def _main_instructions(defender_dir: Path) -> str:
@@ -209,95 +143,31 @@ def gather_model() -> str:
     a cheaper Fireworks model than the MAIN GLM (still single-provider). The gather's
     ES|QL find→execute→verify loop is mechanical, so a flagship is overkill; Kimi
     generates correct ES|QL + reliable tool-calls at ~40% of GLM 5.2's price, run with
-    reasoning off (see `_settings_for`). `DEFENDER_GATHER_MODEL` overrides — e.g.
-    `glm-5.2` to match the main model, or `claude-sonnet-4-6` for the #340 tier."""
+    reasoning off (see `runtime/providers/openai_compat.py`). `DEFENDER_GATHER_MODEL`
+    overrides — e.g. `glm-5.2` to match the main model, or `claude-sonnet-4-6` (#340)."""
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_GATHER_MODEL
 
 
-# --- Model construction: routes by model name. The name is the provider
-# discriminator, so the selectors (`--model` / `$DEFENDER_MODEL` /
-# `$DEFENDER_GATHER_MODEL`) reach either provider: a `claude-*` id builds an
-# AnthropicModel; a `fireworks:<id>` name — or a `glm-*` convenience alias — builds
-# an OpenAIChatModel on Fireworks' OpenAI-compatible endpoint, keyed off
-# FIREWORKS_API_KEY, which is now the default (`DEFAULT_MODEL = "glm-5.2"`).
-_FIREWORKS_PREFIX = "fireworks:"
-_FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
-
-# Friendly aliases → the canonical `fireworks:<model-id>` form (human spelling and
-# Fireworks' own id spelling both accepted). GLM 5.2 is the MAIN default (flagship);
-# Kimi K2.5 is the GATHER default (cheaper). Any other Fireworks model works too via
-# an explicit `fireworks:<id>`.
-_MODEL_ALIASES = {
-    "glm-5.2": _FIREWORKS_PREFIX + "accounts/fireworks/models/glm-5p2",
-    "glm-5p2": _FIREWORKS_PREFIX + "accounts/fireworks/models/glm-5p2",
-    "kimi-k2.5": _FIREWORKS_PREFIX + "accounts/fireworks/models/kimi-k2p5",
-    "kimi-k2p5": _FIREWORKS_PREFIX + "accounts/fireworks/models/kimi-k2p5",
-}
-
-
-def _resolve_alias(name: str) -> str:
-    # Case-insensitive on the alias key only (a mis-cased `GLM-5.2` should still
-    # reach Fireworks, matching pricing.model_key's case-insensitive match); a
-    # non-alias name passes through unchanged so real model ids keep their case.
-    return _MODEL_ALIASES.get(name.lower(), name)
-
-
-def model_provider(name: str) -> str:
-    """`"fireworks"` if `name` selects the Fireworks (OpenAI-compatible) path, else
-    `"anthropic"`. The single classifier — run.py reads it to require the matching
-    API key before a run, so a Fireworks model never 401s mid-investigation."""
-    return "fireworks" if _resolve_alias(name).startswith(_FIREWORKS_PREFIX) else "anthropic"
-
-
-def build_model(name: str) -> Model:
-    """Construct the pydantic-ai model for a resolved model name. A `fireworks:`
-    prefix (or a `glm-*` alias) builds an OpenAIChatModel on Fireworks' OpenAI-
-    compatible endpoint (GLM 5.2 et al.), keyed off `FIREWORKS_API_KEY`; anything
-    else is an AnthropicModel — the prior, byte-identical default. The openai extra
-    is imported lazily, so the Anthropic path never requires it installed."""
-    name = _resolve_alias(name)
-    if not name.startswith(_FIREWORKS_PREFIX):
-        return AnthropicModel(name)
-    model_id = name[len(_FIREWORKS_PREFIX):]
-    api_key = os.environ.get("FIREWORKS_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            f"model {name!r} needs FIREWORKS_API_KEY — set it in <repo>/.env or "
-            "$DEFENDER_ENV_FILE (Fireworks bills its OpenAI-compatible API)."
-        )
-    try:
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
-    except ImportError as e:  # the openai extra isn't installed
-        raise RuntimeError(
-            "the Fireworks/GLM path needs the openai extra — reinstall defender with "
-            "`uv pip install --python .venv/bin/python -e '.[openai]'`."
-        ) from e
-    return OpenAIChatModel(
-        model_id,
-        provider=OpenAIProvider(base_url=_FIREWORKS_BASE_URL, api_key=api_key),
-    )
-
-
 # Model-construction seam: tests inject fake models (pydantic-ai's FunctionModel)
-# by passing `make_model` instead of patching the AnthropicModel symbol. The
-# factory is keyed on `AgentRole` ALONE — the role is the single discriminator,
-# sourced from each deps type's `role` ClassVar (the same value the permission
-# gate reads, so model and gate dispatch can't drift) — and it owns the
-# role->model policy, so build sites never thread a model name. A new subagent
-# role adds a branch here, not a name parameter through four signatures.
-ModelFactory = Callable[[AgentRole], Model]
+# by returning a BuiltModel from `make_model` instead of patching a model symbol.
+# The factory is keyed on `AgentRole` ALONE — the role is the single discriminator,
+# sourced from each deps type's `role` ClassVar (the same value the permission gate
+# reads, so model and gate dispatch can't drift) — and it owns the role->model
+# policy, so build sites never thread a model name. `providers.build` picks the
+# serving infra from the name (Anthropic for `claude-*`; Fireworks for a
+# `fireworks:`/glm/kimi id) and pairs the model with its per-role settings.
+ModelFactory = Callable[[AgentRole], BuiltModel]
 
 
 def _make_default_factory(main_model_name: str) -> ModelFactory:
     """The production model factory: MAIN runs `main_model_name` (run.py's
     `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
-    gather model (`gather_model()`; GLM, `$DEFENDER_GATHER_MODEL` overrides).
-    `build_model` picks the provider from the name (Anthropic, or Fireworks for a
-    `fireworks:`/`glm-*` id); tests replace the whole factory."""
-    def make(role: AgentRole) -> Model:
+    gather model (`gather_model()`; Kimi K2.5, `$DEFENDER_GATHER_MODEL` overrides).
+    `providers.build` picks the serving infra from the name; tests replace the
+    whole factory."""
+    def make(role: AgentRole) -> BuiltModel:
         name = main_model_name if role is AgentRole.MAIN else gather_model()
-        return build_model(name)
+        return providers.build(name, role)
     return make
 
 
@@ -311,7 +181,7 @@ def resolve_main_model(explicit: str | None = None) -> str:
 
 # Default for direct `build_*` callers without an explicit main-model override:
 # resolve the main model from the environment (run.py's flagless path).
-def _env_make_model(role: AgentRole) -> Model:
+def _env_make_model(role: AgentRole) -> BuiltModel:
     return _make_default_factory(resolve_main_model())(role)
 
 
@@ -325,14 +195,14 @@ def _build_subagent(
     summary — it never authors investigation.md/report.md, so denying it
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
     the lead/measurement. The system prompt (`instructions`) + the factory's
-    GATHER-role model specialize the instance into the gather (GLM by default)."""
-    model = make_model(GatherDeps.role)
+    GATHER-role model specialize the instance into the gather (Kimi K2.5 by default)."""
+    built = make_model(GatherDeps.role)
     agent = Agent(
-        model,
+        built.model,
         deps_type=GatherDeps,
         instructions=instructions,
         capabilities=[_make_hooks(logger, agent_id)],
-        model_settings=_settings_for(model, GatherDeps.role),
+        model_settings=built.settings,
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent, writers=False)
@@ -466,13 +336,13 @@ def build_agent(
         print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
-    model = make_model(RunDeps.role)
+    built = make_model(RunDeps.role)
     agent = Agent(
-        model,
+        built.model,
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
         capabilities=capabilities,
-        model_settings=_settings_for(model, RunDeps.role),
+        model_settings=built.settings,
         retries=DEFAULT_TOOL_RETRIES,
     )
     register_tools(agent)

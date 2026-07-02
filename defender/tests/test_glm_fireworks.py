@@ -1,14 +1,16 @@
-"""Unit tests for the Fireworks model integration (feat/glm-fireworks): GLM 5.2 as
-the MAIN default, Kimi K2.5 as the GATHER default.
+"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.2
+as the MAIN default, Kimi K2.5 as the GATHER default.
 
 Hermetic — no API key, no network. Model construction only builds the provider
 client (no request is made), so these run in the default suite. Covers the provider
-seam (`build_model` / `model_provider` / aliases), the role model defaults, the
-per-role `reasoning_effort` settings, the price table, and run.py's provider-keyed
-`FIREWORKS_API_KEY` sourcing.
+registry (`provider_for` routing + fail-loud, `build`, `api_key_vars`), each
+provider's `build_model`, the per-role settings (Anthropic cache / Fireworks
+`reasoning_effort` incl. fail-loud on a bad value), the role model defaults, the
+price table, and run.py's provider-keyed `FIREWORKS_API_KEY` sourcing.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -25,12 +27,19 @@ from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
 from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 
 import run  # noqa: E402
-from defender.runtime import driver  # noqa: E402
+from defender._env import FatalConfigError  # noqa: E402
+from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p2"
 _KIMI_ID = "accounts/fireworks/models/kimi-k2p5"
+_CACHE = {
+    "anthropic_cache_instructions": "1h",
+    "anthropic_cache_tool_definitions": "1h",
+    "anthropic_cache": "5m",
+}
 
 
 # --- role model defaults ----------------------------------------------------
@@ -42,91 +51,112 @@ def test_role_model_defaults(monkeypatch):
     assert driver.gather_model() == "kimi-k2.5"        # GATHER: cheaper Kimi
 
 
-# --- provider classification ------------------------------------------------
+# --- provider routing (registry) --------------------------------------------
 
 @pytest.mark.parametrize(("name", "provider"), [
     ("claude-sonnet-4-6", "anthropic"),
     ("claude-haiku-4-5", "anthropic"),
+    ("anthropic:claude-sonnet-4-6", "anthropic"),
     ("glm-5.2", "fireworks"),
     ("glm-5p2", "fireworks"),
+    ("GLM-5.2", "fireworks"),                 # case-insensitive alias
     ("kimi-k2.5", "fireworks"),
     (f"fireworks:{_GLM_ID}", "fireworks"),
 ])
-def test_model_provider_classifies_by_name(name, provider):
-    assert driver.model_provider(name) == provider
+def test_provider_routes_by_name(name, provider):
+    assert providers.provider_id_for(name) == provider
 
 
-# --- build_model routing ----------------------------------------------------
+def test_provider_for_unknown_name_fails_loud():
+    with pytest.raises(ValueError, match="unknown model"):
+        providers.provider_for("gpt-4o")
+
+
+def test_api_key_vars_covers_both_providers():
+    assert providers.api_key_vars() == {"ANTHROPIC_API_KEY", "FIREWORKS_API_KEY"}
+
+
+# --- build_model ------------------------------------------------------------
 
 def test_build_model_routes_claude_to_anthropic(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    assert isinstance(driver.build_model("claude-sonnet-4-6"), AnthropicModel)
+    m = providers.provider_for("claude-sonnet-4-6").build_model("claude-sonnet-4-6")
+    assert isinstance(m, AnthropicModel)
 
 
 @pytest.mark.parametrize("name", ["glm-5.2", "glm-5p2", f"fireworks:{_GLM_ID}"])
 def test_build_model_fireworks_from_alias_or_prefix(name, monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    m = driver.build_model(name)
+    m = providers.FIREWORKS.build_model(name)
     assert isinstance(m, OpenAIChatModel)
     assert m.model_name == _GLM_ID              # alias + prefix both resolve to the id
     assert "api.fireworks.ai" in str(m.client.base_url)
+    assert m.client.api_key == "fw-test"        # the sourced key is wired to the client
 
 
 def test_build_model_fireworks_requires_key(monkeypatch):
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="FIREWORKS_API_KEY"):
-        driver.build_model("glm-5.2")
+        providers.FIREWORKS.build_model("glm-5.2")
 
 
 def test_build_model_kimi_alias(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    m = driver.build_model("kimi-k2.5")
+    m = providers.FIREWORKS.build_model("kimi-k2.5")
     assert isinstance(m, OpenAIChatModel)
     assert m.model_name == _KIMI_ID
 
 
-# --- per-role reasoning-effort settings -------------------------------------
-
-def test_settings_for_anthropic_keeps_cache(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    m = driver.build_model("claude-sonnet-4-6")
-    assert driver._settings_for(m, AgentRole.MAIN) is driver._CACHE_SETTINGS
-
-
-def test_settings_for_main_defaults_to_low(monkeypatch):
+def test_build_pairs_model_with_settings(monkeypatch):
+    # providers.build (what the driver factory returns) pairs model + per-role settings.
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
+    built = providers.build("glm-5.2", AgentRole.MAIN)
+    assert isinstance(built, BuiltModel)
+    assert isinstance(built.model, OpenAIChatModel)
+    assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
 
 
-def test_settings_for_gather_defaults_to_none_on_kimi(monkeypatch):
-    # The gather default is Kimi — reasoning off, proving the mechanism is model-agnostic.
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+# --- per-provider / per-role settings ---------------------------------------
+
+def test_anthropic_settings_are_the_cache_and_role_invariant():
+    s_main = providers.ANTHROPIC.settings(AgentRole.MAIN)
+    assert s_main == _CACHE
+    # Same object for every role (memoized), never None.
+    assert providers.ANTHROPIC.settings(AgentRole.GATHER) is s_main
+
+
+def test_fireworks_main_defaults_to_low(monkeypatch):
+    monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
+    assert providers.FIREWORKS.settings(AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
+
+
+def test_fireworks_gather_defaults_to_none(monkeypatch):
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
-    m = driver.build_model("kimi-k2.5")
-    assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
+    assert providers.FIREWORKS.settings(AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
 
 
-def test_settings_for_main_effort_override(monkeypatch):
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+def test_fireworks_main_effort_override(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "high")
-    m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
+    assert providers.FIREWORKS.settings(AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
 
 
-def test_settings_for_gather_effort_override(monkeypatch):
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+def test_fireworks_gather_effort_override(monkeypatch):
     monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "low")
-    m = driver.build_model("kimi-k2.5")
-    assert driver._settings_for(m, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
+    assert providers.FIREWORKS.settings(AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
 
 
-def test_settings_for_default_sentinel_disables_the_param(monkeypatch):
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+def test_fireworks_default_sentinel_disables_the_param(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
-    m = driver.build_model("glm-5.2")
-    assert driver._settings_for(m, AgentRole.MAIN) is None
+    assert providers.FIREWORKS.settings(AgentRole.MAIN) is None
+
+
+@pytest.mark.parametrize("bad", ["", "lo", "hgih", "off"])
+def test_fireworks_bad_effort_fails_loud(monkeypatch, bad):
+    # A typo'd or empty operator knob surfaces at read (env_str choices), not silently.
+    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", bad)
+    with pytest.raises(FatalConfigError):
+        providers.FIREWORKS.settings(AgentRole.MAIN)
 
 
 # --- pricing ----------------------------------------------------------------
@@ -173,3 +203,31 @@ def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
     )
     assert key == "fw-xyz"
     assert src == repo / ".env"
+
+
+def test_source_provider_keys_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
+    # The flagless production guarantee: an all-Fireworks run (GLM main + Kimi gather)
+    # requires only FIREWORKS_API_KEY — never ANTHROPIC_API_KEY.
+    env = tmp_path / ".env"
+    env.write_text("FIREWORKS_API_KEY=fw-only\n")
+    monkeypatch.setenv("DEFENDER_ENV_FILE", str(env))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    assert run._source_provider_keys("glm-5.2", "kimi-k2.5") == 0
+    assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def test_source_provider_keys_missing_required_key_exits_2(monkeypatch):
+    # A Fireworks run with neither a .env nor an ambient key → exit 2 (fail before the
+    # run). Stub the .env resolver so the test doesn't find the real repo .env.
+    monkeypatch.setattr(run, "resolve_first_party_key", lambda **kw: (None, None))  # lint-monkeypatch: ok — isolate from the real repo .env
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    assert run._source_provider_keys("glm-5.2", "kimi-k2.5") == 2
+
+
+def test_source_provider_keys_unknown_model_exits_2(capsys):
+    # A typo'd model name is unroutable in provider_for; _source_provider_keys catches
+    # the ValueError and exits 2 with a clean `[run.py] ERROR` line — never a raw
+    # traceback (which would be exit 1 and no actionable message).
+    assert run._source_provider_keys("glm-5.3", "kimi-k2.5") == 2
+    assert "[run.py] ERROR" in capsys.readouterr().err
