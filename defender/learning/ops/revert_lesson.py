@@ -35,9 +35,11 @@ def revert(
 
     ``revert_lesson_pr`` is now HEAD-safe on its own (it runs in a throwaway worktree off
     ``origin/main``, never the dev checkout), so this flock is belt-and-suspenders — it
-    serializes the revert against an in-flight ``author_drain`` at the process level
-    rather than being the sole guard it was under the old in-place ``checkout -B``.
-    Existence is verified against ``origin/main`` inside ``revert_lesson_pr``."""
+    serializes the revert against an in-flight **lessons** ``author_drain`` (its own lock;
+    the lead-author drain runs on a separate lock in its own worktree and is *not*
+    serialized against this) at the process level rather than being the sole guard it was
+    under the old in-place ``checkout -B``. Existence is verified against ``origin/main``
+    inside ``revert_lesson_pr``."""
     if branch is None:
         branch = AuthorBranch()
     rel = f"{LESSONS_REL}/{lesson_name}.md"
@@ -52,7 +54,10 @@ def revert(
         except BranchError as e:
             print(f"[revert_lesson] FATAL: {e}", file=sys.stderr)
             return 2
-        print(f"opened revert PR: {pr}")
+        # Not "opened": revert_lesson_pr is idempotent — on a repeat click it returns the
+        # ALREADY-open PR's ref without opening anything (#482), so a neutral label is honest
+        # for both the freshly-opened and the handed-back case.
+        print(f"revert PR: {pr}")
         return 0
 
 

@@ -62,6 +62,16 @@ def _lessons_pr_body(branch: str) -> str:
     )
 
 
+def _is_non_fast_forward(err: GitError) -> bool:
+    """Does this push failure look like a diverged-remote-branch rejection — the branch
+    already exists on ``origin`` and our fresh revert commit can't fast-forward it? git flags
+    the rejected ref ``(non-fast-forward)`` or ``(fetch first)``. Match those parentheticals,
+    not a bare ``rejected`` (which also covers protected-branch / pre-receive-hook denials the
+    "stale revert branch" message would misdescribe)."""
+    blob = err.stderr.lower()
+    return "non-fast-forward" in blob or "fetch first" in blob
+
+
 @dataclass
 class AuthorBranch:
     # ``forge`` is the one explicit injection seam (the network/auth boundary); git is
@@ -132,6 +142,29 @@ class AuthorBranch:
             str(r.get("headRefName", "")).startswith(self.branch_prefix) for r in rows
         )
 
+    def _open_revert_pr_ref(self, head: str) -> str | None:
+        """The forge ref (url) of an OPEN PR whose head is *exactly* ``head``, else ``None``.
+
+        Uses ``list_prs_for_head`` (the immediately-consistent ``gh pr list --head`` filter),
+        NOT the eventually-consistent search index ``open_pr_exists``/``list_open_prs`` ride:
+        the revert idempotency check must see the PR the instant it is opened — a second click
+        seconds later is its whole reason to exist — so it cannot tolerate search-index lag
+        (a miss there would drop into the non-ff path and misreport an open-PR branch as a
+        stranded one). Keys on the *exact* ``lessons/revert-<name>`` head, never the ``lessons/``
+        prefix: the revert is deliberately **not** lease-gated, so an unrelated open batch PR
+        must not make it look "in flight". Exact-matches ``headRefName`` as belt-and-suspenders
+        over the filter, and falls back to ``head`` when a row carries no ``url`` (older ``gh``
+        json)."""
+        try:
+            rows = self._forge.list_prs_for_head(head)
+        except ForgeError as e:
+            raise BranchError(str(e)) from e
+        for r in rows:
+            if str(r.get("headRefName", "")) == head:
+                url = r.get("url")
+                return str(url) if url is not None else head
+        return None
+
     # -- batch lifecycle ----------------------------------------------------
 
     def start_batch(self, batch_id: str) -> Path:
@@ -198,14 +231,26 @@ class AuthorBranch:
         Runs in its **own throwaway worktree** off freshly-fetched ``origin/main`` — the
         same HEAD-safe model as the batch lifecycle, so it never touches the dev checkout
         and can land while an author drain runs concurrently. NOT lease-gated (a revert
-        may need to land while another PR is open). Verifies the lesson exists on
-        ``origin/main`` *before* cutting the worktree (a missing lesson leaves no stray
-        branch), then ``git rm`` + commit + push + PR, and always removes the worktree.
-        Returns the PR ref. ``lesson_rel_path`` is repo-relative
+        may need to land while another PR is open). If a revert PR for this exact head is
+        **already open** it hands that PR's ref back immediately (idempotent — a second click
+        returns the same PR rather than non-ff-crashing on the stale branch, #482); this is a
+        pure forge query, done *before* any fetch or worktree work, so a repeat click is cheap.
+        Otherwise verifies the lesson exists on ``origin/main`` *before* cutting the worktree
+        (a missing lesson leaves no stray branch), then ``git rm`` + commit + push + PR, and
+        always removes the worktree. Returns the PR ref. ``lesson_rel_path`` is repo-relative
         (``defender/lessons/<name>.md``)."""
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
         wt = self._worktree_base / branch.replace("/", "-")  # branch↔worktree correspond
-        # The revert worktree path is deterministic (per lesson), so unlike the random
+        # Idempotent (#482), checked FIRST — before any fetch or worktree churn. An already-open
+        # revert PR for THIS exact head is authoritative: a repeat click hands the same PR back
+        # with zero local git work (the case this method exists to make cheap). A pure forge
+        # query, independent of local state, keyed on the exact revert head (not the ``lessons/``
+        # prefix) so an unrelated open batch PR never blocks a revert — the not-lease-gated
+        # contract. It uses the immediately-consistent ``gh pr list --head`` lookup, so a
+        # just-opened PR is never missed into the fail-fast path below.
+        if (existing := self._open_revert_pr_ref(branch)) is not None:
+            return existing
+        # Fresh revert. The worktree leaf is deterministic (per lesson), so unlike the random
         # batch id it can collide with a crashed prior revert's leaf — in any of the three
         # shapes that leaf can take. Reclaim each before ``worktree add``, or every future
         # revert of this lesson wedges: ``cleanup`` removes a *registered* worktree; the
@@ -230,7 +275,20 @@ class AuthorBranch:
             _git.git_worktree_add(self.repo_root, wt, _BRANCH_BASE, branch=branch)
             _git.git(["rm", lesson_rel_path], cwd=wt)
             _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
-            _git.git_push(wt, branch)
+            # A non-ff push means a stale revert branch still diverges on origin — and the
+            # up-front exact-head check (immediately consistent) already established there is
+            # no open PR for it. Translate the raw git rejection into an actionable message
+            # instead of leaking it (#482). Any other GitError falls through to the wrap below.
+            try:
+                _git.git_push(wt, branch)
+            except GitError as e:
+                if _is_non_fast_forward(e):
+                    raise BranchError(
+                        f"a stale revert branch {branch!r} already exists on origin with no "
+                        f"open PR (a prior revert of {lesson_name!r} pushed but did not open a "
+                        "PR); delete the remote branch or merge/close its PR, then re-run"
+                    ) from e
+                raise
             return self._forge.open_pr(
                 base=_PR_BASE, head=branch,
                 title=f"revert lesson: {lesson_name}",

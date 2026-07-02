@@ -30,11 +30,22 @@ class ForgeError(Exception):
 
 class Forge(Protocol):
     """The PR-host operations the author drains need: confirm the per-prefix writer
-    lease (any open PR under a branch prefix) and open one PR for a pushed branch."""
+    lease (any open PR under a branch prefix), look up an open PR by *exact* head (the
+    revert idempotency check), and open one PR for a pushed branch."""
 
     def list_open_prs(self, head_prefix: str) -> list[dict]:
         """Open PRs whose head branch matches ``head_prefix`` (a substring search the
-        caller prefix-confirms). Each row carries at least ``number`` + ``headRefName``."""
+        caller prefix-confirms). Backed by the *search index* (``gh pr list --search``),
+        which is eventually consistent — fine for the writer-lease check, which tolerates
+        lag. Each row carries at least ``number`` + ``headRefName`` (+ ``url``)."""
+        ...
+
+    def list_prs_for_head(self, head: str) -> list[dict]:
+        """Open PRs whose head branch is *exactly* ``head`` — the immediately-consistent
+        REST filter (``gh pr list --head``), NOT the eventually-consistent search index
+        ``list_open_prs`` rides. The revert idempotency lookup must see a PR the instant it
+        is opened (its whole point is a re-run seconds later), so it cannot depend on
+        search-index lag. Each row carries ``number`` + ``headRefName`` + ``url``."""
         ...
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
@@ -48,10 +59,13 @@ class GhForge:
 
     cwd: Path = REPO_ROOT
 
-    def list_open_prs(self, head_prefix: str) -> list[dict]:
+    def _list_prs(self, *match_args: str) -> list[dict]:
+        """Run ``gh pr list <match_args> --state open --json …`` and return the dict rows.
+        The single ``gh pr list`` call site; ``match_args`` is the head selector that varies
+        (``--search head:<prefix>`` for the lease vs ``--head <branch>`` for an exact match)."""
         proc = subprocess.run(
-            ["gh", "pr", "list", "--search", f"head:{head_prefix}", "--state", "open",
-             "--json", "number,headRefName"],
+            ["gh", "pr", "list", *match_args, "--state", "open",
+             "--json", "number,headRefName,url"],
             cwd=self.cwd, capture_output=True, text=True,
         )
         if proc.returncode != 0:
@@ -61,6 +75,12 @@ class GhForge:
         except json.JSONDecodeError as e:
             raise ForgeError(f"gh pr list returned non-JSON: {e}") from e
         return [r for r in rows if isinstance(r, dict)]
+
+    def list_open_prs(self, head_prefix: str) -> list[dict]:
+        return self._list_prs("--search", f"head:{head_prefix}")
+
+    def list_prs_for_head(self, head: str) -> list[dict]:
+        return self._list_prs("--head", head)
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         proc = subprocess.run(
