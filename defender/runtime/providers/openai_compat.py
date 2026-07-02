@@ -101,3 +101,19 @@ class OpenAICompatProvider:
         from pydantic_ai.models.openai import OpenAIChatModelSettings
 
         return OpenAIChatModelSettings(extra_body={"reasoning_effort": effort})
+
+    def settings_for_effort(self, effort: str) -> ModelSettings | None:
+        """Explicit per-call reasoning effort — the same `extra_body.reasoning_effort`
+        shape `settings()` produces, but sourced from the passed value rather than the
+        role env. `default` omits the param. (Reached only once the judge runs on GLM,
+        i.e. Step 2; kept here so the provider protocol is total.)"""
+        if effort not in _REASONING_EFFORT_CHOICES:
+            raise ValueError(
+                f"unsupported reasoning_effort {effort!r}; "
+                f"expected one of {_REASONING_EFFORT_CHOICES}"
+            )
+        if effort == "default":
+            return None
+        from pydantic_ai.models.openai import OpenAIChatModelSettings
+
+        return OpenAIChatModelSettings(extra_body={"reasoning_effort": effort})

@@ -80,19 +80,28 @@ def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = ""
     return f"exit={exit_code}\n--- stdout ---\n{out}{err}{note}"
 
 
+# Per-agent gate policy is DATA, not a role branch: the gate keys on `deps.policy`.
+# Runtime agents get theirs from bash_policy.json here; a learning-loop agent (the
+# judge) constructs its own AgentPolicy in its own module and passes it in.
+_MAIN_POLICY = permission.policy_for("main")
+_GATHER_POLICY = permission.policy_for("gather")
+
+
 @dataclass(frozen=True)
 class RunDeps:
     """Per-run state threaded into every tool via `ctx.deps`. This base type is
     the main orchestrator's deps; each subagent gets a `RunDeps` subtype. The
-    agent's identity lives in one place — the `role` class constant — so the
-    permission gate keys on it (not a main/not-main bool, which would cap the
-    runtime at two agents); code that needs a subtype's fields narrows with
+    permission gate keys on `policy` (the agent's declared capability, DATA — not a
+    role branch), so adding an agent is a new policy value, not a new gate method.
+    `role` remains only as an identity label (observability + the gather-capture
+    `isinstance` narrow). Code that needs a subtype's fields narrows with
     `isinstance`."""
 
     run_dir: Path
     defender_dir: Path
     run_id: str
     salt: str
+    policy: permission.AgentPolicy = _MAIN_POLICY
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -111,6 +120,7 @@ class GatherDeps(RunDeps):
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
+    policy: permission.AgentPolicy = _GATHER_POLICY
     lead_id: str = ""
     query_id: str | None = None
 
@@ -140,9 +150,7 @@ def _bash_env(deps: RunDeps) -> dict[str, str]:
 def _tool_bash(deps: RunDeps, command: str) -> str:
     """Logic for the `bash` tool (see the closure's docstring). Module-level so the
     tool closure stays thin; the gather-vs-main adapter-capture path lives here."""
-    decision = permission.decide_bash(
-        command, role=deps.role,
-    )
+    decision = permission.decide_bash(command, policy=deps.policy)
     if not decision.allow:
         raise ModelRetry(decision.reason)
     # The gate parsed the command exactly once and stashed everything on the
@@ -193,7 +201,7 @@ def _tool_read_file(deps: RunDeps, path: str) -> str:
     """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
     decision = permission.decide_read(
         Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        role=deps.role,
+        policy=deps.policy,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)

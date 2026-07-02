@@ -55,3 +55,12 @@ class Provider(Protocol):
     def settings(self, role: AgentRole) -> ModelSettings | None:
         """The per-role `ModelSettings` for this provider, or `None` for none."""
         ...
+
+    def settings_for_effort(self, effort: str) -> ModelSettings | None:
+        """`ModelSettings` for an EXPLICIT per-call reasoning effort, rather than the
+        role-keyed env defaults `settings(role)` derives. For an agent whose effort is
+        per-invocation config (the judge, whose two direction legs run concurrently at
+        possibly different efforts — a single role env can't carry two values). Each
+        provider maps `effort` to its own knob (Anthropic's `anthropic_effort`,
+        OpenAI-compatible's `reasoning_effort`) and fails loud on an unsupported value."""
+        ...

@@ -1,10 +1,10 @@
 """The agent-role discriminator threaded through `RunDeps`.
 
-One value per PydanticAI agent in the runtime. The permission gate and the
-gather capture path key on this instead of a main/not-main bool, so adding an
-agent is a new enum value (+ a `RunDeps` subtype carrying its fields), not a
-re-threaded boolean. `runtime/tools.py` pins the role per deps class; the
-stateless `permission.py` gate reads it to pick a policy.
+One value per agent, used now as an **identity label** — for observability and the
+gather-capture `isinstance` narrow — NOT as the permission discriminator. The gate
+keys on `deps.policy` (an `AgentPolicy`, i.e. data the agent brings), so adding an
+agent is a new policy value (+ custom matchers), not a new gate branch. `role` is
+just a name.
 """
 
 from __future__ import annotations
@@ -15,3 +15,4 @@ from enum import Enum
 class AgentRole(Enum):
     MAIN = "main"      # the orchestrator loop (slice 1)
     GATHER = "gather"  # the per-lead ES|QL gather subagent (slice 2)
+    JUDGE = "judge"    # the learning-loop grounded-outcome judge (PydanticAI)

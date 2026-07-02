@@ -27,8 +27,8 @@ _FALLBACK_POLICY: dict = {
     "bash": {
         "viewers": ["jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "true"],
         "agents": {
-            "main": {"adapters": False, "adapter_sql_pipe": False},
-            "gather": {"adapters": True, "adapter_sql_pipe": True},
+            "main": {"adapters": False, "adapter_sql_pipe": False, "raw_reads": False},
+            "gather": {"adapters": True, "adapter_sql_pipe": True, "raw_reads": True},
         },
     },
     "read_deny": {
@@ -71,6 +71,12 @@ def adapters_allowed(agent: str) -> bool:
 def adapter_sql_pipe_allowed(agent: str) -> bool:
     """May `agent` run the sanctioned `adapter --raw | defender-sql` pipe?"""
     return bool(_policy()["bash"]["agents"].get(agent, {}).get("adapter_sql_pipe", False))
+
+
+def raw_reads_allowed(agent: str) -> bool:
+    """May `agent` read / `jq` `gather_raw/**`? main: no (consumes the gather
+    summary); gather + judge: yes (verify / refute against the raw payload)."""
+    return bool(_policy()["bash"]["agents"].get(agent, {}).get("raw_reads", False))
 
 
 def read_deny_substrings() -> tuple[str, ...]:

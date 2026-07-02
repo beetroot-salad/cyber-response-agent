@@ -33,12 +33,15 @@ from defender.scripts.case_history import case_ticket
 
 @dataclass(frozen=True)
 class _ToolScope:
-    """The tool-surface scoping kwargs forwarded to ``_run_claude`` — settings file,
-    add-dir(s), and permission mode."""
+    """The tool-surface scoping kwargs forwarded to a ``judge_fn`` — settings file,
+    add-dir(s), and permission mode (the ``claude -p`` path), plus ``ticket_cli`` (the
+    PydanticAI path's benign closed-ticket pins; the ``claude -p`` path takes those via
+    the settings file and ignores this field)."""
 
     settings_path: Path | None = None
     add_dir: Path | list[Path] | None = None
     permission_mode: str | None = None
+    ticket_cli: tuple[str, Path] | None = None
 
 
 # Frozen → safe to share one default instance (no mutable-default aliasing).
@@ -79,6 +82,10 @@ class JudgeInvocation:
     add_dirs: list
     settings_path: Path
     comparison_paths: list
+    # The benign closed-ticket pins ``(py, ticket_cli)`` when this direction grants the
+    # scoped read (#338), else None. The PydanticAI judge_fn turns these into its
+    # closed-ticket custom matcher; the claude -p path takes them via the settings file.
+    ticket_cli: tuple[str, Path] | None = None
 
 
 def _ticket_cli_path() -> Path:
@@ -199,6 +206,7 @@ def build_judge_invocation(
     return JudgeInvocation(
         user_text=user, add_dirs=add_dirs, settings_path=settings_path,
         comparison_paths=comparison_paths,
+        ticket_cli=(py, ticket_cli) if closed_ticket_read else None,
     )
 
 
@@ -219,5 +227,8 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
     return judge_fn(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
-        scope=_ToolScope(settings_path=inv.settings_path, add_dir=inv.add_dirs),
+        scope=_ToolScope(
+            settings_path=inv.settings_path, add_dir=inv.add_dirs,
+            ticket_cli=inv.ticket_cli,
+        ),
     )
