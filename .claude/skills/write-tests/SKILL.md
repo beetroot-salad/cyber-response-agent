@@ -33,7 +33,7 @@ The docstring names the injected fault and the expected observable outcome. Stub
 
 When a stub's outcome is a judgment call, carry a `# rejected: <alternative>` comment naming the branch(es) not taken. This is the decision channel. Without it, a silently-chosen branch leaves no trace it was ever a choice, and the diff cannot tell a real agreement from three authors independently guessing the same obvious branch.
 
-Include the strong author as one of the derivations — not as garnish. A cheap peer ensemble converges on the majority branch and manufactures false consensus exactly where the non-obvious branch is the right one; the strong author is the derivation most likely to take and name that minority branch. The cheap trio reliably surfaces forks where the outcome word differs or someone hedges — it will not, on its own, surface a fork that survives only as the road not taken.
+Include the strong author as one of the derivations — not as garnish. In the authoring run that shaped this skill, the cheap peer ensemble converged on the majority branch and manufactured false consensus exactly where the non-obvious branch was the right one; the strong author is the derivation best placed to take and name that minority branch. Expect the cheap trio to surface forks where the outcome word differs or someone hedges — don't count on it to surface a fork that survives only as the road not taken.
 
 ## 3. Diff to surface ambiguity
 
@@ -46,13 +46,13 @@ A separate agent compares the stubs, aligned by **injected fault** (not by test 
 
 ## 4. Resolve forks with the human
 
-Surface the forks, highest implementation-impact first, and resolve them (AskUserQuestion, your recommendation first). This is where human attention is spent and where it earns its keep: a handful of decisions that dictate what the code must do. Consensus scenarios pass through untouched. The resolved catalog is the spec.
+Surface the forks — silent branches are forks, just harder-won — highest implementation-impact first, and resolve them (AskUserQuestion, your recommendation first). This is where human attention is spent and where it earns its keep: a handful of decisions that dictate what the code must do. Gaps join the catalog: auto-accept a gap whose outcome is uncontroversial, treat it as a fork when the outcome is a judgment call. Consensus scenarios pass through untouched. The resolved catalog is the spec.
 
 ## 5. Author the binding suite
 
-One strong author turns the resolved catalog into the real suite:
+One strong author turns the resolved catalog into the real suite. Survey the project's existing test machinery first and build on it — a harness that already fakes a dependency (e.g. `defender/tests/e2e/_replay_harness.py`: "a new scenario is a few lines of `Turn(...)` against this harness, not a fresh copy of the plumbing") is the starting point; write fresh fakes only for dependencies it doesn't cover. Then:
 
-- **Declarative fault-injection fakes** — one fake per dependency, driven by a data fault-spec (`fail_on`, `raise_after`, `malformed`, `delay`). Faults are data, not bespoke per-test mocks. The fake injects faults **only** — it never classifies or decides policy; that is the job of the code under test, and a fake that decides has smuggled in the answer.
+- **Declarative fault-injection fakes** — one fake per dependency, driven by a data fault-spec (`fail_on`, `raise_after`, `malformed`, `delay`). Faults are data, not bespoke per-test mocks. The fake injects faults **only** — it never classifies or decides policy; that is the job of the code under test, and a fake that decides has smuggled in the answer. Fakes enter through the entry point's injection seams (a deps parameter, a constructor argument), never `monkeypatch.setattr` — this repo's CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`). If the design gives a dependency no seam, the seam is part of the contract — pin it back in step 1.
 - **One test per resolved scenario**, driving the **real entry point** against the fakes.
 - **Assert observable outcomes only** — output contents, return value, raised errors, recorded seam calls. Never reach into internals.
 
@@ -60,8 +60,8 @@ One strong author turns the resolved catalog into the real suite:
 
 Reject or repair any test that fails these. They are not style — they are what makes a test bind:
 
-- The file **parses** and imports cleanly.
-- Every test **actually calls the target symbol.** No test that re-implements the logic in its own body, and no test that asserts on a value it constructed itself. A cheap author will happily produce a full-looking suite that never calls the target and therefore tests nothing — gate against it mechanically (AST check: the entry point appears as a call in each test).
+- The file **parses**, and every import except the not-yet-written target resolves. The target's import failing is the expected red before the implement phase; do not repair it by committing skeleton source — the deliverable stays a tests-only diff.
+- Every test **actually calls the target symbol.** No test that re-implements the logic in its own body, and no test that asserts on a value it constructed itself. A cheap author will happily produce a full-looking suite that never calls the target and therefore tests nothing — gate against it mechanically (AST check: each test calls the entry point directly, or via a helper in the same file whose body does — repair a failure by inlining the call, never by loosening the check).
 - Assertions sit at observable seams; fakes inject faults, not policy.
 
 ## 7. Hand off
