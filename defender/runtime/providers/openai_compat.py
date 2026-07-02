@@ -83,11 +83,16 @@ class OpenAICompatProvider:
         )
 
     def settings(self, role: AgentRole) -> ModelSettings | None:
-        env = _GATHER_EFFORT_ENV if role is AgentRole.GATHER else _MAIN_EFFORT_ENV
+        # GATHER vs. everything-else(=MAIN): pick the env knob and its default from the
+        # SAME branch so a future third AgentRole degrades to the MAIN effort (as the
+        # env line already does) instead of KeyError-ing on the `self._effort[role]` lookup.
+        is_gather = role is AgentRole.GATHER
+        env = _GATHER_EFFORT_ENV if is_gather else _MAIN_EFFORT_ENV
+        default = self._effort[AgentRole.GATHER if is_gather else AgentRole.MAIN]
         # env_str fails loud (FatalConfigError) on a typo'd or empty value: an
         # operator knob misconfig should surface at startup, not silently forward a
         # bad reasoning_effort to the API — nor, on an empty string, drop the cost cap.
-        effort = env_str(env, self._effort[role], choices=_REASONING_EFFORT_CHOICES)
+        effort = env_str(env, default, choices=_REASONING_EFFORT_CHOICES)
         if effort == "default":
             return None
         # Sent via extra_body so it round-trips as a raw request param regardless of

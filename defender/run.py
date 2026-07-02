@@ -186,9 +186,16 @@ def _source_provider_keys(main_model: str, gather_model: str) -> int:
     """Source + require the API key for every provider this run will call. The MAIN
     and gather models each pick a provider from their name (`providers.provider_for`),
     so a mixed run (e.g. GLM main + Sonnet gather) needs *both* keys. Sets the sourced
-    keys into `os.environ`; returns a non-zero exit code if a required key is missing,
-    else 0."""
-    used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
+    keys into `os.environ`; returns a non-zero exit code if a required key is missing
+    or a selected model name is unroutable, else 0."""
+    try:
+        used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
+    except ValueError as e:
+        # A typo'd `--model` / `$DEFENDER_MODEL` / `$DEFENDER_GATHER_MODEL` fails loud
+        # in `provider_for`; surface it as run.py's clean exit-2 (matching the missing-key
+        # path below) rather than letting the ValueError escape as a raw traceback.
+        print(f"[run.py] ERROR: {e}", file=sys.stderr)
+        return 2
     for prov in sorted(used, key=lambda p: p.id):  # deterministic: anthropic before fireworks
         rc = _source_one_provider_key(prov)
         if rc:

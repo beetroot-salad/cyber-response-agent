@@ -21,17 +21,18 @@ class AnthropicProvider:
 
     id: str = "anthropic"
     api_key_var: str = "ANTHROPIC_API_KEY"
-    aliases: dict[str, str] = {}
     prefixes: tuple[str, ...] = ("claude-", _ANTHROPIC_PREFIX)
 
     def __init__(self) -> None:
+        # Per-instance (not a class attr) so it mirrors OpenAICompatProvider and can't
+        # alias across instances; empty because claude-* ids need no friendly aliases.
+        self.aliases: dict[str, str] = {}
         self._cache: ModelSettings | None = None
 
     def build_model(self, name: str) -> Model:
         from pydantic_ai.models.anthropic import AnthropicModel
 
-        model_id = name[len(_ANTHROPIC_PREFIX):] if name.startswith(_ANTHROPIC_PREFIX) else name
-        return AnthropicModel(model_id)
+        return AnthropicModel(name.removeprefix(_ANTHROPIC_PREFIX))
 
     def settings(self, role: AgentRole) -> ModelSettings | None:
         # Three-part caching (same for every role/claude model). The byte-stable

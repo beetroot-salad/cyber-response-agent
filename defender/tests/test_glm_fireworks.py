@@ -223,3 +223,11 @@ def test_source_provider_keys_missing_required_key_exits_2(monkeypatch):
     monkeypatch.setattr(run, "resolve_first_party_key", lambda **kw: (None, None))  # lint-monkeypatch: ok — isolate from the real repo .env
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
     assert run._source_provider_keys("glm-5.2", "kimi-k2.5") == 2
+
+
+def test_source_provider_keys_unknown_model_exits_2(capsys):
+    # A typo'd model name is unroutable in provider_for; _source_provider_keys catches
+    # the ValueError and exits 2 with a clean `[run.py] ERROR` line — never a raw
+    # traceback (which would be exit 1 and no actionable message).
+    assert run._source_provider_keys("glm-5.3", "kimi-k2.5") == 2
+    assert "[run.py] ERROR" in capsys.readouterr().err
