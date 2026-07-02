@@ -15,6 +15,7 @@ touches it. Selection happens in ``core/subagents.ClaudePrintSubagents.judge``.
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -53,6 +54,23 @@ JUDGE_REQUEST_LIMIT = 30
 # provider abstraction; tests inject BuiltModel(FunctionModel, None) to run hermetically
 # — the judge's twin of the runtime driver's `make_model` factory.
 JudgeModelFactory = Callable[[str, str], BuiltModel]
+
+# A reasoning model on the in-process engine sometimes prepends prose to its final
+# text turn before the YAML verdict (observed: Sonnet emitting 2 paragraphs of analysis
+# above `outcome:`), which downstream `strip_yaml_fence` (fences/<thinking> only)
+# doesn't remove, so yaml.safe_load fails. The judge doc's first top-level key is always
+# `outcome:` at column 0 (the prompt mandates "first character is o"); a citation's inner
+# `outcome:` is indented, so this anchor finds the doc start without matching those.
+_YAML_DOC_START = re.compile(r"^outcome:", re.MULTILINE)
+
+
+def _extract_yaml_doc(text: str) -> str:
+    """Trim any leading prose preamble before the YAML verdict. Falls back to the full
+    text when there's no top-level `outcome:` line (a genuinely malformed output — it
+    then fails validation downstream, exactly as it should)."""
+    m = _YAML_DOC_START.search(text)
+    return text[m.start():] if m else text
+
 
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
@@ -199,4 +217,4 @@ def _run_judge_pydantic(
         raise RunUnprocessable(f"judge ({label}) failed: {e!r}") from e
     finally:
         logger.close()
-    return str(result.output or "")
+    return _extract_yaml_doc(str(result.output or ""))
