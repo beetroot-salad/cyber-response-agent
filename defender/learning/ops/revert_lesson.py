@@ -54,7 +54,10 @@ def revert(
         except BranchError as e:
             print(f"[revert_lesson] FATAL: {e}", file=sys.stderr)
             return 2
-        print(f"opened revert PR: {pr}")
+        # Not "opened": revert_lesson_pr is idempotent — on a repeat click it returns the
+        # ALREADY-open PR's ref without opening anything (#482), so a neutral label is honest
+        # for both the freshly-opened and the handed-back case.
+        print(f"revert PR: {pr}")
         return 0
 
 

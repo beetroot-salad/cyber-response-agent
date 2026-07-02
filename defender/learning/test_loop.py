@@ -1287,16 +1287,32 @@ class _FakeForge:
     """In-memory forge for the branch tests — records list/open calls, never shells out
     to ``gh`` (the one injected seam). ``git`` is exercised for real against a tmp repo."""
 
-    def __init__(self, *, pr_rows=None, create_ref="https://pr/1", raises=False):
+    def __init__(self, *, pr_rows=None, create_ref="https://pr/1", raises=False,
+                 list_raises=False):
         self.pr_rows = pr_rows or []
         self.create_ref = create_ref
-        self.raises = raises
+        self.raises = raises              # open_pr raises ForgeError
+        self.list_raises = list_raises    # the pr-list calls raise ForgeError
         self.list_calls: list[str] = []
+        self.head_calls: list[str] = []
         self.open_calls: list[dict] = []
 
     def list_open_prs(self, head_prefix: str) -> list[dict]:
+        # Models the eventually-consistent substring search: returns the candidate rows
+        # unfiltered; the caller (``open_pr_exists``) prefix-confirms.
         self.list_calls.append(head_prefix)
+        if self.list_raises:
+            raise _forge.ForgeError("gh boom")
         return self.pr_rows
+
+    def list_prs_for_head(self, head: str) -> list[dict]:
+        # Models the immediately-consistent ``gh pr list --head`` exact filter: returns only
+        # rows whose head is EXACTLY ``head``, so the tests exercise real head matching (not
+        # just the caller's Python-side filter).
+        self.head_calls.append(head)
+        if self.list_raises:
+            raise _forge.ForgeError("gh boom")
+        return [r for r in self.pr_rows if str(r.get("headRefName", "")) == head]
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         self.open_calls.append({"base": base, "head": head, "title": title, "body": body})
@@ -1509,6 +1525,10 @@ def test_author_branch_revert_returns_existing_open_pr_idempotently(tmp_path: Pa
     b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
     assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "https://pr/existing"
     assert forge.open_calls == []  # opened nothing new
+    # Used the immediately-consistent exact-head lookup (gh pr list --head), NOT the
+    # eventually-consistent prefix search — a just-opened PR must never be missed (#482).
+    assert forge.head_calls == ["lessons/revert-bad"]
+    assert forge.list_calls == []
     # pushed nothing — origin never got the revert branch
     assert not _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
 
@@ -1544,6 +1564,31 @@ def test_author_branch_revert_fails_fast_on_stranded_remote_branch(tmp_path: Pat
     b = ab.AuthorBranch(forge=_FakeForge(pr_rows=[]), repo_root=work, worktree_base=tmp_path / "wt")
     with pytest.raises(ab.BranchError, match="stale revert branch"):
         b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+
+
+def test_author_branch_revert_wraps_forge_list_error_as_branch_error(tmp_path: Path):
+    """A ``gh``-list failure during the idempotent preflight surfaces as ``BranchError`` (the
+    lifecycle union), not a raw ``ForgeError`` — so the worktree-batch envelope's
+    ``except BranchError`` path still catches it. The preflight is before any worktree work,
+    so nothing is pushed and no PR is opened."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    forge = _FakeForge(list_raises=True)
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    with pytest.raises(ab.BranchError, match="gh boom"):
+        b.revert_lesson_pr("defender/lessons/bad.md", "bad")
+    assert forge.open_calls == []
+    assert not _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
+
+
+def test_author_branch_revert_idempotent_return_falls_back_to_head_without_url(tmp_path: Path):
+    """When the open revert PR row carries no ``url`` (older ``gh`` json), the idempotent return
+    falls back to the branch name as the ref — still short-circuiting (no push, no new PR)."""
+    _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
+    forge = _FakeForge(pr_rows=[{"number": 8, "headRefName": "lessons/revert-bad"}])  # no url key
+    b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
+    assert b.revert_lesson_pr("defender/lessons/bad.md", "bad") == "lessons/revert-bad"
+    assert forge.open_calls == []  # opened nothing new
+    assert not _real(work, "ls-remote", "--heads", "origin", "lessons/revert-bad").stdout.strip()
 
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
