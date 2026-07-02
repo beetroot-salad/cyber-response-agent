@@ -24,19 +24,25 @@ Fan out **3 cheap, independent enumerators** (e.g. Haiku — cheap enough that a
 
 ```python
 def test_transient_enrich_error():
-    """one enrich() raises a transient error → skip? retry? abort? — and ProcessResult.???"""
+    """one enrich() raises a transient error → event skipped, others written, ProcessResult.failed == 1"""
+    # rejected: retry with backoff; abort the whole batch
+    ...
 ```
 
-The docstring names the injected fault and the expected observable outcome. Stubs are the right altitude: no body means they can't drift into re-implementing the logic, they parse trivially, and each *is* a catalog row in the exact shape the author later fills. Independence is the whole point — decorrelated derivations catch blind spots a single author rationalizes away. Have the strong author enumerate too, so there are ≥2 derivations to diff.
+The docstring names the injected fault and the expected observable outcome. Stubs are the right altitude: no body means they can't drift into re-implementing the logic, they parse trivially, and each *is* a catalog row in the exact shape the author later fills. Independence is the whole point — decorrelated derivations catch blind spots a single author rationalizes away.
+
+When a stub's outcome is a judgment call, carry a `# rejected: <alternative>` comment naming the branch(es) not taken. This is the decision channel. Without it, a silently-chosen branch leaves no trace it was ever a choice, and the diff cannot tell a real agreement from three authors independently guessing the same obvious branch.
+
+Include the strong author as one of the derivations — not as garnish. A cheap peer ensemble converges on the majority branch and manufactures false consensus exactly where the non-obvious branch is the right one; the strong author is the derivation most likely to take and name that minority branch. The cheap trio reliably surfaces forks where the outcome word differs or someone hedges — it will not, on its own, surface a fork that survives only as the road not taken.
 
 ## 3. Diff to surface ambiguity
 
 A separate agent compares the stubs, aligned by **injected fault** (not by test name), and classifies each fault:
 
 - **Fork** — same fault, materially different expected outcome across authors. This is the payoff: a real ambiguity, made visible.
-- **Silent branch** — one author flagged the fault as open; another hard-coded one outcome as if settled. The dangerous kind — it looks resolved from inside any single suite.
+- **Silent branch** — one author's docstring flags the fault as open (a hedge, or a `# rejected:` line); another states one outcome as settled. The dangerous kind — it looks resolved from inside any single suite.
 - **Gap** — a fault only one author thought of. Candidate addition to the union.
-- **Consensus** — same expected outcome everywhere. Auto-accept; no human input needed.
+- **Consensus** — same expected outcome everywhere. Auto-accept — *unless* the strong author's derivation or a `# rejected:` line marks the fault as a decision, in which case treat it as a fork despite the agreement. Three peers guessing the same obvious branch is not evidence the branch is right.
 
 ## 4. Resolve forks with the human
 
