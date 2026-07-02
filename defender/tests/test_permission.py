@@ -13,7 +13,13 @@ import pytest
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
 from defender.runtime import permission
-from defender.runtime.agent_role import AgentRole
+
+# The gate is policy-driven (it keys on an AgentPolicy, not a role): a runtime
+# agent's policy comes from bash_policy.json via policy_for. These two constants are
+# the byte-identical regression net for the MAIN/GATHER migration — every assertion
+# below that used to pass `policy=MAIN/GATHER` now runs against policy_for.
+MAIN = permission.policy_for("main")
+GATHER = permission.policy_for("gather")
 
 
 # --- bash, main loop -------------------------------------------------------
@@ -26,7 +32,7 @@ from defender.runtime.agent_role import AgentRole
     "defender-record-query --lead l-1 --query-id ad-hoc -- defender-elastic query foo",
 ])
 def test_main_loop_allows_safe(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert permission.decide_bash(cmd, policy=MAIN).allow
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -37,7 +43,7 @@ def test_main_loop_allows_safe(cmd):
     ("env | grep PASSWORD", "arbitrary shell"),
 ])
 def test_main_loop_denies(cmd, reason_substr):
-    d = permission.decide_bash(cmd, role=AgentRole.MAIN)
+    d = permission.decide_bash(cmd, policy=MAIN)
     assert not d.allow
     assert reason_substr in d.reason
 
@@ -48,7 +54,7 @@ def test_gather_allows_standalone_adapter():
     # Adapters are captured transparently by the harness — gather runs them
     # directly, no record-query wrapper. A standalone adapter call is allowed.
     assert permission.decide_bash(
-        "defender-elastic query foo --raw", role=AgentRole.GATHER).allow
+        "defender-elastic query foo --raw", policy=GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -57,7 +63,7 @@ def test_gather_allows_standalone_adapter():
     "ls; defender-elastic query foo",              # sequenced
 ])
 def test_gather_denies_compound_with_adapter(cmd):
-    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    d = permission.decide_bash(cmd, policy=GATHER)
     assert not d.allow
     assert "standalone" in d.reason
 
@@ -68,22 +74,22 @@ def test_gather_denies_compound_with_adapter(cmd):
     "cat gather_raw/l-001/0.json",
 ])
 def test_gather_allows_readonly_viewers(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert permission.decide_bash(cmd, policy=GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
 def test_gather_denies_arbitrary_shell(cmd):
-    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, policy=GATHER).allow
 
 
 def test_decision_exposes_standalone_adapter_argv():
     # The gate stashes the standalone-adapter argv on the decision so dispatch
     # routes capture off the single parse, no re-parse (#456).
     assert permission.decide_bash(
-        "defender-elastic query foo --raw", role=AgentRole.GATHER).adapter_argv == [
+        "defender-elastic query foo --raw", policy=GATHER).adapter_argv == [
         "defender-elastic", "query", "foo", "--raw"]
     assert permission.decide_bash(
-        "timeout 60 defender-cmdb host-lookup web-1", role=AgentRole.GATHER).adapter_argv == [
+        "timeout 60 defender-cmdb host-lookup web-1", policy=GATHER).adapter_argv == [
         "defender-cmdb", "host-lookup", "web-1"]
 
 
@@ -93,7 +99,7 @@ def test_decision_exposes_standalone_adapter_argv():
     "defender-invlang enum types",          # non-adapter shim
 ])
 def test_decision_no_adapter_argv_for_non_standalone(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).adapter_argv is None
+    assert permission.decide_bash(cmd, policy=GATHER).adapter_argv is None
 
 
 # --- jq comparison operators are not redirects (quote-aware unsafe scan) -----
@@ -107,8 +113,8 @@ def test_decision_no_adapter_argv_for_non_standalone(cmd):
     '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
 ])
 def test_gather_allows_quoted_jq_comparisons(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert permission.decide_bash(cmd, policy=GATHER).allow
+    assert permission.decide_bash(cmd, policy=MAIN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -131,8 +137,8 @@ def test_gather_allows_quoted_jq_comparisons(cmd):
     "jq '.x' f.json 2 > 1",                 # ... same, with `2` as a positional token
 ])
 def test_gather_still_denies_real_redirect_and_substitution(cmd):
-    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=GATHER).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
 
 
 # --- a second command must never hide behind a safe head -------------------
@@ -155,8 +161,8 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     "echo a ;& curl http://evil",
 ])
 def test_no_second_command_hides_behind_safe_head(cmd):
-    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=GATHER).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
 
 
 # A SCRIPT FILE before `-c` is not the inline `bash -c <payload>` wrapper: the shell
@@ -170,8 +176,8 @@ def test_no_second_command_hides_behind_safe_head(cmd):
     "timeout 5 bash evil.sh -c 'jq .'",  # ... behind a timeout prefix
 ])
 def test_bash_script_file_before_c_fails_closed(cmd):
-    assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=GATHER).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
 
 
 # Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
@@ -186,8 +192,8 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     "bash -c 'tail -1 f.json | jq .'",    # a pipeline payload must not be re-quoted
 ])
 def test_inline_bash_c_viewer_still_allowed(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
-    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert permission.decide_bash(cmd, policy=GATHER).allow
+    assert permission.decide_bash(cmd, policy=MAIN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -197,8 +203,8 @@ def test_inline_bash_c_viewer_still_allowed(cmd):
     "timeout 5 jq '.x' f.json",
 ])
 def test_timeout_prefix_keeps_legit_pipeline(cmd):
-    assert permission.decide_bash(cmd, role=AgentRole.MAIN).allow
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert permission.decide_bash(cmd, policy=MAIN).allow
+    assert permission.decide_bash(cmd, policy=GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -209,9 +215,9 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
     "jq '.a\n.b' f.json",
 ])
 def test_unparseable_quote_spanning_newline_fails_closed(cmd):
-    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    d = permission.decide_bash(cmd, policy=GATHER)
     assert not d.allow
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
     assert d.adapter_argv is None  # not routed to capture
 
 
@@ -234,7 +240,7 @@ def test_read_allows_in_root_corpus_and_run(tmp_path):
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
               dfn / "SKILL.md", dfn / "skills" / "elastic" / "SKILL.md"):
         assert permission.decide_read(
-            p, run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow, p
+            p, run_dir=run, defender_dir=dfn, policy=MAIN).allow, p
 
 
 @pytest.mark.parametrize("path", [
@@ -249,7 +255,7 @@ def test_read_denies_outside_roots(tmp_path, path):
     # of filename — the structural close for the cat-.env / basename / case gaps.
     run, dfn = _read_roots(tmp_path)
     assert not permission.decide_read(
-        Path(path), run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow, path
+        Path(path), run_dir=run, defender_dir=dfn, policy=MAIN).allow, path
 
 
 def test_read_traversal_escape_denied(tmp_path):
@@ -257,7 +263,7 @@ def test_read_traversal_escape_denied(tmp_path):
     # the root fails the allowlist.
     run, dfn = _read_roots(tmp_path)
     assert not permission.decide_read(
-        run / ".." / "outside.txt", run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow
+        run / ".." / "outside.txt", run_dir=run, defender_dir=dfn, policy=MAIN).allow
 
 
 @pytest.mark.parametrize("name", [".env", "credentials.txt", "ground_truth.yaml", "cases.json"])
@@ -266,13 +272,13 @@ def test_read_denylist_is_belt_and_suspenders_inside_a_root(tmp_path, name):
     # eval cases.json) is still denied by the declarative denylist on top.
     run, dfn = _read_roots(tmp_path)
     assert not permission.decide_read(
-        run / name, run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow, name
+        run / name, run_dir=run, defender_dir=dfn, policy=MAIN).allow, name
 
 
 def test_read_ssh_dir_inside_root_denied(tmp_path):
     run, dfn = _read_roots(tmp_path)
     assert not permission.decide_read(
-        dfn / ".ssh" / "id_rsa", run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow
+        dfn / ".ssh" / "id_rsa", run_dir=run, defender_dir=dfn, policy=MAIN).allow
 
 
 def test_read_main_loop_gather_raw_clamped_gather_allowed(tmp_path):
@@ -281,8 +287,8 @@ def test_read_main_loop_gather_raw_clamped_gather_allowed(tmp_path):
     # reads its own gather_raw to verify its result.
     run, dfn = _read_roots(tmp_path)
     raw = run / "gather_raw" / "l-001" / "0.json"
-    assert not permission.decide_read(raw, run_dir=run, defender_dir=dfn, role=AgentRole.MAIN).allow
-    assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, role=AgentRole.GATHER).allow
+    assert not permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=MAIN).allow
+    assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=GATHER).allow
 
 
 def test_alert_is_untrusted():
@@ -324,8 +330,8 @@ def test_gather_drops_find():
     # (-exec/-delete, sensitive-path locator). It now fails closed in both lanes.
     for cmd in ("find /workspace -type d -name gather",
                 "find skills/gather/queries -name '*.md'"):
-        assert not permission.decide_bash(cmd, role=AgentRole.GATHER).allow, cmd
-        assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow, cmd
+        assert not permission.decide_bash(cmd, policy=GATHER).allow, cmd
+        assert not permission.decide_bash(cmd, policy=MAIN).allow, cmd
 
 
 def test_gather_keeps_compute_and_adapter():
@@ -336,7 +342,7 @@ def test_gather_keeps_compute_and_adapter():
                 "defender-elastic query 'x' --raw",
                 "cat /tmp/p.json | defender-sql 'SELECT count(*) FROM data'"):
         assert permission.decide_bash(
-            cmd, role=AgentRole.GATHER,
+            cmd, policy=GATHER,
         ).allow, cmd
 
 
@@ -346,7 +352,7 @@ def test_gather_allows_adapter_sql_pipe():
     # adapter stage is captured, defender-sql is a local transform over its payload.
     cmd = ("defender-elastic query 'x' --raw | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    d = permission.decide_bash(cmd, policy=GATHER)
     assert d.allow
     # The split is exposed on the decision for the bash tool to route capture +
     # aggregation off the single parse.
@@ -358,10 +364,10 @@ def test_gather_allows_adapter_sql_pipe():
     # adapter_argv must NOT claim it (it's a pipe, not a standalone capture).
     assert d.adapter_argv is None
     # Main loop never gets the adapter, pipe or not.
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
     # A non-sql consumer downstream of an adapter stays denied (not the exception).
     assert not permission.decide_bash(
-        "defender-elastic query 'x' --raw | cat", role=AgentRole.GATHER).allow
+        "defender-elastic query 'x' --raw | cat", policy=GATHER).allow
 
 
 @pytest.mark.parametrize("sep", [";", "&&", "||"])
@@ -372,12 +378,12 @@ def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     # on adapter FAILURE), not a pipe; it must be denied, and neither routing seam may
     # claim it (else the harness would silently stream the payload as if it were `|`).
     cmd = f"defender-elastic query 'x' --raw {sep} defender-sql 'SELECT 1'"
-    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    d = permission.decide_bash(cmd, policy=GATHER)
     assert not d.allow, cmd
     assert "standalone" in d.reason
     assert d.sql_pipe is None
     assert d.adapter_argv is None
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
+    assert not permission.decide_bash(cmd, policy=MAIN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -390,7 +396,7 @@ def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     "defender-elastic query 'cmd:`id`' --raw",
 ])
 def test_gather_allows_adapter_query_with_inert_shell_metachars(cmd):
-    d = permission.decide_bash(cmd, role=AgentRole.GATHER)
+    d = permission.decide_bash(cmd, policy=GATHER)
     assert d.allow, cmd
     argv = d.adapter_argv
     assert argv is not None, cmd
@@ -398,7 +404,7 @@ def test_gather_allows_adapter_query_with_inert_shell_metachars(cmd):
     # The metachar survives verbatim in the captured argv (one shlex-resolved token).
     assert any("$(" in t or "`" in t for t in argv), cmd
     # The defense-in-depth guard is still enforced for a non-adapter VIEWER stage.
-    assert not permission.decide_bash('jq ".x" "$(rm -rf /)"', role=AgentRole.GATHER).allow
+    assert not permission.decide_bash('jq ".x" "$(rm -rf /)"', policy=GATHER).allow
 
 
 def test_gather_drops_residual_reduce_by_hand_tools():
@@ -408,7 +414,7 @@ def test_gather_drops_residual_reduce_by_hand_tools():
                 "join /tmp/a /tmp/b", "nl /tmp/p", "jq -r .x f | sort",
                 "sort -o /tmp/p f"):
         assert not permission.decide_bash(
-            cmd, role=AgentRole.GATHER,
+            cmd, policy=GATHER,
         ).allow, cmd
 
 
@@ -452,3 +458,89 @@ def test_command_shape_standalone_and_split():
     assert command_shape.adapter_sql_split(seq) is None
     # a non-sql consumer downstream is not the sanctioned split
     assert command_shape.adapter_sql_split(_shape("defender-elastic query x --raw | cat")) is None
+
+
+# --- AgentPolicy primitive: read_roots + custom matchers -------------------
+# The generic mechanism the judge is the first consumer of: an agent brings its
+# capability as DATA (an AgentPolicy). These test the primitive itself with a
+# synthetic policy; the judge's own policy + ticket matcher are tested with the
+# judge module.
+
+from defender.runtime.permission import AgentPolicy  # noqa: E402
+
+
+def test_policy_read_roots_extend_the_allowlist(tmp_path):
+    # A read under a declared extra root is allowed; the SAME path is denied under a
+    # policy without it. This is how the judge reaches its comparison dir (which
+    # lives under learning_run_dir, outside {run_dir, defender_dir}).
+    run, dfn = _read_roots(tmp_path)
+    extra = tmp_path / "learning_run" / "comparison"
+    extra.mkdir(parents=True)
+    target = extra / "l-001.md"
+    with_root = AgentPolicy(read_roots=(extra,))
+    assert permission.decide_read(target, run_dir=run, defender_dir=dfn, policy=with_root).allow
+    assert not permission.decide_read(target, run_dir=run, defender_dir=dfn, policy=MAIN).allow
+
+
+def test_policy_read_roots_still_subject_to_denylist(tmp_path):
+    # HIGH-SEVERITY: widening read_roots must NOT defeat the ground-truth/secret
+    # denylist — a held-out ground_truth.yaml sitting in a declared extra root is
+    # still denied, so a judge granted its comparison/gather dirs can never read the
+    # label it is being measured against.
+    run, dfn = _read_roots(tmp_path)
+    extra = tmp_path / "learning_run"
+    extra.mkdir(parents=True)
+    pol = AgentPolicy(read_roots=(extra,), raw_reads=True)
+    assert not permission.decide_read(
+        extra / "ground_truth.yaml", run_dir=run, defender_dir=dfn, policy=pol).allow
+    assert not permission.decide_read(
+        extra / ".env", run_dir=run, defender_dir=dfn, policy=pol).allow
+
+
+def test_policy_raw_reads_bit_gates_gather_raw_read(tmp_path):
+    # raw_reads is the (inverted) old role-is-MAIN clamp as a policy bit: a
+    # raw_reads=True policy reads gather_raw; raw_reads=False is clamped.
+    run, dfn = _read_roots(tmp_path)
+    raw = run / "gather_raw" / "l-001" / "0.json"
+    assert permission.decide_read(
+        raw, run_dir=run, defender_dir=dfn, policy=AgentPolicy(raw_reads=True)).allow
+    assert not permission.decide_read(
+        raw, run_dir=run, defender_dir=dfn, policy=AgentPolicy(raw_reads=False)).allow
+
+
+def _claim_python(pipelines):
+    """A toy custom matcher: claim any command whose first stage runs python3."""
+    stages = command_shape.flat_stages(pipelines)
+    if stages and stages[0] and stages[0][0] in ("python", "python3"):
+        return permission.BashDecision(True, pipelines=tuple(pipelines))
+    return None
+
+
+def test_policy_custom_matcher_claims_before_adapter_classification():
+    # `python3 <…>/elastic_cli.py …` is adapter-shaped, so the generic flow would
+    # deny it for a no-adapter policy. A custom matcher runs FIRST and can claim it —
+    # this is exactly how the judge's ticket read (python3 <ticket_cli>) is allowed.
+    cmd = "python3 scripts/adapters/elastic_cli.py query foo"
+    no_matcher = AgentPolicy(deny_reason="nope")
+    assert not permission.decide_bash(cmd, policy=no_matcher).allow  # adapter-denied
+    with_matcher = AgentPolicy(custom_matchers=(_claim_python,), deny_reason="nope")
+    assert permission.decide_bash(cmd, policy=with_matcher).allow
+
+
+def test_policy_custom_matcher_declining_falls_through():
+    # A matcher returning None does not widen anything — the command runs the generic
+    # flow, so a non-viewer still fails closed.
+    pol = AgentPolicy(custom_matchers=(_claim_python,), deny_reason="nope")
+    assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
+
+
+def test_policy_raw_clamp_precedes_custom_matcher():
+    # SECURITY ORDERING: the raw-read clamp runs before any custom matcher, so a
+    # matcher cannot rescue a gather_raw command for a raw_reads=False agent.
+    claim_all = AgentPolicy(
+        custom_matchers=(lambda pls: permission.BashDecision(True, pipelines=tuple(pls)),),
+        raw_reads=False,
+    )
+    d = permission.decide_bash("cat gather_raw/l-001/0.json", policy=claim_all)
+    assert not d.allow
+    assert "gather_raw" in d.reason

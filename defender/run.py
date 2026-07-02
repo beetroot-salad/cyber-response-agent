@@ -38,7 +38,6 @@ import json  # noqa: E402
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _git  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -47,89 +46,16 @@ from defender.runtime import providers  # noqa: E402
 DEFENDER_DIR = _DEFENDER_DIR
 
 
-def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
-    """Extract a single var from a `.env` file. Deliberately *not* a full dotenv
-    load — we only want the API key, not to clobber adapter config (data-source creds,
-    docker-context vars) that also live in these files. Returns the value or None."""
-    try:
-        text = env_file.read_text()
-    except OSError:
-        return None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):]
-        k, sep, v = line.partition("=")
-        if sep and k.strip() == var:
-            return v.strip().strip('"').strip("'") or None
-    return None
-
-
-def _main_repo_root() -> Path:
-    """The main worktree's root, where shared config like `.env` lives.
-
-    Under a linked git worktree `_run.REPO_ROOT` is the *worktree* root, not the
-    main checkout, so `<repo_root>/.env` misses the canonical file. Git's common
-    dir (`.../.git`) is shared by every worktree; its parent is the main root.
-    Falls back to `_run.REPO_ROOT` outside a git tree.
-    """
-    try:
-        out = _git.git(["rev-parse", "--git-common-dir"], cwd=_run.REPO_ROOT)
-    except (OSError, _git.GitError):
-        return _run.REPO_ROOT
-    if not out:
-        return _run.REPO_ROOT
-    common = Path(out)
-    if not common.is_absolute():
-        common = (_run.REPO_ROOT / common).resolve()
-    return common.parent
-
-
-def resolve_first_party_key(
-    *, root: Path | None = None, main_repo_root: Path | None = None,
-    var: str = "ANTHROPIC_API_KEY",
-) -> tuple[str | None, Path | None]:
-    """The billable provider API key for the PydanticAI engine, sourced from a
-    `.env` file rather than the ambient environment. Defaults to the first-party
-    ANTHROPIC_API_KEY; pass ``var="FIREWORKS_API_KEY"`` for the Fireworks/GLM path.
-
-    Inside a Claude Code session the ambient ANTHROPIC key is the *subscription*
-    credential (the session's nested `claude -p` rides it; it 401s against the
-    first-party REST API this engine calls), so the `.env` key takes precedence.
-    First existing file that defines ``var`` wins:
-
-      1. ``$DEFENDER_ENV_FILE``        — explicit override
-      2. ``<repo_root>/.env``
-      3. ``<main_worktree_root>/.env`` — repo_root points at the *worktree* root
-                                         under a linked git worktree; shared config
-                                         like .env lives in the main checkout
-
-    Returns ``(key, source_path)`` or ``(None, None)``.
-    """
-    if root is None:
-        root = _run.REPO_ROOT
-    if main_repo_root is None:
-        main_repo_root = _main_repo_root()
-    candidates: list[Path] = []
-    explicit = os.environ.get("DEFENDER_ENV_FILE")
-    if explicit:
-        candidates.append(Path(explicit))
-    candidates += [
-        root / ".env",
-        main_repo_root / ".env",
-    ]
-    seen: set[Path] = set()
-    for path in candidates:
-        if path in seen:
-            continue
-        seen.add(path)
-        if path.is_file():
-            key = _read_env_key(path, var)
-            if key:
-                return key, path
-    return None, None
+# The `.env` metered-key sourcing lives in the neutral `defender._first_party_key`
+# module so the learning loop (the judge's metered-key sourcing) can import it too —
+# it must NOT import run.py (the heavy runtime graph). Re-exported here for run.py's
+# historical surface: tests reach `run.resolve_first_party_key` (and monkeypatch it),
+# and `_source_one_provider_key` calls the bare name so the patch takes.
+from defender._first_party_key import (  # noqa: E402,F401
+    _main_repo_root,
+    _read_env_key,
+    resolve_first_party_key,
+)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

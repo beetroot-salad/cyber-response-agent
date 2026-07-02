@@ -34,10 +34,10 @@ from defender.hooks.block_main_loop_raw_access import (
     RAW_MARKER,
 )
 from defender.runtime import bash_exec, bash_policy
-from defender.runtime.agent_role import AgentRole
 
 from . import command_shape
 from .decision import Decision
+from .policy import AgentPolicy
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
 # so an unrecognized main-loop command fails closed (deny), matching the net
@@ -150,55 +150,22 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
         return None
 
 
-def _decide_bash_gather(cmd: str) -> BashDecision:
-    """Gather subagent. A standalone adapter call is allowed directly (the harness
-    captures it), as is the `adapter --raw | defender-sql '<SQL>'` aggregation
-    pipe. Any other pipeline/compound containing an adapter is ambiguous and
-    denied. Non-adapter commands must be read-only viewers / non-adapter shims, so
-    arbitrary shell (`rm`, `curl|bash`, `python3 …`) still fails closed."""
-    pipelines = _parse(cmd)
-    if pipelines is None:
-        return BashDecision(False, GATHER_FALLTHROUGH_DENY_REASON)
-    if command_shape.has_adapter(pipelines):
-        # A standalone adapter is captured transparently; the only sanctioned
-        # multi-stage shape is the `adapter --raw | defender-sql '<SQL>'` pipe (a
-        # single two-stage pipeline). Any other compound containing an adapter — a
-        # different downstream program, or a `;`/`&&`/`||` sequence — is ambiguous
-        # and denied. The adapter/sql query payloads are NOT run through the
-        # substitution guard (they go straight to subprocess shell=False).
-        standalone = command_shape.standalone_adapter_argv(pipelines)
-        if standalone is not None:
-            return _allow(pipelines, adapter_argv=standalone)
-        if bash_policy.adapter_sql_pipe_allowed("gather"):
-            split = command_shape.adapter_sql_split(pipelines)
-            if split is not None:
-                return _allow(pipelines, sql_pipe=split)
-        return BashDecision(False, ADAPTER_STANDALONE_REASON)
-    # Non-adapter command: read-only viewers / non-adapter shims only. The
-    # substitution/assignment guard applies here (these stages execute through the
-    # no-shell executor), but not to the adapter/defender-sql payloads above.
-    return _decide_viewers(pipelines, GATHER_FALLTHROUGH_DENY_REASON)
-
-
-def _decide_bash_main(cmd: str) -> BashDecision:
-    """Main loop: no adapter calls, no gather_raw reads, only safe shims/viewers.
-    A `defender-record-query … -- <adapter> …` wrapper is fine — its stage head is
-    the (allowlisted) wrapper, not the adapter, so it is neither flagged as an
-    adapter call nor denied."""
-    if RAW_MARKER in cmd and not _names_a_gather_payload_tool(cmd):
-        return BashDecision(False, RAW_DENY_REASON)
-
-    pipelines = _parse(cmd)
-    if pipelines is None:
-        return BashDecision(False, FALLTHROUGH_DENY_REASON)
-    # A data-source adapter from the main loop is denied with the specific reason
-    # (it must be dispatched via gather, and run directly here it escapes the audit
-    # trail) rather than the generic fall-through.
-    if not bash_policy.adapters_allowed("main") and command_shape.has_adapter(pipelines):
-        return BashDecision(False, ADAPTER_DENY_REASON)
-    # The main loop runs only the read-only viewers/shims (no adapters past the
-    # check above), so the substitution/assignment guard applies to every stage.
-    return _decide_viewers(pipelines, FALLTHROUGH_DENY_REASON)
+def policy_for(agent: str) -> AgentPolicy:
+    """Build the `AgentPolicy` for a runtime agent ('main' | 'gather') from the
+    declarative `bash_policy.json` capability flags. The fall-through deny message
+    differs by agent: the main loop is told to dispatch gather for data access,
+    while the gather subagent (which IS the data layer) is told to run the adapter
+    directly. Learning-loop agents (the judge) construct their own `AgentPolicy` in
+    their own module rather than going through this runtime-agent factory."""
+    deny_reason = (
+        FALLTHROUGH_DENY_REASON if agent == "main" else GATHER_FALLTHROUGH_DENY_REASON
+    )
+    return AgentPolicy(
+        adapters=bash_policy.adapters_allowed(agent),
+        adapter_sql_pipe=bash_policy.adapter_sql_pipe_allowed(agent),
+        raw_reads=bash_policy.raw_reads_allowed(agent),
+        deny_reason=deny_reason,
+    )
 
 
 def _decide_viewers(pipelines: list[bash_exec.Pipeline], deny_reason: str) -> BashDecision:
@@ -223,25 +190,63 @@ def _allow(
     )
 
 
-def decide_bash(command: str, *, role: AgentRole) -> BashDecision:
-    """Allow/deny a Bash command, porting the three Bash gate hooks.
+def decide_bash(command: str, *, policy: AgentPolicy) -> BashDecision:
+    """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy`
+    (no per-role method): custom matchers first, then the raw-read clamp, adapter
+    capture, and the read-only viewer allowlist.
 
-    `role=MAIN` → the orchestrator (slice 1): no adapter calls, no gather_raw
-    reads, only safe shims/viewers.
-    Any non-MAIN role (today `GATHER`, slice 2) → the gather subagent: it may
-    run a data-source adapter directly (captured transparently) — standalone or
-    piped into defender-sql — plus read-only viewers; arbitrary shell fails
-    closed. New subagent roles get their own branch here when their policy
-    diverges from gather's.
-
-    Returns a `BashDecision` carrying the single parse (see the class): callers
-    read `.allow`/`.reason` as before, and route capture/execution off
+    Returns a `BashDecision` carrying the single parse (see the class): callers read
+    `.allow`/`.reason` as before, and route capture/execution off
     `.adapter_argv`/`.sql_pipe`/`.pipelines` without re-parsing (#456).
     """
     cmd = command.strip()
     if not cmd:
         return BashDecision(True)
 
-    if role is not AgentRole.MAIN:
-        return _decide_bash_gather(cmd)
-    return _decide_bash_main(cmd)
+    # Raw-read clamp (a security invariant, so it runs before any custom matcher): a
+    # command naming a gather_raw/ path is denied unless the agent may read raw. The
+    # gather-payload-tool exemption keeps the main loop's `defender-record-query …
+    # <gather_raw path>` wrapper allowed (it legitimately names a raw path); an agent
+    # with raw_reads (gather, judge) skips the clamp entirely.
+    if (
+        RAW_MARKER in cmd
+        and not policy.raw_reads
+        and not _names_a_gather_payload_tool(cmd)
+    ):
+        return BashDecision(False, RAW_DENY_REASON)
+
+    pipelines = _parse(cmd)
+    if pipelines is None:
+        return BashDecision(False, policy.deny_reason)
+
+    # Custom logic: an agent's matcher may claim a command before the generic
+    # adapter/viewer flow — e.g. the judge's pinned closed-ticket read runs as
+    # `python3 <ticket_cli> …`, an adapter-shaped path the generic flow would
+    # otherwise misclassify and deny.
+    for matcher in policy.custom_matchers:
+        claimed = matcher(pipelines)
+        if claimed is not None:
+            return claimed
+
+    if command_shape.has_adapter(pipelines):
+        # A data-source adapter: denied unless the agent may run adapters. When
+        # allowed, a standalone call is captured transparently, and the only
+        # sanctioned multi-stage shape is `adapter --raw | defender-sql '<SQL>'`
+        # (gated on adapter_sql_pipe). Any other adapter compound is ambiguous. The
+        # adapter/sql payloads are NOT run through the substitution guard (they go
+        # straight to subprocess shell=False).
+        if not policy.adapters:
+            return BashDecision(False, ADAPTER_DENY_REASON)
+        standalone = command_shape.standalone_adapter_argv(pipelines)
+        if standalone is not None:
+            return _allow(pipelines, adapter_argv=standalone)
+        if policy.adapter_sql_pipe:
+            split = command_shape.adapter_sql_split(pipelines)
+            if split is not None:
+                return _allow(pipelines, sql_pipe=split)
+        return BashDecision(False, ADAPTER_STANDALONE_REASON)
+
+    # Non-adapter command: read-only viewers / non-adapter shims only. The
+    # substitution/assignment guard applies here (these stages execute through the
+    # no-shell executor).
+    return _decide_viewers(pipelines, policy.deny_reason)

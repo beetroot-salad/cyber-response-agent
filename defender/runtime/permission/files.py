@@ -12,10 +12,10 @@ from pathlib import Path
 
 from defender.hooks.block_main_loop_raw_access import RAW_DENY_REASON, RAW_MARKER
 from defender.runtime import bash_policy
-from defender.runtime.agent_role import AgentRole
 from defender.skills.invlang.validate import validate_companion
 
 from .decision import Decision
+from .policy import AgentPolicy
 
 
 def _is_within(p: Path, root: Path) -> bool:
@@ -28,32 +28,39 @@ def _is_within(p: Path, root: Path) -> bool:
 
 
 def decide_read(
-    path: Path, *, run_dir: Path, defender_dir: Path, role: AgentRole
+    path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy
 ) -> Decision:
     """Allow/deny a file read — a **deny-by-default allowlist**, matching the shape
-    `decide_write` already uses for writes. A read must resolve INSIDE one of two
-    roots: the run dir (the agent's own case artifacts + gather payloads) or the
-    defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md). Past
-    runs read essentially nothing else (alert.json, SKILLs, lessons, run artifacts);
-    everything outside both roots fails closed. `resolve()` collapses `..` and
-    symlinks, so an allowed-root prefix can't be escaped (the structural close for
-    the `cat …/.env` / basename-only / case-sensitivity gaps a denylist alone left).
+    `decide_write` already uses for writes. A read must resolve INSIDE one of the
+    allowed roots: the run dir (the agent's own case artifacts + gather payloads),
+    the defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md), or
+    any of the agent's declared `policy.read_roots` (e.g. the judge's comparison dir
+    under `learning_run_dir`). Everything outside them fails closed. `resolve()`
+    collapses `..` and symlinks, so an allowed-root prefix can't be escaped (the
+    structural close for the `cat …/.env` / basename-only / case-sensitivity gaps a
+    denylist alone left).
 
     On top of the allowlist, the declarative secret/ground-truth denylist
     (`bash_policy.json`) still denies a sensitive file that lands INSIDE a root — a
-    captured `.env` in the run dir, the eval `cases.json` — cheap belt-and-suspenders.
+    captured `.env` in the run dir, the eval `cases.json`/`ground_truth.yaml` — cheap
+    belt-and-suspenders that applies to every agent regardless of policy.
 
-    The main-loop gather_raw clamp is unchanged: the main loop consumes the gather
-    summary, never the raw payload; the gather subagent (a non-MAIN role) reads
-    its own gather_raw to verify its query result."""
+    The gather_raw clamp is now a policy bit: the main loop (raw_reads=False)
+    consumes the gather summary, never the raw payload; the gather subagent and the
+    judge (raw_reads=True) read their own gather_raw to verify / refute."""
     p = Path(path)
     rp = p.resolve()
-    roots = (Path(run_dir).resolve(), Path(defender_dir).resolve())
+    roots = (
+        Path(run_dir).resolve(),
+        Path(defender_dir).resolve(),
+        *(r.resolve() for r in policy.read_roots),
+    )
     if not any(_is_within(rp, root) for root in roots):
         return Decision(
             False,
-            "Blocked: reads are limited to the run dir and the defender corpus "
-            f"(skills/lessons/scripts); {p} is outside both.",
+            "Blocked: reads are limited to the run dir, the defender corpus "
+            f"(skills/lessons/scripts), and this agent's declared roots; {p} is "
+            "outside them.",
         )
     # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
     # still denied (substrings match the filename, dirs match any path component).
@@ -66,9 +73,9 @@ def decide_read(
     # No gather-payload-tool exemption here: that exemption is about a Bash
     # *command* invoking record-query (which legitimately names a gather_raw
     # path). block_main_loop_raw_access never applies it to a Read
-    # (its `cmd` is "" for non-Bash), so a main-loop read of any gather_raw path is
-    # unconditionally clamped.
-    if RAW_MARKER in str(rp) and role is AgentRole.MAIN:
+    # (its `cmd` is "" for non-Bash), so a read of any gather_raw path by an agent
+    # that may not read raw (raw_reads=False, e.g. the main loop) is clamped.
+    if RAW_MARKER in str(rp) and not policy.raw_reads:
         return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 
