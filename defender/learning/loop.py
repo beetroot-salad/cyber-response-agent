@@ -53,6 +53,7 @@ from defender.learning.core.orchestrate import (  # noqa: E402
     read_ground_truth,
     run_one,
     _directions_for,
+    _prepare_judge_engine_for,
 )
 from defender.learning.core.persist import (  # noqa: E402
     append_actor_environment_observations,
@@ -93,7 +94,7 @@ __all__ = [
     "append_actor_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
     "invoke_actor", "invoke_actor_benign", "invoke_oracle",
-    "invoke_judge", "ADVERSARIAL_WIRING", "BENIGN_WIRING",
+    "invoke_judge", "ADVERSARIAL_WIRING", "BENIGN_WIRING", "_prepare_judge_engine_for",
     "is_skip_story", "lead_repository",
     # Underscore names are part of the test-facing surface (loop._outcome_keyword,
     # loop._directions_for, loop._anchor_with_case_key); list them so they read as

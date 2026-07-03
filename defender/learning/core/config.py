@@ -358,26 +358,34 @@ BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
 ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
-JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
-BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
-# The judges do 0 tool calls and follow a heavily-scaffolded prompt that already
-# walks every analytic step, so high-effort reasoning over-thinks: ~90% of judge
-# output tokens were extended thinking at the inherited global `high` default.
-# Pin a low budget explicitly; override per-direction via env for A/B.
-JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "low")
-BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "low")
+# The judge runs in-process on GLM 5.2 (Fireworks) by default — a Fireworks model only
+# routes on the `pydantic_ai` engine (the new `judge_engine()` default); `claude -p`
+# can't serve it, so overriding JUDGE_MODEL back to a `claude-*` id requires
+# LEARNING_JUDGE_ENGINE=claude_print too. Override per-direction via env for the A/B.
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "glm-5.2")
+BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "glm-5.2")
+# GLM 5.2 reasons by default and bills that thinking as output tokens, capped by
+# `reasoning_effort`; the judge follows a heavily-scaffolded prompt and does only a
+# bounded handful of read-only verification tool calls, so `medium` is the ported
+# default (per the Step-2 model A/B — see evals/judge_equivalence.py), with `low` a
+# cheaper fallback. Effort maps through `providers.build_for_effort` (Fireworks
+# `reasoning_effort` / Anthropic `anthropic_effort`), so `medium` is valid on either.
+# Override per-direction via env for A/B.
+JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "medium")
+BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "medium")
 
-# Which engine runs the judge. `claude_print` (default) is the shared `claude -p`
-# transport every learning stage uses — the LEARN path is byte-identical to before
-# the PydanticAI judge existed. `pydantic_ai` runs the judge in-process on the
-# metered first-party API (see pipeline/judge/engine_pydantic.py). Read at call time
-# (not a module constant) so tests can `monkeypatch.setenv`; `env_str` fails loud on
-# a typo. Only the judge moves — actor/oracle/author stay on `claude -p`.
+# Which engine runs the judge. `pydantic_ai` (default) runs the judge in-process on the
+# metered first-party API — GLM 5.2 on Fireworks (see pipeline/judge/engine_pydantic.py);
+# the judge bills the metered key (`source_judge_key` sources FIREWORKS_API_KEY up front),
+# while every sibling stage (actor/oracle/author) still shells out to `claude -p` on the
+# subscription. `claude_print` is the legacy shared `claude -p` transport (opt-in, Anthropic
+# models only) — pair it with a `claude-*` JUDGE_MODEL. Read at call time (not a module
+# constant) so tests can `monkeypatch.setenv`; `env_str` fails loud on a typo.
 VALID_JUDGE_ENGINES = ("claude_print", "pydantic_ai")
 
 
 def judge_engine() -> str:
-    return env_str("LEARNING_JUDGE_ENGINE", "claude_print", choices=VALID_JUDGE_ENGINES)
+    return env_str("LEARNING_JUDGE_ENGINE", "pydantic_ai", choices=VALID_JUDGE_ENGINES)
 
 
 @dataclass(frozen=True)

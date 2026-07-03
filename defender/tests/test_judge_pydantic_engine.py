@@ -7,6 +7,7 @@ provider call raises. Plus the engine-flag routing in ClaudePrintSubagents.judge
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.hooks._cmd_segments import unwrap  # noqa: E402
 from defender.learning.core import subagents  # noqa: E402
+from defender.learning.core.config import FatalConfigError  # noqa: E402
 from defender.learning.core.directions import ADVERSARIAL_WIRING  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic  # noqa: E402
@@ -245,8 +247,9 @@ _SENTINEL = object()
 
 
 def test_subagents_judge_routes_engine_by_flag(monkeypatch, tmp_path):
-    # Default → claude_print: invoke_judge is called with NO judge_fn (uses its own
-    # default _run_judge_claude). pydantic_ai → invoke_judge gets judge_fn=_run_judge_pydantic.
+    # pydantic_ai (the default) → invoke_judge gets judge_fn=_run_judge_pydantic.
+    # claude_print → invoke_judge is called with NO judge_fn (uses its own default
+    # _run_judge_claude).
     captured = {}
 
     def _spy(wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
@@ -256,12 +259,31 @@ def test_subagents_judge_routes_engine_by_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subagents, "invoke_judge", _spy)  # lint-monkeypatch: ok — spy the judge_fn routing decision
     sub = subagents.ClaudePrintSubagents()
-    args = (ADVERSARIAL_WIRING, tmp_path, tmp_path / "story.md", tmp_path / "tel.yaml", tmp_path)
+    tail = (tmp_path, tmp_path / "story.md", tmp_path / "tel.yaml", tmp_path)
 
+    # Default (pydantic_ai): the glm wiring routes to the in-process judge.
     monkeypatch.delenv("LEARNING_JUDGE_ENGINE", raising=False)
-    sub.judge(*args)
-    assert captured["judge_fn"] is _SENTINEL  # default: claude_print, judge_fn not passed
-
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "pydantic_ai")
-    sub.judge(*args)
+    sub.judge(ADVERSARIAL_WIRING, *tail)
     assert captured["judge_fn"] is _run_judge_pydantic
+
+    # claude_print with an Anthropic model routes to the claude -p judge (no judge_fn).
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    claude_wiring = dataclasses.replace(ADVERSARIAL_WIRING, model="claude-sonnet-4-6")
+    sub.judge(claude_wiring, *tail)
+    assert captured["judge_fn"] is _SENTINEL
+
+
+def test_subagents_judge_claude_print_rejects_fireworks_model(monkeypatch, tmp_path):
+    # A Fireworks model (glm-5.2, the default JUDGE_MODEL) that the legacy claude -p
+    # transport can't serve — claude_print + a non-Anthropic model fails loud (a clear
+    # config error), not with an opaque `claude -p --model glm-5.2` CLI failure. Pin the
+    # model on the wiring (rather than lean on the import-time JUDGE_MODEL) so the test
+    # states its Fireworks-model intent and stays green under a JUDGE_MODEL=claude-* override
+    # — without that pin a claude-* override would flip the guard off and fall through to a
+    # real `claude -p` subprocess in this hermetic test.
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    fireworks_wiring = dataclasses.replace(ADVERSARIAL_WIRING, model="glm-5.2")
+    sub = subagents.ClaudePrintSubagents()
+    with pytest.raises(FatalConfigError):
+        sub.judge(fireworks_wiring, tmp_path, tmp_path / "story.md",
+                  tmp_path / "tel.yaml", tmp_path)

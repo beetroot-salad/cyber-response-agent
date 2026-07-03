@@ -115,9 +115,13 @@ def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Pa
     return run_dir
 
 
-def test_run_one_gate_short_circuits_before_append(tmp_path: Path) -> None:
+def test_run_one_gate_short_circuits_before_append(tmp_path: Path, monkeypatch) -> None:
     """The held-out gate fires before append: a queueable finding that would
     otherwise be queued must leave the pending file untouched on a held-out run."""
+    # FakeSubagents never runs a real judge, so pin the legacy engine to keep
+    # run_one's _prepare_judge_engine_for a no-op (the default pydantic_ai engine would
+    # source the metered FIREWORKS_API_KEY, which CI has no reason to hold).
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=True)
     judge_yaml = (
         "outcome: survived\n"
@@ -137,10 +141,11 @@ def test_run_one_gate_short_circuits_before_append(tmp_path: Path) -> None:
     assert not paths.pending_file.exists()  # ...but held-out suppressed the append
 
 
-def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path) -> None:
+def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch) -> None:
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
     adversarial one; the run is enqueued for authoring regardless of disposition
     (lead-author itself now fires later, in the serial author_drain)."""
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")  # FakeSubagents: keep key-sourcing a no-op
     run_dir = _complete_run_dir(tmp_path, "malicious", held_out=False)
     # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
@@ -154,11 +159,12 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path) -> None:
     assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 
 
-def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path) -> None:
+def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, monkeypatch) -> None:
     """A failed direction leg must still enqueue the run for the serial
     author-drainer — lead-author (catalog refinement) is leg-independent — and
     then fail loud. Enqueue happens before the re-raise, so the run isn't
     stranded with no author-work marker."""
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")  # FakeSubagents: keep key-sourcing a no-op
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=False)
     # Malformed judge YAML → the adversarial leg raises RunUnprocessable.
     agents = FakeSubagents(judge="outcome: [unterminated\n")
