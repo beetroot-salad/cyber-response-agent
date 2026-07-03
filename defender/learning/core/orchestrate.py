@@ -1077,9 +1077,11 @@ Environment:
   ORACLE_EFFORT                        oracle reasoning effort (default: low — each call sees
                                        only its own lead; no cross-lead matching to reason about)
   ORACLE_MAX_CONCURRENCY               max concurrent per-lead oracle calls (default: 8)
-  JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: low — the prompt
-                                       fully scaffolds the analysis, so high over-thinks)
-  JUDGE_MODEL / BENIGN_JUDGE_MODEL     claude model for the adversarial / benign judge
+  JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: medium)
+  JUDGE_MODEL / BENIGN_JUDGE_MODEL     adversarial / benign judge model (default: glm-5.2;
+                                       needs FIREWORKS_API_KEY + the pydantic_ai engine)
+  LEARNING_JUDGE_ENGINE                pydantic_ai (default — in-process, metered key) |
+                                       claude_print (legacy claude -p, Anthropic models only)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 450)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before author_actor runs

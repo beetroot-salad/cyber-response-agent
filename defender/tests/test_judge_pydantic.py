@@ -77,14 +77,15 @@ def test_source_judge_key_unroutable_model_fails_loud(monkeypatch):
 
 # --- judge_engine flag -------------------------------------------------------
 
-def test_judge_engine_default_is_claude_print(monkeypatch):
+def test_judge_engine_default_is_pydantic_ai(monkeypatch):
     monkeypatch.delenv("LEARNING_JUDGE_ENGINE", raising=False)
-    assert config.judge_engine() == "claude_print"
-
-
-def test_judge_engine_pydantic_ai(monkeypatch):
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "pydantic_ai")
     assert config.judge_engine() == "pydantic_ai"
+
+
+def test_judge_engine_claude_print(monkeypatch):
+    # The legacy claude -p transport stays reachable as an explicit opt-in.
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    assert config.judge_engine() == "claude_print"
 
 
 @pytest.mark.parametrize("bad", ["", "pydantic", "claude", "print"])
@@ -92,3 +93,28 @@ def test_judge_engine_bad_fails_loud(monkeypatch, bad):
     monkeypatch.setenv("LEARNING_JUDGE_ENGINE", bad)
     with pytest.raises(config.FatalConfigError):
         config.judge_engine()
+
+
+# --- _source_judge_keys_for: the run_one gate, now live on the default engine ----
+
+def test_source_judge_keys_for_noop_on_claude_print(monkeypatch):
+    # The legacy transport bills the subscription, so no metered key is sourced.
+    from defender.learning.core import orchestrate
+
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    called: list[str] = []
+    monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
+    orchestrate._source_judge_keys_for(["adversarial", "benign"])
+    assert called == []
+
+
+def test_source_judge_keys_for_sources_per_direction_on_pydantic(monkeypatch):
+    # The default engine sources the metered key for each direction's judge model,
+    # deduped — both directions default to glm-5.2, so a single FIREWORKS_API_KEY sourcing.
+    from defender.learning.core import orchestrate
+
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "pydantic_ai")
+    called: list[str] = []
+    monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
+    orchestrate._source_judge_keys_for(["adversarial", "benign"])
+    assert called == ["glm-5.2"]
