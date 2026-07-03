@@ -36,7 +36,8 @@ class Subagents(Protocol):
 
 
 class ClaudePrintSubagents:
-    """Default adapter — assembles each step's inputs and shells out to ``claude -p``."""
+    """Default adapter — assembles each step's inputs; actor/oracle shell out to
+    ``claude -p``, the judge runs in-process on PydanticAI (metered key)."""
 
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
         # The actor-facing view is queries-only (no goal / what_to_summarize) —

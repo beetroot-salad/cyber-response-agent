@@ -419,8 +419,8 @@ def run_one(
 
     # The direction legs are mutually independent: each writes disjoint
     # per-direction files (story/telemetry/judge outputs by `spec.*_name`, and the
-    # judge's comparison dir + resolved-settings under the wiring's per-direction
-    # names — see `_loop_subagents.build_judge_invocation`) and serializes shared
+    # judge's comparison dir under the wiring's per-direction name — see
+    # `_loop_subagents.build_judge_invocation`) and serializes shared
     # findings/observation writes on a flock (cross-process safe). subprocess.run
     # releases the GIL while the claude child runs, so threads give real wall-time
     # overlap. Within a leg, actor→oracle→judge stays serial.

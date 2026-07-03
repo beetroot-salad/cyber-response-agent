@@ -1,7 +1,7 @@
 """Judge stage — grounded outcome classifier for both directions.
 
 One driver, parametrized by ``JudgeWiring`` (the adversarial vs benign prompt/model/
-effort + disjoint comparison/settings names + the benign-only closed-ticket read), so
+effort + disjoint comparison dirname + the benign-only closed-ticket read), so
 the per-direction variation is pure config — there is no separate benign driver. The
 comparison join + synthesis (the structural grounding) live in ``compare.py``; the two
 prompts are ``malicious.md`` / ``benign.md`` in this package.
@@ -47,8 +47,8 @@ class JudgeInvocation:
     add_dirs: list
     comparison_paths: list
     # The benign closed-ticket pins ``(py, ticket_cli)`` when this direction grants the
-    # scoped read (#338), else None. The PydanticAI judge_fn turns these into its
-    # closed-ticket custom matcher; the claude -p path takes them via the settings file.
+    # scoped read (#338), else None. The in-process judge_fn turns these into its
+    # closed-ticket custom matcher (see engine_pydantic._make_ticket_matcher).
     ticket_cli: tuple[str, Path] | None = None
 
 

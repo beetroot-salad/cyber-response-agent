@@ -24,8 +24,9 @@ Researcher-cadence (not CI): makes model calls, emits scores. The metric functio
 and verdict parsing are pure and unit-tested (`test_judge_equivalence.py`).
 
 Assembling the frozen set (operator step, once): run `defender/run.py` over
-`fixtures/held-out/` + a few scenarios to produce run dirs, LEARN each once with the
-claude_print judge, then snapshot each run's `(run_dir, actor_story*.md,
+`fixtures/held-out/` + a few scenarios to produce run dirs, LEARN each once (the judge
+engine is irrelevant here — the snapshots are the judge INPUTS), then snapshot each
+run's `(run_dir, actor_story*.md,
 projected_telemetry*.yaml)` — those are the deterministic judge inputs
 (`build_judge_invocation` is a pure function of them). Point `--cases` at the dir of
 snapshots. No external truth oracle exists for a synthetic encounter, so the
