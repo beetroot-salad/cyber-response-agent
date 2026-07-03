@@ -60,7 +60,8 @@ environment_observations:
   - subject: {kebab referent this fact is about, e.g. svc.monitoring — or omit if the fact is not about one named referent}
     alert_rule_ids: [{the alert rule id(s) this standing fact explains}]
     entities:
-      - {type: <invlang vertex type>, class: <type/class slot>}
+      - type: <invlang vertex type>
+        class: <type/class slot>
     relevance_criteria: {one-line predicate a future actor scans during retrieval}
     fact: |
       {1–2 short paragraphs — the standing deployment fact and what grounds it,
