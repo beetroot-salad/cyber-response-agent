@@ -122,6 +122,26 @@ def test_col0_key_present_but_no_suffix_parses_is_fail_closed():
     assert strip_yaml_preamble(raw) == raw
 
 
+def test_indented_verdict_after_preamble_survives_the_trim():
+    """E1 (regression): when the verdict the walk accepts is uniformly INDENTED (e.g. the
+    model emitted it inside a list/quote context), the trimmed result must STILL parse to
+    the same mapping. A plain ``.strip()`` on the accepted suffix would dedent only the
+    first line and desync the block into invalid YAML — corrupting a verdict the walk had
+    already proven parses. Here the accepted suffix is '  outcome: caught\\n  ...'."""
+    raw = "Let me analyze.\n\n  outcome: caught\n  defender_findings: []"
+    out = strip_yaml_preamble(raw)
+    assert yaml.safe_load(out)["outcome"] == "caught"
+
+
+def test_recursion_bomb_is_fail_closed_not_raised():
+    """E1 (fail-closed): a deeply nested flow collection makes ``yaml.safe_load`` raise
+    ``RecursionError`` — NOT a ``yaml.YAMLError`` — on every suffix. The walk must swallow
+    it like any other parse failure and return the input unchanged (so it dead-letters
+    downstream), rather than letting the RecursionError escape and crash the caller."""
+    raw = "outcome: " + "[" * 6000
+    assert strip_yaml_preamble(raw) == raw
+
+
 def test_is_idempotent():
     """E1: strip_yaml_preamble(strip_yaml_preamble(x)) == strip_yaml_preamble(x) — a
     normalized doc is not re-trimmed on a second pass."""
@@ -201,6 +221,19 @@ def test_e2_unparseable_raises_and_writes_raw(tmp_path):
     """E2: a doc that is still unparseable after normalization raises RunUnprocessable and
     writes the raw companion (fail-closed fallback returned it unchanged; safe_load raised)."""
     raw = "not yaml: ["
+    raw_path = tmp_path / "judge.raw.txt"
+    with pytest.raises(RunUnprocessable):
+        _validate_judge_yaml(raw, validate_judge_doc, raw_path)
+    assert raw_path.read_text() == raw
+
+
+def test_e2_recursion_bomb_dead_letters_not_crashes(tmp_path):
+    """E2 (regression): a deeply nested flow collection makes yaml.safe_load raise
+    RecursionError — NOT a YAMLError — at BOTH the normalize step and the caller's re-parse.
+    _validate_judge_yaml must dead-letter it (RunUnprocessable + raw companion), never let
+    the RecursionError escape and crash the learning worker. Mirrors parse_judge_verdict's
+    graceful degradation so the two consumers stay converged (#492)."""
+    raw = "outcome: " + "[" * 6000
     raw_path = tmp_path / "judge.raw.txt"
     with pytest.raises(RunUnprocessable):
         _validate_judge_yaml(raw, validate_judge_doc, raw_path)

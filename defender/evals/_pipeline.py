@@ -214,7 +214,10 @@ def run_head_oracle_and_judge(
         )
     except (loop_mod.RunUnprocessable, subprocess.TimeoutExpired) as e:
         raise SecondaryError(f"judge invocation failed: {e}") from e
-    judge_stripped = loop_mod.strip_yaml_fence(judge_yaml)
+    # Funnel through the SAME shared normalizer as the live loop + A/B harness
+    # (fence/envelope + prose-preamble strip) so a preamble'd judge verdict is not
+    # dead-lettered here while the other two consumers parse it — the #492 drift.
+    judge_stripped = loop_mod.normalize_judge_yaml(judge_yaml)
     (staging_dir / "judge_findings.yaml").write_text(judge_stripped)
     try:
         judge_doc = yaml.safe_load(judge_stripped)

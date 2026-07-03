@@ -104,15 +104,25 @@ def strip_yaml_preamble(text: str) -> str:
     """
     lines = text.split("\n")
     for i in range(len(lines)):
-        candidate = "\n".join(lines[i:])
+        candidate = text if i == 0 else "\n".join(lines[i:])
         try:
             doc = yaml.safe_load(candidate)
-        except yaml.YAMLError:
+        except (yaml.YAMLError, RecursionError):
+            # RecursionError (a deeply nested flow collection) is not a YAMLError, so it
+            # would otherwise escape and crash the caller; treat it like any unparseable
+            # candidate and keep the walk fail-closed.
             continue
         if isinstance(doc, dict):
-            # i == 0: already clean — return verbatim (no whitespace perturbation). i > 0:
-            # a preamble was dropped; strip the boundary whitespace off the trimmed doc.
-            return candidate.strip() if i else text
+            if not i:
+                return text  # already clean — return verbatim (no whitespace perturbation)
+            # A preamble was dropped. Drop only the blank boundary line(s) the split left,
+            # preserving the verified suffix's own indentation — a plain ``.strip()`` would
+            # dedent just the first line and desync a uniformly-indented mapping into
+            # invalid YAML (the function had already proven this candidate parses).
+            suffix = lines[i:]
+            while suffix and not suffix[0].strip():
+                del suffix[0]
+            return "\n".join(suffix)
     return text
 
 

@@ -133,7 +133,10 @@ def _validate_judge_yaml(
     stripped = normalize_judge_yaml(judge_raw)
     try:
         doc = validate(yaml.safe_load(stripped))
-    except (yaml.YAMLError, RunUnprocessable) as e:
+    except (yaml.YAMLError, RunUnprocessable, RecursionError) as e:
+        # RecursionError: yaml.safe_load blows the stack on a deeply nested flow
+        # collection (not a YAMLError); dead-letter it like any invalid verdict rather
+        # than crash the worker — the eval A/B harness already degrades the same way.
         raw_path.write_text(judge_raw)
         raise RunUnprocessable(f"judge YAML invalid: {e}") from e
     if stripped != judge_raw:
