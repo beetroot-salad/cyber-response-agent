@@ -82,15 +82,16 @@ def load_cases(cases_dir: Path) -> list[FrozenCase]:
             print(f"skip {case_dir.name}: unreadable/invalid meta.json ({e})", file=sys.stderr)
             continue
         direction = meta.get("direction") if isinstance(meta, dict) else None
-        spec = BY_NAME.get(direction)
-        if spec is None:
+        if not isinstance(direction, str) or direction not in BY_NAME:
+            # None (non-object payload), or a value that isn't one of the two directions.
             print(f"skip {case_dir.name}: bad direction {direction!r} (expected "
                   "'adversarial' | 'benign')", file=sys.stderr)
             continue
+        # direction is now a valid BY_NAME key (narrowed to str).
         cases.append(FrozenCase(
             case_id=case_dir.name, direction=direction, run_dir=run_dir,
             actor_story_path=story, projected_telemetry_path=telemetry,
-            wiring=spec.judge_wiring,
+            wiring=BY_NAME[direction].judge_wiring,
         ))
     return cases
 
