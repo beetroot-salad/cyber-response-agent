@@ -268,11 +268,16 @@ def test_subagents_judge_routes_engine_by_flag(monkeypatch, tmp_path):
 
 
 def test_subagents_judge_claude_print_rejects_fireworks_model(monkeypatch, tmp_path):
-    # The default JUDGE_MODEL is a Fireworks model (glm-5.2) that the legacy claude -p
+    # A Fireworks model (glm-5.2, the default JUDGE_MODEL) that the legacy claude -p
     # transport can't serve — claude_print + a non-Anthropic model fails loud (a clear
-    # config error), not with an opaque `claude -p --model glm-5.2` CLI failure.
+    # config error), not with an opaque `claude -p --model glm-5.2` CLI failure. Pin the
+    # model on the wiring (rather than lean on the import-time JUDGE_MODEL) so the test
+    # states its Fireworks-model intent and stays green under a JUDGE_MODEL=claude-* override
+    # — without that pin a claude-* override would flip the guard off and fall through to a
+    # real `claude -p` subprocess in this hermetic test.
     monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    fireworks_wiring = dataclasses.replace(ADVERSARIAL_WIRING, model="glm-5.2")
     sub = subagents.ClaudePrintSubagents()
     with pytest.raises(FatalConfigError):
-        sub.judge(ADVERSARIAL_WIRING, tmp_path, tmp_path / "story.md",
+        sub.judge(fireworks_wiring, tmp_path, tmp_path / "story.md",
                   tmp_path / "tel.yaml", tmp_path)

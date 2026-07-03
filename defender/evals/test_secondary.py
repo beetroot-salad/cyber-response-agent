@@ -431,12 +431,17 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         def render_joined_yaml(run_dir):
             return "leads: []\n"
 
+    class _FakeSubagents:
+        def judge(self, *_a, **_kw):
+            raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+
     class FakeLoop:
         class RunUnprocessable(Exception):
             pass
 
         lead_repository = _FakeLR
-        ADVERSARIAL_WIRING = object()  # opaque — invoke_judge stub ignores it
+        ADVERSARIAL_WIRING = object()  # opaque — the judge stub ignores it
+        ClaudePrintSubagents = _FakeSubagents
 
         @staticmethod
         def is_skip_story(text):
@@ -451,8 +456,8 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return text
 
         @staticmethod
-        def invoke_judge(*_a, **_kw):
-            raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+        def _prepare_judge_engine_for(_directions):
+            pass  # hermetic: no metered key sourced, no engine validation
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)

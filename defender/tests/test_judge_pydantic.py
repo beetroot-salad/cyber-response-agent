@@ -5,12 +5,15 @@ metered first-party API; these pin the billing invariants and the flag that gate
 """
 from __future__ import annotations
 
+import dataclasses
 import os
+import types
 
 import pytest
 
 from defender import _first_party_key
 from defender.learning.core import config
+from defender.learning.core.directions import ADVERSARIAL_WIRING
 
 
 def _write_env(tmp_path, **kv):
@@ -95,26 +98,63 @@ def test_judge_engine_bad_fails_loud(monkeypatch, bad):
         config.judge_engine()
 
 
-# --- _source_judge_keys_for: the run_one gate, now live on the default engine ----
+# --- _prepare_judge_engine_for: the up-front run_one gate, now live on the default engine ----
+#
+# The gate reads each direction's judge model off BY_NAME; these inject a fake registry with
+# EXPLICIT per-direction models so the assertions pin the gate's behavior independent of the
+# import-time JUDGE_MODEL/BENIGN_JUDGE_MODEL constants (a legacy-engine override can flip them,
+# and monkeypatch.setenv can't re-capture a module constant after import).
 
-def test_source_judge_keys_for_noop_on_claude_print(monkeypatch):
-    # The legacy transport bills the subscription, so no metered key is sourced.
-    from defender.learning.core import orchestrate
+def _fake_by_name(**models):
+    """A BY_NAME stand-in: {direction: <spec with .judge_wiring>} carrying the given
+    per-direction judge models (real JudgeWirings, so .model/.label are present)."""
+    return {
+        name: types.SimpleNamespace(
+            judge_wiring=dataclasses.replace(ADVERSARIAL_WIRING, model=model, label=name)
+        )
+        for name, model in models.items()
+    }
 
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
-    called: list[str] = []
-    monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
-    orchestrate._source_judge_keys_for(["adversarial", "benign"])
-    assert called == []
 
-
-def test_source_judge_keys_for_sources_per_direction_on_pydantic(monkeypatch):
-    # The default engine sources the metered key for each direction's judge model,
-    # deduped — both directions default to glm-5.2, so a single FIREWORKS_API_KEY sourcing.
+def test_prepare_judge_engine_sources_each_direction_on_pydantic(monkeypatch):
+    # pydantic_ai (default): source the metered key for each direction's DISTINCT judge
+    # model — distinct so the result pins "reads BOTH wirings" (a regression dropping a
+    # direction would change the sourced set), not merely "dedup of two identical models".
     from defender.learning.core import orchestrate
 
     monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "pydantic_ai")
+    registry = _fake_by_name(adversarial="glm-5.2", benign="kimi-k2.5")
+    monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
     called: list[str] = []
     monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
-    orchestrate._source_judge_keys_for(["adversarial", "benign"])
+    orchestrate._prepare_judge_engine_for(["adversarial", "benign"])
+    assert sorted(called) == ["glm-5.2", "kimi-k2.5"]
+
+
+def test_prepare_judge_engine_dedups_identical_direction_models_on_pydantic(monkeypatch):
+    # When both directions share a model (the shipped default), source it ONCE.
+    from defender.learning.core import orchestrate
+
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "pydantic_ai")
+    registry = _fake_by_name(adversarial="glm-5.2", benign="glm-5.2")
+    monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
+    called: list[str] = []
+    monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
+    orchestrate._prepare_judge_engine_for(["adversarial", "benign"])
     assert called == ["glm-5.2"]
+
+
+def test_prepare_judge_engine_noop_on_claude_print(monkeypatch):
+    # The legacy transport bills the subscription, so no metered key is sourced — and
+    # (unlike the pydantic branch) it does NOT validate model↔engine serviceability here:
+    # that lives at the dispatch seam (ClaudePrintSubagents.judge), so run_one's injected
+    # fakes stay free to pin claude_print without re-pinning a claude-* model.
+    from defender.learning.core import orchestrate
+
+    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    registry = _fake_by_name(adversarial="glm-5.2", benign="glm-5.2")  # non-Anthropic — must NOT raise here
+    monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
+    called: list[str] = []
+    monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
+    orchestrate._prepare_judge_engine_for(["adversarial", "benign"])
+    assert called == []

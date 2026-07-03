@@ -47,17 +47,19 @@ from defender.evals.judge_equivalence import (  # noqa: E402
     run_config,
 )
 from defender.learning.core import config  # noqa: E402
-from defender.learning.core.directions import ADVERSARIAL_WIRING, BENIGN_WIRING  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic  # noqa: E402
+from defender.learning.core.directions import BY_NAME  # noqa: E402
 
-_WIRING_BY_DIRECTION = {"adversarial": ADVERSARIAL_WIRING, "benign": BENIGN_WIRING}
+# NB: the pydantic_ai engine (``_run_judge_pydantic``) is imported LAZILY inside ``main``,
+# not at module top — it drags in the heavy pydantic-ai graph, and ``load_cases`` (the one
+# unit-tested surface) needs none of it, so the loader stays importable without the runtime
+# extra (mirrors the codebase's lazy-pydantic-ai convention).
 
 
 def load_cases(cases_dir: Path) -> list[FrozenCase]:
     """Load the frozen snapshots under ``cases_dir`` into ``FrozenCase``s, attaching the
     base wiring for each case's direction (run_config overrides only model+effort on it).
-    Skips a subdir with a loud warning if it's missing a required artifact, so one bad
-    snapshot doesn't abort the whole A/B."""
+    Skips a subdir with a loud warning if it's missing a required artifact — OR carries an
+    unreadable/malformed meta.json — so one bad snapshot doesn't abort the whole A/B."""
     cases: list[FrozenCase] = []
     for case_dir in sorted(p for p in cases_dir.iterdir() if p.is_dir()):
         meta_path = case_dir / "meta.json"
@@ -70,15 +72,25 @@ def load_cases(cases_dir: Path) -> list[FrozenCase]:
         if missing:
             print(f"skip {case_dir.name}: missing {', '.join(missing)}", file=sys.stderr)
             continue
-        direction = json.loads(meta_path.read_text()).get("direction")
-        wiring = _WIRING_BY_DIRECTION.get(direction)
-        if wiring is None:
+        # A present-but-corrupt meta.json (truncated/invalid JSON, or an unreadable file)
+        # is a bad snapshot too — skip it loudly rather than letting json.loads/read_text
+        # abort the whole loader (JSONDecodeError subclasses ValueError). A valid-JSON but
+        # non-object payload falls through to the bad-direction skip below (direction=None).
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (OSError, ValueError) as e:
+            print(f"skip {case_dir.name}: unreadable/invalid meta.json ({e})", file=sys.stderr)
+            continue
+        direction = meta.get("direction") if isinstance(meta, dict) else None
+        spec = BY_NAME.get(direction)
+        if spec is None:
             print(f"skip {case_dir.name}: bad direction {direction!r} (expected "
                   "'adversarial' | 'benign')", file=sys.stderr)
             continue
         cases.append(FrozenCase(
             case_id=case_dir.name, direction=direction, run_dir=run_dir,
-            actor_story_path=story, projected_telemetry_path=telemetry, wiring=wiring,
+            actor_story_path=story, projected_telemetry_path=telemetry,
+            wiring=spec.judge_wiring,
         ))
     return cases
 
@@ -99,6 +111,10 @@ def main(argv: list[str]) -> int:  # pragma: no cover — operator harness over 
     if not cases:
         print(f"no runnable cases under {args.cases}", file=sys.stderr)
         return 1
+
+    # Lazy: the in-process engine drags in the pydantic-ai graph — imported here, at the
+    # one point of use, so importing this module for ``load_cases`` never requires it.
+    from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
 
     # Source the metered key for each distinct model before any call (fails loud on a
     # missing key → the same FatalConfigError the loop raises, rather than a 401 mid-run).

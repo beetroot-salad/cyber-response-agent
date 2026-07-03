@@ -119,7 +119,7 @@ def test_run_one_gate_short_circuits_before_append(tmp_path: Path, monkeypatch) 
     """The held-out gate fires before append: a queueable finding that would
     otherwise be queued must leave the pending file untouched on a held-out run."""
     # FakeSubagents never runs a real judge, so pin the legacy engine to keep
-    # run_one's _source_judge_keys_for a no-op (the default pydantic_ai engine would
+    # run_one's _prepare_judge_engine_for a no-op (the default pydantic_ai engine would
     # source the metered FIREWORKS_API_KEY, which CI has no reason to hold).
     monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=True)

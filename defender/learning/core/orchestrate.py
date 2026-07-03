@@ -373,13 +373,20 @@ def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> Non
     _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
-def _source_judge_keys_for(directions: list[str]) -> None:
-    """When the judge runs in-process (PydanticAI), source its metered key up front in the
-    main thread — before the direction fan-out, so there is no ``os.environ`` race — and
-    only for the judge models the directions that will run actually use (deduped; sourcing
-    one provider twice is idempotent). Gated on the engine flag so the default
-    ``claude_print`` path is untouched. Fails loud here (→ exit 2) rather than 401-ing
-    mid-judge; siblings stay on the subscription (see ``source_judge_key``)."""
+def _prepare_judge_engine_for(directions: list[str]) -> None:
+    """Ready the judge engine for the directions that will run: when the judge runs
+    in-process (``pydantic_ai``, the default), source its metered key UP FRONT in the main
+    thread — before the direction fan-out, so there is no ``os.environ`` race — and only
+    for the judge models the directions that will run actually use (deduped; sourcing one
+    provider twice is idempotent). Gated on the engine flag so the ``claude_print`` path is
+    untouched. Fails loud here (→ exit 2) rather than 401-ing mid-judge; siblings stay on
+    the subscription (see ``source_judge_key``).
+
+    Model↔engine *serviceability* is deliberately NOT checked here — it belongs at the
+    dispatch seam (``ClaudePrintSubagents.judge`` → ``require_claude_print_serviceable``),
+    because ``run_one`` drives an *injected* ``Subagents`` and a fake/SDK adapter needn't
+    use the configured ``claude -p`` model at all (the test fakes pin ``claude_print`` with
+    the default Fireworks model precisely because they never shell a real judge)."""
     if judge_engine() != "pydantic_ai":
         return
     for model in {BY_NAME[name].judge_wiring.model for name in directions}:
@@ -404,7 +411,7 @@ def run_one(
     src = RunPaths(run_dir)
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
-    _source_judge_keys_for(directions)
+    _prepare_judge_engine_for(directions)
 
     alert = json.loads(src.alert.read_text())
     alert_rule_key = derive_alert_rule_key(alert)
