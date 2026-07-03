@@ -30,14 +30,17 @@ from .bash import (
     GATHER_FALLTHROUGH_DENY_REASON,
     BashDecision,
     decide_bash,
+    policy_for,
 )
 from .decision import Decision
 from .files import decide_read, decide_write, is_untrusted_read
+from .policy import AgentPolicy
 
 __all__ = [
     "ADAPTER_STANDALONE_REASON",
     "FALLTHROUGH_DENY_REASON",
     "GATHER_FALLTHROUGH_DENY_REASON",
+    "AgentPolicy",
     "BashDecision",
     "Decision",
     "command_shape",
@@ -45,4 +48,5 @@ __all__ = [
     "decide_read",
     "decide_write",
     "is_untrusted_read",
+    "policy_for",
 ]

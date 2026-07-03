@@ -34,8 +34,10 @@ from defender.learning.core.config import (
     RunPaths,
     _log,
     env_int,
+    judge_engine,
     merge_mode,
     pitfalls_threshold,
+    source_judge_key,
 )
 from defender import _git
 from defender._git import GitError
@@ -371,6 +373,19 @@ def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> Non
     _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
+def _source_judge_keys_for(directions: list[str]) -> None:
+    """When the judge runs in-process (PydanticAI), source its metered key up front in the
+    main thread — before the direction fan-out, so there is no ``os.environ`` race — and
+    only for the judge models the directions that will run actually use (deduped; sourcing
+    one provider twice is idempotent). Gated on the engine flag so the default
+    ``claude_print`` path is untouched. Fails loud here (→ exit 2) rather than 401-ing
+    mid-judge; siblings stay on the subscription (see ``source_judge_key``)."""
+    if judge_engine() != "pydantic_ai":
+        return
+    for model in {BY_NAME[name].judge_wiring.model for name in directions}:
+        source_judge_key(model)
+
+
 def run_one(
     run_dir: Path,
     *,
@@ -389,6 +404,7 @@ def run_one(
     src = RunPaths(run_dir)
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
+    _source_judge_keys_for(directions)
 
     alert = json.loads(src.alert.read_text())
     alert_rule_key = derive_alert_rule_key(alert)

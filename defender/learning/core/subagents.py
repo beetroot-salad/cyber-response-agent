@@ -16,7 +16,7 @@ from typing import Protocol
 
 from defender.learning import lead_repository
 from defender._run_paths import RunPaths
-from defender.learning.core.config import JudgeWiring
+from defender.learning.core.config import JudgeWiring, judge_engine
 from defender.learning.core.prologue import extract_case_entities
 from defender.learning.pipeline.benign_actor.run import invoke_actor_benign
 from defender.learning.pipeline.judge.run import invoke_judge
@@ -57,6 +57,16 @@ class ClaudePrintSubagents:
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
+        # Engine selection: default `claude_print` runs the shared claude -p transport
+        # (invoke_judge's default judge_fn); `pydantic_ai` runs the judge in-process.
+        # The pydantic-ai import is lazy + branch-local so the default path never loads
+        # it. Only the judge moves engine; actor/oracle above stay on claude -p.
+        if judge_engine() == "pydantic_ai":
+            from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
+            return invoke_judge(
+                wiring, run_dir, actor_story_path, projected_telemetry_path,
+                learning_run_dir, judge_fn=_run_judge_pydantic,
+            )
         return invoke_judge(
             wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         )

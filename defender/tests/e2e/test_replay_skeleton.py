@@ -31,7 +31,6 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender.runtime import permission, tools as runtime_tools
-from defender.runtime.agent_role import AgentRole
 from defender.scripts.gather_tools import record_query
 from defender.skills.invlang.validate import validate_companion
 
@@ -159,11 +158,12 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     ("write-escape", "write_file",
      lambda rd: {"path": str(rd.parent / "ESCAPE_OUTSIDE_RUNDIR.txt"), "content": "x"},
      "stay inside the run dir", "ESCAPE_OUTSIDE_RUNDIR.txt"),
-    # A read resolving outside BOTH allowlisted roots (run dir + defender corpus)
-    # is refused — the deny-by-default read allowlist, asserted at the driver seam.
+    # A read resolving outside the allowlisted roots (run dir + defender corpus +
+    # the agent's declared policy read_roots) is refused — the deny-by-default read
+    # allowlist, asserted at the driver seam.
     ("read-escape", "read_file",
      lambda rd: {"path": "/etc/passwd"},
-     "outside both", None),
+     "outside them", None),
     # The main loop must not read a gather_raw payload directly: the gather
     # summary is authoritative, raw evidence stays behind the subagent boundary.
     ("raw-read-from-main", "read_file",
@@ -204,8 +204,8 @@ def test_role_flip_adapter_is_role_dependent():
     above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
     nested-gather replay; this pins the role-dependence the driver must thread."""
     cmd = "defender-elastic query foo --raw"
-    assert not permission.decide_bash(cmd, role=AgentRole.MAIN).allow
-    assert permission.decide_bash(cmd, role=AgentRole.GATHER).allow
+    assert not permission.decide_bash(cmd, policy=permission.policy_for("main")).allow
+    assert permission.decide_bash(cmd, policy=permission.policy_for("gather")).allow
 
 
 # --- nested-gather replay: drives the two-table capture path ---------------

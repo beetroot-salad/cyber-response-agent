@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 
 _ANTHROPIC_PREFIX = "anthropic:"
 
+# The native effort domain (pydantic-ai `AnthropicModelSettings.anthropic_effort`),
+# the same lever `claude -p --effort` set. `default` is the sentinel to omit the
+# override (fall back to the model's own default).
+_EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max", "default")
+
 
 class AnthropicProvider:
     """Builds `AnthropicModel`s and applies Anthropic's three-part prompt cache.
@@ -59,3 +64,25 @@ class AnthropicProvider:
                 anthropic_cache="5m",
             )
         return self._cache
+
+    def settings_for_effort(self, effort: str) -> ModelSettings | None:
+        """Explicit per-call effort → the native `anthropic_effort` knob (the same
+        lever `claude -p --effort` set), on top of the three-part prompt cache. This
+        is the equivalence-critical path for the judge: a BOUNDED effort mirrors what
+        the `claude -p` judge ran under, rather than Sonnet's adaptive-by-default
+        thinking (which, un-capped, both diverges and overruns). `default` omits the
+        override (model default)."""
+        if effort not in _EFFORT_CHOICES:
+            raise ValueError(
+                f"unsupported Anthropic effort {effort!r}; expected one of {_EFFORT_CHOICES}"
+            )
+        from pydantic_ai.models.anthropic import AnthropicModelSettings
+
+        # Copy the (role-independent) cache settings and add the effort — never mutate
+        # the memoized cache object.
+        merged = dict(self.settings(AgentRole.MAIN) or {})
+        if effort != "default":
+            merged["anthropic_effort"] = effort
+        # ** expansion of a widened `dict[str, object]` into a TypedDict is a known mypy
+        # limitation; the keys are exactly the cache settings + anthropic_effort.
+        return AnthropicModelSettings(**merged)  # type: ignore[typeddict-item]

@@ -73,6 +73,14 @@ def build(name: str, role: AgentRole) -> BuiltModel:
     return BuiltModel(p.build_model(name), p.settings(role))
 
 
+def build_for_effort(name: str, effort: str) -> BuiltModel:
+    """Like `build`, but pairs the model with settings for an EXPLICIT reasoning
+    effort (per-invocation config) rather than the role-keyed env defaults — for an
+    agent (the judge) whose effort is config, not a runtime role."""
+    p = provider_for(name)
+    return BuiltModel(p.build_model(name), p.settings_for_effort(effort))
+
+
 def api_key_vars() -> set[str]:
     """Every billable provider key var — run.py sources the ones a run needs;
     run_common.run_env strips all of them from the bash tool's subprocess env."""
@@ -87,6 +95,7 @@ __all__ = [
     "Provider",
     "api_key_vars",
     "build",
+    "build_for_effort",
     "provider_for",
     "provider_id_for",
 ]

@@ -367,6 +367,18 @@ BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "claude-sonnet-4-6")
 JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "low")
 BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "low")
 
+# Which engine runs the judge. `claude_print` (default) is the shared `claude -p`
+# transport every learning stage uses — the LEARN path is byte-identical to before
+# the PydanticAI judge existed. `pydantic_ai` runs the judge in-process on the
+# metered first-party API (see pipeline/judge/engine_pydantic.py). Read at call time
+# (not a module constant) so tests can `monkeypatch.setenv`; `env_str` fails loud on
+# a typo. Only the judge moves — actor/oracle/author stay on `claude -p`.
+VALID_JUDGE_ENGINES = ("claude_print", "pydantic_ai")
+
+
+def judge_engine() -> str:
+    return env_str("LEARNING_JUDGE_ENGINE", "claude_print", choices=VALID_JUDGE_ENGINES)
+
 
 @dataclass(frozen=True)
 class JudgeWiring:
@@ -519,12 +531,61 @@ _log = make_logger("loop")  # this module's own logger
 
 
 def subscription_env() -> dict[str, str]:
-    """Env for a ``claude -p`` call: strip ``ANTHROPIC_API_KEY`` so the call
-    bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run.py)."""
+    """Env for a ``claude -p`` call: strip every billable provider key
+    (``providers.api_key_vars()`` — ``ANTHROPIC_API_KEY``, ``FIREWORKS_API_KEY``, …) so
+    the call bills against the subscription, never a metered first-party key (reserved
+    for the in-process PydanticAI engine — see defender/run.py). Stripping ALL of them
+    (not just Anthropic's, matching ``run_common.run_env``) keeps ``source_judge_key``'s
+    mixed-billing invariant true for every judge provider: a metered key sourced into
+    ``os.environ`` can never reach a sibling ``claude -p``, whatever provider the judge
+    runs on."""
+    from defender.runtime import providers
+
     env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
+    for var in providers.api_key_vars():
+        env.pop(var, None)
     return env
+
+
+def source_judge_key(model: str) -> None:
+    """Source the in-process PydanticAI judge's metered first-party key into
+    ``os.environ`` (idempotent) so the judge can authenticate against the first-party
+    API. The provider is derived from the model name (``claude-*`` → ANTHROPIC_API_KEY,
+    ``glm-5.2`` → FIREWORKS_API_KEY).
+
+    Mixed billing within one run is SAFE: this is the only learning stage that runs
+    in-process on the metered key; every sibling shells out to ``claude -p`` under
+    ``subscription_env``, which COPIES ``os.environ`` and pops the key — so setting it
+    here can never reach a sibling, and they keep billing the subscription. A ``.env``
+    key takes precedence over the ambient value (for Anthropic the ambient is the
+    subscription credential, which 401s against the first-party REST API). Fail loud
+    (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
+    rather than 401-ing mid-judge."""
+    # provider_for imports no pydantic-ai backend (declarative routing), so this is
+    # safe in the SIEM-free learn worker; _first_party_key is neutral (no run.py).
+    from defender.runtime import providers
+    from defender._first_party_key import resolve_first_party_key
+
+    try:
+        var = providers.provider_for(model).api_key_var
+    except ValueError as e:
+        # A typo'd JUDGE_MODEL / BENIGN_JUDGE_MODEL is unroutable in provider_for; surface
+        # it as the FatalConfigError → exit-2 this function documents (matching run.py's
+        # _source_provider_keys) rather than a bare ValueError the drain would dead-letter
+        # per-run for a run-independent config fault.
+        raise FatalConfigError(str(e)) from e
+    key, src = resolve_first_party_key(var=var, root=REPO_ROOT)
+    if key:
+        os.environ[var] = key
+        _log(f"judge_key: {var} sourced from {src} (overrides ambient)")
+        return
+    if os.environ.get(var):
+        _log(f"judge_key: no .env key; using the ambient {var}")
+        return
+    raise FatalConfigError(
+        f"the PydanticAI judge (model {model!r}) needs {var} — set it in <repo>/.env "
+        "or $DEFENDER_ENV_FILE (the in-process judge bills the first-party API)."
+    )
 
 
 def curator_agent_env(state_root: Path) -> dict[str, str]:

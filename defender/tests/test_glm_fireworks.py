@@ -159,6 +159,52 @@ def test_fireworks_bad_effort_fails_loud(monkeypatch, bad):
         providers.FIREWORKS.settings(AgentRole.MAIN)
 
 
+# --- settings_for_effort: explicit per-call effort (the judge's config seam) --
+# Unlike settings(role), this takes the effort as an argument (not a role env), so
+# an agent whose two direction legs run concurrently at different efforts can pass
+# each explicitly. Anthropic maps it to `anthropic_effort` (the claude -p --effort
+# lever); Fireworks to `reasoning_effort`.
+
+def test_anthropic_settings_for_effort_adds_effort_to_cache():
+    s = providers.ANTHROPIC.settings_for_effort("low")
+    assert s == {**_CACHE, "anthropic_effort": "low"}
+    # Must not mutate the memoized cache object.
+    assert providers.ANTHROPIC.settings(AgentRole.MAIN) == _CACHE
+
+
+def test_anthropic_settings_for_effort_default_is_cache_only():
+    # `default` omits the effort override (model default), keeping just the cache.
+    assert providers.ANTHROPIC.settings_for_effort("default") == _CACHE
+
+
+@pytest.mark.parametrize("bad", ["", "lo", "none", "off"])
+def test_anthropic_settings_for_effort_bad_fails_loud(bad):
+    # A bad effort passed programmatically is a ValueError (a bug), distinct from the
+    # env-knob FatalConfigError path. "none" is a Fireworks value, not Anthropic's.
+    with pytest.raises(ValueError, match="unsupported Anthropic effort"):
+        providers.ANTHROPIC.settings_for_effort(bad)
+
+
+def test_fireworks_settings_for_effort_maps_reasoning_effort():
+    assert providers.FIREWORKS.settings_for_effort("medium") == {
+        "extra_body": {"reasoning_effort": "medium"}
+    }
+    assert providers.FIREWORKS.settings_for_effort("default") is None
+
+
+@pytest.mark.parametrize("bad", ["", "lo", "xhigh"])
+def test_fireworks_settings_for_effort_bad_fails_loud(bad):
+    # "xhigh" is an Anthropic value, not a Fireworks reasoning_effort choice.
+    with pytest.raises(ValueError, match="unsupported reasoning_effort"):
+        providers.FIREWORKS.settings_for_effort(bad)
+
+
+def test_build_for_effort_pairs_model_with_effort_settings(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    built = providers.build_for_effort("claude-sonnet-4-6", "low")
+    assert built.settings == {**_CACHE, "anthropic_effort": "low"}
+
+
 # --- pricing ----------------------------------------------------------------
 
 @pytest.mark.parametrize(("model", "key"), [
