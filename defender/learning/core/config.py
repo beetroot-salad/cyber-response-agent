@@ -531,11 +531,19 @@ _log = make_logger("loop")  # this module's own logger
 
 
 def subscription_env() -> dict[str, str]:
-    """Env for a ``claude -p`` call: strip ``ANTHROPIC_API_KEY`` so the call
-    bills against the subscription, never the metered first-party key
-    (reserved for the PydanticAI engine — see defender/run.py)."""
+    """Env for a ``claude -p`` call: strip every billable provider key
+    (``providers.api_key_vars()`` — ``ANTHROPIC_API_KEY``, ``FIREWORKS_API_KEY``, …) so
+    the call bills against the subscription, never a metered first-party key (reserved
+    for the in-process PydanticAI engine — see defender/run.py). Stripping ALL of them
+    (not just Anthropic's, matching ``run_common.run_env``) keeps ``source_judge_key``'s
+    mixed-billing invariant true for every judge provider: a metered key sourced into
+    ``os.environ`` can never reach a sibling ``claude -p``, whatever provider the judge
+    runs on."""
+    from defender.runtime import providers
+
     env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
+    for var in providers.api_key_vars():
+        env.pop(var, None)
     return env
 
 
@@ -558,7 +566,14 @@ def source_judge_key(model: str) -> None:
     from defender.runtime import providers
     from defender._first_party_key import resolve_first_party_key
 
-    var = providers.provider_for(model).api_key_var
+    try:
+        var = providers.provider_for(model).api_key_var
+    except ValueError as e:
+        # A typo'd JUDGE_MODEL / BENIGN_JUDGE_MODEL is unroutable in provider_for; surface
+        # it as the FatalConfigError → exit-2 this function documents (matching run.py's
+        # _source_provider_keys) rather than a bare ValueError the drain would dead-letter
+        # per-run for a run-independent config fault.
+        raise FatalConfigError(str(e)) from e
     key, src = resolve_first_party_key(var=var, root=REPO_ROOT)
     if key:
         os.environ[var] = key

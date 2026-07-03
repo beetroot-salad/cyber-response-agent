@@ -83,4 +83,6 @@ class AnthropicProvider:
         merged = dict(self.settings(AgentRole.MAIN) or {})
         if effort != "default":
             merged["anthropic_effort"] = effort
-        return AnthropicModelSettings(**merged)
+        # ** expansion of a widened `dict[str, object]` into a TypedDict is a known mypy
+        # limitation; the keys are exactly the cache settings + anthropic_effort.
+        return AnthropicModelSettings(**merged)  # type: ignore[typeddict-item]

@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 if TYPE_CHECKING:  # annotations only — importing these here would cycle with bash.py
     from defender.runtime.bash_exec import Pipeline

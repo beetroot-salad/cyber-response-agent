@@ -97,34 +97,35 @@ def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
     assert (lrd / "judge_trace.jsonl").read_text().strip()  # at least one request logged
 
 
-def test_run_judge_pydantic_reads_comparison_through_gate(tmp_path):
-    # End-to-end proof that read_roots widening works: the judge reads a comparison file
-    # under learning_run_dir (outside {run_dir(=lrd here), defender_dir}? it's UNDER lrd,
-    # so allowed) via the REAL read_file tool + policy gate, and the file's content comes
-    # back as the tool return (a deny would instead return the gate's refusal).
+def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
+    # End-to-end proof that read_roots widening actually works: the judge reads a
+    # gather_raw file that lives OUTSIDE {run_dir(=lrd), defender_dir} — under the
+    # investigation run dir, not the learning run dir — so the read is allowed ONLY
+    # because gather_raw is a declared policy.read_root (and raw_reads=True lets it past
+    # the gather_raw clamp). A file under lrd would be allowed by the run_dir root
+    # regardless of read_roots, proving nothing; this one is refused if read_roots is
+    # dropped, so it genuinely exercises the widening.
     lrd = _lrd(tmp_path)
     gather_raw = tmp_path / "run" / "gather_raw"
-    gather_raw.mkdir(parents=True)
-    comparison = lrd / "comparison"
-    comparison.mkdir()
-    cmp_file = comparison / "l-001.md"
-    cmp_file.write_text("COMPARISON_SENTINEL_XYZ: projection vs actual\n")
+    (gather_raw / "l-001").mkdir(parents=True)
+    raw_file = gather_raw / "l-001" / "0.json"
+    raw_file.write_text('{"GATHER_RAW_SENTINEL_XYZ": "projection vs actual"}\n')
 
     seen: list[str] = []
     fn = _replay(
-        [{"calls": [("read_file", {"path": str(cmp_file)})]}, {"text": _YAML}],
+        [{"calls": [("read_file", {"path": str(raw_file)})]}, {"text": _YAML}],
         seen=seen,
     )
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
             _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_trace.jsonl", "judge",
             "score this", lrd,
-            scope=_ToolScope(add_dir=[gather_raw, comparison]),
+            scope=_ToolScope(add_dir=[gather_raw]),
             make_model=_fake_model(fn),
         )
     assert out == _YAML
-    # The file content came back to the model → the read was ALLOWED and executed.
-    assert any("COMPARISON_SENTINEL_XYZ" in s for s in seen)
+    # The file content came back to the model → the read was ALLOWED via read_roots.
+    assert any("GATHER_RAW_SENTINEL_XYZ" in s for s in seen)
 
 
 def test_extract_yaml_doc_trims_prose_preamble():
@@ -167,12 +168,17 @@ def test_run_judge_pydantic_trims_model_preamble_end_to_end(tmp_path):
             make_model=_fake_model(fn),
         )
     v = parse_judge_verdict(out, case_id="c", direction="benign")
-    assert v.parsed_ok and v.outcome == "refuted"
+    assert v.parsed_ok
+    assert v.outcome == "refuted"
 
 
-def test_build_judge_agent_applies_effort_via_provider():
+def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
     # Effort flows model → providers.build_for_effort → Anthropic anthropic_effort (the
-    # claude -p --effort equivalence lever), built without network/key.
+    # claude -p --effort equivalence lever). build_for_effort constructs a REAL
+    # AnthropicModel, which needs a key at construction time (see test_glm_fireworks's
+    # build_model tests); a fake key keeps this hermetic — settings_for_effort (the
+    # assertion target) makes no network request.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     import defender.runtime.observe as observe
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-judge-effort.jsonl"))
     try:
@@ -194,7 +200,8 @@ def test_ticket_matcher_allows_pinned_require_closed():
         f"{_PY} {_CLI} list-tickets --status closed --require-closed --label sig --raw",
     ):
         d = m(_pipes(cmd))
-        assert d is not None and d.allow, cmd
+        assert d is not None, cmd
+        assert d.allow, cmd
 
 
 def test_ticket_matcher_declines_unsafe_or_wrong_shape():

@@ -66,6 +66,15 @@ def test_source_judge_key_missing_fails_loud(monkeypatch):
         config.source_judge_key("claude-sonnet-4-6")
 
 
+def test_source_judge_key_unroutable_model_fails_loud(monkeypatch):
+    # A typo'd JUDGE_MODEL / BENIGN_JUDGE_MODEL is unroutable in provider_for; it must
+    # surface as a FatalConfigError (→ the orchestrator's exit 2), matching the
+    # missing-key path — NOT a bare ValueError the drain would dead-letter per-run for a
+    # run-independent config fault.
+    with pytest.raises(config.FatalConfigError):
+        config.source_judge_key("not-a-real-model")
+
+
 # --- judge_engine flag -------------------------------------------------------
 
 def test_judge_engine_default_is_claude_print(monkeypatch):

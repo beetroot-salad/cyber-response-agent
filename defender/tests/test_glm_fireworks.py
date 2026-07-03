@@ -181,7 +181,7 @@ def test_anthropic_settings_for_effort_default_is_cache_only():
 def test_anthropic_settings_for_effort_bad_fails_loud(bad):
     # A bad effort passed programmatically is a ValueError (a bug), distinct from the
     # env-knob FatalConfigError path. "none" is a Fireworks value, not Anthropic's.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported Anthropic effort"):
         providers.ANTHROPIC.settings_for_effort(bad)
 
 
@@ -195,7 +195,7 @@ def test_fireworks_settings_for_effort_maps_reasoning_effort():
 @pytest.mark.parametrize("bad", ["", "lo", "xhigh"])
 def test_fireworks_settings_for_effort_bad_fails_loud(bad):
     # "xhigh" is an Anthropic value, not a Fireworks reasoning_effort choice.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported reasoning_effort"):
         providers.FIREWORKS.settings_for_effort(bad)
 
 

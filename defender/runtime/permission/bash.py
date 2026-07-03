@@ -190,6 +190,24 @@ def _allow(
     )
 
 
+def _decide_adapter(pipelines: list[bash_exec.Pipeline], policy: AgentPolicy) -> BashDecision:
+    """Classify a command that contains a data-source adapter. Denied unless the agent
+    may run adapters; when allowed, a standalone call is captured transparently and the
+    only sanctioned multi-stage shape is `adapter --raw | defender-sql '<SQL>'` (gated on
+    `adapter_sql_pipe`). Any other adapter compound is ambiguous. The adapter/sql payloads
+    are NOT run through the substitution guard (they go straight to subprocess shell=False)."""
+    if not policy.adapters:
+        return BashDecision(False, ADAPTER_DENY_REASON)
+    standalone = command_shape.standalone_adapter_argv(pipelines)
+    if standalone is not None:
+        return _allow(pipelines, adapter_argv=standalone)
+    if policy.adapter_sql_pipe:
+        split = command_shape.adapter_sql_split(pipelines)
+        if split is not None:
+            return _allow(pipelines, sql_pipe=split)
+    return BashDecision(False, ADAPTER_STANDALONE_REASON)
+
+
 def decide_bash(command: str, *, policy: AgentPolicy) -> BashDecision:
     """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy`
     (no per-role method): custom matchers first, then the raw-read clamp, adapter
@@ -228,23 +246,10 @@ def decide_bash(command: str, *, policy: AgentPolicy) -> BashDecision:
         if claimed is not None:
             return claimed
 
+    # A data-source adapter is classified by its own helper (capture routing / the
+    # sanctioned adapter|defender-sql pipe / the adapter deny reasons).
     if command_shape.has_adapter(pipelines):
-        # A data-source adapter: denied unless the agent may run adapters. When
-        # allowed, a standalone call is captured transparently, and the only
-        # sanctioned multi-stage shape is `adapter --raw | defender-sql '<SQL>'`
-        # (gated on adapter_sql_pipe). Any other adapter compound is ambiguous. The
-        # adapter/sql payloads are NOT run through the substitution guard (they go
-        # straight to subprocess shell=False).
-        if not policy.adapters:
-            return BashDecision(False, ADAPTER_DENY_REASON)
-        standalone = command_shape.standalone_adapter_argv(pipelines)
-        if standalone is not None:
-            return _allow(pipelines, adapter_argv=standalone)
-        if policy.adapter_sql_pipe:
-            split = command_shape.adapter_sql_split(pipelines)
-            if split is not None:
-                return _allow(pipelines, sql_pipe=split)
-        return BashDecision(False, ADAPTER_STANDALONE_REASON)
+        return _decide_adapter(pipelines, policy)
 
     # Non-adapter command: read-only viewers / non-adapter shims only. The
     # substitution/assignment guard applies here (these stages execute through the

@@ -32,13 +32,16 @@ def _v(case, direction, outcome, keys=()):
 
 def test_parse_verdict_valid_empty_findings():
     v = parse_judge_verdict("outcome: caught\ndefender_findings: []\n", case_id="c1", direction="adversarial")
-    assert v.parsed_ok and v.outcome == "caught" and v.finding_keys == frozenset()
+    assert v.parsed_ok
+    assert v.outcome == "caught"
+    assert v.finding_keys == frozenset()
 
 
 def test_parse_verdict_strips_fence():
     v = parse_judge_verdict("```yaml\noutcome: survived\ndefender_findings: []\n```\n",
                       case_id="c1", direction="adversarial")
-    assert v.parsed_ok and v.outcome == "survived"
+    assert v.parsed_ok
+    assert v.outcome == "survived"
 
 
 def test_parse_verdict_invalid_is_not_a_crash():
@@ -46,7 +49,8 @@ def test_parse_verdict_invalid_is_not_a_crash():
     # regression signal), never crashes the A/B.
     for bad in ("not yaml: [", "outcome: bogus-keyword\ndefender_findings: []\n", "just prose"):
         v = parse_judge_verdict(bad, case_id="c1", direction="adversarial")
-        assert not v.parsed_ok and v.outcome is None
+        assert not v.parsed_ok
+        assert v.outcome is None
 
 
 # --- metrics -----------------------------------------------------------------
@@ -92,13 +96,15 @@ def test_compare_and_report():
     ref = [_v("a", "adversarial", "caught"), _v("b", "benign", "refuted")]
     cand = [_v("a", "adversarial", "caught"), _v("b", "benign", "survived")]
     cmp = compare(ref, cand)
-    assert cmp.n == 2 and cmp.outcome_match == 0.5 and cmp.flips == ["b"]
+    assert cmp.n == 2
+    assert cmp.outcome_match == 0.5
+    assert cmp.flips == ["b"]
     txt = render_report("Step 1", cmp, self_consistency=0.9)
-    assert "flips: 1" in txt.replace("flips: ", "flips: ") or "flips" in txt
+    assert "flips: 1" in txt  # the rendered flip count is pinned (one systematic flip)
     assert "NOT yet equivalent" in txt  # a flip → not equivalent even if within floor
 
 
 def test_compare_mismatched_lengths_raises():
     import pytest
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="differ in length"):
         compare([_v("a", "adversarial", "caught")], [])

@@ -93,14 +93,11 @@ class OpenAICompatProvider:
         # operator knob misconfig should surface at startup, not silently forward a
         # bad reasoning_effort to the API — nor, on an empty string, drop the cost cap.
         effort = env_str(env, default, choices=_REASONING_EFFORT_CHOICES)
-        if effort == "default":
-            return None
-        # Sent via extra_body so it round-trips as a raw request param regardless of
-        # the profile pydantic-ai infers for the model id (verified honored by GLM
-        # and Kimi — it scales thinking length).
-        from pydantic_ai.models.openai import OpenAIChatModelSettings
-
-        return OpenAIChatModelSettings(extra_body={"reasoning_effort": effort})
+        # Role→effort resolution is this method's job; the effort→settings mapping (the
+        # `default`→None sentinel + the extra_body shape) is single-sourced in
+        # settings_for_effort so the role path and the judge's explicit-effort path can
+        # never diverge. `effort` is already validated above, so the delegate won't raise.
+        return self.settings_for_effort(effort)
 
     def settings_for_effort(self, effort: str) -> ModelSettings | None:
         """Explicit per-call reasoning effort — the same `extra_body.reasoning_effort`

@@ -41,6 +41,7 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
@@ -50,6 +51,9 @@ from defender.learning.core.validate import (  # noqa: E402
     validate_judge_benign_doc,
     validate_judge_doc,
 )
+
+if TYPE_CHECKING:  # annotation-only — the runtime harness never imports the heavy config graph
+    from defender.learning.core.config import JudgeWiring
 
 # The load-bearing flip axis per direction: a swap between these two verdicts changes
 # FN/FP accounting and therefore which findings get queued. Zero systematic flips is
@@ -104,7 +108,7 @@ def outcome_match_rate(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> float
     """Fraction of paired cases whose `outcome` matches exactly (empty → 1.0)."""
     if not ref:
         return 1.0
-    return sum(a.outcome == b.outcome for a, b in zip(ref, cand)) / len(ref)
+    return sum(a.outcome == b.outcome for a, b in zip(ref, cand, strict=True)) / len(ref)
 
 
 def systematic_flips(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> list[str]:
@@ -112,7 +116,7 @@ def systematic_flips(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> list[st
     load-bearing axis (caught↔survived / refuted↔survived). This must be empty to
     promote a candidate — each flip changes FN/FP accounting and thus training labels."""
     flipped = []
-    for a, b in zip(ref, cand):
+    for a, b in zip(ref, cand, strict=True):
         lo, hi = _axis_for(a.direction)
         if {a.outcome, b.outcome} == {lo, hi}:
             flipped.append(a.case_id)
@@ -125,7 +129,7 @@ def findings_agreement(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> float
     if not ref:
         return 1.0
     total = 0.0
-    for a, b in zip(ref, cand):
+    for a, b in zip(ref, cand, strict=True):
         union = a.finding_keys | b.finding_keys
         total += 1.0 if not union else len(a.finding_keys & b.finding_keys) / len(union)
     return total / len(ref)
@@ -220,7 +224,7 @@ class FrozenCase:
     run_dir: Path
     actor_story_path: Path
     projected_telemetry_path: Path
-    wiring: "object" = field(repr=False, default=None)  # the base JudgeWiring for the direction
+    wiring: JudgeWiring | None = field(repr=False, default=None)  # the base wiring for the direction
 
 
 def run_config(
@@ -234,6 +238,8 @@ def run_config(
 
     verdicts: list[Verdict] = []
     for case in cases:
+        if case.wiring is None:
+            raise ValueError(f"FrozenCase {case.case_id!r} has no wiring to run")
         wiring = dataclasses.replace(case.wiring, model=config.model, effort=config.effort)
         lrd = out_root / config.label / case.case_id
         lrd.mkdir(parents=True, exist_ok=True)

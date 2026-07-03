@@ -92,7 +92,7 @@ class JudgeDeps(RunDeps):
     role: ClassVar[AgentRole] = AgentRole.JUDGE
 
 
-def _make_ticket_matcher(py: Path, ticket_cli: Path):
+def _make_ticket_matcher(py: str, ticket_cli: Path):
     """The benign judge's one bit of custom logic (issue #338): allow the scoped,
     CLOSED-ONLY case-history read that confirms a cited past case. Claims exactly a
     single-stage ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``
@@ -119,7 +119,7 @@ def _make_ticket_matcher(py: Path, ticket_cli: Path):
     return _match
 
 
-def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[Path, Path] | None) -> AgentPolicy:
+def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | None) -> AgentPolicy:
     """The judge's declarative gate policy: read-only, may `jq`/read gather_raw
     (raw_reads) + its comparison dir (read_roots), never runs a data-source adapter,
     and — benign only — carries the pinned closed-ticket matcher as its custom logic."""
@@ -172,7 +172,7 @@ async def _drive(agent: Agent[JudgeDeps, str], user: str, deps: JudgeDeps):
     )
 
 
-def _run_judge_pydantic(
+def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (matches _run_judge_claude) plus the make_model test seam; every param is load-bearing per-call state
     prompt_path: Path,
     model: str,
     effort: str,
@@ -195,8 +195,9 @@ def _run_judge_pydantic(
     ``_validate_judge_yaml`` parses it unchanged). A timeout / usage-limit / model error
     raises ``RunUnprocessable`` — the same per-run failure disposition as the
     ``claude -p`` path's non-zero exit."""
-    add_dirs = scope.add_dir or []
-    read_roots = tuple(add_dirs if isinstance(add_dirs, list) else [add_dirs])
+    # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
+    # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
+    read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
     deps = JudgeDeps(
         run_dir=learning_run_dir,
         defender_dir=REPO_ROOT / "defender",
@@ -207,9 +208,16 @@ def _run_judge_pydantic(
     logger = observe.RequestLogger(learning_run_dir / trace_name)
     _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
     try:
-        agent = build_judge_agent(prompt_path, model, effort, logger, label, make_model=make_model)
+        try:
+            agent = build_judge_agent(prompt_path, model, effort, logger, label, make_model=make_model)
+        except ValueError as e:
+            # An unsupported effort (JUDGE_EFFORT/BENIGN_JUDGE_EFFORT are read unvalidated)
+            # or an unroutable model name is a run-independent CONFIG fault: fail loud
+            # (FatalConfigError → exit 2), never let the broad guard below dead-letter every
+            # run for it. Model/API errors from the run below stay per-run (RunUnprocessable).
+            raise FatalConfigError(f"judge ({label}) misconfigured: {e}") from e
         result = asyncio.run(_drive(agent, user, deps))
-    except (asyncio.TimeoutError, UsageLimitExceeded) as e:
+    except (TimeoutError, UsageLimitExceeded) as e:
         raise RunUnprocessable(f"judge ({label}) did not complete: {e!r}") from e
     except (StageAbort, FatalConfigError):
         raise  # systemic faults doom the whole stage (exit 2) — never per-run dead-letter
