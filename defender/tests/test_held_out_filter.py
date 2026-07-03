@@ -118,10 +118,10 @@ def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Pa
 def test_run_one_gate_short_circuits_before_append(tmp_path: Path, monkeypatch) -> None:
     """The held-out gate fires before append: a queueable finding that would
     otherwise be queued must leave the pending file untouched on a held-out run."""
-    # FakeSubagents never runs a real judge, so pin the legacy engine to keep
-    # run_one's _prepare_judge_engine_for a no-op (the default pydantic_ai engine would
-    # source the metered FIREWORKS_API_KEY, which CI has no reason to hold).
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")
+    # FakeSubagents never runs a real judge, but run_one's _prepare_judge_engine_for
+    # still sources the in-process judge's metered key up front — give it a dummy ambient
+    # key to find (never used) so it doesn't fail loud in CI, which holds no real key.
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=True)
     judge_yaml = (
         "outcome: survived\n"
@@ -145,7 +145,7 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
     adversarial one; the run is enqueued for authoring regardless of disposition
     (lead-author itself now fires later, in the serial author_drain)."""
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")  # FakeSubagents: keep key-sourcing a no-op
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")  # FakeSubagents: satisfy up-front key-sourcing
     run_dir = _complete_run_dir(tmp_path, "malicious", held_out=False)
     # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
@@ -164,7 +164,7 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, mo
     author-drainer — lead-author (catalog refinement) is leg-independent — and
     then fail loud. Enqueue happens before the re-raise, so the run isn't
     stranded with no author-work marker."""
-    monkeypatch.setenv("LEARNING_JUDGE_ENGINE", "claude_print")  # FakeSubagents: keep key-sourcing a no-op
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")  # FakeSubagents: satisfy up-front key-sourcing
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=False)
     # Malformed judge YAML → the adversarial leg raises RunUnprocessable.
     agents = FakeSubagents(judge="outcome: [unterminated\n")

@@ -566,26 +566,6 @@ def test_wiring_closed_ticket_read_flag() -> None:
     assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
 
 
-def test_judge_settings_grants_closed_ticket_read_only_when_requested(tmp_path: Path) -> None:
-    from defender.learning.pipeline.judge import compare as lc
-    gather_raw, comp = tmp_path / "gather_raw", tmp_path / "comparison_benign"
-    base = lc.judge_settings_dict(gather_raw, comp)
-    allow_base = base["permissions"]["allow"]
-    assert not any("ticket_cli" in a for a in allow_base)
-    granted = lc.judge_settings_dict(
-        gather_raw, comp, closed_ticket_read=("/py", "/cli/ticket_cli.py")
-    )["permissions"]["allow"]
-    # Two scoped entries, both gated on --require-closed: the list glob pins
-    # `--status closed --require-closed` adjacently so a trailing `--status open` can't
-    # slip in, and get-ticket carries the flag too.
-    listline = [a for a in granted if "list-tickets" in a]
-    assert listline
-    assert "list-tickets --status closed --require-closed" in listline[0]
-    getline = [a for a in granted if "get-ticket" in a]
-    assert getline
-    assert "--require-closed" in getline[0]
-
-
 def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> None:
     from defender.learning.pipeline.judge import run as su
     run_dir = tmp_path / "20260620T0000Z-sshd"
@@ -604,7 +584,6 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
     inv = su.build_judge_invocation(
         run_dir, story, telem, lrd,
         comparison_dirname="comparison_benign",
-        settings_name="judge-benign-settings.resolved.json",
         closed_ticket_read=True,
     )
     # The injected section names the closed-only read, the in-flight key, and the menu.
@@ -612,9 +591,9 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
     assert "--require-closed" in inv.user_text
     assert run_dir.name in inv.user_text          # the in-flight key it must never read
     assert "case-OLD" in inv.user_text            # candidate closed case from the menu
-    # The resolved settings file carries the scoped ticket-read allow entries.
-    settings = json.loads(inv.settings_path.read_text())
-    assert any("get-ticket" in a for a in settings["permissions"]["allow"])
+    # The scoped closed-ticket pins ride on the invocation → the in-process judge builds
+    # its closed-only matcher from them (see engine_pydantic._make_ticket_matcher).
+    assert inv.ticket_cli is not None
 
 
 def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -> None:
@@ -631,5 +610,4 @@ def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -
 
     inv = su.build_judge_invocation(run_dir, story, telem, lrd)  # defaults: adversarial
     assert "cited_policy_read" not in inv.user_text
-    settings = json.loads(inv.settings_path.read_text())
-    assert not any("ticket_cli" in a for a in settings["permissions"]["allow"])
+    assert inv.ticket_cli is None                  # no closed-ticket read on the adversarial leg

@@ -358,10 +358,8 @@ BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
 ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
-# The judge runs in-process on GLM 5.2 (Fireworks) by default — a Fireworks model only
-# routes on the `pydantic_ai` engine (the new `judge_engine()` default); `claude -p`
-# can't serve it, so overriding JUDGE_MODEL back to a `claude-*` id requires
-# LEARNING_JUDGE_ENGINE=claude_print too. Override per-direction via env for the A/B.
+# The judge runs in-process (PydanticAI) on GLM 5.2 (Fireworks) by default. Override
+# per-direction via env for the A/B (any provider `providers.provider_for` can route).
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "glm-5.2")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "glm-5.2")
 # GLM 5.2 reasons by default and bills that thinking as output tokens, capped by
@@ -374,19 +372,6 @@ BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "glm-5.2")
 JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "medium")
 BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "medium")
 
-# Which engine runs the judge. `pydantic_ai` (default) runs the judge in-process on the
-# metered first-party API — GLM 5.2 on Fireworks (see pipeline/judge/engine_pydantic.py);
-# the judge bills the metered key (`source_judge_key` sources FIREWORKS_API_KEY up front),
-# while every sibling stage (actor/oracle/author) still shells out to `claude -p` on the
-# subscription. `claude_print` is the legacy shared `claude -p` transport (opt-in, Anthropic
-# models only) — pair it with a `claude-*` JUDGE_MODEL. Read at call time (not a module
-# constant) so tests can `monkeypatch.setenv`; `env_str` fails loud on a typo.
-VALID_JUDGE_ENGINES = ("claude_print", "pydantic_ai")
-
-
-def judge_engine() -> str:
-    return env_str("LEARNING_JUDGE_ENGINE", "pydantic_ai", choices=VALID_JUDGE_ENGINES)
-
 
 @dataclass(frozen=True)
 class JudgeWiring:
@@ -394,10 +379,10 @@ class JudgeWiring:
     and benign grounded-judge calls (the projection itself rides
     ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
     the per-direction config lives in one place instead of being threaded as loose kwargs
-    through every call layer. ``comparison_dirname`` / ``settings_name`` are distinct per
-    direction so concurrent legs on an ``inconclusive`` case don't clobber each other's
-    grounding files (see ``build_judge_invocation`` in ``_loop_subagents.py``). The two
-    instances live on the ``Direction`` specs in ``_loop_directions.py``."""
+    through every call layer. ``comparison_dirname`` is distinct per direction so
+    concurrent legs on an ``inconclusive`` case don't clobber each other's grounding
+    files (see ``build_judge_invocation`` in ``_loop_subagents.py``). The two instances
+    live on the ``Direction`` specs in ``_loop_directions.py``."""
 
     prompt_path: Path
     model: str
@@ -405,10 +390,9 @@ class JudgeWiring:
     trace_name: str
     label: str
     comparison_dirname: str
-    settings_name: str
-    # When True, the judge's settings surface grants a scoped, closed-only ticket read
-    # (issue #338) so it can confirm a cited closed case from the case-history store —
-    # the benign (FP) direction only; the adversarial judge never reads the store.
+    # When True, the judge is granted a scoped, closed-only ticket read (issue #338) so it
+    # can confirm a cited closed case from the case-history store — the benign (FP)
+    # direction only; the adversarial judge never reads the store.
     closed_ticket_read: bool = False
 
 

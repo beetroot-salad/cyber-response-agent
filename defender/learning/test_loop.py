@@ -1771,17 +1771,6 @@ def test_render_synthesis_includes_reasoning_and_conclude():
     assert comparison.render_synthesis({}).startswith("(")  # empty → placeholder
 
 
-def test_judge_settings_dict_is_readonly_and_unhooked(tmp_path: Path):
-    s = comparison.judge_settings_dict(tmp_path / "gr", tmp_path / "cmp")
-    assert "hooks" not in s  # the runtime block_main_loop_raw_access gate must NOT apply
-    allow, deny = s["permissions"]["allow"], s["permissions"]["deny"]
-    assert any(a.startswith("Bash(jq") for a in allow)
-    assert any(str(tmp_path / "gr") in a for a in allow)
-    for d in ("Task", "Agent", "Write(**)", "Edit(**)"):
-        assert d in deny
-    assert any("ground_truth" in d for d in deny)
-
-
 def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
     run = _make_run_dir(tmp_path)
     proj = _make_projection(tmp_path)
@@ -1793,10 +1782,6 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
     inv = subagents.build_judge_invocation(run, story, proj, lrd)
 
     assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
-    assert inv.settings_path == lrd / "judge-settings.resolved.json"
-    assert inv.settings_path.is_file()
-    settings = json.loads(inv.settings_path.read_text())
-    assert "hooks" not in settings
     assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
     # The user message is context + the comparison manifest, grounded on the actuals.
     assert str(run / "gather_raw") in inv.user_text
@@ -1807,9 +1792,9 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
 
 def test_invoke_judge_benign_is_grounded(tmp_path: Path):
     """The FP-direction judge is grounded on the actuals (#317): it writes per-lead
-    comparison files + a read-only settings dict, add-dirs gather_raw + comparison, and
-    shells out with the BENIGN prompt/model — the same zipper the adversarial judge uses,
-    not the old narrative path. The FP direction fires on a malicious-disposed source."""
+    comparison files, add-dirs gather_raw + comparison, and runs with the BENIGN
+    prompt/model — the same zipper the adversarial judge uses, not the old narrative path.
+    The FP direction fires on a malicious-disposed source."""
     run = _make_run_dir(tmp_path, disposition="malicious")
     proj = _make_projection(tmp_path)
     story = tmp_path / "actor_benign_story.md"
@@ -1819,29 +1804,29 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
 
     captured: dict = {}
 
-    def _fake_run_judge_claude(prompt_path, model, *args, **kwargs):
-        # positional tail mirrors _run_judge_claude: effort, trace_name, label, user,
-        # learning_run_dir; settings_path/add_dir/permission_mode arrive as kwargs.
+    def _fake_judge_fn(prompt_path, model, *args, **kwargs):
+        # positional tail mirrors the judge_fn protocol: effort, trace_name, label, user,
+        # learning_run_dir; the read scope (add_dir/ticket_cli) arrives as the scope kwarg.
         _effort, _trace, label, user, _lrd = args
         scope = kwargs["scope"]
         captured.update(
             prompt_path=prompt_path, model=model, label=label, user=user,
-            settings_path=scope.settings_path, add_dir=scope.add_dir,
+            add_dir=scope.add_dir, ticket_cli=scope.ticket_cli,
         )
         return "outcome: survived\ndefender_findings: []\n"
 
     out = subagents.invoke_judge(
         directions.BENIGN_WIRING, run, story, proj, lrd,
-        judge_fn=_fake_run_judge_claude,
+        judge_fn=_fake_judge_fn,
     )
 
     assert out.startswith("outcome:")
-    # Grounded surface: per-lead comparison file + settings written; actuals add-dir'd.
-    # Benign uses a per-direction comparison dir + settings name so a concurrent
-    # adversarial leg (inconclusive case, shared learning_run_dir) can't clobber them.
+    # Grounded surface: per-lead comparison file written; actuals add-dir'd. Benign uses a
+    # per-direction comparison dir so a concurrent adversarial leg (inconclusive case,
+    # shared learning_run_dir) can't clobber it, and carries the closed-ticket pins (#338).
     assert (lrd / "comparison_benign" / "l-001.md").is_file()
-    assert captured["settings_path"] == lrd / "judge-benign-settings.resolved.json"
     assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison_benign"}
+    assert captured["ticket_cli"] is not None
     # Benign prompt/model/label — not the adversarial ones; sourced from the wiring.
     assert captured["prompt_path"] == directions.BENIGN_WIRING.prompt_path
     assert captured["model"] == directions.BENIGN_WIRING.model

@@ -30,12 +30,12 @@ from defender.learning.core.validate import validate_judge_benign_doc, validate_
 
 ADVERSARIAL_WIRING = JudgeWiring(
     JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
-    "comparison", "judge-settings.resolved.json",
+    "comparison",
 )
 BENIGN_WIRING = JudgeWiring(
     JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
     "judge_benign_trace.jsonl", "judge-benign",
-    "comparison_benign", "judge-benign-settings.resolved.json",
+    "comparison_benign",
     closed_ticket_read=True,  # the benign judge confirms a cited closed case (#338)
 )
 
