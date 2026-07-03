@@ -261,7 +261,7 @@ def main(argv: list[str]) -> int:  # pragma: no cover — thin CLI over the test
         "judge_equivalence is a library + operator harness. Assemble a frozen case set "
         "(see the module docstring), then in a driver script build FrozenCase list + "
         "two EngineConfigs, call run_config for each, and compare()/render_report(). "
-        "Real model calls require the metered key (LEARNING_JUDGE_ENGINE + .env).",
+        "Real model calls require the metered key (FIREWORKS_API_KEY / ANTHROPIC_API_KEY in .env).",
         file=sys.stderr,
     )
     return 0

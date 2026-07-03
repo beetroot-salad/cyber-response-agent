@@ -34,7 +34,6 @@ from defender.learning.core.config import (
     RunPaths,
     _log,
     env_int,
-    judge_engine,
     merge_mode,
     pitfalls_threshold,
     source_judge_key,
@@ -378,21 +377,12 @@ def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> Non
 
 
 def _prepare_judge_engine_for(directions: list[str]) -> None:
-    """Ready the judge engine for the directions that will run: when the judge runs
-    in-process (``pydantic_ai``, the default), source its metered key UP FRONT in the main
-    thread — before the direction fan-out, so there is no ``os.environ`` race — and only
-    for the judge models the directions that will run actually use (deduped; sourcing one
-    provider twice is idempotent). Gated on the engine flag so the ``claude_print`` path is
-    untouched. Fails loud here (→ exit 2) rather than 401-ing mid-judge; siblings stay on
-    the subscription (see ``source_judge_key``).
-
-    Model↔engine *serviceability* is deliberately NOT checked here — it belongs at the
-    dispatch seam (``ClaudePrintSubagents.judge`` → ``require_claude_print_serviceable``),
-    because ``run_one`` drives an *injected* ``Subagents`` and a fake/SDK adapter needn't
-    use the configured ``claude -p`` model at all (the test fakes pin ``claude_print`` with
-    the default Fireworks model precisely because they never shell a real judge)."""
-    if judge_engine() != "pydantic_ai":
-        return
+    """Ready the in-process judge for the directions that will run: source its metered
+    key UP FRONT in the main thread — before the direction fan-out, so there is no
+    ``os.environ`` race — and only for the judge models the directions that will run
+    actually use (deduped; sourcing one provider twice is idempotent). Fails loud here
+    (→ exit 2) rather than 401-ing mid-judge; siblings stay on the subscription (see
+    ``source_judge_key``)."""
     for model in {BY_NAME[name].judge_wiring.model for name in directions}:
         source_judge_key(model)
 
@@ -1090,9 +1080,7 @@ Environment:
   ORACLE_MAX_CONCURRENCY               max concurrent per-lead oracle calls (default: 8)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: medium)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     adversarial / benign judge model (default: glm-5.2;
-                                       needs FIREWORKS_API_KEY + the pydantic_ai engine)
-  LEARNING_JUDGE_ENGINE                pydantic_ai (default — in-process, metered key) |
-                                       claude_print (legacy claude -p, Anthropic models only)
+                                       needs FIREWORKS_API_KEY — the judge runs in-process)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 450)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
   LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before author_actor runs

@@ -205,11 +205,8 @@ def run_head_oracle_and_judge(
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
-        # Run the judge the SAME way the learning loop does: prepare the engine up front
-        # (source the metered key on the default pydantic_ai engine / validate the model on
-        # claude_print), then dispatch through the engine-selecting seam. Calling invoke_judge
-        # directly here would pin the legacy claude -p path with the now-default glm-5.2 model
-        # and shell an unservable `claude -p --model glm-5.2`.
+        # Run the judge the SAME way the learning loop does: source the in-process judge's
+        # metered key up front, then dispatch through the subagents seam.
         loop_mod._prepare_judge_engine_for(["adversarial"])
         judge_yaml = loop_mod.ClaudePrintSubagents().judge(
             loop_mod.ADVERSARIAL_WIRING,

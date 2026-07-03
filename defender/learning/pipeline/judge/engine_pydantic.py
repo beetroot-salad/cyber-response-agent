@@ -8,9 +8,8 @@ of custom logic (the benign closed-ticket matcher), and its agent builder. It on
 gate, ``register_tools``, ``providers.build_for_effort``, ``_make_hooks``, ``observe``
 — so nothing judge-specific leaks into ``runtime/`` (the shared, agent-neutral layer).
 
-This module imports the pydantic-ai graph, so it is imported LAZILY (only when
-``LEARNING_JUDGE_ENGINE=pydantic_ai``); the default ``claude_print`` path never
-touches it. Selection happens in ``core/subagents.ClaudePrintSubagents.judge``.
+This module imports the pydantic-ai graph, so it is imported LAZILY — only when a judge
+actually runs (``core/subagents.ClaudePrintSubagents.judge``), never at loop import.
 """
 from __future__ import annotations
 
@@ -154,7 +153,7 @@ async def _drive(agent: Agent[JudgeDeps, str], user: str, deps: JudgeDeps):
     )
 
 
-def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (matches _run_judge_claude) plus the make_model test seam; every param is load-bearing per-call state
+def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state
     prompt_path: Path,
     model: str,
     effort: str,
@@ -166,8 +165,8 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (m
     scope: _ToolScope,
     make_model: JudgeModelFactory = providers.build_for_effort,
 ) -> str:
-    """The PydanticAI ``judge_fn`` — same signature as ``_run_judge_claude`` so it drops
-    into ``invoke_judge(..., judge_fn=_run_judge_pydantic)``.
+    """The PydanticAI ``judge_fn`` — the judge_fn protocol signature, so it drops into
+    ``invoke_judge(..., judge_fn=_run_judge_pydantic)``.
 
     Builds the judge agent + its ``JudgeDeps`` from the tool ``scope`` (read roots =
     the comparison + gather_raw add-dirs; the benign closed-ticket paths), runs it once
@@ -175,10 +174,11 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (m
     thread, which has no running event loop), logs every request to
     ``learning_run_dir/{trace_name}``, and returns the model's final text VERBATIM. Any
     prose preamble a reasoning model prepends is left intact: the shared
-    ``normalize_judge_yaml`` on the downstream validate path (both this engine and the
-    ``claude -p`` engine funnel through it) strips it, so the engine no longer trims here.
-    A timeout / usage-limit / model error raises ``RunUnprocessable`` — the same per-run
-    failure disposition as the ``claude -p`` path's non-zero exit."""
+    ``normalize_judge_yaml`` on the downstream validate path (every judge consumer — the
+    live loop and the secondary harness — funnels through it) strips it, so the engine no
+    longer trims here. A timeout / usage-limit / model error raises ``RunUnprocessable`` —
+    quarantining the single run, the same per-run failure disposition the sibling
+    ``claude -p`` stages get from a non-zero exit."""
     # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
     # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
