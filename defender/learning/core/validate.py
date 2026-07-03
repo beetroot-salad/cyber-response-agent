@@ -85,6 +85,47 @@ def strip_yaml_fence(text: str) -> str:
     return s
 
 
+def strip_yaml_preamble(text: str) -> str:
+    """Trim a leading prose preamble that sits before an embedded YAML mapping.
+
+    A reasoning model sometimes prepends analysis prose ("Let me analyze...\\n\\n") above
+    the YAML document it was asked to emit; unfenced, that prose makes ``yaml.safe_load``
+    fail on the whole blob. This drops leading lines until the remainder parses to a YAML
+    **mapping** (a ``dict``), and returns that suffix. Schema-agnostic on purpose — it
+    anchors on "the rest is a mapping", NOT on any particular first key — so it works for
+    any single-mapping document, not just the judge verdict's ``outcome:``.
+
+    Robust by construction: at column 0 a preamble and the real document either merge into
+    one mapping (YAML duplicate-key last-wins keeps the real, later value) or the preamble's
+    suffix fails to parse and the walk falls through to the real document; a multi-document
+    ``---`` stream raises (``safe_load`` is single-document) and is likewise walked past.
+    Fail-closed: when no suffix parses to a mapping (a genuinely malformed output), the text
+    is returned unchanged, so it fails validation downstream exactly as it should.
+    """
+    lines = text.split("\n")
+    for i in range(len(lines)):
+        candidate = "\n".join(lines[i:])
+        try:
+            doc = yaml.safe_load(candidate)
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict):
+            # i == 0: already clean — return verbatim (no whitespace perturbation). i > 0:
+            # a preamble was dropped; strip the boundary whitespace off the trimmed doc.
+            return candidate.strip() if i else text
+    return text
+
+
+def normalize_judge_yaml(text: str) -> str:
+    """The shared judge-output normalizer: strip a code-fence/envelope, then a prose
+    preamble. Both judge consumers — the live loop (``orchestrate._validate_judge_yaml``)
+    and the eval A/B harness (``judge_equivalence.parse_judge_verdict``) — funnel through
+    this ONE function so their preamble handling can never drift apart (the drift #492
+    fixed). Composed of two general primitives; the oracle path deliberately calls only
+    ``strip_yaml_fence`` (its assembled doc has no prose preamble to trim)."""
+    return strip_yaml_preamble(strip_yaml_fence(text))
+
+
 # ---------------------------------------------------------------------------
 # Outcome-keyword parsing
 # ---------------------------------------------------------------------------

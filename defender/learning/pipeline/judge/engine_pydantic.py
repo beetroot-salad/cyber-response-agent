@@ -15,7 +15,6 @@ touches it. Selection happens in ``core/subagents.ClaudePrintSubagents.judge``.
 from __future__ import annotations
 
 import asyncio
-import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -54,23 +53,6 @@ JUDGE_REQUEST_LIMIT = 30
 # provider abstraction; tests inject BuiltModel(FunctionModel, None) to run hermetically
 # — the judge's twin of the runtime driver's `make_model` factory.
 JudgeModelFactory = Callable[[str, str], BuiltModel]
-
-# A reasoning model on the in-process engine sometimes prepends prose to its final
-# text turn before the YAML verdict (observed: Sonnet emitting 2 paragraphs of analysis
-# above `outcome:`), which downstream `strip_yaml_fence` (fences/<thinking> only)
-# doesn't remove, so yaml.safe_load fails. The judge doc's first top-level key is always
-# `outcome:` at column 0 (the prompt mandates "first character is o"); a citation's inner
-# `outcome:` is indented, so this anchor finds the doc start without matching those.
-_YAML_DOC_START = re.compile(r"^outcome:", re.MULTILINE)
-
-
-def _extract_yaml_doc(text: str) -> str:
-    """Trim any leading prose preamble before the YAML verdict. Falls back to the full
-    text when there's no top-level `outcome:` line (a genuinely malformed output — it
-    then fails validation downstream, exactly as it should)."""
-    m = _YAML_DOC_START.search(text)
-    return text[m.start():] if m else text
-
 
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
@@ -191,10 +173,12 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (m
     the comparison + gather_raw add-dirs; the benign closed-ticket paths), runs it once
     (async bridged via ``asyncio.run`` — safe in the loop's per-direction worker
     thread, which has no running event loop), logs every request to
-    ``learning_run_dir/{trace_name}``, and returns the final YAML text (downstream
-    ``_validate_judge_yaml`` parses it unchanged). A timeout / usage-limit / model error
-    raises ``RunUnprocessable`` — the same per-run failure disposition as the
-    ``claude -p`` path's non-zero exit."""
+    ``learning_run_dir/{trace_name}``, and returns the model's final text VERBATIM. Any
+    prose preamble a reasoning model prepends is left intact: the shared
+    ``normalize_judge_yaml`` on the downstream validate path (both this engine and the
+    ``claude -p`` engine funnel through it) strips it, so the engine no longer trims here.
+    A timeout / usage-limit / model error raises ``RunUnprocessable`` — the same per-run
+    failure disposition as the ``claude -p`` path's non-zero exit."""
     # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
     # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
@@ -225,4 +209,4 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature (m
         raise RunUnprocessable(f"judge ({label}) failed: {e!r}") from e
     finally:
         logger.close()
-    return _extract_yaml_doc(str(result.output or ""))
+    return str(result.output or "")

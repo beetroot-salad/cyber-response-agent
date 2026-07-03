@@ -56,6 +56,7 @@ from defender.learning.tickets.ticket_enrichment import enrich_case_ticket
 from defender.learning.core.subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from defender.learning.core.validate import (
     normalize_disposition,
+    normalize_judge_yaml,
     strip_yaml_fence,
 )
 
@@ -129,7 +130,7 @@ def _validate_judge_yaml(
     judge_raw: str, validate: Callable, raw_path: Path
 ) -> tuple[dict, str]:
     """Strip + validate judge YAML; on failure/mutation dump the raw to ``raw_path``."""
-    stripped = strip_yaml_fence(judge_raw)
+    stripped = normalize_judge_yaml(judge_raw)
     try:
         doc = validate(yaml.safe_load(stripped))
     except (yaml.YAMLError, RunUnprocessable) as e:

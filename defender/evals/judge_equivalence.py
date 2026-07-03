@@ -47,7 +47,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.core.validate import (  # noqa: E402
-    strip_yaml_fence,
+    normalize_judge_yaml,
     validate_judge_benign_doc,
     validate_judge_doc,
 )
@@ -78,14 +78,15 @@ class Verdict:
 
 
 def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
-    """Parse a judge's raw YAML output into a `Verdict` — the SAME strip-fence +
-    validate the loop applies downstream, so a candidate that emits an unparseable doc
-    scores as `parsed_ok=False` (itself a regression) rather than crashing the A/B."""
+    """Parse a judge's raw YAML output into a `Verdict` — via the SAME
+    `normalize_judge_yaml` (fence/envelope + prose-preamble strip) + validate the loop
+    applies downstream, so a candidate that emits an unparseable doc scores as
+    `parsed_ok=False` (itself a regression) rather than crashing the A/B."""
     benign = direction == "benign"
     try:
         import yaml
 
-        doc = yaml.safe_load(strip_yaml_fence(text))
+        doc = yaml.safe_load(normalize_judge_yaml(text))
         validated = (validate_judge_benign_doc if benign else validate_judge_doc)(doc)
     except Exception:  # noqa: BLE001 — an unparseable/invalid verdict is a data point, not a crash
         return Verdict(case_id, direction, None, frozenset(), False)
