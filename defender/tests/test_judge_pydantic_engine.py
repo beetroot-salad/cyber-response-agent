@@ -128,35 +128,41 @@ def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
     assert any("GATHER_RAW_SENTINEL_XYZ" in s for s in seen)
 
 
-def test_extract_yaml_doc_trims_prose_preamble():
-    # Reproduces the live-smoke failure: a reasoning model prepended analysis prose above
-    # the YAML. The trim anchors on the top-level `outcome:` (col 0), NOT an indented
-    # citation `outcome:`, so the whole doc parses.
-    raw = (
-        "The payload shows leg-2 is db-1, refuting the story.\n"
-        "This is a clear refutation on the core claim.\n\n"
-        "outcome: refuted\n"
-        "defender_findings:\n"
-        "  - type: disposition-confirmed\n"
-        "    subject_anchor: l-001\n"
-        "    citations:\n"
-        "      - source: comparison\n"
-        "        quote: |\n"
-        "          outcome: success\n"
-    )
-    doc = engine_pydantic._extract_yaml_doc(raw)
-    assert doc.startswith("outcome: refuted")
-    import yaml
-    assert yaml.safe_load(doc)["outcome"] == "refuted"
+# --- #492: the preamble trim RELOCATED off the engine boundary ---------------------
+# The old test_extract_yaml_doc_* unit tests moved to tests/test_judge_yaml_preamble.py
+# (they now target the shared validate.strip_yaml_preamble primitive). What remains here
+# is the engine-side half of the contract: the engine no longer trims, and a preamble'd
+# verdict still survives once the shared downstream normalizer runs.
+
+def test_extract_yaml_doc_symbol_removed():
+    """#492 (E4): the engine-boundary trim is DELETED — `_extract_yaml_doc` and
+    `_YAML_DOC_START` no longer exist on the engine module. Preamble handling is now owned
+    by the shared validate.strip_yaml_preamble, for both engines at once."""
+    assert getattr(engine_pydantic, "_extract_yaml_doc", None) is None
+    assert getattr(engine_pydantic, "_YAML_DOC_START", None) is None
 
 
-def test_extract_yaml_doc_passthrough_and_fallback():
-    clean = "outcome: caught\ndefender_findings: []\n"
-    assert engine_pydantic._extract_yaml_doc(clean) == clean
-    assert engine_pydantic._extract_yaml_doc("just prose, no verdict") == "just prose, no verdict"
+def test_run_judge_pydantic_returns_raw_preamble_untrimmed(tmp_path):
+    """#492 (E4): after the fix `_run_judge_pydantic` returns the model's RAW final text
+    with the prose preamble INTACT — no engine-level trim. The relocation is observable in
+    the return value (it still carries the leading prose)."""
+    lrd = _lrd(tmp_path)
+    fn = _replay([{"text": "Here is my analysis.\n\noutcome: refuted\ndefender_findings: []\n"}])
+    with override_allow_model_requests(False):
+        out = _run_judge_pydantic(
+            _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_benign_trace.jsonl",
+            "judge-benign", "score this", lrd, scope=_ToolScope(add_dir=[]),
+            make_model=_fake_model(fn),
+        )
+    assert out.startswith("Here is my analysis.")
 
 
-def test_run_judge_pydantic_trims_model_preamble_end_to_end(tmp_path):
+def test_pydantic_engine_preamble_survives_end_to_end_via_shared_path(tmp_path):
+    """#492 (E4 regression proof): a preamble'd verdict flows from `_run_judge_pydantic`
+    (raw, untrimmed) through `parse_judge_verdict` and STILL yields outcome=='refuted' with
+    parsed_ok — the shared normalizer picks up exactly what the engine stopped trimming,
+    with no loss of behavior. (Was test_run_judge_pydantic_trims_model_preamble_end_to_end;
+    the ENGINE no longer trims, so the name loses 'trims'.)"""
     lrd = _lrd(tmp_path)
     from defender.evals.judge_equivalence import parse_judge_verdict
     fn = _replay([{"text": "Here is my analysis.\nThe story is refuted.\n\n"

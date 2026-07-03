@@ -56,6 +56,7 @@ from defender.learning.tickets.ticket_enrichment import enrich_case_ticket
 from defender.learning.core.subagents import ClaudePrintSubagents, Subagents, is_skip_story
 from defender.learning.core.validate import (
     normalize_disposition,
+    normalize_judge_yaml,
     strip_yaml_fence,
 )
 
@@ -129,10 +130,13 @@ def _validate_judge_yaml(
     judge_raw: str, validate: Callable, raw_path: Path
 ) -> tuple[dict, str]:
     """Strip + validate judge YAML; on failure/mutation dump the raw to ``raw_path``."""
-    stripped = strip_yaml_fence(judge_raw)
+    stripped = normalize_judge_yaml(judge_raw)
     try:
         doc = validate(yaml.safe_load(stripped))
-    except (yaml.YAMLError, RunUnprocessable) as e:
+    except (yaml.YAMLError, RunUnprocessable, RecursionError) as e:
+        # RecursionError: yaml.safe_load blows the stack on a deeply nested flow
+        # collection (not a YAMLError); dead-letter it like any invalid verdict rather
+        # than crash the worker — the eval A/B harness already degrades the same way.
         raw_path.write_text(judge_raw)
         raise RunUnprocessable(f"judge YAML invalid: {e}") from e
     if stripped != judge_raw:

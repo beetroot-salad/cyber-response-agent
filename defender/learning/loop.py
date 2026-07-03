@@ -74,6 +74,7 @@ from defender.learning.pipeline.judge.run import invoke_judge  # noqa: E402
 from defender.learning.core.validate import (  # noqa: E402
     dump_oracle_doc,
     normalize_disposition,
+    normalize_judge_yaml,
     strip_yaml_fence,
     validate_judge_benign_doc,
     validate_judge_doc,
@@ -85,7 +86,7 @@ __all__ = [
     "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "ClaudePrintSubagents", "Subagents",
     "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
     "main", "is_held_out", "read_ground_truth",
-    "normalize_disposition", "strip_yaml_fence",
+    "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",
     "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",
     "append_findings", "append_actor_observations", "append_environment_observations",
