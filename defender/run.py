@@ -52,7 +52,6 @@ DEFENDER_DIR = _DEFENDER_DIR
 # historical surface: tests reach `run.resolve_first_party_key` (and monkeypatch it),
 # and `_source_one_provider_key` calls the bare name so the patch takes.
 from defender._first_party_key import (  # noqa: E402,F401
-    _main_repo_root,
     _read_env_key,
     resolve_first_party_key,
 )
