@@ -52,16 +52,22 @@ function inTxn<T>(db: DB, fn: () => T): T {
 
 /** Post-commit side effect: fire-and-reconcile. The caller's `fx` records the call (and
  *  the throw) before it reaches us; we swallow it so committed state and the return stand. */
-function runEffect(f: () => void): void {
+function runEffect(f: () => void): boolean {
   try {
     f();
+    return true;
   } catch {
     /* recorded by fx; orphan caught by reconcile */
+    return false;
   }
 }
 
-function isUniqueViolation(err: unknown, needle: string): boolean {
-  return err instanceof Error && /UNIQUE constraint failed/.test(err.message) && err.message.includes(needle);
+/** True when `err` is a SQLite UNIQUE violation whose offending column list is EXACTLY
+ *  `columns`. SQLite reports the `<table>.<col>[, …]` list, never the index name, so the match
+ *  is on columns — and it must be exact: a loose substring on "run.card_id" would also swallow
+ *  the three-column `one_run_per_attempt` breach ("run.card_id, run.stage, run.attempt"). */
+function isUniqueViolation(err: unknown, columns: string): boolean {
+  return err instanceof Error && err.message === `UNIQUE constraint failed: ${columns}`;
 }
 
 function getCardRow(db: DB, id: string): CardState | undefined {
@@ -98,7 +104,7 @@ interface NewRun {
 
 /** Insert a run, translating the one_active_run_per_card index breach (a can't-happen under
  *  single-writer) into `AlreadyInFlightError`. Callers cancel any in-flight run first. */
-function insertRun(db: DB, fx: Effects, r: NewRun): RunRow {
+function insertRun(db: DB, fx: Effects, r: NewRun): void {
   const id = fx.uuid();
   try {
     db.prepare(
@@ -117,10 +123,9 @@ function insertRun(db: DB, fx: Effects, r: NewRun): RunRow {
       started_at: r.startedAt,
     });
   } catch (err) {
-    if (isUniqueViolation(err, "one_active_run_per_card")) throw new AlreadyInFlightError();
+    if (isUniqueViolation(err, "run.card_id")) throw new AlreadyInFlightError();
     throw err;
   }
-  return getRunRow(db, id) as RunRow;
 }
 
 function cancelRun(db: DB, runId: string, now: string): void {
@@ -130,7 +135,9 @@ function cancelRun(db: DB, runId: string, now: string): void {
 /** `trigger` is computed from where the human motion starts, never stored on the event. */
 function computeTrigger(from: { stage: Stage; status: Status }, target: Stage): Trigger {
   if (from.status === "failed" && target === from.stage) return "retry";
-  if (from.status === "awaiting_human" && STAGE_INDEX[target] > STAGE_INDEX[from.stage]) return "auto";
+  // A gate release advances to the IMMEDIATE next stage → auto (§6.2 approve). A forward jump
+  // PAST the next stage is a human-named skip (§6.2) → manual, so require exactly next-stage.
+  if (from.status === "awaiting_human" && STAGE_INDEX[target] === STAGE_INDEX[from.stage] + 1) return "auto";
   return "manual";
 }
 
@@ -156,7 +163,7 @@ export function intake(db: DB, fx: Effects, input: IntakeInput): ApplyResult {
          VALUES (?, ?, ?, NULL, 'backlog', 'idle', ?, NULL, ?, ?, ?, NULL)`,
       ).run(id, input.repo, input.issue_number, input.title, now, now, now);
     } catch (err) {
-      if (isUniqueViolation(err, "card")) return { kind: "stale" as const }; // lost a create race
+      if (isUniqueViolation(err, "card.repo, card.issue_number")) return { kind: "stale" as const }; // lost a create race
       throw err;
     }
     return { kind: "ok" as const, id };
@@ -323,7 +330,7 @@ function handleRunSucceeded(db: DB, fx: Effects, event: Extract<Event, { type: "
     const now = fx.now();
     db.prepare(
       `UPDATE run SET status = 'succeeded', session_id = COALESCE(?, session_id),
-                      cost_usd = COALESCE(?, cost_usd), finished_at = ? WHERE id = ?`,
+                      cost_usd = COALESCE(?, cost_usd), pid = NULL, finished_at = ? WHERE id = ?`,
     ).run(event.session_id ?? null, event.cost_usd ?? null, now, run.id);
 
     let stage: Stage = card.stage;
@@ -385,7 +392,7 @@ function handleRunFailed(db: DB, fx: Effects, event: Extract<Event, { type: "run
     const card = getCardRow(db, run.card_id) as CardState;
     const now = fx.now();
     db.prepare(
-      "UPDATE run SET status = 'failed', session_id = COALESCE(?, session_id), finished_at = ? WHERE id = ?",
+      "UPDATE run SET status = 'failed', session_id = COALESCE(?, session_id), pid = NULL, finished_at = ? WHERE id = ?",
     ).run(event.session_id ?? null, now, run.id);
     const prNumber = event.pr_number ?? card.pr_number;
     db.prepare(
@@ -423,8 +430,14 @@ function handlePrMerged(db: DB, fx: Effects, cardId: string): ApplyResult {
 // pr_closed: drift — a PR closed unmerged drives the card to failed, PR + tree KEPT.
 function handlePrClosed(db: DB, fx: Effects, cardId: string): ApplyResult {
   const plan = inTxn(db, () => {
+    // Idempotent across polls: a card already resting in */failed (this drift's own target)
+    // must NOT re-fire — mirrors pr_merged self-absorbing into 'done'. Without `status !=
+    // 'failed'` every re-poll of a still-closed PR re-runs the UPDATE and resets
+    // state_entered_at, defeating the §5 dwell/gate-nag "stuck" clock.
     const card = db
-      .prepare("SELECT * FROM card WHERE id = ? AND pr_number IS NOT NULL AND stage != 'done' AND archived_at IS NULL")
+      .prepare(
+        "SELECT * FROM card WHERE id = ? AND pr_number IS NOT NULL AND stage != 'done' AND status != 'failed' AND archived_at IS NULL",
+      )
       .get(cardId) as CardState | undefined;
     if (!card) return { kind: "stale" as const };
     const now = fx.now();
@@ -505,7 +518,7 @@ export function reconcile(db: DB, fx: Effects): ReconcileSummary {
         continue;
       }
       // Orphaned headless run → failed (session_id + pr_number kept, resumable); reap the proc.
-      db.prepare("UPDATE run SET status = 'failed', finished_at = ? WHERE id = ?").run(now, run.id);
+      db.prepare("UPDATE run SET status = 'failed', pid = NULL, finished_at = ? WHERE id = ?").run(now, run.id);
       db.prepare("UPDATE card SET status = 'failed', state_entered_at = ?, updated_at = ? WHERE id = ?").run(
         now,
         now,
@@ -519,8 +532,7 @@ export function reconcile(db: DB, fx: Effects): ReconcileSummary {
   });
 
   for (const run of toKill) {
-    runEffect(() => fx.kill(run));
-    summary.killed += 1;
+    if (runEffect(() => fx.kill(run))) summary.killed += 1; // count only reaps that actually fired
   }
   return summary;
 }
