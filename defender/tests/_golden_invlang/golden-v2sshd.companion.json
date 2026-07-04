@@ -1,0 +1,385 @@
+{
+  "closed_loops": [
+    1,
+    2
+  ],
+  "conclude": {
+    "confidence": "medium",
+    "disposition": "inconclusive",
+    "impact_verdict": "none-detected",
+    "matched_archetype": "unattributed-loopback-ssh-retry",
+    "summary": "H2 confirmed: local process on office-ws-1 SSH'd to ::1 with password auth for authorized owner dev.dana in a 2s automated cadence; no persistence installed; process identity unresolvable (auditd not collected, Falco no ancestry, Zeek blocked by permission gate). CMDB documents no automation for this host. Escalating inconclusive at medium confidence: authorized user, no post-auth harm detected, but initiating process cannot be named.",
+    "termination": {
+      "category": "data-ceiling"
+    }
+  },
+  "findings": [
+    {
+      "id": "l-001",
+      "loop": 1,
+      "name": "sshd-auth-sequence-office-ws-1",
+      "outcome": {
+        "attribute_updates": [
+          {
+            "target": "e-001",
+            "updates": {
+              "attrs.auth_method": "password"
+            }
+          }
+        ],
+        "observations": {
+          "edges": [
+            {
+              "attributes": {
+                "auth_method": "password",
+                "count": "3",
+                "outcome": "failure",
+                "span_secs": "2",
+                "user": "dev.dana"
+              },
+              "authority": {
+                "kind": "siem-event",
+                "source": "elastic"
+              },
+              "id": "e-002",
+              "relation": "attempted_auth",
+              "source_vertex": "v-003",
+              "target_vertex": "v-001",
+              "when": {
+                "timestamp": "2026-05-25T15:22:40Z"
+              }
+            }
+          ]
+        }
+      },
+      "query_details": {
+        "system": "elastic",
+        "time_window": "±10m"
+      },
+      "resolutions": [
+        {
+          "after": "--",
+          "before": "null",
+          "hypothesis": "h-001",
+          "hypothesis_id": "h-001",
+          "matched_prediction_ids": [],
+          "matched_refutation_ids": [
+            "r1"
+          ],
+          "reasoning": "all 3 failure events from ::1 (loopback) not external — h-001 p1,p2 both false",
+          "severity_of_test": "severe",
+          "supporting_edges": [
+            "e-002"
+          ]
+        },
+        {
+          "after": "++",
+          "before": "null",
+          "hypothesis": "h-002",
+          "hypothesis_id": "h-002",
+          "matched_prediction_ids": [],
+          "matched_refutation_ids": [],
+          "reasoning": "all events from ::1; 2s total span; password auth — local process SSH retry pattern confirmed on all predictions",
+          "severity_of_test": "p1,p2,p3",
+          "supporting_edges": [
+            "e-002"
+          ]
+        }
+      ],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002"
+      ]
+    },
+    {
+      "id": "l-002",
+      "loop": 1,
+      "name": "identity-profile-dev-dana",
+      "outcome": {
+        "attribute_updates": [
+          {
+            "target": "v-002",
+            "updates": {
+              "attrs.role": "developer",
+              "attrs.status": "active",
+              "class": "user/known-corp"
+            }
+          }
+        ],
+        "authorization_resolutions": [
+          {
+            "anchor_kind": "iam-policy",
+            "edge": "e-001",
+            "fulfills_contract": "ac1",
+            "reasoning": "\"dev.dana active developer, explicitly authorized with sudo on office-ws-1 via identity registry\"",
+            "resolved_by_lead": "l-002",
+            "verdict": "authorized"
+          }
+        ]
+      },
+      "query_details": {
+        "system": "identity",
+        "time_window": "n/a"
+      },
+      "resolutions": [],
+      "target": "v-002",
+      "tests_hypotheses": [
+        "h-001"
+      ]
+    },
+    {
+      "id": "l-003",
+      "loop": 1,
+      "name": "cmdb-lookup-office-ws-1",
+      "outcome": {
+        "attribute_updates": [
+          {
+            "target": "v-001",
+            "updates": {
+              "attrs.owner": "dev.dana",
+              "attrs.services_documented": "none",
+              "class": "workstation/internal/known-corp"
+            }
+          }
+        ]
+      },
+      "query_details": {
+        "system": "cmdb",
+        "time_window": "n/a"
+      },
+      "resolutions": [],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002"
+      ]
+    },
+    {
+      "id": "l-004",
+      "loop": 2,
+      "name": "process-exec-office-ws-1-ssh-window",
+      "outcome": {
+        "authorization_resolutions": [
+          {
+            "anchor_kind": "approved-source-list",
+            "edge": "e-001",
+            "fulfills_contract": "ac2",
+            "reasoning": "\"process-exec telemetry unavailable: auditd not collected; Falco carries no full process ancestry on non-containerized hosts — initiating process on office-ws-1 cannot be identified from available data sources\"",
+            "resolved_by_lead": "l-004",
+            "verdict": "indeterminate"
+          }
+        ]
+      },
+      "query_details": {
+        "system": "elastic",
+        "time_window": "15:20-15:25Z"
+      },
+      "resolutions": [],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-002"
+      ]
+    },
+    {
+      "id": "l-005",
+      "loop": 2,
+      "name": "authorized-keys-office-ws-1",
+      "outcome": {
+        "attribute_updates": [
+          {
+            "target": "v-002",
+            "updates": {
+              "attrs.authorized_keys": "empty"
+            }
+          },
+          {
+            "target": "v-001",
+            "updates": {
+              "attrs.sshd_config_hash": "76300f84e5d20a7850560de3ba4ec7bcd96d6ce797a1bf229cf71159b52a140f"
+            }
+          }
+        ]
+      },
+      "query_details": {
+        "system": "host-state",
+        "time_window": "current"
+      },
+      "resolutions": [],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-002"
+      ]
+    },
+    {
+      "id": "l-006",
+      "loop": 3,
+      "name": "zeek-outbound-office-ws-1-post-session",
+      "outcome": {},
+      "query_details": {
+        "system": "elastic",
+        "time_window": "15:22-15:40Z"
+      },
+      "resolutions": [],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-002"
+      ]
+    }
+  ],
+  "hypothesize": {
+    "hypotheses": [
+      {
+        "anchor": "v-001",
+        "authorization_contract": [
+          {
+            "anchor_kind": "iam-policy",
+            "edge_ref": "e-001",
+            "id": "ac1",
+            "on_indeterminate": "escalate",
+            "on_unauthorized": "escalate",
+            "predicate": "dev.dana is an active provisioned user authorized to access office-ws-1"
+          }
+        ],
+        "id": "h-001",
+        "name": "?scanner-or-noise-probe",
+        "predictions": [
+          {
+            "claim": "failure events originate from a non-loopback source IP (external or other internal, not ::1)",
+            "id": "p1",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "no failures from ::1 in the ±10m window — loopback success is an unrelated coincidental event",
+            "id": "p2",
+            "subject": "proposed_edge"
+          },
+          {
+            "claim": "inter-event timing has a gap between last failure and success, consistent with independent unrelated sources",
+            "id": "p3",
+            "subject": "proposed_edge"
+          }
+        ],
+        "proposed_edge": {
+          "parent_vertex": {
+            "classification": "ip-only/internet/novel",
+            "type": "compute"
+          },
+          "relation": "attempted_auth"
+        },
+        "refutation_shape": [
+          {
+            "claim": "failure events also originate from ::1 — same source as success, ruling out a cross-source spurious EQL join",
+            "id": "r1",
+            "refutes_predictions": [
+              "p1",
+              "p2"
+            ]
+          }
+        ],
+        "status": "active",
+        "weight": null
+      },
+      {
+        "anchor": "v-001",
+        "authorization_contract": [
+          {
+            "anchor_kind": "approved-source-list",
+            "edge_ref": "e-001",
+            "id": "ac2",
+            "on_indeterminate": "escalate",
+            "on_unauthorized": "escalate",
+            "predicate": "a documented authorized process or cron job on office-ws-1 is expected to SSH to localhost with password auth for dev.dana"
+          }
+        ],
+        "id": "h-002",
+        "name": "?local-process-ssh-to-localhost",
+        "predictions": [
+          {
+            "claim": "all failure events also originate from ::1 — same loopback source as the success",
+            "id": "p1",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "inter-failure timing is sub-10s, consistent with automated SSH retry from a local process",
+            "id": "p2",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "auth method on success is password, consistent with local credential-testing against sshd",
+            "id": "p3",
+            "subject": "proposed_parent"
+          }
+        ],
+        "proposed_edge": {
+          "parent_vertex": {
+            "classification": "unclassified-process",
+            "type": "process"
+          },
+          "relation": "attempted_auth"
+        },
+        "refutation_shape": [
+          {
+            "claim": "failure events originate from a non-loopback address — cross-source EQL correlation, not a local retry loop",
+            "id": "r1",
+            "refutes_predictions": [
+              "p1",
+              "p2"
+            ]
+          }
+        ],
+        "status": "active",
+        "weight": null
+      }
+    ]
+  },
+  "prologue": {
+    "edges": [
+      {
+        "attributes": {
+          "auth_method": "unknown",
+          "outcome": "success",
+          "user": "dev.dana"
+        },
+        "authority": {
+          "kind": "siem-event",
+          "source": "elastic"
+        },
+        "id": "e-001",
+        "relation": "attempted_auth",
+        "source_vertex": "v-003",
+        "target_vertex": "v-001",
+        "when": {
+          "timestamp": "2026-05-25T15:27:22.928Z"
+        }
+      }
+    ],
+    "vertices": [
+      {
+        "attributes": {
+          "ip": "172.18.0.14",
+          "os": "ubuntu-22.04"
+        },
+        "classification": "workstation/internal/??",
+        "id": "v-001",
+        "identifier": "office-ws-1",
+        "type": "compute"
+      },
+      {
+        "classification": "user/??",
+        "id": "v-002",
+        "identifier": "dev.dana",
+        "type": "identity"
+      },
+      {
+        "attributes": {
+          "knowledge": "partial"
+        },
+        "classification": "ip-only/internal/known-corp",
+        "id": "v-003",
+        "identifier": "::1",
+        "type": "compute"
+      }
+    ]
+  }
+}

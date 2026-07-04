@@ -1,0 +1,465 @@
+{
+  "conclude": {
+    "confidence": "high",
+    "disposition": "malicious",
+    "impact_verdict": "attempted-lateral-movement",
+    "matched_archetype": "?adversarial-cross-tier-pivot",
+    "summary": "dev.dana authenticated to office-ws-1 via password sshd; within 1 second, scripted ssh probes for dev.dana hit db-1 from 172.18.0.14 (office-ws-1 IP). Twelve failures in three bursts of four at 3-7 second cadence, each round triggered sub-second after a workstation sshd acceptance. dev.dana has no account on db-1 and is IAM-provisioned only for dev-ws-1, jump-box-1, and office-ws-1. Unauthorized destination, scripted cadence, and sub-second workstation-session trigger confirm automated ssh scanning or lateral-movement tooling running under the session. Authz contract ac1 resolves unauthorized — escalate.",
+    "termination": {
+      "category": "adversarial-confirmed"
+    }
+  },
+  "findings": [
+    {
+      "id": "l-001",
+      "loop": 1,
+      "name": "anchor-event-fetch",
+      "outcome": {
+        "attribute_updates": [
+          {
+            "target": "v-002",
+            "updates": {
+              "attrs.hostname": "office-ws-1",
+              "class": "workstation/internal/known-corp"
+            }
+          },
+          {
+            "target": "v-003",
+            "updates": {
+              "attrs.hostname": "db-1",
+              "class": "database-server/internal/known-corp"
+            }
+          }
+        ],
+        "observations": {
+          "edges": [
+            {
+              "attributes": {
+                "host": "office-ws-1",
+                "method": "password",
+                "msg": "Accepted password for dev.dana from ::1 port 56094 ssh2",
+                "outcome": "success",
+                "process": "sshd",
+                "source_ip": "::1"
+              },
+              "authority": {
+                "kind": "siem-event",
+                "source": "elastic"
+              },
+              "id": "e-003",
+              "relation": "authenticated_as",
+              "source_vertex": "v-004",
+              "target_vertex": "v-001",
+              "when": {
+                "timestamp": "2026-05-25T13:52:56Z"
+              }
+            },
+            {
+              "attributes": {
+                "cadence": "3-7s-per-attempt",
+                "count": "12",
+                "host": "db-1",
+                "msg": "Invalid user dev.dana from 172.18.0.14",
+                "outcome": "failure",
+                "process": "sshd",
+                "reason": "invalid-user",
+                "rounds": "3"
+              },
+              "authority": {
+                "kind": "siem-event",
+                "source": "elastic"
+              },
+              "id": "e-004",
+              "relation": "attempted_auth",
+              "source_vertex": "v-008",
+              "target_vertex": "v-007",
+              "when": {
+                "timestamp": "2026-05-25T13:52:57Z"
+              }
+            }
+          ],
+          "vertices": [
+            {
+              "attributes": {
+                "os": "linux"
+              },
+              "classification": "workstation/internal/known-corp",
+              "id": "v-006",
+              "identifier": "office-ws-1",
+              "type": "compute"
+            },
+            {
+              "attributes": {
+                "os": "linux"
+              },
+              "classification": "database-server/internal/known-corp",
+              "id": "v-007",
+              "identifier": "db-1",
+              "type": "compute"
+            },
+            {
+              "attributes": {
+                "knowledge": "partial",
+                "likely": "office-ws-1-network-interface",
+                "note": "source-of-db-1-attempts"
+              },
+              "classification": "ip-only/internal/??",
+              "id": "v-008",
+              "identifier": "172.18.0.14",
+              "type": "compute"
+            }
+          ]
+        }
+      },
+      "query_details": {
+        "system": "elastic",
+        "time_window": "alert-time"
+      },
+      "resolutions": [],
+      "target": "v-002,v-003",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002"
+      ]
+    },
+    {
+      "id": "l-002",
+      "loop": 1,
+      "name": "identity-authz-check",
+      "outcome": {
+        "authorization_resolutions": [
+          {
+            "anchor_kind": "iam-policy",
+            "edge": "e-004",
+            "fulfills_contract": "ac1",
+            "reasoning": "\"dev.dana authorized hosts: dev-ws-1, jump-box-1, office-ws-1 only; db-1 explicitly authorized:false; sshd message Invalid user confirms no account on db-1\"",
+            "resolved_by_lead": "l-002",
+            "verdict": "unauthorized"
+          },
+          {
+            "anchor_kind": "change-mgmt",
+            "edge": "e-004",
+            "fulfills_contract": "ac2",
+            "reasoning": "\"change-mgmt not queried; unauthorized IAM verdict forces escalation regardless\"",
+            "resolved_by_lead": "l-002",
+            "verdict": "indeterminate"
+          }
+        ]
+      },
+      "query_details": {
+        "system": "identity",
+        "time_window": "n/a"
+      },
+      "resolutions": [
+        {
+          "after": "--",
+          "before": "null",
+          "hypothesis": "h-001",
+          "hypothesis_id": "h-001",
+          "matched_prediction_ids": [],
+          "matched_refutation_ids": [
+            "r1"
+          ],
+          "reasoning": "dev.dana NOT provisioned for db-1 (authorized:false); sshd confirms invalid user; ac1 unauthorized",
+          "severity_of_test": "severe",
+          "supporting_edges": [
+            "e-004"
+          ]
+        },
+        {
+          "after": "++",
+          "before": "null",
+          "hypothesis": "h-002",
+          "hypothesis_id": "h-002",
+          "matched_prediction_ids": [
+            "p1"
+          ],
+          "matched_refutation_ids": [],
+          "reasoning": "dev.dana absent from db-1 authorization; IAM oracle confirms unauthorized",
+          "severity_of_test": "severe",
+          "supporting_edges": [
+            "e-004"
+          ]
+        }
+      ],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002",
+        "ac1"
+      ]
+    },
+    {
+      "id": "l-003",
+      "loop": 1,
+      "name": "sshd-auth-sequence",
+      "outcome": {},
+      "query_details": {
+        "system": "elastic",
+        "time_window": "±30m"
+      },
+      "resolutions": [
+        {
+          "after": "--",
+          "before": "--",
+          "hypothesis": "h-001",
+          "hypothesis_id": "h-001",
+          "matched_prediction_ids": [],
+          "matched_refutation_ids": [
+            "r2"
+          ],
+          "reasoning": "12 failed attempts in 3 scripted bursts at 3-7s cadence; sub-second initiation after each workstation acceptance",
+          "severity_of_test": "severe",
+          "supporting_edges": [
+            "e-004"
+          ]
+        },
+        {
+          "after": "++",
+          "before": "++",
+          "hypothesis": "h-002",
+          "hypothesis_id": "h-002",
+          "matched_prediction_ids": [
+            "p2",
+            "p3"
+          ],
+          "matched_refutation_ids": [],
+          "reasoning": "scripted burst pattern (4 per round, 3-7s interval) from 172.18.0.14; initiated sub-second after each office-ws-1 workstation session acceptance; automated ssh probe tooling running under the session",
+          "severity_of_test": "severe",
+          "supporting_edges": [
+            "e-004"
+          ]
+        }
+      ],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002",
+        "p2"
+      ]
+    },
+    {
+      "id": "l-004",
+      "loop": 1,
+      "name": "sshd-baseline-dana",
+      "outcome": {},
+      "query_details": {
+        "system": "elastic",
+        "time_window": "7d"
+      },
+      "resolutions": [],
+      "target": "v-001",
+      "tests_hypotheses": [
+        "h-001",
+        "h-002"
+      ]
+    }
+  ],
+  "hypothesize": {
+    "hypotheses": [
+      {
+        "anchor": "v-001",
+        "authorization_contract": [
+          {
+            "anchor_kind": "iam-policy",
+            "edge_ref": "e-002",
+            "id": "ac1",
+            "on_indeterminate": "escalate",
+            "on_unauthorized": "escalate",
+            "predicate": "dev.dana is provisioned to authenticate to the prod-tier destination host"
+          },
+          {
+            "anchor_kind": "change-mgmt",
+            "edge_ref": "e-002",
+            "id": "ac2",
+            "on_indeterminate": "escalate",
+            "on_unauthorized": "escalate",
+            "predicate": "no unauthorized access flag for this cross-tier attempt"
+          }
+        ],
+        "id": "h-001",
+        "name": "?authorized-user-legitimate-pivot",
+        "predictions": [
+          {
+            "claim": "dev.dana is provisioned for the prod-tier destination in IAM oracle",
+            "id": "p1",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "auth method matches provisioned credential type",
+            "id": "p2",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "timing is human-paced; source session on workstation initiated the pivot",
+            "id": "p3",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "prod-tier attempts are authorized dev workflow, not scripted brute-force",
+            "id": "p4",
+            "subject": "proposed_parent"
+          }
+        ],
+        "proposed_edge": {
+          "parent_vertex": {
+            "classification": "interactive",
+            "type": "session"
+          },
+          "relation": "authenticated_as"
+        },
+        "refutation_shape": [
+          {
+            "claim": "dev.dana has no provisioned access to the prod-tier destination host",
+            "id": "r1",
+            "refutes_predictions": [
+              "p1"
+            ]
+          },
+          {
+            "claim": "attempts show rapid scripted cadence against an invalid user account",
+            "id": "r2",
+            "refutes_predictions": [
+              "p4"
+            ]
+          },
+          {
+            "claim": "sub-second timing between workstation acceptance and prod-tier failures",
+            "id": "r3",
+            "refutes_predictions": [
+              "p3"
+            ]
+          }
+        ],
+        "status": "active",
+        "weight": null
+      },
+      {
+        "anchor": "v-001",
+        "id": "h-002",
+        "name": "?adversarial-cross-tier-pivot",
+        "predictions": [
+          {
+            "claim": "dev.dana NOT provisioned for the prod-tier destination",
+            "id": "p1",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "prod-tier attempts are rapid/scripted from workstation container IP",
+            "id": "p2",
+            "subject": "proposed_parent"
+          },
+          {
+            "claim": "pattern shows automated ssh scanning tool running in the workstation session",
+            "id": "p3",
+            "subject": "proposed_parent"
+          }
+        ],
+        "proposed_edge": {
+          "parent_vertex": {
+            "classification": "interactive",
+            "type": "session"
+          },
+          "relation": "authenticated_as"
+        },
+        "refutation_shape": [
+          {
+            "claim": "dev.dana fully provisioned for the destination and attempts follow human-paced authorized workflow",
+            "id": "r1",
+            "refutes_predictions": [
+              "p1",
+              "p2"
+            ]
+          }
+        ],
+        "status": "active",
+        "weight": null
+      }
+    ]
+  },
+  "prologue": {
+    "edges": [
+      {
+        "attributes": {
+          "event_id": "AZ5faQ9rEmDJyXEvHqWo",
+          "host": "dev-ws-??",
+          "outcome": "success",
+          "process": "sshd"
+        },
+        "authority": {
+          "kind": "siem-event",
+          "source": "elastic"
+        },
+        "id": "e-001",
+        "relation": "authenticated_as",
+        "source_vertex": "v-004",
+        "target_vertex": "v-001",
+        "when": {
+          "timestamp": "2026-05-25T13:52:56Z"
+        }
+      },
+      {
+        "attributes": {
+          "event_id": "AZ5faQ9rEmDJyXFGHg20",
+          "host": "??",
+          "outcome": "failure",
+          "process": "sshd"
+        },
+        "authority": {
+          "kind": "siem-event",
+          "source": "elastic"
+        },
+        "id": "e-002",
+        "relation": "authenticated_as",
+        "source_vertex": "v-005",
+        "target_vertex": "v-001",
+        "when": {
+          "timestamp": "2026-05-25T13:53:35Z"
+        }
+      }
+    ],
+    "vertices": [
+      {
+        "attributes": {
+          "knowledge": "partial"
+        },
+        "classification": "user/known-corp",
+        "id": "v-001",
+        "identifier": "dev.dana",
+        "type": "identity"
+      },
+      {
+        "attributes": {
+          "knowledge": "partial",
+          "os": "linux"
+        },
+        "classification": "workstation/internal/known-corp",
+        "id": "v-002",
+        "identifier": "dev-ws-??",
+        "type": "compute"
+      },
+      {
+        "attributes": {
+          "knowledge": "partial",
+          "note": "prod-tier-destination"
+        },
+        "classification": "??/internal/??",
+        "id": "v-003",
+        "identifier": "??",
+        "type": "compute"
+      },
+      {
+        "classification": "interactive",
+        "id": "v-004",
+        "identifier": "session@dev-ws",
+        "type": "session"
+      },
+      {
+        "classification": "interactive",
+        "id": "v-005",
+        "identifier": "session@prod-dest",
+        "type": "session"
+      }
+    ]
+  }
+}
