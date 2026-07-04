@@ -39,7 +39,7 @@ def load_messages(run_dir: Path) -> list[dict]:
 def _pretty_model(name: str) -> str:
     """A short, provider-agnostic label for a model id:
     ``anthropic:claude-sonnet-4-6`` → ``sonnet-4-6``;
-    ``accounts/fireworks/models/glm-5p2`` → ``glm-5p2``; ``kimi-k2p5`` → ``kimi-k2p5``."""
+    ``accounts/fireworks/models/glm-5p2`` → ``glm-5p2``; ``kimi-k2p6`` → ``kimi-k2p6``."""
     # Drop a `provider:` prefix, then a Fireworks-style `accounts/.../models/` path,
     # then the Anthropic `claude-` prefix.
     n = (name or "").split(":")[-1].rsplit("/", 1)[-1]

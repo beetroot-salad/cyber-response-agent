@@ -2,7 +2,7 @@
 
 A provider is the serving infra (not a model): `anthropic` (native protocol,
 `claude-*`) and `fireworks` (OpenAI-compatible, serving the open models GLM 5.2
-and Kimi K2.5). Models belong to a provider's model set, keyed by name. The
+and Kimi K2.6). Models belong to a provider's model set, keyed by name. The
 registry resolves a model name → provider from each provider's declarative
 `aliases` + `prefixes`; construction and per-role settings live on the provider.
 
@@ -24,8 +24,8 @@ from .openai_compat import OpenAICompatProvider
 
 # The serving infras. `anthropic` is a peer, not the fallback — an unknown name
 # fails loud (see `provider_for`). Fireworks serves the production defaults
-# (`DEFAULT_MODEL = "glm-5.2"`, `DEFAULT_GATHER_MODEL = "kimi-k2.5"`); `glm-5p2` /
-# `kimi-k2p5` mirror Fireworks' own id spelling. Any other Fireworks model is
+# (`DEFAULT_MODEL = "glm-5.2"`, `DEFAULT_GATHER_MODEL = "kimi-k2.6"`); `glm-5p2` /
+# `kimi-k2p6` mirror Fireworks' own id spelling. Any other Fireworks model is
 # reachable via an explicit `fireworks:<id>`.
 ANTHROPIC = AnthropicProvider()
 FIREWORKS = OpenAICompatProvider(
@@ -35,8 +35,8 @@ FIREWORKS = OpenAICompatProvider(
     aliases={
         "glm-5.2": "accounts/fireworks/models/glm-5p2",
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
-        "kimi-k2.5": "accounts/fireworks/models/kimi-k2p5",
-        "kimi-k2p5": "accounts/fireworks/models/kimi-k2p5",
+        "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
+        "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
     },
     main_effort="low",       # MAIN loop (GLM 5.2)
     gather_effort="none",    # GATHER subagent — mechanical ES|QL
@@ -57,7 +57,7 @@ def provider_for(name: str) -> Provider:
             return p
     raise ValueError(
         f"unknown model {name!r}; expected a claude-* id or a Fireworks alias "
-        "(glm-5.2 / kimi-k2.5) / fireworks:<id>"
+        "(glm-5.2 / kimi-k2.6) / fireworks:<id>"
     )
 
 

@@ -114,7 +114,7 @@ defender/
     record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)
-    gather/             # gather subagent (single-agent ES|QL, Kimi K2.5 by default) + per-system query templates
+    gather/             # gather subagent (single-agent ES|QL, Kimi K2.6 by default) + per-system query templates
     handbook/           # on-demand reference docs
     advisory/           # cross-system runtime skill
     # per-system references (v2 environment) — visibility surface + execution:
@@ -203,7 +203,7 @@ resolves to `defender/.venv` first.
 `python3 defender/run.py <alert.json>` → runs the in-process **PydanticAI
 driver** (`runtime/driver.py`) with `defender/SKILL.md` as the system prompt →
 the agent works through ORIENT → PLAN → GATHER → ANALYZE → REPORT, dispatching
-the single-agent ES|QL gather subagent (Kimi K2.5 by default) per lead →
+the single-agent ES|QL gather subagent (Kimi K2.6 by default) per lead →
 emits `investigation.md`, `report.md`, and the two live tables
 (`executed_queries.jsonl` + `gather_raw/`) into a run dir under
 `/tmp/defender-runs/`. After the run, `run.py` renders
