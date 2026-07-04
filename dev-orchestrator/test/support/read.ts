@@ -5,10 +5,12 @@ export function getCard(db: DB, id: string): CardState | undefined {
   return db.prepare("SELECT * FROM card WHERE id = ?").get(id) as CardState | undefined;
 }
 
-/** All of a card's runs, oldest first — the append-only timeline. */
+/** All of a card's runs, oldest first — the append-only timeline. Tie-break on `rowid`
+ *  (SQLite's insertion order) not the string `id`: under the fake clock many runs share a
+ *  `created_at`, and a lexical `id` sort ("id-N" vs "seed-run-N") would reorder them. */
 export function getRuns(db: DB, cardId: string): RunRow[] {
   return db
-    .prepare("SELECT * FROM run WHERE card_id = ? ORDER BY created_at, id")
+    .prepare("SELECT * FROM run WHERE card_id = ? ORDER BY created_at, rowid")
     .all(cardId) as RunRow[];
 }
 
