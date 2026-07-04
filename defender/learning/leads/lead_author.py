@@ -76,7 +76,6 @@ from defender.learning.leads.path_validation import (  # noqa: F401  (re-exporte
     _is_system_file,
     _is_system_skill_draft,
     _is_system_skill_md,
-    _porcelain_records,
     _under_draft,
 )
 from defender.learning.leads.draft_synthesis import (  # noqa: F401  (re-exported)
