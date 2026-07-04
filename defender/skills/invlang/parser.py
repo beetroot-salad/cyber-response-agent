@@ -629,13 +629,13 @@ class _Projector:
     def _project_rows(self, block: Block, project_one) -> list[Any]:
         """Drive a row-projection function across `block.rows`. Each row
         failure becomes a ParseWarning; the rest of the block continues."""
-        out: list[Any] = []
+        projected: list[Any] = []
         for idx, row in enumerate(block.rows):
             try:
-                out.append(project_one(block, row))
+                projected.append(project_one(block, row))
             except RowError as e:
                 self._warn(block, idx, row, str(e))
-        return out
+        return projected
 
     def _for_each_row(
         self, block: Block, default_cols: list[str] | None = None

@@ -158,7 +158,7 @@ class _HypRequired(TypedDict):
 
 class HypothesisRecord(_HypRequired, total=False):
     """A `:H` hypothesis (`_hypothesis_record`) plus the sub-block content
-    routed onto it (`_project_hyp_subblock` / `_HYP_SUB_DISPATCH`). ``weight``
+    routed onto it (`_Projector._project_hyp_subblock` / `_HYP_SUB_DISPATCH`). ``weight``
     is ``None`` when the cell is the literal ``null``."""
 
     anchor: str
@@ -208,7 +208,7 @@ class QueryDetails(TypedDict, total=False):
 
 
 class Observations(TypedDict, total=False):
-    """A lead outcome's analyzed graph delta (`_project_lead_subblock`)."""
+    """A lead outcome's analyzed graph delta (`_Projector._project_lead_subblock`)."""
 
     vertices: list[VertexRecord]
     edges: list[EdgeRecord]
@@ -218,7 +218,7 @@ class LeadOutcome(TypedDict, total=False):
     """A lead's outcome bucket (`outcome` on the finding). The
     ``*_resolutions`` / ``anchor_consultations`` / ``attribute_updates``
     buckets (`_RESOLUTION_BUCKET_KEY`, projected from the `:R` blocks by
-    `_project_resolution_block`) are nested *here* under ``outcome``, not on
+    `_Projector._project_resolution_block`) are nested *here* under ``outcome``, not on
     the finding itself."""
 
     failure_reason: str
@@ -238,7 +238,7 @@ class _FindingRequired(TypedDict):
 
 class FindingRecord(_FindingRequired, total=False):
     """A lead / finding row (`_lead_header_record` + the lead bucket assembled
-    in `companion_from_blocks.lead_bucket`). ``loop`` is coerced to ``int``
+    in `_Projector.lead_bucket`). ``loop`` is coerced to ``int``
     when numeric, else the raw cell string is kept (`_lead_header_record`
     suppresses the `ValueError`) — hence ``int | str``, and consumers
     `isinstance(..., int)`-guard it. The ``*_resolutions`` / ``attribute_updates`` buckets
@@ -246,7 +246,7 @@ class FindingRecord(_FindingRequired, total=False):
     under ``outcome`` (see `LeadOutcome`), not directly on the finding.
 
     ``shelved`` / ``shelved_rationales`` carry the `:T shelved` projection
-    (`_project_shelved_block`)."""
+    (`_Projector._project_shelved_block`)."""
 
     name: str
     target: str
@@ -289,14 +289,14 @@ class Conclude(TypedDict, total=False):
 
 
 class Prologue(TypedDict, total=False):
-    """The `:V/:E prologue.*` graph (`_project_block`)."""
+    """The `:V/:E prologue.*` graph (`_Projector.project_block`)."""
 
     vertices: list[VertexRecord]
     edges: list[EdgeRecord]
 
 
 class Hypothesize(TypedDict, total=False):
-    """The `:H hypothesize.hypotheses` block (`_project_hypothesize_block`)."""
+    """The `:H hypothesize.hypotheses` block (`_Projector._project_hypothesize_block`)."""
 
     hypotheses: list[HypothesisRecord]
 
