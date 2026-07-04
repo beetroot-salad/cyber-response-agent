@@ -123,8 +123,12 @@ def test_build_pairs_model_with_settings(monkeypatch):
 def test_anthropic_settings_are_the_cache_and_role_invariant():
     s_main = providers.ANTHROPIC.settings(AgentRole.MAIN)
     assert s_main == _CACHE
-    # Same object for every role (memoized), never None.
-    assert providers.ANTHROPIC.settings(AgentRole.GATHER) is s_main
+    # Role-invariant by VALUE (never None). Identity was downgraded from `is` to `==`
+    # in #495: settings(role) now collapses to settings_for_effort(effort_for_role(role)),
+    # which builds a fresh settings object per call (effort_for_role(role) is None for
+    # Anthropic → cache-only). The value is preserved; object identity is not a promise
+    # (settings are sent by value), and dropping it keeps the single collapsed path.
+    assert providers.ANTHROPIC.settings(AgentRole.GATHER) == s_main
 
 
 def test_fireworks_main_defaults_to_low(monkeypatch):
