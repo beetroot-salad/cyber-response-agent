@@ -1,0 +1,539 @@
+<title>flowdeck — dev workflow board</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+
+  :root{
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --ground:#eeeef1;
+    --panel:#ffffff;
+    --col:#f5f5f8;
+    --line:#e6e6ec;
+    --line-2:#d1d1d9;
+    --ink:#191920;
+    --ink-2:#545460;
+    --ink-3:#8a8a96;
+    --accent:#2f6bed;      /* cobalt — single accent (mono); gate emphasis is fill, not a second hue */
+    --accent-ink:#ffffff;
+    --run:#2f6bed;         /* same cobalt — "the machine is acting" */
+    --fail:#cf4b4b;
+    --done:#4f9d6b;
+    --shadow: 0 1px 2px rgba(28,26,38,.06), 0 4px 14px rgba(28,26,38,.07);
+    --shadow-lg: 0 16px 46px rgba(28,26,38,.18);
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --ground:#0c0d11; --panel:#16181f; --col:#101116; --line:#262931; --line-2:#383c45;
+    --ink:#e9eaf0; --ink-2:#a2a6b2; --ink-3:#6b6f7b;
+    --accent:#5b8bff; --accent-ink:#0c0d11; --run:#5b8bff; --fail:#e0686d; --done:#5fb07f;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.42);
+    --shadow-lg: 0 20px 54px rgba(0,0,0,.6);
+  }}
+  :root[data-theme="dark"]{
+    --ground:#0c0d11; --panel:#16181f; --col:#101116; --line:#262931; --line-2:#383c45;
+    --ink:#e9eaf0; --ink-2:#a2a6b2; --ink-3:#6b6f7b;
+    --accent:#5b8bff; --accent-ink:#0c0d11; --run:#5b8bff; --fail:#e0686d; --done:#5fb07f;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.42);
+    --shadow-lg: 0 20px 54px rgba(0,0,0,.6);
+  }
+  :root{
+    --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+    --run-soft:    color-mix(in srgb, var(--run) 14%, transparent);
+    --run-dim:     color-mix(in srgb, var(--run) 55%, var(--ink-3));
+    --fail-soft:   color-mix(in srgb, var(--fail) 13%, transparent);
+    --done-soft:   color-mix(in srgb, var(--done) 13%, transparent);
+  }
+
+  body{ font-family:var(--sans); background:var(--ground); color:var(--ink); min-height:100vh; display:flex; flex-direction:column; -webkit-font-smoothing:antialiased; transition:padding-right .22s cubic-bezier(.4,0,.2,1); }
+  body.peek-open{ padding-right:440px; }
+
+  /* ---------- top bar ---------- */
+  .topbar{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:11px 18px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  .brand{ display:flex; align-items:center; gap:9px; }
+  .brand svg{ width:20px; height:20px; display:block; }
+  .brand-name{ font-family:var(--mono); font-weight:700; font-size:14.5px; letter-spacing:-.01em; }
+  .brand-sub{ font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink-3); border:1px solid var(--line-2); border-radius:5px; padding:2px 5px; }
+
+  .summary{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .chip{ display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; font-weight:600; padding:5px 11px; border-radius:999px; border:1px solid var(--line-2); color:var(--ink-2); background:var(--panel); }
+  .chip .cdot{ width:7px; height:7px; border-radius:999px; background:currentColor; }
+  .chip.wait{ color:var(--accent-ink); background:var(--accent); border-color:transparent; }
+  .chip.run{ color:var(--run); background:var(--run-soft); border-color:transparent; }
+
+  .controls{ display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; }
+  select, .icon-btn{ font-family:var(--mono); font-size:12px; color:var(--ink-2); background:var(--panel); border:1px solid var(--line-2); border-radius:8px; padding:7px 10px; cursor:pointer; }
+  select:hover, .icon-btn:hover{ border-color:var(--ink-3); }
+  .btn-new{ font-family:var(--sans); font-weight:600; font-size:12.5px; background:var(--ink); color:var(--panel); border:1px solid var(--ink); border-radius:8px; padding:8px 12px; cursor:pointer; }
+  .btn-new:hover{ opacity:.9; }
+
+  /* ---------- board ---------- */
+  .board{ flex:1; display:flex; gap:13px; padding:16px 18px 8px; overflow-x:auto; overflow-y:hidden; align-items:flex-start; scrollbar-width:thin; }
+  .col{ flex:0 0 264px; width:264px; background:var(--col); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; max-height:calc(100vh - 148px); }
+  .col-head{ display:flex; align-items:baseline; gap:8px; padding:12px 13px 11px; border-bottom:1px solid var(--line); }
+  .stage-key{ font-family:var(--mono); font-weight:700; font-size:13px; color:var(--ink); letter-spacing:-.01em; }
+  .stage-role{ font-family:var(--mono); font-size:10px; color:var(--ink-3); display:inline-flex; align-items:center; gap:5px; opacity:0; transition:opacity .13s ease; }
+  .col:hover .stage-role, .col:focus-within .stage-role{ opacity:1; }
+  .stage-role .gdot{ width:5px; height:5px; border-radius:999px; background:var(--accent); }
+  .col-count{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 7px; min-width:22px; text-align:center; }
+  .col-body{ padding:10px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; scrollbar-width:thin; }
+  .col-body:empty::after{ content:"—"; color:var(--ink-3); font-family:var(--mono); font-size:12px; display:block; text-align:center; padding:12px 0; }
+  .col-collapse{ background:transparent; border:none; color:var(--ink-3); cursor:pointer; font-size:15px; line-height:1; padding:0 4px 0 0; margin:-1px 0 0 -2px; }
+  .col-collapse:hover{ color:var(--ink); }
+  .col.collapsed{ flex:0 0 46px; width:46px; cursor:pointer; }
+  .col.collapsed:hover{ border-color:var(--ink-3); }
+  .col.collapsed:focus-visible{ outline:2px solid var(--run); outline-offset:2px; }
+  .col-rail{ display:flex; flex-direction:column; align-items:center; gap:12px; padding:12px 0; }
+  .rail-count{ font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 6px; min-width:22px; text-align:center; }
+  .rail-key{ writing-mode:vertical-rl; transform:rotate(180deg); font-family:var(--mono); font-weight:700; font-size:12.5px; color:var(--ink-2); letter-spacing:.02em; }
+
+  /* ---------- card ---------- */
+  .card{
+    --s:var(--line-2); --s-soft:transparent;
+    position:relative; text-align:left; width:100%;
+    background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--s);
+    border-radius:9px; padding:11px 12px; box-shadow:var(--shadow); cursor:pointer;
+    display:flex; flex-direction:column; gap:8px;
+    transition:transform .13s ease, box-shadow .13s ease, border-color .13s ease;
+  }
+  .card:hover{ transform:translateY(-1px); box-shadow:var(--shadow-lg); border-color:color-mix(in srgb, var(--s) 40%, var(--line)); }
+  .card:focus-visible{ outline:2px solid var(--run); outline-offset:2px; }
+  .card{ cursor:grab; }
+  .card:active{ cursor:grabbing; }
+  .card.dragging{ opacity:.4; }
+  .col.drop-target{ outline:2px dashed var(--run); outline-offset:-3px; }
+  .col.drop-target > .col-body{ background:color-mix(in srgb, var(--run) 7%, transparent); border-radius:0 0 12px 12px; }
+  /* active (running) — muted, "between" ready and idle; a thin ambient line at the bottom is its only signal */
+  .card[data-status="running"]{ --s:var(--run-dim); --s-soft:var(--run-soft); background:color-mix(in srgb, var(--run-dim) 5%, var(--panel)); }
+  .card[data-status="running"]::after{ content:""; position:absolute; left:3px; right:3px; bottom:2px; height:2px; border-radius:2px;
+    background:linear-gradient(90deg, transparent, var(--run-dim), transparent); background-size:45% 100%; background-repeat:no-repeat; background-position:-45% 0;
+    animation:activebar 1.6s ease-in-out infinite; }
+  /* ready (needs you) — brightest: bright cobalt edge + wash, bold title */
+  .card[data-status="awaiting_human"]{ --s:var(--accent); --s-soft:var(--accent-soft); border-left-width:4px; background:color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+  .card[data-status="awaiting_human"] .card-title{ font-weight:650; }
+  .card[data-status="failed"]{ --s:var(--fail); --s-soft:var(--fail-soft); border-left-width:4px; background:color-mix(in srgb, var(--fail) 8%, var(--panel)); }
+  .card[data-status="failed"] .card-title{ font-weight:650; }
+  /* non-active states — recede: no lift, muted title */
+  .card[data-status="done"]{ --s:var(--done); --s-soft:var(--done-soft); box-shadow:none; }
+  .card[data-status="done"] .card-title{ color:var(--ink-3); }
+  .card[data-status="queued"]{ --s:var(--ink-3); border-left-style:dashed; box-shadow:none; }
+  .card[data-status="queued"] .card-title{ color:var(--ink-2); }
+  .card[data-status="idle"]{ --s:var(--line); box-shadow:none; }
+  .card[data-status="idle"] .card-title{ color:var(--ink-2); font-weight:560; }
+
+  .card-top{ display:flex; align-items:center; gap:8px; }
+  .issue{ font-family:var(--mono); font-size:12px; font-weight:600; color:var(--ink-2); }
+  .repo-tag{ font-family:var(--mono); font-size:10px; color:var(--ink-3); }
+  /* icon-only status markers — no text; shape carries meaning */
+  .mark{ margin-left:auto; display:inline-flex; align-items:center; justify-content:center; min-width:14px; height:14px; }
+  .mark::before{ display:inline-block; line-height:1; }
+  .mark.queued::before{ content:""; width:8px; height:8px; border-radius:50%; border:1.5px solid var(--ink-3); box-sizing:border-box; }
+  /* ready — bright, static diamond (attention comes from brightness, never motion) */
+  .mark.gate::before{ content:""; width:10px; height:10px; background:var(--accent); transform:rotate(45deg); }
+  .mark.failed::before{ content:"\2715"; color:var(--fail); font-family:var(--mono); font-weight:700; font-size:12px; }
+  /* finished — a solid, static badge that pops even on a receded card */
+  .mark.done{ width:16px; height:16px; border-radius:50%; background:var(--done); animation:none; }
+  .mark.done::before{ content:"\2713"; color:var(--panel); font-weight:800; font-size:9px; animation:none; }
+
+  .card-title{ font-family:var(--sans); font-weight:600; font-size:14px; line-height:1.32; margin:0; color:var(--ink); text-wrap:balance; }
+
+  .card-meta{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3); display:flex; align-items:center; gap:6px; }
+  .card-meta .pr{ color:var(--ink-2); text-decoration:none; }
+  .card-meta .pr:hover{ color:var(--run); }
+  .card-meta.warn{ color:var(--fail); }
+
+  .activity{ display:none; align-items:center; gap:8px; padding:6px 9px; border-radius:7px; background:var(--s-soft); font-family:var(--mono); font-size:11px; }
+  .card:hover .activity, .card:focus-within .activity{ display:flex; }
+  .act-step{ color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .act-data{ margin-left:auto; color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; opacity:0; transition:opacity .13s ease; }
+  .card:hover .act-data, .card:focus-within .act-data{ opacity:1; }
+
+  .card-actions{ display:flex; flex-direction:column; gap:7px; }
+  .act-more{ display:none; gap:7px; flex-wrap:wrap; }
+  .card:hover .act-more, .card:focus-within .act-more{ display:flex; }
+  .btn{ font-family:var(--sans); font-weight:600; font-size:11.5px; padding:6px 10px; border-radius:7px; cursor:pointer; border:1px solid var(--line-2); background:var(--panel); color:var(--ink-2); white-space:nowrap; transition:border-color .12s ease, background .12s ease, color .12s ease; }
+  .btn:hover{ border-color:var(--ink-3); color:var(--ink); }
+  .btn.primary{ background:color-mix(in srgb, var(--run) 12%, var(--panel)); border-color:color-mix(in srgb, var(--run) 30%, var(--line-2)); color:var(--ink); }
+  .btn.primary:hover{ background:color-mix(in srgb, var(--run) 20%, var(--panel)); border-color:var(--run); color:var(--ink); }
+  .btn.gate{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); box-shadow:0 1px 6px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .btn.gate:hover{ filter:brightness(1.05); color:var(--accent-ink); }
+  .btn.ghost{ background:transparent; border-color:transparent; }
+  .btn.ghost:hover{ border-color:var(--line-2); }
+
+  /* ---------- ledger footer ---------- */
+  .ledger{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:9px 18px; border-top:1px solid var(--line); background:var(--panel); font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .ledger .sync{ display:inline-flex; align-items:center; gap:7px; color:var(--ink-2); }
+  .ledger .sync .cdot{ width:7px; height:7px; border-radius:999px; background:var(--done); animation:pulse 2.4s ease-in-out infinite; }
+  .ledger-toggle{ font-family:var(--mono); font-size:11px; color:var(--ink-2); background:transparent; border:1px solid var(--line-2); border-radius:6px; padding:3px 9px; cursor:pointer; }
+  .ledger-toggle:hover{ border-color:var(--ink-3); color:var(--ink); }
+  .legend{ display:flex; gap:13px; flex-wrap:wrap; margin-left:auto; }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .legend i{ width:9px; height:9px; display:inline-flex; align-items:center; justify-content:center; font-style:normal; }
+  .legend .lg-run{ border-radius:50%; background:var(--run); }
+  .legend .lg-gate{ background:var(--accent); transform:rotate(45deg); }
+  .legend .lg-fail{ color:var(--fail); font-weight:700; font-size:11px; }
+  .legend .lg-done{ color:var(--done); font-weight:700; font-size:11px; }
+
+  /* ---------- scrim, drawer, modal ---------- */
+  .scrim{ position:fixed; inset:0; background:rgba(8,10,15,.5); opacity:0; pointer-events:none; transition:opacity .18s ease; z-index:40; }
+  .scrim.show{ opacity:1; pointer-events:auto; }
+  .drawer{ position:fixed; top:0; right:0; height:100vh; width:min(440px, 95vw); background:var(--panel); border-left:1px solid var(--line); box-shadow:var(--shadow-lg); z-index:50; transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; }
+  .drawer.show{ transform:translateX(0); }
+  .drawer-head{ display:flex; align-items:flex-start; gap:10px; padding:16px 18px 14px; border-bottom:1px solid var(--line); }
+  .drawer-head .x{ margin-left:auto; }
+  .drawer-body{ padding:16px 18px 22px; overflow-y:auto; display:flex; flex-direction:column; gap:19px; }
+  .d-title{ font-family:var(--sans); font-weight:600; font-size:15.5px; line-height:1.3; margin:5px 0 0; text-wrap:balance; }
+  .d-crumb{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; color:var(--ink-3); flex-wrap:wrap; }
+  .d-statepill{ display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; font-weight:600; background:var(--s-soft); }
+  .d-statepill .pdot{ width:6px; height:6px; border-radius:999px; background:currentColor; display:inline-block; }
+  .d-section h4{ font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.11em; color:var(--ink-3); margin:0 0 9px; font-weight:600; }
+  .points a{ display:flex; align-items:center; gap:9px; padding:9px 11px; margin-bottom:7px; border:1px solid var(--line); border-radius:8px; text-decoration:none; color:var(--ink); font-size:12.5px; background:var(--col); }
+  .points a:hover{ border-color:var(--ink-3); }
+  .points a .lead{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3); min-width:58px; text-transform:uppercase; letter-spacing:.05em; }
+  .points a .val{ font-family:var(--mono); font-size:11.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .points a .ext{ margin-left:auto; color:var(--ink-3); font-family:var(--mono); font-size:11px; white-space:nowrap; }
+  .points a .ext.red{ color:var(--fail); } .points a .ext.green{ color:var(--done); }
+  .watch{ border:1px solid var(--line); border-radius:9px; overflow:hidden; background:var(--col); }
+  .watch-head{ display:flex; align-items:center; gap:8px; padding:8px 11px; border-bottom:1px solid var(--line); font-family:var(--mono); font-size:11px; color:var(--ink-2); }
+  .watch-head .dot{ width:8px; height:8px; border-radius:999px; background:var(--run); animation:pulse 1.7s ease-in-out infinite; }
+  .watch-body{ padding:11px 12px; font-family:var(--mono); font-size:11.5px; line-height:1.75; color:var(--ink-2); overflow-x:auto; max-height:230px; overflow-y:auto; }
+  .watch-body .ln{ white-space:pre; }
+  .watch-body .ok{ color:var(--done); } .watch-body .run{ color:var(--run); } .watch-body .bad{ color:var(--fail); } .watch-body .mut{ color:var(--ink-3); }
+  .watch-foot{ padding:8px 12px; border-top:1px solid var(--line); font-family:var(--mono); font-size:11px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+  .fail-box{ border:1px solid var(--fail-soft); background:var(--fail-soft); border-radius:9px; padding:12px; }
+  .fail-box .cmd{ font-family:var(--mono); font-size:11.5px; background:var(--col); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-top:9px; color:var(--ink); overflow-x:auto; white-space:pre; cursor:pointer; }
+  .fail-box .cmd:hover{ border-color:var(--ink-3); }
+  .gate-box{ border:1px solid var(--accent-soft); background:var(--accent-soft); border-radius:9px; padding:12px; font-size:12.5px; color:var(--ink); line-height:1.5; }
+  .gate-box code, .fail-box code{ font-family:var(--mono); font-size:11.5px; }
+  .timeline{ display:flex; flex-direction:column; }
+  .tl{ display:flex; gap:10px; align-items:flex-start; padding:5px 0; }
+  .tl .tdot{ width:9px; height:9px; border-radius:999px; margin-top:4px; flex:0 0 auto; background:var(--ink-3); }
+  .tl.ok .tdot{ background:var(--done); } .tl.run .tdot{ background:var(--run); } .tl.bad .tdot{ background:var(--fail); }
+  .tl-row{ display:flex; width:100%; gap:8px; align-items:baseline; }
+  .tl .tmain{ font-family:var(--mono); font-size:11.5px; color:var(--ink); }
+  .tl .tmeta{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3); margin-left:auto; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .drawer-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:14px 18px; border-top:1px solid var(--line); }
+
+  .modal-wrap{ position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:20px; opacity:0; pointer-events:none; transition:opacity .16s ease; }
+  .modal-wrap.show{ opacity:1; pointer-events:auto; }
+  .modal{ width:min(460px,96vw); background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg); padding:20px; transform:translateY(8px); transition:transform .16s ease; }
+  .modal-wrap.show .modal{ transform:none; }
+  .modal h3{ margin:0 0 3px; font-size:16px; } .modal p.hint{ margin:0 0 16px; font-size:12px; color:var(--ink-3); font-family:var(--mono); }
+  .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:13px; }
+  .field label{ font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-3); }
+  .field input, .field select, .field textarea{ font-family:var(--sans); font-size:13px; color:var(--ink); background:var(--col); border:1px solid var(--line-2); border-radius:8px; padding:9px 11px; width:100%; }
+  .field textarea{ resize:vertical; min-height:64px; font-size:12.5px; }
+  .field input:focus, .field textarea:focus, .field select:focus{ outline:2px solid var(--run); outline-offset:1px; border-color:var(--run); }
+  .runs-as{ font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--col); border:1px solid var(--line); border-radius:7px; padding:8px 10px; margin-bottom:15px; }
+  .runs-as code{ color:var(--ink-2); }
+  .modal-foot{ display:flex; gap:9px; justify-content:flex-end; }
+  .close-x{ background:transparent; border:1px solid var(--line-2); border-radius:7px; width:30px; height:30px; cursor:pointer; color:var(--ink-2); font-size:14px; line-height:1; }
+  .close-x:hover{ border-color:var(--ink-3); }
+  .toast{ position:fixed; left:50%; bottom:26px; transform:translate(-50%,20px); background:var(--ink); color:var(--panel); font-family:var(--mono); font-size:12px; padding:10px 15px; border-radius:9px; box-shadow:var(--shadow-lg); z-index:80; opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease; max-width:86vw; }
+  .toast.show{ opacity:1; transform:translate(-50%,0); }
+  .toast .tk{ color:var(--accent); }
+
+  @keyframes pulse{ 0%,100%{ opacity:1 } 50%{ opacity:.32 } }
+  @keyframes blink{ 0%,49%{ opacity:1 } 50%,100%{ opacity:0 } }
+  @keyframes activebar{ to{ background-position:145% 0; } }
+  @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } .card[data-status="running"]::after{ background:var(--run-dim); } }
+  @media (max-width:560px){ .summary{ order:3; width:100%; } }
+  @media (max-width:760px){ body.peek-open{ padding-right:0; } .drawer{ width:100vw; border-left:none; } }
+</style>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
+      <rect x="9.5" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
+      <rect x="17" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
+      <rect x="9.5" y="4" width="5" height="6.4" rx="1.6" fill="var(--accent)"/>
+    </svg>
+    <span class="brand-name">flowdeck</span>
+    <span class="brand-sub">local</span>
+  </div>
+  <div class="summary" id="summary"></div>
+  <div class="controls">
+    <select id="repoFilter" aria-label="Filter by repository">
+      <option>all repos</option><option>acme/flowdeck</option><option>acme/defender</option>
+    </select>
+    <button class="btn-new" id="newBtn">+ New issue</button>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main class="board" id="board"></main>
+
+<footer class="ledger">
+  <span class="sync"><span class="cdot"></span>polling <code>gh</code> · 30s</span>
+  <span id="syncAge">last synced 12s ago</span>
+  <span id="counts"></span>
+  <span>workers 2/2</span>
+  <span title="drag a card into a column, or focus it and press left/right">drag ↔ · ←→ to move</span>
+  <button class="ledger-toggle" id="doneToggle"></button>
+  <div class="legend">
+    <span><i class="lg-run"></i>running</span>
+    <span><i class="lg-gate"></i>needs you</span>
+    <span><i class="lg-fail">✕</i>failed</span>
+  </div>
+</footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+
+<div class="modal-wrap" id="modalWrap" aria-hidden="true">
+  <div class="modal" role="dialog" aria-label="New issue">
+    <h3>New issue</h3>
+    <p class="hint">creates a tracked card in backlog</p>
+    <div class="field"><label for="ni-title">Title</label><input id="ni-title" placeholder="Short summary of the work"></div>
+    <div class="field"><label for="ni-body">Body</label><textarea id="ni-body" placeholder="What needs to happen, and why."></textarea></div>
+    <div class="field"><label for="ni-repo">Repository</label><select id="ni-repo"><option>acme/flowdeck</option><option>acme/defender</option></select></div>
+    <div class="runs-as">runs <code>gh issue create --label flow</code> — lands as a card the same way a polled issue does</div>
+    <div class="modal-foot"><button class="btn ghost" id="niCancel">Cancel</button><button class="btn primary" id="niCreate">Create issue</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const STAGES = [
+    { key:"backlog",     role:"intake · poll" },
+    { key:"discuss",     role:"you drive" },
+    { key:"write_tests", role:"spec", gate:true },
+    { key:"write_code",  role:"ship + watch CI" },
+    { key:"review",      role:"fix · approve merge", gate:true },
+    { key:"done",        role:"merged" },
+  ];
+  const label = { idle:"idle", queued:"queued", running:"running", awaiting_human:"needs you", failed:"failed", done:"done" };
+  // (progression is drag / ←→ — no always-visible primary buttons on cards)
+
+  const CARDS = [
+    { id:512, stage:"backlog", status:"idle", repo:"acme/flowdeck", title:"Rate-limit the gh poller to stay under API quota", history:[["issue.opened","github","intake"]] },
+    { id:518, stage:"backlog", status:"idle", repo:"acme/flowdeck", title:"Bump better-sqlite3 to 11.3.0", note:"dep bump · skip candidate", history:[["issue.opened","github","intake"]] },
+    { id:509, stage:"backlog", status:"idle", repo:"acme/defender", title:"Cache SDK total_cost_usd on run completion", history:[["issue.opened","github","intake"]] },
+
+    { id:501, stage:"discuss", status:"running", repo:"acme/flowdeck", title:"Design: multi-repo card routing", session:"b1e4c9a", liveDiscuss:true, dwell:"open 9m", history:[["issue.opened","github","intake"],["discuss","manual","running"]] },
+    { id:506, stage:"discuss", status:"idle", repo:"acme/flowdeck", title:"Spike: embedded-pty session host", session:"a0f7712", note:"parked · discarded", history:[["issue.opened","github","intake"],["discuss","manual","cancelled"]] },
+
+    { id:498, stage:"write_tests", status:"running", repo:"acme/flowdeck", title:"Worktree teardown on archive leaks branches", branch:"flow/issue-498", session:"9c2f5d1", step:"enumerating failure modes", elapsed:72, cost:0.18, dwell:"running 1m",
+      watch:[["▸ read issue #498 + design",""],["▸ enumerating failure modes as stubs",""],["  · leak on archive-before-push","mut"],["  · leak on double-archive","mut"],["⣾ drafting seam-bound suite …","run"]],
+      stream:[["  ⣿ suite drafted — 7 tests","run"],["▸ running suite locally",""],["  ✓ 7 passed   1.2s","ok"],["▸ committing spec → flow/issue-498",""]],
+      history:[["discuss","manual","succeeded"],["write_tests","auto","running"]] },
+    { id:495, stage:"write_tests", status:"awaiting_human", repo:"acme/flowdeck", title:"Show the tests diff at the approve-tests gate", branch:"flow/issue-495", session:"4a7710b", note:"spec ready", dwell:"waiting 8m", history:[["discuss","manual","succeeded"],["write_tests","auto","succeeded","$0.22"]] },
+
+    { id:489, stage:"write_code", status:"running", repo:"acme/flowdeck", title:"Startup reconciler kills detached discuss sessions", branch:"flow/issue-489", pr:443, session:"7f3a91c", step:"watching CI", elapsed:242, cost:0.51, dwell:"running 4m",
+      watch:[["● watching pr #443 checks","mut"],["  ✓ lint          passed    14s","ok"],["  ✓ typecheck     passed    38s","ok"],["  ⣾ test (unit)    running   2m01s","run"],["  ⣾ test (e2e)     running   2m01s","run"],["  · build         queued","mut"]],
+      stream:[["  ✓ test (unit)    passed    2m41s","ok"],["  ⣾ test (e2e)     running   2m58s","run"],["  ✓ test (e2e)     passed    3m20s","ok"],["  ⣾ build          running   3m22s","run"]],
+      history:[["write_tests","auto","succeeded","$0.19"],["write_tests","—","approved"],["write_code","auto","running"]] },
+    { id:486, stage:"write_code", status:"failed", repo:"acme/flowdeck", title:"T-ENQUEUE missing state guard lets a stale approve fork the card", branch:"flow/issue-486", pr:440, session:"2d90e4f", cost:1.24, attempt:3, note:"repair loop exhausted", dwell:"failed 2m ago",
+      fail:{ reason:"Repair loop exhausted — 3 attempts, CI still red.", lines:["attempt 1  push → ci red (test_enqueue_guard)","attempt 2  fix  → ci red (test_enqueue_guard)","attempt 3  fix  → ci red (test_enqueue_guard)"] },
+      history:[["write_tests","auto","succeeded","$0.20"],["write_tests","—","approved"],["write_code","auto","failed","$0.61"],["write_code","retry","failed","$0.63"]] },
+
+    { id:482, stage:"review", status:"queued", repo:"acme/flowdeck", title:"Poll-driven intake for gh issues", branch:"flow/issue-482", pr:438, note:"waiting for a worker", dwell:"queued 40s", history:[["write_code","auto","succeeded","$0.44"],["review","auto","queued"]] },
+
+    { id:478, stage:"review", status:"awaiting_human", repo:"acme/flowdeck", title:"Session-id capture via --session-id across hosts", branch:"flow/issue-478", pr:435, session:"e5b1220", note:"PR green", dwell:"waiting 3m", history:[["write_code","auto","succeeded","$0.52"],["review","auto","succeeded","$0.24"]] },
+
+    { id:471, stage:"done", status:"done", repo:"acme/flowdeck", title:"Cold-start write_tests from the issue", pr:431, note:"merged", history:[["review","auto","succeeded"],["review","approve","merged"]] },
+    { id:469, stage:"done", status:"done", repo:"acme/flowdeck", title:"Add pr.closed drift handling", pr:428, note:"merged by hand · drift", history:[["write_code","auto","succeeded"],["pr.merged","github","done"]] },
+  ];
+
+  // Utility actions only — revealed on hover. Progression is drag-forward or ←/→; the click path lives in the drawer.
+  function cardActions(c){
+    const A=(l,k,m)=>({label:l,kind:k||"ghost",msg:m});
+    switch(c.stage+"/"+c.status){
+      case "backlog/idle":            return [A("Discuss","primary","Opening VS Code at the repo root…")];
+      case "discuss/running":         return [A("Done — proceed","primary","Design captured — enqueuing write_tests"),A("Discard","ghost","Discarded — parked in discuss")];
+      case "discuss/idle":            return [A("Resume","ghost","Reopening the session…")];
+      case "write_tests/running":
+      case "write_code/running":      return [A("Watch","ghost","Tailing the run…"),A("Cancel","ghost","Run cancelled")];
+      case "write_tests/awaiting_human": return [A("View diff ↗","ghost","Opening the tests diff on GitHub")];
+      case "write_code/failed":       return [A("Retry","ghost","Re-running (attempt +1)"),A("Resume","ghost","claude --resume "+(c.session||""))];
+      case "review/queued":           return [A("Cancel","ghost","Run cancelled")];
+      case "review/awaiting_human":   return [A("PR ↗","ghost","Opening PR #"+c.pr)];
+      default:                        return [];
+    }
+  }
+  // Full set incl. progression — lives only in the drawer (the click alternative to drag / ←→).
+  function drawerActions(c){
+    const A=(l,k,m)=>({label:l,kind:k||"ghost",msg:m});
+    const skip=A("Skip to…","ghost","Skip this card to a later phase");
+    switch(c.stage+"/"+c.status){
+      case "backlog/idle":            return [A("Discuss","primary","Opening VS Code…"),skip,A("Archive","ghost","Card archived")];
+      case "discuss/running":         return [A("Done — proceed","primary","Enqueuing write_tests"),A("Discard","ghost","Parked in discuss")];
+      case "discuss/idle":            return [A("Resume discuss","primary","Reopening…"),A("Advance","ghost","Enqueuing write_tests"),skip];
+      case "write_tests/running":
+      case "write_code/running":      return [A("Watch","ghost","Tailing the run…"),A("Cancel","ghost","Run cancelled")];
+      case "write_tests/awaiting_human": return [A("Approve spec","gate","Approved — enqueuing write_code"),A("View diff ↗","ghost","Opening the tests diff"),A("Retry","ghost","Re-running write_tests"),skip];
+      case "write_code/failed":       return [A("Retry","primary","Re-running write_code (attempt +1)"),A("Resume session","ghost","claude --resume "+(c.session||"")),A("PR ↗","ghost","Opening PR #"+c.pr)];
+      case "review/queued":           return [A("Cancel","ghost","Run cancelled")];
+      case "review/awaiting_human":   return [A("Merge & done","gate","Merging PR #"+c.pr+" — card → done"),A("Mark done","ghost","Merge left to you"),A("PR ↗","ghost","Opening PR #"+c.pr)];
+      case "done/done":               return [A("PR ↗","ghost","Opening PR #"+c.pr),A("Archive","ghost","Card archived")];
+      default:                        return [A("Move…","ghost","Move card")];
+    }
+  }
+  // demo-only: dragging or arrowing a card into a stage moves it there
+  const ENTER_STATUS={backlog:"idle",discuss:"idle",write_tests:"queued",write_code:"queued",review:"queued",done:"done"};
+  function moveCard(id,stage){ const c=CARDS.find(x=>x.id===id); if(!c||c.stage===stage) return; c.stage=stage; c.status=ENTER_STATUS[stage]||"idle"; render(); toast(`#${id} → ${stage}`); const el=board.querySelector('.card[data-id="'+id+'"]'); if(el) el.focus(); }
+
+  const $=s=>document.querySelector(s), board=$("#board"), drawer=$("#drawer"), scrim=$("#scrim"), modalWrap=$("#modalWrap");
+  const esc=s=>String(s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+  const fmtEl=s=>{const m=Math.floor(s/60),ss=s%60;return m?m+"m "+String(ss).padStart(2,"0")+"s":ss+"s";};
+  const btnHTML=a=>`<button class="btn ${a.kind}" data-act="${esc(a.msg||a.label)}">${esc(a.label)}</button>`;
+  let repoFilter="all repos", showDone=false;
+  const COLLAPSIBLE=new Set(["backlog"]); const collapsed=new Set(["backlog"]);
+  const inRepo=c=>repoFilter==="all repos"||c.repo===repoFilter;
+  const visible=()=>CARDS.filter(inRepo);
+
+  function markHTML(st){
+    if(st==="idle"||st==="running") return "";   // running is shown by the bottom line, not a marker
+    const cls={queued:"queued",awaiting_human:"gate",failed:"failed",done:"done"}[st]||"";
+    return cls?`<span class="mark ${cls}" role="img" aria-label="${label[st]}"></span>`:"";
+  }
+  function cardHTML(c){
+    const more=cardActions(c).map(btnHTML).join("");
+    let activity="";
+    if(c.status==="running"&&!c.liveDiscuss){
+      activity=`<div class="activity"><span class="act-step">▸ ${esc(c.step)}</span><span class="act-data"><span class="js-elapsed" data-el="${c.elapsed}">${fmtEl(c.elapsed)}</span> · $${c.cost.toFixed(2)}</span></div>`;
+    } else if(c.liveDiscuss){
+      activity=`<div class="activity"><span class="act-step">● live in VS Code</span><span class="act-data">~/.claude ${esc(c.session)}</span></div>`;
+    }
+    let meta="";
+    if(!activity){
+      const bits=[];
+      if(c.pr) bits.push(`<a class="pr" href="#" data-act="Opening PR #${c.pr}">PR #${c.pr} ↗</a>`);
+      if(c.note) bits.push(`<span>${esc(c.note)}</span>`);
+      if(bits.length) meta=`<div class="card-meta ${c.status==="failed"?"warn":""}">${bits.join('<span style="opacity:.45">·</span>')}</div>`;
+    }
+    const repoTag=repoFilter==="all repos"?`<span class="repo-tag">${esc(c.repo)}</span>`:"";
+    return `<article class="card" data-status="${c.status}" data-id="${c.id}" draggable="true" tabindex="0" role="button" aria-label="issue ${c.id}: ${esc(c.title)}">
+      <div class="card-top"><span class="issue">#${c.id}</span>${repoTag}${markHTML(c.status)}</div>
+      <h3 class="card-title">${esc(c.title)}</h3>
+      ${meta}${activity}
+      ${more?`<div class="card-actions"><div class="act-more">${more}</div></div>`:""}
+    </article>`;
+  }
+
+  function render(){
+    const vis=visible();
+    const stages=STAGES.filter(s=>s.key!=="done"||showDone);
+    board.innerHTML=stages.map(s=>{
+      const cs=vis.filter(c=>c.stage===s.key);
+      if(collapsed.has(s.key)){
+        return `<section class="col collapsed" data-stage="${s.key}" role="button" tabindex="0" aria-label="Expand ${s.key}">
+          <div class="col-rail"><span class="rail-count">${cs.length}</span><span class="rail-key">${s.key}</span></div></section>`;
+      }
+      return `<section class="col" data-stage="${s.key}">
+        <div class="col-head">${COLLAPSIBLE.has(s.key)?`<button class="col-collapse" data-collapse="${s.key}" aria-label="Collapse ${s.key}">‹</button>`:""}<span class="stage-key">${s.key}</span>
+          <span class="stage-role">${s.gate?'<span class="gdot"></span>':""}${s.role}</span>
+          <span class="col-count">${cs.length}</span></div>
+        <div class="col-body">${cs.map(cardHTML).join("")}</div></section>`;
+    }).join("");
+    const need=vis.filter(c=>c.status==="awaiting_human").length, run=vis.filter(c=>c.status==="running").length;
+    $("#summary").innerHTML=`<span class="chip wait"><span class="cdot"></span>${need} need you</span><span class="chip run"><span class="cdot"></span>${run} running</span>`;
+    const doneN=vis.filter(c=>c.stage==="done").length;
+    $("#counts").textContent=`${vis.filter(c=>c.stage!=="done").length} active`;
+    $("#doneToggle").textContent=showDone?"hide done":`show done (${doneN})`;
+  }
+
+  function openDrawer(id){
+    const c=CARDS.find(x=>x.id===id); if(!c) return;
+    const acts=drawerActions(c).map(btnHTML).join("");
+    const points=[];
+    points.push(`<a href="#" data-act="Opening issue #${c.id} on GitHub"><span class="lead">issue</span><span class="val">#${c.id} · ${esc(c.repo)}</span><span class="ext">github ↗</span></a>`);
+    if(c.pr){ const g=(c.stage==="review"||c.stage==="done"), r=(c.status==="failed");
+      points.push(`<a href="#" data-act="Opening PR #${c.pr}"><span class="lead">pr</span><span class="val">#${c.pr}</span><span class="ext ${r?"red":g?"green":""}">${r?"red":g?"green":""} github ↗</span></a>`); }
+    if(c.session){ const cost=c.cost?`$${c.cost.toFixed(2)}`:"—";
+      points.push(`<a href="#" data-act="Reading ~/.claude/${c.session}"><span class="lead">session</span><span class="val">${esc(c.session)} · ${cost}</span><span class="ext">resume ↗</span></a>`); }
+    if(c.branch) points.push(`<a href="#" data-act="Worktree ~/wt/${esc(c.branch)}"><span class="lead">worktree</span><span class="val">${esc(c.branch)}</span><span class="ext">local</span></a>`);
+
+    let center="";
+    if(c.status==="running"&&c.watch){
+      center=`<div class="d-section"><h4>Watch it work</h4><div class="watch">
+        <div class="watch-head"><span class="dot"></span>tailing ${esc(c.session)}</div>
+        <div class="watch-body" id="watchBody">${c.watch.map(w=>`<div class="ln ${w[1]}">${esc(w[0])}</div>`).join("")}</div>
+        <div class="watch-foot">${esc(c.step)} · <span class="js-elapsed" data-el="${c.elapsed}">${fmtEl(c.elapsed)}</span> · $${c.cost.toFixed(2)}</div>
+      </div></div>`;
+    } else if(c.status==="failed"&&c.fail){
+      center=`<div class="d-section"><h4>Pick up where it stopped</h4><div class="fail-box">
+        <div class="cmd" data-act="Copied the attempt log">${c.fail.lines.map(esc).join("\n")}</div>
+        <div class="cmd" data-act="Copied: claude --resume ${esc(c.session)}">resume the exact session ⧉\nclaude --resume ${esc(c.session)}</div></div></div>`;
+    }
+
+    const tl=(c.history||[]).map(h=>{
+      const st=h[2]||"", cls=/succeeded|done|merged|approved/.test(st)?"ok":/running|queued/.test(st)?"run":/failed|cancelled/.test(st)?"bad":"";
+      return `<div class="tl ${cls}"><span class="tdot"></span><div class="tl-row"><span class="tmain">${esc(h[0])}</span><span class="tmeta">${esc(h[1])}${st?" · "+esc(st):""}${h[3]?" · "+esc(h[3]):""}</span></div></div>`;
+    }).join("");
+
+    const svar=c.status==="running"?"--run":c.status==="awaiting_human"?"--accent":c.status==="failed"?"--fail":c.status==="done"?"--done":"";
+    const softVar=c.status==="running"?"var(--run-soft)":c.status==="awaiting_human"?"var(--accent-soft)":c.status==="failed"?"var(--fail-soft)":c.status==="done"?"var(--done-soft)":"transparent";
+    drawer.innerHTML=`
+      <div class="drawer-head" style="--s-soft:${softVar}"><div>
+        <div class="d-crumb"><span class="d-statepill" style="color:${svar?`var(${svar})`:"var(--ink-3)"}"><span class="pdot" style="background:currentColor"></span>${c.stage}</span>${c.dwell?`<span>${esc(c.dwell.replace(/^[a-z]+\s+/i,""))}</span>`:""}</div>
+        <h3 class="d-title">${esc(c.title)}</h3>
+        <div class="d-crumb" style="margin-top:5px">#${c.id} · ${esc(c.repo)}</div>
+      </div><button class="close-x x" id="drawerClose" aria-label="Close">✕</button></div>
+      <div class="drawer-body">
+        ${center}
+        <div class="d-section points"><h4>Points at</h4>${points.join("")}</div>
+        <div class="d-section"><h4>Run history</h4><div class="timeline">${tl}</div></div>
+      </div>
+      <div class="drawer-actions">${acts}</div>`;
+    drawer.classList.add("show"); document.body.classList.add("peek-open"); drawer.setAttribute("aria-hidden","false");
+    $("#drawerClose").addEventListener("click",closeAll);
+    startTimers(); startStream(c);
+  }
+  function closeAll(){ drawer.classList.remove("show"); document.body.classList.remove("peek-open"); scrim.classList.remove("show"); drawer.setAttribute("aria-hidden","true"); modalWrap.classList.remove("show"); modalWrap.setAttribute("aria-hidden","true"); stopStream(); }
+
+  let streamId=null;
+  function startStream(c){
+    stopStream(); if(!c.stream||reduceMotion) return;
+    const body=drawer.querySelector("#watchBody"); if(!body) return;
+    let i=0;
+    streamId=setInterval(()=>{ if(i>=c.stream.length){ stopStream(); return; }
+      const [txt,cls]=c.stream[i++]; const d=document.createElement("div"); d.className="ln "+(cls||""); d.textContent=txt; body.appendChild(d); body.scrollTop=body.scrollHeight; },1900);
+  }
+  function stopStream(){ if(streamId){ clearInterval(streamId); streamId=null; } }
+
+  function openModal(){ modalWrap.classList.add("show"); scrim.classList.add("show"); modalWrap.setAttribute("aria-hidden","false"); $("#ni-title").focus(); }
+  let toastT; function toast(msg){ const t=$("#toast"); t.innerHTML=`<span class="tk">▸</span> ${esc(msg)}`; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2400); }
+
+  let timerId=null;
+  function startTimers(){ if(timerId) return; timerId=setInterval(()=>{ document.querySelectorAll(".js-elapsed").forEach(el=>{ const v=parseInt(el.dataset.el,10)+1; el.dataset.el=v; el.textContent=fmtEl(v); }); },1000); }
+
+  document.addEventListener("click",e=>{
+    const a=e.target.closest("[data-act]"); if(a){ e.preventDefault(); e.stopPropagation(); toast(a.dataset.act); return; }
+    const cc=e.target.closest("[data-collapse]"); if(cc){ e.stopPropagation(); collapsed.add(cc.dataset.collapse); render(); return; }
+    const rail=e.target.closest(".col.collapsed"); if(rail){ collapsed.delete(rail.dataset.stage); render(); return; }
+    const card=e.target.closest(".card"); if(card){ openDrawer(parseInt(card.dataset.id,10)); }
+  });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closeAll(); return; }
+    const rail=e.target.closest&&e.target.closest(".col.collapsed"); if(rail&&(e.key==="Enter"||e.key===" ")){ e.preventDefault(); collapsed.delete(rail.dataset.stage); render(); return; }
+    const card=e.target.closest&&e.target.closest(".card"); if(!card) return;
+    if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDrawer(parseInt(card.dataset.id,10)); }
+    else if(e.key==="ArrowRight"||e.key==="ArrowLeft"){ e.preventDefault();
+      const c=CARDS.find(x=>x.id===+card.dataset.id); const order=STAGES.map(s=>s.key);
+      let i=order.indexOf(c.stage)+(e.key==="ArrowRight"?1:-1); i=Math.max(0,Math.min(order.length-1,i)); moveCard(c.id,order[i]); } });
+
+  // drag a card into a column to move it (progression gesture)
+  let dragId=null;
+  board.addEventListener("dragstart",e=>{ const c=e.target.closest(".card"); if(!c) return; dragId=+c.dataset.id; c.classList.add("dragging"); if(e.dataTransfer){ e.dataTransfer.effectAllowed="move"; try{ e.dataTransfer.setData("text/plain",String(dragId)); }catch(_){} } });
+  board.addEventListener("dragend",e=>{ const c=e.target.closest(".card"); if(c) c.classList.remove("dragging"); document.querySelectorAll(".col.drop-target").forEach(x=>x.classList.remove("drop-target")); dragId=null; });
+  board.addEventListener("dragover",e=>{ const col=e.target.closest(".col"); if(!col||dragId==null) return; e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect="move"; document.querySelectorAll(".col.drop-target").forEach(x=>{ if(x!==col) x.classList.remove("drop-target"); }); col.classList.add("drop-target"); });
+  board.addEventListener("drop",e=>{ const col=e.target.closest(".col"); if(!col||dragId==null) return; e.preventDefault(); const id=dragId; dragId=null; col.classList.remove("drop-target"); moveCard(id,col.dataset.stage); });
+  scrim.addEventListener("click",closeAll);
+  $("#newBtn").addEventListener("click",openModal);
+  $("#niCancel").addEventListener("click",closeAll);
+  $("#niCreate").addEventListener("click",()=>{ closeAll(); toast("gh issue create — new card in backlog"); });
+  $("#repoFilter").addEventListener("change",e=>{ repoFilter=e.target.value; render(); });
+  $("#doneToggle").addEventListener("click",()=>{ showDone=!showDone; render(); });
+  $("#themeBtn").addEventListener("click",()=>{ const cur=document.documentElement.getAttribute("data-theme");
+    const next=cur==="dark"?"light":cur==="light"?"dark":(matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark"); document.documentElement.setAttribute("data-theme",next); });
+  let age=12; setInterval(()=>{ age=age>=30?0:age+1; $("#syncAge").textContent=age===0?"syncing…":"last synced "+age+"s ago"; },1000);
+
+  render(); startTimers();
+})();
+</script>

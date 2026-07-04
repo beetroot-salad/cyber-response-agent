@@ -1,0 +1,199 @@
+<title>flowdeck — palette options</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  :root{
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --pg-bg:#f0f1f4; --pg-panel:#ffffff; --pg-ink:#1c1e24; --pg-ink2:#5a606c; --pg-ink3:#8b909b; --pg-line:#e3e5ea;
+    --pg-shadow:0 1px 2px rgba(28,26,38,.06), 0 6px 18px rgba(28,26,38,.06);
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --pg-bg:#0b0c0f; --pg-panel:#15171d; --pg-ink:#e9ebf0; --pg-ink2:#a2a7b3; --pg-ink3:#6b707b; --pg-line:#252831;
+    --pg-shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.4);
+  }}
+  :root[data-theme="dark"]{ --pg-bg:#0b0c0f; --pg-panel:#15171d; --pg-ink:#e9ebf0; --pg-ink2:#a2a7b3; --pg-ink3:#6b707b; --pg-line:#252831; --pg-shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.4); }
+
+  body{ font-family:var(--sans); background:var(--pg-bg); color:var(--pg-ink); min-height:100vh; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:1080px; margin:0 auto; padding:26px 20px 60px; }
+
+  .head{ display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:6px; }
+  .head h1{ font-family:var(--mono); font-size:19px; font-weight:700; letter-spacing:-.01em; margin:0; }
+  .head .sub{ color:var(--pg-ink3); font-size:13px; font-family:var(--mono); }
+  .head .spacer{ flex:1; }
+  .toggle{ font-family:var(--mono); font-size:12px; color:var(--pg-ink2); background:var(--pg-panel); border:1px solid var(--pg-line); border-radius:8px; padding:8px 12px; cursor:pointer; }
+  .toggle:hover{ border-color:var(--pg-ink3); }
+  .intro{ color:var(--pg-ink2); font-size:13.5px; line-height:1.6; margin:14px 0 24px; max-width:70ch; }
+  .intro b{ color:var(--pg-ink); }
+
+  /* one scheme block; scheme tokens live here via inline style */
+  .scheme{ display:grid; grid-template-columns:270px 1fr; gap:20px; align-items:start; padding:18px; border-radius:16px; border:1px solid var(--pg-line); background:var(--pg-panel); box-shadow:var(--pg-shadow); margin-bottom:18px; }
+  .scheme-info h2{ font-family:var(--mono); font-size:16px; margin:0 0 3px; letter-spacing:-.01em; }
+  .scheme-info .tag{ font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--pg-ink3); }
+  .scheme-info p{ font-size:12.5px; line-height:1.55; color:var(--pg-ink2); margin:10px 0 14px; }
+  .swatches{ display:flex; flex-direction:column; gap:7px; }
+  .sw{ display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:11px; color:var(--pg-ink2); }
+  .sw i{ width:15px; height:15px; border-radius:4px; flex:0 0 auto; border:1px solid rgba(128,128,128,.25); }
+  .sw code{ margin-left:auto; color:var(--pg-ink3); font-size:10.5px; }
+
+  /* live preview — colors come from the scheme's inline vars */
+  .pv{ background:var(--ground); border:1px solid var(--line); border-radius:12px; padding:11px; }
+  .pv-summary{ display:flex; gap:7px; margin-bottom:10px; }
+  .pv-chip{ display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; font-weight:600; padding:4px 10px; border-radius:999px; }
+  .pv-chip.wait{ color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .pv-chip.run{ color:var(--run); background:color-mix(in srgb, var(--run) 15%, transparent); }
+  .pv-chip .d{ width:7px; height:7px; border-radius:999px; background:currentColor; animation:pulse 1.8s ease-in-out infinite; }
+  .pv-cols{ display:flex; gap:10px; overflow-x:auto; scrollbar-width:thin; }
+  .pv-col{ flex:0 0 172px; background:var(--col); border:1px solid var(--line); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:8px; }
+  .pv-colhead{ display:flex; align-items:baseline; gap:6px; padding:2px 2px 8px; border-bottom:1px solid var(--line); }
+  .pv-colhead .k{ font-family:var(--mono); font-weight:700; font-size:11.5px; color:var(--ink); }
+  .pv-colhead .g{ width:5px; height:5px; border-radius:999px; background:var(--accent); }
+  .pv-colhead .n{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--ink3); }
+
+  .pv-card{ --s:var(--line-2); background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--s); border-radius:8px; padding:8px 9px; display:flex; flex-direction:column; gap:6px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .pv-card[data-st="running"]{ --s:var(--run); background:color-mix(in srgb, var(--run) 6%, var(--panel)); }
+  .pv-card[data-st="awaiting"]{ --s:var(--accent); background:color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+  .pv-card[data-st="failed"]{ --s:var(--fail); background:color-mix(in srgb, var(--fail) 6%, var(--panel)); }
+  .pv-card[data-st="idle"]{ --s:var(--line-2); }
+  .pv-top{ display:flex; align-items:center; gap:6px; }
+  .pv-id{ font-family:var(--mono); font-size:10.5px; font-weight:600; color:var(--ink2); }
+  .pv-pill{ margin-left:auto; font-family:var(--mono); font-size:9.5px; font-weight:600; display:inline-flex; align-items:center; gap:4px; color:var(--ink3); }
+  .pv-pill .pd{ width:5px; height:5px; border-radius:999px; background:currentColor; }
+  .pv-card[data-st="running"] .pv-pill{ color:var(--run); } .pv-card[data-st="running"] .pd{ animation:pulse 1.7s ease-in-out infinite; }
+  .pv-card[data-st="awaiting"] .pv-pill{ color:var(--accent); }
+  .pv-card[data-st="failed"] .pv-pill{ color:var(--fail); }
+  .pv-title{ font-family:var(--sans); font-weight:600; font-size:11.5px; line-height:1.3; color:var(--ink); margin:0; }
+  .pv-act{ font-family:var(--mono); font-size:10px; display:flex; align-items:center; gap:6px; padding:4px 7px; border-radius:6px; background:color-mix(in srgb, var(--run) 13%, transparent); }
+  .pv-act .stp{ color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pv-act .dat{ margin-left:auto; color:var(--ink2); white-space:nowrap; }
+  .pv-caret{ color:var(--run); animation:blink 1.05s steps(1) infinite; }
+  .pv-note{ font-family:var(--mono); font-size:10px; color:var(--ink3); }
+  .pv-note.warn{ color:var(--fail); }
+  .pv-btn{ font-family:var(--sans); font-weight:600; font-size:10.5px; padding:5px 9px; border-radius:6px; border:1px solid var(--line-2); background:var(--panel); color:var(--ink2); cursor:default; align-self:flex-start; }
+  .pv-btn.gate{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .pv-btn.primary{ background:color-mix(in srgb, var(--run) 13%, var(--panel)); border-color:color-mix(in srgb, var(--run) 30%, var(--line-2)); color:var(--ink); }
+
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.32} }
+  @keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  @media (prefers-reduced-motion: reduce){ *{ animation:none !important } }
+  @media (max-width:720px){ .scheme{ grid-template-columns:1fr; } }
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <h1>flowdeck · palette options</h1>
+    <span class="sub">same board, five directions</span>
+    <span class="spacer"></span>
+    <button class="toggle" id="themeBtn">◐ light / dark</button>
+  </div>
+  <p class="intro">Every option keeps the rule that's working: <b>one hue = the machine is acting</b> (running),
+    <b>one hue = you're needed</b> (the gates), and the two are never a saturated blue-vs-orange pair. What
+    changes is the mood. Each preview shows the same four states — running, needs-you, failed, idle — so you can
+    compare them in context. Flip light/dark to judge both.</p>
+  <div id="schemes"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const SCHEMES = [
+    { name:"Frost", tag:"Nord · cool", desc:"Desaturated arctic blue-greys with a soft gold gate. Low-contrast, easy on the eyes, and a palette developers already recognise from editor themes.",
+      light:{ ground:"#e8edf2", panel:"#ffffff", col:"#f1f5f9", line:"#dde5ee", "line-2":"#c4d0de", ink:"#2e3440", ink2:"#4c566a", ink3:"#8894a6", run:"#5e81ac", accent:"#b7902f", "accent-ink":"#241a04", fail:"#bf616a", done:"#7f9b62" },
+      dark:{ ground:"#232830", panel:"#2e3440", col:"#272c35", line:"#3b4252", "line-2":"#4c566a", ink:"#eceff4", ink2:"#c0c8d6", ink3:"#7e8a9e", run:"#88c0d0", accent:"#ebcb8b", "accent-ink":"#241a04", fail:"#bf616a", done:"#a3be8c" } },
+
+    { name:"Phosphor", tag:"Terminal · dark-first", desc:"Emerald for running (green = go / CI passing), amber for your call, coral for red. The CI mental model — but muted emerald on warm black, not neon acid-green.",
+      light:{ ground:"#e9ece8", panel:"#ffffff", col:"#f1f4ef", line:"#e0e5dd", "line-2":"#c9d1c6", ink:"#1a211b", ink2:"#556055", ink3:"#869285", run:"#12996a", accent:"#b07914", "accent-ink":"#241a04", fail:"#c24d43", done:"#2f8a63" },
+      dark:{ ground:"#0f1311", panel:"#171d19", col:"#10140f", line:"#262c25", "line-2":"#384034", ink:"#e7efe8", ink2:"#a4b1a4", ink3:"#6f7c6f", run:"#46c98a", accent:"#e0a63a", "accent-ink":"#241a04", fail:"#e5695f", done:"#3f9d78" } },
+
+    { name:"Ochre", tag:"Editorial · warm", desc:"Warm paper neutrals, ink text, and a burnt-ochre gate; cool slate-blue keeps the machine states legible against the warmth. The warm counterpoint to every cool option.",
+      light:{ ground:"#ece7df", panel:"#fbf8f3", col:"#f1ebe1", line:"#e0d9cb", "line-2":"#cbc2b0", ink:"#2a2620", ink2:"#5f574b", ink3:"#948b7c", run:"#4c5f86", accent:"#b5631a", "accent-ink":"#fdf6ee", fail:"#a84636", done:"#6f7a45" },
+      dark:{ ground:"#16120d", panel:"#201a14", col:"#17120c", line:"#2f281f", "line-2":"#41382c", ink:"#efe8dd", ink2:"#b4a896", ink3:"#7d7263", run:"#8094c6", accent:"#d98a3a", "accent-ink":"#241505", fail:"#d9695a", done:"#9aa25f" } },
+
+    { name:"Cobalt Mono", tag:"Minimal · single accent", desc:"Near-greyscale with one cobalt accent; attention is shown by emphasis (a solid gate button), not a second colour. Cleanest of the set — the gates pop a little less, the honest trade-off of going mono.",
+      light:{ ground:"#eeeef1", panel:"#ffffff", col:"#f5f5f8", line:"#e6e6ec", "line-2":"#d1d1d9", ink:"#191920", ink2:"#545460", ink3:"#8a8a96", run:"#2f6bed", accent:"#2f6bed", "accent-ink":"#ffffff", fail:"#cf4b4b", done:"#4f9d6b" },
+      dark:{ ground:"#0c0d11", panel:"#16181f", col:"#101116", line:"#262931", "line-2":"#383c45", ink:"#e9eaf0", ink2:"#a2a6b2", ink3:"#6b6f7b", run:"#5b8bff", accent:"#5b8bff", "accent-ink":"#0c0d11", fail:"#e0686d", done:"#5fb07f" } },
+
+    { name:"Indigo & Amber", tag:"Current", desc:"Where we are now: confident indigo for the machine, honey amber for the human gates, on cool neutral grey. Shown for comparison.",
+      light:{ ground:"#e9e9ec", panel:"#ffffff", col:"#f3f3f6", line:"#e4e4e9", "line-2":"#cfcfd7", ink:"#20222a", ink2:"#585c67", ink3:"#8b8f9a", run:"#4d63c9", accent:"#bd7a10", "accent-ink":"#241a04", fail:"#c8474b", done:"#4f7d5c" },
+      dark:{ ground:"#0d0e12", panel:"#191b22", col:"#101117", line:"#272a33", "line-2":"#383c47", ink:"#eaecf1", ink2:"#a3a8b4", ink3:"#6c717d", run:"#8794e6", accent:"#f0aa3f", "accent-ink":"#241a04", fail:"#e8686d", done:"#69ab7d" } },
+  ];
+
+  const swatchRoles = [["run","running"],["accent","needs you"],["fail","failed"],["done","done"],["panel","surface"]];
+
+  function previewHTML(){
+    return `<div class="pv">
+      <div class="pv-summary">
+        <span class="pv-chip wait"><span class="d"></span>1 need you</span>
+        <span class="pv-chip run"><span class="d"></span>2 running</span>
+      </div>
+      <div class="pv-cols">
+        <div class="pv-col">
+          <div class="pv-colhead"><span class="k">write_tests</span><span class="g"></span><span class="n">2</span></div>
+          <div class="pv-card" data-st="running">
+            <div class="pv-top"><span class="pv-id">#498</span><span class="pv-pill"><span class="pd"></span>running</span></div>
+            <p class="pv-title">Worktree teardown leaks branches</p>
+            <div class="pv-act"><span class="stp">▸ drafting suite<span class="pv-caret">▍</span></span><span class="dat">1m12s · $0.18</span></div>
+          </div>
+          <div class="pv-card" data-st="awaiting">
+            <div class="pv-top"><span class="pv-id">#495</span><span class="pv-pill"><span class="pd"></span>needs you</span></div>
+            <p class="pv-title">Approve the tests spec</p>
+            <button class="pv-btn gate">Approve spec</button>
+          </div>
+        </div>
+        <div class="pv-col">
+          <div class="pv-colhead"><span class="k">write_code</span><span class="n">2</span></div>
+          <div class="pv-card" data-st="running">
+            <div class="pv-top"><span class="pv-id">#489</span><span class="pv-pill"><span class="pd"></span>running</span></div>
+            <p class="pv-title">Reconciler kills discuss sessions</p>
+            <div class="pv-act"><span class="stp">▸ watching CI<span class="pv-caret">▍</span></span><span class="dat">4m02s · $0.51</span></div>
+          </div>
+          <div class="pv-card" data-st="failed">
+            <div class="pv-top"><span class="pv-id">#486</span><span class="pv-pill"><span class="pd"></span>failed</span></div>
+            <p class="pv-title">T-ENQUEUE missing state guard</p>
+            <span class="pv-note warn">repair loop exhausted · PR #440</span>
+            <button class="pv-btn primary">Retry</button>
+          </div>
+        </div>
+        <div class="pv-col">
+          <div class="pv-colhead"><span class="k">backlog</span><span class="n">1</span></div>
+          <div class="pv-card" data-st="idle">
+            <div class="pv-top"><span class="pv-id">#512</span><span class="pv-pill"><span class="pd"></span>idle</span></div>
+            <p class="pv-title">Rate-limit the gh poller</p>
+            <button class="pv-btn primary">Discuss</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const host = document.getElementById("schemes");
+  host.innerHTML = SCHEMES.map((s,i)=>`
+    <section class="scheme" data-i="${i}">
+      <div class="scheme-info">
+        <h2>${s.name}</h2><span class="tag">${s.tag}</span>
+        <p>${s.desc}</p>
+        <div class="swatches">${swatchRoles.map(r=>`<div class="sw"><i data-role="${r[0]}"></i>${r[1]}</div>`).join("")}</div>
+      </div>
+      ${previewHTML()}
+    </section>`).join("");
+
+  function currentTheme(){
+    const attr = document.documentElement.getAttribute("data-theme");
+    if(attr) return attr;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function apply(){
+    const theme = currentTheme();
+    document.querySelectorAll(".scheme").forEach(sec=>{
+      const t = SCHEMES[+sec.dataset.i][theme];
+      for(const k in t) sec.style.setProperty("--"+k, t[k]);
+      sec.querySelectorAll(".sw i").forEach(i=>{ i.style.background = "var(--"+i.dataset.role+")"; });
+    });
+  }
+  document.getElementById("themeBtn").addEventListener("click", ()=>{
+    document.documentElement.setAttribute("data-theme", currentTheme()==="dark" ? "light" : "dark");
+    apply();
+  });
+  apply();
+})();
+</script>

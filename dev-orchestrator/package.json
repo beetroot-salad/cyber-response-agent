@@ -1,0 +1,19 @@
+{
+  "name": "dev-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev workflow orchestrator — transition engine (V1)",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.0",
+    "better-sqlite3": "^11.7.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
