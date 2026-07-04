@@ -10,6 +10,8 @@ The e2e tests are the spec. Natural-language design is ambiguous; this phase con
 
 Two limits stay in view throughout. Tests pin **observable behavior**: green means the enumerated behavior holds, not that the code is correct — the human PR review is still essential. And because the suite is written before the code, it must be an **independent** encoding of intent; the moment it silently assumes what the code will do, it stops being a spec and becomes a mirror.
 
+Write the suite in a **dedicated git worktree** — confirm you are on one before starting, and create one if not. The deliverable is a tests-only diff (step 7); an isolated worktree keeps it off the main checkout and clean to hand off.
+
 ## 1. Frame the target
 
 Restate the contract under test: the entry-point signature, its dependencies, and the observable surface — outputs written, return value, raised errors, side effects.
