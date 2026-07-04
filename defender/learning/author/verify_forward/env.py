@@ -37,7 +37,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 from defender._run_paths import resolve_run_bundle
-from defender.learning.core.config import DEFAULT_PATHS, RunPaths
+from defender.learning.core.config import DEFAULT_PATHS, LESSONS_ENV_RETRIEVE_SCRIPT, RunPaths
 from defender.learning.core.prologue import extract_case_entities
 from defender.learning.author.verify_forward.shared import (
     load_observation as _load_observation,
@@ -46,7 +46,9 @@ from defender.learning.author.verify_forward.shared import (
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
-RETRIEVE = REPO_ROOT / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
+# The env-retrieval script offset lives once in core.config (LESSONS_ENV_RETRIEVE_SCRIPT),
+# shared with the in-process actor's pinned-script matcher; reuse it rather than re-deriving.
+RETRIEVE = LESSONS_ENV_RETRIEVE_SCRIPT
 # Sourced from DEFAULT_PATHS (one shared LoopPaths) so the defaults can't drift from the
 # layout. The two differ on purpose: DEFAULT_PENDING is state-relative, so it honors
 # DEFENDER_LEARNING_STATE_DIR and stays worktree-immune (#425); DEFAULT_CORPUS is

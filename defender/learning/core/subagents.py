@@ -36,21 +36,28 @@ class Subagents(Protocol):
 
 
 class ClaudePrintSubagents:
-    """Default adapter — assembles each step's inputs; actor/oracle shell out to
-    ``claude -p``, the judge runs in-process on PydanticAI (metered key)."""
+    """Default adapter — assembles each step's inputs; the actor + judge run in-process on
+    PydanticAI (metered key), the oracle shells out to ``claude -p`` (subscription)."""
 
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
+        # The actor runs in-process on PydanticAI (metered key); the composition root picks the
+        # engine, mirroring .judge. The engine import is lazy so the pydantic-ai graph is pulled
+        # in only when an actor actually runs.
+        from defender.learning.pipeline.actor_engine import _run_actor_pydantic
         # The actor-facing view is queries-only (no goal / what_to_summarize) —
         # written as a real side-artifact for transcripts/visualizers.
         actor_input_path = learning_run_dir / "actor_input.yaml"
         actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir))
-        return invoke_actor(RunPaths(run_dir).alert, actor_input_path, learning_run_dir)
+        return invoke_actor(RunPaths(run_dir).alert, actor_input_path, learning_run_dir,
+                            actor_fn=_run_actor_pydantic)
 
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str:
+        from defender.learning.pipeline.actor_engine import _run_actor_pydantic
         case_entities = extract_case_entities(RunPaths(run_dir).investigation)
         return invoke_actor_benign(
-            RunPaths(run_dir).alert, case_entities, alert_rule_key, learning_run_dir
+            RunPaths(run_dir).alert, case_entities, alert_rule_key, learning_run_dir,
+            actor_fn=_run_actor_pydantic,
         )
 
     def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
@@ -58,9 +65,9 @@ class ClaudePrintSubagents:
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
-        # The judge runs in-process on PydanticAI (metered key); actor/oracle above stay
-        # on claude -p. The engine import is lazy so the pydantic-ai graph is pulled in
-        # only when a judge actually runs.
+        # The judge runs in-process on PydanticAI (metered key), like the actor; the oracle
+        # above stays on claude -p. The engine import is lazy so the pydantic-ai graph is
+        # pulled in only when a judge actually runs.
         from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
         return invoke_judge(
             wiring, run_dir, actor_story_path, projected_telemetry_path,

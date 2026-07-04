@@ -36,7 +36,7 @@ from defender.learning.core.config import (
     env_int,
     merge_mode,
     pitfalls_threshold,
-    source_judge_key,
+    source_first_party_key,
 )
 from defender import _git
 from defender._git import GitError
@@ -376,15 +376,26 @@ def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> Non
     _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
-def _prepare_judge_engine_for(directions: list[str]) -> None:
-    """Ready the in-process judge for the directions that will run: source its metered
-    key UP FRONT in the main thread — before the direction fan-out, so there is no
-    ``os.environ`` race — and only for the judge models the directions that will run
-    actually use (deduped; sourcing one provider twice is idempotent). Fails loud here
-    (→ exit 2) rather than 401-ing mid-judge; siblings stay on the subscription (see
-    ``source_judge_key``)."""
-    for model in {BY_NAME[name].judge_wiring.model for name in directions}:
-        source_judge_key(model)
+def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
+    """Ready the in-process stages (actor + judge) for the directions that will run: source
+    their metered keys UP FRONT in the main thread — before the direction fan-out, so there is
+    no ``os.environ`` race — and only for the models the directions that will run actually use
+    (the union of each leg's actor + judge model, deduped; sourcing one provider twice is
+    idempotent). Fails loud here (→ exit 2) rather than 401-ing mid-stage; the ``claude -p``
+    siblings (oracle, curators) stay on the subscription (see ``source_first_party_key``).
+
+    ``include_actor=False`` sources only the judge model — for a JUDGE-ONLY consumer (the
+    secondary harness, whose actor story is frozen and already generated). Requiring the actor
+    provider's key there would be a phantom dependency: a Sonnet-judge secondary run would fail
+    loud for a Fireworks key the actor never uses in that process."""
+    models: set[str] = set()
+    for name in directions:
+        d = BY_NAME[name]
+        models.add(d.judge_wiring.model)
+        if include_actor:
+            models.add(d.actor_model)
+    for model in models:
+        source_first_party_key(model, label="engine")
 
 
 def run_one(
@@ -405,7 +416,7 @@ def run_one(
     src = RunPaths(run_dir)
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
-    _prepare_judge_engine_for(directions)
+    _prepare_engines_for(directions)
 
     alert = json.loads(src.alert.read_text())
     alert_rule_key = derive_alert_rule_key(alert)

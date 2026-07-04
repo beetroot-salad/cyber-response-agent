@@ -428,12 +428,15 @@ def test_committed_batch_gets_trailers_stamped_by_loop(tmp_path: Path):
             "commit_message": f"defender/actor: lesson batch {batch_id}",
         }
 
-    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
+    cfg = _cfg(ctx, committing_invoke)
+    rc = curator.run_batch(hold_committed=False, cfg=cfg)
     assert rc == 0
-    # The loop committed the lesson with the trailers the agent never wrote.
+    # The loop committed the lesson with the trailers the agent never wrote — the actor model
+    # comes from cfg (config's ACTOR_MODEL default), stamped by the LOOP, not the agent, so this
+    # tracks the configured model rather than pinning a literal that a model flip would break.
     msg = _head_message(ctx["repo"])
     assert "Generation: 1" in msg
-    assert "Actor-Model: claude-sonnet-4-6" in msg
+    assert f"Actor-Model: {cfg.actor_model}" in msg
     assert _head_files(ctx["repo"]) == ["defender/lessons-actor/lesson.md"]
     # a/0 rotated out to consumed, stamped with the loop's commit sha.
     consumed = [

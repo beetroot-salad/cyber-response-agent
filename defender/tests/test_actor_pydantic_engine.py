@@ -1,0 +1,238 @@
+"""Hermetic tests for the in-process PydanticAI actor engine (no API key, no network).
+
+Drives the REAL `_run_actor_pydantic` (deps build + policy-driven gate + observe trace) with a
+`FunctionModel` injected through the actor's `make_model` DI seam, under
+`override_allow_model_requests(False)` so any real provider call raises. Plus the actor's
+distinctive tool surface — the two pinned lessons-script matchers and the no-`read_roots`
+read scope — and the ClaudePrintSubagents.actor routing.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
+from pydantic_ai.models import override_allow_model_requests  # noqa: E402
+from pydantic_ai.models.function import FunctionModel  # noqa: E402
+
+from defender.hooks._cmd_segments import unwrap  # noqa: E402
+from defender.learning.core import config, subagents  # noqa: E402
+from defender.learning.pipeline import _pydantic_stage  # noqa: E402
+from defender.learning.pipeline import actor_engine  # noqa: E402
+from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope, _run_actor_pydantic  # noqa: E402
+from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
+from defender.runtime import bash_exec, observe, permission  # noqa: E402
+from defender.runtime.providers import BuiltModel  # noqa: E402
+
+_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
+_ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
+_DEFENDER_DIR = config.REPO_ROOT / "defender"
+
+
+def _pipes(cmd):
+    return bash_exec.parse(unwrap(cmd))
+
+
+def _flatten(messages) -> str:
+    out = []
+    for msg in messages:
+        for part in getattr(msg, "parts", []):
+            c = getattr(part, "content", None)
+            if isinstance(c, str):
+                out.append(c)
+    return "\n".join(out)
+
+
+def _replay(turns, *, seen=None):
+    """A FunctionModel fn replaying scripted turns. Each turn is
+    {"calls": [(tool, args)...], "text": str}."""
+    state = {"i": 0}
+
+    def fn(messages, info):
+        if seen is not None:
+            seen.append(_flatten(messages))
+        turn = turns[min(state["i"], len(turns) - 1)]
+        state["i"] += 1
+        parts = [ToolCallPart(tool_name=n, args=a) for n, a in turn.get("calls", [])]
+        if turn.get("text"):
+            parts.append(TextPart(content=turn["text"]))
+        return ModelResponse(parts=parts)
+
+    return fn
+
+
+def _fake_model(fn):
+    # settings=None — a FunctionModel needs no provider settings (mirrors _replay_harness).
+    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
+
+
+def _lrd(tmp_path):
+    lrd = tmp_path / "learning_run"
+    lrd.mkdir()
+    return lrd
+
+
+def _prompt(tmp_path):
+    p = tmp_path / "actor.md"
+    p.write_text("You are the adversarial actor. Emit a story or a SKIP line.\n")
+    return p
+
+
+_STORY = "0. Techniques used\n\n1. The adversary logged in with stolen creds and pivoted.\n"
+
+
+# --- the engine returns the model's final text verbatim + writes its trace ---
+
+def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
+    lrd = _lrd(tmp_path)
+    fn = _replay([{"text": _STORY}])
+    with override_allow_model_requests(False):
+        out = _run_actor_pydantic(
+            _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
+            "write the story", lrd,
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+        )
+    assert out == _STORY
+    assert (lrd / "actor_trace.jsonl").is_file()
+    assert (lrd / "actor_trace.jsonl").read_text().strip()  # at least one request logged
+
+
+def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
+    # A SKIP short-circuit flows back verbatim so is_skip_story sees it (even behind a
+    # GLM reasoning preamble — the hardened is_skip_story scans the first few lines).
+    lrd = _lrd(tmp_path)
+    fn = _replay([{"text": "Let me consider the menu.\n\nSKIP: no covering initial-access technique"}])
+    with override_allow_model_requests(False):
+        out = _run_actor_pydantic(
+            _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
+            "write the story", lrd,
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+        )
+    assert out.startswith("Let me consider the menu.")
+    assert is_skip_story(out)
+
+
+# --- the two pinned lessons-script matchers -------------------------------------
+
+def test_lessons_matcher_allows_pinned_script_relative_and_absolute():
+    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
+    for cmd in (
+        "python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web",
+        f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712",   # absolute form
+        f"python {_ENV_RETRIEVE} --alert-rule-ids 5712",    # bare `python` interpreter
+    ):
+        d = m(_pipes(cmd))
+        assert d is not None, cmd
+        assert d.allow, cmd
+
+
+def test_lessons_matcher_declines_wrong_shape():
+    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
+    # a different script, arbitrary python, a non-python program, and a pipe/compound
+    assert m(_pipes(f"python3 {_ACTOR_INDEX} --techniques T1078")) is None
+    assert m(_pipes("python3 -c 'print(1)'")) is None
+    assert m(_pipes("cat /etc/passwd")) is None
+    assert m(_pipes(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat")) is None
+
+
+# --- the policy through the full gate -------------------------------------------
+
+def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX))
+    # both pinned lesson scripts are allowed by the actor's matchers
+    assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=pol).allow
+    assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=pol).allow
+    # arbitrary python, an unpinned script, a data-source adapter, and arbitrary shell are denied
+    assert not permission.decide_bash("python3 -c 'print(1)'", policy=pol).allow
+    assert not permission.decide_bash("python3 defender/scripts/lessons/other.py", policy=pol).allow
+    assert not permission.decide_bash("defender-elastic query x --raw", policy=pol).allow
+    assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
+
+
+def test_benign_actor_policy_excludes_tradecraft_index():
+    # The benign leg carries only the env-retrieve matcher; the tradecraft index stays a
+    # malicious-only capability (the actor-settings.json boundary, now enforced by policy).
+    benign = actor_engine._actor_policy((_ENV_RETRIEVE,))
+    assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=benign).allow
+    assert not permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=benign).allow
+
+
+# --- read scope: under defender_dir, with NO read_roots -------------------------
+
+def test_actor_reads_under_defender_dir_without_read_roots(tmp_path):
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX))
+    assert pol.read_roots == ()          # the corpora live under defender_dir; no widening needed
+    assert pol.raw_reads is False        # gray-box: never touches gather_raw
+    assert pol.adapters is False
+    lrd = _lrd(tmp_path)
+    # a file under defender_dir is allowed purely by the defender-corpus root (no read_roots)
+    allowed = permission.decide_read(
+        _DEFENDER_DIR / "SKILL.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
+    )
+    assert allowed.allow
+    # a file outside {run_dir, defender_dir} is refused (the actor has no extra roots)
+    denied = permission.decide_read(
+        tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
+    )
+    assert not denied.allow
+
+
+# --- the agent is read-only (no writers) + GLM@low effort plumbing --------------
+
+def test_actor_agent_is_read_only_no_writers():
+    logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-tools.jsonl"))
+    try:
+        agent = _pydantic_stage.build_stage_agent(
+            ActorDeps, Path(__file__), "any-model", "low", logger, "actor",
+            make_model=_fake_model(_replay([{"text": ""}])),
+        )
+    finally:
+        logger.close()
+    # read-only: the actor reads lessons + retrieval scripts, never writes
+    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
+
+
+def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
+    # The GLM@low lever this migration ships: effort flows model → providers.build_for_effort →
+    # Fireworks extra_body.reasoning_effort. build_for_effort constructs a REAL OpenAIChatModel
+    # (needs a key at construction; a fake key keeps it hermetic — settings make no request).
+    pytest.importorskip("pydantic_ai.models.openai")
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
+    logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-effort.jsonl"))
+    try:
+        agent = _pydantic_stage.build_stage_agent(
+            ActorDeps, Path(__file__), "glm-5.2", "low", logger, "actor",
+        )
+    finally:
+        logger.close()
+    assert agent.model_settings["extra_body"]["reasoning_effort"] == "low"
+
+
+# --- ClaudePrintSubagents.actor / .actor_benign run the in-process engine -------
+
+def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
+    captured = {}
+
+    def _spy_actor(alert_path, actor_input_path, learning_run_dir, *, actor_fn=None):
+        captured["actor_fn"] = actor_fn
+        return _STORY
+
+    def _spy_benign(alert_path, case_entities, alert_rule_key, learning_run_dir, *, actor_fn=None):
+        captured["benign_fn"] = actor_fn
+        return _STORY
+
+    # render_actor_view_yaml / extract_case_entities read real run artifacts — stub them so the
+    # routing decision is all that's exercised.
+    monkeypatch.setattr(subagents.lead_repository, "render_actor_view_yaml", lambda _rd: "leads: []\n")  # lint-monkeypatch: ok — stub the actor-view projection
+    monkeypatch.setattr(subagents, "extract_case_entities", lambda _p: "host:web")  # lint-monkeypatch: ok — stub the entity extraction
+    monkeypatch.setattr(subagents, "invoke_actor", _spy_actor)  # lint-monkeypatch: ok — spy the actor_fn routing decision
+    monkeypatch.setattr(subagents, "invoke_actor_benign", _spy_benign)  # lint-monkeypatch: ok — spy the actor_fn routing decision
+
+    sub = subagents.ClaudePrintSubagents()
+    sub.actor(tmp_path, tmp_path)
+    assert captured["actor_fn"] is _run_actor_pydantic
+    sub.actor_benign(tmp_path, tmp_path, "5712")
+    assert captured["benign_fn"] is _run_actor_pydantic

@@ -205,9 +205,12 @@ def run_head_oracle_and_judge(
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
-        # Run the judge the SAME way the learning loop does: source the in-process judge's
-        # metered key up front, then dispatch through the subagents seam.
-        loop_mod._prepare_judge_engine_for(["adversarial"])
+        # Source the in-process JUDGE's metered key up front (the way the learning loop does),
+        # then dispatch through the subagents seam. include_actor=False: the actor already ran
+        # frozen in its own subprocess, so requiring its provider key here would be a phantom
+        # dependency (a Sonnet-judge secondary run must not fail loud for the actor's Fireworks
+        # key, which this judge-only path never uses).
+        loop_mod._prepare_engines_for(["adversarial"], include_actor=False)
         judge_yaml = loop_mod.ClaudePrintSubagents().judge(
             loop_mod.ADVERSARIAL_WIRING,
             head_run_dir,

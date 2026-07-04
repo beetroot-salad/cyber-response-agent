@@ -24,7 +24,7 @@ Frozen case layout (``--cases DIR``): one subdir per case, each holding
 
 Researcher-cadence (not CI): makes real model calls; the operator supplies the metered
 keys (ANTHROPIC_API_KEY for Sonnet, FIREWORKS_API_KEY for GLM) via <repo>/.env or
-$DEFENDER_ENV_FILE — this driver sources them up front with ``config.source_judge_key``.
+$DEFENDER_ENV_FILE — this driver sources them up front with ``config.source_first_party_key``.
 
   python3 defender/evals/run_judge_ab.py --cases <snapshots_dir> --out <scratch_dir>
 """
@@ -120,7 +120,7 @@ def main(argv: list[str]) -> int:  # pragma: no cover — operator harness over 
     # Source the metered key for each distinct model before any call (fails loud on a
     # missing key → the same FatalConfigError the loop raises, rather than a 401 mid-run).
     for model in {args.ref_model, args.cand_model}:
-        config.source_judge_key(model)
+        config.source_first_party_key(model)
 
     # Both configs on the in-process engine, so only the model+effort vary. The reference
     # runs twice (ref-a / ref-b) for the self-consistency floor.

@@ -315,6 +315,8 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     captured: dict = {}
 
     class FakeLoop:
+        ACTOR_MODEL = "claude-sonnet-4-6"  # replay sources the metered key for sub.ACTOR_MODEL
+
         class RunUnprocessable(Exception):
             pass
 
@@ -351,7 +353,10 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     (staging / "gather_raw").mkdir()  # the leads table (required replay input)
 
     import unittest.mock as mock
-    with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling):
+    with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling), \
+         mock.patch.object(replay, "source_first_party_key", return_value=None):
+        # Neutralize metered-key sourcing: the actor now runs in-process, so replay.main
+        # sources the first-party key; this hermetic seed test must not require a real .env key.
         rc = replay.main([str(staging), "--case-id", "sec-eval-gen4-b01"])
 
     assert rc == 0
@@ -456,7 +461,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return text
 
         @staticmethod
-        def _prepare_judge_engine_for(_directions):
+        def _prepare_engines_for(_directions, **_kw):  # **_kw: absorbs include_actor=
             pass  # hermetic: no metered key sourced, no engine validation
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):

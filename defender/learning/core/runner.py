@@ -1,15 +1,15 @@
-"""The ``claude -p`` transport shared by every pipeline stage.
+"""The ``claude -p`` transport shared by the ``claude -p`` pipeline stages (oracle,
+curators).
 
-One-shot subprocess invocation (stream-json parsing, ``--session-id`` transcript
-copy, the settings/add-dir/permission-mode flags) plus the small prompt-assembly
-helper ``_section``. The stage drivers under ``pipeline/`` call ``_run_claude`` +
-``_copy_transcript``; the ``Subagents`` adapter in ``core/subagents.py`` composes them.
-A future Agent-SDK transport swaps this module without touching the stages.
+One-shot subprocess invocation (stream-json parsing, the settings/add-dir/
+permission-mode flags) plus the small prompt-assembly helper ``_section``. The stage
+drivers under ``pipeline/`` call ``_run_claude``; the ``Subagents`` adapter in
+``core/subagents.py`` composes it. A future Agent-SDK transport swaps this module
+without touching the stages.
 """
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,7 +17,6 @@ from defender.learning.core.config import (
     RunUnprocessable,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
-    _log,
     subscription_env,
 )
 
@@ -104,24 +103,6 @@ def _extract_assistant_text_parts(stdout: str) -> list[str]:
         elif isinstance(content, str) and content:
             parts.append(content)
     return parts
-
-
-def _transcript_path(session_id: str) -> Path:
-    """Persistent transcript Claude Code writes for ``--session-id``.
-
-    Path = ``~/.claude/projects/{sanitized-cwd}/{session_id}.jsonl`` where the
-    sanitization is ``cwd.replace('/', '-')``.
-    """
-    cwd_slug = str(REPO_ROOT).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / cwd_slug / f"{session_id}.jsonl"
-
-
-def _copy_transcript(session_id: str, dst: Path) -> None:
-    src = _transcript_path(session_id)
-    if src.is_file():
-        shutil.copy2(src, dst)
-    else:
-        _log(f"transcript not found at {src}; skipping {dst.name}")
 
 
 def _section(tag: str, body: str, comment: str | None = None) -> str:
