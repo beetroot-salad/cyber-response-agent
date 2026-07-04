@@ -1160,25 +1160,43 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
 
 
 def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
-    """Two in-scope in-corpus edits → the returned change list is sorted (path order,
-    not git-status order). Guards the shared loop's `return sorted(changed)`."""
+    """Two in-scope edits whose paths interleave ACROSS git's status-class boundary →
+    the returned list is sorted (path order, not git-status order). This discriminates
+    `return sorted(changed)`: git lists all changed-class records before all
+    untracked-class ones (each class internally sorted), so a modified catalog file
+    (`.../gather/...`, sorts LATE) precedes an untracked system draft
+    (`.../elastic/...`, sorts EARLY) in raw git order — only `sorted()` flips them.
+    A regression to `return changed` would return git order and fail this."""
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"
+        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"  # tracked → " M"
     )
-    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
-    skill.write_text(skill.read_text() + "\n## quirk\nx\n")
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
+        "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"  # untracked → "??"
+    )
     changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
     assert changed == [
-        "defender/skills/elastic/SKILL.md",
+        "defender/skills/elastic/_draft/aa-new.md",
         "defender/skills/gather/queries/wazuh/auth-events.md",
     ]
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
-    """Two execution.md edits across systems → returned list is sorted."""
-    (tmp_git_repo / "defender" / "skills" / "cmdb").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "skills" / "cmdb" / "execution.md").write_text("# c\n")
+    """Two execution.md edits that interleave across git's status-class boundary → the
+    returned list is sorted, discriminating `return sorted(changed)`: a tracked-modified
+    `elastic/execution.md` (changed class, sorts LATE) is listed by git BEFORE an
+    untracked `cmdb/execution.md` (untracked class, sorts EARLY), so only `sorted()`
+    yields [cmdb, elastic]. A regression to `return changed` returns [elastic, cmdb]."""
+    # Commit elastic/execution.md so its later edit lands in the changed class.
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
+    _run_git(tmp_git_repo, "add", "defender/skills/elastic/execution.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "seed execution.md")
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
+        "# e edited\n"  # tracked, modified → " M" (sorts LATE)
+    )
+    (tmp_git_repo / "defender" / "skills" / "cmdb").mkdir(parents=True)
+    (tmp_git_repo / "defender" / "skills" / "cmdb" / "execution.md").write_text(
+        "# c\n"  # untracked → "??" (sorts EARLY)
+    )
     changed = lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
     assert changed == [
         "defender/skills/cmdb/execution.md",
@@ -1334,8 +1352,16 @@ def test_loop_commit_message_lists_paths_and_source_run_trailer():
         "defender/skills/gather/queries/wazuh/b.md",
     ]
     msg = lead_author._loop_commit_message(Path("run-123"), changed)
-    assert "- defender/skills/gather/queries/wazuh/a.md\n- defender/skills/gather/queries/wazuh/b.md" in msg
-    assert "source-run: run-123" in msg
+    # Pin the byte structure the fold risks (the shared skeleton's `\n\n` separators and
+    # the trailer's leading `\n`), not just loose substrings — a `\n\n`→`\n` collapse or a
+    # trailer glued onto the last path line must fail here (fork #2: structural substrings,
+    # not a full golden string).
+    assert "git).\n\nPaths:\n- defender/skills/gather/queries/wazuh/a.md\n" in msg
+    assert (
+        "- defender/skills/gather/queries/wazuh/a.md\n"
+        "- defender/skills/gather/queries/wazuh/b.md\n"
+        "\nsource-run: run-123\n"
+    ) in msg
 
 
 def test_loop_commit_message_empty_changed_renders():
@@ -1343,7 +1369,8 @@ def test_loop_commit_message_empty_changed_renders():
     it must render (no catalog/skill ⇒ 'gather catalog') rather than crash."""
     msg = lead_author._loop_commit_message(Path("run-123"), [])
     assert "gather catalog for run-123" in msg
-    assert "source-run: run-123" in msg
+    # Even with no paths, the trailer keeps its blank-line separator (`\n\nsource-run:`).
+    assert "\n\nsource-run: run-123\n" in msg
 
 
 def test_pitfalls_commit_message_title_and_body():
@@ -1352,5 +1379,11 @@ def test_pitfalls_commit_message_title_and_body():
         ["defender/skills/elastic/execution.md", "defender/skills/cmdb/execution.md"]
     )
     assert "learning(lead-author): execution.md pitfalls" in msg
-    assert "- defender/skills/elastic/execution.md" in msg
-    assert "- defender/skills/cmdb/execution.md" in msg
+    # Pin the summary→Paths `\n\n`, the inter-path `\n` join, and the trailing `\n` — the
+    # per-path substrings alone would still pass if a joining newline were dropped.
+    assert (
+        "git).\n\n"
+        "Paths:\n"
+        "- defender/skills/elastic/execution.md\n"
+        "- defender/skills/cmdb/execution.md\n"
+    ) in msg
