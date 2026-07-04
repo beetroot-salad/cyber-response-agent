@@ -2,23 +2,22 @@
 
 ``invoke_actor_benign`` reconstructs the authorized operation from the alert + the
 environment lessons it retrieves, optionally seeded with prior benign-and-survived
-closed cases on the same signature. The mirror of ``malicious_actor`` for the
+closed cases on the same signature, and runs the actor IN-PROCESS via the shared
+PydanticAI engine (``pipeline/actor_engine``). The mirror of ``malicious_actor`` for the
 over-escalation hunt.
 """
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 
 from defender.learning.core.config import (
     ACTOR_BENIGN_PROMPT,
     BENIGN_ACTOR_EFFORT,
     BENIGN_ACTOR_MODEL,
-    BENIGN_ACTOR_SETTINGS,
-    LESSONS_ENVIRONMENT_DIR,
+    LESSONS_ENV_RETRIEVE_SCRIPT,
 )
-from defender.learning.core.runner import _copy_transcript, _run_claude, _section
+from defender.learning.core.runner import _section
 from defender.learning.tickets import ticket_seeds
 
 
@@ -27,6 +26,8 @@ def invoke_actor_benign(
     case_entities: str,
     alert_rule_key: str,
     learning_run_dir: Path,
+    *,
+    actor_fn=None,
 ) -> str:
     """Benign (ops-teamer) actor for the FP direction.
 
@@ -57,11 +58,12 @@ def invoke_actor_benign(
         menu_text = ticket_seeds.format_seeds(seeds)
         (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n")
         user += _section("past_tickets", menu_text)
-    session_id = str(uuid.uuid4())
-    story = _run_claude(
-        ACTOR_BENIGN_PROMPT, user, model=BENIGN_ACTOR_MODEL, effort=BENIGN_ACTOR_EFFORT,
-        settings_path=BENIGN_ACTOR_SETTINGS, add_dir=LESSONS_ENVIRONMENT_DIR,
-        permission_mode="acceptEdits", session_id=session_id,
+    # DI seam that owns its default (CLAUDE.md conventions): the in-process actor engine in
+    # production; ClaudePrintSubagents / tests pass an explicit actor_fn.
+    from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
+    actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
+    return actor_fn(
+        ACTOR_BENIGN_PROMPT, BENIGN_ACTOR_MODEL, BENIGN_ACTOR_EFFORT,
+        "actor_benign_trace.jsonl", "actor-benign", user, learning_run_dir,
+        scope=_ActorScope((LESSONS_ENV_RETRIEVE_SCRIPT,)),
     )
-    _copy_transcript(session_id, learning_run_dir / "actor_benign_trace.jsonl")
-    return story

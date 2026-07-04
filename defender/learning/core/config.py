@@ -294,10 +294,15 @@ ORACLE_PROMPT = _PIPELINE_DIR / "oracle" / "prompt.md"
 JUDGE_PROMPT = _PIPELINE_DIR / "judge" / "malicious.md"
 JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
 
-ACTOR_SETTINGS = _PIPELINE_DIR / "malicious_actor" / "actor-settings.json"
-BENIGN_ACTOR_SETTINGS = _PIPELINE_DIR / "benign_actor" / "benign-actor-settings.json"
 LESSONS_ACTOR_DIR = DEFAULT_PATHS.lessons_actor_dir
 LESSONS_ENVIRONMENT_DIR = DEFAULT_PATHS.lessons_environment_dir
+
+# The two read-only lesson-retrieval scripts the in-process actor may run, pinned by the
+# actor's AgentPolicy matchers (pipeline/actor_engine._make_lessons_matcher). The single
+# home for these offsets — verify_forward/env.py reuses LESSONS_ENV_RETRIEVE_SCRIPT.
+_LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
+LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
+LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 GROUND_TRUTH_FILE = "ground_truth.yaml"
 
@@ -526,11 +531,11 @@ def subscription_env() -> dict[str, str]:
     """Env for a ``claude -p`` call: strip every billable provider key
     (``providers.api_key_vars()`` — ``ANTHROPIC_API_KEY``, ``FIREWORKS_API_KEY``, …) so
     the call bills against the subscription, never a metered first-party key (reserved
-    for the in-process PydanticAI engine — see defender/run.py). Stripping ALL of them
-    (not just Anthropic's, matching ``run_common.run_env``) keeps ``source_judge_key``'s
-    mixed-billing invariant true for every judge provider: a metered key sourced into
-    ``os.environ`` can never reach a sibling ``claude -p``, whatever provider the judge
-    runs on."""
+    for the in-process PydanticAI stages — see defender/run.py). Stripping ALL of them
+    (not just Anthropic's, matching ``run_common.run_env``) keeps ``source_first_party_key``'s
+    mixed-billing invariant true for every provider: a metered key sourced into
+    ``os.environ`` can never reach a sibling ``claude -p``, whatever provider the in-process
+    stage runs on."""
     from defender.runtime import providers
 
     env = dict(os.environ)
@@ -539,20 +544,21 @@ def subscription_env() -> dict[str, str]:
     return env
 
 
-def source_judge_key(model: str) -> None:
-    """Source the in-process PydanticAI judge's metered first-party key into
-    ``os.environ`` (idempotent) so the judge can authenticate against the first-party
-    API. The provider is derived from the model name (``claude-*`` → ANTHROPIC_API_KEY,
-    ``glm-5.2`` → FIREWORKS_API_KEY).
+def source_first_party_key(model: str, *, label: str = "judge") -> None:
+    """Source an in-process PydanticAI stage's metered first-party key into ``os.environ``
+    (idempotent) so the stage can authenticate against the first-party API. The provider is
+    derived from the model name (``claude-*`` → ANTHROPIC_API_KEY, ``glm-5.2`` →
+    FIREWORKS_API_KEY). ``label`` names the stage in the log/error text (``judge`` / ``actor``
+    / ``engine`` for a mixed prep).
 
-    Mixed billing within one run is SAFE: this is the only learning stage that runs
-    in-process on the metered key; every sibling shells out to ``claude -p`` under
-    ``subscription_env``, which COPIES ``os.environ`` and pops the key — so setting it
-    here can never reach a sibling, and they keep billing the subscription. A ``.env``
-    key takes precedence over the ambient value (for Anthropic the ambient is the
-    subscription credential, which 401s against the first-party REST API). Fail loud
-    (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
-    rather than 401-ing mid-judge."""
+    Mixed billing within one run is SAFE: the in-process stages (the actor and the judge) run
+    on the metered key, but every OTHER stage (oracle, curators) shells out to ``claude -p``
+    under ``subscription_env``, which COPIES ``os.environ`` and pops every provider key — so
+    setting it here can never reach a subscription sibling, and they keep billing the
+    subscription. A ``.env`` key takes precedence over the ambient value (for Anthropic the
+    ambient is the subscription credential, which 401s against the first-party REST API). Fail
+    loud (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
+    rather than 401-ing mid-stage."""
     # provider_for imports no pydantic-ai backend (declarative routing), so this is
     # safe in the SIEM-free learn worker; _first_party_key is neutral (no run.py).
     from defender.runtime import providers
@@ -561,7 +567,7 @@ def source_judge_key(model: str) -> None:
     try:
         var = providers.provider_for(model).api_key_var
     except ValueError as e:
-        # A typo'd JUDGE_MODEL / BENIGN_JUDGE_MODEL is unroutable in provider_for; surface
+        # A typo'd model (JUDGE_MODEL / ACTOR_MODEL / …) is unroutable in provider_for; surface
         # it as the FatalConfigError → exit-2 this function documents (matching run.py's
         # _source_provider_keys) rather than a bare ValueError the drain would dead-letter
         # per-run for a run-independent config fault.
@@ -569,14 +575,14 @@ def source_judge_key(model: str) -> None:
     key, src = resolve_first_party_key(var=var, root=REPO_ROOT)
     if key:
         os.environ[var] = key
-        _log(f"judge_key: {var} sourced from {src} (overrides ambient)")
+        _log(f"{label}_key: {var} sourced from {src} (overrides ambient)")
         return
     if os.environ.get(var):
-        _log(f"judge_key: no .env key; using the ambient {var}")
+        _log(f"{label}_key: no .env key; using the ambient {var}")
         return
     raise FatalConfigError(
-        f"the PydanticAI judge (model {model!r}) needs {var} — set it in <repo>/.env "
-        "or $DEFENDER_ENV_FILE (the in-process judge bills the first-party API)."
+        f"the in-process PydanticAI {label} (model {model!r}) needs {var} — set it in "
+        "<repo>/.env or $DEFENDER_ENV_FILE (the in-process stage bills the first-party API)."
     )
 
 

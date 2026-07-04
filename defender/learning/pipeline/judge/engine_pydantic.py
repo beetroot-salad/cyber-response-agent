@@ -1,42 +1,33 @@
 """The judge on the in-process PydanticAI engine — a drop-in ``judge_fn``.
 
-This is the FIRST learning-loop agent to run in-process on PydanticAI rather than
-the shared ``claude -p`` transport. Everything judge-specific lives HERE, in the
-judge's own directory: its deps identity, its permission policy (data), its one bit
-of custom logic (the benign closed-ticket matcher), and its agent builder. It only
-*composes* shared engine machinery from ``defender.runtime`` — the policy-driven
-gate, ``build_agent_core`` (the single construction site — it wires ``register_tools``
-and the budget/observability hooks), ``providers.build_for_effort``, and ``observe`` —
-so nothing judge-specific leaks into ``runtime/`` (the shared, agent-neutral layer).
+The judge was the first learning-loop agent to run in-process on PydanticAI rather than
+the shared ``claude -p`` transport. Everything judge-specific lives HERE, in the judge's own
+directory: its deps identity, its permission policy (data), its one bit of custom logic (the
+benign closed-ticket matcher), and its thin ``judge_fn``. The generic in-process transport it
+shares with the actor — agent construction, the request-capped one-shot drive, the
+error-mapping ladder — lives in ``pipeline/_pydantic_stage.py``; this module only supplies the
+judge's specifics and delegates.
 
-This module imports the pydantic-ai graph, so it is imported LAZILY — only when a judge
-actually runs (``core/subagents.ClaudePrintSubagents.judge``), never at loop import.
+This module pulls the pydantic-ai graph (via ``_pydantic_stage``), so it is imported LAZILY —
+only when a judge actually runs (``core/subagents.ClaudePrintSubagents.judge``), never at loop
+import.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from defender.learning.core.config import (
-    REPO_ROOT,
-    SUBAGENT_TIMEOUT,
-    FatalConfigError,
-    RunUnprocessable,
-    StageAbort,
-    _log,
-)
+from defender.learning.core.config import REPO_ROOT
+from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
-from defender.runtime.driver import AgentSpec, MakeModel, build_agent_core
+from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy, BashDecision, command_shape
 from defender.runtime.tools import RunDeps
 
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.usage import UsageLimits
 
 if TYPE_CHECKING:
     from defender.runtime.bash_exec import Pipeline
@@ -46,11 +37,6 @@ if TYPE_CHECKING:
 # The judge does a handful of jq/grep tool calls then emits its YAML verdict; a small
 # request cap bounds a runaway tool loop (the twin of the gather's per-lead cap).
 JUDGE_REQUEST_LIMIT = 30
-
-# The judge's model-construction seam is the shared `driver.MakeModel` (DI): (model_name,
-# effort) -> BuiltModel, effort `str | None` (None omits the knob). Defaults to the provider
-# abstraction; tests inject a FunctionModel-wrapped fake through the `make_model` param to
-# run hermetically.
 
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
@@ -76,18 +62,18 @@ def _make_ticket_matcher(py: str, ticket_cli: Path):
     """The benign judge's one bit of custom logic (issue #338): allow the scoped,
     CLOSED-ONLY case-history read that confirms a cited past case. Claims exactly a
     single-stage ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``
-    invocation — `py`/`ticket_cli` pinned, and ``--require-closed`` REQUIRED (the
-    security property that the open in-flight ticket stays unreachable rides on that
-    flag). Anything else declines (`None`) and falls through to the generic gate,
-    which denies it (``<py> <ticket_cli> …`` is not a read-only viewer). The
-    adversarial judge is built with no matchers, so it can never reach the store."""
+    invocation — `py`/`ticket_cli` pinned (exact absolute strings from
+    ``build_judge_invocation``), and ``--require-closed`` REQUIRED (the security property
+    that the open in-flight ticket stays unreachable rides on that flag). Anything else
+    declines (`None`) and falls through to the generic gate, which denies it (``<py>
+    <ticket_cli> …`` is not a read-only viewer). The adversarial judge is built with no
+    matchers, so it can never reach the store."""
     py_s, cli_s = str(py), str(ticket_cli)
 
     def _match(pipelines: list[Pipeline]) -> BashDecision | None:
-        stages = command_shape.flat_stages(pipelines)
-        if len(stages) != 1:  # a single command, never a pipe/compound
+        argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
+        if argv is None:
             return None
-        argv = stages[0]
         if len(argv) < 3 or argv[0] != py_s or argv[1] != cli_s:
             return None
         if argv[2] not in ("list-tickets", "get-ticket"):
@@ -119,37 +105,14 @@ def build_judge_agent(
     logger: observe.RequestLogger, agent_id: str,
     *, make_model: MakeModel = providers.build_for_effort,
 ) -> Agent[JudgeDeps, str]:
-    """The in-process judge agent — a THIN WRAPPER over the shared ``build_agent_core``
-    (the single agent-construction site, #493). The judge is just another read-only
-    PydanticAI agent: an ``AgentSpec`` (``writers=False`` → the bash + read_file pair
-    only, no writers, no gather dispatch; the model by name + its per-leg ``effort``),
-    the direction's system prompt, and the shared budget/observability hooks
-    ``build_agent_core`` wires. Its effort is per-DIRECTION-LEG config (not role-keyed),
-    so the two legs can run concurrently at different efforts — the reason the judge
-    builds its own spec rather than going through ``spec_for_role``. ``make_model`` is
-    the DI seam tests use to inject a FunctionModel; production uses
-    ``providers.build_for_effort`` (Anthropic ``anthropic_effort`` / Fireworks
-    ``reasoning_effort``)."""
-    agent: Agent[JudgeDeps, str] = build_agent_core(
-        AgentSpec(model=model, effort=effort, writers=False),
-        deps_type=JudgeDeps,
-        instructions=prompt_path.read_text(),
-        logger=logger,
-        agent_id=agent_id,
-        make_model=make_model,
-    )
-    return agent
-
-
-async def _drive(agent: Agent[JudgeDeps, str], user: str, deps: JudgeDeps):
-    """One-shot judge run with a wall-clock ceiling (the in-process twin of the
-    ``claude -p`` subprocess timeout) and a request cap on the tool loop."""
-    return await asyncio.wait_for(
-        agent.run(
-            user, deps=deps,
-            usage_limits=UsageLimits(request_limit=JUDGE_REQUEST_LIMIT),
-        ),
-        timeout=SUBAGENT_TIMEOUT,
+    """The judge's named build seam — a THIN DELEGATE to the shared ``build_stage_agent``
+    (which wraps the single construction site ``build_agent_core``, #493). ``writers=False``
+    → the bash + read_file pair only (no writers, no gather dispatch). Its effort is
+    per-DIRECTION-LEG config (not role-keyed), so the two legs can run concurrently at
+    different efforts — the reason the judge builds its own spec rather than going through
+    ``spec_for_role``. ``make_model`` is the DI seam tests use to inject a FunctionModel."""
+    return build_stage_agent(
+        JudgeDeps, prompt_path, model, effort, logger, agent_id, make_model=make_model,
     )
 
 
@@ -168,17 +131,12 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     """The PydanticAI ``judge_fn`` — the judge_fn protocol signature, so it drops into
     ``invoke_judge(..., judge_fn=_run_judge_pydantic)``.
 
-    Builds the judge agent + its ``JudgeDeps`` from the tool ``scope`` (read roots =
-    the comparison + gather_raw add-dirs; the benign closed-ticket paths), runs it once
-    (async bridged via ``asyncio.run`` — safe in the loop's per-direction worker
-    thread, which has no running event loop), logs every request to
-    ``learning_run_dir/{trace_name}``, and returns the model's final text VERBATIM. Any
-    prose preamble a reasoning model prepends is left intact: the shared
-    ``normalize_judge_yaml`` on the downstream validate path (every judge consumer — the
-    live loop and the secondary harness — funnels through it) strips it, so the engine no
-    longer trims here. A timeout / usage-limit / model error raises ``RunUnprocessable`` —
-    quarantining the single run, the same per-run failure disposition the sibling
-    ``claude -p`` stages get from a non-zero exit."""
+    Builds the judge's ``JudgeDeps`` from the tool ``scope`` (read roots = the comparison +
+    gather_raw add-dirs; the benign closed-ticket paths) and delegates to the shared
+    ``run_stage`` (agent build + one-shot drive + error mapping + trace logging). The model's
+    final text is returned VERBATIM: any prose preamble a reasoning model prepends is left
+    intact for the shared ``normalize_judge_yaml`` on the downstream validate path (every judge
+    consumer — the live loop and the secondary harness — funnels through it) to strip."""
     # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
     # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
@@ -189,24 +147,10 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
         salt=uuid.uuid4().hex,
         policy=_judge_policy(read_roots, scope.ticket_cli),
     )
-    logger = observe.RequestLogger(learning_run_dir / trace_name)
-    _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
-    try:
-        try:
-            agent = build_judge_agent(prompt_path, model, effort, logger, label, make_model=make_model)
-        except ValueError as e:
-            # An unsupported effort (JUDGE_EFFORT/BENIGN_JUDGE_EFFORT are read unvalidated)
-            # or an unroutable model name is a run-independent CONFIG fault: fail loud
-            # (FatalConfigError → exit 2), never let the broad guard below dead-letter every
-            # run for it. Model/API errors from the run below stay per-run (RunUnprocessable).
-            raise FatalConfigError(f"judge ({label}) misconfigured: {e}") from e
-        result = asyncio.run(_drive(agent, user, deps))
-    except (TimeoutError, UsageLimitExceeded) as e:
-        raise RunUnprocessable(f"judge ({label}) did not complete: {e!r}") from e
-    except (StageAbort, FatalConfigError):
-        raise  # systemic faults doom the whole stage (exit 2) — never per-run dead-letter
-    except Exception as e:  # a model/API error after retries — quarantine the run
-        raise RunUnprocessable(f"judge ({label}) failed: {e!r}") from e
-    finally:
-        logger.close()
-    return str(result.output or "")
+    return run_stage(
+        stage="judge",
+        prompt_path=prompt_path, model=model, effort=effort,
+        trace_name=trace_name, label=label, user=user,
+        learning_run_dir=learning_run_dir, deps=deps,
+        request_limit=JUDGE_REQUEST_LIMIT, make_model=make_model,
+    )

@@ -118,10 +118,12 @@ def _complete_run_dir(tmp_path: Path, disposition: str, *, held_out: bool) -> Pa
 def test_run_one_gate_short_circuits_before_append(tmp_path: Path, monkeypatch) -> None:
     """The held-out gate fires before append: a queueable finding that would
     otherwise be queued must leave the pending file untouched on a held-out run."""
-    # FakeSubagents never runs a real judge, but run_one's _prepare_judge_engine_for
-    # still sources the in-process judge's metered key up front — give it a dummy ambient
-    # key to find (never used) so it doesn't fail loud in CI, which holds no real key.
+    # FakeSubagents never runs a real actor/judge, but run_one's _prepare_engines_for still
+    # sources the in-process stages' metered keys up front (judge + actor, whichever providers
+    # they route to) — give it dummy ambient keys to find (never used) so it doesn't fail loud
+    # in CI, which holds no real key.
     monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "benign", held_out=True)
     judge_yaml = (
         "outcome: survived\n"

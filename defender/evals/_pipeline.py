@@ -205,9 +205,10 @@ def run_head_oracle_and_judge(
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
-        # Run the judge the SAME way the learning loop does: source the in-process judge's
-        # metered key up front, then dispatch through the subagents seam.
-        loop_mod._prepare_judge_engine_for(["adversarial"])
+        # Run the judge the SAME way the learning loop does: source the in-process stages'
+        # metered key up front, then dispatch through the subagents seam. (The frozen actor
+        # already ran in its own subprocess; sourcing its model again here is idempotent.)
+        loop_mod._prepare_engines_for(["adversarial"])
         judge_yaml = loop_mod.ClaudePrintSubagents().judge(
             loop_mod.ADVERSARIAL_WIRING,
             head_run_dir,

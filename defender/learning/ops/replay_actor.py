@@ -35,7 +35,7 @@ Outputs in ``<staging_dir>``:
 
 Exit codes:
   0  story written (any content — including SKIP)
-  2  invocation failed (missing inputs, projection error, claude rc!=0)
+  2  invocation failed (missing inputs, projection error, model/timeout error)
 """
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._run_paths import RunPaths  # noqa: E402 — after the sys.path bootstrap
+from defender.learning.core.config import source_first_party_key  # noqa: E402 — after bootstrap
 
 
 def _load_sibling(modname: str, path: Path):
@@ -99,6 +100,13 @@ def main(argv: list[str]) -> int:
         learning / "pipeline" / "malicious_actor" / "run.py",
     )
     lr = _load_sibling("_defender_learning_lead_repository_replay", learning / "lead_repository.py")
+
+    # The actor now runs IN-PROCESS on the metered first-party key (it moved off the claude -p
+    # subscription transport). Source it up front for the pinned generation's model
+    # (sub.ACTOR_MODEL, resolved from this worktree's config + any ACTOR_MODEL env override the
+    # secondary harness set), fail-loud if absent — the discipline run_one applies before its
+    # fan-out.
+    source_first_party_key(sub.ACTOR_MODEL, label="actor")
 
     # Re-stamp case_id to the caller-supplied stable id so the actor's
     # seed/menu/archetype is keyed on (generation, alert) — independent

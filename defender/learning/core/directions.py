@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from defender.learning.core.config import (
+    ACTOR_MODEL,
+    BENIGN_ACTOR_MODEL,
     BENIGN_JUDGE_EFFORT,
     BENIGN_JUDGE_MODEL,
     JUDGE_BENIGN_PROMPT,
@@ -58,6 +60,10 @@ class Direction:
     # agents.judge(wiring, ...) method, so the per-direction variation is pure config.
     # (actor stays a Callable because actor/actor_benign differ in name and arity.)
     judge_wiring: JudgeWiring     # per-direction judge knobs, passed through agents.judge
+    # The in-process actor model for this leg — the actor twin of judge_wiring.model, read by
+    # orchestrate._prepare_engines_for to source the metered key up front (the actor stage
+    # itself reads ACTOR_MODEL/BENIGN_ACTOR_MODEL directly in pipeline/*_actor/run.py).
+    actor_model: str
     validate: Callable            # (doc) -> doc
     append_observations: Callable  # (doc, run_id, key, lrd, *, paths) -> int
     story_name: str
@@ -78,6 +84,7 @@ ADVERSARIAL = Direction(
     name="adversarial",
     invoke_actor=lambda agents, run_dir, lrd, key: agents.actor(run_dir, lrd),
     judge_wiring=ADVERSARIAL_WIRING,
+    actor_model=ACTOR_MODEL,
     validate=validate_judge_doc,
     append_observations=append_actor_observations,
     story_name="actor_story.md",
@@ -105,6 +112,7 @@ BENIGN = Direction(
     name="benign",
     invoke_actor=lambda agents, run_dir, lrd, key: agents.actor_benign(run_dir, lrd, key),
     judge_wiring=BENIGN_WIRING,
+    actor_model=BENIGN_ACTOR_MODEL,
     validate=validate_judge_benign_doc,
     append_observations=append_environment_observations,
     story_name="actor_benign_story.md",
