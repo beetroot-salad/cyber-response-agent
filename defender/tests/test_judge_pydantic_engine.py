@@ -223,7 +223,7 @@ def test_ticket_matcher_declines_unsafe_or_wrong_shape():
     assert m(_pipes(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed | cat")) is None
 
 
-def test_judge_policy_ticket_read_through_the_gate():
+def test_judge_policy_ticket_read_through_the_gate(tmp_path):
     # The matcher, wired into the benign judge's AgentPolicy, is honored by decide_bash.
     benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
     ok = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed --raw"
@@ -234,10 +234,17 @@ def test_judge_policy_ticket_read_through_the_gate():
     adversarial = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
     assert not permission.decide_bash(ok, policy=adversarial).allow
     # The judge (either direction) still refuses data-source adapters + arbitrary shell,
-    # but MAY jq gather_raw (raw_reads).
+    # but MAY jq an IN-ROOTS gather_raw payload (raw_reads + the path-gated jq-only lane, #512).
     assert not permission.decide_bash("defender-elastic query x --raw", policy=benign).allow
     assert not permission.decide_bash("rm -rf /tmp/x", policy=benign).allow
-    assert permission.decide_bash("jq '.' gather_raw/l-001/0.json", policy=benign).allow
+    raw = tmp_path / "gather_raw" / "l-001" / "0.json"
+    assert permission.decide_bash(
+        f"jq '.' {raw}", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
+    ).allow
+    # …but jq of an OUT-OF-ROOTS file is now denied (the reader surface is path-gated).
+    assert not permission.decide_bash(
+        "jq '.' /etc/passwd", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
+    ).allow
 
 
 # --- ClaudePrintSubagents.judge always runs the in-process judge -----------

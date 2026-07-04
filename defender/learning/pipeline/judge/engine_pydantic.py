@@ -43,9 +43,11 @@ if TYPE_CHECKING:
 JUDGE_REQUEST_LIMIT = 45
 
 _JUDGE_DENY_REASON = (
-    "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
-    "the comparison files and the gather_raw payloads (plus, benign only, the pinned "
-    "closed-ticket read). No data-source adapters, no writes, no arbitrary shell."
+    "Blocked: the judge is read-only over the grounded evidence — jq (path-gated to its "
+    "read roots) over the comparison files and gather_raw payloads, and read_file (with "
+    "an optional grep pattern) for everything else, plus — benign only — the pinned "
+    "closed-ticket read. No cat/grep/ls in bash, no data-source adapters, no writes, no "
+    "arbitrary shell."
 )
 
 
@@ -92,13 +94,21 @@ def _make_ticket_matcher(py: str, ticket_cli: Path):
 def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | None) -> AgentPolicy:
     """The judge's declarative gate policy: read-only, may `jq`/read gather_raw
     (raw_reads) + its comparison dir (read_roots), never runs a data-source adapter,
-    and — benign only — carries the pinned closed-ticket matcher as its custom logic."""
+    and — benign only — carries the pinned closed-ticket matcher as its custom logic.
+
+    ``bash_readers=('jq',)`` (#512): in the bash lane ONLY `jq` survives, and it is
+    path-gated to the judge's read roots (every file it opens must resolve within
+    them — closing the reader surface as an out-of-roots read oracle). cat/grep/head/
+    tail/ls fold into `read_file` (with its optional grep `pattern`). The judge is
+    UNCONFINED this slice (no ``read_confine``), so its roots stay
+    ``{run_dir, defender_dir, *read_roots}``."""
     matchers = (_make_ticket_matcher(*ticket_cli),) if ticket_cli is not None else ()
     return AgentPolicy(
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=True,
         read_roots=read_roots,
+        bash_readers=("jq",),
         custom_matchers=matchers,
         deny_reason=_JUDGE_DENY_REASON,
     )

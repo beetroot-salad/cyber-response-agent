@@ -46,11 +46,14 @@ _ACTOR_DENY_REASON = (
 
 @dataclass(frozen=True)
 class _ActorScope:
-    """The pinned lesson scripts this actor leg may run as ``python3 <script> …`` — the actor's
-    tool-surface scoping (the mirror of the judge's ``_ToolScope``). The adversarial leg carries
-    both (env-fact retrieval + tradecraft index); the benign leg only env-fact retrieval."""
+    """The pinned lesson scripts this actor leg may run as ``python3 <script> …`` plus the leg's
+    read ``confine`` — the actor's tool-surface scoping (the mirror of the judge's ``_ToolScope``).
+    The adversarial leg carries both scripts (env-fact retrieval + tradecraft index) and a confine
+    of ``{lessons-actor, lessons-environment}``; the benign leg carries only env-fact retrieval and
+    a confine of ``{lessons-environment}`` (no tradecraft, no rubric — the gray-box split)."""
 
     scripts: tuple[Path, ...] = ()
+    read_confine: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,8 +61,9 @@ class ActorDeps(RunDeps):
     """The actor's per-run deps — ``RunDeps`` shape; its pinned-script matchers ride in
     ``policy`` (data), no extra fields. ``run_dir`` is the *learning* run dir (its own output
     dir), so budget/observability side effects land there. The actor reads only the lessons
-    corpora (under ``defender_dir``, allowed by ``decide_read`` with no ``read_roots``) and
-    never touches ``gather_raw`` (``raw_reads=False``) — it is gray-box by construction.
+    corpora its ``policy.read_confine`` names (that confine REPLACES the ``defender_dir`` base,
+    so the judge's rubric under ``defender/`` is unreachable) and never touches ``gather_raw``
+    (``raw_reads=False``) — it is gray-box by construction.
     ``role`` is an ACTOR identity label — the gate keys on ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.ACTOR
@@ -89,16 +93,21 @@ def _make_lessons_matcher(script: Path):
     return _match
 
 
-def _actor_policy(scripts: tuple[Path, ...]) -> AgentPolicy:
+def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> AgentPolicy:
     """The actor's declarative gate policy: read-only, NO adapters, NO raw reads (its inputs are
-    all inlined in the user prompt — it never touches gather_raw), NO ``read_roots`` (all reads
-    land under ``defender_dir``, allowed by default), and one pinned matcher per lesson script
-    this leg may run."""
+    all inlined in the user prompt — it never touches gather_raw), NO ``read_roots``, and a
+    ``read_confine`` that REPLACES the ``defender_dir`` read base — the actor sees only its own
+    lesson corpora (its confine), never the judge's grading rubric under ``defender/`` (#512).
+    ``bash_readers=()`` grants NO generic bash reader: every read goes through ``read_file`` (which
+    honours the confine); the pinned lesson scripts still run via the custom matchers below (each
+    a single pinned ``python3 <script>``), which the gate honours upstream of the reader tail."""
     return AgentPolicy(
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=False,
         read_roots=(),
+        read_confine=read_confine,
+        bash_readers=(),
         custom_matchers=tuple(_make_lessons_matcher(s) for s in scripts),
         deny_reason=_ACTOR_DENY_REASON,
     )
@@ -127,7 +136,7 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
         defender_dir=REPO_ROOT / "defender",
         run_id=learning_run_dir.name,
         salt=uuid.uuid4().hex,
-        policy=_actor_policy(scope.scripts),
+        policy=_actor_policy(scope.scripts, read_confine=scope.read_confine),
     )
     return run_stage(
         stage="actor",

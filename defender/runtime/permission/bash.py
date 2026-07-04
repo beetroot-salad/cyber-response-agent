@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS, unwrap
 from defender.hooks.block_main_loop_raw_access import (
@@ -37,6 +38,7 @@ from defender.runtime import bash_exec, bash_policy
 
 from . import command_shape
 from .decision import Decision
+from .files import read_allowed_path
 from .policy import AgentPolicy
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
@@ -82,6 +84,24 @@ _GATHER_PAYLOAD_TOKENS = (
 # A leading `VAR=value` env-assignment prefix (the credential-groping vector) —
 # matched against the first token of a stage only.
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# jq option grammar for the file-arg path-gate (the judge's `bash_readers=('jq',)`
+# lane). jq OPENS a file for: its positional input operands (after the filter
+# program) and the argument-taking flags below. The gate validates EVERY such path
+# against the policy's read roots — closing the flag-injection escape where a
+# `--slurpfile <out-of-roots>` loads a file while the trailing operand looks clean.
+#
+# Each entry: flag -> (tokens consumed INCLUDING the flag, index of the FILE arg
+# within that span or None, supplies-the-filter). `-f`/`--from-file` load the filter
+# program FROM a file, so their arg is both a gated file AND fills the filter slot
+# (the next bare positional is then an input, not the filter).
+_JQ_ARG_FLAGS: dict[str, tuple[int, int | None, bool]] = {
+    "-f": (2, 1, True), "--from-file": (2, 1, True),
+    "--slurpfile": (3, 2, False), "--rawfile": (3, 2, False), "--argfile": (3, 2, False),
+    "--arg": (3, None, False), "--argjson": (3, None, False),       # <name> <value>
+    "--indent": (2, None, False), "-L": (2, None, False), "--library-path": (2, None, False),
+}
+_JQ_ARGS_MODES = frozenset({"--args", "--jsonargs"})  # trailing positionals become strings, not files
 
 
 @dataclass(frozen=True)
@@ -208,10 +228,129 @@ def _decide_adapter(pipelines: list[bash_exec.Pipeline], policy: AgentPolicy) ->
     return BashDecision(False, ADAPTER_STANDALONE_REASON)
 
 
-def decide_bash(command: str, *, policy: AgentPolicy) -> BashDecision:
+def _jq_flag_step(argv: list[str], i: int) -> tuple[int, list[str], bool] | None:
+    """Handle one jq OPTION token at `argv[i]` (a token starting with `-`, never a
+    bare `-`). Returns `(next_i, files_loaded, supplies_filter)`, or `None` to FAIL
+    CLOSED (a malformed arg-taking flag, or an unrecognized long option that might
+    smuggle a file). A short boolean flag / bundle (`-s`, `-nr`, `-c`, …) opens no
+    file and consumes only itself."""
+    t = argv[i]
+    spec = _JQ_ARG_FLAGS.get(t)
+    if spec is not None:
+        consume, file_off, supplies_filter = spec
+        if i + consume > len(argv):
+            return None  # arg-taking flag with its argument(s) missing
+        loaded = [argv[i + file_off]] if file_off is not None else []
+        return i + consume, loaded, supplies_filter
+    if t.startswith("--"):
+        return None  # unrecognized long option — fail closed (may take a file)
+    return i + 1, [], False  # short boolean flag / bundle
+
+
+def _jq_input_files(argv: list[str]) -> list[str] | None:
+    """Every file path a `jq` invocation (`argv[0] == 'jq'`) will OPEN — its
+    positional input operands plus the `--slurpfile`/`--rawfile`/`--argfile`/`-f`
+    file targets. Returns `[]` for an inert stdin-only `jq '.'` (nothing to gate), or
+    `None` when the argv uses a shape we won't reason about (FAIL CLOSED). `-`
+    operands (stdin) are skipped; after `--args`/`--jsonargs` the trailing positionals
+    are string args, not files."""
+    files: list[str] = []
+    filter_seen = False
+    args_mode = False
+    i, n = 1, len(argv)
+    while i < n:
+        t = argv[i]
+        if args_mode:
+            i += 1  # post `--args`/`--jsonargs`: positionals are strings, not files
+        elif t in _JQ_ARGS_MODES:
+            args_mode = True
+            i += 1
+        elif t.startswith("-") and t != "-":
+            step = _jq_flag_step(argv, i)
+            if step is None:
+                return None
+            i, loaded, supplies_filter = step
+            files.extend(loaded)
+            filter_seen = filter_seen or supplies_filter
+        elif not filter_seen:
+            filter_seen = True  # the first bare positional is the filter program
+            i += 1
+        else:
+            if t != "-":
+                files.append(t)  # a subsequent bare positional is an input file
+            i += 1
+    return files
+
+
+def _jq_reads_within_roots(
+    argv: list[str], policy: AgentPolicy, *, run_dir: Path | None, defender_dir: Path | None
+) -> bool:
+    """Whether every file a `jq` stage opens resolves within `policy`'s read roots.
+    An inert stdin `jq '.'` (no file operands) passes; an unparseable jq shape fails
+    closed."""
+    files = _jq_input_files(argv)
+    if files is None:
+        return False
+    return all(
+        read_allowed_path(f, run_dir=run_dir, defender_dir=defender_dir, policy=policy)
+        for f in files
+    )
+
+
+def _decide_restricted_readers(
+    pipelines: list[bash_exec.Pipeline], policy: AgentPolicy,
+    *, run_dir: Path | None, defender_dir: Path | None,
+) -> BashDecision:
+    """A per-policy REDUCED reader set (the judge's jq-only lane). The command must
+    be a SINGLE stage (a pipe/compound would re-open the reader surface via a
+    downstream head/cat through the global fall-through), substitution-free, and a
+    `jq` invocation whose file operands are path-gated to the policy's read roots.
+    The only restricted set in play is `('jq',)`; a non-jq program — even one
+    nominally listed — carries no file-arg path-gate, so it fails closed rather than
+    admit an un-gated reader."""
+    argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
+    if argv is None or _stage_unsafe(argv):
+        return BashDecision(False, policy.deny_reason)
+    if argv[0] != "jq" or "jq" not in (policy.bash_readers or ()):
+        return BashDecision(False, policy.deny_reason)
+    if not _jq_reads_within_roots(argv, policy, run_dir=run_dir, defender_dir=defender_dir):
+        return BashDecision(False, policy.deny_reason)
+    return _allow(pipelines)
+
+
+def _decide_readers(
+    pipelines: list[bash_exec.Pipeline], policy: AgentPolicy,
+    *, run_dir: Path | None, defender_dir: Path | None,
+) -> BashDecision:
+    """The non-adapter reader tail, narrowed by `policy.bash_readers`:
+
+      - `None` — today's GLOBAL viewer allowlist (main / gather, byte-for-byte).
+      - `()` — NO bash reader surface at all (the confined actor: reads go through
+        the read tool, never bash). Its pinned scripts still run — they are claimed
+        by a custom matcher upstream of this tail.
+      - a set (the judge's `('jq',)`) — only those programs, single-stage, with `jq`
+        path-gated to the policy's read roots (`_decide_restricted_readers`)."""
+    if policy.bash_readers is None:
+        return _decide_viewers(pipelines, policy.deny_reason)
+    if not policy.bash_readers:
+        return BashDecision(False, policy.deny_reason)
+    return _decide_restricted_readers(
+        pipelines, policy, run_dir=run_dir, defender_dir=defender_dir
+    )
+
+
+def decide_bash(
+    command: str, *, policy: AgentPolicy,
+    run_dir: Path | None = None, defender_dir: Path | None = None,
+) -> BashDecision:
     """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy`
     (no per-role method): custom matchers first, then the raw-read clamp, adapter
-    capture, and the read-only viewer allowlist.
+    capture, and the per-policy reader surface (`bash_readers`).
+
+    `run_dir`/`defender_dir` supply the read roots the judge's `jq` file-arg
+    path-gate validates against; they are irrelevant to a policy with the default
+    `bash_readers=None` (main/gather) or `()` (the actor), so those callers may omit
+    them.
 
     Returns a `BashDecision` carrying the single parse (see the class): callers read
     `.allow`/`.reason` as before, and route capture/execution off
@@ -251,7 +390,8 @@ def decide_bash(command: str, *, policy: AgentPolicy) -> BashDecision:
     if command_shape.has_adapter(pipelines):
         return _decide_adapter(pipelines, policy)
 
-    # Non-adapter command: read-only viewers / non-adapter shims only. The
-    # substitution/assignment guard applies here (these stages execute through the
-    # no-shell executor).
-    return _decide_viewers(pipelines, policy.deny_reason)
+    # Non-adapter command: the per-policy reader surface. `bash_readers=None` is
+    # today's global viewer allowlist; `()` grants no bash reader; a set narrows to
+    # those programs (the judge's path-gated jq). The substitution/assignment guard
+    # applies throughout (these stages execute through the no-shell executor).
+    return _decide_readers(pipelines, policy, run_dir=run_dir, defender_dir=defender_dir)

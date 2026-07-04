@@ -12,9 +12,6 @@ gate spec (decide_read / decide_bash) is in test_read_confine.py.
 """
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -45,7 +42,8 @@ def test_actor_policy_malicious_wires_confine_and_no_readers():
     pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
     assert set(pol.read_confine) == {_ACTOR_DIR, _ENV_DIR}
     assert pol.bash_readers == ()
-    assert pol.raw_reads is False and pol.adapters is False
+    assert pol.raw_reads is False
+    assert pol.adapters is False
 
 
 def test_benign_actor_policy_env_only():
@@ -144,7 +142,8 @@ def test_tool_pattern_search_returns_matches_only(tmp_path):
     """read_file(in-confine file, pattern='bet') -> the matching line(s), not the whole file (grep folded in)."""
     deps, conf, lesson, rubric = _tree(tmp_path)
     out = tools._tool_read_file(deps, str(lesson), pattern="bet")
-    assert "beta" in out and "alpha" not in out
+    assert "beta" in out
+    assert "alpha" not in out
 
 
 def test_tool_pattern_no_match_returns_empty_not_error(tmp_path):
