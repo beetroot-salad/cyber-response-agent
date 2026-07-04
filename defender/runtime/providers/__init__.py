@@ -8,7 +8,8 @@ registry resolves a model name → provider from each provider's declarative
 
 Public surface (`from defender.runtime import providers; providers.<name>`):
   - `provider_for(name)` / `provider_id_for(name)` — route a model name to its infra
-  - `build(name, role)` — the `BuiltModel(model, settings)` the driver factory returns
+  - `build_for_effort(name, effort)` — the `BuiltModel(model, settings)` the single build
+    site returns; `effort_for_role(name, role)` resolves a role's default effort
   - `api_key_vars()` — every billable key var (run.py sources them, run_env strips them)
   - `PROVIDERS`, `ANTHROPIC`, `FIREWORKS`, `Provider`, `BuiltModel`
 
@@ -66,17 +67,22 @@ def provider_id_for(name: str) -> str:
     return provider_for(name).id
 
 
-def build(name: str, role: AgentRole) -> BuiltModel:
-    """Construct the model for `name` + its per-role settings, paired. The driver's
-    model factory returns this so build sites never re-derive a model's provider."""
-    p = provider_for(name)
-    return BuiltModel(p.build_model(name), p.settings(role))
+def effort_for_role(name: str, role: AgentRole) -> str | None:
+    """The role's default reasoning effort for the infra serving `name`, as a canonical
+    `str | None` (`None` = omit the knob). The top-level router (mirrors `build_for_effort`):
+    routes the name to its provider — failing loud on an unknown name, before any role
+    dispatch — then defers to the provider's own `effort_for_role`. `spec_for_role`
+    reads this to fill `AgentSpec.effort`, so MAIN-on-Anthropic omits effort while
+    MAIN-on-Fireworks caps it at the env-resolved default."""
+    return provider_for(name).effort_for_role(role)
 
 
-def build_for_effort(name: str, effort: str) -> BuiltModel:
-    """Like `build`, but pairs the model with settings for an EXPLICIT reasoning
-    effort (per-invocation config) rather than the role-keyed env defaults — for an
-    agent (the judge) whose effort is config, not a runtime role."""
+def build_for_effort(name: str, effort: str | None) -> BuiltModel:
+    """The single build site: route `name` to its provider, construct the model, and pair
+    it with the settings for `effort` — either a role's resolved default
+    (`effort_for_role(name, role)`) or an agent's explicit per-invocation config (the
+    judge). `effort=None` omits the knob (the canonical omit spelling; `"default"` is also
+    tolerated)."""
     p = provider_for(name)
     return BuiltModel(p.build_model(name), p.settings_for_effort(effort))
 
@@ -94,8 +100,8 @@ __all__ = [
     "BuiltModel",
     "Provider",
     "api_key_vars",
-    "build",
     "build_for_effort",
+    "effort_for_role",
     "provider_for",
     "provider_id_for",
 ]

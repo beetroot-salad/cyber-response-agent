@@ -40,7 +40,6 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import driver  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]  # tests/e2e/ -> tests/ -> defender/
@@ -225,18 +224,31 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
-    plumbing-free. `make_model` is the driver's DI seam; it dispatches on the
-    agent's `AgentRole` so the main loop and a nested gather get distinct fakes,
-    each returned as a `BuiltModel` (settings=None — a FunctionModel needs no
-    provider settings). `override_allow_model_requests(False)` makes any real
+    plumbing-free. `make_model` is the driver's DI seam — now keyed on `(name, effort)`
+    (#493): it dispatches on the model NAME (`driver.gather_model()` marks the nested
+    gather; anything else is the main loop) so the main loop and a nested gather get
+    distinct fakes, each returned as a `BuiltModel` (settings=None — a FunctionModel
+    needs no provider settings). `override_allow_model_requests(False)` makes any real
     provider call raise, so the run is provably hermetic."""
-    main_model = BuiltModel(FunctionModel(main), None)
-    gather_model = BuiltModel(FunctionModel(gather), None) if gather is not None else None
+    main_built = BuiltModel(FunctionModel(main), None)
+    gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
-    def make_model(role):
-        if gather_model is not None and role is not AgentRole.MAIN:
-            return gather_model
-        return main_model
+    # The (name, effort) seam (#493) can only tell the two fakes apart by model NAME, so a
+    # two-fake replay REQUIRES the MAIN and GATHER models to resolve to distinct names. They
+    # do for the defaults (glm-5.2 vs kimi-k2.6); fail loud rather than silently route the
+    # MAIN loop to the gather fake if a fixture/env ever collapses them onto one name (e.g.
+    # DEFENDER_GATHER_MODEL set to match MAIN).
+    if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
+        raise ValueError(
+            "replay harness can't inject distinct main/gather fakes when both resolve to "
+            f"the same model name ({driver.gather_model()!r}); the (name, effort) make_model "
+            "seam keys on the name — set DEFENDER_MODEL / DEFENDER_GATHER_MODEL to differ."
+        )
+
+    def make_model(name, effort):
+        if gather_built is not None and name == driver.gather_model():
+            return gather_built
+        return main_built
 
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(

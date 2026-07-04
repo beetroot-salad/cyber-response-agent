@@ -11,8 +11,8 @@ bare model id) and `prefixes` (e.g. ``"fireworks:"``). The registry (`__init__.p
 resolves a model name to a provider from that data — no per-provider `matches`
 predicate, so there is no first-match ordering fragility.
 
-The heavy pydantic-ai imports live **lazily inside** `build_model`/`settings`, so
-importing this package for routing / key-var metadata (what `run.py` and
+The heavy pydantic-ai imports live **lazily inside** `build_model`/`settings_for_effort`,
+so importing this package for routing / key-var metadata (what `run.py` and
 `run_common.py` need) pulls in no model backend and requires no runtime extra.
 """
 from __future__ import annotations
@@ -52,15 +52,21 @@ class Provider(Protocol):
         """Construct the pydantic-ai model for a name this provider serves."""
         ...
 
-    def settings(self, role: AgentRole) -> ModelSettings | None:
-        """The per-role `ModelSettings` for this provider, or `None` for none."""
+    def effort_for_role(self, role: AgentRole) -> str | None:
+        """The role's default reasoning effort as a canonical `str | None`, where
+        `None` is the single OMIT spelling (fall back to the model's own default).
+        Anthropic exposes no role→effort policy → always `None`; an OpenAI-compatible
+        infra resolves the per-role env knob (`DEFENDER_{MAIN,GATHER}_REASONING_EFFORT`)
+        and normalizes its `default` sentinel to `None`. Paired with `settings_for_effort`
+        it is the whole role→settings path (`settings_for_effort(effort_for_role(role))`)."""
         ...
 
-    def settings_for_effort(self, effort: str) -> ModelSettings | None:
-        """`ModelSettings` for an EXPLICIT per-call reasoning effort, rather than the
-        role-keyed env defaults `settings(role)` derives. For an agent whose effort is
-        per-invocation config (the judge, whose two direction legs run concurrently at
-        possibly different efforts — a single role env can't carry two values). Each
-        provider maps `effort` to its own knob (Anthropic's `anthropic_effort`,
-        OpenAI-compatible's `reasoning_effort`) and fails loud on an unsupported value."""
+    def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
+        """`ModelSettings` for a reasoning effort. `None` (and the tolerated `"default"`
+        string) OMIT the knob; any other value is mapped to the provider's own lever
+        (Anthropic's `anthropic_effort`, OpenAI-compatible's `reasoning_effort`) and an
+        unsupported value fails loud. Fed either the role default (`effort_for_role(role)`,
+        the role→settings path) or an explicit per-invocation effort (the judge, whose two
+        direction legs run concurrently at possibly different efforts — a single role env
+        can't carry two values)."""
         ...

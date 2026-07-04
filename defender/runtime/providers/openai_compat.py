@@ -82,7 +82,7 @@ class OpenAICompatProvider:
             provider=OpenAIProvider(base_url=self.base_url, api_key=api_key),
         )
 
-    def settings(self, role: AgentRole) -> ModelSettings | None:
+    def effort_for_role(self, role: AgentRole) -> str | None:
         # GATHER vs. everything-else(=MAIN): pick the env knob and its default from the
         # SAME branch so a future third AgentRole degrades to the MAIN effort (as the
         # env line already does) instead of KeyError-ing on the `self._effort[role]` lookup.
@@ -93,23 +93,24 @@ class OpenAICompatProvider:
         # operator knob misconfig should surface at startup, not silently forward a
         # bad reasoning_effort to the API — nor, on an empty string, drop the cost cap.
         effort = env_str(env, default, choices=_REASONING_EFFORT_CHOICES)
-        # Role→effort resolution is this method's job; the effort→settings mapping (the
-        # `default`→None sentinel + the extra_body shape) is single-sourced in
-        # settings_for_effort so the role path and the judge's explicit-effort path can
-        # never diverge. `effort` is already validated above, so the delegate won't raise.
-        return self.settings_for_effort(effort)
+        # Normalize the `default` sentinel to None — the single canonical OMIT spelling
+        # (#495), so only one omit value (None) ever reaches AgentSpec.effort. The
+        # EXPLICIT `none` (reasoning disabled — the gather default) is distinct and
+        # survives verbatim: a set knob, not an absent one.
+        return None if effort == "default" else effort
 
-    def settings_for_effort(self, effort: str) -> ModelSettings | None:
-        """Explicit per-call reasoning effort — the same `extra_body.reasoning_effort`
-        shape `settings()` produces, but sourced from the passed value rather than the
-        role env. `default` omits the param. (Reached only once the judge runs on GLM,
-        i.e. Step 2; kept here so the provider protocol is total.)"""
-        if effort not in _REASONING_EFFORT_CHOICES:
+    def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
+        """Explicit reasoning effort → the `extra_body.reasoning_effort` shape. `None`
+        (the canonical omit) and the tolerated `"default"` string both omit the param
+        (fall back to the provider's own full-reasoning default); any other value is
+        validated and forwarded. Used by the collapsed `settings(role)` path and
+        directly by the judge's per-invocation effort config."""
+        if effort is not None and effort not in _REASONING_EFFORT_CHOICES:
             raise ValueError(
                 f"unsupported reasoning_effort {effort!r}; "
                 f"expected one of {_REASONING_EFFORT_CHOICES}"
             )
-        if effort == "default":
+        if effort in (None, "default"):
             return None
         from pydantic_ai.models.openai import OpenAIChatModelSettings
 

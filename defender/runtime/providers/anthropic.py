@@ -39,7 +39,7 @@ class AnthropicProvider:
 
         return AnthropicModel(name.removeprefix(_ANTHROPIC_PREFIX))
 
-    def settings(self, role: AgentRole) -> ModelSettings | None:
+    def _cache_settings(self) -> ModelSettings:
         # Three-part caching (same for every role/claude model). The byte-stable
         # preamble — the SKILL system prompt (~9K tokens, re-sent every request) and
         # the tool schemas — is cached at 1h: it's written ~once and must survive the
@@ -54,7 +54,8 @@ class AnthropicProvider:
         # 3 for explicit ones; instructions(1) + tools(1) = 2, within budget
         # (pydantic-ai trims excess newest-first if it's ever exceeded). Verify via the
         # per-response cache_read/creation token counts already logged in observe.py.
-        # Memoized so the settings object is import-deferred yet identity-stable.
+        # Memoized so the base is import-deferred yet built once (the role-invariant
+        # cache preamble every claude settings object carries).
         if self._cache is None:
             from pydantic_ai.models.anthropic import AnthropicModelSettings
 
@@ -65,14 +66,21 @@ class AnthropicProvider:
             )
         return self._cache
 
-    def settings_for_effort(self, effort: str) -> ModelSettings | None:
-        """Explicit per-call effort → the native `anthropic_effort` knob (the same
-        lever `claude -p --effort` set), on top of the three-part prompt cache. This
-        is the equivalence-critical path for the judge: a BOUNDED effort mirrors what
-        the `claude -p` judge ran under, rather than Sonnet's adaptive-by-default
-        thinking (which, un-capped, both diverges and overruns). `default` omits the
-        override (model default)."""
-        if effort not in _EFFORT_CHOICES:
+    def effort_for_role(self, role: AgentRole) -> str | None:
+        # Anthropic exposes no role→effort policy — the cache preamble is the same for
+        # every role and there is no per-role reasoning knob to cap. `None` omits the
+        # `anthropic_effort` override for both MAIN and GATHER, so the role→settings path
+        # `settings_for_effort(effort_for_role(role))` is cache-only for every role.
+        return None
+
+    def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
+        """Explicit effort → the native `anthropic_effort` knob (the same lever
+        `claude -p --effort` set), on top of the three-part prompt cache. This is the
+        equivalence-critical path for the judge: a BOUNDED effort mirrors what the
+        `claude -p` judge ran under, rather than Sonnet's adaptive-by-default thinking
+        (which, un-capped, both diverges and overruns). `None` (the canonical omit) and
+        the tolerated `"default"` string both omit the override (model default)."""
+        if effort is not None and effort not in _EFFORT_CHOICES:
             raise ValueError(
                 f"unsupported Anthropic effort {effort!r}; expected one of {_EFFORT_CHOICES}"
             )
@@ -80,8 +88,8 @@ class AnthropicProvider:
 
         # Copy the (role-independent) cache settings and add the effort — never mutate
         # the memoized cache object.
-        merged = dict(self.settings(AgentRole.MAIN) or {})
-        if effort != "default":
+        merged = dict(self._cache_settings())
+        if effort not in (None, "default"):
             merged["anthropic_effort"] = effort
         # ** expansion of a widened `dict[str, object]` into a TypedDict is a known mypy
         # limitation; the keys are exactly the cache settings + anthropic_effort.
