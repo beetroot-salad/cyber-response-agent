@@ -123,4 +123,13 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e
     finally:
         logger.close()
-    return str(result.output or "")
+    out = str(result.output or "")
+    if not out.strip():
+        # A reasoning model (GLM@low, the shipped default) can burn its whole budget in the
+        # thinking channel and emit an EMPTY final text part without tripping the request /
+        # usage cap. An empty story or verdict is never valid; quarantine this run (the same
+        # per-run disposition a claude -p stage gets from an empty/failed exit) rather than
+        # letting ``""`` flow on to the oracle/judge — for the actor, is_skip_story("") is
+        # False, so an empty story would otherwise be graded as a real (empty) one.
+        raise RunUnprocessable(f"{stage} ({label}) returned empty output")
+    return out

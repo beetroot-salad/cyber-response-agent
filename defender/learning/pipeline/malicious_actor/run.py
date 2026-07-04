@@ -27,7 +27,14 @@ from defender.learning.core.persist import derive_alert_rule_key
 from defender.learning.core.runner import _section
 from defender.learning.pipeline.malicious_actor import mitre_corpus
 
-_SKIP_SCAN_LINES = 3
+# How many leading non-blank lines to scan for a ``SKIP:`` line. A reasoning model (GLM@low,
+# the shipped default) can prepend a few lines of preamble before the required ``SKIP: …`` line
+# despite the prompt forbidding it, so the window must clear that preamble — a too-tight cap
+# silently misclassifies a real SKIP as a story (it then wastes an oracle+judge pass on a
+# non-story). Kept bounded (not a whole-output scan) so a stray ``SKIP:`` deep inside a real
+# story body can't false-positive; format-agnostic (both directions funnel through here, so it
+# can't anchor on a story-structure marker like Section 0).
+_SKIP_SCAN_LINES = 8
 
 
 def _actor_seed(run_id: str) -> int:

@@ -461,7 +461,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return text
 
         @staticmethod
-        def _prepare_engines_for(_directions):
+        def _prepare_engines_for(_directions, **_kw):  # **_kw: absorbs include_actor=
             pass  # hermetic: no metered key sourced, no engine validation
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
