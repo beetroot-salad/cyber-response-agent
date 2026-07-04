@@ -343,19 +343,18 @@ BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
 BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
-ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
-BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "claude-sonnet-4-6")
-# Story construction was never pinned, so the actor ran at the inherited global
-# `high` default. An effort A/B on a network-tool detection case (n=1/cell) found the
-# response bimodal: medium (~194s) ≈ high (~216s) in wall + thinking, while low
-# (~37s) sharply curtails reasoning. high was *dominated* by medium — medium was
-# both faster and better-grounded (it recovered the real jump-box IP + the
-# monitoring-probe fingerprint that high invented), so high buys nothing. Pinned
-# medium. low stays a 5x-cheaper fallback that still yields coherent (if blunter)
-# stories. Effort drives sophistication, not fact fidelity — that's corpus work.
-# Override via ACTOR_EFFORT.
-ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "medium")
-BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "medium")
+# The actor runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered first-party path,
+# the mirror of the judge migration (both actors share the metered key; oracle/curators stay on
+# claude -p). GLM reasons by default and bills that thinking as output tokens, capped by
+# `reasoning_effort`; `low` is the shipped default (the cheapest coherent tier). NB a prior
+# Sonnet effort A/B found `low` sharply curtails story sophistication (effort drives
+# sophistication, not fact fidelity — that's corpus work), so revisit `medium` if the secondary
+# catch-rate / story quality regresses. Override via ACTOR_MODEL / ACTOR_EFFORT (any provider
+# providers.provider_for routes — e.g. claude-sonnet-4-6 for an A/B).
+ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "glm-5.2")
+BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "glm-5.2")
+ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "low")
+BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
 # Per-lead generative oracle. Generative work — sonnet for content fidelity (per the
 # d2d72ab model decision); effort pinned low since each call sees only its own lead and
 # projects a signed baseline-diff (no cross-lead matching to reason about). Override via
