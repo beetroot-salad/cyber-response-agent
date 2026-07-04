@@ -127,6 +127,18 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     assert orchestrate._run_stage(lambda: orchestrate.author_drain(paths=paths)) == 0
     assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 0
 
+    # Dispatch guard (#513): the lead-author drain resolves the cross-run pitfalls
+    # curation mode by module-name string (_invoke_pitfalls -> _run_curator_module ->
+    # <module>.run_pitfalls). The drains above short-circuit at the wake gate on empty
+    # queues, so they never exercise that resolution; drive it directly. With an empty
+    # pitfalls queue run_pitfalls returns 0 without spawning or touching git, so this
+    # stays green through a correct Part-2 move of run_pitfalls into pitfalls_curator (the
+    # module-name dispatch entry updated in lockstep) and goes red — an AttributeError from
+    # _run_curator_module's `mod.run_pitfalls` — if the code moves but the dispatch is left
+    # pointing at its old home.
+    empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
+    assert orchestrate._invoke_pitfalls(empty) == 0
+
 
 # --- #438 / #443: StageAbort punches through the per-marker quarantine guards ---
 #
