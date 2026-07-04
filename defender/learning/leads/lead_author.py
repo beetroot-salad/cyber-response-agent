@@ -108,7 +108,7 @@ RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
-# Sourced from core.config (single env-read site, no duplicated default — cf. #449).
+# Sourced from core.config (single env-read site, no duplicated default).
 LEAD_AUTHOR_MODEL = _loop_config.LEAD_AUTHOR_MODEL
 LEAD_AUTHOR_TIMEOUT = _loop_config.LEAD_AUTHOR_TIMEOUT
 
@@ -339,6 +339,42 @@ _ALLOWLIST = (
 )
 
 
+def _spawn_author_agent(
+    *,
+    system_prompt_file: Path,
+    batch_id: str,
+    user_prompt: str,
+    repo_root: Path,
+    log_label: str,
+) -> int:
+    """Shared spawn envelope for both lead-author modes; they differ only in
+    ``system_prompt_file`` / ``batch_id`` / the caller-built ``user_prompt``. The agent runs
+    no git and writes no result marker, so this uses the raw runner variant and maps a
+    ``RunnerError`` (timeout / spawn failure) to rc 124 (caller then returns rc=2). ``cwd`` is
+    ``repo_root`` (the batch worktree), so the agent's repo-relative ``rm`` paths resolve under
+    it. ``log_label`` names the spawn in the run log."""
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    _log(f"spawn {log_label} (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
+    options = _author_runner.RunnerOptions(
+        system_prompt_file=system_prompt_file,
+        allowed_tools=_ALLOWLIST,
+        model=LEAD_AUTHOR_MODEL,
+        effort=None,
+        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
+        cwd=repo_root,
+        log_path=RUN_LOG_FILE,
+        result_marker=None,
+        batch_id=batch_id,
+    )
+    try:
+        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
+    except _author_runner.RunnerError as e:
+        _log(f"{log_label} failed: {e}")
+        return 124
+    _log(f"{log_label} exited rc={rc}")
+    return rc
+
+
 def invoke_agent(
     run_dir: Path,
     handoffs: list[dict],
@@ -346,17 +382,8 @@ def invoke_agent(
     *,
     repo_root: Path = REPO_ROOT,
 ) -> int:
-    """Spawn ``claude -p`` via the shared runner with the lead-author prompt. Returns rc.
-
-    Routed through ``_author_runner.invoke_claude_print_raw`` (issue #373) so the lead
-    author shares the one spawn path — select-loop deadline, stderr drain, non-blocking
-    stdin, event teeing to the run log — instead of its own ``subprocess.run``. The agent
-    runs no git and writes no result marker; its edits + ``rm``s sit in the working tree
-    (the source of truth), so it uses the raw variant (no ``AUTHOR_RESULT:`` marker) and
-    maps the runner's timeout to rc 124 so ``_run_locked`` returns rc=2 and the drain
-    quarantines the marker. ``repo_root`` is the batch worktree (the drain
-    passes ``deps.paths.repo_root``) and becomes the agent's cwd, so its repo-relative
-    ``rm`` paths resolve under it — no worktree-absolute matcher is needed."""
+    """Spawn ``claude -p`` via ``_spawn_author_agent`` with the lead-author prompt. Returns
+    rc (124 on a runner timeout / spawn failure). ``repo_root`` is the batch worktree."""
     pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
@@ -367,26 +394,13 @@ def invoke_agent(
         f"pending_system_drafts ({len(pending_drafts)}):\n"
         f"{json.dumps(pending_drafts, indent=2)}\n"
     )
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    _log(f"spawn claude (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
-    options = _author_runner.RunnerOptions(
+    return _spawn_author_agent(
         system_prompt_file=LEAD_AUTHOR_PROMPT,
-        allowed_tools=_ALLOWLIST,
-        model=LEAD_AUTHOR_MODEL,
-        effort=None,
-        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
-        cwd=repo_root,
-        log_path=RUN_LOG_FILE,
-        result_marker=None,
         batch_id=run_dir.name,
+        user_prompt=user_prompt,
+        repo_root=repo_root,
+        log_label="claude",
     )
-    try:
-        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
-    except _author_runner.RunnerError as e:
-        _log(f"claude failed: {e}")
-        return 124
-    _log(f"claude exited rc={rc}")
-    return rc
 
 
 # ---------------------------------------------------------------------------
@@ -394,77 +408,94 @@ def invoke_agent(
 # ---------------------------------------------------------------------------
 
 
-def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
-    """Verify the agent's uncommitted edits before the loop commits + writes ``done``.
-
-    The agent runs no git, so its edits sit in the working tree. One ``git status`` read
-    (``_porcelain_records``) drives every check; returns the in-scope changed paths (for
-    the commit message). Raises ``LeadAuthorError`` — the drain quarantines the marker — on:
-      * a NEW change outside ``defender/skills/``*.md (stray ``Write`` / improvised shim),
-        diffed against ``baseline_stray`` captured before the agent ran so pre-existing
-        leftovers aren't blamed on it;
-      * an in-skills change outside lead_author's scope (not catalog / system ``SKILL.md`` /
-        ``_draft/``), or a ``_draft/README.md`` / catalog ``SCHEMA.md`` mutation;
-      * a deletion of a non-draft established template or ``SKILL.md`` — delete-prohibition,
-        which also covers a demotion (rm-established + write-draft shows the ``D`` here);
-      * a half-promote — an established catalog template written while its ``_draft/`` twin
-        still exists on disk (the promote's ``rm`` never happened). This one is invisible to
-        the records-only checks above: the surviving draft is *unchanged*, so it isn't in
-        ``git status`` at all — only a filesystem probe of the twin sees it.
-    """
+def _verify_corpus_scope(
+    repo_root: Path,
+    baseline_stray: list[str],
+    *,
+    actor: str,
+    rule: Callable[[str, str], None],
+) -> list[str]:
+    """Shared verify preamble for both commit modes. One ``git status`` read drives every
+    check. Rejects any NEW change outside ``defender/skills/``*.md (diffed against
+    ``baseline_stray`` so pre-existing leftovers aren't blamed on the agent). This stray-gate
+    runs BEFORE the per-path loop, so a run that both strays and breaks an in-corpus rule is
+    rejected as a stray. Then applies the per-mode ``rule`` to each in-corpus change and
+    returns the accepted paths ``sorted``. ``actor`` names the culprit in the stray error."""
     records = _porcelain_records(repo_root)
 
     def _in_corpus(p: str) -> bool:
         return p.startswith(SKILLS_REL) and p.endswith(".md")
 
-    strays = sorted({p for _, p in records if not _in_corpus(p)})
-    new_stray = sorted(set(strays) - set(baseline_stray))
+    new_stray = sorted({p for _, p in records if not _in_corpus(p)} - set(baseline_stray))
     if new_stray:
         raise LeadAuthorError(
-            f"agent changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
+            f"{actor} changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
         )
-
     changed: list[str] = []
     for xy, path in records:
         if not _in_corpus(path):
             continue  # non-corpus strays already rejected above
-        if not _is_in_scope(path):
-            raise LeadAuthorError(
-                f"agent edited an out-of-scope skills path ({path}); refusing to commit"
-            )
-        if _is_draft_readme(path) or _is_schema_md(path):
-            raise LeadAuthorError(
-                f"agent mutated a protected surface file ({path}); refusing to commit"
-            )
-        if "D" in xy and not (_under_draft(path) or _is_system_skill_draft(path)):
-            raise LeadAuthorError(
-                f"agent deleted an established template / SKILL.md ({path}); refusing to "
-                "commit (delete-prohibition; a demotion is rejected the same way)"
-            )
-        # Half-promote: an established catalog template was written (promote target, or an
-        # in-place fold of an existing template) but its ``_draft/`` twin still exists, so
-        # the promote's ``rm`` didn't happen and we'd commit both. (A delete already raised
-        # above, so this path is a non-delete write; a plain fold has no twin on disk, so it
-        # never trips.) The surviving draft is unchanged ⇒ not in ``records`` ⇒ the only
-        # signal is the filesystem.
-        if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
-            twin = _draft_twin(path)
-            if (repo_root / twin).exists():
-                raise LeadAuthorError(
-                    f"half-promote: established template {path} was written but its draft "
-                    f"twin {twin} still exists; refusing to commit (the promote's `rm` "
-                    "didn't happen — established + draft would both land)"
-                )
+        rule(xy, path)
         changed.append(path)
     return sorted(changed)
 
 
-def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
-    """Deterministic loop-authored commit message — the agent runs no git and authors no
-    message. Title names the scope touched + the source run; body lists the changed paths.
+def _skills_path_rule(repo_root: Path, xy: str, path: str) -> None:
+    """Per-path scope rule for the per-run lead author. Raises ``LeadAuthorError`` on: an
+    out-of-scope skills path or a ``_draft/README.md`` / catalog ``SCHEMA.md`` mutation; a
+    deletion of a non-draft established template or ``SKILL.md`` (delete-prohibition, which
+    also covers a demotion); or a half-promote — an established catalog template written while
+    its ``_draft/`` twin still exists on disk (the promote's ``rm`` didn't happen, so both
+    would land). The half-promote is invisible to the ``git status`` records — the surviving
+    draft is unchanged — so only a filesystem probe of the twin catches it."""
+    if not _is_in_scope(path):
+        raise LeadAuthorError(
+            f"agent edited an out-of-scope skills path ({path}); refusing to commit"
+        )
+    if _is_draft_readme(path) or _is_schema_md(path):
+        raise LeadAuthorError(
+            f"agent mutated a protected surface file ({path}); refusing to commit"
+        )
+    if "D" in xy and not (_under_draft(path) or _is_system_skill_draft(path)):
+        raise LeadAuthorError(
+            f"agent deleted an established template / SKILL.md ({path}); refusing to "
+            "commit (delete-prohibition; a demotion is rejected the same way)"
+        )
+    if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
+        twin = _draft_twin(path)
+        if (repo_root / twin).exists():
+            raise LeadAuthorError(
+                f"half-promote: established template {path} was written but its draft "
+                f"twin {twin} still exists; refusing to commit (the promote's `rm` "
+                "didn't happen — established + draft would both land)"
+            )
 
+
+def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+    """Verify the per-run agent's uncommitted edits before the loop commits. Routes the shared
+    preamble through ``_verify_corpus_scope`` and the per-path contract through
+    ``_skills_path_rule``; returns the in-scope changed paths."""
+    return _verify_corpus_scope(
+        repo_root, baseline_stray, actor="agent",
+        rule=functools.partial(_skills_path_rule, repo_root),
+    )
+
+
+def _loop_commit_body(
+    title: str, summary: str, changed: list[str], *, trailer: str = "",
+) -> str:
+    """Shared loop-authored commit-message skeleton: a ``title`` line, a ``summary``
+    paragraph, a bulleted ``Paths:`` block over ``changed``, and an optional ``trailer``.
     (Distinct from ``_author_shared._commit_message``, which *extracts* the agent-authored
-    message for the lessons curators — opposite direction; named apart to avoid confusion.)"""
+    message — opposite direction.)"""
+    body_paths = "\n".join(f"- {p}" for p in changed)
+    return f"{title}\n\n{summary}\n\nPaths:\n{body_paths}\n{trailer}"
+
+
+def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
+    """Deterministic loop-authored commit message for the per-run catalog/skill fold. Title
+    names the scope touched (a 3-way branch: gather catalog / system skills / both) + the
+    source run; body lists the changed paths; a ``source-run:`` trailer closes it."""
     has_catalog = any(_is_catalog_path(p) for p in changed)
     has_skill = any(_is_system_skill_md(p) or _is_system_skill_draft(p) for p in changed)
     if has_catalog and has_skill:
@@ -473,12 +504,11 @@ def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
         scope = "system skills"
     else:
         scope = "gather catalog"
-    body_paths = "\n".join(f"- {p}" for p in changed)
-    return (
-        f"learning(lead-author): {scope} for {run_dir.name}\n\n"
-        "Curated by the lead author; loop-committed (the agent runs no git).\n\n"
-        f"Paths:\n{body_paths}\n\n"
-        f"source-run: {run_dir.name}\n"
+    return _loop_commit_body(
+        f"learning(lead-author): {scope} for {run_dir.name}",
+        "Curated by the lead author; loop-committed (the agent runs no git).",
+        changed,
+        trailer=f"\nsource-run: {run_dir.name}\n",
     )
 
 
@@ -528,81 +558,55 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
 
 
 def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
-    """Spawn the pitfalls curator via the shared runner. Mirrors ``invoke_agent``:
-    raw variant (no result marker), timeout → rc 124, cwd at the batch worktree.
-    The coarse ``_ALLOWLIST`` (Edit/Write ``defender/skills/**``) already covers
-    execution.md; the ``rm`` grant goes unused (the curator only edits)."""
+    """Spawn the pitfalls curator via ``_spawn_author_agent``. The coarse ``_ALLOWLIST``
+    (Edit/Write ``defender/skills/**``) already covers execution.md; the ``rm`` grant goes
+    unused (the curator only edits)."""
     user_prompt = (
         f"skills_dir: {SKILLS_REL}\n"
         f"pitfalls_handoffs ({len(handoffs)}):\n"
         f"{json.dumps(handoffs, indent=2)}\n"
     )
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    _log(f"spawn pitfalls curator (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
-    options = _author_runner.RunnerOptions(
+    return _spawn_author_agent(
         system_prompt_file=LEAD_PITFALLS_PROMPT,
-        allowed_tools=_ALLOWLIST,
-        model=LEAD_AUTHOR_MODEL,
-        effort=None,
-        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
-        cwd=repo_root,
-        log_path=RUN_LOG_FILE,
-        result_marker=None,
         batch_id="pitfalls",
+        user_prompt=user_prompt,
+        repo_root=repo_root,
+        log_label="pitfalls curator",
     )
-    try:
-        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
-    except _author_runner.RunnerError as e:
-        _log(f"pitfalls curator failed: {e}")
-        return 124
-    _log(f"pitfalls curator exited rc={rc}")
-    return rc
+
+
+def _pitfalls_path_rule(xy: str, path: str) -> None:
+    """Per-path scope rule for the pitfalls curator: the ONLY permitted in-corpus change is an
+    edit to a system ``execution.md``. Raises ``LeadAuthorError`` on any other skills path or
+    on a deletion (execution.md is pruned in place, never removed)."""
+    if not _is_system_execution_md(path):
+        raise LeadAuthorError(
+            f"pitfalls curator edited a non-execution.md skills path ({path}); "
+            "refusing to commit (its scope is execution.md only)"
+        )
+    if "D" in xy:
+        raise LeadAuthorError(
+            f"pitfalls curator deleted {path}; refusing to commit "
+            "(execution.md is pruned in place, never removed)"
+        )
 
 
 def _verify_pitfalls_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
-    """Verify the curator's working-tree edits before the loop commits. Narrower
-    than ``_verify_skills_state``: the ONLY in-corpus change permitted is an edit
-    to a system ``execution.md``. Returns the changed paths; raises
-    ``LeadAuthorError`` (the drain quarantines) on a stray outside
-    ``defender/skills/``*.md, any other skills path, or a deletion (execution.md
-    is pruned in place, never removed)."""
-    records = _porcelain_records(repo_root)
-
-    def _in_corpus(p: str) -> bool:
-        return p.startswith(SKILLS_REL) and p.endswith(".md")
-
-    new_stray = sorted({p for _, p in records if not _in_corpus(p)} - set(baseline_stray))
-    if new_stray:
-        raise LeadAuthorError(
-            f"pitfalls curator changed files outside {SKILLS_REL}*.md: {new_stray}; "
-            "refusing to commit"
-        )
-    changed: list[str] = []
-    for xy, path in records:
-        if not _in_corpus(path):
-            continue
-        if not _is_system_execution_md(path):
-            raise LeadAuthorError(
-                f"pitfalls curator edited a non-execution.md skills path ({path}); "
-                "refusing to commit (its scope is execution.md only)"
-            )
-        if "D" in xy:
-            raise LeadAuthorError(
-                f"pitfalls curator deleted {path}; refusing to commit "
-                "(execution.md is pruned in place, never removed)"
-            )
-        changed.append(path)
-    return sorted(changed)
+    """Verify the curator's working-tree edits before the loop commits. Routes the shared
+    preamble through ``_verify_corpus_scope`` and the per-path contract through
+    ``_pitfalls_path_rule``; returns the changed paths."""
+    return _verify_corpus_scope(
+        repo_root, baseline_stray, actor="pitfalls curator", rule=_pitfalls_path_rule,
+    )
 
 
 def _pitfalls_commit_message(changed: list[str]) -> str:
-    """Deterministic loop-authored message for the execution.md fold."""
-    body_paths = "\n".join(f"- {p}" for p in changed)
-    return (
-        "learning(lead-author): execution.md pitfalls\n\n"
+    """Deterministic loop-authored message for the execution.md fold (fixed title)."""
+    return _loop_commit_body(
+        "learning(lead-author): execution.md pitfalls",
         "Folded agent-fixable general failures into per-system execution.md "
-        "## Common pitfalls; loop-committed (the agent runs no git).\n\n"
-        f"Paths:\n{body_paths}\n"
+        "## Common pitfalls; loop-committed (the agent runs no git).",
+        changed,
     )
 
 
@@ -707,8 +711,8 @@ def _write_state(path: Path, content: str) -> None:
 class LeadAuthorDeps:
     """Injected collaborators for ``run`` — the spawn, the leaf I/O helpers, and the
     queue-lock pair — plus the filesystem ``paths``. Defaults to production via
-    ``build_lead_author_deps``; tests pass fakes (``dataclasses.replace``) instead of
-    monkeypatching lead_author's own functions (the SUT-patching #374 removes)."""
+    ``build_lead_author_deps``; tests pass fakes (``dataclasses.replace``) rather than
+    monkeypatching lead_author's own functions."""
     paths: _loop_config.LoopPaths
     invoke_agent: Callable[..., int]
     extract: Callable[[Path], tuple[list, list[ExecutedLead]]]

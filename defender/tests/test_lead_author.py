@@ -1114,3 +1114,276 @@ def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path
     ]
     out = lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)
     assert out == []
+
+
+# ===========================================================================
+# #455 Part 1 — behavior-preservation spec for the invoke / verify / commit fold
+# ===========================================================================
+#
+# These pin the observable behavior of the three wrapper *pairs* that the dedup
+# collapses onto shared helpers (`_verify_corpus_scope`, one spawn envelope, one
+# commit-message builder). They characterize CURRENT behavior — they pass against
+# HEAD today — and must stay green after the fold; the public function names + two-
+# arg signatures survive as thin wrappers, so every test binds at that public seam.
+# Fork resolutions (see PR discussion): stray message asserts only the shared
+# "outside" (the fold may unify the per-mode wording); commit messages assert
+# load-bearing substrings, not an exact golden string.
+
+
+# ---------------------------------------------------------------------------
+# verify fold — the shared preamble (stray-gate) runs before the per-path loop,
+# and the returned in-corpus change list is sorted. (Single-violation branches are
+# already covered above; these pin the cross-cutting behavior the extraction risks.)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
+    """A stray edit AND an in-corpus deletion together → the stray-gate error
+    ('outside') is raised, proving the preamble runs before the per-path loop (a
+    loop-first order would surface 'delete-prohibition', which lacks 'outside')."""
+    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
+    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()  # delete-prohibition
+    with pytest.raises(lead_author.LeadAuthorError, match="outside"):
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
+    """Pitfalls mode: a stray edit AND an in-corpus non-execution.md edit → the
+    stray-gate error ('outside') is raised, not the 'non-execution.md' loop error."""
+    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
+    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
+    skill.write_text(skill.read_text() + "\nedit\n")  # in-corpus, non-execution.md
+    with pytest.raises(lead_author.LeadAuthorError, match="outside"):
+        lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
+    """Two in-scope edits whose paths interleave ACROSS git's status-class boundary →
+    the returned list is sorted (path order, not git-status order). This discriminates
+    `return sorted(changed)`: git lists all changed-class records before all
+    untracked-class ones (each class internally sorted), so a modified catalog file
+    (`.../gather/...`, sorts LATE) precedes an untracked system draft
+    (`.../elastic/...`, sorts EARLY) in raw git order — only `sorted()` flips them.
+    A regression to `return changed` would return git order and fail this."""
+    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
+        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"  # tracked → " M"
+    )
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
+        "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"  # untracked → "??"
+    )
+    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
+    assert changed == [
+        "defender/skills/elastic/_draft/aa-new.md",
+        "defender/skills/gather/queries/wazuh/auth-events.md",
+    ]
+
+
+def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
+    """Two execution.md edits that interleave across git's status-class boundary → the
+    returned list is sorted, discriminating `return sorted(changed)`: a tracked-modified
+    `elastic/execution.md` (changed class, sorts LATE) is listed by git BEFORE an
+    untracked `cmdb/execution.md` (untracked class, sorts EARLY), so only `sorted()`
+    yields [cmdb, elastic]. A regression to `return changed` returns [elastic, cmdb]."""
+    # Commit elastic/execution.md so its later edit lands in the changed class.
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
+    _run_git(tmp_git_repo, "add", "defender/skills/elastic/execution.md")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "seed execution.md")
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
+        "# e edited\n"  # tracked, modified → " M" (sorts LATE)
+    )
+    (tmp_git_repo / "defender" / "skills" / "cmdb").mkdir(parents=True)
+    (tmp_git_repo / "defender" / "skills" / "cmdb" / "execution.md").write_text(
+        "# c\n"  # untracked → "??" (sorts EARLY)
+    )
+    changed = lead_author._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+    assert changed == [
+        "defender/skills/cmdb/execution.md",
+        "defender/skills/elastic/execution.md",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# invoke fold — the two spawns differ only in prompt content + system_prompt_file +
+# batch_id; both map a RunnerError to rc 124 and pass through a non-124 rc. The
+# `_invoke_pitfalls_agent` body is otherwise never exercised (run_pitfalls injects a
+# fake), so the fold could drift it invisibly without these.
+# ---------------------------------------------------------------------------
+
+
+def _capture_invoke(monkeypatch, *, rc: int = 0, text: str = "", raise_exc=None):
+    """Patch the shared-runner seam (the same file+target as
+    test_invoke_agent_includes_pending_drafts_in_prompt — already baselined) and
+    capture the RunnerOptions + user_prompt the invoke wrapper built."""
+    cap: dict = {}
+
+    def _fake_raw(options, user_prompt, log_fn):
+        cap["options"] = options
+        cap["prompt"] = user_prompt
+        if raise_exc is not None:
+            raise raise_exc
+        return rc, text
+
+    monkeypatch.setattr(
+        lead_author._author_runner, "invoke_claude_print_raw", _fake_raw
+    )
+    return cap
+
+
+def test_invoke_pitfalls_agent_prompt_content(tmp_path: Path, monkeypatch):
+    """The pitfalls prompt carries skills_dir + pitfalls_handoffs and NONE of the
+    per-run keys (run_dir / catalog_dir / executed_template_handoffs)."""
+    cap = _capture_invoke(monkeypatch)
+    handoffs = [{"system": "elastic",
+                 "execution_md_path": "defender/skills/elastic/execution.md",
+                 "failures": []}]
+    rc = lead_author._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
+    assert rc == 0
+    prompt = cap["prompt"]
+    assert "pitfalls_handoffs (1)" in prompt
+    assert "skills_dir: defender/skills/" in prompt
+    assert "run_dir" not in prompt
+    assert "catalog_dir" not in prompt
+    assert "executed_template_handoffs" not in prompt
+
+
+def test_invoke_pitfalls_agent_options_wired(tmp_path: Path, monkeypatch):
+    """RunnerOptions for the pitfalls spawn: the pitfalls prompt file, the 'pitfalls'
+    batch id, cwd at the injected repo_root, and the shared model/timeout/allowlist."""
+    cap = _capture_invoke(monkeypatch)
+    lead_author._invoke_pitfalls_agent([], repo_root=tmp_path)
+    opt = cap["options"]
+    assert opt.system_prompt_file == lead_author.LEAD_PITFALLS_PROMPT
+    assert opt.batch_id == "pitfalls"
+    assert opt.cwd == tmp_path
+    assert opt.result_marker is None
+    assert opt.effort is None
+    assert opt.model == lead_author.LEAD_AUTHOR_MODEL
+    assert opt.timeout_seconds == lead_author.LEAD_AUTHOR_TIMEOUT
+    assert opt.allowed_tools == lead_author._ALLOWLIST
+
+
+def test_invoke_agent_options_wired(run_dir: Path, tmp_path: Path, monkeypatch):
+    """RunnerOptions for the per-run spawn: the lead-author prompt file, the run-dir-
+    named batch id, and cwd at the injected repo_root (distinguishing it from pitfalls)."""
+    cap = _capture_invoke(monkeypatch)
+    lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
+    opt = cap["options"]
+    assert opt.system_prompt_file == lead_author.LEAD_AUTHOR_PROMPT
+    assert opt.batch_id == run_dir.name
+    assert opt.cwd == tmp_path
+    assert opt.result_marker is None
+
+
+def test_invoke_agent_runner_error_maps_to_124(run_dir: Path, tmp_path: Path, monkeypatch):
+    """A RunnerError (spawn/timeout) from the shared runner → invoke_agent returns 124."""
+    _capture_invoke(monkeypatch, raise_exc=lead_author._author_runner.RunnerError("boom"))
+    assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 124
+
+
+def test_invoke_pitfalls_agent_runner_error_maps_to_124(tmp_path: Path, monkeypatch):
+    """Same RunnerError → 124 mapping for the pitfalls spawn."""
+    _capture_invoke(monkeypatch, raise_exc=lead_author._author_runner.RunnerError("boom"))
+    assert lead_author._invoke_pitfalls_agent([], repo_root=tmp_path) == 124
+
+
+def test_invoke_agent_passes_through_nonzero_rc(run_dir: Path, tmp_path: Path, monkeypatch):
+    """A non-124 non-zero rc from the runner is returned unchanged (not remapped)."""
+    _capture_invoke(monkeypatch, rc=2)
+    assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 2
+
+
+def test_invoke_pitfalls_agent_passes_through_nonzero_rc(tmp_path: Path, monkeypatch):
+    """Pitfalls spawn likewise returns a non-124 non-zero rc unchanged."""
+    _capture_invoke(monkeypatch, rc=2)
+    assert lead_author._invoke_pitfalls_agent([], repo_root=tmp_path) == 2
+
+
+# ---------------------------------------------------------------------------
+# commit-message fold — the loop message's 3-way scope selection + trailer, and the
+# fixed pitfalls message. Pure functions; asserted by structural substring (fork #2).
+# ---------------------------------------------------------------------------
+
+
+def test_loop_commit_message_catalog_only_scope():
+    """Only catalog paths changed → scope 'gather catalog' (never 'system skills')."""
+    msg = lead_author._loop_commit_message(
+        Path("run-123"), ["defender/skills/gather/queries/wazuh/auth-events.md"]
+    )
+    assert "gather catalog for run-123" in msg
+    assert "system skills" not in msg
+
+
+def test_loop_commit_message_skill_md_only_scope():
+    """Only a system SKILL.md changed → scope 'system skills' (never 'gather catalog')."""
+    msg = lead_author._loop_commit_message(
+        Path("run-123"), ["defender/skills/elastic/SKILL.md"]
+    )
+    assert "learning(lead-author): system skills for run-123" in msg
+    assert "gather catalog" not in msg
+
+
+def test_loop_commit_message_system_draft_counts_as_skill():
+    """A system-skill _draft (not a catalog path) counts as 'system skills' scope."""
+    msg = lead_author._loop_commit_message(
+        Path("run-123"), ["defender/skills/elastic/_draft/falco-na.md"]
+    )
+    assert "system skills" in msg
+    assert "gather catalog" not in msg
+
+
+def test_loop_commit_message_mixed_scope():
+    """Catalog + skill together → scope 'gather catalog + system skills'."""
+    msg = lead_author._loop_commit_message(
+        Path("run-123"),
+        [
+            "defender/skills/gather/queries/wazuh/auth-events.md",
+            "defender/skills/elastic/SKILL.md",
+        ],
+    )
+    assert "gather catalog + system skills" in msg
+
+
+def test_loop_commit_message_lists_paths_and_source_run_trailer():
+    """Body lists each changed path as '- {p}' in order; trailer carries source-run."""
+    changed = [
+        "defender/skills/gather/queries/wazuh/a.md",
+        "defender/skills/gather/queries/wazuh/b.md",
+    ]
+    msg = lead_author._loop_commit_message(Path("run-123"), changed)
+    # Pin the byte structure the fold risks (the shared skeleton's `\n\n` separators and
+    # the trailer's leading `\n`), not just loose substrings — a `\n\n`→`\n` collapse or a
+    # trailer glued onto the last path line must fail here (fork #2: structural substrings,
+    # not a full golden string).
+    assert "git).\n\nPaths:\n- defender/skills/gather/queries/wazuh/a.md\n" in msg
+    assert (
+        "- defender/skills/gather/queries/wazuh/a.md\n"
+        "- defender/skills/gather/queries/wazuh/b.md\n"
+        "\nsource-run: run-123\n"
+    ) in msg
+
+
+def test_loop_commit_message_empty_changed_renders():
+    """The loop message is built unconditionally (even for an empty change set) —
+    it must render (no catalog/skill ⇒ 'gather catalog') rather than crash."""
+    msg = lead_author._loop_commit_message(Path("run-123"), [])
+    assert "gather catalog for run-123" in msg
+    # Even with no paths, the trailer keeps its blank-line separator (`\n\nsource-run:`).
+    assert "\n\nsource-run: run-123\n" in msg
+
+
+def test_pitfalls_commit_message_title_and_body():
+    """Fixed 'execution.md pitfalls' title; body lists each changed path as '- {p}'."""
+    msg = lead_author._pitfalls_commit_message(
+        ["defender/skills/elastic/execution.md", "defender/skills/cmdb/execution.md"]
+    )
+    assert "learning(lead-author): execution.md pitfalls" in msg
+    # Pin the summary→Paths `\n\n`, the inter-path `\n` join, and the trailing `\n` — the
+    # per-path substrings alone would still pass if a joining newline were dropped.
+    assert (
+        "git).\n\n"
+        "Paths:\n"
+        "- defender/skills/elastic/execution.md\n"
+        "- defender/skills/cmdb/execution.md\n"
+    ) in msg
