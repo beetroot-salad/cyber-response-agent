@@ -17,7 +17,6 @@ from defender.learning.core.config import (
     RunUnprocessable,
     REPO_ROOT,
     SUBAGENT_TIMEOUT,
-    _log,
     subscription_env,
 )
 
