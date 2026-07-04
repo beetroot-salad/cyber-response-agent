@@ -14,7 +14,8 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +73,8 @@ DEFAULT_TOOL_RETRIES = 10
 
 # Per-provider model construction + per-role ModelSettings (Anthropic prompt cache /
 # Fireworks reasoning_effort) live in `runtime/providers/`. The driver stays
-# provider-neutral: the factory calls `providers.build(name, role)` → a BuiltModel.
+# provider-neutral: `build_agent_core` resolves a model via the `(name, effort)`
+# `make_model` seam (`providers.build_for_effort`) → a BuiltModel.
 
 
 def _main_instructions(defender_dir: Path) -> str:
@@ -148,65 +150,91 @@ def gather_model() -> str:
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_GATHER_MODEL
 
 
-# Model-construction seam: tests inject fake models (pydantic-ai's FunctionModel)
-# by returning a BuiltModel from `make_model` instead of patching a model symbol.
-# The factory is keyed on `AgentRole` ALONE — the role is the single discriminator,
-# sourced from each deps type's `role` ClassVar (the same value the permission gate
-# reads, so model and gate dispatch can't drift) — and it owns the role->model
-# policy, so build sites never thread a model name. `providers.build` picks the
-# serving infra from the name (Anthropic for `claude-*`; Fireworks for a
-# `fireworks:`/glm/kimi id) and pairs the model with its per-role settings.
-ModelFactory = Callable[[AgentRole], BuiltModel]
+# The single agent-construction unit + site (#493). `AgentSpec` is the per-agent
+# CONFIG (model + optional effort + the one build-time permission bit, writers);
+# `build_agent_core` is the ONE `Agent(...)` site every caller funnels through (MAIN,
+# GATHER, and — via a thin wrapper — the JUDGE), collapsing three near-duplicate build
+# sites into one. `logger` / `agent_id` stay separate params, NOT spec fields: they're
+# per-run / per-dispatch observability wiring (one shared RequestLogger fans across
+# main + N gathers, keyed by agent_id), not static config.
 
 
-def _make_default_factory(main_model_name: str) -> ModelFactory:
-    """The production model factory: MAIN runs `main_model_name` (run.py's
-    `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
-    gather model (`gather_model()`; Kimi K2.6, `$DEFENDER_GATHER_MODEL` overrides).
-    `providers.build` picks the serving infra from the name; tests replace the
-    whole factory."""
-    def make(role: AgentRole) -> BuiltModel:
-        name = main_model_name if role is AgentRole.MAIN else gather_model()
-        return providers.build(name, role)
-    return make
+@dataclass(frozen=True)
+class AgentSpec:
+    """The per-agent construction config. `effort=None` OMITS the reasoning knob (the
+    model's own default — the canonical omit spelling); `writers=False` is the SAFE,
+    read-only default (only MAIN opts into the file writers). Frozen so an agent's
+    config can't drift after construction."""
+
+    model: str
+    effort: str | None = None
+    writers: bool = False
+
+
+# The model-construction seam: `(name, effort) -> BuiltModel`. Tests inject a fake (a
+# pydantic-ai FunctionModel wrapped in a BuiltModel) instead of patching a model symbol;
+# production passes `providers.build_for_effort`, which routes the name to its serving
+# infra (Anthropic for `claude-*`; Fireworks for a `fireworks:`/glm/kimi id) and pairs
+# the model with its effort settings. (Was role-keyed; #493 re-keyed it on (name, effort)
+# so the one build site never re-derives a model's provider from a role.)
+MakeModel = Callable[[str, str | None], BuiltModel]
+
+
+def build_agent_core(
+    spec: AgentSpec,
+    *,
+    deps_type: type,
+    instructions: str,
+    logger: observe.RequestLogger,
+    agent_id: str,
+    extra_capabilities: Sequence[Any] = (),
+    make_model: MakeModel = providers.build_for_effort,
+) -> Agent[Any, str]:
+    """Construct one agent + register its generic tool slice — the single build site.
+
+    Resolves the model via `make_model(spec.model, spec.effort)`; wires the shared
+    budget/observability hooks FIRST (so observability wraps any capability-rewritten
+    request) then `extra_capabilities` (MAIN's compaction ProcessHistory; the empty
+    default keeps a no-capability build byte-identical); and registers the generic
+    tools gated by `spec.writers`. Layered per-caller extras (MAIN's `gather` dispatch
+    tool) stay at the call site — they are not construction. No defensive catch: a
+    `make_model` fault (unroutable name / missing key / bad effort) surfaces at the
+    build, not as a half-built agent that 401s mid-run."""
+    built = make_model(spec.model, spec.effort)
+    agent: Agent[Any, str] = Agent(
+        built.model,
+        deps_type=deps_type,
+        instructions=instructions,
+        capabilities=[_make_hooks(logger, agent_id), *extra_capabilities],
+        model_settings=built.settings,
+        retries=DEFAULT_TOOL_RETRIES,
+    )
+    register_tools(agent, writers=spec.writers)
+    return agent
+
+
+def spec_for_role(role: AgentRole, main_model: str | None = None) -> AgentSpec:
+    """The MAIN / GATHER spec producer — role → `AgentSpec` (the role's own model, its
+    role-default effort, its writers policy). MAIN runs `main_model` (resolved via
+    `resolve_main_model`) and opts into writers; GATHER IGNORES the main model and runs
+    its own cheaper `gather_model()`, read-only — passing the main model must not leak
+    into the gather spec. Effort comes from `providers.effort_for_role(name, role)`, so
+    MAIN-on-Anthropic omits effort (stays uncapped, exactly as today) while
+    MAIN-on-Fireworks caps at the env default. (The judge is not role-keyed — it builds
+    its `AgentSpec` from per-direction-leg config directly.)"""
+    if role is AgentRole.MAIN:
+        name = resolve_main_model(main_model)
+        return AgentSpec(name, providers.effort_for_role(name, role), writers=True)
+    name = gather_model()
+    return AgentSpec(name, providers.effort_for_role(name, role), writers=False)
 
 
 def resolve_main_model(explicit: str | None = None) -> str:
     """The MAIN-agent model name: an explicit override (run.py's ``--model``), else
     ``$DEFENDER_MODEL``, else ``DEFAULT_MODEL``. The single read of ``DEFENDER_MODEL`` —
-    every entry point (run.py, ``_env_make_model``, ``run_investigation``) routes through
+    every entry point (run.py, ``spec_for_role``, ``run_investigation``) routes through
     here so the env var and its default don't get re-read with drifting fallbacks."""
     return explicit or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
-
-
-# Default for direct `build_*` callers without an explicit main-model override:
-# resolve the main model from the environment (run.py's flagless path).
-def _env_make_model(role: AgentRole) -> BuiltModel:
-    return _make_default_factory(resolve_main_model())(role)
-
-
-def _build_subagent(
-    defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
-    instructions: str, make_model: ModelFactory = _env_make_model,
-) -> Agent[GatherDeps, str]:
-    """A nested subagent with the read-only slice of the generic tools (bash +
-    read_file; the bash tool auto-captures the gather's adapter calls under the
-    `GATHER` role). `writers=False`: this subagent measures and returns a
-    summary — it never authors investigation.md/report.md, so denying it
-    write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
-    the lead/measurement. The system prompt (`instructions`) + the factory's
-    GATHER-role model specialize the instance into the gather (Kimi K2.6 by default)."""
-    built = make_model(GatherDeps.role)
-    agent = Agent(
-        built.model,
-        deps_type=GatherDeps,
-        instructions=instructions,
-        capabilities=[_make_hooks(logger, agent_id)],
-        model_settings=built.settings,
-        retries=DEFAULT_TOOL_RETRIES,
-    )
-    register_tools(agent, writers=False)
-    return agent
 
 
 def _gather_instructions(defender_dir: Path) -> str:
@@ -215,16 +243,24 @@ def _gather_instructions(defender_dir: Path) -> str:
 
 def build_gather_agent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
-    make_model: ModelFactory = _env_make_model,
+    make_model: MakeModel = providers.build_for_effort,
 ) -> Agent[GatherDeps, str]:
-    """The single-agent gather (#340) — the production gather for the
-    PydanticAI engine. One agent runs find→execute(one server-side ES|QL
-    aggregation)→verify and auto-captures its own adapter calls (no finder/executor
-    split). Loads `skills/gather/SKILL.md`. The factory resolves the GATHER-role
-    model (`gather_model()`; GLM, `DEFENDER_GATHER_MODEL` overrides)."""
-    return _build_subagent(
-        defender_dir, logger, agent_id, _gather_instructions(defender_dir),
-        make_model,
+    """The single-agent gather (#340) — the production gather for the PydanticAI
+    engine. One agent runs find→execute(one server-side ES|QL aggregation)→verify and
+    auto-captures its own adapter calls (no finder/executor split). Built through the
+    single `build_agent_core` site from the GATHER spec: the read-only tool pair (bash +
+    read_file, `writers=False` — it measures and returns a summary, never authors
+    investigation.md/report.md, so denying the file writers keeps it in lane), its own
+    cheaper `gather_model()`, and NO layered `gather` dispatch tool (a gather must not
+    dispatch itself). Loads `skills/gather/SKILL.md`. One per dispatch so `agent_id`
+    binds to the lead/measurement."""
+    return build_agent_core(
+        spec_for_role(AgentRole.GATHER),
+        deps_type=GatherDeps,
+        instructions=_gather_instructions(defender_dir),
+        logger=logger,
+        agent_id=agent_id,
+        make_model=make_model,
     )
 
 
@@ -323,29 +359,44 @@ def _make_compaction_processor():
     return process
 
 
+def _main_extra_capabilities() -> list[ProcessHistory[Any]]:
+    """MAIN's compaction assembly seam — the observable compaction toggle. Returns one
+    `ProcessHistory` (the per-loop invlang compaction) when `DEFENDER_COMPACTION` is on,
+    else `[]`, which `build_agent` passes to `build_agent_core` as `extra_capabilities`:
+    off → `()`, byte-identical to a no-capability build (the A/B invariant). MAIN only —
+    gather sub-runs are short single leads, nothing to compact. Listed AFTER the hooks in
+    `build_agent_core` so observability wraps the rewritten request (recorded usage then
+    reflects the compacted token cost). (That `[hooks, *extra]` ordering + the live wiring
+    is pinned by the e2e replay suite — pydantic-ai exposes no public capabilities surface
+    to assert against here.)"""
+    if not _compaction_enabled():
+        return []
+    print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
+    return [ProcessHistory(_make_compaction_processor())]
+
+
 def build_agent(
     defender_dir: Path, logger: observe.RequestLogger,
-    make_model: ModelFactory = _env_make_model,
+    make_model: MakeModel = providers.build_for_effort,
+    *, main_model: str | None = None,
 ) -> Agent[RunDeps, str]:
-    capabilities: list[Hooks[Any] | ProcessHistory[Any]] = [_make_hooks(logger, "main")]
-    if _compaction_enabled():
-        # Main agent only — gather sub-runs are short single leads, nothing to
-        # compact. Listed after the hooks so observability wraps the rewritten
-        # request (the recorded usage then reflects the compacted token cost).
-        capabilities.append(ProcessHistory(_make_compaction_processor()))
-        print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
+    """The MAIN loop agent — built through the single `build_agent_core` site from the
+    MAIN spec (writers + the role-default effort + MAIN's compaction capability), then
+    the `gather` dispatch tool layered on (MAIN-only; construction stays generic).
+    `main_model` resolves via `resolve_main_model` (run.py's `--model` /
+    `$DEFENDER_MODEL` / `DEFAULT_MODEL`)."""
+    extra = _main_extra_capabilities()
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
-    built = make_model(RunDeps.role)
-    agent = Agent(
-        built.model,
+    agent = build_agent_core(
+        spec_for_role(AgentRole.MAIN, main_model),
         deps_type=RunDeps,
         instructions=_main_instructions(defender_dir),
-        capabilities=capabilities,
-        model_settings=built.settings,
-        retries=DEFAULT_TOOL_RETRIES,
+        logger=logger,
+        agent_id="main",
+        extra_capabilities=extra,
+        make_model=make_model,
     )
-    register_tools(agent)
     # The gather dispatch tool builds a fresh nested gather agent per lead
     # (#340): one agent runs find→execute(one server-side ES|QL aggregation)→verify
     # and auto-captures its own adapter calls. The finder/executor split (#339) was
@@ -375,13 +426,13 @@ async def run_investigation(
     defender_dir: Path,
     salt: str,
     model_name: str | None = None,
-    make_model: ModelFactory | None = None,
+    make_model: MakeModel | None = None,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary."""
     model_name = resolve_main_model(model_name)
-    make_model = make_model or _make_default_factory(model_name)
+    make_model = make_model or providers.build_for_effort
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    agent = build_agent(defender_dir, logger, make_model)
+    agent = build_agent(defender_dir, logger, make_model, main_model=model_name)
     deps = RunDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
         salt=salt,

@@ -53,14 +53,28 @@ class Provider(Protocol):
         ...
 
     def settings(self, role: AgentRole) -> ModelSettings | None:
-        """The per-role `ModelSettings` for this provider, or `None` for none."""
+        """The per-role `ModelSettings` for this provider, or `None` for none.
+
+        Single-sourced through `settings_for_effort(effort_for_role(role))`, so the
+        role path and the judge's explicit-effort path can never diverge (#495)."""
         ...
 
-    def settings_for_effort(self, effort: str) -> ModelSettings | None:
-        """`ModelSettings` for an EXPLICIT per-call reasoning effort, rather than the
-        role-keyed env defaults `settings(role)` derives. For an agent whose effort is
-        per-invocation config (the judge, whose two direction legs run concurrently at
-        possibly different efforts — a single role env can't carry two values). Each
-        provider maps `effort` to its own knob (Anthropic's `anthropic_effort`,
-        OpenAI-compatible's `reasoning_effort`) and fails loud on an unsupported value."""
+    def effort_for_role(self, role: AgentRole) -> str | None:
+        """The role's default reasoning effort as a canonical `str | None`, where
+        `None` is the single OMIT spelling (fall back to the model's own default).
+        Anthropic exposes no role→effort policy → always `None`; an OpenAI-compatible
+        infra resolves the per-role env knob (`DEFENDER_{MAIN,GATHER}_REASONING_EFFORT`)
+        and normalizes its `default` sentinel to `None`. Feeds `settings_for_effort`,
+        collapsing `settings(role)` onto one effort→settings path."""
+        ...
+
+    def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
+        """`ModelSettings` for an EXPLICIT reasoning effort, rather than the role-keyed
+        env defaults `settings(role)` derives. `None` (and the tolerated `"default"`
+        string) OMIT the knob; any other value is mapped to the provider's own lever
+        (Anthropic's `anthropic_effort`, OpenAI-compatible's `reasoning_effort`) and an
+        unsupported value fails loud. Used both by the collapsed `settings(role)` path
+        and directly by an agent whose effort is per-invocation config (the judge, whose
+        two direction legs run concurrently at possibly different efforts — a single role
+        env can't carry two values)."""
         ...

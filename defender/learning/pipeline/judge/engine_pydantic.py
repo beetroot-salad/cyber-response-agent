@@ -30,10 +30,10 @@ from defender.learning.core.config import (
 )
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
-from defender.runtime.driver import DEFAULT_TOOL_RETRIES, _make_hooks
+from defender.runtime.driver import AgentSpec, build_agent_core
 from defender.runtime.permission import AgentPolicy, BashDecision, command_shape
 from defender.runtime.providers import BuiltModel
-from defender.runtime.tools import RunDeps, register_tools
+from defender.runtime.tools import RunDeps
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -50,8 +50,9 @@ JUDGE_REQUEST_LIMIT = 30
 
 # The model-construction seam (DI): (model_name, effort) -> BuiltModel. Defaults to the
 # provider abstraction; tests inject BuiltModel(FunctionModel, None) to run hermetically
-# — the judge's twin of the runtime driver's `make_model` factory.
-JudgeModelFactory = Callable[[str, str], BuiltModel]
+# — the judge's twin of the runtime driver's `make_model` factory (the shared
+# `driver.MakeModel` shape: effort is `str | None`, None omitting the knob).
+JudgeModelFactory = Callable[[str, str | None], BuiltModel]
 
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
@@ -120,24 +121,25 @@ def build_judge_agent(
     logger: observe.RequestLogger, agent_id: str,
     *, make_model: JudgeModelFactory = providers.build_for_effort,
 ) -> Agent[JudgeDeps, str]:
-    """The in-process judge agent: the read-only tool pair (bash + read_file, via
-    ``register_tools(writers=False)`` — no writers, no gather dispatch), the direction's
-    system prompt, the model chosen by name + its effort settings
-    (``providers.build_for_effort`` → Anthropic ``anthropic_effort`` / Fireworks
-    ``reasoning_effort``), and the shared budget/observability hooks. Parallels the
-    runtime's ``_build_subagent`` — the judge is just another read-only PydanticAI
-    agent, specialized by prompt + policy + model. ``make_model`` is the DI seam tests
-    use to inject a FunctionModel."""
-    built = make_model(model, effort)
-    agent: Agent[JudgeDeps, str] = Agent(
-        built.model,
+    """The in-process judge agent — a THIN WRAPPER over the shared ``build_agent_core``
+    (the single agent-construction site, #493). The judge is just another read-only
+    PydanticAI agent: an ``AgentSpec`` (``writers=False`` → the bash + read_file pair
+    only, no writers, no gather dispatch; the model by name + its per-leg ``effort``),
+    the direction's system prompt, and the shared budget/observability hooks
+    ``build_agent_core`` wires. Its effort is per-DIRECTION-LEG config (not role-keyed),
+    so the two legs can run concurrently at different efforts — the reason the judge
+    builds its own spec rather than going through ``spec_for_role``. ``make_model`` is
+    the DI seam tests use to inject a FunctionModel; production uses
+    ``providers.build_for_effort`` (Anthropic ``anthropic_effort`` / Fireworks
+    ``reasoning_effort``)."""
+    agent: Agent[JudgeDeps, str] = build_agent_core(
+        AgentSpec(model=model, effort=effort, writers=False),
         deps_type=JudgeDeps,
         instructions=prompt_path.read_text(),
-        capabilities=[_make_hooks(logger, agent_id)],
-        model_settings=built.settings,
-        retries=DEFAULT_TOOL_RETRIES,
+        logger=logger,
+        agent_id=agent_id,
+        make_model=make_model,
     )
-    register_tools(agent, writers=False)
     return agent
 
 

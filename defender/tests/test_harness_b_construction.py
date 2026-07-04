@@ -168,7 +168,7 @@ def test_effort_for_role_fireworks_bad_env_fails_loud(monkeypatch):
 def test_effort_for_role_unknown_model_fails_loud():
     """An unroutable model name (typo) → ValueError from provider_for, before any role
     dispatch — the same fail-loud provider.build() gives, not a silent default."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unknown model"):
         providers.effort_for_role("gpt-4o", AgentRole.MAIN)
 
 

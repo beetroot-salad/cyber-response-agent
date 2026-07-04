@@ -73,10 +73,21 @@ def build(name: str, role: AgentRole) -> BuiltModel:
     return BuiltModel(p.build_model(name), p.settings(role))
 
 
-def build_for_effort(name: str, effort: str) -> BuiltModel:
+def effort_for_role(name: str, role: AgentRole) -> str | None:
+    """The role's default reasoning effort for the infra serving `name`, as a canonical
+    `str | None` (`None` = omit the knob). The top-level router (mirrors `build`):
+    routes the name to its provider — failing loud on an unknown name, before any role
+    dispatch — then defers to the provider's own `effort_for_role`. `spec_for_role`
+    reads this to fill `AgentSpec.effort`, so MAIN-on-Anthropic omits effort while
+    MAIN-on-Fireworks caps it at the env-resolved default."""
+    return provider_for(name).effort_for_role(role)
+
+
+def build_for_effort(name: str, effort: str | None) -> BuiltModel:
     """Like `build`, but pairs the model with settings for an EXPLICIT reasoning
     effort (per-invocation config) rather than the role-keyed env defaults — for an
-    agent (the judge) whose effort is config, not a runtime role."""
+    agent (the judge) whose effort is config, not a runtime role. `effort=None` omits
+    the knob (the canonical omit spelling; `"default"` is also tolerated)."""
     p = provider_for(name)
     return BuiltModel(p.build_model(name), p.settings_for_effort(effort))
 
@@ -96,6 +107,7 @@ __all__ = [
     "api_key_vars",
     "build",
     "build_for_effort",
+    "effort_for_role",
     "provider_for",
     "provider_id_for",
 ]
