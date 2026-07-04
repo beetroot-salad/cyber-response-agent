@@ -502,9 +502,9 @@ class RunUnprocessable(Exception):
 def pitfalls_threshold() -> int:
     """Min count of queued general-failure pitfalls before the curation mode fires.
 
-    Lives in ``core`` (not ``leads.lead_author``) because BOTH the lead-author drain's
+    Lives in ``core`` (not ``leads.pitfalls_curator``) because BOTH the lead-author drain's
     wake gate (``core.orchestrate._has_lead_author_work``) and the curator itself
-    (``leads.lead_author.run_pitfalls``) read it. Keeping the env name + default in one
+    (``leads.pitfalls_curator.run_pitfalls``) read it. Keeping the env name + default in one
     core place stops the gate and the curator from disagreeing about the threshold — and
     lets the gate read it without ``core`` reaching up into the ``leads`` package. Read at
     call time so tests can monkeypatch via ``monkeypatch.setenv``.

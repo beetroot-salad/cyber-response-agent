@@ -323,6 +323,7 @@ def _maybe_trigger_author(
 # kept for log lines) -> its dotted module path after the package reorg.
 _CURATOR_MODULES = {
     "lead_author": "defender.learning.leads.lead_author",
+    "pitfalls_curator": "defender.learning.leads.pitfalls_curator",
     "author": "defender.learning.author.lessons.run",
     "author_actor": "defender.learning.author.malicious_actor.run",
     "author_actor_benign": "defender.learning.author.benign_actor.run",
@@ -718,11 +719,11 @@ def _drain_lead_author_markers(
 
 
 def _invoke_pitfalls(paths: LoopPaths) -> int:
-    """Run the cross-run execution.md pitfalls curation mode (lead_author.run_pitfalls),
+    """Run the cross-run execution.md pitfalls curation mode (pitfalls_curator.run_pitfalls),
     committing in the batch worktree (``paths.repo_root``). The pitfalls queue resolves
     off the shared state root, so it is drained from the original location."""
     _log("step=pitfalls-curation")
-    rc = _run_curator_module("lead_author", lambda mod: mod.run_pitfalls(paths=paths))
+    rc = _run_curator_module("pitfalls_curator", lambda mod: mod.run_pitfalls(paths=paths))
     return rc if rc is not None else 0
 
 

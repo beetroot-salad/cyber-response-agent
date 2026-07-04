@@ -49,7 +49,7 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import runner as _author_runner
+from defender.learning.author import runner as _author_runner  # noqa: F401  (re-exported: the per-run invoke_agent tests patch this runner seam; the spawn lives in _lead_spine)
 from defender.learning.author import shared as _author_shared
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
@@ -73,7 +73,6 @@ from defender.learning.leads.path_validation import (  # noqa: F401  (re-exporte
     _is_draft_readme,
     _is_in_scope,
     _is_schema_md,
-    _is_system_execution_md,
     _is_system_file,
     _is_system_skill_draft,
     _is_system_skill_md,
@@ -98,19 +97,22 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
     extract,
     extract_from_joined,
 )
+from defender.learning.leads._lead_spine import (
+    PENDING_DIR,
+    RUN_LOG_FILE,
+    _log,
+    _loop_commit_body,
+    _spawn_author_agent,
+    _verify_corpus_scope,
+)
 
 
-# Mutable lead-author queue state resolves from DEFAULT_PATHS so it honors
-# DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs).
-PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
+# The per-run queue lock + prompt. The shared spawn/verify/commit spine and its constants
+# (PENDING_DIR / RUN_LOG_FILE / model / timeout / the ``lead-author`` logger / the coarse
+# skills allowlist) live in ``_lead_spine``; the cross-run pitfalls curation mode now lives
+# in ``pitfalls_curator`` (#455 Part 2 / #513).
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
-RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
-LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
-
-# Sourced from core.config (single env-read site, no duplicated default).
-LEAD_AUTHOR_MODEL = _loop_config.LEAD_AUTHOR_MODEL
-LEAD_AUTHOR_TIMEOUT = _loop_config.LEAD_AUTHOR_TIMEOUT
 
 
 def _lift_threshold() -> int:
@@ -123,17 +125,9 @@ def _lift_threshold() -> int:
     return _loop_config.env_int("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", 5)
 
 
-# The pitfalls-curation threshold is read from ``core.config.pitfalls_threshold`` — the
-# shared reader the lead-author drain's wake gate uses too, so the gate and this curator
-# can't disagree about whether the queue is at threshold (see that function's docstring).
-
-
 # ---------------------------------------------------------------------------
 # Driver primitives
 # ---------------------------------------------------------------------------
-
-
-_log = _loop_config.make_logger("lead-author", flush=True)
 
 
 def acquire_queue_lock() -> Any:
@@ -317,64 +311,6 @@ def build_system_draft_handoffs(
 # ---------------------------------------------------------------------------
 
 
-# The agent runs NO git — the loop is the sole committer. Edit/Write are scoped to the
-# skills tree; promote = Write the established template + ``rm`` the draft, discard = ``rm``
-# the draft, fold/split/lift = Edit/Write. The loop's ``_verify_skills_state`` enforces the
-# fine scope (in-scope, no protected-surface mutation, draft-only deletion), so the
-# allowlist itself can be the coarse ``defender/skills/`` tree.
-#
-# Two matcher grammars, deliberately: ``**`` is the documented recursive glob for the
-# *file-path* tools (Edit/Write/Read), so it matches a nested draft path there. Claude
-# Code's *Bash* matcher is a different grammar — a single ``*`` over the raw command
-# string, which already crosses ``/`` — and ``**`` is undefined for it, so the ``rm`` grant
-# uses the documented ``:*`` prefix form (``Bash(rm defender/skills/:*)``) rather than an
-# undocumented ``**`` that only matches nested drafts by accident. The drain hands the agent
-# repo-relative paths and runs it with cwd at the worktree, so one repo-relative matcher
-# covers every removal — no worktree-absolute twin needed.
-_ALLOWLIST = (
-    "Read,Glob,Grep,"
-    f"Edit({SKILLS_REL}**),"
-    f"Write({SKILLS_REL}**),"
-    f"Bash(rm {SKILLS_REL}:*)"
-)
-
-
-def _spawn_author_agent(
-    *,
-    system_prompt_file: Path,
-    batch_id: str,
-    user_prompt: str,
-    repo_root: Path,
-    log_label: str,
-) -> int:
-    """Shared spawn envelope for both lead-author modes; they differ only in
-    ``system_prompt_file`` / ``batch_id`` / the caller-built ``user_prompt``. The agent runs
-    no git and writes no result marker, so this uses the raw runner variant and maps a
-    ``RunnerError`` (timeout / spawn failure) to rc 124 (caller then returns rc=2). ``cwd`` is
-    ``repo_root`` (the batch worktree), so the agent's repo-relative ``rm`` paths resolve under
-    it. ``log_label`` names the spawn in the run log."""
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    _log(f"spawn {log_label} (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
-    options = _author_runner.RunnerOptions(
-        system_prompt_file=system_prompt_file,
-        allowed_tools=_ALLOWLIST,
-        model=LEAD_AUTHOR_MODEL,
-        effort=None,
-        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
-        cwd=repo_root,
-        log_path=RUN_LOG_FILE,
-        result_marker=None,
-        batch_id=batch_id,
-    )
-    try:
-        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
-    except _author_runner.RunnerError as e:
-        _log(f"{log_label} failed: {e}")
-        return 124
-    _log(f"{log_label} exited rc={rc}")
-    return rc
-
-
 def invoke_agent(
     run_dir: Path,
     handoffs: list[dict],
@@ -406,38 +342,6 @@ def invoke_agent(
 # ---------------------------------------------------------------------------
 # Scope gate — the loop verifies the agent's working-tree edits before committing
 # ---------------------------------------------------------------------------
-
-
-def _verify_corpus_scope(
-    repo_root: Path,
-    baseline_stray: list[str],
-    *,
-    actor: str,
-    rule: Callable[[str, str], None],
-) -> list[str]:
-    """Shared verify preamble for both commit modes. One ``git status`` read drives every
-    check. Rejects any NEW change outside ``defender/skills/``*.md (diffed against
-    ``baseline_stray`` so pre-existing leftovers aren't blamed on the agent). This stray-gate
-    runs BEFORE the per-path loop, so a run that both strays and breaks an in-corpus rule is
-    rejected as a stray. Then applies the per-mode ``rule`` to each in-corpus change and
-    returns the accepted paths ``sorted``. ``actor`` names the culprit in the stray error."""
-    records = _porcelain_records(repo_root)
-
-    def _in_corpus(p: str) -> bool:
-        return p.startswith(SKILLS_REL) and p.endswith(".md")
-
-    new_stray = sorted({p for _, p in records if not _in_corpus(p)} - set(baseline_stray))
-    if new_stray:
-        raise LeadAuthorError(
-            f"{actor} changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
-        )
-    changed: list[str] = []
-    for xy, path in records:
-        if not _in_corpus(path):
-            continue  # non-corpus strays already rejected above
-        rule(xy, path)
-        changed.append(path)
-    return sorted(changed)
 
 
 def _skills_path_rule(repo_root: Path, xy: str, path: str) -> None:
@@ -481,17 +385,6 @@ def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str
     )
 
 
-def _loop_commit_body(
-    title: str, summary: str, changed: list[str], *, trailer: str = "",
-) -> str:
-    """Shared loop-authored commit-message skeleton: a ``title`` line, a ``summary``
-    paragraph, a bulleted ``Paths:`` block over ``changed``, and an optional ``trailer``.
-    (Distinct from ``_author_shared._commit_message``, which *extracts* the agent-authored
-    message — opposite direction.)"""
-    body_paths = "\n".join(f"- {p}" for p in changed)
-    return f"{title}\n\n{summary}\n\nPaths:\n{body_paths}\n{trailer}"
-
-
 def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
     """Deterministic loop-authored commit message for the per-run catalog/skill fold. Title
     names the scope touched (a 3-way branch: gather catalog / system skills / both) + the
@@ -510,178 +403,6 @@ def _loop_commit_message(run_dir: Path, changed: list[str]) -> str:
         changed,
         trailer=f"\nsource-run: {run_dir.name}\n",
     )
-
-
-# ---------------------------------------------------------------------------
-# Pitfalls curation mode (Stage 2) — fold general failures into execution.md
-# ---------------------------------------------------------------------------
-#
-# A second, cross-run, threshold-gated spawn that rides the SAME lead-author drain
-# (worktree / committer / PR). It drains the central pitfalls queue that the per-run
-# tick fills (`collect_general_failures`) into each system's `execution.md`
-# `## Common pitfalls` — the file gather reads at dispatch, so the mistake is
-# PREVENTED next time, not merely catalogued. Its edit scope is disjoint from the
-# per-run agent's (execution.md only), enforced by `_verify_pitfalls_state`.
-
-
-def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
-    """Group queued pitfalls by system → one handoff per system.
-
-    Carries the repo-relative ``execution.md`` path the curator edits plus the
-    failures to fold (query_id / goal / executed_query / stderr_digest). The
-    curator Reads the execution.md itself — the handoff is records + path only,
-    mirroring the system-draft handoff. Rows with no ``system`` are dropped.
-    """
-    by_system: dict[str, list[dict]] = {}
-    for r in rows:
-        system = str(r.get("system") or "").strip()
-        if system:
-            by_system.setdefault(system, []).append(r)
-    out: list[dict] = []
-    for system in sorted(by_system):
-        out.append(
-            {
-                "system": system,
-                "execution_md_path": f"{SKILLS_REL}{system}/execution.md",
-                "failures": [
-                    {
-                        "query_id": f.get("query_id", ""),
-                        "goal": f.get("goal", ""),
-                        "executed_query": f.get("executed_query", ""),
-                        "stderr_digest": f.get("stderr_digest", ""),
-                    }
-                    for f in by_system[system]
-                ],
-            }
-        )
-    return out
-
-
-def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
-    """Spawn the pitfalls curator via ``_spawn_author_agent``. The coarse ``_ALLOWLIST``
-    (Edit/Write ``defender/skills/**``) already covers execution.md; the ``rm`` grant goes
-    unused (the curator only edits)."""
-    user_prompt = (
-        f"skills_dir: {SKILLS_REL}\n"
-        f"pitfalls_handoffs ({len(handoffs)}):\n"
-        f"{json.dumps(handoffs, indent=2)}\n"
-    )
-    return _spawn_author_agent(
-        system_prompt_file=LEAD_PITFALLS_PROMPT,
-        batch_id="pitfalls",
-        user_prompt=user_prompt,
-        repo_root=repo_root,
-        log_label="pitfalls curator",
-    )
-
-
-def _pitfalls_path_rule(xy: str, path: str) -> None:
-    """Per-path scope rule for the pitfalls curator: the ONLY permitted in-corpus change is an
-    edit to a system ``execution.md``. Raises ``LeadAuthorError`` on any other skills path or
-    on a deletion (execution.md is pruned in place, never removed)."""
-    if not _is_system_execution_md(path):
-        raise LeadAuthorError(
-            f"pitfalls curator edited a non-execution.md skills path ({path}); "
-            "refusing to commit (its scope is execution.md only)"
-        )
-    if "D" in xy:
-        raise LeadAuthorError(
-            f"pitfalls curator deleted {path}; refusing to commit "
-            "(execution.md is pruned in place, never removed)"
-        )
-
-
-def _verify_pitfalls_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
-    """Verify the curator's working-tree edits before the loop commits. Routes the shared
-    preamble through ``_verify_corpus_scope`` and the per-path contract through
-    ``_pitfalls_path_rule``; returns the changed paths."""
-    return _verify_corpus_scope(
-        repo_root, baseline_stray, actor="pitfalls curator", rule=_pitfalls_path_rule,
-    )
-
-
-def _pitfalls_commit_message(changed: list[str]) -> str:
-    """Deterministic loop-authored message for the execution.md fold (fixed title)."""
-    return _loop_commit_body(
-        "learning(lead-author): execution.md pitfalls",
-        "Folded agent-fixable general failures into per-system execution.md "
-        "## Common pitfalls; loop-committed (the agent runs no git).",
-        changed,
-    )
-
-
-def run_pitfalls(
-    *,
-    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
-    invoke: Callable[..., int] | None = None,
-) -> int:
-    """Curation mode: fold queued general failures into per-system ``execution.md``.
-
-    Cross-run + threshold-gated (unlike the per-run tick). Below threshold it is a
-    no-op with the queue intact. Otherwise: build per-system handoffs, spawn the
-    curator (edits execution.md, runs no git), verify the working tree, commit
-    pathspec-scoped, and rotate the processed batch out of the central queue. Runs
-    inside the lead-author drain's worktree (``paths.repo_root``); the queue
-    resolves to the shared state root.
-
-    The batch rotates out once the curator has *processed* it (returned rc=0),
-    whether or not it produced a commit — a no-edit tick is a valid outcome (the
-    prompt blesses making no edits when every failure is already documented or too
-    thin to name a fix), and an all-system-less batch can't be folded at all.
-    Leaving such a batch queued would keep it at/above threshold and re-spawn the
-    curator on the same un-foldable rows every drain tick. Rotation is immediate by
-    design (no ``hold_committed``); a failure that recurs is re-collected.
-
-    ``invoke`` is injectable for tests. Returns 0 on success / no-op / no-edit, 2
-    on a curator spawn failure (queue left intact for retry). A scope violation
-    raises ``LeadAuthorError``, which the drain (``_drain_pitfalls``) logs and
-    swallows — discarding the worktree edits and leaving the queue intact; there is
-    no marker to quarantine on this cross-run path.
-    """
-    rows = _loop_persist.read_pitfalls(paths)
-    threshold = _loop_config.pitfalls_threshold()
-    if len(rows) < threshold:
-        if rows:
-            _log(
-                f"pitfalls queue below threshold (n={len(rows)}, "
-                f"threshold={threshold}) — skipping curation"
-            )
-        return 0
-    batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
-    handoffs = _build_pitfalls_handoffs(rows)
-    if not handoffs:
-        # No row carried a system, so none maps to a defender/skills/{system}/
-        # execution.md to fold into. Drop the batch rather than leave it stuck at
-        # threshold re-waking the drain forever; an unfoldable row is dead weight.
-        _log(f"{len(rows)} queued pitfall(s) but none carried a system — dropping")
-        _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
-        return 0
-    repo_root = paths.repo_root
-    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
-    _log(f"pitfalls curation: {len(rows)} failure(s) across {len(handoffs)} system(s)")
-
-    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root)
-    if rc != 0:
-        _log(f"FATAL: pitfalls curator exited rc={rc}; leaving queue intact")
-        return 2
-
-    changed = _verify_pitfalls_state(repo_root, baseline_stray)
-    sha = None
-    if changed:
-        sha = _author_shared.commit_corpus(
-            repo_root, repo_root / "defender" / "skills",
-            _pitfalls_commit_message(changed),
-        )
-    else:
-        _log("pitfalls curator made no execution.md edits (valid no-edit tick)")
-    # Rotate whether or not a commit was made: the curator processed the batch, so
-    # leaving it queued would only re-spawn the curator on the same rows next tick.
-    _loop_persist.rotate_pitfalls(batch_ids, sha, paths=paths)
-    _log(
-        f"pitfalls curation done; commit={(sha or 'none')[:12]}, edits={len(changed)}, "
-        f"rotated {len(batch_ids)} row(s) out of the queue"
-    )
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -981,9 +702,6 @@ Environment
   LEAD_AUTHOR_TIMEOUT_SECONDS                spawn timeout (default 1800)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
                                              system-skill lift queue (default 5)
-  LEARNING_PITFALLS_THRESHOLD                min queued general-failure count to
-                                             fire the execution.md curation mode
-                                             (default 5)
 """
 
 
