@@ -99,14 +99,6 @@ class OpenAICompatProvider:
         # survives verbatim: a set knob, not an absent one.
         return None if effort == "default" else effort
 
-    def settings(self, role: AgentRole) -> ModelSettings | None:
-        # Collapsed (#495): role→effort resolution is `effort_for_role`'s job; the
-        # effort→settings mapping (the None/`default` omit + the extra_body shape) is
-        # single-sourced in `settings_for_effort`, so the role path and the judge's
-        # explicit-effort path can never diverge. `effort_for_role` already validated
-        # the env value, so the delegate won't raise.
-        return self.settings_for_effort(self.effort_for_role(role))
-
     def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
         """Explicit reasoning effort → the `extra_body.reasoning_effort` shape. `None`
         (the canonical omit) and the tolerated `"default"` string both omit the param

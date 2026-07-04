@@ -4,7 +4,7 @@ The PydanticAI runtime ("Harness B") builds its agents at three near-duplicate
 `Agent(...)` sites today (`driver.build_agent` MAIN, `driver._build_subagent`
 GATHER, `engine_pydantic.build_judge_agent` JUDGE). This refactor collapses them
 onto one `build_agent_core(spec, ...)` fed by a per-agent `AgentSpec(model, effort?,
-writers)`, and collapses the provider's `settings(role)` onto the single
+writers)`, and replaces the provider's `settings(role)` with the single
 `settings_for_effort(effort_for_role(role))` path.
 
 These tests are the SPEC (written before the code) — they pin observable behavior at
@@ -167,7 +167,7 @@ def test_effort_for_role_fireworks_bad_env_fails_loud(monkeypatch):
 
 def test_effort_for_role_unknown_model_fails_loud():
     """An unroutable model name (typo) → ValueError from provider_for, before any role
-    dispatch — the same fail-loud provider.build() gives, not a silent default."""
+    dispatch — the same fail-loud provider_for() gives, not a silent default."""
     with pytest.raises(ValueError, match="unknown model"):
         providers.effort_for_role("gpt-4o", AgentRole.MAIN)
 
@@ -191,16 +191,18 @@ def test_fireworks_settings_for_effort_none_disables_the_param():
 
 
 def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
-    """Equivalence guard: after settings(role) collapses to settings_for_effort(
-    effort_for_role(role)), the EXACT dicts test_glm_fireworks pins are unchanged —
-    Fireworks MAIN {"extra_body":{"reasoning_effort":"low"}}, GATHER "none", Anthropic
-    cache-only + role-invariant by VALUE (identity downgraded per Fork 2)."""
+    """Equivalence guard: the live role→settings path settings_for_effort(effort_for_role(
+    role)) — which replaced settings(role) (#493) — yields the EXACT dicts test_glm_fireworks
+    pins: Fireworks MAIN {"extra_body":{"reasoning_effort":"low"}}, GATHER "none", Anthropic
+    cache-only + role-invariant by VALUE."""
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
-    assert providers.FIREWORKS.settings(AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
-    assert providers.FIREWORKS.settings(AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
-    assert providers.ANTHROPIC.settings(AgentRole.MAIN) == _CACHE
-    assert providers.ANTHROPIC.settings(AgentRole.MAIN) == providers.ANTHROPIC.settings(AgentRole.GATHER)
+    fw, an = providers.FIREWORKS, providers.ANTHROPIC
+    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
+    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
+    assert an.settings_for_effort(an.effort_for_role(AgentRole.MAIN)) == _CACHE
+    assert (an.settings_for_effort(an.effort_for_role(AgentRole.MAIN))
+            == an.settings_for_effort(an.effort_for_role(AgentRole.GATHER)))
 
 
 # ============================================================================
@@ -312,10 +314,15 @@ def test_spec_for_role_main_on_anthropic_omits_effort(monkeypatch):
 # MAIN / GATHER / JUDGE construction — the three callers survive the collapse
 # ============================================================================
 
-def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(logger):
+def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, logger):
     """build_gather_agent (re-pointed at build_agent_core via the GATHER spec) yields the
     read-only pair ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent
     must not dispatch itself)."""
+    # The GATHER spec routes through the real env path (gather_model() → provider_for,
+    # effort_for_role → env_str); clear the gather env so an ambient DEFENDER_GATHER_MODEL
+    # (the A/B benchmark exports it) or DEFENDER_GATHER_REASONING_EFFORT can't error the build.
+    monkeypatch.delenv("DEFENDER_GATHER_MODEL", raising=False)
+    monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
         agent = driver.build_gather_agent(_DEFENDER, logger, "gather:l-001", make_model=fake)
@@ -329,6 +336,9 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
     seam MAIN must now accept."""
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
     monkeypatch.delenv("DEFENDER_MODEL", raising=False)
+    # MAIN's spec routes through effort_for_role → env_str; clear the effort env so an
+    # ambient DEFENDER_MAIN_REASONING_EFFORT can't FatalConfigError the build.
+    monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
         agent = driver.build_agent(_DEFENDER, logger, make_model=fake)

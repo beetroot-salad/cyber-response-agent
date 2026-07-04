@@ -69,17 +69,9 @@ class AnthropicProvider:
     def effort_for_role(self, role: AgentRole) -> str | None:
         # Anthropic exposes no role→effort policy — the cache preamble is the same for
         # every role and there is no per-role reasoning knob to cap. `None` omits the
-        # `anthropic_effort` override for both MAIN and GATHER, preserving today's
-        # cache-only role settings when `settings(role)` collapses onto the effort path.
+        # `anthropic_effort` override for both MAIN and GATHER, so the role→settings path
+        # `settings_for_effort(effort_for_role(role))` is cache-only for every role.
         return None
-
-    def settings(self, role: AgentRole) -> ModelSettings | None:
-        # Collapsed onto the single effort→settings path (#495): the role contributes
-        # only its effort default (None here), and `settings_for_effort` owns the
-        # cache-base + optional-override shape — so this path and the judge's explicit
-        # effort path can never diverge. Value-equal to the old memoized cache; object
-        # identity is no longer promised (Fork 2 — settings are sent by value).
-        return self.settings_for_effort(self.effort_for_role(role))
 
     def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
         """Explicit effort → the native `anthropic_effort` knob (the same lever

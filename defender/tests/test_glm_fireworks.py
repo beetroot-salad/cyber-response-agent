@@ -3,10 +3,11 @@ as the MAIN default, Kimi K2.6 as the GATHER default.
 
 Hermetic — no API key, no network. Model construction only builds the provider
 client (no request is made), so these run in the default suite. Covers the provider
-registry (`provider_for` routing + fail-loud, `build`, `api_key_vars`), each
-provider's `build_model`, the per-role settings (Anthropic cache / Fireworks
-`reasoning_effort` incl. fail-loud on a bad value), the role model defaults, the
-price table, and run.py's provider-keyed `FIREWORKS_API_KEY` sourcing.
+registry (`provider_for` routing + fail-loud, `build_for_effort`, `api_key_vars`), each
+provider's `build_model`, the role→settings path (`settings_for_effort(effort_for_role(
+role))`; Anthropic cache / Fireworks `reasoning_effort` incl. fail-loud on a bad value),
+the role model defaults, the price table, and run.py's provider-keyed `FIREWORKS_API_KEY`
+sourcing.
 """
 from __future__ import annotations
 
@@ -40,6 +41,12 @@ _CACHE = {
     "anthropic_cache_tool_definitions": "1h",
     "anthropic_cache": "5m",
 }
+
+
+def _role_settings(provider, role):
+    """The live role→settings path after `settings(role)` was retired (#493): resolve the
+    role's default effort, then map it to settings."""
+    return provider.settings_for_effort(provider.effort_for_role(role))
 
 
 # --- role model defaults ----------------------------------------------------
@@ -109,10 +116,11 @@ def test_build_model_kimi_alias(monkeypatch):
 
 
 def test_build_pairs_model_with_settings(monkeypatch):
-    # providers.build (what the driver factory returns) pairs model + per-role settings.
+    # build_for_effort (the single build site) pairs model + settings for a role's resolved
+    # effort (effort_for_role) — MAIN on glm resolves to "low".
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    built = providers.build("glm-5.2", AgentRole.MAIN)
+    built = providers.build_for_effort("glm-5.2", providers.effort_for_role("glm-5.2", AgentRole.MAIN))
     assert isinstance(built, BuiltModel)
     assert isinstance(built.model, OpenAIChatModel)
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
@@ -121,39 +129,38 @@ def test_build_pairs_model_with_settings(monkeypatch):
 # --- per-provider / per-role settings ---------------------------------------
 
 def test_anthropic_settings_are_the_cache_and_role_invariant():
-    s_main = providers.ANTHROPIC.settings(AgentRole.MAIN)
+    s_main = _role_settings(providers.ANTHROPIC, AgentRole.MAIN)
     assert s_main == _CACHE
-    # Role-invariant by VALUE (never None). Identity was downgraded from `is` to `==`
-    # in #495: settings(role) now collapses to settings_for_effort(effort_for_role(role)),
-    # which builds a fresh settings object per call (effort_for_role(role) is None for
-    # Anthropic → cache-only). The value is preserved; object identity is not a promise
-    # (settings are sent by value), and dropping it keeps the single collapsed path.
-    assert providers.ANTHROPIC.settings(AgentRole.GATHER) == s_main
+    # Role-invariant by VALUE (never None): effort_for_role is None for Anthropic for every
+    # role → the role→settings path settings_for_effort(effort_for_role(role)) is cache-only.
+    # Object identity is not a promise — settings_for_effort builds a fresh object per call
+    # (settings are sent by value); the `is`-identity guarantee was retired with settings(role).
+    assert _role_settings(providers.ANTHROPIC, AgentRole.GATHER) == s_main
 
 
 def test_fireworks_main_defaults_to_low(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    assert providers.FIREWORKS.settings(AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
+    assert _role_settings(providers.FIREWORKS, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "low"}}
 
 
 def test_fireworks_gather_defaults_to_none(monkeypatch):
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
-    assert providers.FIREWORKS.settings(AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
+    assert _role_settings(providers.FIREWORKS, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "none"}}
 
 
 def test_fireworks_main_effort_override(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "high")
-    assert providers.FIREWORKS.settings(AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
+    assert _role_settings(providers.FIREWORKS, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
 
 
 def test_fireworks_gather_effort_override(monkeypatch):
     monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "low")
-    assert providers.FIREWORKS.settings(AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
+    assert _role_settings(providers.FIREWORKS, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
 
 
 def test_fireworks_default_sentinel_disables_the_param(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
-    assert providers.FIREWORKS.settings(AgentRole.MAIN) is None
+    assert _role_settings(providers.FIREWORKS, AgentRole.MAIN) is None
 
 
 @pytest.mark.parametrize("bad", ["", "lo", "hgih", "off"])
@@ -161,20 +168,20 @@ def test_fireworks_bad_effort_fails_loud(monkeypatch, bad):
     # A typo'd or empty operator knob surfaces at read (env_str choices), not silently.
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", bad)
     with pytest.raises(FatalConfigError):
-        providers.FIREWORKS.settings(AgentRole.MAIN)
+        _role_settings(providers.FIREWORKS, AgentRole.MAIN)
 
 
 # --- settings_for_effort: explicit per-call effort (the judge's config seam) --
-# Unlike settings(role), this takes the effort as an argument (not a role env), so
-# an agent whose two direction legs run concurrently at different efforts can pass
-# each explicitly. Anthropic maps it to `anthropic_effort` (the claude -p --effort
-# lever); Fireworks to `reasoning_effort`.
+# Unlike the role path (`settings_for_effort(effort_for_role(role))`), this takes the
+# effort as an argument (not a role env), so an agent whose two direction legs run
+# concurrently at different efforts can pass each explicitly. Anthropic maps it to
+# `anthropic_effort` (the claude -p --effort lever); Fireworks to `reasoning_effort`.
 
 def test_anthropic_settings_for_effort_adds_effort_to_cache():
     s = providers.ANTHROPIC.settings_for_effort("low")
     assert s == {**_CACHE, "anthropic_effort": "low"}
-    # Must not mutate the memoized cache object.
-    assert providers.ANTHROPIC.settings(AgentRole.MAIN) == _CACHE
+    # Must not mutate the memoized cache object (a fresh role→settings build stays cache-only).
+    assert _role_settings(providers.ANTHROPIC, AgentRole.MAIN) == _CACHE
 
 
 def test_anthropic_settings_for_effort_default_is_cache_only():
