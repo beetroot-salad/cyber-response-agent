@@ -52,11 +52,11 @@ from defender.hooks.budget_enforcer import (
 # dependency; a `claude-*` id is still reachable via the override.
 DEFAULT_MODEL = "glm-5.2"
 # The GATHER-subagent default — a CHEAPER Fireworks model than MAIN, since the ES|QL
-# find→execute→verify loop is mechanical and flagship reasoning is overkill. Kimi K2.5
+# find→execute→verify loop is mechanical and flagship reasoning is overkill. Kimi K2.6
 # (~$0.60/$3.00 vs GLM 5.2's $1.40/$4.40) generates correct ES|QL + reliable
 # tool-calls, run with reasoning off (see `runtime/providers/openai_compat.py`). Override via
 # $DEFENDER_GATHER_MODEL (e.g. `glm-5.2` to match MAIN, or `claude-sonnet-4-6` for #340).
-DEFAULT_GATHER_MODEL = "kimi-k2.5"
+DEFAULT_GATHER_MODEL = "kimi-k2.6"
 DEFAULT_REQUEST_LIMIT = 60
 GATHER_REQUEST_LIMIT = 40  # the gather's per-lead loop; large multi-dimension
 # leads need well over 20 turns (#304: a 6-dimension large-dump lead needed ~26).
@@ -139,7 +139,7 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
 
 
 def gather_model() -> str:
-    """The production gather model — **Kimi K2.5** by default (`DEFAULT_GATHER_MODEL`),
+    """The production gather model — **Kimi K2.6** by default (`DEFAULT_GATHER_MODEL`),
     a cheaper Fireworks model than the MAIN GLM (still single-provider). The gather's
     ES|QL find→execute→verify loop is mechanical, so a flagship is overkill; Kimi
     generates correct ES|QL + reliable tool-calls at ~40% of GLM 5.2's price, run with
@@ -162,7 +162,7 @@ ModelFactory = Callable[[AgentRole], BuiltModel]
 def _make_default_factory(main_model_name: str) -> ModelFactory:
     """The production model factory: MAIN runs `main_model_name` (run.py's
     `--model` / `$DEFENDER_MODEL` / `DEFAULT_MODEL`), every other role runs the
-    gather model (`gather_model()`; Kimi K2.5, `$DEFENDER_GATHER_MODEL` overrides).
+    gather model (`gather_model()`; Kimi K2.6, `$DEFENDER_GATHER_MODEL` overrides).
     `providers.build` picks the serving infra from the name; tests replace the
     whole factory."""
     def make(role: AgentRole) -> BuiltModel:
@@ -195,7 +195,7 @@ def _build_subagent(
     summary — it never authors investigation.md/report.md, so denying it
     write_file/edit_file keeps it in lane. One per dispatch so `agent_id` binds to
     the lead/measurement. The system prompt (`instructions`) + the factory's
-    GATHER-role model specialize the instance into the gather (Kimi K2.5 by default)."""
+    GATHER-role model specialize the instance into the gather (Kimi K2.6 by default)."""
     built = make_model(GatherDeps.role)
     agent = Agent(
         built.model,

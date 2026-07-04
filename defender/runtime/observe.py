@@ -21,7 +21,7 @@ Everything else is a **projection** of those messages — same data, re-tagged:
     main instance's messages; the trailing `result` event's `total_cost_usd` is
     summed **per response message at its own model's rate** via `scripts/pricing.py`
     (the first-party API does not return a cost the way `claude -p` did), so a run
-    that dispatched gather mixes the MAIN and gather models (e.g. GLM 5.2 + Kimi K2.5)
+    that dispatched gather mixes the MAIN and gather models (e.g. GLM 5.2 + Kimi K2.6)
     correctly.
 
 To add another view (a tool-only audit, a cost-by-phase rollup), write another
@@ -297,7 +297,7 @@ def write_trace(run_dir: Path, messages: list[dict], *, wall_ms: float) -> None:
     totals = _usage_totals(messages)  # aggregate token counts across all instances
     # Price each response at ITS OWN model's rate, then sum: a run that dispatched
     # gather mixes the MAIN and gather models (e.g. GLM 5.2 main + the cheaper Kimi
-    # K2.5 gather) — pricing the combined totals at one model's rate would misreport.
+    # K2.6 gather) — pricing the combined totals at one model's rate would misreport.
     total_cost = sum(
         usage_cost(r.get("model") or "", r.get("usage") or {})
         for r in messages if r.get("kind") == "response"

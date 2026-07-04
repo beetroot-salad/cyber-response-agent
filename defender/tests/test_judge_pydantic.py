@@ -102,12 +102,12 @@ def test_prepare_judge_engine_sources_each_direction(monkeypatch):
     # sourced set), not merely "dedup of two identical models".
     from defender.learning.core import orchestrate
 
-    registry = _fake_by_name(adversarial="glm-5.2", benign="kimi-k2.5")
+    registry = _fake_by_name(adversarial="glm-5.2", benign="kimi-k2.6")
     monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
     called: list[str] = []
     monkeypatch.setattr(orchestrate, "source_judge_key", called.append)  # lint-monkeypatch: ok — spy the gate decision
     orchestrate._prepare_judge_engine_for(["adversarial", "benign"])
-    assert sorted(called) == ["glm-5.2", "kimi-k2.5"]
+    assert sorted(called) == ["glm-5.2", "kimi-k2.6"]
 
 
 def test_prepare_judge_engine_dedups_identical_direction_models(monkeypatch):

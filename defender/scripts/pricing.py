@@ -12,15 +12,17 @@ from __future__ import annotations
 
 # Per-million-token prices, USD. Anthropic pricing for claude-sonnet-4-6 /
 # claude-haiku-4-5; Fireworks serverless pricing for the MAIN model GLM 5.2 (glm-5p2:
-# $1.40 in / $0.14 cached-in / $4.40 out) and the GATHER model Kimi K2.5 (kimi-k2p5:
-# $0.60 in / $3.00 out — size-based-priced on Fireworks with no separate cached rate,
-# so `cache_r` = `in`). Fireworks caches automatically and does not bill cache writes
-# separately (reports zero cache-write tokens), so `cache_w` mirrors `in` and is inert.
+# $1.40 in / $0.14 cached-in / $4.40 out) and the GATHER model Kimi K2.6 (kimi-k2p6:
+# $0.60 in / $3.00 out — same size class / rate as the retired K2.5, size-based-priced
+# on Fireworks with no separate cached rate, so `cache_r` = `in`). Fireworks caches
+# automatically and does not bill cache writes separately (reports zero cache-write
+# tokens), so `cache_w` mirrors `in` and is inert. `model_key` routes every `kimi*`
+# id (incl. old runs logged as `kimi-k2p5`) here, so historical costing is unchanged.
 PRICING = {
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_w": 3.75, "cache_r": 0.30},
     "claude-haiku-4-5":  {"in": 1.0, "out":  5.0, "cache_w": 1.25, "cache_r": 0.10},
     "glm-5.2":           {"in": 1.4, "out":  4.4, "cache_w": 1.40, "cache_r": 0.14},
-    "kimi-k2.5":         {"in": 0.6, "out":  3.0, "cache_w": 0.60, "cache_r": 0.60},
+    "kimi-k2.6":         {"in": 0.6, "out":  3.0, "cache_w": 0.60, "cache_r": 0.60},
 }
 
 
@@ -33,7 +35,7 @@ def model_key(model: str) -> str:
     if "glm" in m:
         return "glm-5.2"
     if "kimi" in m:
-        return "kimi-k2.5"
+        return "kimi-k2.6"
     if "haiku" in m:
         return "claude-haiku-4-5"
     return "claude-sonnet-4-6"
