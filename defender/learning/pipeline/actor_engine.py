@@ -29,10 +29,12 @@ from defender.runtime.tools import RunDeps
 if TYPE_CHECKING:
     from defender.runtime.bash_exec import Pipeline
 
-# The actor does at most a couple of lesson retrievals then emits its story; a small cap
-# bounds a runaway tool loop (the twin of JUDGE_REQUEST_LIMIT — tighter, since the actor's
-# whole discretionary surface is the two read-only lesson scripts + reads under defender/).
-ACTOR_REQUEST_LIMIT = 20
+# Bounds a runaway tool loop (the twin of JUDGE_REQUEST_LIMIT). Sized for GLM's tool-hunger:
+# GLM issues ~2-3 tool calls per model request and explores the lessons corpora more than the
+# earlier Sonnet regime — a live smoke run saw the adversarial actor reach 18/20 on a single
+# case, so 20 gave almost no headroom. Raised to 30 (still a backstop, not a budget). Reducing
+# GLM's tool-call count at the source is tracked in #514.
+ACTOR_REQUEST_LIMIT = 30
 
 _ACTOR_DENY_REASON = (
     "Blocked: the actor is read-only over the lessons corpora — it may run only the pinned "
