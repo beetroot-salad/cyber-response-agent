@@ -160,3 +160,103 @@ export class InvalidEventError extends Error {
     this.name = "InvalidEventError";
   }
 }
+
+// ===========================================================================
+// Slice 2b — the runnable surface (§9.7.1 / §9.8 / §9.9 / §10).
+//
+// Pure DATA + collaborator types shared by the 2b spec. The engine (above) is
+// UNTOUCHED by 2b; these describe the server read model, the injected config, and
+// the boot seam that wire the shell-agnostic core (slice #1/#2a) to real I/O.
+// ===========================================================================
+
+/** Per-repo config (§9.9): the local clone the worktrees branch from. */
+export interface RepoConfig {
+  name: string; // "owner/name" — matches card.repo and the gh -R target
+  root: string; // local clone dir for `git -C <root>`
+  base: string; // createWorktree base ref, e.g. "origin/main"
+}
+
+export type SessionHostKind = "vscode" | "command" | "tmux" | "embedded-pty";
+
+/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid} placeholders. */
+export interface SessionHostConfig {
+  kind: SessionHostKind;
+  command?: string; // required for kind="command"/"tmux"
+}
+
+/** The one injected config object (§9.9) — never global, never re-read in the hot path. */
+export interface Config {
+  runRoot: string; // sqlite db + wt/ worktrees + run/ pidfiles + *.code-workspace
+  label: string; // §7.9 tracking label — intake filter + new-issue create label
+  pool: number; // headless worker slots (§3.2); discuss runs outside it
+  pollMs: number; // gh poll cadence (§9.4)
+  workerTickMs: number; // drainQueue cadence
+  port: number; // board + /rpc
+  permissionMode: string; // claude -p --permission-mode for headless stages
+  model: string; // optional claude --model override; "" = CLI default
+  repos: RepoConfig[];
+  sessionHost: SessionHostConfig;
+}
+
+/** The live "watch it work" tail (§9.3) — only for a running headless run, else null. */
+export interface RunActivity {
+  last_step: string;
+  elapsed: number;
+}
+
+/** A card's newest run, as the board renders it (§9.3). */
+export interface BoardRun {
+  id: string;
+  stage: RunStage;
+  attempt: number;
+  status: RunStatus;
+  trigger: Trigger;
+  session_id: string | null;
+  activity: RunActivity | null; // overlay; ALWAYS null in the pure DB projection (readBoard)
+}
+
+/** One board card — denormalized so a paint is one query, no live gh call (§9.3). */
+export interface BoardCard {
+  id: string;
+  repo: string;
+  issue_number: number;
+  pr_number: number | null;
+  title: string | null;
+  stage: Stage;
+  status: Status;
+  state_entered_at: string;
+  latest_run: BoardRun | null;
+}
+
+/** `getCard`: the card + its full append-only run timeline (§9.2). */
+export interface CardDetail {
+  card: CardState;
+  runs: RunRow[];
+}
+
+/** The one wire handler shape (§9.1). Both a hand-rolled fetch and a Hono `app.fetch` satisfy it. */
+export type FetchHandler = (req: Request) => Response | Promise<Response>;
+export interface App {
+  fetch: FetchHandler;
+}
+
+/** Injected boot collaborators (§9.8). main.ts defaults these to the real ones; the boot-ordering
+ *  test injects recording fakes to pin that `reconcile` fires BEFORE any loop or the server. */
+export interface BootDeps {
+  openDb(runRoot: string): DB;
+  effects(cfg: Config): Effects;
+  reconcile(db: DB, fx: Effects): ReconcileSummary;
+  drainQueue(db: DB, fx: Effects, opts: { pool: number }): Promise<void>;
+  pollOnce(db: DB, fx: Effects, opts: { label?: string }): Promise<PollSummary>;
+  makeApp(db: DB, fx: Effects, cfg: Config): App;
+  serve(opts: { port: number; fetch: FetchHandler }): unknown;
+  every(ms: number, fn: () => void | Promise<void>): unknown; // self-rescheduling, non-overlapping timer
+}
+
+/** What `boot` hands back — the live handles (§9.8). */
+export interface BootHandle {
+  db: DB;
+  worker: unknown;
+  poll: unknown;
+  server: unknown;
+}
