@@ -48,6 +48,16 @@ class AgentPolicy:
       gather subagent and the judge may).
     - `read_roots` — extra allowed read roots beyond `{run_dir, defender_dir}`
       (the judge's comparison dir under `learning_run_dir`).
+    - `read_confine` — when non-empty, REPLACES the `defender_dir` read base: the
+      read gate then allows only `{run_dir} ∪ read_confine ∪ read_roots`, not the
+      whole corpus. The gray-box confine (#512): a confined actor sees only its
+      lesson corpora, never the judge's grading rubric. Empty (the default) keeps
+      the legacy `{run_dir, defender_dir, *read_roots}` — inert for main/gather.
+    - `bash_readers` — the agent's bash reader surface. `None` (the default) keeps
+      today's GLOBAL viewer allowlist (main/gather, byte-for-byte). `()` grants NO
+      bash reader at all (the confined actor: reads go through `read_file`). A set
+      (the judge's `('jq',)`) narrows the readers to those programs — and `jq` is
+      additionally PATH-GATED to the policy's read roots (see `decide_bash`).
     - `custom_matchers` — the agent's custom logic (see `Matcher`).
     - `deny_reason` — the fall-through deny message shown to the model.
     """
@@ -56,5 +66,7 @@ class AgentPolicy:
     adapter_sql_pipe: bool = False
     raw_reads: bool = False
     read_roots: tuple[Path, ...] = ()
+    read_confine: tuple[Path, ...] = ()
+    bash_readers: tuple[str, ...] | None = None
     custom_matchers: tuple[Matcher, ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON

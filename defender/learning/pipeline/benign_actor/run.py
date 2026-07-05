@@ -16,6 +16,7 @@ from defender.learning.core.config import (
     BENIGN_ACTOR_EFFORT,
     BENIGN_ACTOR_MODEL,
     LESSONS_ENV_RETRIEVE_SCRIPT,
+    LESSONS_ENVIRONMENT_DIR,
 )
 from defender.learning.core.runner import _section
 from defender.learning.tickets import ticket_seeds
@@ -65,5 +66,8 @@ def invoke_actor_benign(
     return actor_fn(
         ACTOR_BENIGN_PROMPT, BENIGN_ACTOR_MODEL, BENIGN_ACTOR_EFFORT,
         "actor_benign_trace.jsonl", "actor-benign", user, learning_run_dir,
-        scope=_ActorScope((LESSONS_ENV_RETRIEVE_SCRIPT,)),
+        scope=_ActorScope(
+            (LESSONS_ENV_RETRIEVE_SCRIPT,),
+            read_confine=(LESSONS_ENVIRONMENT_DIR,),
+        ),
     )
