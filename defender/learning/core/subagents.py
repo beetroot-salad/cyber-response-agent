@@ -30,14 +30,16 @@ class Subagents(Protocol):
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str: ...
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
                      alert_rule_key: str) -> str: ...
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str: ...
+    def oracle(self, run_dir: Path, actor_story_path: Path,
+               learning_run_dir: Path) -> str: ...
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
 
 
 class ClaudePrintSubagents:
-    """Default adapter — assembles each step's inputs; the actor + judge run in-process on
-    PydanticAI (metered key), the oracle shells out to ``claude -p`` (subscription)."""
+    """Default adapter — assembles each step's inputs; the actor, oracle, and judge all run
+    in-process on PydanticAI (metered key). (Name kept for the ``claude -p`` curators the loop
+    still shells out to elsewhere.)"""
 
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
         # The actor runs in-process on PydanticAI (metered key); the composition root picks the
@@ -60,14 +62,20 @@ class ClaudePrintSubagents:
             actor_fn=_run_actor_pydantic,
         )
 
-    def oracle(self, run_dir: Path, actor_story_path: Path) -> str:
-        return invoke_oracle(run_dir, actor_story_path)
+    def oracle(self, run_dir: Path, actor_story_path: Path,
+               learning_run_dir: Path) -> str:
+        # The oracle runs in-process on PydanticAI (metered key), like the actor + judge; the
+        # composition root picks the engine, mirroring .actor/.judge. The engine import is lazy so
+        # the pydantic-ai graph is pulled in only when an oracle actually runs.
+        from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic
+        return invoke_oracle(run_dir, actor_story_path, learning_run_dir,
+                             oracle_fn=_run_oracle_pydantic)
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
-        # The judge runs in-process on PydanticAI (metered key), like the actor; the oracle
-        # above stays on claude -p. The engine import is lazy so the pydantic-ai graph is
-        # pulled in only when a judge actually runs.
+        # The judge runs in-process on PydanticAI (metered key), like the actor + oracle above.
+        # The engine import is lazy so the pydantic-ai graph is pulled in only when a judge
+        # actually runs.
         from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
         return invoke_judge(
             wiring, run_dir, actor_story_path, projected_telemetry_path,

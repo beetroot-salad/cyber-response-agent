@@ -355,12 +355,21 @@ ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "glm-5.2")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "glm-5.2")
 ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "low")
 BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
-# Per-lead generative oracle. Generative work — sonnet for content fidelity (per the
-# d2d72ab model decision); effort pinned low since each call sees only its own lead and
-# projects a signed baseline-diff (no cross-lead matching to reason about). Override via
-# ORACLE_*. ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
-ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
-ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "low")
+# The oracle runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered first-party path,
+# the mirror of the actor/judge migrations (all three in-process stages share the metered key;
+# the curators stay on claude -p). Each call is a MECHANICAL per-lead projection: it sees only its
+# own lead — sanitized what_to_summarize + queries + one scrubbed sample — and emits a signed
+# baseline-diff, with no cross-lead matching to reason about. So reasoning is DISABLED: `none` is
+# the explicit string that forwards reasoning_effort="none" (NOT Python None, which OMITS the knob
+# and leaves GLM reasoning on) — the same lever the equally-mechanical gather subagent uses. Effort
+# maps through `providers.build_for_effort` (Fireworks `reasoning_effort` / Anthropic
+# `anthropic_effort`). Override via ORACLE_MODEL / ORACLE_EFFORT (any provider
+# providers.provider_for routes). NB `none` is a Fireworks-only effort: an Anthropic A/B
+# (e.g. ORACLE_MODEL=claude-sonnet-4-6) MUST also set ORACLE_EFFORT to a Claude-valid effort
+# (low/medium/high/…), else build_for_effort raises → FatalConfigError (exit 2) on every lead.
+# ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
+ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "glm-5.2")
+ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "none")
 ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
 # The judge runs in-process (PydanticAI) on GLM 5.2 (Fireworks) by default. Override
 # per-direction via env for the A/B (any provider `providers.provider_for` can route).
@@ -550,8 +559,8 @@ def source_first_party_key(model: str, *, label: str = "judge") -> None:
     FIREWORKS_API_KEY). ``label`` names the stage in the log/error text (``judge`` / ``actor``
     / ``engine`` for a mixed prep).
 
-    Mixed billing within one run is SAFE: the in-process stages (the actor and the judge) run
-    on the metered key, but every OTHER stage (oracle, curators) shells out to ``claude -p``
+    Mixed billing within one run is SAFE: the in-process stages (the actor, oracle, and judge)
+    run on the metered key, but every OTHER stage (the curators) shells out to ``claude -p``
     under ``subscription_env``, which COPIES ``os.environ`` and pops every provider key — so
     setting it here can never reach a subscription sibling, and they keep billing the
     subscription. A ``.env`` key takes precedence over the ambient value (for Anthropic the

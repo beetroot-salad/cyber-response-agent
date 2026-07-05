@@ -18,10 +18,12 @@ import.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import (
+    REPO_ROOT,
     SUBAGENT_TIMEOUT,
     FatalConfigError,
     RunUnprocessable,
@@ -30,6 +32,7 @@ from defender.learning.core.config import (
 )
 from defender.runtime import observe, providers
 from defender.runtime.driver import AgentSpec, MakeModel, build_agent_core
+from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import RunDeps
 
 from pydantic_ai import Agent
@@ -64,6 +67,22 @@ def build_stage_agent(
         logger=logger,
         agent_id=label,
         make_model=make_model,
+    )
+
+
+def build_stage_deps(deps_type: type, learning_run_dir: Path, policy: AgentPolicy) -> RunDeps:
+    """Build a learning stage's per-run ``RunDeps`` — the identity every in-process stage shares
+    (``run_dir`` = its own ``learning_run_dir``, ``defender_dir`` = the corpus, ``run_id`` = the
+    dir name, a fresh per-run ``salt``) plus the stage's declared ``policy``. Only ``deps_type``
+    (the stage's role label) and ``policy`` vary per stage; this hoists the identical construction
+    the three engine modules (``actor_engine`` / ``judge/engine_pydantic`` / ``oracle_engine``)
+    would otherwise each copy verbatim, so the shape can't drift across them."""
+    return deps_type(
+        run_dir=learning_run_dir,
+        defender_dir=REPO_ROOT / "defender",
+        run_id=learning_run_dir.name,
+        salt=uuid.uuid4().hex,
+        policy=policy,
     )
 
 

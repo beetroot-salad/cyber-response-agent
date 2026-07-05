@@ -385,13 +385,14 @@ def test_module_import_does_not_reexec():
 
 
 def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
-    """A subprocess.TimeoutExpired from invoke_oracle must surface as SecondaryError.
+    """A RunUnprocessable from the oracle must surface as SecondaryError.
 
-    loop._run_claude wraps subprocess.run with a timeout, so a hung
-    oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
-    RunUnprocessable). Earlier rev only caught RunUnprocessable; one timeout
-    aborted the whole harness and prevented the summary from being
-    written. This test pins the conversion.
+    The oracle now runs IN-PROCESS (PydanticAI), dispatched through the ClaudePrintSubagents
+    adapter like the judge: run_stage maps a hung / timed-out / model-errored per-lead call to
+    ``RunUnprocessable`` (there is no subprocess to raise TimeoutExpired). Left uncaught it would
+    escape the per-alert handler in run_secondary() and abort the whole harness before the summary
+    is written. This test pins the conversion. NB the harness now sources the in-process stages'
+    keys BEFORE the oracle, so the fake stubs ``_prepare_engines_for`` too.
     """
     actor_story = tmp_path / "actor_story.md"
     actor_story.write_text("not a SKIP\n")
@@ -408,13 +409,17 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
         class RunUnprocessable(Exception):
             pass
 
+        class ClaudePrintSubagents:
+            def oracle(self, *_a, **_kw):
+                raise FakeLoop.RunUnprocessable("per-lead oracle timed out")
+
         @staticmethod
         def is_skip_story(text):
             return False
 
         @staticmethod
-        def invoke_oracle(*_a, **_kw):
-            raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+        def _prepare_engines_for(_directions, **_kw):  # **_kw: absorbs include_actor=
+            pass  # hermetic: no metered key sourced, no engine validation
 
     with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
@@ -437,6 +442,9 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return "leads: []\n"
 
     class _FakeSubagents:
+        def oracle(self, *_a, **_kw):
+            return valid_oracle
+
         def judge(self, *_a, **_kw):
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
@@ -451,10 +459,6 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         @staticmethod
         def is_skip_story(text):
             return False
-
-        @staticmethod
-        def invoke_oracle(*_a, **_kw):
-            return valid_oracle
 
         @staticmethod
         def strip_yaml_fence(text):
