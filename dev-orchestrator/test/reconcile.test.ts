@@ -83,7 +83,7 @@ describe("reconcile", () => {
 // "orphan" = a listWorktrees() path that equals NO non-archived card's worktree_path (matched
 // by path VALUE, never by parsing issue-<n>). swept counts only removals that actually fired.
 function sweptPaths(fx: FakeEffects): string[] {
-  return fx.callsTo("removeWorktree").map((c) => (c.args as { worktree_path: string }).worktree_path);
+  return fx.callsTo("removeWorktreePath").map((c) => (c.args as { worktree_path: string }).worktree_path);
 }
 
 describe("reconcile — worktree sweep", () => {
@@ -95,6 +95,7 @@ describe("reconcile — worktree sweep", () => {
     const summary = reconcile(db, fx);
     expect(sweptPaths(fx)).toEqual(["/wt/issue-99"]); // the unclaimed one only
     expect(summary.swept).toBe(1);
+    expect(fx.countOf("removeWorktree")).toBe(0); // the sweep reaps by PATH, never via the card-driven seam
   });
 
   it("reaps a leftover tree whose card already cleared its worktree_path (cancel/done aftermath)", () => {
@@ -108,19 +109,19 @@ describe("reconcile — worktree sweep", () => {
     expect(summary.swept).toBe(1);
   });
 
-  it("empty listWorktrees → swept:0, no removeWorktree", () => {
+  it("empty listWorktrees → swept:0, no removeWorktreePath", () => {
     const db = createTestDb();
     const fx = new FakeEffects().setWorktrees([]);
     seedCard(db, { stage: "write_code", status: "running", worktree_path: "/wt/issue-1" });
     expect(reconcile(db, fx).swept).toBe(0);
-    expect(fx.countOf("removeWorktree")).toBe(0);
+    expect(fx.countOf("removeWorktreePath")).toBe(0);
   });
 
-  it("a throwing removeWorktree does not abort the sweep; swept counts only removals that fired", () => {
+  it("a throwing removeWorktreePath does not abort the sweep; swept counts only removals that fired", () => {
     const db = createTestDb();
-    const fx = new FakeEffects().setWorktrees(["/wt/issue-90", "/wt/issue-91"]).failOn("removeWorktree");
+    const fx = new FakeEffects().setWorktrees(["/wt/issue-90", "/wt/issue-91"]).failOn("removeWorktreePath");
     const summary = reconcile(db, fx);
-    expect(fx.countOf("removeWorktree")).toBe(2); // both orphans still attempted
+    expect(fx.countOf("removeWorktreePath")).toBe(2); // both orphans still attempted
     expect(summary.swept).toBe(0); // neither fired
   });
 

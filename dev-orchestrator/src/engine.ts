@@ -570,9 +570,8 @@ function sweepOrphanWorktrees(db: DB, fx: Effects, summary: ReconcileSummary): v
   );
   for (const path of onDisk) {
     if (claimed.has(path)) continue;
-    // The sweep holds only a path (an orphan has no owning card) — hand removeWorktree a phantom
-    // carrying just the worktree_path it needs to `git worktree remove`.
-    const phantom = { worktree_path: path } as unknown as CardState;
-    if (runEffect(() => fx.removeWorktree(phantom))) summary.swept += 1;
+    // An orphan has no owning card — the sweep holds only the path, so it reaps via the path-based
+    // seam (`removeWorktreePath`) rather than casting a phantom card. `swept` counts only reaps that fired.
+    if (runEffect(() => fx.removeWorktreePath(path))) summary.swept += 1;
   }
 }
