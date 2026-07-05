@@ -316,7 +316,7 @@ def _decide_restricted_readers(
     argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
     if argv is None or _stage_unsafe(argv):
         return BashDecision(False, policy.deny_reason)
-    if argv[0] != "jq" or "jq" not in policy.bash_readers:
+    if argv[0] != "jq" or not policy.bash_readers or "jq" not in policy.bash_readers:
         return BashDecision(False, policy.deny_reason)
     if not _jq_reads_within_roots(argv, policy, run_dir=run_dir, defender_dir=defender_dir):
         return BashDecision(False, policy.deny_reason)
