@@ -1,6 +1,6 @@
 // claimNext (T-CLAIM): the worker pulls the oldest queued run to running, lazily creating
 // the worktree and requesting the headless spawn. Effect failures are fire-and-reconcile.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { claimNext } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { seedCard, seedRun } from "./support/arrange";

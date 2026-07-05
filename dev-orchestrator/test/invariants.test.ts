@@ -1,6 +1,6 @@
 // Cross-cutting invariants: attempt scoping, atomicity, the clock, and the malformed-event
 // contract.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent } from "../src/engine";
 import { InvalidEventError } from "../src/contract";
 import { createTestDb } from "./support/db";
@@ -64,7 +64,9 @@ describe("atomicity of enqueue", () => {
   // connection — the one_active_run_per_card index prevents the precondition from ever
   // existing — so the engine's translation of the raw index violation is a concurrency-only
   // path, verified with a two-writer harness in a later slice, not here.
-  it.todo("throws AlreadyInFlightError when a concurrent insert races a second in-flight run");
+  it.todo("throws AlreadyInFlightError when a concurrent insert races a second in-flight run", () => {
+    // Deferred to a two-writer harness (see comment above); un-representable on one connection.
+  });
 });
 
 describe("clock and malformed events", () => {

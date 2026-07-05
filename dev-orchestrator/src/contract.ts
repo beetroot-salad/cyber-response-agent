@@ -13,8 +13,8 @@ export type RunStage = "discuss" | "write_tests" | "write_code" | "review";
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type Trigger = "manual" | "auto" | "retry";
 
-/** better-sqlite3 Database handle (structural, avoids an import-shape fight). */
-export type DB = import("better-sqlite3").Database;
+/** bun:sqlite Database handle. */
+export type DB = import("bun:sqlite").Database;
 
 /** A card row — the authoritative current state (§4, §5). */
 export interface CardState {

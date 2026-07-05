@@ -1,6 +1,6 @@
 // `goto` is the whole soft board — one primitive reading as advance / skip / approve /
 // retry / start-discuss / move by (from, target). These pin the polymorphism.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent, claimNext } from "../src/engine";
 import { InvalidEventError } from "../src/contract";
 import { createTestDb } from "./support/db";

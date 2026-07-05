@@ -1,6 +1,6 @@
 // End-to-end: the pipeline drives itself through the automated hops, stopping only at the
 // two human gates. Pins the shared-worktree-once invariant and the spawn accounting.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent, claimNext, intake } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { getCard, latestRun } from "./support/read";

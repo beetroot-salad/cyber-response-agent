@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { intake } from "../src/engine";
 import { InvalidEventError } from "../src/contract";
 import { createTestDb } from "./support/db";
