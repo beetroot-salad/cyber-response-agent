@@ -33,7 +33,6 @@ CREATE TABLE run (
                  CHECK (trigger IN ('manual','auto','retry')),
   session_id   TEXT,
   pid          INTEGER,
-  cost_usd     REAL,
   created_at   TEXT NOT NULL,
   started_at   TEXT,
   finished_at  TEXT

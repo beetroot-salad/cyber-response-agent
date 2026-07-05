@@ -63,7 +63,6 @@ export interface SeedRun {
   trigger?: Trigger;
   session_id?: string | null;
   pid?: number | null;
-  cost_usd?: number | null;
   started_at?: string | null;
   finished_at?: string | null;
 }
@@ -73,9 +72,9 @@ export function seedRun(db: DB, cardId: string, opts: SeedRun = {}): RunRow {
   const id = opts.id ?? `seed-run-${seq}`;
   db.prepare(
     `INSERT INTO run (id, card_id, stage, attempt, status, trigger, session_id, pid,
-                      cost_usd, created_at, started_at, finished_at)
+                      created_at, started_at, finished_at)
      VALUES (@id, @card_id, @stage, @attempt, @status, @trigger, @session_id, @pid,
-             @cost_usd, @created_at, @started_at, @finished_at)`,
+             @created_at, @started_at, @finished_at)`,
   ).run({
     id,
     card_id: cardId,
@@ -85,7 +84,6 @@ export function seedRun(db: DB, cardId: string, opts: SeedRun = {}): RunRow {
     trigger: opts.trigger ?? "manual",
     session_id: opts.session_id ?? null,
     pid: opts.pid ?? null,
-    cost_usd: opts.cost_usd ?? null,
     created_at: T0,
     started_at: opts.started_at ?? null,
     finished_at: opts.finished_at ?? null,

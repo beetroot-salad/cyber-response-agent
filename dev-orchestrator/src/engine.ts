@@ -108,9 +108,9 @@ function insertRun(db: DB, fx: Effects, r: NewRun): void {
   const id = fx.uuid();
   try {
     db.prepare(
-      `INSERT INTO run (id, card_id, stage, attempt, status, trigger, session_id, pid, cost_usd,
+      `INSERT INTO run (id, card_id, stage, attempt, status, trigger, session_id, pid,
                         created_at, started_at, finished_at)
-       VALUES (@id, @card_id, @stage, @attempt, @status, @trigger, NULL, NULL, NULL,
+       VALUES (@id, @card_id, @stage, @attempt, @status, @trigger, NULL, NULL,
                @created_at, @started_at, NULL)`,
     ).run({
       id,
@@ -330,8 +330,8 @@ function handleRunSucceeded(db: DB, fx: Effects, event: Extract<Event, { type: "
     const now = fx.now();
     db.prepare(
       `UPDATE run SET status = 'succeeded', session_id = COALESCE(?, session_id),
-                      cost_usd = COALESCE(?, cost_usd), pid = NULL, finished_at = ? WHERE id = ?`,
-    ).run(event.session_id ?? null, event.cost_usd ?? null, now, run.id);
+                      pid = NULL, finished_at = ? WHERE id = ?`,
+    ).run(event.session_id ?? null, now, run.id);
 
     let stage: Stage = card.stage;
     let status: Status = card.status;
