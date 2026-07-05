@@ -13,13 +13,12 @@ actually runs (``core/subagents.ClaudePrintSubagents.actor``), never at loop imp
 """
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from defender.learning.core.config import REPO_ROOT
-from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning.pipeline._pydantic_stage import build_stage_deps, run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
@@ -122,13 +121,7 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     mapping + trace logging). Returns the model's final text VERBATIM — the story, or a
     ``SKIP: …`` line. A timeout / usage-limit / model error → ``RunUnprocessable`` (quarantines
     this run, the disposition a ``claude -p`` non-zero exit gave)."""
-    deps = ActorDeps(
-        run_dir=learning_run_dir,
-        defender_dir=REPO_ROOT / "defender",
-        run_id=learning_run_dir.name,
-        salt=uuid.uuid4().hex,
-        policy=_actor_policy(scope.scripts),
-    )
+    deps = build_stage_deps(ActorDeps, learning_run_dir, _actor_policy(scope.scripts))
     return run_stage(
         stage="actor",
         prompt_path=prompt_path, model=model, effort=effort,

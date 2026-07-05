@@ -91,7 +91,7 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
 # --- the deny-all policy through the full gate (the oracle runs NO tools) --------------
 
 def test_oracle_policy_denies_everything():
-    pol = oracle_engine._oracle_policy()
+    pol = oracle_engine._ORACLE_POLICY
     assert pol.adapters is False
     assert pol.adapter_sql_pipe is False
     assert pol.raw_reads is False
@@ -110,7 +110,7 @@ def test_oracle_policy_denies_everything():
 # --- read scope: under defender_dir / run_dir defaults, with NO read_roots -------------
 
 def test_oracle_reads_under_defender_dir_without_read_roots(tmp_path):
-    pol = oracle_engine._oracle_policy()
+    pol = oracle_engine._ORACLE_POLICY
     assert pol.read_roots == ()
     lrd = _lrd(tmp_path)
     # a file under defender_dir is allowed purely by the defender-corpus root (no read_roots)
@@ -220,9 +220,42 @@ def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
     assert [p["lead_id"] for p in parsed["projections"]] == ["l-001", "l-002", "l-003"]
     assert [p["events"][0]["lead"] for p in parsed["projections"]] == ["l-001", "l-002", "l-003"]
 
-    # one call per lead, with distinct per-lead labels + trace names; learning_run_dir threaded in
+    # one call per lead, with distinct per-lead labels + trace names; learning_run_dir threaded in.
+    # The trace name carries the story stem ("story") so the two direction legs (which share
+    # learning_run_dir and the same lead set) don't collide on one file — see the next test.
     assert sorted(c[0] for c in calls) == ["oracle:l-001", "oracle:l-002", "oracle:l-003"]
     assert sorted(c[1] for c in calls) == [
-        "oracle_l-001.trace.jsonl", "oracle_l-002.trace.jsonl", "oracle_l-003.trace.jsonl"
+        "oracle_story_l-001.trace.jsonl", "oracle_story_l-002.trace.jsonl",
+        "oracle_story_l-003.trace.jsonl",
     ]
     assert all(c[2] == lrd for c in calls)
+
+
+def test_invoke_oracle_trace_name_is_per_direction(monkeypatch, tmp_path):
+    """The two direction legs share one learning_run_dir and the SAME lead set (both read the same
+    run_dir), so a lead-only trace name would collide on one RequestLogger file (opened mode "w").
+    invoke_oracle keys the trace on the per-direction story stem, so the adversarial + benign legs
+    write DISJOINT trace files for the same lead_id — no cross-leg truncation/interleave."""
+    leads = [SimpleNamespace(lead_id="l-001", queries=[], what_to_summarize=[])]
+    monkeypatch.setattr(oracle_run.lead_repository, "joined", lambda _rd: leads)  # lint-monkeypatch: ok — inject a shared lead set so both legs project the same lead_id
+    lrd = tmp_path / "lrd"
+    lrd.mkdir()
+
+    def _trace_names_for(story_name: str) -> list[str]:
+        seen = []
+        story = tmp_path / story_name
+        story.write_text("the story\n")
+
+        def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir):
+            seen.append(trace_name)
+            return 'events:\n  - lead: "l-001"\n'
+
+        oracle_run.invoke_oracle(tmp_path, story, lrd, oracle_fn=fake_oracle_fn)
+        return seen
+
+    adversarial = _trace_names_for("actor_story.md")
+    benign = _trace_names_for("actor_benign_story.md")
+    # same lead_id, but the per-direction stem keeps the trace files disjoint across legs
+    assert adversarial == ["oracle_actor_story_l-001.trace.jsonl"]
+    assert benign == ["oracle_actor_benign_story_l-001.trace.jsonl"]
+    assert set(adversarial).isdisjoint(benign)

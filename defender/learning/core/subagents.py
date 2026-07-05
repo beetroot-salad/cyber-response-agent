@@ -73,9 +73,9 @@ class ClaudePrintSubagents:
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
               projected_telemetry_path: Path, learning_run_dir: Path) -> str:
-        # The judge runs in-process on PydanticAI (metered key), like the actor; the oracle
-        # above stays on claude -p. The engine import is lazy so the pydantic-ai graph is
-        # pulled in only when a judge actually runs.
+        # The judge runs in-process on PydanticAI (metered key), like the actor + oracle above.
+        # The engine import is lazy so the pydantic-ai graph is pulled in only when a judge
+        # actually runs.
         from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
         return invoke_judge(
             wiring, run_dir, actor_story_path, projected_telemetry_path,

@@ -1,34 +1,35 @@
 """The oracle stage on the in-process PydanticAI engine — a drop-in ``oracle_fn``.
 
 Mirror of the actor's ``pipeline/actor_engine.py`` and the judge's
-``pipeline/judge/engine_pydantic.py``: the oracle's specifics (its deps identity + a deny-all
+``pipeline/judge/engine_pydantic.py``: the oracle's specifics (its deps identity + a locked-down
 permission policy) live here, and the generic in-process transport it shares with the actor +
 judge lives in ``pipeline/_pydantic_stage.py``. The oracle is the THIRD consumer of that harness.
 
 Unlike the actor/judge (one in-process call per direction), the oracle fans out ONE call per
 lead concurrently (``pipeline/oracle/run.py``), so each per-lead call passes its own
 ``trace_name``/``label``: the ``ThreadPoolExecutor`` worker thread has no running event loop, so
-``run_stage``'s ``asyncio.run`` bridge is safe per thread, and distinct per-lead trace names keep
-the concurrent ``RequestLogger``s from racing on one file.
+``run_stage``'s ``asyncio.run`` bridge is safe per thread, and a trace name keyed on the
+per-direction discriminator AND the lead id keeps the concurrent ``RequestLogger``s from racing
+on one file (see ``oracle/run.invoke_oracle``).
 
 The oracle emits a single YAML document and calls NO tools — its whole input is inlined in the
-user prompt — so its policy denies everything (the ``["bash", "read_file"]`` tools the shared
-``build_agent_core`` always registers stay unused, gated shut). ``ORACLE_REQUEST_LIMIT`` is a
-tiny backstop: a clean projection is one model request; the headroom only absorbs a stray denied
-tool call GLM might attempt before it re-emits the YAML.
+user prompt. Its policy is locked down to match: data-source adapters, the ``adapter | defender-
+sql`` pipe, ``gather_raw`` raw reads, writes, and arbitrary shell are all denied (the
+``["bash", "read_file"]`` pair ``build_agent_core`` always registers stays available but unused —
+the model simply never issues a call). ``ORACLE_REQUEST_LIMIT`` is a tiny backstop: a clean
+projection is one model request; the headroom only absorbs a stray denied tool call GLM might
+attempt before it re-emits the YAML.
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when the oracle
 actually runs (``core/subagents.ClaudePrintSubagents.oracle``), never at loop import.
 """
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import REPO_ROOT
-from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning.pipeline._pydantic_stage import build_stage_deps, run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
@@ -50,27 +51,28 @@ _ORACLE_DENY_REASON = (
 
 @dataclass(frozen=True)
 class OracleDeps(RunDeps):
-    """The oracle's per-run deps — plain ``RunDeps`` shape with a deny-all ``policy`` (data). One
-    ``OracleDeps`` per lead; ``run_dir`` is the *learning* run dir, so the per-lead budget /
+    """The oracle's per-run deps — plain ``RunDeps`` shape with the locked-down ``policy`` (data).
+    One ``OracleDeps`` per lead; ``run_dir`` is the *learning* run dir, so the per-lead budget /
     observability side effects land there. ``role`` is an ORACLE identity label — the gate keys on
     ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.ORACLE
 
 
-def _oracle_policy() -> AgentPolicy:
-    """The oracle's declarative gate policy: deny everything. It projects one lead into a YAML diff
-    from an all-inlined prompt — no adapters, no ``adapter | defender-sql`` pipe, no ``gather_raw``
-    reads, no extra read roots, no custom matchers. Reads under ``defender_dir`` / the learning
-    ``run_dir`` remain allowed by ``decide_read``'s defaults, but the oracle never issues one."""
-    return AgentPolicy(
-        adapters=False,
-        adapter_sql_pipe=False,
-        raw_reads=False,
-        read_roots=(),
-        custom_matchers=(),
-        deny_reason=_ORACLE_DENY_REASON,
-    )
+# The oracle's declarative gate policy. Unlike the actor/judge policies (parameterized per leg by
+# their pinned scripts / read roots), the oracle's is a CONSTANT — it takes no per-lead input, so
+# it is built once here rather than rebuilt on every fan-out call. It locks the tool surface down:
+# no adapters, no ``adapter | defender-sql`` pipe, no ``gather_raw`` raw reads, no extra read
+# roots, no custom matchers. (Reads under ``defender_dir`` / the learning ``run_dir`` stay allowed
+# by ``decide_read``'s defaults, but the oracle never issues one — its whole input is inlined.)
+_ORACLE_POLICY = AgentPolicy(
+    adapters=False,
+    adapter_sql_pipe=False,
+    raw_reads=False,
+    read_roots=(),
+    custom_matchers=(),
+    deny_reason=_ORACLE_DENY_REASON,
+)
 
 
 def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state
@@ -85,18 +87,13 @@ def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature 
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The PydanticAI ``oracle_fn`` — drops into ``invoke_oracle_lead`` as ``oracle_fn=``. Builds
-    the oracle's deny-all ``OracleDeps`` and delegates to the shared ``run_stage`` (agent build +
-    one-shot drive + error mapping + per-lead trace logging). Returns the model's final YAML text
-    VERBATIM (``sample.parse_lead_events`` parses it downstream). A timeout / usage-limit / model
-    error → ``RunUnprocessable`` (quarantines the run — the same disposition a ``claude -p``
-    non-zero exit gave, which the per-lead fan-out surfaces as a whole-direction failure)."""
-    deps = OracleDeps(
-        run_dir=learning_run_dir,
-        defender_dir=REPO_ROOT / "defender",
-        run_id=learning_run_dir.name,
-        salt=uuid.uuid4().hex,
-        policy=_oracle_policy(),
-    )
+    the oracle's ``OracleDeps`` (via the shared ``build_stage_deps``, with the locked-down
+    ``_ORACLE_POLICY``) and delegates to the shared ``run_stage`` (agent build + one-shot drive +
+    error mapping + per-lead trace logging). Returns the model's final YAML text VERBATIM
+    (``sample.parse_lead_events`` parses it downstream). A timeout / usage-limit / model error →
+    ``RunUnprocessable`` (quarantines the run — the same disposition a ``claude -p`` non-zero exit
+    gave, which the per-lead fan-out surfaces as a whole-direction failure)."""
+    deps = build_stage_deps(OracleDeps, learning_run_dir, _ORACLE_POLICY)
     return run_stage(
         stage="oracle",
         prompt_path=prompt_path, model=model, effort=effort,

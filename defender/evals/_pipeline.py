@@ -195,13 +195,17 @@ def run_head_oracle_and_judge(
     # Fireworks key, which this actor-frozen path never uses).
     loop_mod._prepare_engines_for(["adversarial"], include_actor=False)
 
-    # Wrap invoke_oracle/invoke_judge themselves — they raise RunUnprocessable on timeout / model
-    # error, which would otherwise escape the per-alert handler in run_secondary() and abort the
-    # harness mid-loop with no summary written. invoke_oracle now fans one IN-PROCESS PydanticAI
-    # call per lead and reassembles; a per-lead failure surfaces the same way (run_stage maps a
-    # per-lead timeout/model error to RunUnprocessable — no subprocess to raise TimeoutExpired).
+    # Dispatch the oracle + judge through the SAME ClaudePrintSubagents adapter the learning loop
+    # uses (the composition root that names the in-process engines), then wrap their RunUnprocessable
+    # — raised on timeout / model error — which would otherwise escape the per-alert handler in
+    # run_secondary() and abort the harness mid-loop with no summary written. The oracle fans one
+    # in-process PydanticAI call per lead and reassembles; a per-lead failure surfaces the same way
+    # (run_stage maps a per-lead timeout/model error to RunUnprocessable — no subprocess to raise
+    # TimeoutExpired).
     try:
-        oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path, staging_dir)
+        oracle_yaml = loop_mod.ClaudePrintSubagents().oracle(
+            head_run_dir, actor_story_path, staging_dir
+        )
     except loop_mod.RunUnprocessable as e:
         raise SecondaryError(f"oracle invocation failed: {e}") from e
     # The oracle doc is assembled by our own code (one projection per lead, lead_ids

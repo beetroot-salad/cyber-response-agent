@@ -364,8 +364,10 @@ BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
 # and leaves GLM reasoning on) — the same lever the equally-mechanical gather subagent uses. Effort
 # maps through `providers.build_for_effort` (Fireworks `reasoning_effort` / Anthropic
 # `anthropic_effort`). Override via ORACLE_MODEL / ORACLE_EFFORT (any provider
-# providers.provider_for routes — e.g. claude-sonnet-4-6 for an A/B). ORACLE_MAX_CONCURRENCY bounds
-# the per-direction fan-out of per-lead calls.
+# providers.provider_for routes). NB `none` is a Fireworks-only effort: an Anthropic A/B
+# (e.g. ORACLE_MODEL=claude-sonnet-4-6) MUST also set ORACLE_EFFORT to a Claude-valid effort
+# (low/medium/high/…), else build_for_effort raises → FatalConfigError (exit 2) on every lead.
+# ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "glm-5.2")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "none")
 ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
@@ -557,8 +559,8 @@ def source_first_party_key(model: str, *, label: str = "judge") -> None:
     FIREWORKS_API_KEY). ``label`` names the stage in the log/error text (``judge`` / ``actor``
     / ``engine`` for a mixed prep).
 
-    Mixed billing within one run is SAFE: the in-process stages (the actor and the judge) run
-    on the metered key, but every OTHER stage (oracle, curators) shells out to ``claude -p``
+    Mixed billing within one run is SAFE: the in-process stages (the actor, oracle, and judge)
+    run on the metered key, but every OTHER stage (the curators) shells out to ``claude -p``
     under ``subscription_env``, which COPIES ``os.environ`` and pops every provider key — so
     setting it here can never reach a subscription sibling, and they keep billing the
     subscription. A ``.env`` key takes precedence over the ambient value (for Anthropic the

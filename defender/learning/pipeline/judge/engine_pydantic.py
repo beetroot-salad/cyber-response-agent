@@ -14,13 +14,15 @@ import.
 """
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from defender.learning.core.config import REPO_ROOT
-from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
+from defender.learning.pipeline._pydantic_stage import (
+    build_stage_agent,
+    build_stage_deps,
+    run_stage,
+)
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
@@ -144,12 +146,8 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
     # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
-    deps = JudgeDeps(
-        run_dir=learning_run_dir,
-        defender_dir=REPO_ROOT / "defender",
-        run_id=learning_run_dir.name,
-        salt=uuid.uuid4().hex,
-        policy=_judge_policy(read_roots, scope.ticket_cli),
+    deps = build_stage_deps(
+        JudgeDeps, learning_run_dir, _judge_policy(read_roots, scope.ticket_cli)
     )
     return run_stage(
         stage="judge",
