@@ -2,9 +2,9 @@
 
 This repository centers on `defender/`, an alert-triage agent, built around a learning loop.
 
-The idea is to provide the agent with a structured way to identify its runtime mistakes and learn from them. That way, the system improves over time, just from running by itself. Depending on the disposition, a counterfactual actor (gray-box for benign, ops person for malicious) is launched, writing a story aimed to undermine the defender's investigation - bypass or disprove it. A judge reviews the story and its generated telemetry against the investigation, and identifies gaps in both, creating seeds for an author to turn into validated lessons.
+The idea is to provide the agent with a structured way to identify its runtime mistakes and learn from them. That way, the system improves over time, just from running by itself. Depending on the disposition, a counterfactual actor is launched — an adversary for `benign` verdicts, a benign ops person for `malicious` ones — writing a story aimed to undermine the defender's investigation: bypass or disprove it. The actor is gray-box: it sees which queries the defender ran, but never the defender's goals or the raw payloads. A judge reviews the story and its generated telemetry against the investigation, and identifies gaps in both, creating seeds for an author to turn into validated lessons.
 
-> **Status: experimental / PoC.** The learning loop is the headlining experiment. Runtime reliability gates (hooks, validators, judge gates) are deliberately out of scope until the loop proves itself end-to-end on real cases.
+> **Status: experimental / PoC.** The learning loop is the headlining experiment. It has proven its value end-to-end on real cases, so the earlier "runtime reliability gates are out of scope" stance is lifted: the permission/validation gates now run in-process inside the PydanticAI runtime driver (see `defender/CLAUDE.md`).
 
 ## What This Project Contains
 
@@ -12,11 +12,14 @@ The idea is to provide the agent with a structured way to identify its runtime m
 - `defender/learning/`: actor / oracle / judge / forward-check / author pipeline + eval harness + read-only frontend
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
 - `defender/fixtures/`: alert inputs used to drive runs
-- `playground/` and `playground-v2/`: security lab scenarios and local simulation assets
+- `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
+- `infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
+- `playground/`: the superseded v1 lab (Wazuh-era); its `ticket-server/` is still reused by v2
+- `dev-orchestrator/`: meta-tooling, not part of the security agent — a spec-first SQLite state-machine service (TypeScript/Bun) that orchestrates the Claude-Code-driven dev workflow used to build this repo
 
 ## Runtime Loop
 
-A single agent works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
+A single agent — driven by the in-process PydanticAI runtime (`defender/runtime/driver.py`) with `defender/SKILL.md` as its system prompt — works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
 
 ```mermaid
 flowchart LR
@@ -27,13 +30,13 @@ flowchart LR
     ANALYZE -->|confident| REPORT
 ```
 
-`GATHER` is dispatched to a cheap subagent (Haiku) per query; the main agent works from the summary and reads raw payloads on demand. The run emits three artifacts: `investigation.md` (the dense audit log), `lead_sequence.yaml` (the machine-readable contract the learning loop consumes), and `report.md` (disposition + one paragraph).
+`GATHER` is dispatched to a cheap subagent per lead (single-agent ES|QL, Kimi K2.6 by default); the main agent works from the summary and reads raw payloads on demand. The run emits `investigation.md` (the dense audit log, written in **invlang** — the project's structured investigation notation; see `defender/skills/invlang/`), `report.md` (disposition + one paragraph), and two live append-only tables the learning loop consumes: the leads table (`gather_raw/{lead_id}.lead.json`) and the queries table (`executed_queries.jsonl`), both written by the harness as the agent dispatches gather — no post-run projection.
 
-`defender/SKILL.md` is the spec for this loop. The on-disk shape and projection contract are documented in `defender/CLAUDE.md`.
+`defender/SKILL.md` is the spec for this loop. The on-disk shape and two-table contract are documented in `defender/CLAUDE.md`.
 
 ## Learning Loop
 
-After the runtime loop exits, `run.py` hands the run dir to the offline loop (skip with `--no-learn`). The disposition routes the run into one or both counterfactual directions — hexagons are `claude -p` agents, rectangles are deterministic code:
+The learning loop runs off-process: after the runtime loop exits, `run.py` drops a learn-queue marker (skip with `--no-learn`), and a worker drains the queue via `defender/learning/loop.py --learn-drain`. The disposition routes each run into one or both counterfactual directions — hexagons are `claude -p` agents, rectangles are deterministic code:
 
 ```mermaid
 flowchart TD
@@ -79,15 +82,15 @@ Design rationale lives in `defender/docs/` — start with `defender/docs/learnin
 
 ## Quick Start
 
-Defender has its own venv at `defender/.venv` (only runtime dep is `pyyaml`):
+Defender has its own venv at `defender/.venv` (core dep is just `pyyaml`; the runtime loop needs the `runtime` extra — PydanticAI + duckdb):
 
 ```bash
-cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev,runtime]'
 ```
 
 `run.py` re-execs into `defender/.venv/bin/python3`, so it works regardless of which python is on PATH.
 
-Live runs additionally need the `claude` CLI installed and authenticated, plus the SIEM/host adapters reachable (see `defender/skills/{system}/SKILL.md`).
+Live runs additionally need a provider API key (Anthropic by default; Fireworks for the GLM/Kimi paths) and the SIEM/host adapters reachable (see `defender/skills/{system}/SKILL.md`). The learning loop's stages run as `claude -p`, so it also needs the `claude` CLI installed and authenticated.
 
 ## Running The Agent
 
@@ -100,10 +103,10 @@ python3 defender/run.py <alert.json>
 Notes:
 
 - run dirs are created under `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`), outside the repo
-- pass `--no-learn` to skip the learning step while iterating on the runtime loop only
-- the learning loop can also run standalone: `python3 defender/learning/loop.py <run_dir>`
+- pass `--no-learn` to skip enqueuing the learning step while iterating on the runtime loop only
+- the learning loop runs off-process — a worker drains the queue with `python3 defender/learning/loop.py --learn-drain`; run one dir directly with `python3 defender/learning/loop.py <run_dir>`
 
-Each run dir contains at least `alert.json`, `investigation.md`, `lead_sequence.yaml`, `report.md`, `tool_trace.jsonl`, `transcript.html`, and a `gather_raw/` directory of per-query payloads.
+Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `llm_requests.jsonl`, `tool_trace.jsonl`, `transcript.html`, and a `gather_raw/` directory of lead sidecars + per-query payloads.
 
 ## Learning-Loop Frontend
 
@@ -117,7 +120,7 @@ Nicer reading experience.
 
 ## Tests
 
-The runtime agent has no unit tests — it's evaluated by running real alerts and reviewing the run dir. `defender/tests/` covers learning-loop invariants (lesson schema, author pre/post-flight, atomic writes, forward-check):
+The runtime agent has no unit tests — it's evaluated by running real alerts and reviewing the run dir, plus a hermetic e2e replay suite (`defender/tests/test_replay_*`, run with `-m e2e`; no API key needed). `defender/tests/` also covers learning-loop invariants (lesson schema, author pre/post-flight, atomic writes, forward-check):
 
 ```bash
 cd defender && .venv/bin/python -m pytest tests/ -q -m "not llm and not live"
