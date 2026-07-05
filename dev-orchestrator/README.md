@@ -28,5 +28,7 @@ sense of "triage") is planning, not execution, and belongs on a separate view.
 
 ## Next
 
-Define the service API + data flows: the local endpoints the board calls per action, the
-read models it renders, and the poller/worker loops that feed them.
+The service API + data flows are drafted in [`design.md` §9](./design.md): one `/rpc`
+command endpoint mirroring the `goto` event alphabet, the `getBoard` read model, and the
+in-process worker/poll loops that feed it. Remaining: choose the app shell (Next.js vs.
+Hono+Vite — decision #4) and scaffold.

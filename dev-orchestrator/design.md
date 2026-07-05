@@ -77,7 +77,10 @@ launches/links everything that has a canonical home.
 **Owns (independent — nothing else has it):**
 - The board grid — cards + `(stage, status)` (the SQLite state) — and the action
   affordances (`approve` / `skip` / `advance` / `retry` / `cancel` / `move` /
-  `start_discuss`), including the launcher that `exec`s local tools.
+  `start_discuss`), including the launcher that `exec`s local tools. These are **UI
+  gestures, not machine events**: every forward/lateral one lowers to a single primitive,
+  `goto(target)` (plus `cancel` / `archive`) — the board is soft, so the transition layer
+  never distinguishes advance from skip from approve (§6.2, §9.2).
 - **Intake + issue creation.** It **discovers `gh` issues into `backlog` by default** (the
   poller, filtered by the tracking label — §7.9); a **"new issue" form runs
   `gh issue create`** under the hood, so a UI-authored issue lands as a card the same way.
@@ -392,103 +395,116 @@ CREATE UNIQUE INDEX one_run_per_attempt ON run (card_id, stage, attempt);
 `status ∈ {idle, queued, running, awaiting_human, failed}`.
 
 **Events** — the transition function's input alphabet (in-memory messages dispatched to
-`nextState`, *not* rows; there is no `event` table, §5):
+`nextState`, *not* rows; there is no `event` table, §5). Because the board is **soft**
+(§1.6 — any drag is legal), every forward/lateral human gesture collapses to *one*
+primitive, **`goto(target)`**; the old named gestures (advance / skip / approve / retry /
+start_discuss / move) are just `goto` specialized by target, resolved from `(from, target)`
+in code — not distinct events.
+
+UI-originated (arrive over the board's `/rpc` endpoint):
+
+| Event | UI gestures that emit it | Meaning |
+|---|---|---|
+| `goto(target[, park])` | Start-discuss · Advance · Skip · drag-forward · Approve-tests · Approve-merge · Retry · Move | put the card at `target` stage. Code derives everything else: cancel any in-flight run first, **enqueue** a run iff `target` is run-bearing (else rest `idle` / at its gate), bump `attempt` on re-entry, and compute `trigger`. `park` forces `idle` even at a run-bearing target (the old `move`). |
+| `cancel` | Cancel · Discard (discuss) | discard the in-flight run **and its worktree**, rest at the current stage/`idle`. Distinct from `goto(current)`/Retry, which **keeps** the tree. |
+| `archive` | Archive | drop off the board (`archived_at`); cancels any in-flight run first. |
+
+System-originated (dispatched in-process by the worker/poller — never over the wire):
 
 | Event | Source | Meaning |
 |---|---|---|
 | `issue.opened` | github (poll) | new tracked issue → intake (guarded by a tracking label) |
-| `start_discuss` | ui | human opens the discuss session in VS Code |
-| `advance` | ui | human moves a resting card to the next stage (e.g. discuss → write_tests) |
-| `approve` | ui | human passes a soft gate (approve-tests, approve-merge) |
-| `retry` | ui | re-run a failed stage |
-| `cancel` | ui | stop a queued/running run |
-| `move(target)` | ui | manual drag / park to an arbitrary stage |
-| `skip` | ui | advance past the current stage to the next one and enqueue it — the dashboard "skip this phase" gesture (§6.3) |
-| `archive` | ui | remove from board |
-| `run_succeeded(id)` / `run_failed(id)` | system (worker); for `discuss` it's the card's **Done — proceed** button (§2) | a run finished (CI-red inside `write_code` surfaces as `run_failed`) |
-| `pr.merged` | github (poll) | the tracked PR merged (by the pipeline or by hand) → card is done (drift) |
-| `pr.closed` | github (poll) | the tracked PR closed **without** merge → work abandoned; card → `failed` so the human can reopen / rework / archive (drift) |
+| `run_succeeded(id)` / `run_failed(id)` | worker; for `discuss` it's the card's **Done — proceed** button (§2) | a run finished (CI-red inside `write_code` surfaces as `run_failed`). *(Mergeable to `run_finished(id, ok)`; kept split to mirror T-SUCCEED / T-FAIL, §6.5.)* |
+| `pr.merged` | github (poll) | tracked PR merged (pipeline or by hand) → card done (drift) |
+| `pr.closed` | github (poll) | tracked PR closed **without** merge → card `failed`, so the human can reopen / rework / archive (drift) |
 
-`run.trigger ∈ {manual, auto, retry}` records *why* a run row exists: **`manual`** =
-human-started (`start_discuss`, `advance`, `skip`); **`auto`** = a gate release (`approve`)
-or an auto-chain link (`write_code → review`, and `discuss → write_tests` on **Done —
-proceed**); **`retry`** = re-run after a failure. The split is *who chose what
-runs next*, not *who clicked*: `advance`/`skip` are `manual` because the human named the
-target stage, whereas `approve` is `auto` because releasing the gate hands the "what runs
-next" choice back to the transition map. (Rename to `human`/`chain`/`retry` if that reads
-clearer.)
+**How one `goto` reads by position** (all computed, none enumerated):
+
+| `goto(target)` from… | reads as | because |
+|---|---|---|
+| resting `*/idle`, target = next stage | **advance** | +1 step |
+| any resting stage, target = a later stage | **skip** | +N steps — the board is soft |
+| `write_tests / awaiting_human` → `write_code` | **approve-tests** | a forward `goto` *out of* a gate releases it |
+| `review / awaiting_human` → `done` | **approve-merge** | target is terminal → no run |
+| `*/failed` → same stage | **retry** | re-enter; `attempt+1` |
+| `backlog/idle` → `discuss` | **start-discuss** | target `discuss` → interactive lane (§6.3) |
+| any state → arbitrary stage, `park` | **move / park** | explicit rest, no run |
+
+`run.trigger ∈ {manual, auto, retry}` is **computed from `(source, from-state)`**, not the
+gesture: **`retry`** = `goto(current)` from `*/failed`; **`auto`** = a gate release (a
+forward `goto` out of `*/awaiting_human`) or a system auto-chain (`write_code → review`,
+`discuss → write_tests` on **Done — proceed**); **`manual`** = every other human `goto`
+(the human named the target). *(Rename to `retry`/`chain`/`human` if that reads clearer.)*
 
 ### 6.3 Transition table
 
-Happy path (▸ = automatic, ✋ = human action):
+Happy path (▸ = automatic, ✋ = human `goto`/action):
 
-| From `(stage/status)` | Event | Guard | Actions (atomic) | To `(stage/status)` |
-|---|---|---|---|---|
-| — | `issue.opened` | has tracking label | insert card | `backlog / idle` |
-| `backlog / idle` | ✋`start_discuss` | | insert run(discuss, manual, running); exec `code` → seeded `claude` in VS Code *(post-commit)* | `discuss / running` |
-| `discuss / running` | ▸`run_succeeded` (Done — proceed) | | enqueue write_tests | `write_tests / queued` |
-| `discuss / idle` | ✋`advance` | | enqueue write_tests | `write_tests / queued` |
-| `write_tests / queued` | ▸worker claim | | run→running | `write_tests / running` |
-| `write_tests / running` | ▸`run_succeeded` | | — | `write_tests / awaiting_human` |
-| `write_tests / awaiting_human` | ✋`approve` | | enqueue write_code | `write_code / queued` |
-| `write_code / queued` | ▸worker claim | | run→running | `write_code / running` |
-| `write_code / running` | ▸`run_succeeded` | | store `pr_number`; enqueue review | `review / queued` |
-| `review / queued` | ▸worker claim | | run→running | `review / running` |
-| `review / running` | ▸`run_succeeded` (fixes pushed + follow-ups filed) | | — | `review / awaiting_human` |
-| `review / awaiting_human` | ✋`approve` (merge) | | (optionally merge PR) — **terminal, no run** | `done / idle` |
-
-Cross-cutting (apply from most states):
-
-| From | Event | Actions | To |
+| From `(stage/status)` | Event | Actions (atomic) | To `(stage/status)` |
 |---|---|---|---|
+| — | `issue.opened` (has label) | insert card | `backlog / idle` |
+| `backlog / idle` | ✋`goto(discuss)` | insert run(discuss, manual, running); spawn seeded `claude` in the session host *(post-commit)* | `discuss / running` |
+| `discuss / running` | ▸`run_succeeded` (Done — proceed) | auto-chain: enqueue write_tests | `write_tests / queued` |
+| `write_tests / queued` | ▸ worker claim | run→running | `write_tests / running` |
+| `write_tests / running` | ▸`run_succeeded` | — | `write_tests / awaiting_human` |
+| `write_tests / awaiting_human` | ✋`goto(write_code)` *(approve-tests)* | enqueue write_code | `write_code / queued` |
+| `write_code / queued` | ▸ worker claim | run→running | `write_code / running` |
+| `write_code / running` | ▸`run_succeeded` | store `pr_number`; auto-chain: enqueue review | `review / queued` |
+| `review / queued` | ▸ worker claim | run→running | `review / running` |
+| `review / running` | ▸`run_succeeded` *(fixes pushed + follow-ups filed)* | — | `review / awaiting_human` |
+| `review / awaiting_human` | ✋`goto(done)` *(approve-merge)* | (optionally merge PR) — **terminal, no run** | `done / idle` |
+
+Cross-cutting — the whole block is now **six rows**, because one `goto` absorbs advance /
+skip / approve / retry / move / start_discuss:
+
+| From | Event | Actions (atomic) | To |
+|---|---|---|---|
+| any state | ✋`goto(target[, park])` | cancel any in-flight run *(post-commit)*; set `stage=target`; **enqueue** a run there (or rest `idle`/at the gate if `park` or a non-run target); `attempt+1` on re-entry; `trigger` per §6.2 | `target / {queued\|awaiting_human\|idle}` |
 | `* / running` | `run_failed` | run→failed; store `session_id` + `pr_number` (shipped-but-unmerged PR stays linked; `claude --resume` works) | `* / failed` |
-| `* / failed` | ✋`retry` | enqueue same stage, `attempt+1`, trigger=retry | `* / queued` |
-| `* / {queued,running}` | ✋`cancel` | run→cancelled; kill proc + worktree *(post-commit)* | `* / idle` |
-| `*` | ✋`move(t)` | cancel any in-flight run, then set stage=t, status=idle (park — no run) | `t / idle` |
-| `* (work stage)` | ✋`skip` | cancel any in-flight run, then advance to the **next** stage and enqueue it (or land on its gate) — the dashboard "skip this phase" gesture | `<next> / {queued\|awaiting_human}` |
+| `* / {queued,running}` | ✋`cancel` | run→cancelled; kill proc + **remove worktree** *(post-commit)* — a discard, not a pause | `* / idle` |
 | `*` | ✋`archive` | cancel any in-flight run, then set `archived_at` | (hidden) |
 | `* (pr_number set)` | `pr.merged` | cancel any in-flight run *(post-commit)*, then mark done | `done / idle` |
 | `* (pr_number set)` | `pr.closed` (unmerged) | cancel any in-flight run *(post-commit)*; keep `pr_number` linked so the human can reopen / rework / archive | `* / failed` |
 
 Notes:
-- **`discuss` bypasses the worker queue.** It's human-initiated and interactive, so it
-  spawns straight to `running` in its own lane rather than waiting behind headless runs
-  in the concurrency-capped queue. *(Open decision.)*
-- **`discuss → write_tests` is resolved from the board, not by process exit.** VS Code
-  hosts the session and the board doesn't parent it (§2 UI seam), so the discuss card
-  carries two actions: **"Done — proceed"** (`run_succeeded` → the chain rolls into
-  `write_tests`) and **"Discard"** (`cancel` → the card parks in `discuss / idle`,
-  re-openable via `start_discuss`). Intent is an explicit click, not inferred from how you
-  closed a terminal — an exploratory poke never barrels into writing tests; a real design
-  pass is one button. `write_tests` then **cold-starts from the issue** (§7.5), so discuss's
-  deliverable is the converged design written into the issue (§1.1); nothing is carried
-  forward from the session's context.
-- **Forward-drag = the gate gesture.** Dragging a card forward past a gate emits
-  `approve`/`advance`; any other drag is a `move` (park). One UI affordance, two
-  meanings by direction.
-- **Any phase is skippable from the dashboard** via `skip` (advance + enqueue the next
-  stage) or `move` (park anywhere). A dep bump skips `discuss` and `write_tests` straight
-  into `write_code`; skipping `write_tests` also drops the approve-tests gate for that
-  card (no spec to approve). From `backlog`, `start_discuss` opens discussion while
-  `skip`/`move` jumps straight into a work stage. *(Future enhancement: capture recurring
-  skip patterns as named per-card **recipes** — a stored `plan` the card auto-runs, e.g.
-  `chore = [write_code, review]` — so dep-bump-shaped work runs the short path without
-  per-card clicks.)*
-- **Auto-chains** (`write_code → review`, and `discuss → write_tests` on **Done — proceed**)
-  enqueue the next run inside the predecessor's `T-SUCCEED`, atomically — so `write_code`
-  success alone drives the card to `review`; there is no separate CI event. `review`
-  files its own follow-ups and finishes on its own **merge gate** (`review / awaiting_human`) — no separate `follow_ups` run.
-- **The merge `approve` (at `review / awaiting_human`) is terminal** — it runs no new run;
-  it sets `done` (+ optional PR merge). Not every `approve` enqueues.
+- **`goto` *is* the soft board.** One primitive expresses advance, skip, approve, retry,
+  move, and start-discuss; the transition fn reads `(from, target)` to decide run-vs-park,
+  the `attempt` bump, and `trigger` (§6.2). "Any phase is skippable / a card drags anywhere"
+  (§1.6) isn't extra machinery — it's the *default*, and the old named events were just
+  `goto` with the target precomputed. A dep bump is `goto(write_code)` from `backlog`
+  (skipping discuss + write_tests, and thereby dropping the approve-tests gate — no spec to
+  approve).
+- **The gates are positions, not events.** `write_tests/awaiting_human` and
+  `review/awaiting_human` are resting states; a forward `goto` *out of* one **is** the
+  approval (approve-tests enqueues `write_code`; approve-merge is terminal `done`, no run).
+  The two human gates are unchanged — they're just no longer distinct verbs, which is why
+  "not every approve enqueues" stops being a special case: the target stage decides.
+- **`cancel` vs `goto(current)`/Retry.** Both stop the current run, but `cancel` **removes
+  the worktree** (a discard) while `goto` back onto the same stage / Retry **keeps** it for
+  `claude --resume` and reuse (§6.5 T-CANCEL vs T-FAIL). That worktree semantic — not the
+  target — is why `cancel` survives as its own verb.
+- **`discuss` bypasses the worker queue.** `goto(discuss)` is human-initiated and
+  interactive, so it spawns straight to `running` in its own lane rather than queueing
+  behind headless runs. Available from any resting `*/idle`, not just `backlog`. Whether
+  re-discussing from a later stage parks the card in `discuss` (default) or opens an ad-hoc
+  side session leaving `card.stage` untouched is open. *(Open decision — §7.12.)*
+- **`discuss → write_tests` is resolved from the board, not process exit.** The session host
+  doesn't parent the session (§2), so the discuss card carries **Done — proceed**
+  (`run_succeeded` → auto-chain to `write_tests`) and **Discard** (`cancel` → parks in
+  `discuss/idle`). Intent is an explicit click, never inferred from how a terminal closed.
+  `write_tests` then **cold-starts from the issue** (§7.5); nothing carries from the session.
+- **Auto-chains** (`write_code → review`; `discuss → write_tests` on Done — proceed) enqueue
+  the next run inside the predecessor's `T-SUCCEED`, atomically (`trigger=auto`) — so
+  `write_code` success alone drives the card to `review`; there is no separate CI event.
+  `review` files its own follow-ups and finishes on its own merge gate — no `follow_ups` run.
+- **Drift.** Polling `gh` surfaces `pr.merged`/`pr.closed` for a card with `pr_number` set:
+  merged → `done` from wherever it sat (CAS on any non-`done` state, so re-observing next
+  poll is a no-op); closed-unmerged → `failed`, `pr_number` kept linked to reopen / rework /
+  archive. This is the "PR you merged by hand" case §3.1 motivates.
 - Filed follow-up issues re-enter via `issue.opened` as fresh `backlog` cards.
-- **Drift = a hand-merge.** Polling `gh` also surfaces `pr.merged` for a card whose
-  `pr_number` is set; the card jumps to `done` from wherever it sat (CAS on any non-`done`
-  state, so re-observing next poll is a no-op). This is the "PR you merged by hand" case
-  §3.1 motivates.
-- **`start_discuss` is on-demand from any resting `*/idle`,** not just `backlog`. Whether
-  re-discussing from a later stage parks the card back in `discuss` (default — visible,
-  reachable forward again via `move`) or opens an ad-hoc side session that leaves
-  `card.stage` untouched is an open question.
+- *(Future: capture a recurring `goto` sequence as a named per-card **recipe** — a stored
+  `plan` the card auto-runs, e.g. `chore = goto(write_code) → goto(review)` — so
+  dep-bump-shaped work runs the short path without per-card clicks.)*
 
 ### 6.4 Transaction rules
 
@@ -534,7 +550,7 @@ BEGIN IMMEDIATE;
     ON CONFLICT(repo, issue_number) DO NOTHING;   -- already tracked → 0 rows → return
 COMMIT;
 
--- T-ENQUEUE: the core transition (advance / tests-approve / skip / retry).
+-- T-ENQUEUE: the core transition — any `goto(target)` that enqueues (advance / approve-tests / skip / retry).
 -- Auto-chains (write_code→review; discuss→write_tests on "Done — proceed") run this same shape in T-SUCCEED.
 BEGIN IMMEDIATE;
   -- Guarded CAS on the card's EXPECTED (stage,status) FIRST: a stale/duplicate event —
@@ -660,3 +676,109 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
 4. Author the `write-code` skill (§3.2) — the missing engine piece.
 5. Wire one end-to-end slice on a real issue: poll-discovered intake → approve-tests →
    `write_code` (ships PR + watches CI green) → review run → findings comment.
+
+---
+
+## 9. Service API & data flows
+
+The service is **one Node process**: it serves the board's static bundle, exposes a single
+command endpoint for the browser, and runs the worker + poll loops in-process. Everything
+except the browser hop is a plain function call — the core (transition fn, SQLite via
+`better-sqlite3`, effect layer, worker, poller) never talks to itself over a wire.
+
+### 9.1 The one wire — `/rpc`
+
+The board is browser JS, a different process from Node, so a click **must** cross a socket;
+that hop is the only API. It is **command-shaped, not REST** — the UI's job is to emit the
+§6.2 event alphabet, so the endpoint is a direct projection of the state machine (§1.5),
+not a set of CRUD resources.
+
+| Route | Kind | Purpose |
+|---|---|---|
+| `GET /*` | static | the board bundle (HTML/JS/CSS) — the "files at :8765" |
+| `POST /rpc` | command/query | `{op, args}` → dispatch to an in-process function; the whole API |
+| `GET /events` *(optional)* | SSE | push the read model on change; **omit until polling feels slow** (§9.5) |
+
+Endpoint *count* is cosmetic — `/rpc` multiplexes every operation, exactly as tRPC / Next
+server actions do under the hood. Whether it's hand-rolled JSON, tRPC, or server actions is
+**decision #4** (the app-shell choice); the *shape* is fixed either way.
+
+### 9.2 Operations behind `/rpc`
+
+Four procedures — different shapes, so distinct functions, but all in-process on the server:
+
+| `op` | Args | Does | Maps to |
+|---|---|---|---|
+| `getBoard` | — | read model for every non-archived card | one SELECT (§9.3) |
+| `getCard` | `cardId` | one card + its append-only run timeline | SELECT card + run |
+| `dispatchEvent` | `cardId, event` | run the guarded-CAS transition for a UI event | T-ENQUEUE / T-CANCEL / … (§6.5) |
+| `createIssue` | `repo, title, body` | `gh issue create`, then intake the result as a card | T-INTAKE (§6.5) |
+
+`dispatchEvent` is the **whole write surface**. Its `event` is the §6.2 UI alphabet — a
+discriminated union `{type:'goto', target, park?} | {type:'cancel'} | {type:'archive'}` —
+carrying the `(stage,status)` the caller believes the card is in (the CAS guard, §6.4.3). It
+runs the transaction and returns the card's new `(stage, status)`; a stale or double-clicked
+event updates 0 rows and returns the *unchanged* state — a safe no-op, never an error.
+
+### 9.3 The read model
+
+`getBoard` returns what the board renders with **no** further GitHub / `~/.claude` call —
+denormalized so a paint is one SELECT:
+
+```jsonc
+// per card
+{
+  id, repo, issue_number, pr_number, title,     // card columns (denormalized on purpose, §5)
+  stage, status, state_entered_at,              // position + dwell / gate-nag signal
+  latest_run: {                                 // the card's newest run row, or null
+    id, stage, attempt, status, trigger,
+    session_id,                                 // JOIN KEY into ~/.claude
+    cost_usd,                                   // OPTIONAL cache (§7.2)
+    activity: { last_step, elapsed }            // live-tailed by session_id, running runs only
+  } | null
+}
+```
+
+`title` / `stage` / `status` / `pr_number` are card columns, so the board paints with no
+live `gh` call. `activity` is the only field read live, and only for a `running` headless
+run — tailed from `~/.claude` by `session_id` (§2), never stored. Everything durable (diffs,
+design, follow-ups) is a **link out**, not a payload.
+
+### 9.4 What feeds the state — the loops
+
+State changes come from three sources; the §6.2 **Source** column decides which cross the
+wire. Only UI gestures do; the loops call the same `nextState` in-process.
+
+1. **UI → `/rpc`** — human gestures (`goto` / `cancel` / `archive`). `dispatchEvent` runs
+   the transaction; **side effects run post-commit** (§6.4.1) — spawn / kill / `gh` /
+   worktree — off the committed row, never inside the write-lock.
+2. **Worker loop (in-process)** — polls `run WHERE status='queued'` (the outbox, §6.4.2),
+   `T-CLAIM`s one, spawns `claude` via the Agent SDK, and on the result message dispatches
+   `run_succeeded` / `run_failed` **as an in-process call** (`T-SUCCEED` / `T-FAIL`) — it
+   never POSTs to itself. Pool = small N (§3.2); `discuss` runs outside it (§6.3).
+3. **Poll loop (in-process)** — `gh` on a timer for `issue.opened` / `pr.merged` /
+   `pr.closed`, dispatched in-process (`T-INTAKE` / drift). No inbound endpoint, no webhook
+   (§3.1); webhooks remain an optional latency swap (§7.10).
+
+So the only traffic on `/rpc` is UI-sourced; worker- and poll-sourced events are function
+calls into one `applyEvent(cardId, event)` core — three callers, one transition function.
+
+### 9.5 Live updates — poll first
+
+The board stays current by **re-`getBoard` on a timer** (1–2 s) — no push, matching the
+service's own poll-don't-webhook stance (§3.1). Add `GET /events` (SSE) only if a human
+notices lag on the activity tail; it needs no schema change (same read model, pushed instead
+of pulled), so start without it.
+
+### 9.6 Packaging — the exec-on-host boundary
+
+The API is trivially containerizable; the **launcher isn't**. §2's whole justification — "a
+local button that `exec`s `code <worktree>` / `claude` / `gh` on *your* machine" — needs the
+developer's actual workstation, which a container isolates you from (worst on macOS, where
+the VS Code host is a GUI app). The clean split: the **headless half** (web server + worker
++ poller + SQLite + headless `claude` / `gh`) containerizes fine; the **interactive session
+host** (§2) wants host access. Default recommendation: **run the whole thing as a local host
+process** (a `npx` / systemd / launchd one-liner) — it matches "the service is local" better
+than a container. If a container is still wanted, scope it to the headless half and keep the
+session-host launcher on the host, or degrade the host to `command` / `tmux` (§2's
+capability table). *(Open decision — folds into #4 / packaging.)*
