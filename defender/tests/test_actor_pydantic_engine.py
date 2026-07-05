@@ -18,22 +18,21 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender.hooks._cmd_segments import unwrap  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline import actor_engine  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope, _run_actor_pydantic  # noqa: E402
 from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
-from defender.runtime import bash_exec, observe, permission  # noqa: E402
+from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
-
-
-def _pipes(cmd):
-    return bash_exec.parse(unwrap(cmd))
+_ACTOR_DIR = config.LESSONS_ACTOR_DIR
+_ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
+# The malicious leg's read confine (both lesson corpora), as malicious_actor.run wires it.
+_MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 
 
 def _flatten(messages) -> str:
@@ -93,7 +92,8 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
         out = _run_actor_pydantic(
             _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
             "write the story", lrd,
-            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
+            make_model=_fake_model(fn),
         )
     assert out == _STORY
     assert (lrd / "actor_trace.jsonl").is_file()
@@ -109,39 +109,41 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
         out = _run_actor_pydantic(
             _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
             "write the story", lrd,
-            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
+            make_model=_fake_model(fn),
         )
     assert out.startswith("Let me consider the menu.")
     assert is_skip_story(out)
 
 
-# --- the two pinned lessons-script matchers -------------------------------------
+# --- the two pinned lessons-script patterns -------------------------------------
 
-def test_lessons_matcher_allows_pinned_script_relative_and_absolute():
-    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
-    for cmd in (
-        "python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web",
-        f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712",   # absolute form
-        f"python {_ENV_RETRIEVE} --alert-rule-ids 5712",    # bare `python` interpreter
-    ):
-        d = m(_pipes(cmd))
-        assert d is not None, cmd
-        assert d.allow, cmd
+def test_script_pattern_accepts_pinned_spellings():
+    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+    # repo-relative (what the prompt types), absolute, and a bare `python` interpreter
+    assert p.fullmatch("python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web")
+    assert p.fullmatch(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712")
+    assert p.fullmatch(f"python {_ENV_RETRIEVE} --alert-rule-ids 5712")
 
 
-def test_lessons_matcher_declines_wrong_shape():
-    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
-    # a different script, arbitrary python, a non-python program, and a pipe/compound
-    assert m(_pipes(f"python3 {_ACTOR_INDEX} --techniques T1078")) is None
-    assert m(_pipes("python3 -c 'print(1)'")) is None
-    assert m(_pipes("cat /etc/passwd")) is None
-    assert m(_pipes(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat")) is None
+def test_script_pattern_rejects_wrong_shape():
+    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+    assert not p.fullmatch(f"python3 {_ACTOR_INDEX} --techniques T1078")  # different pinned script
+    assert not p.fullmatch("python3 -c print(1)")                         # arbitrary python
+    assert not p.fullmatch("cat /etc/passwd")                             # non-python program
+
+
+def test_actor_script_pipe_denied_through_gate():
+    # a pipe re-opens no reader surface: the `| cat` stage matches no actor pattern → denied.
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
+    assert not permission.decide_bash(
+        f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat", policy=pol).allow
 
 
 # --- the policy through the full gate -------------------------------------------
 
 def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
-    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX))
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
     # both pinned lesson scripts are allowed by the actor's matchers
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=pol).allow
     assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=pol).allow
@@ -155,29 +157,50 @@ def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
 def test_benign_actor_policy_excludes_tradecraft_index():
     # The benign leg carries only the env-retrieve matcher; the tradecraft index stays a
     # malicious-only capability (the actor-settings.json boundary, now enforced by policy).
-    benign = actor_engine._actor_policy((_ENV_RETRIEVE,))
+    benign = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=benign).allow
     assert not permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=benign).allow
 
 
-# --- read scope: under defender_dir, with NO read_roots -------------------------
+# --- read scope: CONFINED to the lesson corpora (#512) --------------------------
 
-def test_actor_reads_under_defender_dir_without_read_roots(tmp_path):
-    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX))
-    assert pol.read_roots == ()          # the corpora live under defender_dir; no widening needed
+def test_actor_read_scope_is_confined_to_lessons(tmp_path):
+    # #512: the actor's read_confine REPLACES the defender_dir base, so a defender_dir
+    # file OUTSIDE the confine (SKILL.md, the judge rubric) is no longer readable — the
+    # gray-box hole #510 opened. run_dir artifacts and in-confine lessons still are.
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    assert set(pol.read_confine) == set(_MALICIOUS_CONFINE)
+    assert pol.read_roots == ()          # confine replaces the corpus base; no widening
     assert pol.raw_reads is False        # gray-box: never touches gather_raw
     assert pol.adapters is False
     lrd = _lrd(tmp_path)
-    # a file under defender_dir is allowed purely by the defender-corpus root (no read_roots)
-    allowed = permission.decide_read(
+    # in-confine lesson: allowed
+    assert permission.decide_read(
+        _ACTOR_DIR / "T1078.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
+    ).allow
+    # under defender_dir but OUTSIDE the confine (SKILL.md): now DENIED
+    assert not permission.decide_read(
         _DEFENDER_DIR / "SKILL.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
-    )
-    assert allowed.allow
-    # a file outside {run_dir, defender_dir} is refused (the actor has no extra roots)
-    denied = permission.decide_read(
+    ).allow
+    # the actor's own run-dir artifact stays readable (run_dir remains a root)
+    assert permission.decide_read(
+        lrd / "actor_menu.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
+    ).allow
+    # a file outside {run_dir} ∪ confine is refused
+    assert not permission.decide_read(
         tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
-    )
-    assert not denied.allow
+    ).allow
+
+
+def test_actor_scope_requires_explicit_confine():
+    # #512 fail-loud: read_confine is a required keyword-only field — building an actor scope
+    # WITHOUT it is a construction-time TypeError, not a silent fall back to the full defender_dir
+    # corpus (which would reopen the #510 gray-box hole). There is no unconfined actor.
+    with pytest.raises(TypeError):
+        _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX))
+    # …and naming the confine builds the confined scope as before.
+    scope = _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    assert scope.read_confine == _MALICIOUS_CONFINE
 
 
 # --- the agent is read-only (no writers) + GLM@low effort plumbing --------------

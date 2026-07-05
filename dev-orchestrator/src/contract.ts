@@ -42,10 +42,42 @@ export interface RunRow {
   trigger: Trigger;
   session_id: string | null;
   pid: number | null;
-  cost_usd: number | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+/** The pair a `claimNext` CAS returns — the run it moved to `running` and its card.
+ *  claimNext is a PURE CAS (§9.4): it enqueues no effect; the worker loop owns the arc. */
+export interface ClaimedRun {
+  run: RunRow;
+  card: CardState;
+}
+
+/** What a finished headless run reports back (§9.7). `session_id` is confirmatory — it was
+ *  assigned + persisted before the spawn (recordSession); `pr_number` is discovered post-run.
+ *  No `cost_usd` (dropped, §7.2). */
+export interface RunResult {
+  ok: boolean;
+  session_id?: string;
+  pr_number?: number;
+}
+
+/** A GitHub issue the poller discovered (§9.4). */
+export interface IssueRef {
+  repo: string;
+  issue_number: number;
+  title: string;
+}
+
+/** The state of a PR the poller checks for drift (§9.4). */
+export type PrState = "open" | "merged" | "closed";
+
+/** One poll pass's applied-transition counts (stale/no-op transitions are NOT counted). */
+export interface PollSummary {
+  intook: number;
+  merged: number;
+  closed: number;
 }
 
 /** Every card-targeted event carries the (stage,status) the caller believes the card is
@@ -61,7 +93,7 @@ export type Event =
   | ({ type: "cancel" } & Expect)
   | ({ type: "archive" } & Expect)
   // Worker completion — guarded by run_id + status='running' (the run CAS is the idempotency key).
-  | { type: "run_succeeded"; run_id: string; session_id?: string; cost_usd?: number; pr_number?: number }
+  | { type: "run_succeeded"; run_id: string; session_id?: string; pr_number?: number }
   | { type: "run_failed"; run_id: string; session_id?: string; pr_number?: number }
   // Poller drift — guarded by "this card, pr_number set, any non-done state".
   | { type: "pr_merged" }
@@ -83,18 +115,30 @@ export interface ReconcileSummary {
   left_discuss: number;
   redriven_queued: number;
   killed: number;
+  swept: number; // worktrees reaped by the filesystem sweep (§9.4) — orphans no live card claims
 }
 
 /** Injected side-effect seam (principle 7). State commits in-txn; these run AFTER
  *  commit and are fire-and-reconcile: a throwing effect is recorded, never rolled back
  *  into committed state, and never changes a transition's return value. */
 export interface Effects {
-  createWorktree(card: CardState): string; // returns worktree_path
-  removeWorktree(card: CardState): void;
-  spawnHeadless(run: RunRow, card: CardState): void;
+  createWorktree(card: CardState): string; // deterministic path (pure fn of the card); idempotent on retry
+  removeWorktree(card: CardState): void; // card-driven teardown (cancel/archive/done/drift) — has repo context
+  listWorktrees(): string[]; // every worktree path on disk under the run root — for the reconcile sweep
+  // Reap a worktree by PATH alone. The reconcile sweep reaps orphans — on-disk trees no live card
+  // claims — and an orphan has NO owning card, so the sweep holds only a path (never a phantom card).
+  removeWorktreePath(path: string): void;
+  // Spawn a headless `claude -p --session-id <sessionId>` (the id is assigned + persisted BEFORE
+  // spawn, §9.7). Returns the child pid and a promise that resolves on exit. The worker awaits
+  // `done` OUTSIDE any transaction; a rejected `done` is a failed run.
+  spawnHeadless(run: RunRow, card: CardState, sessionId: string): { pid: number; done: Promise<RunResult> };
   spawnSession(card: CardState, resume?: string): void;
   kill(run: RunRow): void;
-  gh: { issueCreate(input: { repo: string; title: string; body?: string }): { issue_number: number } };
+  gh: {
+    issueCreate(input: { repo: string; title: string; body?: string }): { issue_number: number };
+    issueList(input: { repo?: string; label?: string }): IssueRef[]; // poll → intake
+    prStatus(input: { repo: string; pr_number: number }): PrState; // poll → drift
+  };
   now(): string; // ISO-8601 UTC
   uuid(): string;
 }
@@ -115,4 +159,104 @@ export class InvalidEventError extends Error {
     super(message);
     this.name = "InvalidEventError";
   }
+}
+
+// ===========================================================================
+// Slice 2b — the runnable surface (§9.7.1 / §9.8 / §9.9 / §10).
+//
+// Pure DATA + collaborator types shared by the 2b spec. The engine (above) is
+// UNTOUCHED by 2b; these describe the server read model, the injected config, and
+// the boot seam that wire the shell-agnostic core (slice #1/#2a) to real I/O.
+// ===========================================================================
+
+/** Per-repo config (§9.9): the local clone the worktrees branch from. */
+export interface RepoConfig {
+  name: string; // "owner/name" — matches card.repo and the gh -R target
+  root: string; // local clone dir for `git -C <root>`
+  base: string; // createWorktree base ref, e.g. "origin/main"
+}
+
+export type SessionHostKind = "vscode" | "command" | "tmux" | "embedded-pty";
+
+/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid} placeholders. */
+export interface SessionHostConfig {
+  kind: SessionHostKind;
+  command?: string; // required for kind="command"/"tmux"
+}
+
+/** The one injected config object (§9.9) — never global, never re-read in the hot path. */
+export interface Config {
+  runRoot: string; // sqlite db + wt/ worktrees + run/ pidfiles + *.code-workspace
+  label: string; // §7.9 tracking label — intake filter + new-issue create label
+  pool: number; // headless worker slots (§3.2); discuss runs outside it
+  pollMs: number; // gh poll cadence (§9.4)
+  workerTickMs: number; // drainQueue cadence
+  port: number; // board + /rpc
+  permissionMode: string; // claude -p --permission-mode for headless stages
+  model: string; // optional claude --model override; "" = CLI default
+  repos: RepoConfig[];
+  sessionHost: SessionHostConfig;
+}
+
+/** The live "watch it work" tail (§9.3) — only for a running headless run, else null. */
+export interface RunActivity {
+  last_step: string;
+  elapsed: number;
+}
+
+/** A card's newest run, as the board renders it (§9.3). */
+export interface BoardRun {
+  id: string;
+  stage: RunStage;
+  attempt: number;
+  status: RunStatus;
+  trigger: Trigger;
+  session_id: string | null;
+  activity: RunActivity | null; // overlay; ALWAYS null in the pure DB projection (readBoard)
+}
+
+/** One board card — denormalized so a paint is one query, no live gh call (§9.3). */
+export interface BoardCard {
+  id: string;
+  repo: string;
+  issue_number: number;
+  pr_number: number | null;
+  title: string | null;
+  stage: Stage;
+  status: Status;
+  state_entered_at: string;
+  latest_run: BoardRun | null;
+}
+
+/** `getCard`: the card + its full append-only run timeline (§9.2). */
+export interface CardDetail {
+  card: CardState;
+  runs: RunRow[];
+}
+
+/** The one wire handler shape (§9.1). Both a hand-rolled fetch and a Hono `app.fetch` satisfy it. */
+export type FetchHandler = (req: Request) => Response | Promise<Response>;
+export interface App {
+  fetch: FetchHandler;
+}
+
+/** Injected boot collaborators (§9.8). main.ts defaults these to the real ones; the boot-ordering
+ *  test injects recording fakes to pin that `reconcile` fires BEFORE any loop or the server. */
+export interface BootDeps {
+  openDb(runRoot: string): DB;
+  effects(cfg: Config): Effects;
+  reconcile(db: DB, fx: Effects): ReconcileSummary;
+  drainQueue(db: DB, fx: Effects, opts: { pool: number }): Promise<void>;
+  pollOnce(db: DB, fx: Effects, opts: { label?: string }): Promise<PollSummary>;
+  makeApp(db: DB, fx: Effects, cfg: Config): App;
+  serve(opts: { port: number; fetch: FetchHandler }): unknown;
+  every(ms: number, fn: () => void | Promise<void>): unknown; // self-rescheduling, non-overlapping timer
+}
+
+/** What `boot` hands back — the live handles (§9.8). */
+export interface BootHandle {
+  db: DB;
+  worker: unknown;
+  poll: unknown;
+  server: unknown;
 }

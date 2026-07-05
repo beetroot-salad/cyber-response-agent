@@ -150,7 +150,10 @@ def _bash_env(deps: RunDeps) -> dict[str, str]:
 def _tool_bash(deps: RunDeps, command: str) -> str:
     """Logic for the `bash` tool (see the closure's docstring). Module-level so the
     tool closure stays thin; the gather-vs-main adapter-capture path lives here."""
-    decision = permission.decide_bash(command, policy=deps.policy)
+    decision = permission.decide_bash(
+        command, policy=deps.policy,
+        run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+    )
     if not decision.allow:
         raise ModelRetry(decision.reason)
     # The gate parsed the command exactly once and stashed everything on the
@@ -197,8 +200,21 @@ def _tool_bash(deps: RunDeps, command: str) -> str:
     return _format_bash_result(rc, out, err)
 
 
-def _tool_read_file(deps: RunDeps, path: str) -> str:
-    """Logic for the `read_file` tool: permission → bound → untrusted-wrap."""
+def _grep_lines(text: str, pattern: str) -> str:
+    """The grep fold behind `read_file(pattern=)`: the lines of `text` that CONTAIN
+    `pattern` (a plain substring match, like the read-only `grep` it replaces for a
+    confined agent), newline-joined. Zero matches → `''` — a valid "nothing here"
+    outcome, NOT an error (the caller returns it as-is)."""
+    return "\n".join(line for line in text.splitlines() if pattern in line)
+
+
+def _tool_read_file(deps: RunDeps, path: str, pattern: str | None = None) -> str:
+    """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
+    untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
+    read raises the policy denial for an existing and an absent path alike — no
+    existence oracle. An optional `pattern` folds grep into the read (return only
+    the matching lines): search never widens the read surface — the confine gates
+    the PATH before any scan — so a `pattern` over a denied path still raises."""
     decision = permission.decide_read(
         Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         policy=deps.policy,
@@ -210,6 +226,10 @@ def _tool_read_file(deps: RunDeps, path: str) -> str:
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
     _record_lesson_load(deps, p)  # lesson→outcome traceability (best-effort)
+    if pattern is not None:
+        # grep fold: only the matching lines reach the model (the read-only bash
+        # grep viewer a confined agent no longer has). No-match → '' (not an error).
+        text = _grep_lines(text, pattern)
     # Bound the in-context view BEFORE wrapping: an oversized payload read
     # whole would overflow the model's window (#303). Cap first so the head is
     # what gets tag-wrapped (injected text in it stays inert), not the full dump.
@@ -283,9 +303,14 @@ def register_tools(agent, *, writers: bool = True) -> None:
         return _tool_bash(ctx.deps, command)
 
     @agent.tool
-    async def read_file(ctx: RunContext[RunDeps], path: str) -> str:
-        """Read a file's contents (e.g. alert.json, a SKILL, a lesson)."""
-        return _tool_read_file(ctx.deps, path)
+    async def read_file(
+        ctx: RunContext[RunDeps], path: str, pattern: str | None = None
+    ) -> str:
+        """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
+        `pattern` to return only the lines containing that substring — the grep
+        fold, for scanning a large file (or when the read-only bash grep/cat
+        viewers are not available to this agent)."""
+        return _tool_read_file(ctx.deps, path, pattern)
 
     # Gather stops here: read-only surface (bash + read_file), no file writers.
     if not writers:

@@ -618,6 +618,74 @@ def test_rotate_queue_preserves_held_and_appends_consumed(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+def _index_cli_runner(ctx: dict):
+    """Mirror lessons_actor_index.py + its import deps into ctx's tmp repo (at the real
+    scripts/lessons/ depth, so the script's REPO_ROOT resolves to the fake repo) and return a
+    ``_run(extra_argv) -> stdout`` closure that runs it against ctx's isolated corpus."""
+    defender_src = Path(__file__).resolve().parents[1]
+    script = defender_src / "scripts" / "lessons" / "lessons_actor_index.py"
+    fake_scripts = ctx["repo"] / "defender" / "scripts" / "lessons"
+    fake_scripts.mkdir(parents=True, exist_ok=True)
+    (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
+    # The script imports defender._frontmatter and the shared scripts.lessons._lessons_common
+    # helper (both via its sys.path bootstrap), which re-exports scripts._venv — mirror all three.
+    (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
+        (defender_src / "_frontmatter.py").read_text()
+    )
+    (fake_scripts / "_lessons_common.py").write_text(
+        (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()
+    )
+    (ctx["repo"] / "defender" / "scripts" / "_venv.py").write_text(
+        (defender_src / "scripts" / "_venv.py").read_text()
+    )
+
+    def _run(extra: list[str]) -> str:
+        proc = subprocess.run(
+            [sys.executable, str(fake_scripts / "lessons_actor_index.py"), *extra],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout
+
+    return _run
+
+
+def test_index_cli_applies_to_filter(tmp_path: Path):
+    """--applies-to selects pattern lessons whose applies_to frontmatter lists the queried env-fact
+    subject (OR within the comma list) — the retrieval axis that previously needed grep (#517)."""
+    ctx = _isolate(tmp_path)
+    _write_lesson(ctx["lessons"], "cover-prereqs", {
+        "techniques": ["T1036"], "mutable": False,
+        "applies_to": ["svc-monitoring-cadence-baseline", "authorized-keys-host-cr-baseline"],
+        "relevance_criteria": "cover on pre-existing infra",
+    })
+    _write_lesson(ctx["lessons"], "unrelated", {
+        "techniques": ["T1078"], "mutable": False,
+        "applies_to": ["some-other-subject"],
+        "relevance_criteria": "different axis",
+    })
+    _write_lesson(ctx["lessons"], "no-applies", {
+        "techniques": ["T1036"], "mutable": False,
+        "relevance_criteria": "no applies_to key at all",
+    })
+    _run = _index_cli_runner(ctx)
+    # names the subject -> only the lesson that lists it (excludes the mismatch AND the no-key lesson)
+    out = _run(["--applies-to", "authorized-keys-host-cr-baseline"])
+    assert "cover-prereqs" in out
+    assert "unrelated" not in out
+    assert "no-applies" not in out
+    # OR within the comma list: either subject hits
+    out2 = _run(["--applies-to", "some-other-subject,svc-monitoring-cadence-baseline"])
+    assert "cover-prereqs" in out2
+    assert "unrelated" in out2
+    # no filter -> the field is opt-in; all live lessons surface
+    out3 = _run([])
+    assert "cover-prereqs" in out3
+    assert "unrelated" in out3
+    assert "no-applies" in out3
+
+
 def test_index_cli_hides_stale_lessons_by_default(tmp_path: Path):
     """The runtime actor uses lessons_actor_index.py; stale lessons must not be
     surfaced unless --include-stale is passed. v2: stale-hiding applies to any
@@ -648,36 +716,7 @@ def test_index_cli_hides_stale_lessons_by_default(tmp_path: Path):
             "source_observation_ids": ["r0/0"],
         },
     )
-    defender_src = Path(__file__).resolve().parents[1]
-    script = defender_src / "scripts" / "lessons" / "lessons_actor_index.py"
-    # Mirror the real scripts/lessons/ depth so the script's REPO_ROOT
-    # (parents[3]) resolves to this fake repo, not its parent.
-    fake_scripts = ctx["repo"] / "defender" / "scripts" / "lessons"
-    fake_scripts.mkdir(parents=True, exist_ok=True)
-    (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
-    # The script imports defender._frontmatter and the shared
-    # scripts.lessons._lessons_common helper (both resolved via its sys.path
-    # bootstrap), so mirror those modules into the fake repo too.
-    (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
-        (defender_src / "_frontmatter.py").read_text()
-    )
-    (fake_scripts / "_lessons_common.py").write_text(
-        (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()
-    )
-    # _lessons_common re-exports the shared venv helper from defender.scripts._venv,
-    # so mirror that module too (it imports nothing venv-only).
-    (ctx["repo"] / "defender" / "scripts" / "_venv.py").write_text(
-        (defender_src / "scripts" / "_venv.py").read_text()
-    )
-
-    def _run(extra: list[str]) -> str:
-        proc = subprocess.run(
-            [sys.executable, str(fake_scripts / "lessons_actor_index.py"), *extra],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return proc.stdout
+    _run = _index_cli_runner(ctx)
 
     out = _run([])
     assert "live-claim" in out

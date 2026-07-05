@@ -96,7 +96,7 @@ def test_oracle_policy_denies_everything():
     assert pol.adapter_sql_pipe is False
     assert pol.raw_reads is False
     assert pol.read_roots == ()
-    assert pol.custom_matchers == ()
+    assert pol.bash_allow == ()
     # a data-source adapter, the adapter|defender-sql pipe, arbitrary python, and arbitrary shell
     # are all denied — the oracle's whole input is inlined in the prompt, so it needs none of them.
     assert not permission.decide_bash("defender-elastic query x --raw", policy=pol).allow

@@ -34,7 +34,7 @@ variable "devcontainer_ssh_public_key_path" {
 }
 
 variable "ssh_source_cidrs" {
-  description = "List of CIDRs allowed to reach SSH (port 22). Keep narrow. Example: [\"147.235.201.26/32\"]."
+  description = "List of CIDRs allowed to reach SSH (port 22). Keep narrow. Example: [\"203.0.113.7/32\"]."
   type        = list(string)
 }
 

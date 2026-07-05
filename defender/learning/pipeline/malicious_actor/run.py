@@ -19,8 +19,10 @@ from defender.learning.core.config import (
     ACTOR_EFFORT,
     ACTOR_MODEL,
     ACTOR_PROMPT,
+    LESSONS_ACTOR_DIR,
     LESSONS_ACTOR_INDEX_SCRIPT,
     LESSONS_ENV_RETRIEVE_SCRIPT,
+    LESSONS_ENVIRONMENT_DIR,
     RunUnprocessable,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.RunUnprocessable`
 )
 from defender.learning.core.persist import derive_alert_rule_key
@@ -86,5 +88,8 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     return actor_fn(
         ACTOR_PROMPT, ACTOR_MODEL, ACTOR_EFFORT, "actor_trace.jsonl", "actor",
         user, learning_run_dir,
-        scope=_ActorScope((LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT)),
+        scope=_ActorScope(
+            (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT),
+            read_confine=(LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR),
+        ),
     )

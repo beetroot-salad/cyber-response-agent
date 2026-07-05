@@ -31,11 +31,16 @@ hooks). The gates:
   exactly what executes, with no validator/executor parser differential to
   bypass. The gate parses the command once and returns a `BashDecision` carrying
   that parse, so dispatch + execution never re-decompose it (#456). The decision
-  is then a
-  **deny-by-default allowlist** over each stage's program, sourced from the
-  declarative `runtime/bash_policy.json` (read-only viewers + the read denylist);
-  the adapter/non-adapter shim taxonomy still comes from `_cmd_segments.py` and
-  the main-loop deny *reasons* from `block_main_loop_raw_access.py`.
+  is then a **deny-by-default, per-agent regex allowlist** over the tokenized argv
+  (#522): each agent's `AgentPolicy.bash_allow` is a tuple of anchored `re.Pattern`s
+  matched per stage, and a non-adapter command is allowed iff every stage matches
+  one. Main/gather build theirs from the viewer/​shim program names in
+  `runtime/bash_policy.json` (`permission/policies/{main,gather}.py`); judge/actor
+  build theirs in their pipeline modules (the judge's path-gated `jq` + closed-ticket
+  read, the actor's pinned lesson scripts). `bash_policy.json` also carries the
+  capability bits + the read denylist; the adapter/non-adapter shim taxonomy still
+  comes from `_cmd_segments.py` and the main-loop deny *reasons* from their policy
+  files / `block_main_loop_raw_access.py`.
   - **Main-loop raw-access + shim gating** — only the `defender-*` shims and
     read-only viewers run from the main loop; data-source adapters and
     `gather_raw/` reads are denied there (the gather subagent is the

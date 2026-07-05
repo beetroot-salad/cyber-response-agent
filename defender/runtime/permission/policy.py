@@ -2,35 +2,29 @@
 
 An agent's Bash/Read capability is *data it brings*, not a role branch in the
 gate. `decide_bash`/`decide_read` take an `AgentPolicy` and behave accordingly,
-so adding an agent is a new policy value (+ any custom matchers), never a new
-`_decide_bash_<role>` method. Runtime agents (main/gather) get their policy from
-`bash_policy.json` via `bash.policy_for(name)`; a learning-loop agent (the judge)
-constructs its own `AgentPolicy` in its own module.
+so adding an agent is a new policy value, never a new `_decide_bash_<role>`
+method. Every agent's Bash surface is one flat, anchored **regex allowlist over
+the tokenized argv** (`bash_allow`) — "what can this agent run?" is answered by
+reading that agent's policy file, not the gate. Matching happens on the parsed
+argv (`command_shape.flat_stages`), which is de-quoted and expansion-free, NOT on
+the raw command string — so the classic raw-string fail-opens (`jq "$(cmd)"`
+matching a quoted-arg pattern and then expanding under a shell) cannot occur, and
+`shell=False` execution keeps the args inert (the regex gates program/shape only).
 
-The shared security invariants — the read-only viewer allowlist and the
-secret/ground-truth read denylist — stay GLOBAL in `bash_policy.json` and are
-applied by the gate for every agent regardless of policy; they are not per-agent
-config.
+Command **shape** is the allowlist's job; operand **path-containment** is not — a
+regex cannot see a symlink/`..` target resolved against a dynamic run-dir prefix.
+Containment stays `resolve()`-based: the read gate (`files.decide_read`) and the
+judge's `jq` file-operand path-gate (`bash._jq_reads_within_roots`, enabled by
+`jq_operand_gated`). The shared security invariants — the secret/ground-truth read
+denylist and the `gather_raw` raw-read clamp — stay global / capability-bit driven
+and are applied for every agent regardless of `bash_allow`.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
-from collections.abc import Callable
-
-if TYPE_CHECKING:  # annotations only — importing these here would cycle with bash.py
-    from defender.runtime.bash_exec import Pipeline
-
-    from .bash import BashDecision
-
-# A custom matcher is an agent's *custom logic*: given the gate's single parse, it
-# claims a command (returns an allow `BashDecision`) or declines (`None`, falling
-# through to the generic adapter/viewer flow). It runs before adapter
-# classification, so an agent can permit a shape the generic flow would misclassify
-# or deny (e.g. the judge's pinned closed-ticket read via `python3 <ticket_cli>`).
-Matcher = Callable[["list[Pipeline]"], "BashDecision | None"]
 
 _DEFAULT_DENY_REASON = (
     "Blocked: this command is not permitted for this agent (read-only viewers and "
@@ -42,19 +36,35 @@ _DEFAULT_DENY_REASON = (
 class AgentPolicy:
     """What an agent may do at the Bash/Read gate.
 
+    - `bash_allow` — the agent's Bash allowlist: anchored `re.Pattern`s matched
+      per stage against `" ".join(argv)` (the de-quoted, expansion-free tokens
+      from `command_shape.flat_stages`). A non-adapter command is allowed iff
+      EVERY stage matches some pattern here. Empty (the default) → no bash reader
+      surface at all (the confined actor reads through `read_file`). Data-source
+      adapters are NOT expressed here — they route structurally (see `adapters`).
+    - `jq_operand_gated` — when True, a `jq` stage's file operands must resolve
+      within the policy's read roots (the judge's path-gated `jq`; see
+      `bash._jq_reads_within_roots`). False (main/gather) leaves `jq` operands
+      unconfined on the bash lane — deferred, jq dual-use.
     - `adapters` — may invoke a data-source adapter (captured transparently).
     - `adapter_sql_pipe` — may run the `adapter --raw | defender-sql '<SQL>'` pipe.
     - `raw_reads` — may read / `jq` `gather_raw/**` (the MAIN loop may not; the
       gather subagent and the judge may).
     - `read_roots` — extra allowed read roots beyond `{run_dir, defender_dir}`
       (the judge's comparison dir under `learning_run_dir`).
-    - `custom_matchers` — the agent's custom logic (see `Matcher`).
+    - `read_confine` — when non-empty, REPLACES the `defender_dir` read base: the
+      read gate then allows only `{run_dir} ∪ read_confine ∪ read_roots`, not the
+      whole corpus. The gray-box confine (#512): a confined actor sees only its
+      lesson corpora, never the judge's grading rubric. Empty (the default) keeps
+      the legacy `{run_dir, defender_dir, *read_roots}` — inert for main/gather.
     - `deny_reason` — the fall-through deny message shown to the model.
     """
 
+    bash_allow: tuple[re.Pattern[str], ...] = ()
+    jq_operand_gated: bool = False
     adapters: bool = False
     adapter_sql_pipe: bool = False
     raw_reads: bool = False
     read_roots: tuple[Path, ...] = ()
-    custom_matchers: tuple[Matcher, ...] = ()
+    read_confine: tuple[Path, ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON

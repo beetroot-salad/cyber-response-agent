@@ -1,7 +1,19 @@
 # Dev Workflow Orchestrator — Design
 
-> Status: **design / pre-implementation**. Name: TBD. Lives in the defender repo under
-> `dev-orchestrator/` for now; relocate to the new project's own repo when scaffolded.
+> Status: **slice #1 + slice #2a shipped; slice #2b in spec-grade firm-up.** Name: `flowdeck`
+> (working). Lives in the defender repo under `dev-orchestrator/` for now; relocate to the new
+> project's own repo when scaffolded.
+>
+> - **Slice #1** — the V1 transition engine (`intake` / `applyEvent` / `claimNext` / `reconcile`)
+>   against a recording `Effects` fake (Bun + `bun:sqlite` + `bun test`).
+> - **Slice #2a** — the shell-agnostic loops the engine drives: the worker arc (`executeRun` /
+>   `drainQueue`), the poll pass (`pollOnce`), `claimNext` as a pure CAS, and reconcile's worktree
+>   sweep — still bound against the fake (§9.4).
+> - **Slice #2b** *(this firm-up)* — the **runnable surface**: the real `Effects` as subprocesses
+>   (`git worktree` / `claude -p` / `gh` / the session host), the on-disk `bun:sqlite` migration,
+>   the `Bun.serve` + Hono `/rpc` server + read model, the board wired to live data, and the
+>   `main` boot sequence. Spec'd in **§9.7.1 (effects), §9.8 (boot + layout), §9.9 (config),
+>   §10 (test surface)**.
 >
 > Interactive UI mockups live in `mockups/` (board + palette explorer).
 
@@ -26,9 +38,9 @@ orchestration + observation layer that removes repetitive manual hops.
    session pointers, transition history, transition idempotency. Nothing durable-to-a-human.
 3. **`~/.claude` = system of record for session *content*.** Transcript, cost,
    tokens. We store a **pointer** (`session_id`) and read content back on demand —
-   never duplicate it. For headless stages the Agent SDK hands us `session_id` +
-   `total_cost_usd` directly.
-4. **Don't rebuild what the SDK / GitHub already give you.** The orchestrator stores
+   never duplicate it. For headless stages we **assign** `session_id` up front via
+   `claude --session-id` (§2), so the pointer is known before the run starts.
+4. **Don't rebuild what Claude / GitHub already give you.** The orchestrator stores
    only what it knows that Claude and GitHub don't.
 5. **The transition map is code, not data.** Stage × trigger × what-runs is logic and
    lives in TypeScript. SQLite stores *instances* (cards, runs, events), not rules.
@@ -48,16 +60,21 @@ orchestration + observation layer that removes repetitive manual hops.
 
 ## 2. Tech stack
 
-TypeScript end-to-end, so logic + UI share one language and the Agent SDK is
-first-class.
+TypeScript end-to-end on **Bun** — logic, UI, tests, and bundle share one runtime with zero
+native addons. The stack is chosen for *fast / lightweight / local*: everything is built-in
+(sqlite, test runner, bundler, PTY) or a thin CLI wrapper, so a fresh clone runs on
+`bun install` alone. `claude` is a subprocess (not the Agent SDK) — a real OS pid the worker
+loop can pid-track, kill, and reap (§6.4).
 
 | Concern | Choice | Notes |
 |---|---|---|
-| App / serving | **Next.js** (API routes + React board), or leaner **Hono + Vite/React** | one deployable |
-| Engine — automated stages | **Claude Agent SDK (TS)** | `query({ options: { resume: sessionId } })`; returns `session_id` + `total_cost_usd` in the result message |
-| Engine — interactive discuss | **configurable session host** (default VS Code) | injected launcher `exec`s a per-host command (VS Code / any terminal / tmux); `claude` runs in that host's terminal — no embedded pty |
-| Data | **SQLite** via `better-sqlite3` (+ Drizzle if typed queries wanted) | WAL mode |
-| GitHub | injected `gh` CLI | intake + drift discovered by **polling**; no inbound webhooks (skills self-report; CI is watched inside `write_code`) |
+| Runtime | **Bun** | one runtime for server + build + tests; no Node, no native addons |
+| App / serving | **`Bun.serve` + Hono**, board bundled by **`bun build`** | one process serves `/rpc` + the static board (§9.1); no Next / Vite |
+| Engine — headless stages | **`claude -p` subprocess** (write_tests / write_code / review) | injected spawn → real OS pid; `--session-id <uuid>` assigned up front; **not** the Agent SDK (no dep) |
+| Engine — interactive discuss | **configurable session host** (default VS Code; **`Bun.Terminal`** backs the built-in `embedded-pty`) | injected launcher `exec`s a per-host command; the board owns the pty only for `embedded-pty` |
+| Data | **`bun:sqlite`** (built-in, synchronous), WAL, on-disk in the run dir | open `{ strict: true }` for bare-key named binding; raw SQL, no Drizzle |
+| Tests | **`bun test`** | slice #1's suite already runs here |
+| GitHub | injected **`gh` CLI** | intake + drift by **polling** (§9.4); no inbound webhooks (skills self-report; CI is watched inside `write_code`) |
 
 ### Why build our own board (not GitHub Projects)
 
@@ -101,8 +118,8 @@ launches/links everything that has a canonical home.
 - **Issue body / design / follow-ups → GitHub**, linked.
 
 **Consequence — a detached host isn't parented by the board.** VS Code (the default) runs
-the session out-of-process, so there's no board-owned pid and no SDK callback (unlike headless
-runs, which the worker spawns and pid-tracks — §6.4; the `embedded-pty` host is the exception —
+the session out-of-process, so there's no board-owned pid and no exit for the loop to await
+(unlike headless runs, which the worker spawns, pid-tracks, and awaits — §6.4, §9.4; the `embedded-pty` host is the exception —
 the board owns that one). Two follow-ons: (1) session-id capture is by pre-generated
 `--session-id` or reading the newest `~/.claude` file (below); (2) the discuss run's
 lifecycle is resolved by a **board action** — "Done — proceed" (`run_succeeded`) or
@@ -158,15 +175,16 @@ surface. The board is a launcher and ledger, never a place you do the work.
 
 ### Session-id capture
 
-- **Headless stages:** the SDK result message carries `session_id` — capture at
-  completion.
-- **Interactive discuss (VS Code / terminal):** the board isn't the process parent, so
-  there's no SDK callback. If the CLI accepts a `--session-id` you generate, pass it in the
-  launch command; otherwise read the newest session file in the project's `~/.claude` dir
-  right after launch. *(Confirm against the installed CLI version before committing to this.)*
-- **Live view:** because session content lives in `~/.claude`, the board can tail a
-  headless run's transcript by `session_id` for a "watch it work" pane (or subscribe to
-  the SDK's streamed events directly) — no need to store any of it.
+- **Headless stages (`claude -p`):** we **assign** the id — generate a uuid, pass
+  `claude --session-id <uuid>`, and store it on the run *before* the process starts. Known up
+  front, so there's no post-hoc harvest and no race with `~/.claude` file mtimes.
+- **Interactive discuss (VS Code / terminal):** same `--session-id` when the host can carry it
+  (the baseline capability, §2 table); a bare terminal that can't falls back to reading the
+  newest `~/.claude` session file right after launch.
+- **Live view:** session content lives in `~/.claude`, so the board tails a running headless
+  run's transcript by `session_id` for a "watch it work" pane — read on demand, never stored.
+
+*(Verify `--session-id` against the installed CLI when wiring the real effect.)*
 
 ---
 
@@ -316,7 +334,7 @@ CREATE TABLE card (
 
 -- (card, stage, attempt) -> session. Doubles as JOB QUEUE and append-only HISTORY.
 -- Stores POINTERS + orchestration state only — never transcript/cost/logs
--- (read those from the SDK result or ~/.claude via session_id).
+-- (read those from ~/.claude via session_id).
 CREATE TABLE run (
   id           TEXT PRIMARY KEY,
   card_id      TEXT NOT NULL REFERENCES card(id) ON DELETE CASCADE,
@@ -328,10 +346,10 @@ CREATE TABLE run (
   trigger      TEXT NOT NULL                    -- why it ran (audit)
                  CHECK (trigger IN ('manual','auto','retry')),
   session_id   TEXT,                            -- JOIN KEY into ~/.claude; content stays there
-  pid          INTEGER,                         -- OS pid of the stage subprocess; set post-spawn, NULL when finished
-                                                -- (the startup reconciler liveness-checks this, §6.4)
-  cost_usd     REAL,                            -- OPTIONAL cache of the SDK's total_cost_usd after completion
-                                                -- (derive-on-read first; add this only if the board feels slow)
+  pid          INTEGER,                         -- OS pid of the stage subprocess; written by the worker loop
+                                                -- post-spawn, NULL when finished. A best-effort KILL handle only
+                                                -- (reap by pgroup+pidfile, never bare kill(pid), §6.4); RETAINED
+                                                -- on 'cancelled' so the reaper can reach a swallowed-kill orphan.
   created_at   TEXT NOT NULL,
   started_at   TEXT,
   finished_at  TEXT
@@ -367,7 +385,7 @@ CREATE UNIQUE INDEX one_run_per_attempt ON run (card_id, stage, attempt);
 - The transition map → TypeScript code.
 - Big logs → files on disk; `run` points via `session_id` / a log path if needed.
 - Design, discussion, follow-up issues → GitHub.
-- Session transcript / cost / tokens → `~/.claude` (or the SDK result).
+- Session transcript / cost / tokens → `~/.claude`, read by `session_id`.
 - Soft gates (approve-tests, approve-merge) → not stored; an `approve` is a UI action that runs
   the transition transaction directly (enqueue the next run, or set `done`). Its only
   trace is the resulting `(card, run)` state change.
@@ -527,7 +545,7 @@ Notes:
      throw; caught as "already in flight."
 4. **Crash recovery = a startup reconciler over runs left `running`, split by kind.**
    The durable handle is `run.session_id`, not the pid. A **headless** run the restarted
-   orchestrator can no longer harvest (it lost the SDK handle) is simply stale → `failed`,
+   orchestrator can no longer harvest (it lost the child-process handle) is simply stale → `failed`,
    and is **retryable / `claude --resume`-able off its `session_id`** — no liveness probe
    needed to decide that. `run.pid` is kept *only* as a best-effort **kill handle** to reap
    an orphaned subprocess that outlived the crash and would otherwise burn credits — and
@@ -536,7 +554,12 @@ Notes:
    `discuss` runs are exempt:** the board never parented them (§2), so a restart leaves them
    `running`, to be resolved by the card's Done/Discard button and re-attached with
    `claude --resume <session_id>` — reconciling them to `failed` would destroy a live design
-   session. Then re-drive `queued` runs, purely from committed state.
+   session. Then re-drive `queued` runs, purely from committed state. Finally, a **worktree
+   sweep** (`listWorktrees` vs the cards): remove any tree whose card is gone or now
+   `worktree_path IS NULL` (cancelled / archived / done), reaping what a swallowed post-commit
+   teardown left on disk (§9.4). The orphaned-**process** counterpart — a swallowed `kill` on
+   a cancelled run — is reaped the same way once the pgroup+pidfile handle is real (2b);
+   `cancelRun` keeps the `pid` for it.
 5. **`BEGIN IMMEDIATE` for claim/enqueue** so the worker and the poll loop can't race a
    card into two runs.
 
@@ -571,11 +594,13 @@ BEGIN IMMEDIATE;
   UPDATE run  SET status='running', started_at=:now WHERE id=:run AND status='queued';  -- CAS
   UPDATE card SET status='running', updated_at=:now WHERE id=:card;
 COMMIT;
--- (post-commit) spawn claude (Agent SDK); write the child pid, then session_id, onto the run
+-- claimNext returns {run, card} here — it is PURE CAS, no post-commit effect. The worker
+-- loop (§9.4) creates the worktree, spawns `claude -p`, writes the child pid, then awaits
+-- exit and dispatches T-SUCCEED / T-FAIL. session_id is assigned up front via --session-id (§2).
 
 -- T-SUCCEED: run finished ok → transition function sets the next card state
 BEGIN IMMEDIATE;
-  UPDATE run SET status='succeeded', finished_at=:now, session_id=:sid, cost_usd=:cost, pid=NULL
+  UPDATE run SET status='succeeded', finished_at=:now, session_id=:sid, pid=NULL
     WHERE id=:run AND status='running';           -- 0 rows → already handled → abort
   -- next state from the finished stage (map in code):
   --   discuss    → INSERT run(write_tests, auto, queued); (write_tests, queued)  [on "Done — proceed"; write_tests cold-starts from the issue (§7.5); abandon → (discuss, idle) via T-CANCEL]
@@ -591,7 +616,7 @@ COMMIT;
 -- T-FAIL: run failed → card to (stage, failed). Capture pointers even on failure so the
 -- card stays linked and resumable.
 BEGIN IMMEDIATE;
-  UPDATE run  SET status='failed', finished_at=:now, session_id=:sid, cost_usd=:cost, pid=NULL
+  UPDATE run  SET status='failed', finished_at=:now, session_id=:sid, pid=NULL
     WHERE id=:run AND status='running';           -- 0 rows → already handled → abort
   UPDATE card SET status='failed',
                   pr_number=COALESCE(:pr, pr_number),   -- shipped-but-unmerged PR stays linked
@@ -629,14 +654,16 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
 
 1. **Multi-repo now, or single-repo?** (`repo` column is included; drop it if it's one
    repo forever.)
-2. **Cost tracking:** derive-on-read only, or cache `run.cost_usd` on completion?
-   (Lean: derive first, cache if the board feels slow.) Note the VS-Code-hosted `discuss` run has no
-   SDK `total_cost_usd` hook — read it from `~/.claude` by `session_id`, or omit discuss
-   from the rollup.
-3. **Discuss session-id capture** for interactive sessions — verify the CLI's `--session-id`
-   support: it unlocks the "prearranged" capability across *all* session hosts (§2);
-   otherwise every host falls back to reading the newest `~/.claude` session file.
-4. **Next.js vs. Hono+Vite** for the app shell.
+2. **Resolved — cost tracking dropped.** `run.cost_usd` is removed from the schema (§5) and
+   the read model (§9.3); the board links out to `~/.claude` by `session_id` for cost on
+   demand. Dropped for simplicity — one fewer column, and no SDK `total_cost_usd` hook to
+   chase now that headless stages run as `claude -p` (§2). *(was: derive-on-read vs cache.)*
+3. **Resolved — session-id is assigned, not harvested.** Headless (`claude -p`) and any host
+   that can carry `--session-id` get the id we generate up front (§2 capture); a bare terminal
+   that can't falls back to the newest `~/.claude` file. *(Verify `--session-id` on the
+   installed CLI when wiring the real effect.)*
+4. **Resolved — app shell = Bun.** `Bun.serve` + Hono serve `/rpc` + the `bun build` board
+   bundle in one process (§2, §9.1); Next.js / Vite dropped. *(was: Next.js vs. Hono+Vite.)*
 5. **Resolved — the `discuss → write_tests` boundary.** Two independent choices, both
    settled: (1) **discussion-done is a manual "Done — proceed" click** (§2, §6.3), never
    inferred from session exit, an LLM judgement, or a design-doc mtime — inferring it would
@@ -670,7 +697,7 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
 ## 8. Suggested next steps
 
 1. Confirm the open decisions above.
-2. Scaffold the TS repo (app shell + `better-sqlite3` + migration for §5).
+2. Scaffold the TS repo (app shell + `bun:sqlite` + migration for §5).
 3. Encode the transition map (§6.3) in code, with the atomic enqueue helper (§6.5) and
    the `nextState(stage)` function that §6.5's `T-SUCCEED` map describes.
 4. Author the `write-code` skill (§3.2) — the missing engine piece.
@@ -681,10 +708,11 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
 
 ## 9. Service API & data flows
 
-The service is **one Node process**: it serves the board's static bundle, exposes a single
-command endpoint for the browser, and runs the worker + poll loops in-process. Everything
-except the browser hop is a plain function call — the core (transition fn, SQLite via
-`better-sqlite3`, effect layer, worker, poller) never talks to itself over a wire.
+The service is **one Bun process**: it serves the board's static bundle (`bun build`),
+exposes a single command endpoint for the browser (`Bun.serve` + Hono), and runs the worker
++ poll loops in-process. Everything except the browser hop is a plain function call — the
+core (transition fn, SQLite via `bun:sqlite`, effect layer, worker, poller) never talks to
+itself over a wire.
 
 ### 9.1 The one wire — `/rpc`
 
@@ -703,6 +731,14 @@ Endpoint *count* is cosmetic — `/rpc` multiplexes every operation, exactly as 
 server actions do under the hood. Whether it's hand-rolled JSON, tRPC, or server actions is
 **decision #4** (the app-shell choice); the *shape* is fixed either way.
 
+**2b resolves the shape: Hono + hand-rolled JSON `/rpc`, board served as a single static file.**
+`Bun.serve({ fetch: app.fetch })` mounts one Hono app; `POST /rpc` reads `{op, args}`, dispatches
+to an in-process handler, and returns JSON; `GET /*` serves the board. The board is **one
+hand-authored file** (`src/board/index.html` — the wired-up `mockups/board.html`), returned as a
+static asset — no `bun build` step in V1 (the board is vanilla JS with no imports, so there is
+nothing to bundle; `bun build` stays available for when the board grows modules). SSE `/events`
+stays omitted (§9.5). The whole server is ~one file (§9.8).
+
 ### 9.2 Operations behind `/rpc`
 
 Four procedures — different shapes, so distinct functions, but all in-process on the server:
@@ -720,6 +756,27 @@ carrying the `(stage,status)` the caller believes the card is in (the CAS guard,
 runs the transaction and returns the card's new `(stage, status)`; a stale or double-clicked
 event updates 0 rows and returns the *unchanged* state — a safe no-op, never an error.
 
+**The router is a thin, total projection of the engine — 2b binds the wire, not new logic.**
+Only the UI events (`goto` / `cancel` / `archive`) cross `/rpc`; worker- and poll-events never
+do (§9.4). So the router's whole job is decode → call → shape the reply, and its behavior is
+**fully pinned by the engine's return contract** (§ contract.ts `ApplyResult`), which is why it is
+the prime 2b test seam (§10, driven via `app.fetch`):
+
+| Outcome from the engine | Wire response |
+|---|---|
+| `getBoard` / `getCard` | `200 { … }` (read model, §9.3) |
+| `dispatchEvent` → `{ ok:true, card }` | `200 { ok:true, card }` |
+| `dispatchEvent` → `{ ok:false, reason:'stale' }` | `200 { ok:false, reason:'stale' }` — **a no-op, not an error** |
+| `createIssue` → `{ ok:true, card }` | `200 { ok:true, card }` |
+| `InvalidEventError` (malformed target / event / issue#) | `400 { error }` |
+| `AlreadyInFlightError` (can't-happen index breach) | `409 { error }` |
+| unknown `op` / unparseable body | `400 { error }` |
+
+The stale-vs-error split is load-bearing: a double-clicked approve or a poll re-observing a
+resolved PR is a **200 no-op**, never a 4xx — the CAS backbone (§6.4.3) surfaced verbatim on the
+wire. `dispatchEvent`'s `event` is decoded straight into the §6.2 `Event` union (the `expected_*`
+CAS key rides along from the client's last-seen state); the router adds no state of its own.
+
 ### 9.3 The read model
 
 `getBoard` returns what the board renders with **no** further GitHub / `~/.claude` call —
@@ -732,8 +789,7 @@ denormalized so a paint is one SELECT:
   stage, status, state_entered_at,              // position + dwell / gate-nag signal
   latest_run: {                                 // the card's newest run row, or null
     id, stage, attempt, status, trigger,
-    session_id,                                 // JOIN KEY into ~/.claude
-    cost_usd,                                   // OPTIONAL cache (§7.2)
+    session_id,                                 // JOIN KEY into ~/.claude (cost/tokens on demand)
     activity: { last_step, elapsed }            // live-tailed by session_id, running runs only
   } | null
 }
@@ -744,24 +800,76 @@ live `gh` call. `activity` is the only field read live, and only for a `running`
 run — tailed from `~/.claude` by `session_id` (§2), never stored. Everything durable (diffs,
 design, follow-ups) is a **link out**, not a payload.
 
-### 9.4 What feeds the state — the loops
+**2b splits the read model into a pure DB projection + a best-effort overlay.** `readBoard(db)`
+is one query pass over the DB — non-archived cards, each joined to its **newest** `run`
+(`ORDER BY created_at, rowid DESC LIMIT 1`, the § read.ts `latestRun` rule, so ties under a
+coarse clock don't reorder) — and returns everything **except** `activity`, which is `null`. This
+projection is pure, deterministic, and the §10 test seam. The `activity` overlay is a separate,
+**degradable** server-layer step: only for a card whose `latest_run.status === 'running'` and
+carries a `session_id`, tail `~/.claude` for `{ last_step, elapsed }`; **any read miss → leave it
+`null`** (the run still shows as running from `status`, just without the live step). The overlay
+touches no DB and is never unit-tested against a fixed transcript — it is I/O that fails soft
+(§10 "verified by running"), so a `~/.claude` layout change degrades the activity line, never the
+board.
 
-State changes come from three sources; the §6.2 **Source** column decides which cross the
-wire. Only UI gestures do; the loops call the same `nextState` in-process.
+### 9.4 What feeds the state — the three loops
 
-1. **UI → `/rpc`** — human gestures (`goto` / `cancel` / `archive`). `dispatchEvent` runs
-   the transaction; **side effects run post-commit** (§6.4.1) — spawn / kill / `gh` /
-   worktree — off the committed row, never inside the write-lock.
-2. **Worker loop (in-process)** — polls `run WHERE status='queued'` (the outbox, §6.4.2),
-   `T-CLAIM`s one, spawns `claude` via the Agent SDK, and on the result message dispatches
-   `run_succeeded` / `run_failed` **as an in-process call** (`T-SUCCEED` / `T-FAIL`) — it
-   never POSTs to itself. Pool = small N (§3.2); `discuss` runs outside it (§6.3).
-3. **Poll loop (in-process)** — `gh` on a timer for `issue.opened` / `pr.merged` /
-   `pr.closed`, dispatched in-process (`T-INTAKE` / drift). No inbound endpoint, no webhook
-   (§3.1); webhooks remain an optional latency swap (§7.10).
+State changes come from three sources; only UI gestures cross the wire (§9.1). All three
+callers reach the **same sync engine** in-process — `applyEvent` / `claimNext` / `reconcile`.
+The engine stays pure and synchronous; **all async and all effects live in the loops**, so
+each loop is unit-testable against the same recording `Effects` fake the transition engine
+already uses (slice #1).
 
-So the only traffic on `/rpc` is UI-sourced; worker- and poll-sourced events are function
-calls into one `applyEvent(cardId, event)` core — three callers, one transition function.
+**1. UI → `/rpc`** — human gestures (`goto` / `cancel` / `archive`). `dispatchEvent` runs
+`applyEvent`; side effects fire post-commit (§6.4.1), off the committed row.
+
+**2. Worker loop — owns run execution.** The engine's `claimNext` is a **pure CAS**: one
+`BEGIN IMMEDIATE` moves the oldest `queued` run + its card to `running` and returns
+`{run, card}` — it spawns nothing and touches no worktree. The loop owns the rest of the arc,
+so a worktree- or spawn-failure becomes an immediate `run_failed` (fast retry) instead of a
+run stuck `running` until the next restart-reconcile:
+
+```ts
+const claimed = claimNext(db, fx);              // pure CAS, sync
+if (!claimed || active >= POOL) return;         // outbox-poll + concurrency cap (§3.2)
+const { run, card } = claimed;
+try {
+  const sid = fx.uuid();
+  recordSession(db, run.id, sid);                // assign + persist BEFORE spawn → resumable on crash
+  const path = fx.createWorktree(card);          // deterministic path → idempotent on retry
+  recordWorktree(db, card.id, path);
+  const { pid, done } = fx.spawnHeadless(run, { ...card, worktree_path: path }, sid);  // --session-id sid
+  recordPid(db, run.id, pid);                    // ← run.pid is finally written (§6.4)
+  const r = await done;                          // the run — minutes
+  applyEvent(db, fx, card.id, r.ok
+    ? { type: 'run_succeeded', run_id: run.id, session_id: r.session_id, pr_number: r.pr_number }
+    : { type: 'run_failed',    run_id: run.id, session_id: r.session_id });
+} catch {
+  applyEvent(db, fx, card.id, { type: 'run_failed', run_id: run.id });
+}
+```
+
+The pool is a small N (§3.2). `discuss` is **not** in it — it's spawned interactively in
+`handleGoto`'s post-commit via `fx.spawnSession` (§6.5, decision #12) and resolves on the
+card's Done/Discard button, never by an await.
+
+**3. Poll loop — `gh` on a 30–60 s timer** (§3.1; 5000/hr REST budget, avoid `--search`).
+`fx.gh.issueList` (filtered by the tracking label, §7.9) → `intake` each; `fx.gh.prStatus`
+for any card carrying a `pr_number` → `pr_merged` / `pr_closed` drift. Every dispatch is
+idempotent (guarded CAS + `ON CONFLICT` intake), so re-polling the same issue/PR is a no-op.
+No inbound endpoint, no webhook.
+
+**Reconcile — startup, now with a worktree sweep.** Runs once before the loops start:
+headless runs left `running` → `failed` (`session_id` kept, resumable); `discuss` runs exempt
+(the board never parented them, §6.4.4); `queued` runs left claimable. Slice #2 adds a
+**filesystem sweep** — `fx.listWorktrees()`, and `removeWorktree` any tree whose card is gone
+or now `worktree_path IS NULL` (cancelled / archived / done) — reaping the worktree a
+swallowed post-commit teardown left on disk. (The orphaned-**process** half of that reap — a
+swallowed `kill` — needs the pgroup+pidfile protocol and lands with the real effects;
+`cancelRun` already retains the run's `pid`, so the reaper has its handle, §6.4.)
+
+So the only traffic on `/rpc` is UI-sourced; worker- and poll-sourced events are plain calls
+into one engine — three callers, one transition function.
 
 ### 9.5 Live updates — poll first
 
@@ -778,7 +886,212 @@ developer's actual workstation, which a container isolates you from (worst on ma
 the VS Code host is a GUI app). The clean split: the **headless half** (web server + worker
 + poller + SQLite + headless `claude` / `gh`) containerizes fine; the **interactive session
 host** (§2) wants host access. Default recommendation: **run the whole thing as a local host
-process** (a `npx` / systemd / launchd one-liner) — it matches "the service is local" better
-than a container. If a container is still wanted, scope it to the headless half and keep the
+process** (a `bunx` / systemd / launchd one-liner, or a single `bun build --compile` binary) —
+it matches "the service is local" better than a container. If a container is still wanted, scope it to the headless half and keep the
 session-host launcher on the host, or degrade the host to `command` / `tmux` (§2's
 capability table). *(Open decision — folds into #4 / packaging.)*
+
+### 9.7 The effect seam — what slice #2 makes real
+
+Slice #1 shipped the engine against a recording `Effects` fake. Slice #2 (a) implements those
+effects as real subprocesses and (b) extends the seam where the loops need it. The **engine
+never widens — only the effect layer does**, so the pure-CAS core and its test suite are
+untouched by the surface work.
+
+| Method | Slice #1 | Slice #2 | Drives |
+|---|---|---|---|
+| `createWorktree(card)` | returns a path | path is a **pure fn of the card** (`<runroot>/wt/issue-<n>`) | idempotent retry — no orphan tree |
+| `removeWorktree(card)` | recorded | `git worktree remove` | cancel / teardown / sweep |
+| `listWorktrees()` | — | **new** — enumerate trees under the run root | reconcile sweep |
+| `spawnHeadless(run, card, sessionId)` | `void`, no id | **`{ pid, done: Promise<RunResult> }`** — spawn `claude -p --session-id <sessionId>`, resolve on exit | worker-loop await |
+| `spawnSession(card, resume?)` | recorded | open the session host (§2); `resume` now wired | interactive discuss |
+| `kill(run)` | recorded | pgroup + pidfile reap | cancel / reconcile |
+| `gh.issueCreate(…)` | returns `{issue_number}` | `gh issue create` | UI new-issue |
+| `gh.issueList(…)` | — | **new** — `gh issue list --label <flow>` | poll → intake |
+| `gh.prStatus(…)` | — | **new** — `gh pr view --json state` | poll → drift |
+| `now()` / `uuid()` | fake clock / counter | wall clock / real uuid | timestamps / ids |
+
+`RunResult = { ok, session_id?, pr_number? }`. `session_id` is **assigned** up front and
+**persisted before the spawn**: the worker generates a uuid, writes it to the run row
+(`recordSession`, an engine helper), and passes it as `claude --session-id <uuid>`. So it's
+known before the run starts — no post-hoc harvest, no `~/.claude` mtime race — and, crucially,
+a run orphaned by a crash *before* completion still carries its `session_id`, so `reconcile`
+can `claude --resume` it (§6.4.4). `RunResult.session_id` is therefore **confirmatory** (the
+completion `COALESCE`s onto the already-written id, never a second source of truth); `pr_number`
+is **discovered** post-run via
+`gh pr list --head flow/issue-<n>`; `ok` is subprocess exit `0` (and, if we run `claude -p`
+with `--output-format json`, `is_error === false`). No `cost_usd` — dropped for simplicity
+(§7.2). Populating these is 2b; the `RunResult` **shape** is what 2a's loops bind against, with
+the value supplied by the fake — exactly the slice-1 pattern.
+
+### 9.7.1 The real effects — concrete construction (slice 2b)
+
+Every real effect is a **pure builder/parser + a thin imperative shell**. The builder (argv, a
+path, a parsed struct) is a total function of its inputs and is the §10 unit seam; the shell is
+the one `Bun.spawn` / `Bun.file` / `process.kill` line that runs it, verified by running (§10),
+not mocked. This split is the whole reason the surface is testable without a live `git`/`gh`/
+`claude`. Effects are constructed from config (§9.9): a `repoRoot(repo) → localCloneDir` map, the
+`runRoot`, the tracking `label`, and the `sessionHost` adapter. *(Flags below verified against the
+installed CLIs — `claude` 2.1.201, `gh` 2.x, `git` 2.47 — when this was authored; re-verify on
+wiring.)*
+
+**Worktrees — `git worktree`, path encodes the repo.** The path is a pure fn of the card:
+`worktreePath(card, cfg) = <runRoot>/wt/<owner>__<name>/issue-<issue_number>`, branch
+`flow/issue-<n>`. Encoding `<owner>__<name>` in the path is load-bearing: `removeWorktreePath`
+and the sweep hold **only a path** (an orphan has no card, contract.ts), so the path itself must
+recover the owning repo → its `repoRoot` for the `git -C` call.
+- `createWorktree(card)` → derive the path; if it is already a registered worktree
+  (`git -C <root> worktree list --porcelain` contains it) return it unchanged (idempotent retry,
+  §9.7); else `git -C <root> worktree add -B flow/issue-<n> <path> <base>` (`base` = cfg per repo,
+  default `origin/<default-branch>`). Called **only when `card.worktree_path` is null** (the worker
+  guards it, worker.ts) so a *kept* tree (fail/retry, §6.6) is reused directly and never reset.
+- `removeWorktree(card)` / `removeWorktreePath(path)` → `git -C <root> worktree remove --force
+  <path>` then best-effort `git worktree prune`. `removeWorktree` has the card's repo; the
+  path-only variant recovers `<owner>__<name>` from the path (above).
+- `listWorktrees()` → **union over every configured repo** of `git -C <root> worktree list
+  --porcelain`, take the `worktree <path>` lines, keep only paths under `<runRoot>/wt/` (drops each
+  repo's own main checkout — §9.7 "under the run root"). The reconcile sweep matches these by value
+  against `card.worktree_path` (engine.ts `sweepOrphanWorktrees`).
+
+**Headless stage — `claude -p`, one process group.** `spawnHeadless(run, card, sessionId)`:
+- argv `headlessArgv(run, card, sessionId, cfg)` = `["setsid", "claude", "-p",
+  headlessPrompt(run, card), "--session-id", sessionId, "--output-format", "json",
+  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path, …cfg.model?]`.
+  `setsid` makes the child a **session + group leader** (pgid == pid), so the reaper can
+  `kill(-pid)` the whole tree (below) — the §6.4 "never a bare `kill(pid)`" rule.
+- `headlessPrompt(run, card)` is a **per-stage template keyed by `run.stage`** — the "skills own
+  the work" seam (§1.8): `write_tests` → run the write-tests skill against issue `#n`; `write_code`
+  → write-code-from-spec; `review` → `/code-review --fix` + file follow-ups. Every headless stage
+  **cold-starts from the issue** (§7.5) — the prompt names the repo + issue number, nothing carries
+  from a session. Exact wording is impl-tunable; what's *fixed* is: keyed by stage, cold from the
+  issue, one skill per stage.
+- shell → `Bun.spawn(argv, { cwd: card.worktree_path, stdout: "pipe" })`; write a pidfile
+  `<runRoot>/run/<run.id>.pid` = `{ pid, started_at }` (the §6.4 reuse-guard); return `{ pid,
+  done }` where `done = subprocess.exited.then(code => parseRunResult(code, stdout, discoverPr()))`.
+- `parseRunResult(exitCode, stdout, prNumber?)` (pure) → `{ ok: exitCode === 0 && json.is_error
+  === false, session_id: json.session_id, pr_number }`. `session_id` is **confirmatory** (§9.7).
+  `discoverPr()` (write_code / review only) = `gh pr list -R <repo> --head flow/issue-<n> --json
+  number` → the first number, or `undefined`.
+
+**Interactive discuss — the session host (§2).** `spawnSession(card, resume?)` dispatches on
+`cfg.sessionHost.kind`, all reducible to a **pure command/doc builder** + one `exec`:
+- `command` / `tmux` → `sessionHostArgv(cfg, card, { resume, sid })` fills the template's
+  `{cwd,resume,sid}` placeholders → `Bun.spawn`.
+- `vscode` (default) → `vscodeWorkspaceDoc(cfg, card, { resume, sid })` emits a `.code-workspace`
+  JSON (written to `<runRoot>` — never in-tree, §2) carrying a `folderOpen` task that runs `claude
+  {--resume S} --session-id <sid>`, then `exec code <workspace>`.
+Both builders are §10 unit seams; the `exec` is the shell. `discuss` opens at `card.worktree_path
+?? repoRoot` (§6.6) and resolves via the card's Done/Discard button, never a process await (§2).
+
+**Reap — pgroup + pidfile.** `kill(run)`: read `<runRoot>/run/<run.id>.pid`; if the recorded
+`started_at` still matches the live process (guard against a **reused** pid after reboot, §6.4),
+`process.kill(-pid, "SIGTERM")`, then `SIGKILL` after a short grace; unlink the pidfile. A missing
+pidfile or a start-time mismatch is a no-op (nothing of ours to reap). Mostly shell — the *decision*
+(pgroup + pidfile + start-time guard, never bare `kill(pid)`) is what's fixed; verified by running.
+
+**GitHub — `gh`, parse stdout.** All three are a `gh` call + a pure parser:
+- `gh.issueCreate({repo,title,body})` → `gh issue create -R <repo> --title <t> [--body <b>]
+  --label <cfg.label>`; **`gh issue create` has no `--json`** — it prints the new issue's URL, so
+  `parseIssueNumberFromUrl(stdout)` (pure) takes the trailing `/issues/<n>` → `{ issue_number }`.
+- `gh.issueList({repo,label})` → `gh issue list -R <repo> --label <label> --state open --json
+  number,title` → `parseIssueList(json, repo)` (pure) → `IssueRef[]`.
+- `gh.prStatus({repo,pr_number})` → `gh pr view <n> -R <repo> --json state` → `parsePrState(json)`
+  (pure): `MERGED → "merged"`, `CLOSED → "closed"`, `OPEN → "open"`. The PR `state` already
+  distinguishes merged from closed, so **no `mergedAt` field is needed** (grounding correction to
+  the §9.7 table's `--json state`).
+
+**Clock / ids.** `now()` = `new Date().toISOString()`; `uuid()` = `crypto.randomUUID()`. (In tests
+the fake's stable clock + monotonic counter stand in, unchanged from slice 1.)
+
+### 9.8 Boot sequence & module layout (slice 2b)
+
+One `main.ts` wires the process; the order is a **hard invariant** (and a §10 seam):
+
+```ts
+export async function boot(cfg: Config, deps = { serve: Bun.serve }) {
+  const db = openDb(cfg.runRoot);        // §9.9: bun:sqlite, WAL, foreign_keys=ON, migrate-if-fresh
+  const fx = realEffects(cfg);           // §9.7.1
+  reconcile(db, fx);                     // 1. crash-recovery + worktree sweep — ONCE, BEFORE any loop
+  const worker = every(cfg.workerTickMs, () => drainQueue(db, fx, { pool: cfg.pool }));  // 2.
+  const poll   = every(cfg.pollMs,       () => pollOnce(db, fx, { label: cfg.label }));  // 3.
+  const server = deps.serve({ port: cfg.port, fetch: makeApp(db, fx, cfg).fetch });      // 4.
+  return { db, worker, poll, server };
+}
+```
+
+`reconcile` **must** run before the worker/poll/server start — a loop that claimed or a UI event
+that dispatched while stale `running` rows were still un-recovered would race crash-recovery. `boot`
+takes an injectable `serve` (and `every`, a self-rescheduling non-overlapping timer) so a test
+asserts the **ordering** (`reconcile` before first `drainQueue`/`pollOnce`/`serve`) without opening
+a socket — the boot-ordering seam (§10). `drainQueue`/`pollOnce` are already async and idempotent
+(2a), so a tick that overlaps a slow prior tick is prevented by `every`'s non-overlap guard, not by
+new engine logic.
+
+**File layout** (all under `dev-orchestrator/src/`, thin — the engine is untouched):
+
+| File | Holds |
+|---|---|
+| `db.ts` | `openDb(runRoot)` — open + `PRAGMA` + migrate `SCHEMA_SQL` if `user_version` is 0 (promotes test-support `schema.ts` to a real migration) |
+| `effects/git.ts` · `claude.ts` · `gh.ts` · `session_host.ts` · `reap.ts` | the §9.7.1 builders + shells; `effects/index.ts` composes them into one `Effects` |
+| `server.ts` | `makeApp(db, fx, cfg)` — the Hono app: `POST /rpc` router (§9.2 table) + `GET /*` static board; `readBoard`/`readCard` (§9.3) live here |
+| `config.ts` | `Config` type + `loadConfig()` (TOML/env → object); config is injected everywhere, never re-read in the hot path |
+| `board/index.html` | the wired-up `mockups/board.html` (fetches `/rpc`, §10-UI) |
+| `main.ts` | `boot(loadConfig())` — the entrypoint |
+
+### 9.9 Configuration
+
+One config object, injected (never global). Defaults target *local, single-dev, single-repo* (open
+decision #1), but the shape is multi-repo-ready (the `repo` list + path-encoded worktrees, §9.7.1):
+
+```toml
+run_root = "~/.flowdeck"      # sqlite db + wt/ worktrees + run/ pidfiles + *.code-workspace
+label = "flow"                # §7.9 tracking label — intake filter + the new-issue create label
+pool = 2                      # headless worker slots (§3.2); discuss runs outside it
+poll_ms = 30000               # §9.4 gh poll cadence (30–60s; 5000/hr REST budget)
+worker_tick_ms = 1000         # drainQueue cadence
+port = 8765                   # board + /rpc
+permission_mode = "acceptEdits"   # claude -p --permission-mode for headless stages
+model = ""                    # optional claude --model override; empty = CLI default
+
+[[repo]]
+name = "owner/name"           # gh -R + the card.repo value
+root = "/abs/path/to/clone"   # local checkout the worktrees branch from
+base = "origin/main"          # createWorktree base ref
+
+[session_host]                # §2 capability table
+kind = "vscode"               # | "command" | "tmux" | "embedded-pty"
+# command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid}"   # kind="command"
+```
+
+Deferred to later slices (not 2b): the `embedded-pty` host (`Bun.Terminal`), SSE `/events` (§9.5),
+`bun build --compile` packaging (§9.6), and auto-merge at the merge gate (open decision #8) — 2b's
+merge-gate approve marks `done` and leaves the actual merge to the human (the conservative default).
+
+---
+
+## 10. Slice 2b — the test surface
+
+The 2b deliverable follows the same **spec-first** shape as 2a (write-tests → write-code): the
+tests are the contract. But 2b is *surface* — I/O and a browser — so the seam between "pinned by a
+test" and "verified by running" is drawn deliberately, and stated here so the write-tests phase
+knows exactly what to bind. The rule: **anything that is a pure function of its inputs is unit-
+tested against the real DB + the slice-1 `FakeEffects`; anything that is a subprocess/socket/GUI
+launch is verified by running the app, never mocked into a green test.** Mocking a `Bun.spawn` only
+tests the mock; the honest signal is a real boot (§9.8) driving a real `gh`/`git` flow.
+
+**Unit-tested (the binding suite):**
+
+| Seam | Entry point | What's pinned |
+|---|---|---|
+| RPC router | `makeApp(db, fx, cfg).fetch(Request)` | op dispatch; `dispatchEvent` decode → §6.2 `Event` (incl. the `expected_*` CAS key); the §9.2 response table — `stale → 200` no-op, `InvalidEventError → 400`, `AlreadyInFlightError → 409`, unknown op / bad body → 400; `createIssue → gh.issueCreate → intake`; `getBoard`/`getCard` shapes |
+| Read model | `readBoard(db)` / `readCard(db, id)` | non-archived only; newest-run join (§ read.ts `latestRun` rule); `activity` is `null` in the pure projection; `getCard` returns the full run timeline |
+| Effect builders | `worktreePath` · `worktreeAddArgv`/`removeArgv` · `headlessArgv`/`headlessPrompt` · `parseRunResult` · `parseIssueNumberFromUrl` · `parseIssueList` · `parsePrState` · `sessionHostArgv`/`vscodeWorkspaceDoc` | argv/path/doc built exactly; parsers total over real CLI output samples (incl. malformed / empty) and the `MERGED`/`CLOSED`/`OPEN` mapping; path→repo recovery for the sweep |
+| Boot ordering | `boot(cfg, { serve: fake, every: fake })` | `reconcile` fires **before** the first `drainQueue`/`pollOnce`/`serve`; `pool`/`label`/`port` threaded through |
+| Migration | `openDb(tmpDir)` | fresh dir → full §5 schema; re-open → no-op (idempotent `user_version` gate); WAL + FK pragmas set |
+
+**Verified by running, not unit-tested** (§ "verify" — drive the real flow, observe): the
+`Bun.spawn`/`setsid`/`exec` shells, real `git worktree` create/list/remove, real `gh` calls, the
+`~/.claude` activity tail (§9.3, fails soft), the VS Code launch, and the board's live fetch/render
+against a booted server. The impl PR's evidence is a **real end-to-end boot** on a scratch repo:
+poll-discovered intake → a card advancing → a real worktree on disk → `/rpc` responses over curl →
+the board painting them — the §8 step-5 "one end-to-end slice on a real issue", now executable.

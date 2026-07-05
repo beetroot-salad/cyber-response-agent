@@ -48,16 +48,6 @@ def has_adapter(pipelines: list[Pipeline]) -> bool:
     return any(is_adapter_stage(s) for s in flat_stages(pipelines))
 
 
-def single_stage_argv(pipelines: list[Pipeline]) -> list[str] | None:
-    """The argv of a command that is exactly ONE stage (never a pipe/compound), else None —
-    the shape a learning-loop policy's pinned-command matcher claims before pinning its own
-    program/args (the judge's closed-ticket read, the actor's lessons retrieval). The generic
-    twin of ``standalone_adapter_argv`` (which is adapter-specific); factoring the
-    ``flat_stages`` + single-stage check here keeps each matcher to its own pinning logic."""
-    stages = flat_stages(pipelines)
-    return stages[0] if len(stages) == 1 else None
-
-
 def standalone_adapter_argv(pipelines: list[Pipeline]) -> list[str] | None:
     """If the command is a STANDALONE adapter invocation (the gather-captured
     case) — a single stage whose command is an adapter — return its argv; else

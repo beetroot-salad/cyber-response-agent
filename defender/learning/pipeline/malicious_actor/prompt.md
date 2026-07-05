@@ -69,7 +69,8 @@ python3 defender/scripts/lessons/lessons_actor_index.py \
   --alert-rule-ids <ids,...> \
   --defender-lead-tags <tags,...> \
   --techniques <T-IDs,...> \
-  --subject <single-subject>
+  --subject <single-subject> \
+  --applies-to <env-fact-subjects,...>
 ```
 
 Output is `<path>\t<relevance_criteria>`. Scan, Read the files that matter, incorporate what you learn into Sections 1–2. Do not cite lesson IDs.
@@ -82,4 +83,4 @@ Retrieval axes:
 | `defender_lead_tags` | …lessons about what a specific lead's output actually surfaces. |
 | `techniques` | …lessons tied to a MITRE T-ID you're building the story around. |
 | `subject` | …a specific deployment-property lesson when you already know the referent name. |
-| `applies_to` | …pattern lessons that depend on a given env-fact subject (grep, not index). |
+| `applies_to` | …pattern lessons that depend on a given env-fact subject (via `--applies-to`; OR within the list). |

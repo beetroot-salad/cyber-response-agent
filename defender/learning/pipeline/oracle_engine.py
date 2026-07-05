@@ -63,14 +63,16 @@ class OracleDeps(RunDeps):
 # their pinned scripts / read roots), the oracle's is a CONSTANT — it takes no per-lead input, so
 # it is built once here rather than rebuilt on every fan-out call. It locks the tool surface down:
 # no adapters, no ``adapter | defender-sql`` pipe, no ``gather_raw`` raw reads, no extra read
-# roots, no custom matchers. (Reads under ``defender_dir`` / the learning ``run_dir`` stay allowed
-# by ``decide_read``'s defaults, but the oracle never issues one — its whole input is inlined.)
+# roots, and an EMPTY ``bash_allow`` (no bash reader surface at all — #522). (Reads under
+# ``defender_dir`` / the learning ``run_dir`` stay allowed by ``decide_read``'s defaults, but the
+# oracle never issues one — its whole input is inlined.)
 _ORACLE_POLICY = AgentPolicy(
+    bash_allow=(),
+    jq_operand_gated=False,
     adapters=False,
     adapter_sql_pipe=False,
     raw_reads=False,
     read_roots=(),
-    custom_matchers=(),
     deny_reason=_ORACLE_DENY_REASON,
 )
 

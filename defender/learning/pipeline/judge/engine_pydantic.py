@@ -14,6 +14,7 @@ import.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -26,35 +27,35 @@ from defender.learning.pipeline._pydantic_stage import (
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy, BashDecision, command_shape
+from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import RunDeps
 
 from pydantic_ai import Agent
 
 if TYPE_CHECKING:
-    from defender.runtime.bash_exec import Pipeline
-
     from .run import _ToolScope
 
 # Bounds a runaway tool loop (the twin of the gather's per-lead cap). Sized for GLM's
 # tool-hunger: GLM issues ~2-3 tool calls per model request and surveys gather_raw per lead
-# (ls/wc/jq) before its verdict — a live smoke run saw the benign judge reach 25/30 and the
+# (jq/read_file) before its verdict — a live smoke run saw the benign judge reach 25/30 and the
 # adversarial judge hit 30/30 (29 DISTINCT tool calls, no spin — legitimate grounded work) and
 # dead-letter the run on a 7-lead case. Raised to 45 for multi-lead headroom (still a backstop,
 # not a budget). Reducing GLM's tool-call count at the source is tracked in #514.
 JUDGE_REQUEST_LIMIT = 45
 
 _JUDGE_DENY_REASON = (
-    "Blocked: the judge is read-only over the grounded evidence — jq/grep/cat/ls over "
-    "the comparison files and the gather_raw payloads (plus, benign only, the pinned "
-    "closed-ticket read). No data-source adapters, no writes, no arbitrary shell."
+    "Blocked: the judge is read-only over the grounded evidence — jq (path-gated to its "
+    "read roots) over the comparison files and gather_raw payloads, and read_file (with "
+    "an optional grep pattern) for everything else, plus — benign only — the pinned "
+    "closed-ticket read. No cat/grep/ls in bash, no data-source adapters, no writes, no "
+    "arbitrary shell."
 )
 
 
 @dataclass(frozen=True)
 class JudgeDeps(RunDeps):
     """The judge's per-run deps. Identical shape to ``RunDeps`` (run_dir, defender_dir,
-    run_id, salt, policy) — the judge's read roots and its custom matcher ride in
+    run_id, salt, policy) — the judge's read roots and its bash allowlist ride in
     ``policy`` (data), not in extra deps fields. ``run_dir`` is the *learning* run dir
     (the judge's own output dir), so budget/lesson-load side effects land there and the
     judge can only reach gather_raw via its policy read roots, never roam the whole
@@ -64,44 +65,47 @@ class JudgeDeps(RunDeps):
     role: ClassVar[AgentRole] = AgentRole.JUDGE
 
 
-def _make_ticket_matcher(py: str, ticket_cli: Path):
-    """The benign judge's one bit of custom logic (issue #338): allow the scoped,
-    CLOSED-ONLY case-history read that confirms a cited past case. Claims exactly a
-    single-stage ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``
-    invocation — `py`/`ticket_cli` pinned (exact absolute strings from
-    ``build_judge_invocation``), and ``--require-closed`` REQUIRED (the security property
-    that the open in-flight ticket stays unreachable rides on that flag). Anything else
-    declines (`None`) and falls through to the generic gate, which denies it (``<py>
-    <ticket_cli> …`` is not a read-only viewer). The adversarial judge is built with no
-    matchers, so it can never reach the store."""
-    py_s, cli_s = str(py), str(ticket_cli)
+# The judge's bash lane is `jq` ONLY (any shape); its file operands are path-gated to
+# the read roots by ``jq_operand_gated`` (see ``bash._jq_reads_within_roots``).
+# cat/grep/head/tail/ls fold into ``read_file`` (with its optional grep ``pattern``).
+_JQ_PATTERN = re.compile(r"^jq(?: .*)?$")
 
-    def _match(pipelines: list[Pipeline]) -> BashDecision | None:
-        argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
-        if argv is None:
-            return None
-        if len(argv) < 3 or argv[0] != py_s or argv[1] != cli_s:
-            return None
-        if argv[2] not in ("list-tickets", "get-ticket"):
-            return None
-        if "--require-closed" not in argv:
-            return None
-        return BashDecision(True, pipelines=tuple(pipelines))
 
-    return _match
+def _ticket_pattern(py: str, ticket_cli: Path) -> re.Pattern[str]:
+    """The benign judge's scoped, CLOSED-ONLY case-history read (#338): a single-stage
+    ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``. `py`/`ticket_cli`
+    are pinned (exact strings from ``build_judge_invocation``, interpolated ``re.escape``-d
+    so a `.`/`-` in the path can't widen the match); ``--require-closed`` is REQUIRED — the
+    security property that the open in-flight ticket stays unreachable rides on that flag,
+    enforced by the leading lookahead (the flag must appear as a whole space-delimited
+    token). The adversarial judge is built without this pattern, so it can never reach the
+    store."""
+    head = rf"{re.escape(py)} {re.escape(str(ticket_cli))}"
+    return re.compile(
+        rf"^(?=(?:.* )?--require-closed(?: |$)){head} (?:list-tickets|get-ticket)(?: .*)?$"
+    )
 
 
 def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | None) -> AgentPolicy:
     """The judge's declarative gate policy: read-only, may `jq`/read gather_raw
     (raw_reads) + its comparison dir (read_roots), never runs a data-source adapter,
-    and — benign only — carries the pinned closed-ticket matcher as its custom logic."""
-    matchers = (_make_ticket_matcher(*ticket_cli),) if ticket_cli is not None else ()
+    and — benign only — carries the pinned closed-ticket read in ``bash_allow``.
+
+    ``bash_allow=(jq, [ticket])`` with ``jq_operand_gated=True`` (#512): in the bash
+    lane only `jq` survives, and every file it opens must resolve within the judge's
+    read roots — closing the reader surface as an out-of-roots read oracle. The judge is
+    UNCONFINED this slice (no ``read_confine``), so its roots stay
+    ``{run_dir, defender_dir, *read_roots}``."""
+    patterns = [_JQ_PATTERN]
+    if ticket_cli is not None:
+        patterns.append(_ticket_pattern(*ticket_cli))
     return AgentPolicy(
+        bash_allow=tuple(patterns),
+        jq_operand_gated=True,
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=True,
         read_roots=read_roots,
-        custom_matchers=matchers,
         deny_reason=_JUDGE_DENY_REASON,
     )
 

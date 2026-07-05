@@ -27,18 +27,75 @@ def _is_within(p: Path, root: Path) -> bool:
         return False
 
 
+def _denylisted(rp: Path) -> bool:
+    """True iff a resolved path hits the secret/ground-truth denylist — a denied
+    filename substring (`.env` / `cases.json` / `ground_truth` / `credentials`) or a
+    denied path component (`.ssh`). Belt-and-suspenders that applies INSIDE every
+    allowed root, on BOTH read surfaces: the read tool (`decide_read`) and the judge's
+    bash `jq` lane (`read_allowed_path`) — so the two surfaces can't disagree about a
+    denied file that resolves within-root (the held-out `ground_truth.yaml` under the
+    defender corpus, a captured `.env` in the run dir)."""
+    return any(d in set(rp.parts) for d in bash_policy.read_deny_dirs()) or any(
+        s in rp.name for s in bash_policy.read_deny_substrings()
+    )
+
+
+def _resolved_read_roots(
+    policy: AgentPolicy, run_dir: Path, defender_dir: Path
+) -> tuple[Path, ...]:
+    """The resolved roots a read must land within for `policy`. When
+    `policy.read_confine` is non-empty it REPLACES the `defender_dir` base (the
+    gray-box confine — a confined actor sees only its lesson corpora, not the whole
+    corpus); `run_dir` and the agent's `read_roots` still widen. Empty confine is
+    the legacy `{run_dir, defender_dir, *read_roots}`. May raise `OSError` /
+    `RuntimeError` from `resolve()` (a symlink cycle) — every caller FAILS CLOSED."""
+    base = policy.read_confine if policy.read_confine else (Path(defender_dir),)
+    return tuple(
+        r.resolve() for r in (Path(run_dir), *base, *policy.read_roots)
+    )
+
+
+def read_allowed_path(
+    path: str | Path, *, run_dir: Path | None, defender_dir: Path | None,
+    policy: AgentPolicy,
+) -> bool:
+    """Whether a file operand resolves within `policy`'s read roots — the
+    containment half of `decide_read`, reused by the judge's bash-lane `jq`
+    path-gate (`permission.bash`). FAILS CLOSED: a `resolve()` error (a symlink
+    cycle) OR a missing root context (`run_dir`/`defender_dir` `None`) returns
+    `False`, never raises. The secret/ground-truth denylist IS applied (parity with
+    `decide_read`, so `jq` can't read a denied file the read tool refuses — the
+    held-out `ground_truth.yaml`, a captured `.env`); the gather_raw RAW clamp is
+    NOT — a `jq` reader that may read raw (the judge, `raw_reads=True`) legitimately
+    names a gather_raw path, and the bash gate owns the raw clamp for agents that
+    may not."""
+    if run_dir is None or defender_dir is None:
+        return False  # no root context to gate against — fail closed
+    try:
+        rp = Path(path).resolve()
+        roots = _resolved_read_roots(policy, run_dir, defender_dir)
+    except (OSError, RuntimeError):
+        return False
+    if _denylisted(rp):
+        return False  # a secret / ground-truth file is denied even inside a root
+    return any(_is_within(rp, root) for root in roots)
+
+
 def decide_read(
     path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy
 ) -> Decision:
     """Allow/deny a file read — a **deny-by-default allowlist**, matching the shape
     `decide_write` already uses for writes. A read must resolve INSIDE one of the
     allowed roots: the run dir (the agent's own case artifacts + gather payloads),
-    the defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md), or
-    any of the agent's declared `policy.read_roots` (e.g. the judge's comparison dir
-    under `learning_run_dir`). Everything outside them fails closed. `resolve()`
-    collapses `..` and symlinks, so an allowed-root prefix can't be escaped (the
-    structural close for the `cat …/.env` / basename-only / case-sensitivity gaps a
-    denylist alone left).
+    the defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md) OR,
+    when the policy declares a `read_confine`, that confine set IN PLACE of the
+    corpus (the gray-box actor sees only its lesson dirs), plus any of the agent's
+    declared `policy.read_roots` (e.g. the judge's comparison dir under
+    `learning_run_dir`). Everything outside them fails closed. `resolve()` collapses
+    `..` and symlinks, so an allowed-root prefix can't be escaped (the structural
+    close for the `cat …/.env` / basename-only / case-sensitivity gaps a denylist
+    alone left); a `resolve()` error (a symlink cycle) FAILS CLOSED rather than
+    propagating out of a blocking gate.
 
     On top of the allowlist, the declarative secret/ground-truth denylist
     (`bash_policy.json`) still denies a sensitive file that lands INSIDE a root — a
@@ -49,27 +106,23 @@ def decide_read(
     consumes the gather summary, never the raw payload; the gather subagent and the
     judge (raw_reads=True) read their own gather_raw to verify / refute."""
     p = Path(path)
-    rp = p.resolve()
-    roots = (
-        Path(run_dir).resolve(),
-        Path(defender_dir).resolve(),
-        *(r.resolve() for r in policy.read_roots),
-    )
+    try:
+        rp = p.resolve()
+        roots = _resolved_read_roots(policy, run_dir, defender_dir)
+    except (OSError, RuntimeError):
+        return Decision(False, f"Blocked: {p} could not be resolved (failing closed).")
     if not any(_is_within(rp, root) for root in roots):
         return Decision(
             False,
-            "Blocked: reads are limited to the run dir, the defender corpus "
-            f"(skills/lessons/scripts), and this agent's declared roots; {p} is "
-            "outside them.",
+            "Blocked: reads are limited to the run dir, the defender corpus (or "
+            "this agent's read confine), and its declared roots; "
+            f"{p} is outside them.",
         )
     # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
     # still denied (substrings match the filename, dirs match any path component).
-    name = rp.name
-    parts = set(rp.parts)
-    if any(d in parts for d in bash_policy.read_deny_dirs()) or any(
-        s in name for s in bash_policy.read_deny_substrings()
-    ):
-        return Decision(False, f"Blocked: {name} is a denied read (secrets / ground truth).")
+    # Shared with the bash `jq` lane (`read_allowed_path`) so both surfaces agree.
+    if _denylisted(rp):
+        return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
     # No gather-payload-tool exemption here: that exemption is about a Bash
     # *command* invoking record-query (which legitimately names a gather_raw
     # path). block_main_loop_raw_access never applies it to a Read

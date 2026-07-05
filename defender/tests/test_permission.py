@@ -6,6 +6,7 @@ ports, so functionality parity is checked for free.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -508,39 +509,34 @@ def test_policy_raw_reads_bit_gates_gather_raw_read(tmp_path):
         raw, run_dir=run, defender_dir=dfn, policy=AgentPolicy(raw_reads=False)).allow
 
 
-def _claim_python(pipelines):
-    """A toy custom matcher: claim any command whose first stage runs python3."""
-    stages = command_shape.flat_stages(pipelines)
-    if stages and stages[0] and stages[0][0] in ("python", "python3"):
-        return permission.BashDecision(True, pipelines=tuple(pipelines))
-    return None
+# A pinned-command pattern: exactly `python3 <…>/elastic_cli.py …` (adapter-SHAPED,
+# the mirror of the judge's ticket read / the actor's lesson scripts).
+_PY_CLI = re.compile(r"^python3 scripts/adapters/elastic_cli\.py .*$")
 
 
-def test_policy_custom_matcher_claims_before_adapter_classification():
-    # `python3 <…>/elastic_cli.py …` is adapter-shaped, so the generic flow would
-    # deny it for a no-adapter policy. A custom matcher runs FIRST and can claim it —
-    # this is exactly how the judge's ticket read (python3 <ticket_cli>) is allowed.
+def test_policy_bash_allow_claims_before_adapter_classification():
+    # `python3 <…>/elastic_cli.py …` is adapter-shaped, so adapter classification would
+    # deny it for a no-adapter policy. The `bash_allow` reader lane runs FIRST and can
+    # claim it — exactly how the judge's ticket read (python3 <ticket_cli>) is allowed.
     cmd = "python3 scripts/adapters/elastic_cli.py query foo"
-    no_matcher = AgentPolicy(deny_reason="nope")
-    assert not permission.decide_bash(cmd, policy=no_matcher).allow  # adapter-denied
-    with_matcher = AgentPolicy(custom_matchers=(_claim_python,), deny_reason="nope")
-    assert permission.decide_bash(cmd, policy=with_matcher).allow
+    no_allow = AgentPolicy(deny_reason="nope")
+    assert not permission.decide_bash(cmd, policy=no_allow).allow  # adapter-denied
+    with_allow = AgentPolicy(bash_allow=(_PY_CLI,), deny_reason="nope")
+    assert permission.decide_bash(cmd, policy=with_allow).allow
 
 
-def test_policy_custom_matcher_declining_falls_through():
-    # A matcher returning None does not widen anything — the command runs the generic
-    # flow, so a non-viewer still fails closed.
-    pol = AgentPolicy(custom_matchers=(_claim_python,), deny_reason="nope")
+def test_policy_bash_allow_non_match_falls_through_to_deny():
+    # A command matching no `bash_allow` pattern does not widen anything — a non-adapter,
+    # non-matching command fails closed.
+    pol = AgentPolicy(bash_allow=(_PY_CLI,), deny_reason="nope")
     assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
 
 
-def test_policy_raw_clamp_precedes_custom_matcher():
-    # SECURITY ORDERING: the raw-read clamp runs before any custom matcher, so a
-    # matcher cannot rescue a gather_raw command for a raw_reads=False agent.
-    claim_all = AgentPolicy(
-        custom_matchers=(lambda pls: permission.BashDecision(True, pipelines=tuple(pls)),),
-        raw_reads=False,
-    )
+def test_policy_raw_clamp_precedes_reader_lane():
+    # SECURITY ORDERING: the raw-read clamp runs before the `bash_allow` reader lane, so
+    # even an all-permissive allowlist cannot rescue a gather_raw command for a
+    # raw_reads=False agent.
+    claim_all = AgentPolicy(bash_allow=(re.compile(r"^.*$"),), raw_reads=False)
     d = permission.decide_bash("cat gather_raw/l-001/0.json", policy=claim_all)
     assert not d.allow
     assert "gather_raw" in d.reason

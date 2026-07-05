@@ -11,6 +11,7 @@
 import type {
   ApplyResult,
   CardState,
+  ClaimedRun,
   DB,
   Effects,
   Event,
@@ -108,9 +109,9 @@ function insertRun(db: DB, fx: Effects, r: NewRun): void {
   const id = fx.uuid();
   try {
     db.prepare(
-      `INSERT INTO run (id, card_id, stage, attempt, status, trigger, session_id, pid, cost_usd,
+      `INSERT INTO run (id, card_id, stage, attempt, status, trigger, session_id, pid,
                         created_at, started_at, finished_at)
-       VALUES (@id, @card_id, @stage, @attempt, @status, @trigger, NULL, NULL, NULL,
+       VALUES (@id, @card_id, @stage, @attempt, @status, @trigger, NULL, NULL,
                @created_at, @started_at, NULL)`,
     ).run({
       id,
@@ -130,6 +131,28 @@ function insertRun(db: DB, fx: Effects, r: NewRun): void {
 
 function cancelRun(db: DB, runId: string, now: string): void {
   db.prepare("UPDATE run SET status = 'cancelled', finished_at = ? WHERE id = ?").run(now, runId);
+}
+
+// ---------------------------------------------------------------------------
+// Run-arc DB writes — the worker loop's own atomic writes (NOT injected Effects). Each is a
+// single statement the worker fires OUTSIDE any transaction (§9.4), so nothing it does holds a
+// lock across the awaited headless run.
+// ---------------------------------------------------------------------------
+
+/** Persist the assigned session_id onto a run BEFORE the headless spawn (FORK-G / §9.7), so a
+ *  crash mid-run leaves a resumable `--session-id`; the completion's session_id is confirmatory. */
+export function recordSession(db: DB, runId: string, sessionId: string): void {
+  db.prepare("UPDATE run SET session_id = ? WHERE id = ?").run(sessionId, runId);
+}
+
+/** Persist the child pid onto a run after the spawn — the kill/reap handle (§6.4). */
+export function recordPid(db: DB, runId: string, pid: number): void {
+  db.prepare("UPDATE run SET pid = ? WHERE id = ?").run(pid, runId);
+}
+
+/** Write the lazily-created shared worktree path back onto the card (reused across the arc). */
+export function recordWorktree(db: DB, cardId: string, path: string, now: string): void {
+  db.prepare("UPDATE card SET worktree_path = ?, updated_at = ? WHERE id = ?").run(path, now, cardId);
 }
 
 /** `trigger` is computed from where the human motion starts, never stored on the event. */
@@ -330,8 +353,8 @@ function handleRunSucceeded(db: DB, fx: Effects, event: Extract<Event, { type: "
     const now = fx.now();
     db.prepare(
       `UPDATE run SET status = 'succeeded', session_id = COALESCE(?, session_id),
-                      cost_usd = COALESCE(?, cost_usd), pid = NULL, finished_at = ? WHERE id = ?`,
-    ).run(event.session_id ?? null, event.cost_usd ?? null, now, run.id);
+                      pid = NULL, finished_at = ? WHERE id = ?`,
+    ).run(event.session_id ?? null, now, run.id);
 
     let stage: Stage = card.stage;
     let status: Status = card.status;
@@ -457,47 +480,31 @@ function handlePrClosed(db: DB, fx: Effects, cardId: string): ApplyResult {
 }
 
 // ---------------------------------------------------------------------------
-// claimNext — the worker pulls the oldest queued run to running, lazily creating the
-// shared worktree and requesting the headless spawn. Effect failures are fire-and-reconcile.
+// claimNext — a PURE CAS (§9.4): move the oldest queued run + its card to `running` and hand
+// back the pair. It creates NO worktree and spawns NOTHING; the whole effect arc
+// (createWorktree → spawnHeadless → recordPid → await → dispatch) is the worker loop's
+// (`executeRun`, src/worker.ts), so the sync engine stays lock-free across the run.
 // ---------------------------------------------------------------------------
 
-export function claimNext(db: DB, fx: Effects): ApplyResult | null {
-  const plan = inTxn(db, () => {
+export function claimNext(db: DB, fx: Effects): ClaimedRun | null {
+  const runId = inTxn(db, () => {
     const run = db
       .prepare("SELECT * FROM run WHERE status = 'queued' ORDER BY created_at, rowid LIMIT 1")
       .get() as RunRow | undefined;
-    if (!run) return { kind: "none" as const };
-    const card = getCardRow(db, run.card_id) as CardState;
+    if (!run) return null;
     const now = fx.now();
     db.prepare("UPDATE run SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'").run(now, run.id);
     db.prepare("UPDATE card SET status = 'running', state_entered_at = ?, updated_at = ? WHERE id = ?").run(
       now,
       now,
-      card.id,
+      run.card_id,
     );
-    return {
-      kind: "ok" as const,
-      runId: run.id,
-      cardId: card.id,
-      needsWorktree: run.stage !== "discuss" && card.worktree_path === null,
-    };
+    return run.id;
   });
-  if (plan.kind === "none") return null;
-
-  let card = getCardRow(db, plan.cardId) as CardState;
-  const run = getRunRow(db, plan.runId) as RunRow;
-  if (plan.needsWorktree) {
-    try {
-      const path = fx.createWorktree(card);
-      db.prepare("UPDATE card SET worktree_path = ?, updated_at = ? WHERE id = ?").run(path, fx.now(), card.id);
-      card = getCardRow(db, plan.cardId) as CardState;
-    } catch {
-      // fire-and-reconcile: the run is committed running with no path; spawn is not reached.
-      return { ok: true, card };
-    }
-  }
-  runEffect(() => fx.spawnHeadless(run, card));
-  return { ok: true, card };
+  if (runId === null) return null;
+  const run = getRunRow(db, runId) as RunRow;
+  const card = getCardRow(db, run.card_id) as CardState;
+  return { run, card };
 }
 
 // ---------------------------------------------------------------------------
@@ -505,7 +512,7 @@ export function claimNext(db: DB, fx: Effects): ApplyResult | null {
 // ---------------------------------------------------------------------------
 
 export function reconcile(db: DB, fx: Effects): ReconcileSummary {
-  const summary: ReconcileSummary = { failed_headless: 0, left_discuss: 0, redriven_queued: 0, killed: 0 };
+  const summary: ReconcileSummary = { failed_headless: 0, left_discuss: 0, redriven_queued: 0, killed: 0, swept: 0 };
   const toKill: RunRow[] = [];
 
   inTxn(db, () => {
@@ -534,5 +541,37 @@ export function reconcile(db: DB, fx: Effects): ReconcileSummary {
   for (const run of toKill) {
     if (runEffect(() => fx.kill(run))) summary.killed += 1; // count only reaps that actually fired
   }
+
+  sweepOrphanWorktrees(db, fx, summary);
   return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Worktree sweep (§9.4, finding #2) — after crash-recovery, reap every on-disk worktree that no
+// live card claims (an orphan a swallowed post-commit teardown left behind). Runs AFTER recovery
+// commits, so a just-failed run's KEPT path counts as a live claim and is spared. An orphan is a
+// listWorktrees() path equal to NO non-archived card's worktree_path — matched by path VALUE,
+// never by parsing `issue-<n>`. `swept` counts only removals that actually fired.
+// ---------------------------------------------------------------------------
+
+function sweepOrphanWorktrees(db: DB, fx: Effects, summary: ReconcileSummary): void {
+  let onDisk: string[];
+  try {
+    onDisk = fx.listWorktrees();
+  } catch {
+    return; // list blip — recovery already stands; leave swept at 0.
+  }
+  const claimed = new Set(
+    (
+      db
+        .prepare("SELECT worktree_path FROM card WHERE archived_at IS NULL AND worktree_path IS NOT NULL")
+        .all() as { worktree_path: string }[]
+    ).map((r) => r.worktree_path),
+  );
+  for (const path of onDisk) {
+    if (claimed.has(path)) continue;
+    // An orphan has no owning card — the sweep holds only the path, so it reaps via the path-based
+    // seam (`removeWorktreePath`) rather than casting a phantom card. `swept` counts only reaps that fired.
+    if (runEffect(() => fx.removeWorktreePath(path))) summary.swept += 1;
+  }
 }
