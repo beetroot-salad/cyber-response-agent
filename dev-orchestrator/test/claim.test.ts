@@ -46,15 +46,19 @@ describe("claimNext — pure CAS", () => {
     expect(claimNext(db, fx)).toBeNull();
   });
 
-  it("claims the OLDEST queued run first (FIFO by created_at, rowid)", () => {
+  it("claims the OLDEST queued run first (FIFO — created_at is the PRIMARY key, rowid the tiebreak)", () => {
     const db = createTestDb();
     const fx = new FakeEffects();
     const a = seedCard(db, { issue_number: 1, stage: "write_tests", status: "queued" });
     const b = seedCard(db, { issue_number: 2, stage: "write_tests", status: "queued" });
-    const first = seedRun(db, a.id, { id: "r-first", stage: "write_tests", status: "queued" });
-    seedRun(db, b.id, { id: "r-second", stage: "write_tests", status: "queued" });
+    // Make created_at and rowid DISAGREE: the newer run is inserted FIRST (lower rowid). A correct
+    // `ORDER BY created_at, rowid` claims the earlier-created run despite its higher rowid; a LIFO
+    // regression (`created_at DESC`) — or one that drops created_at and orders by rowid alone —
+    // would claim r-newer instead and fail here.
+    seedRun(db, a.id, { id: "r-newer", stage: "write_tests", status: "queued", created_at: "2026-01-01T00:00:05.000Z" });
+    const older = seedRun(db, b.id, { id: "r-older", stage: "write_tests", status: "queued", created_at: "2026-01-01T00:00:01.000Z" });
 
-    expect(expectClaim(claimNext(db, fx)).run.id).toBe(first.id); // r-first inserted first
+    expect(expectClaim(claimNext(db, fx)).run.id).toBe(older.id); // earliest created_at wins
   });
 
   it("never claims a running discuss run — discuss is never 'queued' (spawnSession'd interactively)", () => {
