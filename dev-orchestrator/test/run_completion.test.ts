@@ -1,7 +1,7 @@
 // run_succeeded / run_failed (T-SUCCEED / T-FAIL): the per-finished-stage next-state map,
 // keyed by run_id + status='running'. Auto-chains for discuss/write_code; gates for
 // write_tests/review. Pointers captured even on failure.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { seedCard, seedRun } from "./support/arrange";

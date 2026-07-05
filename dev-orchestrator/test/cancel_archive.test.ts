@@ -1,6 +1,6 @@
 // cancel (T-CANCEL) is a discard: it removes the worktree, unlike a fail/goto-cancel-first
 // which keep it. archive drops the card off the board and tears the tree down.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { seedCard, seedRun } from "./support/arrange";

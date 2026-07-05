@@ -1,6 +1,6 @@
 // Drift (pr_merged / pr_closed): the poller reconciles a PR resolved outside the pipeline.
 // Guarded by "this card, pr_number set, any non-done state" — so re-observing is a no-op.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { applyEvent } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { seedCard, seedRun } from "./support/arrange";

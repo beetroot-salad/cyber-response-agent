@@ -1,4 +1,4 @@
-import { expect } from "vitest";
+import { expect } from "bun:test";
 import type { ApplyResult, CardState } from "../../src/contract";
 
 /** Assert a successful transition and return the new card state. */

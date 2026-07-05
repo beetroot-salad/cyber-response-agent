@@ -1,7 +1,7 @@
 // reconcile (§6.4.4): startup crash recovery over runs left 'running'. Headless runs are
 // failed (and their orphans killed) but stay resumable; a running discuss run is exempt
 // (the board never parented it); queued runs are left claimable.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { reconcile } from "../src/engine";
 import { createTestDb } from "./support/db";
 import { seedCard, seedRun } from "./support/arrange";
