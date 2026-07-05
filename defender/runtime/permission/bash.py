@@ -4,15 +4,28 @@
 `shell=False` (`runtime/bash_exec.py`), so the gate does not parse a shell string
 and predict what bash will do — it validates the SAME `Pipeline` decomposition the
 executor runs (`bash_exec.parse`). What the gate approves is exactly what executes;
-there is no validator/executor parser differential to bypass. The decision is then a
-deny-by-default allowlist over each stage's program, sourced from the declarative
-`bash_policy.json`:
+there is no validator/executor parser differential to bypass.
 
-  - main loop — only the read-only viewers + non-adapter `defender-*` shims; no
-    data-source adapters (dispatch gather), no `gather_raw/` reads.
-  - gather subagent — the same viewers/shims, plus a data-source adapter run
-    either standalone (captured transparently) or as the sanctioned
-    `adapter --raw | defender-sql '<SQL>'` aggregation pipe.
+**The decision is a per-agent regex allowlist over the TOKENIZED argv.** Each
+agent's policy carries `bash_allow` — anchored `re.Pattern`s matched per stage
+against `" ".join(argv)` (the de-quoted, expansion-free tokens from
+`command_shape.flat_stages`). A non-adapter command is allowed iff EVERY stage
+matches some pattern. Matching the parsed argv (not the raw string) is what makes
+this safe: a raw-string pattern would have to encode bash's quoting/expansion
+grammar (`jq "$(cmd)"` matches `^jq "[^"]*"$` yet expands under a shell), whereas
+the tokens are already normalized and `shell=False` keeps the args inert — the
+allowlist gates program/shape only. Command **shape** is the pattern's job;
+operand **path-containment** is NOT (a regex can't resolve a symlink/`..` target
+against a dynamic run-dir prefix): the judge's `jq` file operands are
+`resolve()`-gated separately (`jq_operand_gated` → `_jq_reads_within_roots`).
+
+  - main / gather — the read-only viewers + non-adapter `defender-*` shims
+    (`policies/main.py`, `policies/gather.py`); gather additionally routes a
+    data-source adapter run either standalone (captured transparently) or as the
+    sanctioned `adapter --raw | defender-sql '<SQL>'` pipe.
+  - judge / actor — build their own `bash_allow` in their pipeline modules (the
+    judge's path-gated `jq` + pinned closed-ticket read; the actor's pinned
+    lesson scripts).
 
 **The command is parsed exactly once (#456).** `decide_bash` unwraps + parses, then
 returns a `BashDecision` carrying that parse: the verdict, the `Pipeline` list (for
@@ -25,43 +38,23 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS, unwrap
+from defender.hooks._cmd_segments import unwrap
 from defender.hooks.block_main_loop_raw_access import (
     ADAPTER_DENY_REASON,
     RAW_DENY_REASON,
     RAW_MARKER,
 )
-from defender.runtime import bash_exec, bash_policy
+from defender.runtime import bash_exec
 
 from . import command_shape
 from .decision import Decision
 from .files import read_allowed_path
 from .policy import AgentPolicy
 
-# Fall-through in `claude -p` meant "ask the user"; headless we have no prompt,
-# so an unrecognized main-loop command fails closed (deny), matching the net
-# effect of the static allowlist (only defender-* shims + jq/ls/cat were ever
-# permitted without a prompt).
-FALLTHROUGH_DENY_REASON = (
-    "Blocked: only the defender-* shims and read-only viewers (jq/ls/cat/…) are "
-    "permitted from the main loop. Dispatch gather for data-source access; do not "
-    "run arbitrary shell."
-)
-
-# The gather subagent IS the data-access layer, so the main-loop "dispatch gather"
-# advice is nonsensical here — it would tell gather to dispatch itself. Gather may
-# run a data-source adapter (`defender-<system> …`) directly as a standalone
-# command (captured automatically) plus read-only viewers; everything else fails
-# closed.
-GATHER_FALLTHROUGH_DENY_REASON = (
-    "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as "
-    "a standalone command — it is captured automatically — plus read-only viewers "
-    "(jq/grep/ls/cat/…). To read data, run the adapter directly; don't run "
-    "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
-)
+# The main / gather fall-through deny reasons live with their policies now
+# (`policies/main.py`, `policies/gather.py`); the gate reads `policy.deny_reason`.
 
 # Gather may run a data-source adapter directly — it's captured transparently —
 # but only solo, or as the sanctioned `adapter --raw | defender-sql '<SQL>'`
@@ -134,14 +127,6 @@ def _names_a_gather_payload_tool(cmd: str) -> bool:
     return any(tok in cmd for tok in _GATHER_PAYLOAD_TOKENS)
 
 
-@lru_cache(maxsize=1)
-def _allowed_programs() -> frozenset:
-    """Programs allowed as a stage head in either lane: the declarative read-only
-    viewers (`bash_policy.json`) plus the non-adapter `defender-*` shims (the
-    taxonomy's source of truth). Adapters are gated separately (per-agent)."""
-    return frozenset(bash_policy.viewers() | set(NON_ADAPTER_SHIMS))
-
-
 def _stage_unsafe(argv: list[str]) -> bool:
     """A stage carrying a construct we refuse to auto-approve even though the
     no-shell executor renders it inert: a subshell / command substitution
@@ -178,32 +163,19 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
 
 
 def policy_for(agent: str) -> AgentPolicy:
-    """Build the `AgentPolicy` for a runtime agent ('main' | 'gather') from the
-    declarative `bash_policy.json` capability flags. The fall-through deny message
-    differs by agent: the main loop is told to dispatch gather for data access,
-    while the gather subagent (which IS the data layer) is told to run the adapter
-    directly. Learning-loop agents (the judge) construct their own `AgentPolicy` in
-    their own module rather than going through this runtime-agent factory."""
-    deny_reason = (
-        FALLTHROUGH_DENY_REASON if agent == "main" else GATHER_FALLTHROUGH_DENY_REASON
-    )
-    return AgentPolicy(
-        adapters=bash_policy.adapters_allowed(agent),
-        adapter_sql_pipe=bash_policy.adapter_sql_pipe_allowed(agent),
-        raw_reads=bash_policy.raw_reads_allowed(agent),
-        deny_reason=deny_reason,
-    )
+    """Build the `AgentPolicy` for a runtime agent ('main' | 'gather') — a thin
+    dispatcher to that agent's own policy file (`policies/main.py`,
+    `policies/gather.py`), each of which owns its `bash_allow` regex allowlist,
+    capability bits, and deny reason. Learning-loop agents (judge, actor) build
+    their own `AgentPolicy` in their pipeline modules rather than going through this
+    runtime-agent factory."""
+    from .policies import gather as _gather, main as _main
 
-
-def _decide_viewers(pipelines: list[bash_exec.Pipeline], deny_reason: str) -> BashDecision:
-    """The shared non-adapter tail: every stage must be substitution-free and an
-    allowlisted read-only viewer / non-adapter shim, else fail closed."""
-    stages = command_shape.flat_stages(pipelines)
-    if any(_stage_unsafe(s) for s in stages):
-        return BashDecision(False, deny_reason)
-    if not all(s[0] in _allowed_programs() for s in stages):
-        return BashDecision(False, deny_reason)
-    return _allow(pipelines)
+    if agent == "main":
+        return _main.main_policy()
+    if agent == "gather":
+        return _gather.gather_policy()
+    raise ValueError(f"no runtime Bash policy for agent {agent!r}")
 
 
 def _allow(
@@ -302,46 +274,42 @@ def _jq_reads_within_roots(
     )
 
 
-def _decide_restricted_readers(
-    pipelines: list[bash_exec.Pipeline], policy: AgentPolicy,
-    *, run_dir: Path | None, defender_dir: Path | None,
-) -> BashDecision:
-    """A per-policy REDUCED reader set (the judge's jq-only lane). The command must
-    be a SINGLE stage (a pipe/compound would re-open the reader surface via a
-    downstream head/cat through the global fall-through), substitution-free, and a
-    `jq` invocation whose file operands are path-gated to the policy's read roots.
-    The only restricted set in play is `('jq',)`; a non-jq program — even one
-    nominally listed — carries no file-arg path-gate, so it fails closed rather than
-    admit an un-gated reader."""
-    argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
-    if argv is None or _stage_unsafe(argv):
-        return BashDecision(False, policy.deny_reason)
-    if argv[0] != "jq" or not policy.bash_readers or "jq" not in policy.bash_readers:
-        return BashDecision(False, policy.deny_reason)
-    if not _jq_reads_within_roots(argv, policy, run_dir=run_dir, defender_dir=defender_dir):
-        return BashDecision(False, policy.deny_reason)
-    return _allow(pipelines)
+def _stage_shape_ok(argv: list[str], policy: AgentPolicy) -> bool:
+    """Whether a stage matches one of the policy's `bash_allow` patterns. Matched
+    with `fullmatch` against `" ".join(argv)` — the de-quoted, expansion-free tokens
+    — so the WHOLE stage must be an approved shape, not merely a prefix."""
+    joined = " ".join(argv)
+    return any(p.fullmatch(joined) for p in policy.bash_allow)
 
 
 def _decide_readers(
     pipelines: list[bash_exec.Pipeline], policy: AgentPolicy,
     *, run_dir: Path | None, defender_dir: Path | None,
-) -> BashDecision:
-    """The non-adapter reader tail, narrowed by `policy.bash_readers`:
+) -> BashDecision | None:
+    """The non-adapter reader lane, driven by `policy.bash_allow`. Returns:
 
-      - `None` — today's GLOBAL viewer allowlist (main / gather, byte-for-byte).
-      - `()` — NO bash reader surface at all (the confined actor: reads go through
-        the read tool, never bash). Its pinned scripts still run — they are claimed
-        by a custom matcher upstream of this tail.
-      - a set (the judge's `('jq',)`) — only those programs, single-stage, with `jq`
-        path-gated to the policy's read roots (`_decide_restricted_readers`)."""
-    if policy.bash_readers is None:
-        return _decide_viewers(pipelines, policy.deny_reason)
-    if not policy.bash_readers:
+      - `None` when the command is NOT a reader command (some stage matches no
+        `bash_allow` pattern) — the caller then tries adapter classification;
+      - an ALLOW when every stage matches an approved shape (and, when
+        `jq_operand_gated`, every `jq` stage's file operands resolve in-roots);
+      - a DENY when a shape-approved command carries an unsafe construct
+        (`$(...)`/backtick/`export`/`VAR=`) or a `jq` operand escapes the read roots.
+
+    Requiring EVERY stage to match the (narrow, per-agent) allowlist is what makes a
+    pipe safe without a single-stage restriction: the judge's `jq … | jq …` is fine,
+    but a downstream `cat`/`head` matches no judge pattern and is denied here."""
+    stages = command_shape.flat_stages(pipelines)
+    if not stages or not all(_stage_shape_ok(s, policy) for s in stages):
+        return None  # not a reader command → let the caller try adapter routing
+    if any(_stage_unsafe(s) for s in stages):
         return BashDecision(False, policy.deny_reason)
-    return _decide_restricted_readers(
-        pipelines, policy, run_dir=run_dir, defender_dir=defender_dir
-    )
+    if policy.jq_operand_gated:
+        for s in stages:
+            if s[0] == "jq" and not _jq_reads_within_roots(
+                s, policy, run_dir=run_dir, defender_dir=defender_dir
+            ):
+                return BashDecision(False, policy.deny_reason)
+    return _allow(pipelines)
 
 
 def decide_bash(
@@ -349,13 +317,12 @@ def decide_bash(
     run_dir: Path | None = None, defender_dir: Path | None = None,
 ) -> BashDecision:
     """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy`
-    (no per-role method): custom matchers first, then the raw-read clamp, adapter
-    capture, and the per-policy reader surface (`bash_readers`).
+    (no per-role method): the raw-read clamp, then the per-agent `bash_allow` regex
+    reader lane, then structural adapter routing.
 
     `run_dir`/`defender_dir` supply the read roots the judge's `jq` file-arg
-    path-gate validates against; they are irrelevant to a policy with the default
-    `bash_readers=None` (main/gather) or `()` (the actor), so those callers may omit
-    them.
+    path-gate validates against; they are irrelevant to a policy with
+    `jq_operand_gated=False` (main/gather/actor), so those callers may omit them.
 
     Returns a `BashDecision` carrying the single parse (see the class): callers read
     `.allow`/`.reason` as before, and route capture/execution off
@@ -365,11 +332,11 @@ def decide_bash(
     if not cmd:
         return BashDecision(True)
 
-    # Raw-read clamp (a security invariant, so it runs before any custom matcher): a
-    # command naming a gather_raw/ path is denied unless the agent may read raw. The
-    # gather-payload-tool exemption keeps the main loop's `defender-record-query …
-    # <gather_raw path>` wrapper allowed (it legitimately names a raw path); an agent
-    # with raw_reads (gather, judge) skips the clamp entirely.
+    # Raw-read clamp (a security invariant, first): a command naming a gather_raw/
+    # path is denied unless the agent may read raw. The gather-payload-tool exemption
+    # keeps the main loop's `defender-record-query … <gather_raw path>` wrapper
+    # allowed (it legitimately names a raw path); an agent with raw_reads (gather,
+    # judge) skips the clamp entirely.
     if (
         RAW_MARKER in cmd
         and not policy.raw_reads
@@ -381,22 +348,19 @@ def decide_bash(
     if pipelines is None:
         return BashDecision(False, policy.deny_reason)
 
-    # Custom logic: an agent's matcher may claim a command before the generic
-    # adapter/viewer flow — e.g. the judge's pinned closed-ticket read runs as
-    # `python3 <ticket_cli> …`, an adapter-shaped path the generic flow would
-    # otherwise misclassify and deny.
-    for matcher in policy.custom_matchers:
-        claimed = matcher(pipelines)
-        if claimed is not None:
-            return claimed
+    # Reader lane FIRST: the per-agent `bash_allow` allowlist claims any command whose
+    # every stage matches an approved shape — including the judge's pinned `python3
+    # <ticket_cli>` read and the actor's pinned scripts, adapter-SHAPED commands that
+    # must win over adapter classification (the job the old custom matchers did). A
+    # shape-approved command that fails the jq operand path-gate / carries an unsafe
+    # construct denies HERE rather than falling through.
+    reader = _decide_readers(pipelines, policy, run_dir=run_dir, defender_dir=defender_dir)
+    if reader is not None:
+        return reader
 
-    # A data-source adapter is classified by its own helper (capture routing / the
+    # Not a reader command: a data-source adapter routes structurally (capture / the
     # sanctioned adapter|defender-sql pipe / the adapter deny reasons).
     if command_shape.has_adapter(pipelines):
         return _decide_adapter(pipelines, policy)
 
-    # Non-adapter command: the per-policy reader surface. `bash_readers=None` is
-    # today's global viewer allowlist; `()` grants no bash reader; a set narrows to
-    # those programs (the judge's path-gated jq). The substitution/assignment guard
-    # applies throughout (these stages execute through the no-shell executor).
-    return _decide_readers(pipelines, policy, run_dir=run_dir, defender_dir=defender_dir)
+    return BashDecision(False, policy.deny_reason)

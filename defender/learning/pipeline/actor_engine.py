@@ -1,7 +1,7 @@
 """The actor stages on the in-process PydanticAI engine — a drop-in ``actor_fn``.
 
 Mirror of the judge's ``pipeline/judge/engine_pydantic.py``: the actor's specifics (its deps
-identity, its permission policy + the pinned-lessons-script matchers) live here, and the
+identity, its permission policy + the pinned-lessons-script bash patterns) live here, and the
 generic in-process transport it shares with the judge lives in ``pipeline/_pydantic_stage.py``.
 ONE engine serves BOTH actor directions (malicious/benign) the way one ``_run_judge_pydantic``
 serves both judge directions — the per-direction variation (prompt/model/effort + which pinned
@@ -13,21 +13,19 @@ actually runs (``core/subagents.ClaudePrintSubagents.actor``), never at loop imp
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from defender.learning.core.config import REPO_ROOT
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy, BashDecision, command_shape
+from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import RunDeps
-
-if TYPE_CHECKING:
-    from defender.runtime.bash_exec import Pipeline
 
 # Bounds a runaway tool loop (the twin of JUDGE_REQUEST_LIMIT). Sized for GLM's tool-hunger:
 # GLM issues ~2-3 tool calls per model request and explores the lessons corpora more than the
@@ -63,7 +61,7 @@ class _ActorScope:
 
 @dataclass(frozen=True)
 class ActorDeps(RunDeps):
-    """The actor's per-run deps — ``RunDeps`` shape; its pinned-script matchers ride in
+    """The actor's per-run deps — ``RunDeps`` shape; its pinned-script patterns ride in
     ``policy`` (data), no extra fields. ``run_dir`` is the *learning* run dir (its own output
     dir), so budget/observability side effects land there. The actor reads only the lessons
     corpora its ``policy.read_confine`` names (that confine REPLACES the ``defender_dir`` base,
@@ -74,28 +72,18 @@ class ActorDeps(RunDeps):
     role: ClassVar[AgentRole] = AgentRole.ACTOR
 
 
-def _make_lessons_matcher(script: Path):
+def _script_pattern(script: Path) -> re.Pattern[str]:
     """Allow the actor's read-only lessons retrieval: a single-stage ``python[3] <script>
-    <args…>`` invocation whose script resolves (against ``REPO_ROOT`` — the actor prompts type
-    the bare repo-relative form and bash runs with cwd=repo root) to the pinned ``script``.
-    Anything else declines (``None``) → the generic gate DENIES it (``python3`` is not a
-    read-only viewer). The mirror of the judge's ``_make_ticket_matcher``. Because the matcher
-    cannot constrain the script's internals, the pinned scripts MUST stay read-only — both
-    ``lessons_env_retrieve.py`` and ``lessons_actor_index.py`` are pure argparse corpus scanners
-    (no writes, no network)."""
+    <args…>`` whose script token is the pinned ``script`` — matched by its repo-relative form
+    (what the prompts type, bash running with cwd=repo root) OR its absolute form, both
+    ``re.escape``-d so a `.`/`-` in the path can't widen the match. Any other spelling fails
+    CLOSED. Because the pattern can't constrain the script's internals, the pinned scripts MUST
+    stay read-only — both ``lessons_env_retrieve.py`` and ``lessons_actor_index.py`` are pure
+    argparse corpus scanners (no writes, no network)."""
     script_abs = script.resolve()
-
-    def _match(pipelines: list[Pipeline]) -> BashDecision | None:
-        argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
-        if argv is None or len(argv) < 2:
-            return None
-        if Path(argv[0]).name not in ("python", "python3"):
-            return None
-        if (REPO_ROOT / argv[1]).resolve() != script_abs:
-            return None
-        return BashDecision(True, pipelines=tuple(pipelines))
-
-    return _match
+    rel = script_abs.relative_to(REPO_ROOT.resolve())
+    spellings = "|".join(re.escape(s) for s in (str(rel), str(script_abs)))
+    return re.compile(rf"^(?:[^ ]*/)?python3? (?:{spellings})(?: .*)?$")
 
 
 def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> AgentPolicy:
@@ -103,17 +91,18 @@ def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> 
     all inlined in the user prompt — it never touches gather_raw), NO ``read_roots``, and a
     ``read_confine`` that REPLACES the ``defender_dir`` read base — the actor sees only its own
     lesson corpora (its confine), never the judge's grading rubric under ``defender/`` (#512).
-    ``bash_readers=()`` grants NO generic bash reader: every read goes through ``read_file`` (which
-    honours the confine); the pinned lesson scripts still run via the custom matchers below (each
-    a single pinned ``python3 <script>``), which the gate honours upstream of the reader tail."""
+    ``bash_allow`` is JUST one pinned-script pattern per lesson script (no viewer surface): every
+    non-script read goes through ``read_file`` (which honours the confine). The pinned scripts now
+    run through the reader lane like any other approved shape, so the substitution guard
+    (``bash._stage_unsafe``) applies to them too — closing the #500 matcher-skips-guard gap."""
     return AgentPolicy(
+        bash_allow=tuple(_script_pattern(s) for s in scripts),
+        jq_operand_gated=False,
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=False,
         read_roots=(),
         read_confine=read_confine,
-        bash_readers=(),
-        custom_matchers=tuple(_make_lessons_matcher(s) for s in scripts),
         deny_reason=_ACTOR_DENY_REASON,
     )
 
