@@ -781,9 +781,11 @@ const claimed = claimNext(db, fx);              // pure CAS, sync
 if (!claimed || active >= POOL) return;         // outbox-poll + concurrency cap (§3.2)
 const { run, card } = claimed;
 try {
-  const path = fx.createWorktree(card);         // deterministic path → idempotent on retry
+  const sid = fx.uuid();
+  recordSession(db, run.id, sid);                // assign + persist BEFORE spawn → resumable on crash
+  const path = fx.createWorktree(card);          // deterministic path → idempotent on retry
   recordWorktree(db, card.id, path);
-  const { pid, done } = fx.spawnHeadless(run, { ...card, worktree_path: path });
+  const { pid, done } = fx.spawnHeadless(run, { ...card, worktree_path: path }, sid);  // --session-id sid
   recordPid(db, run.id, pid);                    // ← run.pid is finally written (§6.4)
   const r = await done;                          // the run — minutes
   applyEvent(db, fx, card.id, r.ok
@@ -848,7 +850,7 @@ untouched by the surface work.
 | `createWorktree(card)` | returns a path | path is a **pure fn of the card** (`<runroot>/wt/issue-<n>`) | idempotent retry — no orphan tree |
 | `removeWorktree(card)` | recorded | `git worktree remove` | cancel / teardown / sweep |
 | `listWorktrees()` | — | **new** — enumerate trees under the run root | reconcile sweep |
-| `spawnHeadless(run, card)` | `void` | **`{ pid, done: Promise<RunResult> }`** — spawn `claude -p`, resolve on exit | worker-loop await |
+| `spawnHeadless(run, card, sessionId)` | `void`, no id | **`{ pid, done: Promise<RunResult> }`** — spawn `claude -p --session-id <sessionId>`, resolve on exit | worker-loop await |
 | `spawnSession(card, resume?)` | recorded | open the session host (§2); `resume` now wired | interactive discuss |
 | `kill(run)` | recorded | pgroup + pidfile reap | cancel / reconcile |
 | `gh.issueCreate(…)` | returns `{issue_number}` | `gh issue create` | UI new-issue |
@@ -856,9 +858,14 @@ untouched by the surface work.
 | `gh.prStatus(…)` | — | **new** — `gh pr view --json state` | poll → drift |
 | `now()` / `uuid()` | fake clock / counter | wall clock / real uuid | timestamps / ids |
 
-`RunResult = { ok, session_id?, pr_number? }`. `session_id` is **assigned** up front (generate
-a uuid, pass `claude --session-id <uuid>`, so it's known before the run starts — no post-hoc
-harvest, no `~/.claude` mtime race); `pr_number` is **discovered** post-run via
+`RunResult = { ok, session_id?, pr_number? }`. `session_id` is **assigned** up front and
+**persisted before the spawn**: the worker generates a uuid, writes it to the run row
+(`recordSession`, an engine helper), and passes it as `claude --session-id <uuid>`. So it's
+known before the run starts — no post-hoc harvest, no `~/.claude` mtime race — and, crucially,
+a run orphaned by a crash *before* completion still carries its `session_id`, so `reconcile`
+can `claude --resume` it (§6.4.4). `RunResult.session_id` is therefore **confirmatory** (the
+completion `COALESCE`s onto the already-written id, never a second source of truth); `pr_number`
+is **discovered** post-run via
 `gh pr list --head flow/issue-<n>`; `ok` is subprocess exit `0` (and, if we run `claude -p`
 with `--output-format json`, `is_error === false`). No `cost_usd` — dropped for simplicity
 (§7.2). Populating these is 2b; the `RunResult` **shape** is what 2a's loops bind against, with
