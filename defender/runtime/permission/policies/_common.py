@@ -15,8 +15,8 @@ from defender.runtime import bash_policy
 def viewer_patterns() -> tuple[re.Pattern[str], ...]:
     """Anchored per-program patterns for the read-only viewers + non-adapter
     `defender-*` shims — the main/gather reader allowlist (`bash_policy.json`'s
-    `viewers` plus the taxonomy's `NON_ADAPTER_SHIMS`, the same set the old
-    `_allowed_programs` used). Each program is allowed with any trailing args:
+    `viewers` plus the taxonomy's `NON_ADAPTER_SHIMS`, the program set the
+    pre-#522 static allowlist admitted). Each program is allowed with any trailing args:
     the argv is already de-quoted and expansion-free, `shell=False` keeps the args
     inert, and the substitution guard (`bash._stage_unsafe`) still rejects a
     `$(...)`/backtick/`VAR=` stage. Data-source adapters are NOT here — they route

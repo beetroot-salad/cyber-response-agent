@@ -78,7 +78,7 @@ _GATHER_PAYLOAD_TOKENS = (
 # matched against the first token of a stage only.
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# jq option grammar for the file-arg path-gate (the judge's `bash_readers=('jq',)`
+# jq option grammar for the file-arg path-gate (the judge's `jq_operand_gated`
 # lane). jq OPENS a file for: its positional input operands (after the filter
 # program) and the argument-taking flags below. The gate validates EVERY such path
 # against the policy's read roots — closing the flag-injection escape where a
@@ -92,15 +92,23 @@ _JQ_ARG_FLAGS: dict[str, tuple[int, int | None, bool]] = {
     "-f": (2, 1, True), "--from-file": (2, 1, True),
     "--slurpfile": (3, 2, False), "--rawfile": (3, 2, False), "--argfile": (3, 2, False),
     "--arg": (3, None, False), "--argjson": (3, None, False),       # <name> <value>
-    "--indent": (2, None, False), "-L": (2, None, False), "--library-path": (2, None, False),
+    "--indent": (2, None, False),
+    # `-L`/`--library-path <dir>` is DELIBERATELY absent → it fails closed (below).
+    # It adds a jq MODULE search dir, and an `include`/`import` in the filter then
+    # opens `<dir>/<mod>.jq` — files the operand gate can't enumerate (they come from
+    # the filter body, not the argv), so gating the dir alone would miss them and a
+    # compile error echoes a module file's source line to stderr (an out-of-roots
+    # read oracle). The judge has no legitimate use for jq module paths, so any `-L`
+    # (standalone or bundled/attached) is denied rather than decoded ungated.
 }
 _JQ_ARGS_MODES = frozenset({"--args", "--jsonargs"})  # trailing positionals become strings, not files
 # The arg-taking SHORT flags (`-f`/`-L`). jq bundles short options AND lets a
 # bundle's trailing arg-taking flag consume the next token (`jq -nf FILE` opens
-# FILE as the `-f` filter program) or an attached value (`-L<dir>`). We only decode
-# these as STANDALONE tokens (in `_JQ_ARG_FLAGS`), so a bundle carrying one would
-# desync the positional count and leave its file un-gated — the gate FAILS CLOSED
-# on such a bundle instead (see `_jq_flag_step`).
+# FILE as the `-f` filter program) or an attached value (`-L<dir>`). `-f` is decoded
+# as a STANDALONE token (in `_JQ_ARG_FLAGS`); `-L` is decoded NOWHERE (it opens files
+# the gate can't enumerate — see above). Either appearing in a bundle/attached form,
+# and `-L` in ANY form, desyncs the positional count or hides an ungated read, so the
+# gate FAILS CLOSED on it instead (see `_jq_flag_step`).
 _JQ_SHORT_ARG_FLAGS = frozenset("fL")
 
 
@@ -274,11 +282,28 @@ def _jq_reads_within_roots(
     )
 
 
+# Sentinel replacing a token's OWN spaces before the argv is joined for shape
+# matching. A plain `" ".join(argv)` is many-to-one: a quoted token carrying a space
+# (`"a b"`) is indistinguishable from two tokens (`a b`), so a pattern that asserts
+# an inner token (the judge's `--require-closed` lookahead) or the program name could
+# be spoofed by smuggling that text inside a NEIGHBOURING quoted argument — which
+# argparse/exec then binds as a value, not the token the gate matched (the gate would
+# approve a shape the executed argv does not have). Mapping each token's own spaces to
+# a byte that cannot occur in a shell token keeps every space in the joined string a
+# TRUE token boundary, so the regex reasons over the same boundaries execution has.
+# `.`/`[^ ]` in the patterns still match the sentinel, so an approved shape's trailing
+# `(?: .*)?` is unaffected.
+_TOKEN_SPACE = "\x00"
+
+
 def _stage_shape_ok(argv: list[str], policy: AgentPolicy) -> bool:
-    """Whether a stage matches one of the policy's `bash_allow` patterns. Matched
-    with `fullmatch` against `" ".join(argv)` — the de-quoted, expansion-free tokens
-    — so the WHOLE stage must be an approved shape, not merely a prefix."""
-    joined = " ".join(argv)
+    """Whether a stage matches one of the policy's `bash_allow` patterns. Matched with
+    `fullmatch` against the tokens joined on a real space, each token's own spaces
+    mapped to `_TOKEN_SPACE` so a space in the joined string is ALWAYS a true token
+    boundary (see `_TOKEN_SPACE`) — the WHOLE stage must be an approved shape (not
+    merely a prefix), and an inner-token / program assertion can't be spoofed by a
+    space-carrying quoted argument."""
+    joined = " ".join(t.replace(" ", _TOKEN_SPACE) for t in argv)
     return any(p.fullmatch(joined) for p in policy.bash_allow)
 
 

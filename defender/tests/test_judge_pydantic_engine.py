@@ -219,6 +219,29 @@ def test_judge_ticket_pipe_and_arbitrary_denied_through_gate():
     assert not permission.decide_bash(f"{_PY} -c 'print(1)'", policy=benign).allow
 
 
+def test_judge_ticket_require_closed_spoof_denied_through_gate():
+    """SECURITY (#338): the `--require-closed` guard is enforced on the ACTUAL argv token,
+    not on a lossy `" ".join(argv)`. A command that only smuggles the flag's TEXT inside a
+    quoted argument value (so argparse binds it as data and `require_closed` stays False,
+    leaving the OPEN in-flight ticket readable) must be DENIED even though the flag's bytes
+    appear in the joined string. Regression for the token-boundary spoof."""
+    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    # The flag lives inside a single `--q`/`--status`/`--label`/`key` VALUE token → not a real
+    # flag at exec time. The double-`--q` form (last `--q` wins → broad filter) is the full-leak
+    # variant. All must be denied; the honest flagless form is denied too (control).
+    for spoof in (
+        f'{_PY} {_CLI} list-tickets --status open --q "sshd --require-closed"',
+        f'{_PY} {_CLI} list-tickets --q "x --require-closed" --q " "',
+        f'{_PY} {_CLI} list-tickets --label "x --require-closed" --label sig',
+        f'{_PY} {_CLI} get-ticket "SOC-OPEN --require-closed"',
+    ):
+        assert not permission.decide_bash(spoof, policy=benign).allow, spoof
+    # sanity: an honest --require-closed read whose OTHER arg legitimately carries a space
+    # (a multi-word `--q`) is still allowed — the fix only rejects the FORGED boundary.
+    assert permission.decide_bash(
+        f'{_PY} {_CLI} list-tickets --require-closed --q "foo bar"', policy=benign).allow
+
+
 def test_judge_policy_ticket_read_through_the_gate(tmp_path):
     # The matcher, wired into the benign judge's AgentPolicy, is honored by decide_bash.
     benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))

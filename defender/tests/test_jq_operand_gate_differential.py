@@ -111,10 +111,12 @@ def test_jq_input_files_table(argv, expected):
 
 
 @pytest.mark.parametrize("argv", [
-    ["jq", "-nf", "/etc/passwd"],       # short bundle carrying -f -> desyncs the count
-    ["jq", "-Rf", "/etc/passwd"],       # -R + -f
-    ["jq", "-L/etc/ssh", "."],          # attached -L<dir>
-    ["jq", "--totally-unknown", "."],   # unknown long option might take a file
+    ["jq", "-nf", "/etc/passwd"],            # short bundle carrying -f -> desyncs the count
+    ["jq", "-Rf", "/etc/passwd"],            # -R + -f
+    ["jq", "-L/etc/ssh", "."],              # attached -L<dir>
+    ["jq", "-L", "/etc/ssh", "."],           # standalone -L <dir>: jq module search path, an
+    ["jq", "--library-path", "/etc", "."],   #   ungated `<dir>/<mod>.jq` read oracle -> fail closed
+    ["jq", "--totally-unknown", "."],       # unknown long option might take a file
 ])
 def test_jq_input_files_fails_closed(argv):
     assert _jq_input_files(argv) is None

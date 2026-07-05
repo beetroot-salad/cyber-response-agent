@@ -298,7 +298,7 @@ LESSONS_ACTOR_DIR = DEFAULT_PATHS.lessons_actor_dir
 LESSONS_ENVIRONMENT_DIR = DEFAULT_PATHS.lessons_environment_dir
 
 # The two read-only lesson-retrieval scripts the in-process actor may run, pinned by the
-# actor's AgentPolicy matchers (pipeline/actor_engine._make_lessons_matcher). The single
+# actor's AgentPolicy bash_allow patterns (pipeline/actor_engine._script_pattern). The single
 # home for these offsets — verify_forward/env.py reuses LESSONS_ENV_RETRIEVE_SCRIPT.
 _LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
 LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
