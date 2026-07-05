@@ -1,7 +1,19 @@
 # Dev Workflow Orchestrator — Design
 
-> Status: **design / pre-implementation**. Name: TBD. Lives in the defender repo under
-> `dev-orchestrator/` for now; relocate to the new project's own repo when scaffolded.
+> Status: **slice #1 + slice #2a shipped; slice #2b in spec-grade firm-up.** Name: `flowdeck`
+> (working). Lives in the defender repo under `dev-orchestrator/` for now; relocate to the new
+> project's own repo when scaffolded.
+>
+> - **Slice #1** — the V1 transition engine (`intake` / `applyEvent` / `claimNext` / `reconcile`)
+>   against a recording `Effects` fake (Bun + `bun:sqlite` + `bun test`).
+> - **Slice #2a** — the shell-agnostic loops the engine drives: the worker arc (`executeRun` /
+>   `drainQueue`), the poll pass (`pollOnce`), `claimNext` as a pure CAS, and reconcile's worktree
+>   sweep — still bound against the fake (§9.4).
+> - **Slice #2b** *(this firm-up)* — the **runnable surface**: the real `Effects` as subprocesses
+>   (`git worktree` / `claude -p` / `gh` / the session host), the on-disk `bun:sqlite` migration,
+>   the `Bun.serve` + Hono `/rpc` server + read model, the board wired to live data, and the
+>   `main` boot sequence. Spec'd in **§9.7.1 (effects), §9.8 (boot + layout), §9.9 (config),
+>   §10 (test surface)**.
 >
 > Interactive UI mockups live in `mockups/` (board + palette explorer).
 
@@ -719,6 +731,14 @@ Endpoint *count* is cosmetic — `/rpc` multiplexes every operation, exactly as 
 server actions do under the hood. Whether it's hand-rolled JSON, tRPC, or server actions is
 **decision #4** (the app-shell choice); the *shape* is fixed either way.
 
+**2b resolves the shape: Hono + hand-rolled JSON `/rpc`, board served as a single static file.**
+`Bun.serve({ fetch: app.fetch })` mounts one Hono app; `POST /rpc` reads `{op, args}`, dispatches
+to an in-process handler, and returns JSON; `GET /*` serves the board. The board is **one
+hand-authored file** (`src/board/index.html` — the wired-up `mockups/board.html`), returned as a
+static asset — no `bun build` step in V1 (the board is vanilla JS with no imports, so there is
+nothing to bundle; `bun build` stays available for when the board grows modules). SSE `/events`
+stays omitted (§9.5). The whole server is ~one file (§9.8).
+
 ### 9.2 Operations behind `/rpc`
 
 Four procedures — different shapes, so distinct functions, but all in-process on the server:
@@ -735,6 +755,27 @@ discriminated union `{type:'goto', target, park?} | {type:'cancel'} | {type:'arc
 carrying the `(stage,status)` the caller believes the card is in (the CAS guard, §6.4.3). It
 runs the transaction and returns the card's new `(stage, status)`; a stale or double-clicked
 event updates 0 rows and returns the *unchanged* state — a safe no-op, never an error.
+
+**The router is a thin, total projection of the engine — 2b binds the wire, not new logic.**
+Only the UI events (`goto` / `cancel` / `archive`) cross `/rpc`; worker- and poll-events never
+do (§9.4). So the router's whole job is decode → call → shape the reply, and its behavior is
+**fully pinned by the engine's return contract** (§ contract.ts `ApplyResult`), which is why it is
+the prime 2b test seam (§10, driven via `app.fetch`):
+
+| Outcome from the engine | Wire response |
+|---|---|
+| `getBoard` / `getCard` | `200 { … }` (read model, §9.3) |
+| `dispatchEvent` → `{ ok:true, card }` | `200 { ok:true, card }` |
+| `dispatchEvent` → `{ ok:false, reason:'stale' }` | `200 { ok:false, reason:'stale' }` — **a no-op, not an error** |
+| `createIssue` → `{ ok:true, card }` | `200 { ok:true, card }` |
+| `InvalidEventError` (malformed target / event / issue#) | `400 { error }` |
+| `AlreadyInFlightError` (can't-happen index breach) | `409 { error }` |
+| unknown `op` / unparseable body | `400 { error }` |
+
+The stale-vs-error split is load-bearing: a double-clicked approve or a poll re-observing a
+resolved PR is a **200 no-op**, never a 4xx — the CAS backbone (§6.4.3) surfaced verbatim on the
+wire. `dispatchEvent`'s `event` is decoded straight into the §6.2 `Event` union (the `expected_*`
+CAS key rides along from the client's last-seen state); the router adds no state of its own.
 
 ### 9.3 The read model
 
@@ -758,6 +799,18 @@ denormalized so a paint is one SELECT:
 live `gh` call. `activity` is the only field read live, and only for a `running` headless
 run — tailed from `~/.claude` by `session_id` (§2), never stored. Everything durable (diffs,
 design, follow-ups) is a **link out**, not a payload.
+
+**2b splits the read model into a pure DB projection + a best-effort overlay.** `readBoard(db)`
+is one query pass over the DB — non-archived cards, each joined to its **newest** `run`
+(`ORDER BY created_at, rowid DESC LIMIT 1`, the § read.ts `latestRun` rule, so ties under a
+coarse clock don't reorder) — and returns everything **except** `activity`, which is `null`. This
+projection is pure, deterministic, and the §10 test seam. The `activity` overlay is a separate,
+**degradable** server-layer step: only for a card whose `latest_run.status === 'running'` and
+carries a `session_id`, tail `~/.claude` for `{ last_step, elapsed }`; **any read miss → leave it
+`null`** (the run still shows as running from `status`, just without the live step). The overlay
+touches no DB and is never unit-tested against a fixed transcript — it is I/O that fails soft
+(§10 "verified by running"), so a `~/.claude` layout change degrades the activity line, never the
+board.
 
 ### 9.4 What feeds the state — the three loops
 
@@ -870,3 +923,175 @@ is **discovered** post-run via
 with `--output-format json`, `is_error === false`). No `cost_usd` — dropped for simplicity
 (§7.2). Populating these is 2b; the `RunResult` **shape** is what 2a's loops bind against, with
 the value supplied by the fake — exactly the slice-1 pattern.
+
+### 9.7.1 The real effects — concrete construction (slice 2b)
+
+Every real effect is a **pure builder/parser + a thin imperative shell**. The builder (argv, a
+path, a parsed struct) is a total function of its inputs and is the §10 unit seam; the shell is
+the one `Bun.spawn` / `Bun.file` / `process.kill` line that runs it, verified by running (§10),
+not mocked. This split is the whole reason the surface is testable without a live `git`/`gh`/
+`claude`. Effects are constructed from config (§9.9): a `repoRoot(repo) → localCloneDir` map, the
+`runRoot`, the tracking `label`, and the `sessionHost` adapter. *(Flags below verified against the
+installed CLIs — `claude` 2.1.201, `gh` 2.x, `git` 2.47 — when this was authored; re-verify on
+wiring.)*
+
+**Worktrees — `git worktree`, path encodes the repo.** The path is a pure fn of the card:
+`worktreePath(card, cfg) = <runRoot>/wt/<owner>__<name>/issue-<issue_number>`, branch
+`flow/issue-<n>`. Encoding `<owner>__<name>` in the path is load-bearing: `removeWorktreePath`
+and the sweep hold **only a path** (an orphan has no card, contract.ts), so the path itself must
+recover the owning repo → its `repoRoot` for the `git -C` call.
+- `createWorktree(card)` → derive the path; if it is already a registered worktree
+  (`git -C <root> worktree list --porcelain` contains it) return it unchanged (idempotent retry,
+  §9.7); else `git -C <root> worktree add -B flow/issue-<n> <path> <base>` (`base` = cfg per repo,
+  default `origin/<default-branch>`). Called **only when `card.worktree_path` is null** (the worker
+  guards it, worker.ts) so a *kept* tree (fail/retry, §6.6) is reused directly and never reset.
+- `removeWorktree(card)` / `removeWorktreePath(path)` → `git -C <root> worktree remove --force
+  <path>` then best-effort `git worktree prune`. `removeWorktree` has the card's repo; the
+  path-only variant recovers `<owner>__<name>` from the path (above).
+- `listWorktrees()` → **union over every configured repo** of `git -C <root> worktree list
+  --porcelain`, take the `worktree <path>` lines, keep only paths under `<runRoot>/wt/` (drops each
+  repo's own main checkout — §9.7 "under the run root"). The reconcile sweep matches these by value
+  against `card.worktree_path` (engine.ts `sweepOrphanWorktrees`).
+
+**Headless stage — `claude -p`, one process group.** `spawnHeadless(run, card, sessionId)`:
+- argv `headlessArgv(run, card, sessionId, cfg)` = `["setsid", "claude", "-p",
+  headlessPrompt(run, card), "--session-id", sessionId, "--output-format", "json",
+  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path, …cfg.model?]`.
+  `setsid` makes the child a **session + group leader** (pgid == pid), so the reaper can
+  `kill(-pid)` the whole tree (below) — the §6.4 "never a bare `kill(pid)`" rule.
+- `headlessPrompt(run, card)` is a **per-stage template keyed by `run.stage`** — the "skills own
+  the work" seam (§1.8): `write_tests` → run the write-tests skill against issue `#n`; `write_code`
+  → write-code-from-spec; `review` → `/code-review --fix` + file follow-ups. Every headless stage
+  **cold-starts from the issue** (§7.5) — the prompt names the repo + issue number, nothing carries
+  from a session. Exact wording is impl-tunable; what's *fixed* is: keyed by stage, cold from the
+  issue, one skill per stage.
+- shell → `Bun.spawn(argv, { cwd: card.worktree_path, stdout: "pipe" })`; write a pidfile
+  `<runRoot>/run/<run.id>.pid` = `{ pid, started_at }` (the §6.4 reuse-guard); return `{ pid,
+  done }` where `done = subprocess.exited.then(code => parseRunResult(code, stdout, discoverPr()))`.
+- `parseRunResult(exitCode, stdout, prNumber?)` (pure) → `{ ok: exitCode === 0 && json.is_error
+  === false, session_id: json.session_id, pr_number }`. `session_id` is **confirmatory** (§9.7).
+  `discoverPr()` (write_code / review only) = `gh pr list -R <repo> --head flow/issue-<n> --json
+  number` → the first number, or `undefined`.
+
+**Interactive discuss — the session host (§2).** `spawnSession(card, resume?)` dispatches on
+`cfg.sessionHost.kind`, all reducible to a **pure command/doc builder** + one `exec`:
+- `command` / `tmux` → `sessionHostArgv(cfg, card, { resume, sid })` fills the template's
+  `{cwd,resume,sid}` placeholders → `Bun.spawn`.
+- `vscode` (default) → `vscodeWorkspaceDoc(cfg, card, { resume, sid })` emits a `.code-workspace`
+  JSON (written to `<runRoot>` — never in-tree, §2) carrying a `folderOpen` task that runs `claude
+  {--resume S} --session-id <sid>`, then `exec code <workspace>`.
+Both builders are §10 unit seams; the `exec` is the shell. `discuss` opens at `card.worktree_path
+?? repoRoot` (§6.6) and resolves via the card's Done/Discard button, never a process await (§2).
+
+**Reap — pgroup + pidfile.** `kill(run)`: read `<runRoot>/run/<run.id>.pid`; if the recorded
+`started_at` still matches the live process (guard against a **reused** pid after reboot, §6.4),
+`process.kill(-pid, "SIGTERM")`, then `SIGKILL` after a short grace; unlink the pidfile. A missing
+pidfile or a start-time mismatch is a no-op (nothing of ours to reap). Mostly shell — the *decision*
+(pgroup + pidfile + start-time guard, never bare `kill(pid)`) is what's fixed; verified by running.
+
+**GitHub — `gh`, parse stdout.** All three are a `gh` call + a pure parser:
+- `gh.issueCreate({repo,title,body})` → `gh issue create -R <repo> --title <t> [--body <b>]
+  --label <cfg.label>`; **`gh issue create` has no `--json`** — it prints the new issue's URL, so
+  `parseIssueNumberFromUrl(stdout)` (pure) takes the trailing `/issues/<n>` → `{ issue_number }`.
+- `gh.issueList({repo,label})` → `gh issue list -R <repo> --label <label> --state open --json
+  number,title` → `parseIssueList(json, repo)` (pure) → `IssueRef[]`.
+- `gh.prStatus({repo,pr_number})` → `gh pr view <n> -R <repo> --json state` → `parsePrState(json)`
+  (pure): `MERGED → "merged"`, `CLOSED → "closed"`, `OPEN → "open"`. The PR `state` already
+  distinguishes merged from closed, so **no `mergedAt` field is needed** (grounding correction to
+  the §9.7 table's `--json state`).
+
+**Clock / ids.** `now()` = `new Date().toISOString()`; `uuid()` = `crypto.randomUUID()`. (In tests
+the fake's stable clock + monotonic counter stand in, unchanged from slice 1.)
+
+### 9.8 Boot sequence & module layout (slice 2b)
+
+One `main.ts` wires the process; the order is a **hard invariant** (and a §10 seam):
+
+```ts
+export async function boot(cfg: Config, deps = { serve: Bun.serve }) {
+  const db = openDb(cfg.runRoot);        // §9.9: bun:sqlite, WAL, foreign_keys=ON, migrate-if-fresh
+  const fx = realEffects(cfg);           // §9.7.1
+  reconcile(db, fx);                     // 1. crash-recovery + worktree sweep — ONCE, BEFORE any loop
+  const worker = every(cfg.workerTickMs, () => drainQueue(db, fx, { pool: cfg.pool }));  // 2.
+  const poll   = every(cfg.pollMs,       () => pollOnce(db, fx, { label: cfg.label }));  // 3.
+  const server = deps.serve({ port: cfg.port, fetch: makeApp(db, fx, cfg).fetch });      // 4.
+  return { db, worker, poll, server };
+}
+```
+
+`reconcile` **must** run before the worker/poll/server start — a loop that claimed or a UI event
+that dispatched while stale `running` rows were still un-recovered would race crash-recovery. `boot`
+takes an injectable `serve` (and `every`, a self-rescheduling non-overlapping timer) so a test
+asserts the **ordering** (`reconcile` before first `drainQueue`/`pollOnce`/`serve`) without opening
+a socket — the boot-ordering seam (§10). `drainQueue`/`pollOnce` are already async and idempotent
+(2a), so a tick that overlaps a slow prior tick is prevented by `every`'s non-overlap guard, not by
+new engine logic.
+
+**File layout** (all under `dev-orchestrator/src/`, thin — the engine is untouched):
+
+| File | Holds |
+|---|---|
+| `db.ts` | `openDb(runRoot)` — open + `PRAGMA` + migrate `SCHEMA_SQL` if `user_version` is 0 (promotes test-support `schema.ts` to a real migration) |
+| `effects/git.ts` · `claude.ts` · `gh.ts` · `session_host.ts` · `reap.ts` | the §9.7.1 builders + shells; `effects/index.ts` composes them into one `Effects` |
+| `server.ts` | `makeApp(db, fx, cfg)` — the Hono app: `POST /rpc` router (§9.2 table) + `GET /*` static board; `readBoard`/`readCard` (§9.3) live here |
+| `config.ts` | `Config` type + `loadConfig()` (TOML/env → object); config is injected everywhere, never re-read in the hot path |
+| `board/index.html` | the wired-up `mockups/board.html` (fetches `/rpc`, §10-UI) |
+| `main.ts` | `boot(loadConfig())` — the entrypoint |
+
+### 9.9 Configuration
+
+One config object, injected (never global). Defaults target *local, single-dev, single-repo* (open
+decision #1), but the shape is multi-repo-ready (the `repo` list + path-encoded worktrees, §9.7.1):
+
+```toml
+run_root = "~/.flowdeck"      # sqlite db + wt/ worktrees + run/ pidfiles + *.code-workspace
+label = "flow"                # §7.9 tracking label — intake filter + the new-issue create label
+pool = 2                      # headless worker slots (§3.2); discuss runs outside it
+poll_ms = 30000               # §9.4 gh poll cadence (30–60s; 5000/hr REST budget)
+worker_tick_ms = 1000         # drainQueue cadence
+port = 8765                   # board + /rpc
+permission_mode = "acceptEdits"   # claude -p --permission-mode for headless stages
+model = ""                    # optional claude --model override; empty = CLI default
+
+[[repo]]
+name = "owner/name"           # gh -R + the card.repo value
+root = "/abs/path/to/clone"   # local checkout the worktrees branch from
+base = "origin/main"          # createWorktree base ref
+
+[session_host]                # §2 capability table
+kind = "vscode"               # | "command" | "tmux" | "embedded-pty"
+# command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid}"   # kind="command"
+```
+
+Deferred to later slices (not 2b): the `embedded-pty` host (`Bun.Terminal`), SSE `/events` (§9.5),
+`bun build --compile` packaging (§9.6), and auto-merge at the merge gate (open decision #8) — 2b's
+merge-gate approve marks `done` and leaves the actual merge to the human (the conservative default).
+
+---
+
+## 10. Slice 2b — the test surface
+
+The 2b deliverable follows the same **spec-first** shape as 2a (write-tests → write-code): the
+tests are the contract. But 2b is *surface* — I/O and a browser — so the seam between "pinned by a
+test" and "verified by running" is drawn deliberately, and stated here so the write-tests phase
+knows exactly what to bind. The rule: **anything that is a pure function of its inputs is unit-
+tested against the real DB + the slice-1 `FakeEffects`; anything that is a subprocess/socket/GUI
+launch is verified by running the app, never mocked into a green test.** Mocking a `Bun.spawn` only
+tests the mock; the honest signal is a real boot (§9.8) driving a real `gh`/`git` flow.
+
+**Unit-tested (the binding suite):**
+
+| Seam | Entry point | What's pinned |
+|---|---|---|
+| RPC router | `makeApp(db, fx, cfg).fetch(Request)` | op dispatch; `dispatchEvent` decode → §6.2 `Event` (incl. the `expected_*` CAS key); the §9.2 response table — `stale → 200` no-op, `InvalidEventError → 400`, `AlreadyInFlightError → 409`, unknown op / bad body → 400; `createIssue → gh.issueCreate → intake`; `getBoard`/`getCard` shapes |
+| Read model | `readBoard(db)` / `readCard(db, id)` | non-archived only; newest-run join (§ read.ts `latestRun` rule); `activity` is `null` in the pure projection; `getCard` returns the full run timeline |
+| Effect builders | `worktreePath` · `worktreeAddArgv`/`removeArgv` · `headlessArgv`/`headlessPrompt` · `parseRunResult` · `parseIssueNumberFromUrl` · `parseIssueList` · `parsePrState` · `sessionHostArgv`/`vscodeWorkspaceDoc` | argv/path/doc built exactly; parsers total over real CLI output samples (incl. malformed / empty) and the `MERGED`/`CLOSED`/`OPEN` mapping; path→repo recovery for the sweep |
+| Boot ordering | `boot(cfg, { serve: fake, every: fake })` | `reconcile` fires **before** the first `drainQueue`/`pollOnce`/`serve`; `pool`/`label`/`port` threaded through |
+| Migration | `openDb(tmpDir)` | fresh dir → full §5 schema; re-open → no-op (idempotent `user_version` gate); WAL + FK pragmas set |
+
+**Verified by running, not unit-tested** (§ "verify" — drive the real flow, observe): the
+`Bun.spawn`/`setsid`/`exec` shells, real `git worktree` create/list/remove, real `gh` calls, the
+`~/.claude` activity tail (§9.3, fails soft), the VS Code launch, and the board's live fetch/render
+against a booted server. The impl PR's evidence is a **real end-to-end boot** on a scratch repo:
+poll-discovered intake → a card advancing → a real worktree on disk → `/rpc` responses over curl →
+the board painting them — the §8 step-5 "one end-to-end slice on a real issue", now executable.
