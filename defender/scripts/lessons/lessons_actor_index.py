@@ -14,6 +14,7 @@ Usage:
     lessons_actor_index.py --alert-rule-ids 5712,5710
     lessons_actor_index.py --defender-lead-tags {system}.auth-events-by-srcip
     lessons_actor_index.py --subject <subject-slug>
+    lessons_actor_index.py --applies-to <env-fact-subject,...>
     lessons_actor_index.py --include-stale                # author-only
 
 Lessons missing a filtered field are skipped silently. Lessons with
@@ -58,12 +59,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--alert-rule-ids", help="Comma-separated SIEM rule IDs; OR within the list")
     ap.add_argument("--defender-lead-tags", help="Comma-separated lead-template tags ({system}.{kebab-name}); OR within the list")
     ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key)")
+    ap.add_argument("--applies-to", help="Comma-separated env-fact subjects; match pattern lessons whose applies_to lists any of them (OR within the list)")
     ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only)")
     ns = ap.parse_args(argv[1:])
 
     want_techniques = csv_set(ns.techniques)
     want_rule_ids = csv_set(ns.alert_rule_ids)
     want_lead_tags = csv_set(ns.defender_lead_tags)
+    want_applies_to = csv_set(ns.applies_to)
     want_subject = ns.subject.strip() if ns.subject else None
 
     for path, fm in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
@@ -82,6 +85,8 @@ def main(argv: list[str]) -> int:
         if want_rule_ids and as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
             continue
         if want_lead_tags and as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
+            continue
+        if want_applies_to and as_str_set(fm.get("applies_to")).isdisjoint(want_applies_to):
             continue
 
         criteria = fm.get("relevance_criteria") or ""

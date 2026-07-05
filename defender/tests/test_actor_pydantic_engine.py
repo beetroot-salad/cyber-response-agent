@@ -97,7 +97,8 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
         out = _run_actor_pydantic(
             _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
             "write the story", lrd,
-            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
+            make_model=_fake_model(fn),
         )
     assert out == _STORY
     assert (lrd / "actor_trace.jsonl").is_file()
@@ -113,7 +114,8 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
         out = _run_actor_pydantic(
             _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
             "write the story", lrd,
-            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX)), make_model=_fake_model(fn),
+            scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
+            make_model=_fake_model(fn),
         )
     assert out.startswith("Let me consider the menu.")
     assert is_skip_story(out)
@@ -192,6 +194,17 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     assert not permission.decide_read(
         tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
+
+
+def test_actor_scope_requires_explicit_confine():
+    # #512 fail-loud: read_confine is a required keyword-only field — building an actor scope
+    # WITHOUT it is a construction-time TypeError, not a silent fall back to the full defender_dir
+    # corpus (which would reopen the #510 gray-box hole). There is no unconfined actor.
+    with pytest.raises(TypeError):
+        _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX))
+    # …and naming the confine builds the confined scope as before.
+    scope = _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    assert scope.read_confine == _MALICIOUS_CONFINE
 
 
 # --- the agent is read-only (no writers) + GLM@low effort plumbing --------------

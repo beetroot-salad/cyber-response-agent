@@ -14,7 +14,7 @@ actually runs (``core/subagents.ClaudePrintSubagents.actor``), never at loop imp
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -50,10 +50,15 @@ class _ActorScope:
     read ``confine`` — the actor's tool-surface scoping (the mirror of the judge's ``_ToolScope``).
     The adversarial leg carries both scripts (env-fact retrieval + tradecraft index) and a confine
     of ``{lessons-actor, lessons-environment}``; the benign leg carries only env-fact retrieval and
-    a confine of ``{lessons-environment}`` (no tradecraft, no rubric — the gray-box split)."""
+    a confine of ``{lessons-environment}`` (no tradecraft, no rubric — the gray-box split).
+
+    ``read_confine`` is REQUIRED (keyword-only, no default): an empty confine falls back to the
+    whole ``defender_dir`` corpus (``permission/files.py``), reopening the #510 gray-box hole #512
+    closes — so an actor scope must NAME its confine explicitly. There is no unconfined actor;
+    omitting it is a construction-time ``TypeError``, not a silent full-corpus read."""
 
     scripts: tuple[Path, ...] = ()
-    read_confine: tuple[Path, ...] = ()
+    read_confine: tuple[Path, ...] = field(kw_only=True)
 
 
 @dataclass(frozen=True)
