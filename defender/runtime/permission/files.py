@@ -27,6 +27,19 @@ def _is_within(p: Path, root: Path) -> bool:
         return False
 
 
+def _denylisted(rp: Path) -> bool:
+    """True iff a resolved path hits the secret/ground-truth denylist — a denied
+    filename substring (`.env` / `cases.json` / `ground_truth` / `credentials`) or a
+    denied path component (`.ssh`). Belt-and-suspenders that applies INSIDE every
+    allowed root, on BOTH read surfaces: the read tool (`decide_read`) and the judge's
+    bash `jq` lane (`read_allowed_path`) — so the two surfaces can't disagree about a
+    denied file that resolves within-root (the held-out `ground_truth.yaml` under the
+    defender corpus, a captured `.env` in the run dir)."""
+    return any(d in set(rp.parts) for d in bash_policy.read_deny_dirs()) or any(
+        s in rp.name for s in bash_policy.read_deny_substrings()
+    )
+
+
 def _resolved_read_roots(
     policy: AgentPolicy, run_dir: Path, defender_dir: Path
 ) -> tuple[Path, ...]:
@@ -50,9 +63,12 @@ def read_allowed_path(
     containment half of `decide_read`, reused by the judge's bash-lane `jq`
     path-gate (`permission.bash`). FAILS CLOSED: a `resolve()` error (a symlink
     cycle) OR a missing root context (`run_dir`/`defender_dir` `None`) returns
-    `False`, never raises. The denylist / gather_raw clamp are NOT applied here — a
-    `jq` reader that may read raw (the judge, `raw_reads=True`) legitimately names a
-    gather_raw path; the bash gate owns the raw clamp for agents that may not."""
+    `False`, never raises. The secret/ground-truth denylist IS applied (parity with
+    `decide_read`, so `jq` can't read a denied file the read tool refuses — the
+    held-out `ground_truth.yaml`, a captured `.env`); the gather_raw RAW clamp is
+    NOT — a `jq` reader that may read raw (the judge, `raw_reads=True`) legitimately
+    names a gather_raw path, and the bash gate owns the raw clamp for agents that
+    may not."""
     if run_dir is None or defender_dir is None:
         return False  # no root context to gate against — fail closed
     try:
@@ -60,6 +76,8 @@ def read_allowed_path(
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
     except (OSError, RuntimeError):
         return False
+    if _denylisted(rp):
+        return False  # a secret / ground-truth file is denied even inside a root
     return any(_is_within(rp, root) for root in roots)
 
 
@@ -102,12 +120,9 @@ def decide_read(
         )
     # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
     # still denied (substrings match the filename, dirs match any path component).
-    name = rp.name
-    parts = set(rp.parts)
-    if any(d in parts for d in bash_policy.read_deny_dirs()) or any(
-        s in name for s in bash_policy.read_deny_substrings()
-    ):
-        return Decision(False, f"Blocked: {name} is a denied read (secrets / ground truth).")
+    # Shared with the bash `jq` lane (`read_allowed_path`) so both surfaces agree.
+    if _denylisted(rp):
+        return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
     # No gather-payload-tool exemption here: that exemption is about a Bash
     # *command* invoking record-query (which legitimately names a gather_raw
     # path). block_main_loop_raw_access never applies it to a Read

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 # Bounds a runaway tool loop (the twin of the gather's per-lead cap). Sized for GLM's
 # tool-hunger: GLM issues ~2-3 tool calls per model request and surveys gather_raw per lead
-# (ls/wc/jq) before its verdict — a live smoke run saw the benign judge reach 25/30 and the
+# (jq/read_file) before its verdict — a live smoke run saw the benign judge reach 25/30 and the
 # adversarial judge hit 30/30 (29 DISTINCT tool calls, no spin — legitimate grounded work) and
 # dead-letter the run on a 7-lead case. Raised to 45 for multi-lead headroom (still a backstop,
 # not a budget). Reducing GLM's tool-call count at the source is tracked in #514.

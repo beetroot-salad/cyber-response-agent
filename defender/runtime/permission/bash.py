@@ -102,6 +102,13 @@ _JQ_ARG_FLAGS: dict[str, tuple[int, int | None, bool]] = {
     "--indent": (2, None, False), "-L": (2, None, False), "--library-path": (2, None, False),
 }
 _JQ_ARGS_MODES = frozenset({"--args", "--jsonargs"})  # trailing positionals become strings, not files
+# The arg-taking SHORT flags (`-f`/`-L`). jq bundles short options AND lets a
+# bundle's trailing arg-taking flag consume the next token (`jq -nf FILE` opens
+# FILE as the `-f` filter program) or an attached value (`-L<dir>`). We only decode
+# these as STANDALONE tokens (in `_JQ_ARG_FLAGS`), so a bundle carrying one would
+# desync the positional count and leave its file un-gated — the gate FAILS CLOSED
+# on such a bundle instead (see `_jq_flag_step`).
+_JQ_SHORT_ARG_FLAGS = frozenset("fL")
 
 
 @dataclass(frozen=True)
@@ -244,7 +251,9 @@ def _jq_flag_step(argv: list[str], i: int) -> tuple[int, list[str], bool] | None
         return i + consume, loaded, supplies_filter
     if t.startswith("--"):
         return None  # unrecognized long option — fail closed (may take a file)
-    return i + 1, [], False  # short boolean flag / bundle
+    if any(c in _JQ_SHORT_ARG_FLAGS for c in t[1:]):
+        return None  # short bundle carrying an arg-taking flag (`-nf FILE`, `-L<dir>`)
+    return i + 1, [], False  # boolean short flag / bundle
 
 
 def _jq_input_files(argv: list[str]) -> list[str] | None:
@@ -256,16 +265,12 @@ def _jq_input_files(argv: list[str]) -> list[str] | None:
     are string args, not files."""
     files: list[str] = []
     filter_seen = False
-    args_mode = False
     i, n = 1, len(argv)
     while i < n:
         t = argv[i]
-        if args_mode:
-            i += 1  # post `--args`/`--jsonargs`: positionals are strings, not files
-        elif t in _JQ_ARGS_MODES:
-            args_mode = True
-            i += 1
-        elif t.startswith("-") and t != "-":
+        if t in _JQ_ARGS_MODES:
+            break  # `--args`/`--jsonargs`: every remaining positional is a string arg, never a file
+        if t.startswith("-") and t != "-":
             step = _jq_flag_step(argv, i)
             if step is None:
                 return None
@@ -311,7 +316,7 @@ def _decide_restricted_readers(
     argv = command_shape.single_stage_argv(pipelines)  # a single command, never a pipe/compound
     if argv is None or _stage_unsafe(argv):
         return BashDecision(False, policy.deny_reason)
-    if argv[0] != "jq" or "jq" not in (policy.bash_readers or ()):
+    if argv[0] != "jq" or "jq" not in policy.bash_readers:
         return BashDecision(False, policy.deny_reason)
     if not _jq_reads_within_roots(argv, policy, run_dir=run_dir, defender_dir=defender_dir):
         return BashDecision(False, policy.deny_reason)

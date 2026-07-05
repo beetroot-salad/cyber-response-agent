@@ -263,6 +263,29 @@ def test_judge_jq_multiple_operands_one_out_of_roots_denied(tmp_path):
     assert not _judge_gate(f"jq -s '.' {raw} /etc/passwd", tmp_path).allow
 
 
+@pytest.mark.parametrize("cmd", [
+    "jq -nf /etc/passwd",      # -n + -f bundled: jq opens /etc/passwd as its `-f` filter program
+    "jq -Rf /etc/passwd",      # -R + -f
+    "jq -sf /etc/passwd",      # -s + -f
+    "jq -L/etc/ssh '.'",       # attached -L<dir>: an out-of-roots module search path
+])
+def test_judge_jq_bundled_arg_flag_denied(tmp_path, cmd):
+    """a SHORT bundle carrying an arg-taking flag (`-nf FILE`, `-L<dir>`) -> deny. jq bundles short options
+    and lets a trailing `-f`/`-L` consume the next token / an attached value, opening a file the per-token
+    parser would otherwise miss (and jq echoes a compile error's source line to stderr). The gate FAILS
+    CLOSED on such a bundle rather than leave its file un-gated."""
+    assert not _judge_gate(cmd, tmp_path).allow, cmd
+
+
+@pytest.mark.parametrize("name", ["cases.json", "ground_truth.yaml", ".env", "credentials.txt"])
+def test_judge_jq_denylisted_file_in_roots_denied(tmp_path, name):
+    """a denylisted secret / ground-truth file that resolves INSIDE the judge's roots is denied in the bash
+    jq lane too — parity with decide_read, so the judge can't `jq` the held-out answer key / a captured .env
+    that read_file refuses. A non-denylisted sibling in the same dir stays allowed (it's the name, not the dir)."""
+    assert not _judge_gate(f"jq '.' {tmp_path / name}", tmp_path).allow, name
+    assert _judge_gate(f"jq '.' {tmp_path / 'payload.json'}", tmp_path).allow  # sibling, not denied
+
+
 def test_judge_jq_comparison_dir_via_read_roots_allowed(tmp_path):
     """jq of a file under the judge's read_roots (its comparison dir) -> allow (read_roots still widen)."""
     comp = tmp_path / "comparison"
