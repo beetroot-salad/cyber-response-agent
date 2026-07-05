@@ -18,21 +18,16 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender.hooks._cmd_segments import unwrap  # noqa: E402
 from defender.learning.core import subagents  # noqa: E402
 from defender.learning.core.directions import ADVERSARIAL_WIRING  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.run import _ToolScope  # noqa: E402
-from defender.runtime import bash_exec, permission  # noqa: E402
+from defender.runtime import permission  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _PY = "/venv/bin/python3"  # a full path, like sys.executable
 _CLI = Path("/repo/defender/scripts/adapters/ticket_cli.py")
-
-
-def _pipes(cmd):
-    return bash_exec.parse(unwrap(cmd))
 
 _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 
@@ -198,29 +193,53 @@ def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
     assert agent.model_settings["anthropic_effort"] == "low"
 
 
-# --- the benign closed-ticket matcher (the judge's custom logic, #338) -------
+# --- the benign closed-ticket read (the judge's pinned bash_allow pattern, #338) -------
 
-def test_ticket_matcher_allows_pinned_require_closed():
-    m = engine_pydantic._make_ticket_matcher(_PY, _CLI)
-    for cmd in (
-        f"{_PY} {_CLI} get-ticket CASE-9 --require-closed --raw",
-        f"{_PY} {_CLI} list-tickets --status closed --require-closed --label sig --raw",
-    ):
-        d = m(_pipes(cmd))
-        assert d is not None, cmd
-        assert d.allow, cmd
-
-
-def test_ticket_matcher_declines_unsafe_or_wrong_shape():
-    m = engine_pydantic._make_ticket_matcher(_PY, _CLI)
+def test_ticket_pattern_shape():
+    p = engine_pydantic._ticket_pattern(_PY, _CLI)
+    # accepted: the pinned CLI, a ticket subcommand, and --require-closed present
+    assert p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed --raw")
+    assert p.fullmatch(f"{_PY} {_CLI} list-tickets --status closed --require-closed --label sig")
     # --require-closed REQUIRED (the security property: the open ticket stays unreachable)
-    assert m(_pipes(f"{_PY} {_CLI} get-ticket CASE-9 --raw")) is None
-    # a different CLI / arbitrary python / not the ticket subcommands
-    assert m(_pipes(f"{_PY} /repo/defender/scripts/adapters/elastic_cli.py query x")) is None
-    assert m(_pipes(f"{_PY} -c 'print(1)'")) is None
-    assert m(_pipes(f"{_PY} {_CLI} delete-ticket CASE-9 --require-closed")) is None
-    # a pipe/compound is never the single-stage ticket read
-    assert m(_pipes(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed | cat")) is None
+    assert not p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --raw")
+    # …and it must be a WHOLE space-delimited token, not a substring
+    assert not p.fullmatch(f"{_PY} {_CLI} get-ticket --require-closed-not")
+    # wrong subcommand / wrong CLI / arbitrary python — denied even WITH the flag
+    assert not p.fullmatch(f"{_PY} {_CLI} delete-ticket CASE-9 --require-closed")
+    assert not p.fullmatch(f"{_PY} /repo/defender/scripts/adapters/elastic_cli.py q --require-closed")
+    assert not p.fullmatch(f"{_PY} -c print(1) --require-closed")
+
+
+def test_judge_ticket_pipe_and_arbitrary_denied_through_gate():
+    # Through decide_bash: the ticket read is a single approved shape; a pipe (its `| cat`
+    # stage matches no judge pattern) and arbitrary python are denied.
+    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    assert not permission.decide_bash(
+        f"{_PY} {_CLI} get-ticket CASE-9 --require-closed | cat", policy=benign).allow
+    assert not permission.decide_bash(f"{_PY} -c 'print(1)'", policy=benign).allow
+
+
+def test_judge_ticket_require_closed_spoof_denied_through_gate():
+    """SECURITY (#338): the `--require-closed` guard is enforced on the ACTUAL argv token,
+    not on a lossy `" ".join(argv)`. A command that only smuggles the flag's TEXT inside a
+    quoted argument value (so argparse binds it as data and `require_closed` stays False,
+    leaving the OPEN in-flight ticket readable) must be DENIED even though the flag's bytes
+    appear in the joined string. Regression for the token-boundary spoof."""
+    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    # The flag lives inside a single `--q`/`--status`/`--label`/`key` VALUE token → not a real
+    # flag at exec time. The double-`--q` form (last `--q` wins → broad filter) is the full-leak
+    # variant. All must be denied; the honest flagless form is denied too (control).
+    for spoof in (
+        f'{_PY} {_CLI} list-tickets --status open --q "sshd --require-closed"',
+        f'{_PY} {_CLI} list-tickets --q "x --require-closed" --q " "',
+        f'{_PY} {_CLI} list-tickets --label "x --require-closed" --label sig',
+        f'{_PY} {_CLI} get-ticket "SOC-OPEN --require-closed"',
+    ):
+        assert not permission.decide_bash(spoof, policy=benign).allow, spoof
+    # sanity: an honest --require-closed read whose OTHER arg legitimately carries a space
+    # (a multi-word `--q`) is still allowed — the fix only rejects the FORGED boundary.
+    assert permission.decide_bash(
+        f'{_PY} {_CLI} list-tickets --require-closed --q "foo bar"', policy=benign).allow
 
 
 def test_judge_policy_ticket_read_through_the_gate(tmp_path):

@@ -18,13 +18,12 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender.hooks._cmd_segments import unwrap  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline import actor_engine  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope, _run_actor_pydantic  # noqa: E402
 from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
-from defender.runtime import bash_exec, observe, permission  # noqa: E402
+from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
@@ -34,10 +33,6 @@ _ACTOR_DIR = config.LESSONS_ACTOR_DIR
 _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 # The malicious leg's read confine (both lesson corpora), as malicious_actor.run wires it.
 _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
-
-
-def _pipes(cmd):
-    return bash_exec.parse(unwrap(cmd))
 
 
 def _flatten(messages) -> str:
@@ -121,27 +116,28 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
     assert is_skip_story(out)
 
 
-# --- the two pinned lessons-script matchers -------------------------------------
+# --- the two pinned lessons-script patterns -------------------------------------
 
-def test_lessons_matcher_allows_pinned_script_relative_and_absolute():
-    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
-    for cmd in (
-        "python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web",
-        f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712",   # absolute form
-        f"python {_ENV_RETRIEVE} --alert-rule-ids 5712",    # bare `python` interpreter
-    ):
-        d = m(_pipes(cmd))
-        assert d is not None, cmd
-        assert d.allow, cmd
+def test_script_pattern_accepts_pinned_spellings():
+    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+    # repo-relative (what the prompt types), absolute, and a bare `python` interpreter
+    assert p.fullmatch("python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web")
+    assert p.fullmatch(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712")
+    assert p.fullmatch(f"python {_ENV_RETRIEVE} --alert-rule-ids 5712")
 
 
-def test_lessons_matcher_declines_wrong_shape():
-    m = actor_engine._make_lessons_matcher(_ENV_RETRIEVE)
-    # a different script, arbitrary python, a non-python program, and a pipe/compound
-    assert m(_pipes(f"python3 {_ACTOR_INDEX} --techniques T1078")) is None
-    assert m(_pipes("python3 -c 'print(1)'")) is None
-    assert m(_pipes("cat /etc/passwd")) is None
-    assert m(_pipes(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat")) is None
+def test_script_pattern_rejects_wrong_shape():
+    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+    assert not p.fullmatch(f"python3 {_ACTOR_INDEX} --techniques T1078")  # different pinned script
+    assert not p.fullmatch("python3 -c print(1)")                         # arbitrary python
+    assert not p.fullmatch("cat /etc/passwd")                             # non-python program
+
+
+def test_actor_script_pipe_denied_through_gate():
+    # a pipe re-opens no reader surface: the `| cat` stage matches no actor pattern → denied.
+    pol = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
+    assert not permission.decide_bash(
+        f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat", policy=pol).allow
 
 
 # --- the policy through the full gate -------------------------------------------

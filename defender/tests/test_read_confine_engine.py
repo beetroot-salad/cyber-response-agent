@@ -1,14 +1,14 @@
 """Executable spec (engine + tool layer) for #512 slice 2 — pydantic-guarded.
 
 Pins the parts that need the pydantic runtime:
-  - the actor/judge policy BUILDERS wire the new confinement fields
-    (_actor_policy(scripts, read_confine); _judge_policy -> bash_readers=('jq',)),
+  - the actor/judge policy BUILDERS wire the confinement fields + the #522 regex allowlist
+    (_actor_policy(scripts, read_confine) -> one pinned-script pattern per script;
+    _judge_policy -> bash_allow=(jq,), jq_operand_gated=True),
   - the read tool _tool_read_file(deps, path, pattern=None) routes through the confined policy,
     folds search via `pattern`, and honours the return contract (deny -> ModelRetry, no existence
     oracle, no-match -> empty, in-confine-missing -> 'file not found').
 
-RED until the implement phase lands the builders' new behaviour and read_file(pattern=). The pure
-gate spec (decide_read / decide_bash) is in test_read_confine.py.
+The pure gate spec (decide_read / decide_bash) is in test_read_confine.py.
 """
 from __future__ import annotations
 
@@ -38,19 +38,22 @@ _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 
 def test_actor_policy_malicious_wires_confine_and_no_readers():
     """_actor_policy for the malicious leg -> read_confine == {lessons-actor, lessons-environment},
-    bash_readers == () (zero generic bash readers), and still gray-box (raw_reads False, no adapters)."""
+    `bash_allow` is JUST the two pinned-script patterns (no viewer/jq surface), and still gray-box
+    (raw_reads False, no adapters)."""
     pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
     assert set(pol.read_confine) == {_ACTOR_DIR, _ENV_DIR}
-    assert pol.bash_readers == ()
+    assert len(pol.bash_allow) == 2
+    assert pol.jq_operand_gated is False
     assert pol.raw_reads is False
     assert pol.adapters is False
 
 
 def test_benign_actor_policy_env_only():
-    """_actor_policy for the benign leg -> read_confine == {lessons-environment} only; no bash readers."""
+    """_actor_policy for the benign leg -> read_confine == {lessons-environment} only; a single
+    pinned-script pattern (env-retrieve), no viewer/jq surface."""
     pol = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert set(pol.read_confine) == {_ENV_DIR}
-    assert pol.bash_readers == ()
+    assert len(pol.bash_allow) == 1
 
 
 def test_actor_policy_confine_denies_rubric_via_gate(tmp_path):
@@ -62,7 +65,7 @@ def test_actor_policy_confine_denies_rubric_via_gate(tmp_path):
 
 
 def test_actor_policy_still_runs_pinned_scripts_but_no_reader(tmp_path):
-    """confinement does not disturb the pinned-script matchers: both lesson scripts still run for the
+    """confinement does not disturb the pinned-script patterns: both lesson scripts still run for the
     malicious leg; a bash reader of the rubric is still denied."""
     pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=pol).allow
@@ -80,10 +83,13 @@ def test_benign_actor_pins_env_script_only():
 
 
 def test_judge_policy_is_jq_only():
-    """_judge_policy -> bash_readers == ('jq',): jq retained, cat/grep/head/tail/ls dropped."""
+    """_judge_policy -> `bash_allow` admits `jq` (any shape) and nothing else, with jq_operand_gated
+    on: cat/grep/head/tail/ls match no pattern and are dropped."""
     from defender.learning.pipeline.judge import engine_pydantic
     pol = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
-    assert pol.bash_readers == ("jq",)
+    assert pol.jq_operand_gated is True
+    assert any(p.fullmatch("jq '.'") for p in pol.bash_allow)
+    assert not any(p.fullmatch("cat x") for p in pol.bash_allow)
 
 
 # ============================================================================
@@ -104,7 +110,7 @@ def _tree(tmp_path):
     rubric.write_text("SURVIVED-CRITERIA\n")
     run = tmp_path / "run"
     run.mkdir()
-    pol = AgentPolicy(read_confine=(conf,), bash_readers=(), raw_reads=False,
+    pol = AgentPolicy(read_confine=(conf,), bash_allow=(), raw_reads=False,
                       adapters=False, adapter_sql_pipe=False, read_roots=())
     deps = ActorDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol)
     return deps, conf, lesson, rubric
