@@ -11,7 +11,7 @@ import { ev } from "./support/events";
 import { expectOk, expectStale } from "./support/assert";
 
 function runRow(db: ReturnType<typeof createTestDb>, id: string) {
-  return db.prepare("SELECT * FROM run WHERE id = ?").get(id) as { status: string; session_id: string | null; cost_usd: number | null; pid: number | null };
+  return db.prepare("SELECT * FROM run WHERE id = ?").get(id) as { status: string; session_id: string | null; pid: number | null };
 }
 
 describe("run completion — auto-chains and gates", () => {
@@ -50,7 +50,7 @@ describe("run completion — auto-chains and gates", () => {
     seedRun(db, card.id, { id: "c", stage: "write_code", status: "running" });
 
     const now = expectOk(
-      applyEvent(db, fx, card.id, ev.runSucceeded("c", { pr_number: 42, session_id: "s", cost_usd: 0.5 })),
+      applyEvent(db, fx, card.id, ev.runSucceeded("c", { pr_number: 42, session_id: "s" })),
     );
     expect([now.stage, now.status]).toEqual(["review", "queued"]);
     expect(now.pr_number).toBe(42);
@@ -58,7 +58,6 @@ describe("run completion — auto-chains and gates", () => {
     const done = runRow(db, "c");
     expect(done.status).toBe("succeeded");
     expect(done.session_id).toBe("s");
-    expect(done.cost_usd).toBe(0.5);
     expect(done.pid).toBeNull();
 
     const chained = latestRun(db, card.id)!;

@@ -42,10 +42,42 @@ export interface RunRow {
   trigger: Trigger;
   session_id: string | null;
   pid: number | null;
-  cost_usd: number | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+/** The pair a `claimNext` CAS returns — the run it moved to `running` and its card.
+ *  claimNext is a PURE CAS (§9.4): it enqueues no effect; the worker loop owns the arc. */
+export interface ClaimedRun {
+  run: RunRow;
+  card: CardState;
+}
+
+/** What a finished headless run reports back (§9.7). `session_id` is confirmatory — it was
+ *  assigned + persisted before the spawn (recordSession); `pr_number` is discovered post-run.
+ *  No `cost_usd` (dropped, §7.2). */
+export interface RunResult {
+  ok: boolean;
+  session_id?: string;
+  pr_number?: number;
+}
+
+/** A GitHub issue the poller discovered (§9.4). */
+export interface IssueRef {
+  repo: string;
+  issue_number: number;
+  title: string;
+}
+
+/** The state of a PR the poller checks for drift (§9.4). */
+export type PrState = "open" | "merged" | "closed";
+
+/** One poll pass's applied-transition counts (stale/no-op transitions are NOT counted). */
+export interface PollSummary {
+  intook: number;
+  merged: number;
+  closed: number;
 }
 
 /** Every card-targeted event carries the (stage,status) the caller believes the card is
@@ -61,7 +93,7 @@ export type Event =
   | ({ type: "cancel" } & Expect)
   | ({ type: "archive" } & Expect)
   // Worker completion — guarded by run_id + status='running' (the run CAS is the idempotency key).
-  | { type: "run_succeeded"; run_id: string; session_id?: string; cost_usd?: number; pr_number?: number }
+  | { type: "run_succeeded"; run_id: string; session_id?: string; pr_number?: number }
   | { type: "run_failed"; run_id: string; session_id?: string; pr_number?: number }
   // Poller drift — guarded by "this card, pr_number set, any non-done state".
   | { type: "pr_merged" }
@@ -83,18 +115,27 @@ export interface ReconcileSummary {
   left_discuss: number;
   redriven_queued: number;
   killed: number;
+  swept: number; // worktrees reaped by the filesystem sweep (§9.4) — orphans no live card claims
 }
 
 /** Injected side-effect seam (principle 7). State commits in-txn; these run AFTER
  *  commit and are fire-and-reconcile: a throwing effect is recorded, never rolled back
  *  into committed state, and never changes a transition's return value. */
 export interface Effects {
-  createWorktree(card: CardState): string; // returns worktree_path
+  createWorktree(card: CardState): string; // deterministic path (pure fn of the card); idempotent on retry
   removeWorktree(card: CardState): void;
-  spawnHeadless(run: RunRow, card: CardState): void;
+  listWorktrees(): string[]; // every worktree path on disk under the run root — for the reconcile sweep
+  // Spawn a headless `claude -p --session-id <sessionId>` (the id is assigned + persisted BEFORE
+  // spawn, §9.7). Returns the child pid and a promise that resolves on exit. The worker awaits
+  // `done` OUTSIDE any transaction; a rejected `done` is a failed run.
+  spawnHeadless(run: RunRow, card: CardState, sessionId: string): { pid: number; done: Promise<RunResult> };
   spawnSession(card: CardState, resume?: string): void;
   kill(run: RunRow): void;
-  gh: { issueCreate(input: { repo: string; title: string; body?: string }): { issue_number: number } };
+  gh: {
+    issueCreate(input: { repo: string; title: string; body?: string }): { issue_number: number };
+    issueList(input: { repo?: string; label?: string }): IssueRef[]; // poll → intake
+    prStatus(input: { repo: string; pr_number: number }): PrState; // poll → drift
+  };
   now(): string; // ISO-8601 UTC
   uuid(): string;
 }

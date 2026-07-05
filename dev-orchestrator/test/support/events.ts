@@ -16,7 +16,7 @@ export const ev = {
   archive(from: Believed): Event {
     return { type: "archive", expected_stage: from.stage, expected_status: from.status };
   },
-  runSucceeded(run_id: string, extra: { session_id?: string; cost_usd?: number; pr_number?: number } = {}): Event {
+  runSucceeded(run_id: string, extra: { session_id?: string; pr_number?: number } = {}): Event {
     return { type: "run_succeeded", run_id, ...extra };
   },
   runFailed(run_id: string, extra: { session_id?: string; pr_number?: number } = {}): Event {
