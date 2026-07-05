@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Dev workflow orchestrator — transition engine (V1)",
   "scripts": {
+    "start": "bun src/main.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
