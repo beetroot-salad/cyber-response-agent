@@ -7,9 +7,11 @@ Resolves the observation row from
 ``defender/learning/_pending/actor_observations.jsonl`` (the active
 queue — the row is still present during the author run; the queue is
 rotated only on AUTHOR_RESULT post-flight). Reads the actor story
-section 0 + body from ``{source_run_dir}/actor_story.md``. Calls
-``claude -p --model claude-haiku-4-5`` with
-``defender/learning/author/verify_forward/actor.md`` as the system prompt.
+section 0 + body from ``{source_run_dir}/actor_story.md``. Runs the forward-check
+IN-PROCESS on PydanticAI (GLM 5.2, Fireworks — the metered first-party path, the
+mirror of the judge/actor/oracle migrations) with
+``defender/learning/author/verify_forward/actor.md`` as the system prompt, via the
+shared ``verify_forward/engine.forward_check``.
 Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
 
 One rep per invocation. The author prompt allows one retry per
@@ -31,17 +33,10 @@ REPO_ROOT = HERE.parents[3]
 # block — the author drives it as a `claude -p` Bash subprocess).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from defender.learning.core.config import (  # noqa: E402
-    DEFAULT_PATHS,
-    VERIFIER_MODEL,
-    VERIFIER_TIMEOUT,
-    subscription_env,
-)
+from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
 from defender._run_paths import resolve_run_bundle  # noqa: E402
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
-    call_haiku as _call_haiku,
     load_observation as _load_observation,
-    parse_verdict as _parse_verdict,
     render_prompt,
 )
 
@@ -93,16 +88,19 @@ def main(argv: list[str]) -> int:
         observation=observation_text,
         lesson=lesson_path.read_text(),
     )
+    # Lazy import: pulls the pydantic-ai graph only when a check actually runs, so this
+    # module stays importable under any interpreter (the subprocess tests rely on that).
+    from defender.learning.author.verify_forward.engine import forward_check
+
     t0 = time.monotonic()
-    output = _call_haiku(
-        user_prompt,
+    verdict = forward_check(
+        prompt_path=PROMPT_PATH,
+        user=user_prompt,
+        source_run_dir=resolve_run_bundle(DEFAULT_PATHS.runs_dir, source_run_dir),
+        lesson_stem=lesson_path.stem,
         error_prefix="verify_forward_actor",
-        model=VERIFIER_MODEL,
-        timeout=VERIFIER_TIMEOUT,
-        env_fn=subscription_env,
     )
     elapsed = time.monotonic() - t0
-    verdict = _parse_verdict(output, error_prefix="verify_forward_actor")
     log_path = os.environ.get("VERIFY_TIMING_LOG") or str(
         HERE / "_verify_timing_actor.log"
     )

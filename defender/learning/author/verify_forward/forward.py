@@ -6,10 +6,13 @@ Usage: ``verify_forward.py [--direction adversarial|benign] <lesson_path> <run_i
 Reads the lesson file, the source case's investigation transcript at
 ``defender/learning/runs/<run_id>/investigation.md``, and the recorded
 disposition from
-``defender/learning/runs/<run_id>/source_refs.yaml``. Calls
-``claude -p --model claude-haiku-4-5`` with
-``defender/learning/author/verify_forward/forward.md`` as the system prompt.
-Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
+``defender/learning/runs/<run_id>/source_refs.yaml``. Runs the forward-check
+IN-PROCESS on PydanticAI (GLM 5.2, Fireworks — the metered first-party path, the
+mirror of the judge/actor/oracle migrations) with
+``defender/learning/author/verify_forward/forward.md`` as the system prompt, via
+the shared ``verify_forward/engine.forward_check``. Predicting with the defender's
+own model (``runtime/driver.DEFAULT_MODEL``) tightens this same-case regression
+proxy. Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
 
 The disposition handed to the verifier is direction-aware (see
 ``expected_disposition``): a benign-direction (FP) lesson is generated from a
@@ -35,24 +38,17 @@ REPO_ROOT = HERE.parents[3]
 # The run bundle (investigation.md + source_refs.yaml) is written under
 # DEFAULT_PATHS.runs_dir, which honors DEFENDER_LEARNING_STATE_DIR — out-of-repo
 # under concurrent runs. Resolve from the same seam the producer wrote to rather
-# than assuming the in-repo default. _loop_config is stdlib-only (no pyyaml), so
-# importing it keeps this verifier runnable under any interpreter.
+# than assuming the in-repo default. The module-level imports stay stdlib + core.config
+# (no pyyaml, no pydantic-ai), so this file imports under any interpreter — the GLM
+# engine is pulled LAZILY inside main() (see `forward_check`), which is what keeps the
+# tests/test_verify_forward subprocess cases (import + load_run_context) runtime-free.
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (see tests/conftest.py).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.learning.core.config import (  # noqa: E402
-    DEFAULT_PATHS,
-    VERIFIER_MODEL,
-    VERIFIER_TIMEOUT,
-    subscription_env,
-)
-from defender.learning.author.verify_forward.shared import (  # noqa: E402
-    call_haiku as _call_haiku,
-    parse_verdict as _parse_verdict,
-    render_prompt,
-)
+from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
+from defender.learning.author.verify_forward.shared import render_prompt  # noqa: E402
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "forward.md"
 
@@ -213,17 +209,20 @@ def main(argv: list[str]) -> int:
         disposition=disposition,
         cited_policy=cited_policy,
     )
+    # Lazy import: pulls the pydantic-ai graph only when a check actually runs, so this
+    # module stays importable under any interpreter (the subprocess tests rely on that).
+    from defender.learning.author.verify_forward.engine import forward_check
+
     import time as _time
     t0 = _time.monotonic()
-    output = _call_haiku(
-        user_prompt,
+    verdict = forward_check(
+        prompt_path=PROMPT_PATH,
+        user=user_prompt,
+        source_run_dir=RUNS_DIR / run_id,
+        lesson_stem=lesson_path.stem,
         error_prefix="verify_forward",
-        model=VERIFIER_MODEL,
-        timeout=VERIFIER_TIMEOUT,
-        env_fn=subscription_env,
     )
     elapsed = _time.monotonic() - t0
-    verdict = _parse_verdict(output, error_prefix="verify_forward")
     # Append timing for the harness to reconstruct verifier time. The
     # path is opportunistic: if VERIFY_TIMING_LOG is set we use it,
     # else fall back to a sibling file next to the script. Last line

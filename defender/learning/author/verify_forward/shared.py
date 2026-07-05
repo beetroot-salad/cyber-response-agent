@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
-"""Shared helpers for the verify-forward gate trio.
+"""Shared pure helpers for the verify-forward gate trio.
 
-``verify_forward.py`` (adversarial lesson check), ``verify_forward_actor.py``
-(actor lesson check) and ``verify_forward_env.py`` (deterministic environment
-lesson check) used to carry byte-identical copies of these helpers, differing
-only in the ``verify_forward*:`` error prefix and the prompt placeholders. They
-live here once, parameterized on ``error_prefix`` (and, for the prompt, on the
-template path + substitution kwargs), so the trio shares one implementation.
+``forward.py`` (adversarial/benign lesson check), ``actor.py`` (actor lesson check) and
+``env.py`` (deterministic environment lesson check) used to carry byte-identical copies of
+these helpers, differing only in the ``verify_forward*:`` error prefix and the prompt
+placeholders. They live here once, parameterized on ``error_prefix`` (and, for the prompt,
+on the template path + substitution kwargs), so the trio shares one implementation.
 
-Pure + importable: no module-level state, no side effects on import. The
-callers own ``VERIFIER_MODEL`` / ``VERIFIER_TIMEOUT`` and the
-``subscription_env`` seam and pass them in, so behavior is identical to the
-in-line copies this replaced.
+Pure + importable: no module-level state, no side effects on import, no pydantic-ai —
+these stay usable under any interpreter (the ``tests/test_verify_forward`` subprocess cases
+import this without the runtime extra). The LLM TRANSPORT the two model-driven gates share —
+the in-process GLM forward-check — lives in ``engine.py`` (imported lazily by their
+``main``s); ``parse_verdict`` here parses its ``VERDICT: GOOD|BAD`` output.
 """
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from collections.abc import Callable
 
 from defender._io import read_jsonl_rows
 
@@ -34,38 +32,6 @@ def render_prompt(template_path: Path, **subs: str) -> str:
     return text
 
 
-def call_haiku(
-    user_prompt: str,
-    *,
-    error_prefix: str,
-    model: str,
-    timeout: int,
-    env_fn: Callable[[], dict],
-) -> str:
-    cmd = [
-        "claude",
-        "-p",
-        "--model",
-        model,
-        "--output-format",
-        "text",
-    ]
-    proc = subprocess.run(
-        cmd,
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env_fn(),
-    )
-    if proc.returncode != 0:
-        raise SystemExit(
-            f"{error_prefix}: claude -p failed (rc={proc.returncode}): "
-            f"{proc.stderr[-2000:]}"
-        )
-    return proc.stdout
-
-
 def parse_verdict(text: str, *, error_prefix: str) -> str:
     for line in reversed(text.strip().splitlines()):
         s = line.strip()
@@ -75,7 +41,7 @@ def parse_verdict(text: str, *, error_prefix: str) -> str:
                 return v
             raise SystemExit(f"{error_prefix}: unrecognized verdict {v!r}")
     raise SystemExit(
-        f"{error_prefix}: no VERDICT line found in Haiku output:\n" + text[-1000:]
+        f"{error_prefix}: no VERDICT line found in verifier output:\n" + text[-1000:]
     )
 
 

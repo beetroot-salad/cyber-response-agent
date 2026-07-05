@@ -75,8 +75,10 @@ def build_stage_deps(deps_type: type, learning_run_dir: Path, policy: AgentPolic
     (``run_dir`` = its own ``learning_run_dir``, ``defender_dir`` = the corpus, ``run_id`` = the
     dir name, a fresh per-run ``salt``) plus the stage's declared ``policy``. Only ``deps_type``
     (the stage's role label) and ``policy`` vary per stage; this hoists the identical construction
-    the three engine modules (``actor_engine`` / ``judge/engine_pydantic`` / ``oracle_engine``)
-    would otherwise each copy verbatim, so the shape can't drift across them."""
+    the engine modules (``actor_engine`` / ``judge/engine_pydantic`` / ``oracle_engine`` /
+    ``verify_forward/engine``) would otherwise each copy verbatim, so the shape can't drift across
+    them. The forward-check passes the SOURCE run's dir as ``learning_run_dir`` (its trace lands
+    beside the case it regression-checks), which the shared identity handles unchanged."""
     return deps_type(
         run_dir=learning_run_dir,
         defender_dir=REPO_ROOT / "defender",
@@ -86,12 +88,14 @@ def build_stage_deps(deps_type: type, learning_run_dir: Path, policy: AgentPolic
     )
 
 
-async def _drive(agent: Agent[Any, str], user: str, deps: RunDeps, request_limit: int):
+async def _drive(
+    agent: Agent[Any, str], user: str, deps: RunDeps, request_limit: int, timeout: int
+):
     """One-shot stage run with a wall-clock ceiling (the in-process twin of the ``claude -p``
     subprocess timeout) and a request cap on the tool loop."""
     return await asyncio.wait_for(
         agent.run(user, deps=deps, usage_limits=UsageLimits(request_limit=request_limit)),
-        timeout=SUBAGENT_TIMEOUT,
+        timeout=timeout,
     )
 
 
@@ -109,6 +113,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     writers: bool = False,
+    wall_clock_timeout: int | None = None,
 ) -> str:
     """Run one in-process stage to completion and return its model's final text VERBATIM.
 
@@ -122,7 +127,11 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     (``RunUnprocessable``), the same per-run disposition the sibling ``claude -p`` stages get
     from a non-zero exit; ``StageAbort`` / ``FatalConfigError`` from the run are systemic and
     re-raised. ``stage`` is the human stage name in those messages (``judge`` / ``actor``);
-    ``label`` is the per-leg observability id (``agent_id`` + the ``step=`` log line)."""
+    ``label`` is the per-leg observability id (``agent_id`` + the ``step=`` log line).
+
+    ``wall_clock_timeout`` (seconds) overrides the per-run wall-clock ceiling — the author-time
+    forward-check passes its own ``VERIFIER_TIMEOUT`` here; ``None`` keeps the pipeline default
+    (``SUBAGENT_TIMEOUT``) unchanged for the judge/actor/oracle stages."""
     logger = observe.RequestLogger(learning_run_dir / trace_name)
     _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
     try:
@@ -133,7 +142,9 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
-        result = asyncio.run(_drive(agent, user, deps, request_limit))
+        result = asyncio.run(
+            _drive(agent, user, deps, request_limit, wall_clock_timeout or SUBAGENT_TIMEOUT)
+        )
     except (TimeoutError, UsageLimitExceeded) as e:
         raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
     except (StageAbort, FatalConfigError):
