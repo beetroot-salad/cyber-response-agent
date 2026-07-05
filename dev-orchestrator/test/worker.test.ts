@@ -63,13 +63,31 @@ describe("executeRun — the run arc", () => {
     expect(getRun(db, run.id)?.session_id).toBe(sid!); // completion is confirmatory, not a 2nd source
   });
 
+  it("REUSES an already-assigned session_id (resume) instead of minting a fresh one", async () => {
+    const db = createTestDb();
+    const fx = new FakeEffects();
+    const card = seedCard(db, { stage: "write_code", status: "running", worktree_path: "/wt/existing" });
+    const run = seedRun(db, card.id, { id: "run-resume", stage: "write_code", status: "running", session_id: "sid-prior" });
+
+    const p = executeRun(db, fx, run, card);
+    // FORK-G's `run.session_id ?? fx.uuid()`: a run that already carries an id keeps it (resumable
+    // pointer), and the SAME id is handed to the subprocess — an always-mint impl would break resume.
+    expect(getRun(db, run.id)?.session_id).toBe("sid-prior"); // not overwritten with a fresh uuid
+    const spawnArgs = fx.callsTo("spawnHeadless")[0]?.args as { sessionId: string };
+    expect(spawnArgs.sessionId).toBe("sid-prior");
+    fx.succeedRun(run.id);
+    await p;
+  });
+
   it("records the child pid after spawn (the kill/reap handle, §6.4)", async () => {
     const db = createTestDb();
     const fx = new FakeEffects();
     const { run, card } = runningRun(db);
 
     const p = executeRun(db, fx, run, card);
-    expect(getRun(db, run.id)?.pid).not.toBeNull(); // written pre-await
+    // The exact handle the fake's spawn returned (its first pid), written pre-await — recording a
+    // WRONG pid (any non-null number) would satisfy `.not.toBeNull()` yet kill the wrong process.
+    expect(getRun(db, run.id)?.pid).toBe(5000);
     fx.succeedRun(run.id);
     await p;
   });
@@ -224,7 +242,7 @@ describe("drainQueue — the pool cap", () => {
     }
     await p;
 
-    expect(peak).toBeLessThanOrEqual(POOL); // the cap held
+    expect(peak).toBe(POOL); // the cap held AND the pool was actually used — a serialized (peak=1) drain fails here
     expect(fx.spawned().length).toBe(K); // every queued run ran
   });
 

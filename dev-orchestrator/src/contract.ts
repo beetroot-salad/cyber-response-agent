@@ -123,8 +123,11 @@ export interface ReconcileSummary {
  *  into committed state, and never changes a transition's return value. */
 export interface Effects {
   createWorktree(card: CardState): string; // deterministic path (pure fn of the card); idempotent on retry
-  removeWorktree(card: CardState): void;
+  removeWorktree(card: CardState): void; // card-driven teardown (cancel/archive/done/drift) — has repo context
   listWorktrees(): string[]; // every worktree path on disk under the run root — for the reconcile sweep
+  // Reap a worktree by PATH alone. The reconcile sweep reaps orphans — on-disk trees no live card
+  // claims — and an orphan has NO owning card, so the sweep holds only a path (never a phantom card).
+  removeWorktreePath(path: string): void;
   // Spawn a headless `claude -p --session-id <sessionId>` (the id is assigned + persisted BEFORE
   // spawn, §9.7). Returns the child pid and a promise that resolves on exit. The worker awaits
   // `done` OUTSIDE any transaction; a rejected `done` is a failed run.

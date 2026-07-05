@@ -63,6 +63,7 @@ export interface SeedRun {
   trigger?: Trigger;
   session_id?: string | null;
   pid?: number | null;
+  created_at?: string; // override the T0 default to make FIFO (`ORDER BY created_at, rowid`) testable
   started_at?: string | null;
   finished_at?: string | null;
 }
@@ -84,7 +85,7 @@ export function seedRun(db: DB, cardId: string, opts: SeedRun = {}): RunRow {
     trigger: opts.trigger ?? "manual",
     session_id: opts.session_id ?? null,
     pid: opts.pid ?? null,
-    created_at: T0,
+    created_at: opts.created_at ?? T0,
     started_at: opts.started_at ?? null,
     finished_at: opts.finished_at ?? null,
   });

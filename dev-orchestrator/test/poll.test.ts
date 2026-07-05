@@ -68,6 +68,19 @@ describe("pollOnce — drift", () => {
     expect(fx.countOf("removeWorktree")).toBe(1);
   });
 
+  it("drifts EVERY eligible card, not just the first (two merged PRs → merged:2)", async () => {
+    const db = createTestDb();
+    const fx = new FakeEffects().setIssues([]).setPrState(61, "merged").setPrState(62, "merged");
+    const a = withOpenPr(db, 61);
+    const b = withOpenPr(db, 62);
+    const summary = await pollOnce(db, fx, {});
+    // The drift half must scan the WHOLE eligible set: a `.get()`-instead-of-`.all()` or a
+    // `break`-after-first regression drifts only one card and yields merged:1 here.
+    expect(summary.merged).toBe(2);
+    expect(getCard(db, a.id)?.stage).toBe("done");
+    expect(getCard(db, b.id)?.stage).toBe("done");
+  });
+
   it("a closed-unmerged PR drives the card to failed, KEEPING the PR + tree (closed:1)", async () => {
     const db = createTestDb();
     const fx = new FakeEffects().setIssues([]).setPrState(51, "closed");
@@ -132,7 +145,19 @@ describe("pollOnce — robustness (independent halves)", () => {
     const summary = await pollOnce(db, fx, {}); // must not reject
     expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 });
     expect([getCard(db, card.id)?.stage, getCard(db, card.id)?.status]).toEqual(["review", "awaiting_human"]);
-    // The stronger claim — "one card's prStatus throw doesn't skip the OTHERS' drift" — needs a
-    // per-call fault seam (failOn is a permanent set), so it is deferred with recordPid's it.todo.
+  });
+
+  it("a prStatus throw on one card doesn't abort the OTHER eligible cards' checks (per-card catch)", async () => {
+    const db = createTestDb();
+    const fx = new FakeEffects().setIssues([]).failOn("gh.prStatus"); // every prStatus throws
+    seedCard(db, { stage: "review", status: "awaiting_human", pr_number: 81, worktree_path: "/wt/x" });
+    seedCard(db, { stage: "review", status: "awaiting_human", pr_number: 82, worktree_path: "/wt/y" });
+    const summary = await pollOnce(db, fx, {});
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 }); // both threw, nothing applied
+    // The fake records each call BEFORE throwing, so BOTH cards being checked (count 2) proves the
+    // try/catch sits INSIDE the drift loop — a catch hoisted to wrap the whole loop stops at 1.
+    expect(fx.countOf("gh.prStatus")).toBe(2);
+    // (The stronger SELECTIVE claim — card A throws but card B still drifts to *merged* — needs a
+    // per-call fault seam, `failOn` being permanent, so THAT remains deferred with recordPid's todo.)
   });
 });

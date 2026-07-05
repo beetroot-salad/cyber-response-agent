@@ -140,6 +140,10 @@ export class FakeEffects implements Effects {
     this.record("removeWorktree", { cardId: card.id, worktree_path: card.worktree_path });
   }
 
+  removeWorktreePath(path: string): void {
+    this.record("removeWorktreePath", { worktree_path: path });
+  }
+
   listWorktrees(): string[] {
     this.record("listWorktrees", {});
     return [...this.worktrees];
