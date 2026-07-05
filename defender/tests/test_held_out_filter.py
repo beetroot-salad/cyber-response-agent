@@ -38,7 +38,7 @@ class FakeSubagents:
         self._bump("actor_benign")
         return self._story_benign
 
-    def oracle(self, run_dir, actor_story_path):
+    def oracle(self, run_dir, actor_story_path, learning_run_dir):
         self._bump("oracle")
         return self._oracle
 

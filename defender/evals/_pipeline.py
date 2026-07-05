@@ -187,16 +187,22 @@ def run_head_oracle_and_judge(
     if loop_mod.is_skip_story(actor_story):
         return SKIP_OUTCOME
 
-    # Wrap invoke_oracle/invoke_judge themselves — they raise RunUnprocessable
-    # on subprocess rc!=0 / timeout, which would otherwise escape the
-    # per-alert handler in run_secondary() and abort the harness
-    # mid-loop with no summary written. invoke_oracle now fans one claude -p
-    # per lead and reassembles; a per-lead hang surfaces the same way.
+    # Source the in-process stages' metered keys UP FRONT — before the oracle's per-lead fan-out
+    # AND the judge, the way the learning loop does. _prepare_engines_for sources the oracle +
+    # judge (both run here, both in-process on the metered key); include_actor=False skips only the
+    # actor, which already ran frozen in its own subprocess, so requiring its provider key here
+    # would be a phantom dependency (a Sonnet-judge secondary run must not fail loud for the actor's
+    # Fireworks key, which this actor-frozen path never uses).
+    loop_mod._prepare_engines_for(["adversarial"], include_actor=False)
+
+    # Wrap invoke_oracle/invoke_judge themselves — they raise RunUnprocessable on timeout / model
+    # error, which would otherwise escape the per-alert handler in run_secondary() and abort the
+    # harness mid-loop with no summary written. invoke_oracle now fans one IN-PROCESS PydanticAI
+    # call per lead and reassembles; a per-lead failure surfaces the same way (run_stage maps a
+    # per-lead timeout/model error to RunUnprocessable — no subprocess to raise TimeoutExpired).
     try:
-        oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path)
-    except (loop_mod.RunUnprocessable, subprocess.TimeoutExpired) as e:
-        # _run_claude wraps subprocess.run with a timeout that raises TimeoutExpired
-        # (not RunUnprocessable); catch both so a single per-lead hang doesn't abort the harness.
+        oracle_yaml = loop_mod.invoke_oracle(head_run_dir, actor_story_path, staging_dir)
+    except loop_mod.RunUnprocessable as e:
         raise SecondaryError(f"oracle invocation failed: {e}") from e
     # The oracle doc is assembled by our own code (one projection per lead, lead_ids
     # from the join); the only model-authored content is each lead's events list, read
@@ -205,12 +211,6 @@ def run_head_oracle_and_judge(
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
-        # Source the in-process JUDGE's metered key up front (the way the learning loop does),
-        # then dispatch through the subagents seam. include_actor=False: the actor already ran
-        # frozen in its own subprocess, so requiring its provider key here would be a phantom
-        # dependency (a Sonnet-judge secondary run must not fail loud for the actor's Fireworks
-        # key, which this judge-only path never uses).
-        loop_mod._prepare_engines_for(["adversarial"], include_actor=False)
         judge_yaml = loop_mod.ClaudePrintSubagents().judge(
             loop_mod.ADVERSARIAL_WIRING,
             head_run_dir,
