@@ -4,8 +4,8 @@
 # The matching private key stays on your machine; Terraform never sees it.
 ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-# Narrow this to the IP you actually SSH from. Detected public IP at writing: 147.235.201.26
-ssh_source_cidrs = ["147.235.201.26/32"]
+# Narrow this to the IP you actually SSH from (check with: curl -s ifconfig.me).
+ssh_source_cidrs = ["203.0.113.7/32"]
 
 # Optional overrides:
 # server_name = "soc-playground"
