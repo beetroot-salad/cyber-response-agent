@@ -150,7 +150,8 @@ def test_main_loop_constructs_with_explicit_main_policy(tmp_path):
     post-refactor main construction AgentDeps(4 identity fields, policy=_MAIN_POLICY)
     succeeds, role is MAIN, .policy is _MAIN_POLICY — main is not special-cased away."""
     deps = tools.AgentDeps(**_ident(tmp_path), policy=_MAIN_POLICY)
-    assert deps.role is AgentRole.MAIN and deps.policy is _MAIN_POLICY
+    assert deps.role is AgentRole.MAIN
+    assert deps.policy is _MAIN_POLICY
 
 
 def test_rename_agent_deps_is_base_of_subtypes():
@@ -175,7 +176,8 @@ def test_judge_for_scope_returns_judge_deps_with_identity_fields(tmp_path):
     assert deps.defender_dir == PATHS.defender_dir
     assert deps.run_id == tmp_path.name
     assert deps.role is AgentRole.JUDGE
-    assert len(deps.salt) == 32 and all(c in "0123456789abcdef" for c in deps.salt)
+    assert len(deps.salt) == 32
+    assert all(c in "0123456789abcdef" for c in deps.salt)
 
 
 def test_actor_for_scope_returns_actor_deps_with_identity_fields(tmp_path):

@@ -60,8 +60,9 @@ def test_gather_deny_message_is_not_main_loop_worded():
 # --- #4: progressive-disclosure prompt header ------------------------------
 
 def test_gather_prompt_header_is_progressive_disclosure():
-    deps = tools.RunDeps(
+    deps = tools.AgentDeps(
         run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r", salt="s",
+        policy=tools._MAIN_POLICY,
     )
     request = tools.GatherRequest("l-001", "elastic", "goal", ("dim-a",))
     prompt = tools._gather_prompt(deps, request, catalog="- `elastic`: desc")

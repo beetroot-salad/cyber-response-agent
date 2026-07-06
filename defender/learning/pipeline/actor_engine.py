@@ -14,7 +14,6 @@ actually runs (``core/subagents.ClaudePrintSubagents.actor``), never at loop imp
 from __future__ import annotations
 
 import re
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
@@ -25,7 +24,7 @@ from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 # Bounds a runaway tool loop (the twin of JUDGE_REQUEST_LIMIT). Sized for GLM's tool-hunger:
 # GLM issues ~2-3 tool calls per model request and explores the lessons corpora more than the
@@ -60,8 +59,8 @@ class _ActorScope:
 
 
 @dataclass(frozen=True)
-class ActorDeps(RunDeps):
-    """The actor's per-run deps — ``RunDeps`` shape; its pinned-script patterns ride in
+class ActorDeps(AgentDeps):
+    """The actor's per-run deps — ``AgentDeps`` shape; its pinned-script patterns ride in
     ``policy`` (data), no extra fields. ``run_dir`` is the *learning* run dir (its own output
     dir), so budget/observability side effects land there. The actor reads only the lessons
     corpora its ``policy.read_confine`` names (that confine REPLACES the ``defender_dir`` base,
@@ -70,6 +69,13 @@ class ActorDeps(RunDeps):
     ``role`` is an ACTOR identity label — the gate keys on ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.ACTOR
+
+    @classmethod
+    def for_scope(cls, scope: _ActorScope, run_dir: Path) -> ActorDeps:
+        """The actor's front door: build its deps from the tool ``scope`` (the pinned lesson
+        scripts + the leg's read ``confine``) over the base ``_for_run``. Mirrors the judge's
+        ``JudgeDeps.for_scope`` — the required policy is the backstop, this is the front door."""
+        return cls._for_run(run_dir, _actor_policy(scope.scripts, read_confine=scope.read_confine))
 
 
 def _script_pattern(script: Path) -> re.Pattern[str]:
@@ -125,13 +131,7 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     mapping + trace logging). Returns the model's final text VERBATIM — the story, or a
     ``SKIP: …`` line. A timeout / usage-limit / model error → ``RunUnprocessable`` (quarantines
     this run, the disposition a ``claude -p`` non-zero exit gave)."""
-    deps = ActorDeps(
-        run_dir=learning_run_dir,
-        defender_dir=REPO_ROOT / "defender",
-        run_id=learning_run_dir.name,
-        salt=uuid.uuid4().hex,
-        policy=_actor_policy(scope.scripts, read_confine=scope.read_confine),
-    )
+    deps = ActorDeps.for_scope(scope, learning_run_dir)
     return run_stage(
         stage="actor",
         prompt_path=prompt_path, model=model, effort=effort,

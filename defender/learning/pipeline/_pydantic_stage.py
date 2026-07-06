@@ -8,7 +8,7 @@ error-mapping ladder (config faults → ``FatalConfigError`` exit-2, per-run mod
 faults → ``RunUnprocessable`` dead-letter, systemic faults re-raised). A SECOND in-process
 stage (the actor) would have cloned all of it, so it lives here once and both stages
 (``judge/engine_pydantic.py``, ``actor_engine.py``) compose it. Each stage module keeps only
-what is genuinely stage-specific — its ``RunDeps`` subclass, its ``AgentPolicy`` (matchers),
+what is genuinely stage-specific — its ``AgentDeps`` subclass, its ``AgentPolicy`` (matchers),
 its request cap, its labels — and builds its own fully-scoped ``deps`` before delegating.
 
 This module imports the pydantic-ai graph, so it is imported LAZILY — only by the two engine
@@ -30,7 +30,7 @@ from defender.learning.core.config import (
 )
 from defender.runtime import observe, providers
 from defender.runtime.driver import AgentSpec, MakeModel, build_agent_core
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -67,7 +67,7 @@ def build_stage_agent(
     )
 
 
-async def _drive(agent: Agent[Any, str], user: str, deps: RunDeps, request_limit: int):
+async def _drive(agent: Agent[Any, str], user: str, deps: AgentDeps, request_limit: int):
     """One-shot stage run with a wall-clock ceiling (the in-process twin of the ``claude -p``
     subprocess timeout) and a request cap on the tool loop."""
     return await asyncio.wait_for(
@@ -86,7 +86,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     label: str,
     user: str,
     learning_run_dir: Path,
-    deps: RunDeps,
+    deps: AgentDeps,
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     writers: bool = False,

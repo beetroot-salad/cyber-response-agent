@@ -1,4 +1,4 @@
-"""The agent-role discriminator threaded through `RunDeps`.
+"""The agent-role discriminator threaded through `AgentDeps`.
 
 One value per agent, used now as an **identity label** — for observability and the
 gather-capture `isinstance` narrow — NOT as the permission discriminator. The gate
