@@ -69,15 +69,32 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
         vf.load_run_context("rid", runs_dir=runs)
 
 
-def test_render_prompt_substitutes(tmp_path):
-    prompt = tmp_path / "vf.md"
-    prompt.write_text("T={transcript} L={lesson} D={disposition}")
-    out = vfs.render_prompt(
-        prompt, transcript="the transcript", lesson="the lesson", disposition="benign"
+def test_data_section_builds_labeled_block():
+    # The verify CLIs build the DATA-only user message from these blocks (instructions ride
+    # in the .md system prompt). `LABEL:\n\n<body>`, body stripped.
+    assert vfs.data_section("CASE TRANSCRIPT (raw)", "the transcript\n") == (
+        "CASE TRANSCRIPT (raw):\n\nthe transcript"
     )
-    assert "T=the transcript" in out
-    assert "L=the lesson" in out
-    assert "D=benign" in out
+
+
+def test_data_section_body_placeholder_is_inert():
+    # Single f-string interpolation: a body containing a literal `{other}` is NOT
+    # re-substituted (the multi-pass str.replace footgun the old render_prompt had).
+    assert vfs.data_section("CANDIDATE LESSON", "route to {transcript}") == (
+        "CANDIDATE LESSON:\n\nroute to {transcript}"
+    )
+
+
+def test_prompt_files_are_instructions_only():
+    # Payload-shape regression pin for the dual-prompt bug: actor.md / forward.md are the
+    # SYSTEM prompt (instructions only). The case data rides in the user message, built via
+    # `section`. A `{placeholder}` left in the .md would mean the raw template is being handed
+    # in AS the system prompt with unsubstituted braces — instructions duplicated across
+    # system+user, garbage `{story}`/`{lesson}` in the system copy.
+    import re
+    for name in ("actor.md", "forward.md"):
+        text = (vf.HERE / name).read_text()
+        assert re.findall(r"\{[a-z_]+\}", text) == [], f"{name} has leftover data placeholders"
 
 
 def test_expected_disposition_direction_aware():
@@ -143,22 +160,6 @@ def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
-
-
-def test_render_prompt_substitutes_cited_policy(tmp_path):
-    prompt = tmp_path / "vf.md"
-    prompt.write_text("D={disposition} P={cited_policy}")
-    out = vfs.render_prompt(
-        prompt, lesson="L", transcript="T", disposition="benign",
-        cited_policy="the policy block",
-    )
-    assert "P=the policy block" in out
-    # the adversarial call site passes the neutral placeholder explicitly
-    out2 = vfs.render_prompt(
-        prompt, lesson="L", transcript="T", disposition="benign",
-        cited_policy=vf._NO_CITED_POLICY,
-    )
-    assert vf._NO_CITED_POLICY in out2
 
 
 # ---------------------------------------------------------------------------

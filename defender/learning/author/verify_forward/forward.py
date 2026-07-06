@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -48,7 +49,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
-from defender.learning.author.verify_forward.shared import render_prompt  # noqa: E402
+from defender.learning.author.verify_forward.shared import data_section  # noqa: E402
 RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "forward.md"
 
@@ -202,19 +203,19 @@ def main(argv: list[str]) -> int:
     cited_policy = (
         load_cited_policy(run_id) if ns.direction == "benign" else _NO_CITED_POLICY
     )
-    user_prompt = render_prompt(
-        PROMPT_PATH,
-        transcript=transcript,
-        lesson=lesson_path.read_text(),
-        disposition=disposition,
-        cited_policy=cited_policy,
-    )
+    # Instructions live in forward.md (the system prompt, passed as prompt_path); the user
+    # message is the case DATA only — the system/user split the sibling stages honor.
+    user_prompt = "\n\n".join((
+        data_section("CASE TRANSCRIPT (the original investigation, including its actual evidence and disposition)", transcript),
+        data_section("CANDIDATE LESSON", lesson_path.read_text()),
+        data_section("CASE GROUND-TRUTH DISPOSITION", disposition),
+        data_section("CITED COVERING POLICY (closed prior cases this lesson's routing may lean on; benign/FP lessons only — adversarial lessons cite none)", cited_policy),
+    ))
     # Lazy import: pulls the pydantic-ai graph only when a check actually runs, so this
     # module stays importable under any interpreter (the subprocess tests rely on that).
     from defender.learning.author.verify_forward.engine import forward_check
 
-    import time as _time
-    t0 = _time.monotonic()
+    t0 = time.monotonic()
     verdict = forward_check(
         prompt_path=PROMPT_PATH,
         user=user_prompt,
@@ -222,7 +223,7 @@ def main(argv: list[str]) -> int:
         lesson_stem=lesson_path.stem,
         error_prefix="verify_forward",
     )
-    elapsed = _time.monotonic() - t0
+    elapsed = time.monotonic() - t0
     # Append timing for the harness to reconstruct verifier time. The
     # path is opportunistic: if VERIFY_TIMING_LOG is set we use it,
     # else fall back to a sibling file next to the script. Last line

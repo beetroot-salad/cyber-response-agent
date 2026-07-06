@@ -37,7 +37,7 @@ from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
 from defender._run_paths import resolve_run_bundle  # noqa: E402
 from defender.learning.author.verify_forward.shared import (  # noqa: E402
     load_observation as _load_observation,
-    render_prompt,
+    data_section,
 )
 
 # Resolve the run bundle + queue off DEFAULT_PATHS (which honors
@@ -82,12 +82,13 @@ def main(argv: list[str]) -> int:
             f"verify_forward_actor: observation row missing observation/source_run_dir: {row!r}"
         )
     story_text = load_story(source_run_dir)
-    user_prompt = render_prompt(
-        PROMPT_PATH,
-        story=story_text,
-        observation=observation_text,
-        lesson=lesson_path.read_text(),
-    )
+    # Instructions live in actor.md (the system prompt, passed as prompt_path); the user
+    # message is the case DATA only — the system/user split the sibling stages honor.
+    user_prompt = "\n\n".join((
+        data_section("ACTOR STORY (the original Section 0 + body the judge graded)", story_text),
+        data_section("JUDGE OBSERVATION (the failure the lesson is trying to teach against)", observation_text),
+        data_section("CANDIDATE LESSON", lesson_path.read_text()),
+    ))
     # Lazy import: pulls the pydantic-ai graph only when a check actually runs, so this
     # module stays importable under any interpreter (the subprocess tests rely on that).
     from defender.learning.author.verify_forward.engine import forward_check

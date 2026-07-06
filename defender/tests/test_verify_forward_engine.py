@@ -83,13 +83,12 @@ def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
     # A GLM reasoning model can burn its whole budget in the thinking channel and emit an EMPTY
     # final text part; an empty verdict is never valid, so run_stage quarantines the run — which
     # the CLI surfaces as a non-zero exit / batch ERROR, not a bogus GOOD/BAD.
-    with override_allow_model_requests(False):
-        with pytest.raises(RunUnprocessable):
-            _run_verify_pydantic(
-                _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
-                "vf.trace.jsonl", "verify:X", "predict this case", _src(tmp_path),
-                make_model=_fake_model(_replay("")),
-            )
+    with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
+        _run_verify_pydantic(
+            _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
+            "vf.trace.jsonl", "verify:X", "predict this case", _src(tmp_path),
+            make_model=_fake_model(_replay("")),
+        )
 
 
 # --- the deny-all policy through the full gate -----------------------------------
@@ -165,10 +164,13 @@ def test_forward_check_sources_key_then_runs_and_parses(tmp_path):
     assert sourced == [(config.VERIFIER_MODEL, "verify_forward")]  # key sourced BEFORE the call
     # wiring: the config defaults (glm-5.2 @ low, matching the defender) + a per-lesson trace
     # name/label flow through to the transport
-    assert ran["model"] == config.VERIFIER_MODEL and ran["effort"] == config.VERIFIER_EFFORT
+    assert ran["model"] == config.VERIFIER_MODEL
+    assert ran["effort"] == config.VERIFIER_EFFORT
     assert ran["wall_clock_timeout"] == config.VERIFIER_TIMEOUT
-    assert ran["source_run_dir"] == tmp_path and ran["user"] == "u"
-    assert "T1078" in ran["trace_name"] and "T1078" in ran["label"]
+    assert ran["source_run_dir"] == tmp_path
+    assert ran["user"] == "u"
+    assert "T1078" in ran["trace_name"]
+    assert "T1078" in ran["label"]
 
 
 def test_forward_check_config_fault_becomes_systemexit(tmp_path):

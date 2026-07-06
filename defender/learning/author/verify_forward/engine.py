@@ -11,12 +11,17 @@ directions: the per-check variation (its prompt text, trace name, and label) is 
 ``_run_verify_pydantic``'s args, not a second engine module. (``env.py`` is a deterministic
 retrieval check with no model, so it does not touch this engine.)
 
-The forward-check emits a short reasoning preamble + a single ``VERDICT: GOOD|BAD`` line and calls
-NO tools — its whole input (transcript/story + lesson + disposition) is inlined in the user
-prompt — so its policy denies everything (the ``["bash", "read_file"]`` tools the shared
-``build_agent_core`` always registers stay unused, gated shut). ``VERIFY_REQUEST_LIMIT`` is a tiny
-backstop: a clean verdict is one model request; the headroom only absorbs a stray denied tool call
-GLM might attempt before it re-emits the verdict.
+The forward-check emits a short reasoning preamble + a single ``VERDICT: GOOD|BAD`` line and is
+MEANT to call no tools — its whole input (transcript/story + lesson + disposition) is inlined in the
+user prompt. Its ``_VERIFY_POLICY`` hard-denies the ``bash`` half of the always-registered
+``["bash", "read_file"]`` toolset (``bash_allow=()``, no adapters/raw reads). ``read_file`` is NOT
+hard-denied, though: ``decide_read`` still allows reads under ``run_dir`` / ``defender_dir``, and for
+the forward-check ``run_dir`` is the SOURCE run's dir — which holds ``source_refs.yaml`` with the very
+``normalized_disposition`` an adversarial check is asked to predict. So "the verifier reads nothing"
+is a PROMPT guarantee (everything is inlined, and it is told to answer directly), not a gate-enforced
+one; a genuinely tool-tight verifier would need a no-toolset build (see the altitude note in the
+review). ``VERIFY_REQUEST_LIMIT`` is a tiny backstop: a clean verdict is one model request; the
+headroom only absorbs a stray denied ``bash`` call GLM might attempt before it re-emits the verdict.
 
 Unlike the pipeline stages (invoked in-process BY the orchestrator, which sources the metered key
 up front), the forward-check runs as a CLI ``python3`` SUBPROCESS spawned by the curator agent
@@ -32,6 +37,7 @@ subprocess cases).
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,7 +90,9 @@ class VerifierDeps(RunDeps):
 # defender-sql`` pipe, no ``gather_raw`` reads, no extra read roots. Every field is the deny/empty
 # default; they are named explicitly so the deny-all intent is legible (mirrors the actor/oracle
 # engines). Reads under ``defender_dir`` / the ``run_dir`` remain allowed by ``decide_read``'s
-# defaults, but the verifier never issues one.
+# defaults; the verifier is PROMPTED not to issue one (all input inlined), but this is not gate-
+# enforced — and ``run_dir`` is the source run, whose ``source_refs.yaml`` holds the answer key. See
+# the module docstring.
 _VERIFY_POLICY = AgentPolicy(
     bash_allow=(),
     jq_operand_gated=False,
@@ -105,7 +113,7 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     user: str,
     source_run_dir: Path,
     *,
-    wall_clock_timeout: int | None = None,
+    wall_clock_timeout: int = VERIFIER_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """Run one forward-check in-process and return the model's final text VERBATIM.
@@ -129,7 +137,7 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     )
 
 
-def forward_check(
+def forward_check(  # noqa: PLR0913 — the CLI-facing verify contract (5 inputs) + its 3 config knobs + 2 DI seams; every param is load-bearing per-call state
     *,
     prompt_path: Path,
     user: str,
@@ -153,8 +161,10 @@ def forward_check(
     clean ``SystemExit`` (a config fault → no key / unroutable model; an unprocessable run → timeout
     / usage-limit / model error / empty verdict; an unparseable verdict) so a non-zero CLI exit
     surfaces as ``batch.py`` ERROR — the same disposition the old ``claude -p`` non-zero exit gave —
-    rather than an uncaught traceback. ``lesson_stem`` disambiguates the per-check trace file so
-    concurrent batch children (which may share a ``source_run_dir``) never race on one log.
+    rather than an uncaught traceback. The per-check trace file is keyed on ``lesson_stem`` AND the
+    child's pid (``RequestLogger`` opens in truncate mode), so concurrent batch children that share a
+    ``source_run_dir`` and a lesson stem — two lessons with the same basename, or the same lesson in
+    both directions — still never clobber one log.
 
     ``source_key`` / ``run_verify`` are DI seams that OWN their production defaults (the same shape as
     the engines' ``make_model``): production calls with neither, running the real key-sourcing +
@@ -171,7 +181,7 @@ def forward_check(
             prompt_path=prompt_path,
             model=model,
             effort=effort,
-            trace_name=f"{error_prefix}.{lesson_stem}.trace.jsonl",
+            trace_name=f"{error_prefix}.{lesson_stem}.{os.getpid()}.trace.jsonl",
             label=f"{error_prefix}:{lesson_stem}",
             user=user,
             source_run_dir=source_run_dir,

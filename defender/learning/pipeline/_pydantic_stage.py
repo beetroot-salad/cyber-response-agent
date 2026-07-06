@@ -113,7 +113,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     writers: bool = False,
-    wall_clock_timeout: int | None = None,
+    wall_clock_timeout: int = SUBAGENT_TIMEOUT,
 ) -> str:
     """Run one in-process stage to completion and return its model's final text VERBATIM.
 
@@ -129,9 +129,11 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     re-raised. ``stage`` is the human stage name in those messages (``judge`` / ``actor``);
     ``label`` is the per-leg observability id (``agent_id`` + the ``step=`` log line).
 
-    ``wall_clock_timeout`` (seconds) overrides the per-run wall-clock ceiling — the author-time
-    forward-check passes its own ``VERIFIER_TIMEOUT`` here; ``None`` keeps the pipeline default
-    (``SUBAGENT_TIMEOUT``) unchanged for the judge/actor/oracle stages."""
+    ``wall_clock_timeout`` (seconds) is the per-run wall-clock ceiling — the author-time
+    forward-check passes its own ``VERIFIER_TIMEOUT`` here; the default anchors to the pipeline
+    ``SUBAGENT_TIMEOUT`` (unchanged for the judge/actor/oracle stages, which omit the arg). Anchored
+    in the signature rather than coalesced with ``or`` in the body so a deliberately-set ``0`` is
+    honored, not silently swapped for the 450s default."""
     logger = observe.RequestLogger(learning_run_dir / trace_name)
     _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
     try:
@@ -143,7 +145,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
         result = asyncio.run(
-            _drive(agent, user, deps, request_limit, wall_clock_timeout or SUBAGENT_TIMEOUT)
+            _drive(agent, user, deps, request_limit, wall_clock_timeout)
         )
     except (TimeoutError, UsageLimitExceeded) as e:
         raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
