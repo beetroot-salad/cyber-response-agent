@@ -51,7 +51,8 @@ from defender.learning.core.config import (  # noqa: E402
     VERIFY_BATCH_WORKERS,
 )
 
-# Cap concurrency so a large batch does not fan out unbounded claude children.
+# Cap concurrency so a large batch does not fan out unbounded verify children — each
+# child now runs an in-process GLM forward-check (Fireworks), not a `claude -p` call.
 MAX_WORKERS = VERIFY_BATCH_WORKERS
 # Per-check ceiling; above the single-check VERIFIER_TIMEOUT so a child that hits its
 # own timeout reports BAD/ERROR rather than being killed here.

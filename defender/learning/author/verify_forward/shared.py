@@ -1,81 +1,52 @@
 #!/usr/bin/env python3
-"""Shared helpers for the verify-forward gate trio.
+"""Shared pure helpers for the verify-forward gate trio.
 
-``verify_forward.py`` (adversarial lesson check), ``verify_forward_actor.py``
-(actor lesson check) and ``verify_forward_env.py`` (deterministic environment
-lesson check) used to carry byte-identical copies of these helpers, differing
-only in the ``verify_forward*:`` error prefix and the prompt placeholders. They
-live here once, parameterized on ``error_prefix`` (and, for the prompt, on the
-template path + substitution kwargs), so the trio shares one implementation.
+``forward.py`` (adversarial/benign lesson check), ``actor.py`` (actor lesson check) and
+``env.py`` (deterministic environment lesson check) used to carry byte-identical copies of
+these helpers, differing only in the ``verify_forward*:`` error prefix and the labeled data
+blocks. They live here once, parameterized on ``error_prefix``, so the trio shares one
+implementation.
 
-Pure + importable: no module-level state, no side effects on import. The
-callers own ``VERIFIER_MODEL`` / ``VERIFIER_TIMEOUT`` and the
-``subscription_env`` seam and pass them in, so behavior is identical to the
-in-line copies this replaced.
+Pure + importable: no module-level state, no side effects on import, no pydantic-ai —
+these stay usable under any interpreter (the ``tests/test_verify_forward`` subprocess cases
+import this without the runtime extra). The LLM TRANSPORT the two model-driven gates share —
+the in-process GLM forward-check — lives in ``engine.py`` (imported lazily by their
+``main``s); ``parse_verdict`` here parses its ``VERDICT: GOOD|BAD`` output.
 """
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from collections.abc import Callable
 
 from defender._io import read_jsonl_rows
 
 
-def render_prompt(template_path: Path, **subs: str) -> str:
-    """Read ``template_path`` and substitute ``{key}`` -> value for each kwarg.
+def data_section(label: str, body: str) -> str:
+    """One prose-labeled block — ``{label}:\\n\\n{body}`` — for a verifier's *data* (user) message.
 
-    Generic over placeholders: each caller passes the kwargs its template names
-    (e.g. ``transcript=..., lesson=...`` or ``story=..., observation=...``).
-    """
-    text = template_path.read_text()
-    for key, value in subs.items():
-        text = text.replace("{" + key + "}", value)
-    return text
-
-
-def call_haiku(
-    user_prompt: str,
-    *,
-    error_prefix: str,
-    model: str,
-    timeout: int,
-    env_fn: Callable[[], dict],
-) -> str:
-    cmd = [
-        "claude",
-        "-p",
-        "--model",
-        model,
-        "--output-format",
-        "text",
-    ]
-    proc = subprocess.run(
-        cmd,
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env_fn(),
-    )
-    if proc.returncode != 0:
-        raise SystemExit(
-            f"{error_prefix}: claude -p failed (rc={proc.returncode}): "
-            f"{proc.stderr[-2000:]}"
-        )
-    return proc.stdout
+    The two model-driven gates carry their INSTRUCTIONS in the ``.md`` that ``engine.run_stage``
+    hands the agent as the system prompt, and build the *data-only* user message from these blocks —
+    the system/user split the sibling stages honor (cf. the actor's ``_section``-built user in
+    ``pipeline/malicious_actor/run.py``; that wraps bodies in ``<tag>``s, this keeps the verify
+    prompts' own prose labels). A single f-string interpolation, so a ``body`` that itself contains a
+    literal ``{placeholder}`` is inert (unlike a multi-pass ``str.replace`` template)."""
+    return f"{label}:\n\n{body.strip()}"
 
 
 def parse_verdict(text: str, *, error_prefix: str) -> str:
+    # Tolerate a reasoning model (GLM, the migrated default) dressing the required line in markdown
+    # emphasis / a heading marker / trailing punctuation — ``**VERDICT: GOOD**``, ``### VERDICT: BAD``,
+    # ``VERDICT: GOOD.``, ``verdict: good`` — rather than losing an otherwise-valid verdict to a
+    # formatting flourish (a lost verdict costs a metered call and surfaces as a batch ERROR). The
+    # ``VERDICT:`` marker and the GOOD/BAD tokens themselves stay required.
     for line in reversed(text.strip().splitlines()):
-        s = line.strip()
-        if s.startswith("VERDICT:"):
-            v = s.split(":", 1)[1].strip()
+        s = line.strip().strip("*`# ").strip()
+        if s.upper().startswith("VERDICT:"):
+            v = s.split(":", 1)[1].strip().strip("*`. ").upper()
             if v in ("GOOD", "BAD"):
                 return v
             raise SystemExit(f"{error_prefix}: unrecognized verdict {v!r}")
     raise SystemExit(
-        f"{error_prefix}: no VERDICT line found in Haiku output:\n" + text[-1000:]
+        f"{error_prefix}: no VERDICT line found in verifier output:\n" + text[-1000:]
     )
 
 

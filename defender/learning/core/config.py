@@ -418,10 +418,28 @@ SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 # the same env var + default from os.environ — the duplicated-default divergence #449
 # fixed for the actor model, generalized to every stage knob.
 
-# Forward-check Haiku gate — shared by both verify_forward entry points
-# (verify_forward/actor.py and forward.py), which previously each re-read these with
-# their own copy of the default.
-VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "claude-haiku-4-5")
+# Forward-check gate — shared by both LLM verify_forward entry points
+# (verify_forward/actor.py and forward.py; verify_forward/env.py is deterministic and
+# has no model). Runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered
+# first-party path, the mirror of the judge/actor/oracle migrations. Two reasons the
+# forward-check runs GLM rather than the old subscription Haiku: (1) it is the FOURTH
+# in-process stage, so it shares the `_pydantic_stage` transport + billing invariant with
+# the rest of the loop, and (2) the check is a same-case regression PROXY — it predicts
+# what the *defender* (`runtime/driver.DEFAULT_MODEL = "glm-5.2"`) would conclude with the
+# candidate lesson loaded — so predicting with the defender's own model tightens the proxy.
+# GLM reasons by default and bills that thinking as output tokens, capped by
+# `reasoning_effort`; `low` is the default — it matches the defender's OWN MAIN effort
+# (`providers.FIREWORKS.main_effort`), so the proxy reasons at the SAME tier the defender it
+# predicts does (and it mirrors the actor). `medium` is the fallback if a verifier TNR/TPR
+# re-measure under GLM (experiments/defender-author-verification/) shows the counterfactual
+# judgment regressing at `low`. Both knobs override via env (any provider
+# `providers.provider_for` routes — e.g. claude-haiku-4-5 to A/B against the pre-migration gate).
+VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "glm-5.2")
+VERIFIER_EFFORT = os.environ.get("LEARNING_VERIFIER_EFFORT", "low")
+# Per-check wall-clock ceiling for the in-process forward-check (threaded into
+# `_pydantic_stage.run_stage` as its `wall_clock_timeout`, the in-process twin of the old
+# `claude -p` subprocess timeout). Kept BELOW the batch child ceiling so a batched check
+# reports its own BAD/ERROR before verify_forward/batch.py kills it.
 VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 # Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
 # single-check VERIFIER_TIMEOUT so a child reports BAD/ERROR rather than being killed.
