@@ -36,7 +36,7 @@ sys.path.insert(0, str(DEFENDER_DIR.parent))
 
 from defender import run_common as _run  # noqa: E402
 from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.tools import GatherRequest, RunDeps, _run_gather  # noqa: E402
+from defender.runtime.tools import _MAIN_POLICY, GatherRequest, AgentDeps, _run_gather  # noqa: E402
 from defender import run as _entry  # noqa: E402
 
 # Canned leads taken verbatim from the gsplit-haiku-1 crash run's leads table.
@@ -124,8 +124,8 @@ async def main() -> int:
     run_dir = _run.materialize_run_dir(alert, run_id)
     salt = json.loads((run_dir / "meta.json").read_text()).get("salt", "")
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    deps = RunDeps(run_dir=run_dir, defender_dir=DEFENDER_DIR, run_id=run_id,
-                   salt=salt, is_main_session=True)
+    deps = AgentDeps(run_dir=run_dir, defender_dir=DEFENDER_DIR, run_id=run_id,
+                   salt=salt, policy=_MAIN_POLICY)
 
     # The single-agent gather (#340): SKILL.md, one ES|QL aggregation,
     # auto-capture. Same lead dispatch + capture hooks as a full run.

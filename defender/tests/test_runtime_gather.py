@@ -82,7 +82,7 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-sonnet-4-6")
     lead_id, system = "l-007", params["system"]
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    deps = tools.RunDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt")
+    deps = tools.AgentDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt", policy=tools._MAIN_POLICY)
 
     def factory(agent_id):
         return driver.build_gather_agent(sb, logger, agent_id)

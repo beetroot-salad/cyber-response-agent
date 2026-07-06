@@ -8,7 +8,7 @@ error-mapping ladder (config faults → ``FatalConfigError`` exit-2, per-run mod
 faults → ``RunUnprocessable`` dead-letter, systemic faults re-raised). A SECOND in-process
 stage (the actor) would have cloned all of it, so it lives here once and both stages
 (``judge/engine_pydantic.py``, ``actor_engine.py``) compose it. Each stage module keeps only
-what is genuinely stage-specific — its ``RunDeps`` subclass, its ``AgentPolicy`` (matchers),
+what is genuinely stage-specific — its ``AgentDeps`` subclass, its ``AgentPolicy`` (matchers),
 its request cap, its labels — and builds its own fully-scoped ``deps`` before delegating.
 
 This module imports the pydantic-ai graph, so it is imported LAZILY — only by the two engine
@@ -18,12 +18,10 @@ import.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import (
-    REPO_ROOT,
     SUBAGENT_TIMEOUT,
     FatalConfigError,
     RunUnprocessable,
@@ -32,8 +30,7 @@ from defender.learning.core.config import (
 )
 from defender.runtime import observe, providers
 from defender.runtime.driver import AgentSpec, MakeModel, build_agent_core
-from defender.runtime.permission import AgentPolicy
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -70,23 +67,7 @@ def build_stage_agent(
     )
 
 
-def build_stage_deps(deps_type: type, learning_run_dir: Path, policy: AgentPolicy) -> RunDeps:
-    """Build a learning stage's per-run ``RunDeps`` — the identity every in-process stage shares
-    (``run_dir`` = its own ``learning_run_dir``, ``defender_dir`` = the corpus, ``run_id`` = the
-    dir name, a fresh per-run ``salt``) plus the stage's declared ``policy``. Only ``deps_type``
-    (the stage's role label) and ``policy`` vary per stage; this hoists the identical construction
-    the three engine modules (``actor_engine`` / ``judge/engine_pydantic`` / ``oracle_engine``)
-    would otherwise each copy verbatim, so the shape can't drift across them."""
-    return deps_type(
-        run_dir=learning_run_dir,
-        defender_dir=REPO_ROOT / "defender",
-        run_id=learning_run_dir.name,
-        salt=uuid.uuid4().hex,
-        policy=policy,
-    )
-
-
-async def _drive(agent: Agent[Any, str], user: str, deps: RunDeps, request_limit: int):
+async def _drive(agent: Agent[Any, str], user: str, deps: AgentDeps, request_limit: int):
     """One-shot stage run with a wall-clock ceiling (the in-process twin of the ``claude -p``
     subprocess timeout) and a request cap on the tool loop."""
     return await asyncio.wait_for(
@@ -105,7 +86,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     label: str,
     user: str,
     learning_run_dir: Path,
-    deps: RunDeps,
+    deps: AgentDeps,
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     writers: bool = False,

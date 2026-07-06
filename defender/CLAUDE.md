@@ -75,7 +75,7 @@ hooks). The gates:
   progressive-disclosure descriptor catalog), `tag_tool_results.wrap` (salted
   untrusted-data tagging of adapter/alert reads + the gather return), and
   `record_lesson_load.lesson_name` (lesson→outcome traceability into
-  `lessons_loaded.jsonl`). These anchor on the run dir from `RunDeps`.
+  `lessons_loaded.jsonl`). These anchor on the run dir from `AgentDeps`.
 
 Still out of scope (port later if a case demands it): report-consistency
 judges, the phase state machine, class-slot grammar vocab, and sibling-fork

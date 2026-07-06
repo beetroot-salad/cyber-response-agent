@@ -34,8 +34,9 @@ from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
 from .providers import BuiltModel
 from .tools import (
+    _MAIN_POLICY,
+    AgentDeps,
     GatherDeps,
-    RunDeps,
     register_gather_tool,
     register_tools,
 )
@@ -110,7 +111,7 @@ def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
     async def _budget(ctx, *, call, result, **_):  # noqa: ANN001 — **_ absorbs the unused tool_def/args framework kwargs
         # Warning-only budget accounting, same caps as the claude -p enforcer.
         try:
-            deps: RunDeps = ctx.deps
+            deps: AgentDeps = ctx.deps
             state = update_budget_locked(deps.run_dir, deps.run_id, call.tool_name)
             for w in check_budgets(state, DEFAULT_LIMITS):
                 print(f"[run.py] {w}", file=sys.stderr)
@@ -349,7 +350,7 @@ def _make_compaction_processor():
     # The first param MUST be annotated `RunContext[...]` — pydantic-ai's
     # `takes_run_context` detects the ctx-taking variant by the annotation, not
     # the name; an unannotated `ctx` is silently called as a no-ctx processor.
-    async def process(ctx: RunContext[RunDeps], messages: list) -> list:
+    async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         try:
             return _compact_messages(messages, ctx.deps.run_dir)
         except Exception as e:  # noqa: BLE001 — compaction must never break the run
@@ -379,7 +380,7 @@ def build_agent(
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None,
-) -> Agent[RunDeps, str]:
+) -> Agent[AgentDeps, str]:
     """The MAIN loop agent — built through the single `build_agent_core` site from the
     MAIN spec (writers + the role-default effort + MAIN's compaction capability), then
     the `gather` dispatch tool layered on (MAIN-only; construction stays generic).
@@ -390,7 +391,7 @@ def build_agent(
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     agent = build_agent_core(
         spec_for_role(AgentRole.MAIN, main_model),
-        deps_type=RunDeps,
+        deps_type=AgentDeps,
         instructions=_main_instructions(defender_dir),
         logger=logger,
         agent_id="main",
@@ -433,9 +434,9 @@ async def run_investigation(
     make_model = make_model or providers.build_for_effort
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     agent = build_agent(defender_dir, logger, make_model, main_model=model_name)
-    deps = RunDeps(
+    deps = AgentDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-        salt=salt,
+        salt=salt, policy=_MAIN_POLICY,
     )
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
