@@ -114,14 +114,14 @@ class AgentDeps:
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
     @classmethod
-    def _for_run(cls, run_dir: Path, policy: permission.AgentPolicy, **extra) -> Self:
+    def _for_run(cls, run_dir: Path, policy: permission.AgentPolicy) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (defender_dir
         via the `PATHS` primitive — one owner of the `<repo>/defender` offset — run_id as
         the run dir's basename, a fresh salt) and stamp the caller's `policy`. The shared
-        spine behind each subtype's `for_scope`; `**extra` carries subtype-only fields."""
+        spine behind each subtype's `for_scope`."""
         return cls(
             run_dir=run_dir, defender_dir=PATHS.defender_dir,
-            run_id=run_dir.name, salt=uuid.uuid4().hex, policy=policy, **extra,
+            run_id=run_dir.name, salt=uuid.uuid4().hex, policy=policy,
         )
 
 
