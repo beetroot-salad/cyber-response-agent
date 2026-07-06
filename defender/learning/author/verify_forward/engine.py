@@ -53,12 +53,12 @@ from defender.learning.core.config import (
     source_first_party_key,
 )
 from defender.learning.author.verify_forward.shared import parse_verdict
-from defender.learning.pipeline._pydantic_stage import build_stage_deps, run_stage
+from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 # The forward-check calls no tools, so a clean verdict is a SINGLE model request. This cap is only
 # a backstop: it leaves a little headroom for a stray tool call GLM might attempt (the deny-all
@@ -75,13 +75,22 @@ _VERIFY_DENY_REASON = (
 
 
 @dataclass(frozen=True)
-class VerifierDeps(RunDeps):
-    """The forward-check's per-run deps — plain ``RunDeps`` shape with a deny-all ``policy`` (data).
+class VerifierDeps(AgentDeps):
+    """The forward-check's per-run deps — plain ``AgentDeps`` shape with a deny-all ``policy`` (data).
     ``run_dir`` is the SOURCE run's dir (so the per-check budget / observability trace lands beside
     the case being regression-checked). ``role`` is a VERIFIER identity label — the gate keys on
     ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.VERIFIER
+
+    @classmethod
+    def for_run(cls, source_run_dir: Path) -> VerifierDeps:
+        """The forward-check's front door: its policy is a STATIC constant (``_VERIFY_POLICY``, no
+        per-check scope), so the factory takes only the run dir. Mirrors ``OracleDeps.for_run`` over
+        the base ``_for_run`` (#536's required-``policy`` contract — no inheritable MAIN default).
+        ``source_run_dir`` is the SOURCE run's dir; its trace / budget land beside the case being
+        regression-checked."""
+        return cls._for_run(source_run_dir, _VERIFY_POLICY)
 
 
 # The forward-check's declarative gate policy. Like the oracle's, it takes no per-check input, so it
@@ -118,15 +127,15 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
 ) -> str:
     """Run one forward-check in-process and return the model's final text VERBATIM.
 
-    Builds the forward-check's deny-all ``VerifierDeps`` (via the shared ``build_stage_deps``, with
-    the module-constant ``_VERIFY_POLICY``) and delegates to the shared ``run_stage`` (agent build +
+    Builds the forward-check's deny-all ``VerifierDeps`` (via ``VerifierDeps.for_run``, carrying the
+    module-constant ``_VERIFY_POLICY``) and delegates to the shared ``run_stage`` (agent build +
     one-shot drive + error mapping + trace logging). The caller (``forward.py`` / ``actor.py``)
     parses the returned text with ``shared.parse_verdict``. A timeout / usage-limit / model error →
     ``RunUnprocessable`` (which the CLI ``main`` surfaces as a non-zero exit, reported by ``batch.py``
     as ERROR — the same disposition the old ``claude -p`` non-zero exit gave). ``source_run_dir`` is
     where the RequestLogger trace lands; distinct ``trace_name``s per lesson keep concurrent batch
     children from racing on one file."""
-    deps = build_stage_deps(VerifierDeps, source_run_dir, _VERIFY_POLICY)
+    deps = VerifierDeps.for_run(source_run_dir)
     return run_stage(
         stage="verify_forward",
         prompt_path=prompt_path, model=model, effort=effort,

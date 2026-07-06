@@ -19,16 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from defender.learning.pipeline._pydantic_stage import (
-    build_stage_agent,
-    build_stage_deps,
-    run_stage,
-)
+from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
 
@@ -53,8 +49,8 @@ _JUDGE_DENY_REASON = (
 
 
 @dataclass(frozen=True)
-class JudgeDeps(RunDeps):
-    """The judge's per-run deps. Identical shape to ``RunDeps`` (run_dir, defender_dir,
+class JudgeDeps(AgentDeps):
+    """The judge's per-run deps. Identical shape to ``AgentDeps`` (run_dir, defender_dir,
     run_id, salt, policy) — the judge's read roots and its bash allowlist ride in
     ``policy`` (data), not in extra deps fields. ``run_dir`` is the *learning* run dir
     (the judge's own output dir), so budget/lesson-load side effects land there and the
@@ -63,6 +59,16 @@ class JudgeDeps(RunDeps):
     ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.JUDGE
+
+    @classmethod
+    def for_scope(cls, scope: _ToolScope, run_dir: Path) -> JudgeDeps:
+        """The judge's front door: build its deps from the tool ``scope`` (read roots =
+        the comparison + gather_raw add-dirs; the benign closed-ticket pins) over the base
+        ``_for_run``. ``scope.add_dir`` is the ``JudgeInvocation.add_dirs`` list; ``None``
+        only in a direct unit call → empty roots (a lone Path, unreachable in prod, also
+        yields ``()`` — preserved)."""
+        read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
+        return cls._for_run(run_dir, _judge_policy(read_roots, scope.ticket_cli))
 
 
 # The judge's bash lane is `jq` ONLY (any shape); its file operands are path-gated to
@@ -147,12 +153,7 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     final text is returned VERBATIM: any prose preamble a reasoning model prepends is left
     intact for the shared ``normalize_judge_yaml`` on the downstream validate path (every judge
     consumer — the live loop and the secondary harness — funnels through it) to strip."""
-    # scope.add_dir is the JudgeInvocation.add_dirs list (invoke_judge is the sole
-    # constructor of a judge _ToolScope), None only in a direct unit call → empty roots.
-    read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
-    deps = build_stage_deps(
-        JudgeDeps, learning_run_dir, _judge_policy(read_roots, scope.ticket_cli)
-    )
+    deps = JudgeDeps.for_scope(scope, learning_run_dir)
     return run_stage(
         stage="judge",
         prompt_path=prompt_path, model=model, effort=effort,

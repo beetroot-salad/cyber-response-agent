@@ -53,7 +53,7 @@ from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import driver, observe, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.runtime.tools import RunDeps  # noqa: E402
+from defender.runtime.tools import AgentDeps  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -218,7 +218,7 @@ def test_build_agent_core_threads_spec_model_and_effort_to_make_model(logger):
     spec = driver.AgentSpec(model="glm-5.2", effort="low")
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=RunDeps, instructions="x", logger=logger,
+            spec, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
     assert calls == [("glm-5.2", "low")]
@@ -233,7 +233,7 @@ def test_build_agent_core_writers_false_registers_read_only_pair(logger):
     spec = driver.AgentSpec(model="glm-5.2", effort=None, writers=False)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=RunDeps, instructions="x", logger=logger,
+            spec, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=fake,
         )
     assert list(agent._function_toolset.tools) == ["bash", "read_file"]
@@ -246,7 +246,7 @@ def test_build_agent_core_writers_true_registers_write_tools(logger):
     spec = driver.AgentSpec(model="glm-5.2", effort="low", writers=True)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=RunDeps, instructions="x", logger=logger,
+            spec, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
     assert list(agent._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
@@ -261,7 +261,7 @@ def test_build_agent_core_propagates_make_model_error(logger):
     spec = driver.AgentSpec(model="glm-5.2", effort="low")
     with pytest.raises(RuntimeError), override_allow_model_requests(False):
         driver.build_agent_core(
-            spec, deps_type=RunDeps, instructions="x", logger=logger,
+            spec, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=boom,
         )
 

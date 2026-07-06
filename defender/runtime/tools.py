@@ -12,11 +12,13 @@ clean version of the `tag_tool_results` annotation.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from defender._clock import now_iso
+from defender._paths import PATHS
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
@@ -88,27 +90,44 @@ _GATHER_POLICY = permission.policy_for("gather")
 
 
 @dataclass(frozen=True)
-class RunDeps:
+class AgentDeps:
     """Per-run state threaded into every tool via `ctx.deps`. This base type is
-    the main orchestrator's deps; each subagent gets a `RunDeps` subtype. The
+    the main orchestrator's deps; each subagent gets an `AgentDeps` subtype. The
     permission gate keys on `policy` (the agent's declared capability, DATA — not a
     role branch), so adding an agent is a new policy value, not a new gate method.
     `role` remains only as an identity label (observability + the gather-capture
     `isinstance` narrow). Code that needs a subtype's fields narrows with
-    `isinstance`."""
+    `isinstance`.
+
+    `policy` is REQUIRED (keyword-only, no inheritable default): a security-critical
+    subtype can no longer be born MAIN-shaped by omitting it. Static-policy subtypes
+    (`GatherDeps`) carry their own default; per-scope subtypes (`JudgeDeps`, `ActorDeps`)
+    build theirs through a `for_scope` factory over `_for_run`. A subtype supplying
+    neither is a construction-time `TypeError`, not a silent MAIN."""
 
     run_dir: Path
     defender_dir: Path
     run_id: str
     salt: str
-    policy: permission.AgentPolicy = _MAIN_POLICY
+    policy: permission.AgentPolicy = field(kw_only=True)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
+    @classmethod
+    def _for_run(cls, run_dir: Path, policy: permission.AgentPolicy) -> Self:
+        """Build a per-run deps of this subtype: wire the identity fields (defender_dir
+        via the `PATHS` primitive — one owner of the `<repo>/defender` offset — run_id as
+        the run dir's basename, a fresh salt) and stamp the caller's `policy`. The shared
+        spine behind each subtype's `for_scope`."""
+        return cls(
+            run_dir=run_dir, defender_dir=PATHS.defender_dir,
+            run_id=run_dir.name, salt=uuid.uuid4().hex, policy=policy,
+        )
+
 
 @dataclass(frozen=True)
-class GatherDeps(RunDeps):
-    """Gather subagent deps: RunDeps + the lead being gathered. The harness reads
+class GatherDeps(AgentDeps):
+    """Gather subagent deps: an AgentDeps + the lead being gathered. The harness reads
     `lead_id` here to attribute captured queries (it is never model-supplied to
     the capture path). The `GATHER` role drives the permission policy; code that
     needs the gather-only fields narrows with `isinstance(deps, GatherDeps)`.
@@ -120,12 +139,15 @@ class GatherDeps(RunDeps):
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
-    policy: permission.AgentPolicy = _GATHER_POLICY
+    # STATIC policy → the subtype safely carries its own default (unlike the per-scope
+    # judge/actor). kw_only to match the base field it overrides, so bare construction
+    # `GatherDeps(run_dir, defender_dir, run_id, salt)` still gets _GATHER_POLICY.
+    policy: permission.AgentPolicy = field(default=_GATHER_POLICY, kw_only=True)
     lead_id: str = ""
     query_id: str | None = None
 
 
-def _record_lesson_load(deps: RunDeps, path: Path) -> None:
+def _record_lesson_load(deps: AgentDeps, path: Path) -> None:
     """Append a `lessons_loaded.jsonl` row when a runtime lesson is read into
     context — the in-process equivalent of the `record_lesson_load` PostToolUse
     hook (reusing its `lesson_name` matcher), feeding learning/trace_lesson.py's
@@ -141,13 +163,13 @@ def _record_lesson_load(deps: RunDeps, path: Path) -> None:
         pass
 
 
-def _bash_env(deps: RunDeps) -> dict[str, str]:
+def _bash_env(deps: AgentDeps) -> dict[str, str]:
     """The runtime agent's shell environment — defined once in run_common.py."""
     from defender import run_common
     return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
-def _tool_bash(deps: RunDeps, command: str) -> str:
+def _tool_bash(deps: AgentDeps, command: str) -> str:
     """Logic for the `bash` tool (see the closure's docstring). Module-level so the
     tool closure stays thin; the gather-vs-main adapter-capture path lives here."""
     decision = permission.decide_bash(
@@ -208,7 +230,7 @@ def _grep_lines(text: str, pattern: str) -> str:
     return "\n".join(line for line in text.splitlines() if pattern in line)
 
 
-def _tool_read_file(deps: RunDeps, path: str, pattern: str | None = None) -> str:
+def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
     """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
     untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
     read raises the policy denial for an existing and an absent path alike — no
@@ -241,7 +263,7 @@ def _tool_read_file(deps: RunDeps, path: str, pattern: str | None = None) -> str
     return text
 
 
-def _tool_write_file(deps: RunDeps, path: str, content: str) -> str:
+def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     """Logic for the `write_file` tool: a validated run-dir write."""
     decision = permission.decide_write(
         Path(path), content, run_dir=deps.run_dir
@@ -252,7 +274,7 @@ def _tool_write_file(deps: RunDeps, path: str, content: str) -> str:
     return f"wrote {path} ({len(content)} bytes)"
 
 
-def _tool_edit_file(deps: RunDeps, path: str, old_string: str, new_string: str) -> str:
+def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str) -> str:
     """Logic for the `edit_file` tool: the create-only / not-found / non-unique
     guards, then a validated write."""
     p = Path(path)
@@ -285,7 +307,7 @@ def _tool_edit_file(deps: RunDeps, path: str, old_string: str, new_string: str) 
 
 
 def register_tools(agent, *, writers: bool = True) -> None:
-    """Register the generic tools on `agent` (deps_type must be RunDeps).
+    """Register the generic tools on `agent` (deps_type must be AgentDeps).
 
     `writers=True` (the main agent) registers all four: bash, read_file,
     write_file, edit_file. `writers=False` (the gather subagent) registers only
@@ -296,7 +318,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
     the clean lane boundary)."""
 
     @agent.tool
-    async def bash(ctx: RunContext[RunDeps], command: str) -> str:
+    async def bash(ctx: RunContext[AgentDeps], command: str) -> str:
         """Run a shell command. Use the `defender-*` shims (defender-invlang,
         defender-lessons, …) for first-party tooling. Data-source adapters are
         not runnable from the main loop — dispatch gather instead."""
@@ -304,7 +326,7 @@ def register_tools(agent, *, writers: bool = True) -> None:
 
     @agent.tool
     async def read_file(
-        ctx: RunContext[RunDeps], path: str, pattern: str | None = None
+        ctx: RunContext[AgentDeps], path: str, pattern: str | None = None
     ) -> str:
         """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
         `pattern` to return only the lines containing that substring — the grep
@@ -317,14 +339,14 @@ def register_tools(agent, *, writers: bool = True) -> None:
         return
 
     @agent.tool
-    async def write_file(ctx: RunContext[RunDeps], path: str, content: str) -> str:
+    async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
         """Write a file in the run dir (investigation.md, report.md). Writes of
         investigation.md are validated against the invlang schema."""
         return _tool_write_file(ctx.deps, path, content)
 
     @agent.tool
     async def edit_file(
-        ctx: RunContext[RunDeps], path: str, old_string: str, new_string: str
+        ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
     ) -> str:
         """Replace the first occurrence of old_string with new_string in a run-dir
         file. The resulting full text is validated (invlang for investigation.md)."""

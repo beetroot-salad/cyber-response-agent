@@ -29,12 +29,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.pipeline._pydantic_stage import build_stage_deps, run_stage
+from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
-from defender.runtime.tools import RunDeps
+from defender.runtime.tools import AgentDeps
 
 # The oracle calls no tools, so a clean per-lead projection is a SINGLE model request. This cap is
 # only a backstop: it leaves a little headroom for a stray tool call GLM might attempt (the
@@ -50,13 +50,21 @@ _ORACLE_DENY_REASON = (
 
 
 @dataclass(frozen=True)
-class OracleDeps(RunDeps):
-    """The oracle's per-run deps — plain ``RunDeps`` shape with the locked-down ``policy`` (data).
+class OracleDeps(AgentDeps):
+    """The oracle's per-run deps — plain ``AgentDeps`` shape with the locked-down ``policy`` (data).
     One ``OracleDeps`` per lead; ``run_dir`` is the *learning* run dir, so the per-lead budget /
     observability side effects land there. ``role`` is an ORACLE identity label — the gate keys on
     ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.ORACLE
+
+    @classmethod
+    def for_run(cls, run_dir: Path) -> OracleDeps:
+        """The oracle's front door: its policy is a STATIC constant (``_ORACLE_POLICY``, no
+        per-lead scope), so the factory takes only ``run_dir``. Mirrors ``JudgeDeps``/``ActorDeps``
+        ``for_scope`` over the base ``_for_run`` — the required policy is the backstop, this is the
+        front door (and the one owner of the identity wiring across the three in-process stages)."""
+        return cls._for_run(run_dir, _ORACLE_POLICY)
 
 
 # The oracle's declarative gate policy. Unlike the actor/judge policies (parameterized per leg by
@@ -89,13 +97,13 @@ def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature 
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The PydanticAI ``oracle_fn`` — drops into ``invoke_oracle_lead`` as ``oracle_fn=``. Builds
-    the oracle's ``OracleDeps`` (via the shared ``build_stage_deps``, with the locked-down
+    the oracle's ``OracleDeps`` (via ``OracleDeps.for_run``, carrying the locked-down
     ``_ORACLE_POLICY``) and delegates to the shared ``run_stage`` (agent build + one-shot drive +
     error mapping + per-lead trace logging). Returns the model's final YAML text VERBATIM
     (``sample.parse_lead_events`` parses it downstream). A timeout / usage-limit / model error →
     ``RunUnprocessable`` (quarantines the run — the same disposition a ``claude -p`` non-zero exit
     gave, which the per-lead fan-out surfaces as a whole-direction failure)."""
-    deps = build_stage_deps(OracleDeps, learning_run_dir, _ORACLE_POLICY)
+    deps = OracleDeps.for_run(learning_run_dir)
     return run_stage(
         stage="oracle",
         prompt_path=prompt_path, model=model, effort=effort,

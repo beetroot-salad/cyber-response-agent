@@ -5,7 +5,7 @@ The transparent adapter-capture core (`_capture_adapter`, `_capture_adapter_sql`
 and their `_capture_query` prelude) is what `tools._tool_bash` reaches for when a
 `GatherDeps`-scoped bash call runs a standalone adapter; `register_gather_tool`
 installs the main agent's `gather` dispatch tool, whose `_run_gather` drives the
-nested subagent. These import the shared foundation (`RunDeps`, `GatherDeps`,
+nested subagent. These import the shared foundation (`AgentDeps`, `GatherDeps`,
 `_format_bash_result`, `_bash_env`, `_BASH_TIMEOUT_S`) from `tools.py`; `tools.py`
 re-exports the names back at its own module bottom (after the foundation is
 defined), so there is no import cycle.
@@ -31,7 +31,7 @@ from . import circuit_breaker
 from . import tools
 from .tools import (
     GatherDeps,
-    RunDeps,
+    AgentDeps,
     _BASH_TIMEOUT_S,
     _bash_env,
     _format_bash_result,
@@ -207,7 +207,7 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
 
 
 def _gather_prompt(
-    deps: RunDeps, request: GatherRequest, catalog: str | None,
+    deps: AgentDeps, request: GatherRequest, catalog: str | None,
 ) -> str:
     """The gather subagent's user prompt: the dispatch block its SKILL reads, plus
     the descriptor catalog (every data-source system + its one-line description) —
@@ -265,7 +265,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 
 
 async def _run_gather(
-    deps: RunDeps, gather_factory, request_limit: int, request: GatherRequest,
+    deps: AgentDeps, gather_factory, request_limit: int, request: GatherRequest,
 ) -> str:
     """The gather dispatch, factored out of the tool closure so it's testable
     without the main model: claim the lead → inject the descriptor catalog → run
@@ -352,7 +352,7 @@ def register_gather_tool(
 
     @main_agent.tool
     async def gather(
-        ctx: RunContext[RunDeps], lead_id: str, system: str,
+        ctx: RunContext[AgentDeps], lead_id: str, system: str,
         goal: str, what_to_summarize: list[str],
     ) -> str:
         """Dispatch the gather subagent (Kimi K2.6 by default) to measure one lead against a
