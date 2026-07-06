@@ -14,6 +14,7 @@ re-exports these names for its historical surface.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from defender._git import REPO_ROOT, GitError, git
@@ -39,6 +40,7 @@ def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
     return None
 
 
+@lru_cache(maxsize=1)
 def _main_repo_root() -> Path:
     """The main worktree's root, where shared config like `.env` lives.
 
@@ -46,6 +48,13 @@ def _main_repo_root() -> Path:
     checkout, so `<repo_root>/.env` misses the canonical file. Git's common dir
     (`.../.git`) is shared by every worktree; its parent is the main root. Falls back
     to `REPO_ROOT` outside a git tree.
+
+    `@lru_cache`d: the value is a function of `REPO_ROOT` + the on-disk `.git` layout, both
+    process-invariant, so the `git rev-parse` fork runs once per process instead of once
+    per key-sourcing. A learn drain sources a metered key per run (N runs, one process),
+    which without the cache is N identical forks — and more, since `_prepare_engines_for`
+    sources one key per distinct model. The error-fallback is therefore sticky for the
+    process; a test exercising it must `_main_repo_root.cache_clear()`.
     """
     try:
         out = git(["rev-parse", "--git-common-dir"], cwd=REPO_ROOT)
