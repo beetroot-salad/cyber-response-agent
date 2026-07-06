@@ -27,6 +27,7 @@ from defender.learning.core.config import (
     BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
     GROUND_TRUTH_FILE,
+    ORACLE_MODEL,
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
@@ -187,7 +188,7 @@ def run_direction(
         return False
 
     _log(f"step=oracle ({spec.name})")
-    oracle_raw = agents.oracle(run_dir, actor_story_path)
+    oracle_raw = agents.oracle(run_dir, actor_story_path, learning_run_dir)
     telemetry_path = _write_oracle_telemetry(
         oracle_raw, learning_run_dir, spec.telemetry_name
     )
@@ -378,18 +379,21 @@ def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> Non
 
 
 def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
-    """Ready the in-process stages (actor + judge) for the directions that will run: source
-    their metered keys UP FRONT in the main thread — before the direction fan-out, so there is
-    no ``os.environ`` race — and only for the models the directions that will run actually use
-    (the union of each leg's actor + judge model, deduped; sourcing one provider twice is
-    idempotent). Fails loud here (→ exit 2) rather than 401-ing mid-stage; the ``claude -p``
-    siblings (oracle, curators) stay on the subscription (see ``source_first_party_key``).
+    """Ready the in-process stages (oracle + judge, and the actor unless excluded) for the
+    directions that will run: source their metered keys UP FRONT in the main thread — before the
+    direction fan-out AND before the oracle's per-lead fan-out, so there is no ``os.environ`` race
+    — and only for the models the directions that will run actually use (the union of each leg's
+    oracle + judge + actor model, deduped; sourcing one provider twice is idempotent). Fails loud
+    here (→ exit 2) rather than 401-ing mid-stage; only the ``claude -p`` curators stay on the
+    subscription (see ``source_first_party_key``).
 
-    ``include_actor=False`` sources only the judge model — for a JUDGE-ONLY consumer (the
-    secondary harness, whose actor story is frozen and already generated). Requiring the actor
-    provider's key there would be a phantom dependency: a Sonnet-judge secondary run would fail
-    loud for a Fireworks key the actor never uses in that process."""
-    models: set[str] = set()
+    The oracle + judge are ALWAYS sourced — both run for every non-skip direction, in the learning
+    loop and the secondary harness alike. ``include_actor=False`` skips only the actor model, for
+    an ACTOR-FROZEN consumer (the secondary harness, whose story is generated in its own frozen
+    subprocess). Requiring the actor provider's key there would be a phantom dependency: a
+    Sonnet-judge secondary run would fail loud for a Fireworks key the actor never uses in that
+    process."""
+    models: set[str] = {ORACLE_MODEL} if directions else set()
     for name in directions:
         d = BY_NAME[name]
         models.add(d.judge_wiring.model)
@@ -1086,9 +1090,10 @@ Outputs:
 
 Environment:
   ACTOR_MODEL / BENIGN_ACTOR_MODEL     claude model for the adversarial / benign actor
-  ORACLE_MODEL                         per-lead telemetry oracle (sonnet by design — generative)
-  ORACLE_EFFORT                        oracle reasoning effort (default: low — each call sees
-                                       only its own lead; no cross-lead matching to reason about)
+  ORACLE_MODEL                         per-lead telemetry oracle model (default: glm-5.2;
+                                       needs FIREWORKS_API_KEY — the oracle runs in-process)
+  ORACLE_EFFORT                        oracle reasoning effort (default: none — reasoning
+                                       DISABLED; the mechanical per-lead projection needs none)
   ORACLE_MAX_CONCURRENCY               max concurrent per-lead oracle calls (default: 8)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: medium)
   JUDGE_MODEL / BENIGN_JUDGE_MODEL     adversarial / benign judge model (default: glm-5.2;

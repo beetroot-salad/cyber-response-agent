@@ -17,3 +17,4 @@ class AgentRole(Enum):
     GATHER = "gather"  # the per-lead ES|QL gather subagent (slice 2)
     JUDGE = "judge"    # the learning-loop grounded-outcome judge (PydanticAI)
     ACTOR = "actor"    # the learning-loop adversarial/benign story actor (PydanticAI)
+    ORACLE = "oracle"  # the learning-loop per-lead telemetry oracle (PydanticAI)
