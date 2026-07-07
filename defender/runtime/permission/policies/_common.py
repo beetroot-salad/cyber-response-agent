@@ -165,7 +165,7 @@ def _shim_names() -> list[str]:
     return sorted(set(NON_ADAPTER_SHIMS) | argument_inert_viewers)
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1)
 def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
     """The main/gather bash reader allowlist, ANCHORED to `run_dir` + the defender
     corpus (#535). Every viewer's file/dir operand must resolve — textually, no
@@ -178,7 +178,16 @@ def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str],
     the roots + the process-static denylist (`bash_policy._policy` is itself cached),
     and `policy_for('gather', …)` is called once per gather DISPATCH (many per run) —
     so without the cache each dispatch recompiles the whole ~14-pattern allowlist for a
-    per-run-constant value."""
+    per-run-constant value.
+
+    `maxsize=1`, not unbounded: within a run the key is invariant (main's setup call
+    and every gather dispatch share this one `(run_dir, defender_dir)`), so a single
+    slot serves every hit; a new run just evicts the prior entry instead of retaining
+    it forever. An unbounded cache (`maxsize=None` / `@cache`) keyed on `run_dir` would
+    grow one never-evicted ~14-`Pattern` entry per run in any long-lived multi-run
+    process (the e2e replay suite, the eval harness's temp trees) — a latent leak that
+    the one-run-per-process production `run.py` merely hides. Mirrors the sibling
+    `bash_policy._policy`'s `@lru_cache(maxsize=1)`."""
     run, dfn = str(run_dir), str(defender_dir)
     programs = _reader_program_patterns(run, dfn)
     shims = [rf"{re.escape(n)}(?: .*)?" for n in _shim_names()]
