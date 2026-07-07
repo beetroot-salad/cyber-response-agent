@@ -138,8 +138,10 @@ def _capture_query(
     if lead is None:
         # A bind-produced gather deps is per-run only (lead_id unset); the gather dispatch
         # stamps the real lead before any adapter runs, so an unstamped deps reaching capture
-        # is a wiring bug, not model input. Fail loud rather than record against a null lead.
-        raise ModelRetry("internal: gather reached adapter capture without a dispatched lead_id")
+        # is a wiring bug, not model input. Fail loud with a hard error — a ModelRetry here is
+        # unfixable by the model (the lead stays None across retries), so it would only burn the
+        # tool-retry budget into an UnexpectedModelBehavior crash instead of surfacing the bug.
+        raise RuntimeError("internal: gather reached adapter capture without a dispatched lead_id")
     try:
         passthrough, stderr, record = _capture(
             deps.run_dir, lead, argv, env=env,

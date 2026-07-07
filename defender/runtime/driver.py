@@ -273,13 +273,14 @@ def build_gather_agent(
     (no file writers — it measures and returns a summary, never authors
     investigation.md/report.md), its own cheaper `gather_model()`, and NO layered `gather`
     dispatch tool (a gather must not dispatch itself). Loads `skills/gather/SKILL.md`. One
-    per dispatch so `agent_id` binds to the lead/measurement. The per-invocation effort is
-    re-bound from the resolved model (so a `DEFENDER_GATHER_MODEL=claude-*` override omits
-    the Fireworks-only `none` knob, exactly as today), while the static def carries the
-    Fireworks default."""
+    per dispatch so `agent_id` binds to the lead/measurement. The resolved model name is read
+    ONCE and both `model` + `effort` are re-bound onto the def from it (mirroring `build_agent`),
+    so the built model and its effort can't disagree on a mid-build env change — a
+    `DEFENDER_GATHER_MODEL=claude-*` override omits the Fireworks-only `none` knob, exactly as
+    today, while the static def carries the Fireworks default."""
     name = gather_model()
     return build_agent_core(
-        replace(GATHER_DEF, effort=providers.effort_for_role(name, AgentRole.GATHER)),
+        replace(GATHER_DEF, model=lambda: name, effort=providers.effort_for_role(name, AgentRole.GATHER)),
         deps_type=GatherDeps,
         instructions=_gather_instructions(defender_dir),
         logger=logger,
