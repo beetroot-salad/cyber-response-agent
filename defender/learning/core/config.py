@@ -459,9 +459,21 @@ AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
 AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
 AUTHOR_ENV_TIMEOUT = env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
-# Offline lead-author (skills/ catalog) agent.
-LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
+# Offline lead-author (skills/ catalog + system skills) agent, plus its sibling the pitfalls
+# curator (both share the _lead_spine spawn). Runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks)
+# — the FIRST *writer* among the in-process stages (the read-only judge/actor/oracle/verifier
+# predate it). `glm-5.2 @ low` matches the defender MAIN + verifier (the corpus the author writes
+# is what the defender reads). A strong-author A/B overrides via LEAD_AUTHOR_MODEL / LEAD_AUTHOR_EFFORT
+# (any provider `providers.provider_for` routes — e.g. claude-sonnet-4-6 @ low). NB `none` is a
+# Fireworks-only effort: an Anthropic A/B MUST set a Claude-valid effort (low/medium/high/…), else
+# build_for_effort raises → FatalConfigError (which the lead-author spawn lets PROPAGATE, exit 2).
+LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "glm-5.2")
+LEAD_AUTHOR_EFFORT = os.environ.get("LEAD_AUTHOR_EFFORT", "low")
 LEAD_AUTHOR_TIMEOUT = env_int("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
+# The lead author is a multi-file editor (reads the catalog + sibling skills, writes/edits several
+# skill files, rm's drafts), so its tool-loop request cap is generous — the LEAD_AUTHOR_TIMEOUT
+# wall-clock ceiling is the real backstop (the read-only predictors need only a handful of requests).
+LEAD_AUTHOR_REQUEST_LIMIT = env_int("LEAD_AUTHOR_REQUEST_LIMIT", 250)
 
 # Repo lock wait ceiling — the single location every curator serializes on. Lives here
 # (not author/shared.py) so the value has one home; shared.py re-exports it.

@@ -21,44 +21,18 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import runner as _author_runner
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_records
 
 
 # Mutable lead-author queue state resolves from DEFAULT_PATHS so it honors
-# DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs).
+# DEFENDER_LEARNING_STATE_DIR (out-of-repo under concurrent runs). The in-process engine reads its
+# model/effort/timeout straight from core.config; the per-spawn observability trace is the
+# RequestLogger file under the spawn's learning_run_dir (no separate run-log file).
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
-RUN_LOG_FILE = PENDING_DIR / "lead_author_run.log"
-
-# Sourced from core.config (single env-read site, no duplicated default).
-LEAD_AUTHOR_MODEL = _loop_config.LEAD_AUTHOR_MODEL
-LEAD_AUTHOR_TIMEOUT = _loop_config.LEAD_AUTHOR_TIMEOUT
 
 _log = _loop_config.make_logger("lead-author", flush=True)
-
-
-# The agent runs NO git — the loop is the sole committer. Edit/Write are scoped to the
-# skills tree; promote = Write the established template + ``rm`` the draft, discard = ``rm``
-# the draft, fold/split/lift = Edit/Write. The loop's scope gate (``_verify_corpus_scope``
-# + the per-mode rule) enforces the fine scope (in-scope, no protected-surface mutation,
-# draft-only deletion), so the allowlist itself can be the coarse ``defender/skills/`` tree.
-#
-# Two matcher grammars, deliberately: ``**`` is the documented recursive glob for the
-# *file-path* tools (Edit/Write/Read), so it matches a nested draft path there. Claude
-# Code's *Bash* matcher is a different grammar — a single ``*`` over the raw command
-# string, which already crosses ``/`` — and ``**`` is undefined for it, so the ``rm`` grant
-# uses the documented ``:*`` prefix form (``Bash(rm defender/skills/:*)``) rather than an
-# undocumented ``**`` that only matches nested drafts by accident. The drain hands the agent
-# repo-relative paths and runs it with cwd at the worktree, so one repo-relative matcher
-# covers every removal — no worktree-absolute twin needed.
-_ALLOWLIST = (
-    "Read,Glob,Grep,"
-    f"Edit({SKILLS_REL}**),"
-    f"Write({SKILLS_REL}**),"
-    f"Bash(rm {SKILLS_REL}:*)"
-)
 
 
 def _spawn_author_agent(
@@ -67,34 +41,33 @@ def _spawn_author_agent(
     batch_id: str,
     user_prompt: str,
     repo_root: Path,
+    learning_run_dir: Path,
     log_label: str,
 ) -> int:
-    """Shared spawn envelope for both lead-author modes; they differ only in
-    ``system_prompt_file`` / ``batch_id`` / the caller-built ``user_prompt``. The agent runs
-    no git and writes no result marker, so this uses the raw runner variant and maps a
-    ``RunnerError`` (timeout / spawn failure) to rc 124 (caller then returns rc=2). ``cwd`` is
-    ``repo_root`` (the batch worktree), so the agent's repo-relative ``rm`` paths resolve under
-    it. ``log_label`` names the spawn in the run log."""
+    """Shared spawn envelope for both lead-author modes (the per-run catalog/skill author and the
+    cross-run pitfalls curator); they differ only in ``system_prompt_file`` / ``batch_id`` /
+    ``learning_run_dir`` (the RequestLogger trace anchor — the case ``run_dir`` for the per-run
+    author, ``PENDING_DIR`` for the cross-run pitfalls curator) / the caller-built ``user_prompt``.
+
+    Routes through the in-process PydanticAI engine (GLM). The heavy engine module (it pulls the
+    pydantic-ai graph via ``_pydantic_stage``) is imported LAZILY here, and ``run_author_stage`` is
+    looked up on the module at CALL time so a test can patch that seam. The agent runs no git and
+    writes no result marker — its output is the working tree under ``repo_root`` (the batch
+    worktree), verified + committed by the loop; ``repo_root`` is where its file writers land. The
+    fine scope (in-scope, no protected-surface mutation, draft-only deletion) is enforced by the
+    write gate + ``_verify_corpus_scope`` + the per-mode rule. Returns the engine rc (0 success /
+    124 per-run fault); a systemic ``FatalConfigError`` / ``StageAbort`` PROPAGATES (F1)."""
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    _log(f"spawn {log_label} (model={LEAD_AUTHOR_MODEL}, timeout={LEAD_AUTHOR_TIMEOUT}s)")
-    options = _author_runner.RunnerOptions(
+    from defender.learning.leads import lead_author_engine
+    return lead_author_engine.run_author_stage(
         system_prompt_file=system_prompt_file,
-        allowed_tools=_ALLOWLIST,
-        model=LEAD_AUTHOR_MODEL,
-        effort=None,
-        timeout_seconds=LEAD_AUTHOR_TIMEOUT,
-        cwd=repo_root,
-        log_path=RUN_LOG_FILE,
-        result_marker=None,
         batch_id=batch_id,
+        user_prompt=user_prompt,
+        repo_root=repo_root,
+        learning_run_dir=learning_run_dir,
+        log_label=log_label,
+        log=_log,
     )
-    try:
-        rc, _text = _author_runner.invoke_claude_print_raw(options, user_prompt, _log)
-    except _author_runner.RunnerError as e:
-        _log(f"{log_label} failed: {e}")
-        return 124
-    _log(f"{log_label} exited rc={rc}")
-    return rc
 
 
 def _verify_corpus_scope(

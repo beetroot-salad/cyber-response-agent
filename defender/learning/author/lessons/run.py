@@ -228,7 +228,7 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
     """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict.
 
-    Subprocess driver lives in ``_author_runner.invoke_claude_print`` —
+    Subprocess driver lives in ``_runner.invoke_claude_print`` —
     shared with ``author_actor.py``. This wrapper builds the
     defender-specific user prompt + allowed-tools spec and translates
     ``RunnerError`` into ``AuthorError`` so the caller's error path is

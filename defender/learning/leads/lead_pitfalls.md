@@ -54,3 +54,4 @@ One line: the mistake, then the fix. Concrete, imperative, grounded in the failu
 - **Edit, never delete.** Prune bullets in place; never `rm` an `execution.md`.
 - **No-edit runs exit zero.** If every failure is already documented or too thin to name a fix, make no edits and finish — that is a valid tick, not an error.
 - **You commit nothing.** Leave the working tree in the state you want; the loop commits your `execution.md` edits in one pathspec-scoped commit.
+- **Finish with a one-line summary.** End your turn with a single line naming what you changed (e.g. `Added 1 pitfall to {system}/execution.md.`) or `No changes.` for a no-edit tick. Do not end with an empty message — a terminal summary line is required.

@@ -63,6 +63,15 @@ class AgentPolicy:
       whole corpus. The gray-box confine (#512): a confined actor sees only its
       lesson corpora, never the judge's grading rubric. Empty (the default) keeps
       the legacy `{run_dir, defender_dir, *read_roots}` — inert for main/gather.
+    - `write_allow` — the agent's Write/Edit allowlist: anchored `re.Pattern`s
+      matched (`fullmatch`) against the RESOLVED write path (`decide_write`). The write
+      twin of `bash_allow` — a **flat, deny-by-default** list of the specific paths an
+      agent may author, NOT a coarse root prefix. A writer declares exactly what it
+      owns: the main loop its run-dir subtree (`policies.main`), the lead author its
+      `defender/skills/**.md` corpus (`lead_author_engine`). Empty (the default) → the
+      agent may write nothing (every read-only/predictor stage). Because the operand is
+      `resolve()`d before matching, a `..` escape is collapsed away and can't match a
+      pattern, so the allowlist is a true path set, not a string prefix (`build_write_allow`).
     - `deny_reason` — the fall-through deny message shown to the model.
     """
 
@@ -73,4 +82,5 @@ class AgentPolicy:
     raw_reads: bool = False
     read_roots: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
+    write_allow: tuple[re.Pattern[str], ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON

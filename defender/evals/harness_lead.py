@@ -23,9 +23,10 @@ The harness materializes a fresh temp repo (the real learning/ scripts +
 the real query catalog + per-system SKILL.md), overlays the scenario, git
 commits a baseline, runs the lead-author tick, and evaluates ``expect.json``.
 
-The lead-author spawns ``claude -p`` (subscription — it strips
-ANTHROPIC_API_KEY itself), so this is a live, non-deterministic agent run:
-treat the verdict as one sample, not a unit test. Re-run for confidence.
+The lead-author runs IN-PROCESS on GLM (Fireworks, the metered first-party path;
+the engine sources FIREWORKS_API_KEY from the repo ``.env``), so this is a live,
+non-deterministic agent run: treat the verdict as one sample, not a unit test.
+Re-run for confidence.
 """
 from __future__ import annotations
 
@@ -109,9 +110,11 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     # Keep the lead-author's mutable queue/lock state out of the repo tree so
     # the post-flight clean-tree check isn't tripped by lock files.
     env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
-    # Pin the validated model unless the caller overrode it in the environment
-    # (env already carries any inherited LEAD_AUTHOR_MODEL via the copy above).
-    env.setdefault("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
+    # The lead author now runs IN-PROCESS on GLM (Fireworks) — the shipped default
+    # (LEAD_AUTHOR_MODEL=glm-5.2 @ low); the engine sources FIREWORKS_API_KEY from <repo>/.env.
+    # Left unpinned so the eval exercises the production default; a caller can override
+    # LEAD_AUTHOR_MODEL / LEAD_AUTHOR_EFFORT via the environment for an A/B (e.g. claude-sonnet-4-6
+    # @ low — any provider providers.provider_for routes; keep effort Claude-valid, not `none`).
     return _run(
         [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],
         cwd=tmp, env=env, check=False,

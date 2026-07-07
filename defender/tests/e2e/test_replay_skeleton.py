@@ -155,10 +155,12 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo --raw"},
      "data-source CLIs directly", None),
-    # D6 — a write escaping the run dir must be refused.
+    # D6 — a write escaping the run dir must be refused. Main's write_allow is its
+    # run-dir subtree only (the flat deny-by-default write allowlist), so a path outside
+    # it is not in the agent's declared paths.
     ("write-escape", "write_file",
      lambda rd: {"path": str(rd.parent / "ESCAPE_OUTSIDE_RUNDIR.txt"), "content": "x"},
-     "stay inside the run dir", "ESCAPE_OUTSIDE_RUNDIR.txt"),
+     "declared paths", "ESCAPE_OUTSIDE_RUNDIR.txt"),
     # A read resolving outside the allowlisted roots (run dir + defender corpus +
     # the agent's declared policy read_roots) is refused — the deny-by-default read
     # allowlist, asserted at the driver seam.
