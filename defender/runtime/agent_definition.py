@@ -17,7 +17,7 @@ This module is the primitive layer:
     the resolved read roots.
   - ``compile_policy`` — projects a ``ToolSet`` + roots into the gate's ``AgentPolicy``
     (STEP ONE: reproduces today's per-agent policy field-for-field, so
-    ``decide_bash`` / ``decide_read`` do not change; the #535 read/bash reshaping is
+    ``decide_bash`` / ``decide_read`` do not change; the #545 read/bash reshaping is
     deferred).
   - ``bind`` — the single resolution seam: ``resolve_roots`` → ``compile_policy`` →
     the role's ``AgentDeps`` subtype.
@@ -100,7 +100,7 @@ class AgentDefinition:
     drive the gate via ``compile_policy``. Frozen, so ``bind``/``build`` can't corrupt a
     shared definition.
 
-    ``read_shapes`` carries the ~6 tight filename grammars (#535); at step one only the
+    ``read_shapes`` carries the ~6 tight filename grammars (#545); at step one only the
     FIELD exists — its filtering semantics are deferred (the r3/read_shapes waiver)."""
 
     role: AgentRole
@@ -225,7 +225,7 @@ def compile_policy(
     ``write_allow`` is the run-dir write subtree when the ToolSet grants writers (main —
     the #543 write gate; the read-only stages get none), and the read roots/confine come
     from the scope. STEP ONE reproduces today's per-agent policy field-for-field, so the
-    gate is unchanged; ``read_shapes`` filtering is the #535-deferred half (the field is
+    gate is unchanged; ``read_shapes`` filtering is the #545-deferred half (the field is
     carried, not yet consumed here)."""
     bash = tools.bash
     if bash is None:

@@ -220,7 +220,7 @@ def resolve_main_model(explicit: str | None = None) -> str:
 # DECLARATIVE signal that main/gather are reader agents; `compile_policy` delegates the
 # actual per-run anchored allowlist to `permission.policies._common.reader_patterns`
 # (the #535 anchoring), so this content documents intent and only its non-emptiness is
-# load-bearing at step one (the #535 end-state compiles the grammar directly). The
+# load-bearing at step one (the #545 end-state compiles the grammar directly). The
 # corpus dirs are the tight `.md` roots under `defender_dir` a reader may open.
 _READER_VIEWERS = ("cat", "grep", "tail", "head", "wc", "ls", "cd", "jq")
 _CORPUS_DIRS = ("lessons", "skills", "examples")
