@@ -18,9 +18,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import REPO_ROOT
+from defender.learning.core.config import ACTOR_EFFORT, ACTOR_MODEL, REPO_ROOT
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
+from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
@@ -111,6 +112,21 @@ def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> 
         read_confine=read_confine,
         deny_reason=_ACTOR_DENY_REASON,
     )
+
+
+# The actor's AgentDefinition (#538). Unlike the pure-prediction stages, the actor genuinely USES
+# its tools — it runs the pinned read-only lesson scripts on the bash lane and reads its lesson
+# corpora via ``read_file`` — so ``tools`` keeps the read + bash pair (``BashGrammar()`` registers the
+# bash tool; the per-leg pinned-script allowlist is compiled from the ``RunScope`` at bind, not
+# declared here). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each leg
+# re-binds its own per-call model/effort in ``build_stage_agent``.
+ACTOR_DEF = AgentDefinition(
+    role=AgentRole.ACTOR,
+    model=lambda: ACTOR_MODEL,
+    effort=ACTOR_EFFORT,
+    tools=ToolSet(read=True, bash=BashGrammar()),
+    deny_reason=_ACTOR_DENY_REASON,
+)
 
 
 def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state

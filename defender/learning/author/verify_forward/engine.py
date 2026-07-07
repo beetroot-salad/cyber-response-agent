@@ -11,17 +11,15 @@ directions: the per-check variation (its prompt text, trace name, and label) is 
 ``_run_verify_pydantic``'s args, not a second engine module. (``env.py`` is a deterministic
 retrieval check with no model, so it does not touch this engine.)
 
-The forward-check emits a short reasoning preamble + a single ``VERDICT: GOOD|BAD`` line and is
-MEANT to call no tools — its whole input (transcript/story + lesson + disposition) is inlined in the
-user prompt. Its ``_VERIFY_POLICY`` hard-denies the ``bash`` half of the always-registered
-``["bash", "read_file"]`` toolset (``bash_allow=()``, no adapters/raw reads). ``read_file`` is NOT
-hard-denied, though: ``decide_read`` still allows reads under ``run_dir`` / ``defender_dir``, and for
-the forward-check ``run_dir`` is the SOURCE run's dir — which holds ``source_refs.yaml`` with the very
-``normalized_disposition`` an adversarial check is asked to predict. So "the verifier reads nothing"
-is a PROMPT guarantee (everything is inlined, and it is told to answer directly), not a gate-enforced
-one; a genuinely tool-tight verifier would need a no-toolset build (see the altitude note in the
-review). ``VERIFY_REQUEST_LIMIT`` is a tiny backstop: a clean verdict is one model request; the
-headroom only absorbs a stray denied ``bash`` call GLM might attempt before it re-emits the verdict.
+The forward-check emits a short reasoning preamble + a single ``VERDICT: GOOD|BAD`` line and calls
+NO tools — its whole input (transcript/story + lesson + disposition) is inlined in the user prompt.
+Since #538 that tool-freeness is STRUCTURAL: ``VERIFY_DEF`` registers an empty ``ToolSet()`` (no
+``read_file``, no ``bash``), so the adversarial check can no longer ``read_file`` the SOURCE run's
+``source_refs.yaml`` — which holds the very ``normalized_disposition`` it is asked to predict (the
+answer-key affordance the #534 review flagged; sharpest in the benign direction, where the recorded
+malicious call and the corrected benign target disagree, so a stray read CONTRADICTS the check). The
+no-toolset build closes it by construction rather than by prompt guarantee, and the request cap drops
+to 1 (no tool can be called). ``_VERIFY_POLICY`` stays deny-all as belt-and-suspenders.
 
 Unlike the pipeline stages (invoked in-process BY the orchestrator, which sources the metered key
 up front), the forward-check runs as a CLI ``python3`` SUBPROCESS spawned by the curator agent
@@ -55,16 +53,16 @@ from defender.learning.core.config import (
 from defender.learning.author.verify_forward.shared import parse_verdict
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
+from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import AgentDeps
 
-# The forward-check calls no tools, so a clean verdict is a SINGLE model request. This cap is only
-# a backstop: it leaves a little headroom for a stray tool call GLM might attempt (the deny-all
-# policy bounces it with ModelRetry, costing one extra request) before it re-emits the verdict.
-# Kept tiny — a genuinely looping verifier should hit the timeout, not burn a budget.
-VERIFY_REQUEST_LIMIT = 6
+# The forward-check is TOOL-FREE (#538): VERIFY_DEF registers an empty toolset, so no tool can be
+# called and a clean verdict is exactly ONE model request — no headroom above 1 is needed
+# (dropped 6→1). A genuinely looping verifier should hit the timeout, not burn a budget.
+VERIFY_REQUEST_LIMIT = 1
 
 _VERIFY_DENY_REASON = (
     "Blocked: the forward-check is a pure prediction — its entire input (transcript/story, lesson, "
@@ -109,6 +107,20 @@ _VERIFY_POLICY = AgentPolicy(
     adapter_sql_pipe=False,
     raw_reads=False,
     read_roots=(),
+    deny_reason=_VERIFY_DENY_REASON,
+)
+
+
+# The forward-check's AgentDefinition (#538): TOOL-FREE (``tools=ToolSet()`` — the build site
+# registers nothing, so there is no ``read_file`` to peek at the SOURCE run's ``source_refs.yaml``
+# answer key). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each check
+# re-binds its own per-call model/effort in ``build_stage_agent``. Collected into
+# ``runtime.agents.AGENTS``.
+VERIFY_DEF = AgentDefinition(
+    role=AgentRole.VERIFIER,
+    model=lambda: VERIFIER_MODEL,
+    effort=VERIFIER_EFFORT,
+    tools=ToolSet(),
     deny_reason=_VERIFY_DENY_REASON,
 )
 

@@ -20,6 +20,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import permission, tools  # noqa: E402
+from defender.runtime.agent_definition import ToolSet  # noqa: E402
 
 CAP = tools._read_char_cap()
 
@@ -98,7 +99,7 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
         return ModelResponse(parts=[TextPart("done")])
 
     agent = Agent(deps_type=tools.AgentDeps)
-    tools.register_tools(agent)
+    tools.register_tools(agent, ToolSet(read=True))  # the test exercises read_file only
     deps = tools.AgentDeps(
         run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt,
         policy=permission.policy_for("main", run_dir=run_dir, defender_dir=_DEFENDER),

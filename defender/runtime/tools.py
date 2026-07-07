@@ -26,6 +26,7 @@ from pydantic_ai.exceptions import ModelRetry
 from defender._io import append_jsonl
 from . import bash_exec
 from . import permission
+from .agent_definition import ToolSet
 from .agent_role import AgentRole
 
 # Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
@@ -146,7 +147,13 @@ class GatherDeps(AgentDeps):
     # base (kw_only), built via `permission.policy_for("gather", run_dir=…, defender_dir=…)`
     # at the construction site. A bare `GatherDeps(run_dir, defender_dir, run_id, salt)`
     # is now a construction-time TypeError, not a silent unconfined MAIN/GATHER.
-    lead_id: str = ""
+    #
+    # `lead_id` is the PER-DISPATCH capture id — UNSET (None) until the dispatch stamps it
+    # (#538): `bind(GATHER_DEF, run_dir)` yields a per-run gather deps with `lead_id=None`
+    # (bind is scope-only, no lead param), and the gather dispatch (`register_gather_tool`)
+    # constructs/stamps the real id before any adapter capture runs. The capture path
+    # asserts it is stamped.
+    lead_id: str | None = None
     query_id: str | None = None
 
 
@@ -309,51 +316,50 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     return f"edited {path} ({len(new_text)} bytes)"
 
 
-def register_tools(agent, *, writers: bool = True) -> None:
-    """Register the generic tools on `agent` (deps_type must be AgentDeps).
+def register_tools(agent, tools: ToolSet) -> None:
+    """Register EXACTLY the tools `tools` declares present on `agent` (deps_type must
+    be AgentDeps) — the single toolset-registration site (#538). There is no always-on
+    pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
+    (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
+    main keeps all four. Registration order is fixed — `bash, read_file, write_file,
+    edit_file` — independent of the `ToolSet` field order, so the pinned tool ordering
+    the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
+    (a `BashGrammar()` with no programs still REGISTERS the tool — the gate then denies
+    every command); the file writers are the `tools.write` opt-in (MAIN only)."""
 
-    `writers=True` (the main agent) registers all four: bash, read_file,
-    write_file, edit_file. `writers=False` (the gather subagent) registers only
-    the read-only pair (bash + read_file) — gather's contract is to measure and
-    return a summary, never to author run-dir artifacts, so it gets no file
-    writers at all (the gate would block its investigation.md writes anyway, but
-    not the stray summary.md / gather_summary.md ones; withholding the tools is
-    the clean lane boundary)."""
+    if tools.bash is not None:
+        @agent.tool
+        async def bash(ctx: RunContext[AgentDeps], command: str) -> str:
+            """Run a shell command. Use the `defender-*` shims (defender-invlang,
+            defender-lessons, …) for first-party tooling. Data-source adapters are
+            not runnable from the main loop — dispatch gather instead."""
+            return _tool_bash(ctx.deps, command)
 
-    @agent.tool
-    async def bash(ctx: RunContext[AgentDeps], command: str) -> str:
-        """Run a shell command. Use the `defender-*` shims (defender-invlang,
-        defender-lessons, …) for first-party tooling. Data-source adapters are
-        not runnable from the main loop — dispatch gather instead."""
-        return _tool_bash(ctx.deps, command)
+    if tools.read:
+        @agent.tool
+        async def read_file(
+            ctx: RunContext[AgentDeps], path: str, pattern: str | None = None
+        ) -> str:
+            """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
+            `pattern` to return only the lines containing that substring — the grep
+            fold, for scanning a large file (or when the read-only bash grep/cat
+            viewers are not available to this agent)."""
+            return _tool_read_file(ctx.deps, path, pattern)
 
-    @agent.tool
-    async def read_file(
-        ctx: RunContext[AgentDeps], path: str, pattern: str | None = None
-    ) -> str:
-        """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
-        `pattern` to return only the lines containing that substring — the grep
-        fold, for scanning a large file (or when the read-only bash grep/cat
-        viewers are not available to this agent)."""
-        return _tool_read_file(ctx.deps, path, pattern)
+    if tools.write:
+        @agent.tool
+        async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
+            """Write a file in the run dir (investigation.md, report.md). Writes of
+            investigation.md are validated against the invlang schema."""
+            return _tool_write_file(ctx.deps, path, content)
 
-    # Gather stops here: read-only surface (bash + read_file), no file writers.
-    if not writers:
-        return
-
-    @agent.tool
-    async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
-        """Write a file in the run dir (investigation.md, report.md). Writes of
-        investigation.md are validated against the invlang schema."""
-        return _tool_write_file(ctx.deps, path, content)
-
-    @agent.tool
-    async def edit_file(
-        ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
-    ) -> str:
-        """Replace the first occurrence of old_string with new_string in a run-dir
-        file. The resulting full text is validated (invlang for investigation.md)."""
-        return _tool_edit_file(ctx.deps, path, old_string, new_string)
+        @agent.tool
+        async def edit_file(
+            ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
+        ) -> str:
+            """Replace the first occurrence of old_string with new_string in a run-dir
+            file. The resulting full text is validated (invlang for investigation.md)."""
+            return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
 
 # --- gather dispatch & in-process adapter capture ----------------------------

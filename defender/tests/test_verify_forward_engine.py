@@ -119,8 +119,9 @@ def test_verify_agent_is_read_only_no_writers():
         )
     finally:
         logger.close()
-    # read-only: the verifier calls no tools at all, but the shared build always registers these
-    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
+    # #538: the verifier is TOOL-FREE — VERIFY_DEF registers an empty ToolSet(), so there is no
+    # read_file to peek at the source run's source_refs.yaml answer key (nor any bash).
+    assert list(agent._function_toolset.tools) == []
 
 
 def test_build_verify_agent_applies_glm_effort(monkeypatch):

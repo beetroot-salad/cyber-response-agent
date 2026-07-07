@@ -19,8 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from defender.learning.core.config import JUDGE_EFFORT, JUDGE_MODEL
 from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
+from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
@@ -116,17 +118,32 @@ def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | N
     )
 
 
+# The judge's AgentDefinition (#538). The judge genuinely USES its tools — path-gated ``jq`` over the
+# comparison files + ``gather_raw`` payloads, and ``read_file`` for everything else — so ``tools`` keeps
+# the read + bash pair, with ``jq_operand_gated`` marking its ``jq``-only bash lane (the per-run read
+# roots + benign closed-ticket pin ride the ``RunScope`` at bind, not this static def). ``model``/
+# ``effort`` are the declarative stage defaults (glm-5.2 @ medium); each direction leg re-binds its
+# own per-call model/effort in ``build_stage_agent``.
+JUDGE_DEF = AgentDefinition(
+    role=AgentRole.JUDGE,
+    model=lambda: JUDGE_MODEL,
+    effort=JUDGE_EFFORT,
+    tools=ToolSet(read=True, bash=BashGrammar(jq_operand_gated=True)),
+    deny_reason=_JUDGE_DENY_REASON,
+)
+
+
 def build_judge_agent(
     prompt_path: Path, model: str, effort: str,
     logger: observe.RequestLogger, agent_id: str,
     *, make_model: MakeModel = providers.build_for_effort,
 ) -> Agent[JudgeDeps, str]:
     """The judge's named build seam — a THIN DELEGATE to the shared ``build_stage_agent``
-    (which wraps the single construction site ``build_agent_core``, #493). ``writers=False``
-    → the bash + read_file pair only (no writers, no gather dispatch). Its effort is
-    per-DIRECTION-LEG config (not role-keyed), so the two legs can run concurrently at
-    different efforts — the reason the judge builds its own spec rather than going through
-    ``spec_for_role``. ``make_model`` is the DI seam tests use to inject a FunctionModel."""
+    (which wraps the single construction site ``build_agent_core``, #493/#538). The toolset comes
+    from ``JUDGE_DEF`` (read + the ``jq``-only bash lane; no writers, no gather dispatch). Its
+    effort is per-DIRECTION-LEG config (not role-keyed), so the two legs can run concurrently at
+    different efforts — re-bound onto the def per call. ``make_model`` is the DI seam tests use to
+    inject a FunctionModel."""
     return build_stage_agent(
         JudgeDeps, prompt_path, model, effort, logger, agent_id, make_model=make_model,
     )

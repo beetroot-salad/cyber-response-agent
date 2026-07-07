@@ -94,7 +94,7 @@ class OpenAICompatProvider:
         # bad reasoning_effort to the API — nor, on an empty string, drop the cost cap.
         effort = env_str(env, default, choices=_REASONING_EFFORT_CHOICES)
         # Normalize the `default` sentinel to None — the single canonical OMIT spelling
-        # (#495), so only one omit value (None) ever reaches AgentSpec.effort. The
+        # (#495), so only one omit value (None) ever reaches an AgentDefinition's effort. The
         # EXPLICIT `none` (reasoning disabled — the gather default) is distinct and
         # survives verbatim: a set knob, not an absent one.
         return None if effort == "default" else effort

@@ -18,6 +18,7 @@ import.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,7 @@ from defender.learning.core.config import (
     _log,
 )
 from defender.runtime import observe, providers
-from defender.runtime.driver import AgentSpec, MakeModel, build_agent_core
+from defender.runtime.driver import MakeModel, build_agent_core
 from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
@@ -38,7 +39,7 @@ from pydantic_ai.usage import UsageLimits
 
 
 def build_stage_agent(
-    deps_type: type,
+    deps_type: type[AgentDeps],
     prompt_path: Path,
     model: str,
     effort: str | None,
@@ -46,19 +47,25 @@ def build_stage_agent(
     label: str,
     *,
     make_model: MakeModel = providers.build_for_effort,
-    writers: bool = False,
 ) -> Agent[Any, str]:
     """Build one in-process stage agent — a THIN WRAPPER over the shared ``build_agent_core``
-    (the single agent-construction site, #493). Every in-process learning stage is just
-    another read-only PydanticAI agent: an ``AgentSpec`` (``writers`` gates the file writers;
-    the model by name + its per-leg ``effort``), the stage's system prompt, and the shared
-    budget/observability hooks ``build_agent_core`` wires. ``effort`` is per-call config (not
-    role-keyed), so two legs of a stage can run concurrently at different efforts. ``make_model``
-    is the DI seam tests use to inject a FunctionModel; production uses
-    ``providers.build_for_effort`` (Anthropic ``anthropic_effort`` / Fireworks
-    ``reasoning_effort``)."""
+    (the single agent-construction site, #493/#538). The stage's TOOLSET comes from its
+    ``AgentDefinition`` (looked up by ``deps_type.role`` in ``agents.AGENTS`` — the single
+    source of truth), so the judge/actor register the read + bash pair while the
+    pure-prediction oracle/verify register NOTHING (#538); this stage's per-run ``model`` +
+    ``effort`` are re-bound onto that def. ``effort`` is per-call config (not role-keyed), so
+    two legs of a stage can run concurrently at different efforts. ``make_model`` is the DI
+    seam tests use to inject a FunctionModel; production uses ``providers.build_for_effort``
+    (Anthropic ``anthropic_effort`` / Fireworks ``reasoning_effort``).
+
+    ``AGENTS`` is imported LAZILY here (not at module top) to keep the shared-harness ↔
+    registry edge off the import graph — ``agents`` pulls the stage engine modules, which
+    import this harness."""
+    from defender.runtime.agents import AGENTS
+
+    defn = replace(AGENTS[deps_type.role], model=lambda: model, effort=effort)
     return build_agent_core(
-        AgentSpec(model=model, effort=effort, writers=writers),
+        defn,
         deps_type=deps_type,
         instructions=prompt_path.read_text(),
         logger=logger,
@@ -91,7 +98,6 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     deps: AgentDeps,
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
-    writers: bool = False,
     wall_clock_timeout: int = SUBAGENT_TIMEOUT,
 ) -> str:
     """Run one in-process stage to completion and return its model's final text VERBATIM.
@@ -119,7 +125,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
         try:
             agent = build_stage_agent(
                 type(deps), prompt_path, model, effort, logger, label,
-                make_model=make_model, writers=writers,
+                make_model=make_model,
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
