@@ -841,12 +841,16 @@ def test_request_limit_reject_below_one(logger, tmp_path):
 def test_agentspec_removed_migrated():
     """AgentSpec is removed: no residual construction site under defender/ (production + tests
     migrated); build_agent_core accepts an AgentDefinition and derives writers from tools.write,
-    so its former callers still build their agents. Observed by walking the source tree."""
+    so its former callers still build their agents. Observed by walking the SOURCE tree — the
+    installed venv is skipped: `defender/.venv/**/site-packages` is third-party code, and
+    pydantic_ai ships its OWN unrelated `AgentSpec` (`pydantic_ai/agent/spec.py`), so scanning it
+    would false-positive on CI (where `.venv` sits under `defender/`); it is not our source, the
+    same reason `__pycache__` is skipped."""
     needle = "AgentSpec" "("   # split so this test file itself never matches
     this = Path(__file__).resolve()
     hits = []
     for py in PATHS.defender_dir.rglob("*.py"):
-        if py.resolve() == this or "__pycache__" in py.parts:
+        if py.resolve() == this or "__pycache__" in py.parts or ".venv" in py.parts:
             continue
         if needle in py.read_text(encoding="utf-8", errors="ignore"):
             hits.append(str(py))
