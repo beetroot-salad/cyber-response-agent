@@ -117,13 +117,18 @@ class AgentDeps:
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
     @classmethod
-    def _for_run(cls, run_dir: Path, policy: permission.AgentPolicy) -> Self:
-        """Build a per-run deps of this subtype: wire the identity fields (defender_dir
-        via the `PATHS` primitive — one owner of the `<repo>/defender` offset — run_id as
-        the run dir's basename, a fresh salt) and stamp the caller's `policy`. The shared
-        spine behind each subtype's `for_scope`."""
+    def _for_run(
+        cls, run_dir: Path, policy: permission.AgentPolicy,
+        *, defender_dir: Path = PATHS.defender_dir,
+    ) -> Self:
+        """Build a per-run deps of this subtype: wire the identity fields (run_id as the
+        run dir's basename, a fresh salt) and stamp the caller's `policy`. The shared spine
+        behind each subtype's `for_scope`. `defender_dir` defaults to the `PATHS` primitive
+        (the MAIN checkout's `<repo>/defender` — the read-only predictors + main loop), but
+        a writer that edits a throwaway git WORKTREE (the lead author) overrides it with its
+        worktree `<wt>/defender` so the gate resolves reads/writes against the right tree."""
         return cls(
-            run_dir=run_dir, defender_dir=PATHS.defender_dir,
+            run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=uuid.uuid4().hex, policy=policy,
         )
 
@@ -240,6 +245,18 @@ def _grep_lines(text: str, pattern: str) -> str:
     return "\n".join(line for line in text.splitlines() if pattern in line)
 
 
+def _resolve_operand(deps: AgentDeps, path: str) -> Path:
+    """Resolve a file-tool operand against the agent's repo root (`deps.defender_dir.parent`),
+    matching the bash lane's cwd (`_tool_bash` runs the executor at `deps.defender_dir.parent`).
+    A repo-relative operand — the lead-author writer's handoff paths (`defender/skills/…`) —
+    then lands in the agent's own tree (its worktree), not the ambient process cwd; an absolute
+    operand is unchanged (the read-only stages + the main loop pass absolute run-dir paths, so
+    this is inert for them). Closes the file-vs-bash resolution differential the bash lane never
+    had — the gate still `resolve()`s the result, so a `..` escape past the confine is still denied."""
+    p = Path(path)
+    return p if p.is_absolute() else deps.defender_dir.parent / p
+
+
 def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
     """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
     untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
@@ -247,13 +264,13 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     existence oracle. An optional `pattern` folds grep into the read (return only
     the matching lines): search never widens the read surface — the confine gates
     the PATH before any scan — so a `pattern` over a denied path still raises."""
+    p = _resolve_operand(deps, path)
     decision = permission.decide_read(
-        Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         policy=deps.policy,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p = Path(path)
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
@@ -274,20 +291,41 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
 
 
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
-    """Logic for the `write_file` tool: a validated run-dir write."""
-    decision = permission.decide_write(
-        Path(path), content, run_dir=deps.run_dir
-    )
+    """Logic for the `write_file` tool: a validated write against the policy's
+    `write_allow` (the agent's declared paths — the main loop's run dir, the
+    lead-author writer's `defender/skills/**.md` corpus)."""
+    p = _resolve_operand(deps, path)
+    decision = permission.decide_write(p, content, policy=deps.policy)
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    Path(path).write_text(content)
+    # Mirror Claude Code's Write (which the claude -p stages used): create missing
+    # parent dirs so a write into a not-yet-existing corpus subtree (the lead author
+    # promoting/lifting into a new system dir) succeeds instead of raising an uncaught
+    # FileNotFoundError — which run_stage maps to RunUnprocessable, quarantining the
+    # whole run and discarding every valid in-tree edit already made. The gate ran
+    # first, so we only ever mkdir under an allowed (write_allow) path.
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content)
     return f"wrote {path} ({len(content)} bytes)"
 
 
 def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str) -> str:
-    """Logic for the `edit_file` tool: the create-only / not-found / non-unique
-    guards, then a validated write."""
-    p = Path(path)
+    """Logic for the `edit_file` tool: gate the READ first, then the create-only /
+    not-found / non-unique guards, then a validated write.
+
+    The read gate (`decide_read`) runs BEFORE `p.read_text()` — parity with `read_file`.
+    Without it, edit_file's differential `ModelRetry`s ("old_string not found" vs "not
+    unique (N)") plus `p.is_file()` would be an existence / substring / occurrence-count
+    oracle over ANY path the process can read (a `.env`, the eval `ground_truth.yaml`),
+    bypassing the read confine + secret denylist that `read_file` enforces. Every path an
+    agent may WRITE it may also READ (write_allow ⊆ read roots), so this denies no legit
+    edit — it only closes the probe of files outside the agent's read surface."""
+    p = _resolve_operand(deps, path)
+    read_decision = permission.decide_read(
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
+    )
+    if not read_decision.allow:
+        raise ModelRetry(read_decision.reason)
     current = p.read_text() if p.is_file() else ""
     if not old_string and p.is_file():
         # Empty old_string against an existing file would replace the WHOLE
@@ -309,9 +347,14 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
             "one, or use write_file to replace the whole file."
         )
     new_text = current.replace(old_string, new_string, 1) if old_string else new_string
-    decision = permission.decide_write(p, new_text, run_dir=deps.run_dir)
+    decision = permission.decide_write(p, new_text, policy=deps.policy)
     if not decision.allow:
         raise ModelRetry(decision.reason)
+    # Create-into-a-new-subtree parity with write_file (and Claude Code's Edit): mkdir
+    # the parents of an approved path so a create edit into a fresh dir doesn't raise an
+    # uncaught FileNotFoundError that quarantines the run. No-op on the common in-place
+    # edit (parent already exists); only runs after the gate approved the path.
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(new_text)
     return f"edited {path} ({len(new_text)} bytes)"
 

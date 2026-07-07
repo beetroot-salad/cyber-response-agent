@@ -841,21 +841,32 @@ def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path):
     assert pending == []
 
 
-def test_invoke_agent_includes_pending_drafts_in_prompt(
-    run_dir: Path, monkeypatch
-):
-    """User prompt must carry the new pending_system_drafts section."""
-    captured: dict = {}
+def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
+    """Patch the in-process engine seam the spawn spine calls (the GLM port replaced the old
+    ``invoke_claude_print_raw`` capture). ``_spawn_author_agent`` looks up ``run_author_stage`` on
+    the engine module at call time, so patching the module attr is seen. Captures the kwargs the
+    spawn forwards to the engine + returns a canned rc / raises."""
+    from defender.learning.leads import lead_author_engine  # the port target
 
-    # invoke_agent routes through the shared runner (#373); capture the prompt at
-    # that seam instead of stubbing subprocess.run, which it no longer calls.
-    def _fake_raw(options, user_prompt, log_fn):
-        captured["input"] = user_prompt
-        return 0, ""
+    cap: dict = {}
 
-    monkeypatch.setattr(
-        lead_author._author_runner, "invoke_claude_print_raw", _fake_raw
+    def _fake(**kwargs):
+        cap.update(kwargs)
+        if raise_exc is not None:
+            raise raise_exc
+        return rc
+
+    monkeypatch.setattr(  # lint-monkeypatch: ok — the spawn spine has no DI seam; capture engine kwargs
+        lead_author_engine, "run_author_stage", _fake
     )
+    return cap
+
+
+def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, monkeypatch):
+    """(GLM-port rewrite) invoke_agent no longer spawns ``claude -p`` — it routes to the in-process
+    engine. Assert the handoff envelope reaches the engine as the ``user_prompt`` PAYLOAD (not
+    merely that a rc came back): the whole prompt survives the transport swap."""
+    cap = _capture_engine(monkeypatch)
     handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
                  "executed_template_path": "defender/skills/gather/queries/wazuh/auth-events.md",
                  "neighbors": [], "invocations": []}]
@@ -864,7 +875,7 @@ def test_invoke_agent_includes_pending_drafts_in_prompt(
                 "skill_path": "defender/skills/elastic/SKILL.md"}]
     rc = lead_author.invoke_agent(run_dir, handoffs, pending)
     assert rc == 0
-    prompt = captured["input"]
+    prompt = cap["user_prompt"]
     assert "executed_template_handoffs (1)" in prompt
     assert "pending_system_drafts (1)" in prompt
     assert "elastic/_draft/falco-na.md" in prompt
@@ -1056,53 +1067,42 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
 
 
 # ---------------------------------------------------------------------------
-# invoke fold — the per-run invoke_agent spawn wiring: it maps a RunnerError to rc 124
-# and passes a non-124 rc through unchanged. (The pitfalls spawn's mirror of these —
-# _invoke_pitfalls_agent — now lives in test_pitfalls_curator.py, #513.)
+# invoke fold — the per-run invoke_agent spawn wiring (GLM port): it hands the in-process
+# engine the prompt / batch id / repo_root / run_dir trace anchor, passes a per-run rc
+# through, and lets a systemic config fault PROPAGATE (F1). RunnerOptions/allowlist-string
+# are gone. (The pitfalls spawn's mirror lives in test_pitfalls_curator.py, #513.)
 # ---------------------------------------------------------------------------
 
 
-def _capture_invoke(monkeypatch, *, rc: int = 0, text: str = "", raise_exc=None):
-    """Patch the shared-runner seam (the same file+target as
-    test_invoke_agent_includes_pending_drafts_in_prompt — already baselined) and
-    capture the RunnerOptions + user_prompt the invoke wrapper built."""
-    cap: dict = {}
-
-    def _fake_raw(options, user_prompt, log_fn):
-        cap["options"] = options
-        cap["prompt"] = user_prompt
-        if raise_exc is not None:
-            raise raise_exc
-        return rc, text
-
-    monkeypatch.setattr(
-        lead_author._author_runner, "invoke_claude_print_raw", _fake_raw
-    )
-    return cap
-
-
-def test_invoke_agent_options_wired(run_dir: Path, tmp_path: Path, monkeypatch):
-    """RunnerOptions for the per-run spawn: the lead-author prompt file, the run-dir-
-    named batch id, and cwd at the injected repo_root (distinguishing it from pitfalls)."""
-    cap = _capture_invoke(monkeypatch)
+def test_invoke_agent_wires_engine_kwargs(run_dir: Path, tmp_path: Path, monkeypatch):
+    """(rewrite of the RunnerOptions options-wiring) The spawn hands the engine the lead-author
+    prompt, the run-dir-named batch id, the injected repo_root (distinguishing it from the
+    pitfalls spawn), and the run_dir as the learning trace anchor. The model/effort/request_limit
+    default INSIDE run_author_stage from config (pinned in test_lead_author_engine), so they are
+    not forwarded here — only the per-spawn wiring is."""
+    cap = _capture_engine(monkeypatch)
     lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
-    opt = cap["options"]
-    assert opt.system_prompt_file == lead_author.LEAD_AUTHOR_PROMPT
-    assert opt.batch_id == run_dir.name
-    assert opt.cwd == tmp_path
-    assert opt.result_marker is None
+    assert cap["system_prompt_file"] == lead_author.LEAD_AUTHOR_PROMPT
+    assert cap["batch_id"] == run_dir.name
+    assert cap["repo_root"] == tmp_path
+    assert cap["learning_run_dir"] == run_dir
 
 
-def test_invoke_agent_runner_error_maps_to_124(run_dir: Path, tmp_path: Path, monkeypatch):
-    """A RunnerError (spawn/timeout) from the shared runner → invoke_agent returns 124."""
-    _capture_invoke(monkeypatch, raise_exc=lead_author._author_runner.RunnerError("boom"))
+def test_invoke_agent_config_fault_propagates(run_dir: Path, tmp_path: Path, monkeypatch):
+    """(replaces runner-error-maps-to-124) F1: a systemic FatalConfigError from the engine
+    PROPAGATES through invoke_agent — it is NOT swallowed into an rc, so a deployment-wide
+    misconfig fails loudly instead of quarantining every marker."""
+    from defender.learning.core.config import FatalConfigError
+    _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
+    with pytest.raises(FatalConfigError):
+        lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
+
+
+def test_invoke_agent_passes_through_engine_rc(run_dir: Path, tmp_path: Path, monkeypatch):
+    """A per-run rc from the engine (124 from a RunUnprocessable inside run_author_stage) is
+    returned unchanged — the caller then maps rc != 0 → 2 → drain quarantine."""
+    _capture_engine(monkeypatch, rc=124)
     assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 124
-
-
-def test_invoke_agent_passes_through_nonzero_rc(run_dir: Path, tmp_path: Path, monkeypatch):
-    """A non-124 non-zero rc from the runner is returned unchanged (not remapped)."""
-    _capture_invoke(monkeypatch, rc=2)
-    assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 2
 
 
 # ---------------------------------------------------------------------------

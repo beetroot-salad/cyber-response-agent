@@ -2,12 +2,14 @@
 
 Both return a plain `Decision`. Reads must resolve inside the run dir or the
 defender corpus (with a belt-and-suspenders secret/ground-truth denylist on top);
-writes must stay inside the run dir, and an `investigation.md` write must pass the
-structural invlang validator. `is_untrusted_read` flags attacker-influenced data
-the caller must tag-wrap."""
+writes must `fullmatch` one of the agent's `policy.write_allow` patterns (its
+declared paths — a flat, deny-by-default allowlist), and an `investigation.md`
+write must additionally pass the structural invlang validator. `is_untrusted_read`
+flags attacker-influenced data the caller must tag-wrap."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from defender.hooks.block_main_loop_raw_access import RAW_DENY_REASON, RAW_MARKER
@@ -53,6 +55,19 @@ def _resolved_read_roots(
     return tuple(
         r.resolve() for r in (Path(run_dir), *base, *policy.read_roots)
     )
+
+
+def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
+    """Build one `AgentPolicy.write_allow` pattern admitting `root` itself and everything
+    under it — optionally only paths whose basename ends `suffix` (a `re`-escaped literal,
+    e.g. `".md"`). `decide_write` `fullmatch`es this against the RESOLVED operand, so `root`
+    is `resolve()`d here to align the two, and a `..` in the operand is collapsed before the
+    match (a subtree, not a string prefix — `<root>-evil/x` can't match either). The write
+    twin of the bash lane's baked reader anchors (`policies._common`), used by every writer's
+    policy (`policies.main`, `lead_author_engine`) so the flat allowlist has one builder."""
+    base = re.escape(str(root.resolve()))
+    tail = r"/[^\x00]*" + re.escape(suffix) if suffix else r"(?:/[^\x00]*)?"
+    return re.compile(base + tail)
 
 
 def read_allowed_path(
@@ -140,9 +155,16 @@ def is_untrusted_read(path: Path) -> bool:
     return p.name == "alert.json" or RAW_MARKER in str(p)
 
 
-def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
-    """Allow/deny a write of `proposed_text` to `path`, porting the
-    `Write(<run_dir>/**)` path allow + `invlang_validate`.
+def decide_write(
+    path: Path, proposed_text: str, *, policy: AgentPolicy
+) -> Decision:
+    """Allow/deny a write of `proposed_text` to `path` — a **flat, deny-by-default allowlist**
+    (the write twin of `bash_allow`): the RESOLVED path must `fullmatch` one of the agent's
+    `policy.write_allow` patterns (the specific paths it declares it may author — the main
+    loop's run-dir subtree, the lead author's `defender/skills/**.md`). Empty `write_allow`
+    (every read-only / predictor stage) denies all writes. `resolve()` collapses `..`/symlinks
+    before the match so a pattern is a true path set, not a string prefix an operand can escape;
+    a `resolve()` error (a symlink cycle) FAILS CLOSED rather than propagating out of the gate.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);
@@ -150,12 +172,15 @@ def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
     invlang — the in-process equivalent of the hook's exit-2 feedback.
     """
     path = Path(path)
-    run_dir = Path(run_dir).resolve()
-    if not _is_within(path.resolve(), run_dir):
+    try:
+        rp = path.resolve()
+    except (OSError, RuntimeError):
+        return Decision(False, f"Blocked: {path} could not be resolved (failing closed).")
+    if not any(pat.fullmatch(str(rp)) for pat in policy.write_allow):
         return Decision(
             False,
-            f"Blocked: writes must stay inside the run dir ({run_dir}); "
-            f"{path} is outside it.",
+            "Blocked: writes are limited to this agent's declared paths "
+            f"(its write allowlist); {path} is not one of them.",
         )
 
     if path.name == "investigation.md":

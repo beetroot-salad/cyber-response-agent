@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 from defender._paths import PATHS
 
 from .agent_role import AgentRole
-from .permission import AgentPolicy
+from .permission import AgentPolicy, build_write_allow
 from .permission.policies._common import reader_patterns
 
 if TYPE_CHECKING:
@@ -222,9 +222,11 @@ def compile_policy(
     A genuine projection: the capability bits come straight off the grammar (a bit is
     set only when its source bit is), ``raw_reads`` is derived (an agent that runs
     adapters or path-gated ``jq`` reads ``gather_raw``; main/actor/oracle/verify do not),
-    and the read roots/confine come from the scope. STEP ONE reproduces today's per-
-    agent policy field-for-field, so the gate is unchanged; ``read_shapes`` filtering is
-    the #535-deferred half (the field is carried, not yet consumed here)."""
+    ``write_allow`` is the run-dir write subtree when the ToolSet grants writers (main —
+    the #543 write gate; the read-only stages get none), and the read roots/confine come
+    from the scope. STEP ONE reproduces today's per-agent policy field-for-field, so the
+    gate is unchanged; ``read_shapes`` filtering is the #535-deferred half (the field is
+    carried, not yet consumed here)."""
     bash = tools.bash
     if bash is None:
         adapters = adapter_sql_pipe = jq_gated = False
@@ -242,6 +244,7 @@ def compile_policy(
         raw_reads=adapters or adapter_sql_pipe or jq_gated,
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
+        write_allow=(build_write_allow(roots.run_dir),) if tools.write else (),
         deny_reason=deny_reason,
     )
 

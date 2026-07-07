@@ -16,6 +16,7 @@ role→toolset lookup) import it here."""
 from __future__ import annotations
 
 from defender.learning.author.verify_forward.engine import VERIFY_DEF
+from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.learning.pipeline.actor_engine import ACTOR_DEF
 from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
 from defender.learning.pipeline.oracle_engine import ORACLE_DEF
@@ -26,7 +27,7 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 # One entry per AgentRole; ``build_registry`` raises on a duplicate role rather than the
 # dict-comp's silent last-wins, so a copy-paste that reuses a role fails loud here.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
-    (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF)
+    (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF)
 )
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "AGENTS",
     "GATHER_DEF",
     "JUDGE_DEF",
+    "LEAD_AUTHOR_DEF",
     "MAIN_DEF",
     "ORACLE_DEF",
     "VERIFY_DEF",

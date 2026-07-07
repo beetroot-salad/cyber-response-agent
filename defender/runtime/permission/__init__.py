@@ -31,7 +31,7 @@ from .bash import (
     policy_for,
 )
 from .decision import Decision
-from .files import decide_read, decide_write, is_untrusted_read
+from .files import build_write_allow, decide_read, decide_write, is_untrusted_read
 from .policies.gather import GATHER_FALLTHROUGH_DENY_REASON
 from .policies.main import FALLTHROUGH_DENY_REASON
 from .policy import AgentPolicy
@@ -43,6 +43,7 @@ __all__ = [
     "AgentPolicy",
     "BashDecision",
     "Decision",
+    "build_write_allow",
     "command_shape",
     "decide_bash",
     "decide_read",

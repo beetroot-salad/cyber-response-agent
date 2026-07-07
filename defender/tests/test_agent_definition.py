@@ -656,16 +656,15 @@ def test_corpus_dirs_excludes_gather_summaries(tmp_path):
 # AGENTS registry (R2) + duplicate-role guard
 # ============================================================================
 
-def test_agents_six_distinct():
-    """AGENTS has exactly 6 entries, set(AGENTS.keys()) == set(AgentRole), and every value is
-    an AgentDefinition keyed on its own role — no silent last-wins drop. (enum member is
-    VERIFIER; the def keys on AgentRole.VERIFIER.)"""
-    assert len(AGENTS) == 6
+def test_agents_registry_covers_every_role():
+    """AGENTS covers EXACTLY the AgentRole members (one AgentDefinition each, keyed on its own
+    role — no silent last-wins drop). The spec forked at 6 roles; the #543 merge added a 7th,
+    AgentRole.LEAD_AUTHOR (the loop's first writer), which is folded into the registry — so the
+    invariant is `set(AGENTS.keys()) == set(AgentRole)`, and the count tracks the enum rather than
+    a hardcoded 6."""
     assert set(AGENTS.keys()) == set(AgentRole)
-    assert set(AGENTS.keys()) == {
-        AgentRole.MAIN, AgentRole.GATHER, AgentRole.JUDGE,
-        AgentRole.ACTOR, AgentRole.ORACLE, AgentRole.VERIFIER,
-    }
+    assert len(AGENTS) == len(AgentRole)
+    assert AgentRole.LEAD_AUTHOR in AGENTS      # the #543 writer, brought into the AgentDefinition framework
     for role, d in AGENTS.items():
         assert isinstance(d, AgentDefinition)
         assert d.role is role

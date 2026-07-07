@@ -32,7 +32,6 @@ from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.learning.core import config, persist  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-from defender.learning.author import runner as _author_runner  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
@@ -247,37 +246,37 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Pat
 # ---------------------------------------------------------------------------
 
 
-def _capture_invoke(monkeypatch, *, rc: int = 0, text: str = "", raise_exc=None):
-    """Patch the shared-runner seam and capture the RunnerOptions + user_prompt the
-    invoke wrapper built. Patches the canonical ``author.runner`` module object, so the
-    capture is seen no matter which module the shared spawn spine lands in — every
-    caller's ``_author_runner`` alias is the same module object, and the spine looks up
-    ``invoke_claude_print_raw`` on it at call time."""
+def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
+    """Patch the in-process engine seam the shared spawn spine calls (the GLM port replaced the
+    ``invoke_claude_print_raw`` capture). ``_spawn_author_agent`` looks up ``run_author_stage`` on
+    the engine module at call time, so patching the module attr is seen regardless of where the
+    spine lands. Captures the kwargs the pitfalls spawn forwards + returns a canned rc / raises."""
+    from defender.learning.leads import lead_author_engine  # the port target
+
     cap: dict = {}
 
-    def _fake_raw(options, user_prompt, log_fn):
-        cap["options"] = options
-        cap["prompt"] = user_prompt
+    def _fake(**kwargs):
+        cap.update(kwargs)
         if raise_exc is not None:
             raise raise_exc
-        return rc, text
+        return rc
 
-    monkeypatch.setattr(  # lint-monkeypatch: ok — the spawn has no DI seam; capture RunnerOptions at the runner
-        _author_runner, "invoke_claude_print_raw", _fake_raw
+    monkeypatch.setattr(  # lint-monkeypatch: ok — the shared spawn spine has no DI seam
+        lead_author_engine, "run_author_stage", _fake
     )
     return cap
 
 
-def test_invoke_pitfalls_agent_prompt_content(tmp_path: Path, monkeypatch):
-    """The pitfalls prompt carries skills_dir + pitfalls_handoffs and NONE of the
-    per-run keys (run_dir / catalog_dir / executed_template_handoffs)."""
-    cap = _capture_invoke(monkeypatch)
+def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch):
+    """The pitfalls prompt (skills_dir + pitfalls_handoffs, and NONE of the per-run keys) reaches
+    the in-process engine as the ``user_prompt`` payload."""
+    cap = _capture_engine(monkeypatch)
     handoffs = [{"system": "elastic",
                  "execution_md_path": "defender/skills/elastic/execution.md",
                  "failures": []}]
     rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
     assert rc == 0
-    prompt = cap["prompt"]
+    prompt = cap["user_prompt"]
     assert "pitfalls_handoffs (1)" in prompt
     assert "skills_dir: defender/skills/" in prompt
     assert "run_dir" not in prompt
@@ -285,41 +284,33 @@ def test_invoke_pitfalls_agent_prompt_content(tmp_path: Path, monkeypatch):
     assert "executed_template_handoffs" not in prompt
 
 
-def test_invoke_pitfalls_agent_options_wired(tmp_path: Path, monkeypatch):
-    """RunnerOptions for the pitfalls spawn: the pitfalls prompt file, the 'pitfalls'
-    batch id, cwd at the injected repo_root, and the shared model/timeout/allowlist.
-
-    Model + timeout are asserted against their canonical ``config`` source and the
-    allowlist against its literal protocol string, so the assertion is decoupled from
-    wherever the shared spawn spine (and its constants) land post-move (#513)."""
-    cap = _capture_invoke(monkeypatch)
+def test_invoke_pitfalls_agent_wires_engine_kwargs_and_pending_anchor(tmp_path: Path, monkeypatch):
+    """(rewrite of the RunnerOptions/allowlist-string options-wiring — both are gone) The engine
+    gets the pitfalls prompt, the 'pitfalls' batch id, and the injected repo_root. F4: the pitfalls
+    curator has NO per-run dir, so its learning trace anchors at PENDING_DIR (the stable cross-run
+    queue dir), not a synthesized run dir. Model/effort/request_limit default inside
+    run_author_stage (pinned in test_lead_author_engine)."""
+    cap = _capture_engine(monkeypatch)
     pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path)
-    opt = cap["options"]
-    assert opt.system_prompt_file == pitfalls_curator.LEAD_PITFALLS_PROMPT
-    assert opt.batch_id == "pitfalls"
-    assert opt.cwd == tmp_path
-    assert opt.result_marker is None
-    assert opt.effort is None
-    assert opt.model == config.LEAD_AUTHOR_MODEL
-    assert opt.timeout_seconds == config.LEAD_AUTHOR_TIMEOUT
-    assert opt.allowed_tools == (
-        "Read,Glob,Grep,"
-        "Edit(defender/skills/**),"
-        "Write(defender/skills/**),"
-        "Bash(rm defender/skills/:*)"
-    )
+    assert cap["system_prompt_file"] == pitfalls_curator.LEAD_PITFALLS_PROMPT
+    assert cap["batch_id"] == "pitfalls"
+    assert cap["repo_root"] == tmp_path
+    assert cap["learning_run_dir"] == config.DEFAULT_PATHS.lead_pending_dir
 
 
-def test_invoke_pitfalls_agent_runner_error_maps_to_124(tmp_path: Path, monkeypatch):
-    """A RunnerError (spawn/timeout) from the shared runner → the pitfalls spawn returns 124."""
-    _capture_invoke(monkeypatch, raise_exc=_author_runner.RunnerError("boom"))
+def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypatch):
+    """F1: a systemic config fault from the engine PROPAGATES through the pitfalls spawn too —
+    not swallowed into an rc."""
+    from defender.learning.core.config import FatalConfigError
+    _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
+    with pytest.raises(FatalConfigError):
+        pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path)
+
+
+def test_invoke_pitfalls_agent_passes_through_engine_rc(tmp_path: Path, monkeypatch):
+    """A per-run rc (124 from a RunUnprocessable inside the engine) is returned unchanged."""
+    _capture_engine(monkeypatch, rc=124)
     assert pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path) == 124
-
-
-def test_invoke_pitfalls_agent_passes_through_nonzero_rc(tmp_path: Path, monkeypatch):
-    """A non-124 non-zero rc from the runner is returned unchanged (not remapped)."""
-    _capture_invoke(monkeypatch, rc=2)
-    assert pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path) == 2
 
 
 # ---------------------------------------------------------------------------
