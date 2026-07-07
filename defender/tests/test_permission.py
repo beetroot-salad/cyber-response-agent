@@ -15,12 +15,17 @@ import pytest
 # `defender.*` namespace imports resolve.
 from defender.runtime import permission
 
-# The gate is policy-driven (it keys on an AgentPolicy, not a role): a runtime
-# agent's policy comes from bash_policy.json via policy_for. These two constants are
-# the byte-identical regression net for the MAIN/GATHER migration — every assertion
-# below that used to pass `policy=MAIN/GATHER` now runs against policy_for.
-MAIN = permission.policy_for("main")
-GATHER = permission.policy_for("gather")
+# The gate is policy-driven (it keys on an AgentPolicy, not a role). Since #535 the
+# runtime-agent factory is PER-RUN — `policy_for(agent, *, run_dir, defender_dir)`
+# bakes the anchored reader roots into the policy's `bash_allow` and RAISES without
+# them (safe-by-construction). These synthetic absolute roots anchor the reader lane;
+# the gate never stats them (only `decide_read` resolves), so they need not exist. The
+# per-run anchored-read behavior itself is specced in test_read_confine_bash.py; here
+# the bash tests exercise shim/adapter/unwrap/redirect shapes against the same policies.
+_RUN = Path("/run")
+_DFN = Path("/dfn")
+MAIN = permission.policy_for("main", run_dir=_RUN, defender_dir=_DFN)
+GATHER = permission.policy_for("gather", run_dir=_RUN, defender_dir=_DFN)
 
 
 # --- bash, main loop -------------------------------------------------------
@@ -28,8 +33,8 @@ GATHER = permission.policy_for("gather")
 @pytest.mark.parametrize("cmd", [
     "defender-invlang enum types",
     "defender-lessons --tags",
-    "tail -1 executed_queries.jsonl | jq '.'",
-    "ls -la",
+    "tail -1 /run/executed_queries.jsonl | jq '.'",   # #535: absolute in-root operand + jq stdin-compute
+    "ls /run",                                         # #535: ls anchored to an in-root dir
     "defender-record-query --lead l-1 --query-id ad-hoc -- defender-elastic query foo",
 ])
 def test_main_loop_allows_safe(cmd):
@@ -69,13 +74,15 @@ def test_gather_denies_compound_with_adapter(cmd):
     assert "standalone" in d.reason
 
 
+# #535: reader operands are anchored + absolute; jq is stdin-compute-only (no file slot).
+# Full anchored-read coverage is in test_read_confine_bash.py — these are in-shape sanity checks.
 @pytest.mark.parametrize("cmd", [
-    "jq '.' gather_raw/l-001/0.json",
+    "cat /run/gather_raw/l-001/0.json | jq '.'",   # jq over stdin, not a file operand
     "defender-invlang enum types",
-    "cat gather_raw/l-001/0.json",
+    "cat /run/gather_raw/l-001/0.json",            # gather reads its own raw, absolute
 ])
 def test_gather_allows_readonly_viewers(cmd):
-    assert permission.decide_bash(cmd, policy=GATHER).allow
+    assert permission.decide_bash(cmd, policy=GATHER, run_dir=_RUN, defender_dir=_DFN).allow
 
 
 @pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
@@ -109,13 +116,13 @@ def test_decision_no_adapter_argv_for_non_standalone(cmd):
 # command substitution outside quotes must still be denied.
 
 @pytest.mark.parametrize("cmd", [
-    # plain jq with comparisons (single-quoted filter, double-quoted literals)
-    '''jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' f.json''',
-    '''jq '[.hosts[] | select(.trust_edges_out | length > 0)]' f.json''',
+    # #535: jq is stdin-compute-only, so the payload is fed via an anchored `cat …`; the point of
+    # this regression stays — `>`/`<` inside the single-quoted filter are comparisons, not redirects.
+    '''cat /run/gather_raw/l-001/0.json | jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' ''',
+    '''cat /run/gather_raw/l-001/0.json | jq '[.hosts[] | select(.trust_edges_out | length > 0)]' ''',
 ])
 def test_gather_allows_quoted_jq_comparisons(cmd):
-    assert permission.decide_bash(cmd, policy=GATHER).allow
-    assert permission.decide_bash(cmd, policy=MAIN).allow
+    assert permission.decide_bash(cmd, policy=GATHER, run_dir=_RUN, defender_dir=_DFN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -186,26 +193,26 @@ def test_bash_script_file_before_c_fails_closed(cmd):
 # wrapping a read-only viewer must STILL be approved in BOTH sessions. Without this,
 # every `bash -c` test is a deny case, so a future over-tightening of unwrap could
 # flip these real commands to deny and the whole suite would stay green.
-@pytest.mark.parametrize("cmd", [
-    "bash -c 'jq .x f.json'",
-    "sh -c 'jq .x f.json'",
-    "timeout 5 bash -c 'jq .x f.json'",   # ... behind a timeout prefix
-    "bash -c 'tail -1 f.json | jq .'",    # a pipeline payload must not be re-quoted
+@pytest.mark.parametrize("cmd", [   # #535: in-shape absolute operands + jq stdin-compute
+    "bash -c 'cat /run/investigation.md'",
+    "sh -c 'cat /run/investigation.md'",
+    "timeout 5 bash -c 'cat /run/investigation.md'",       # ... behind a timeout prefix
+    "bash -c 'tail -1 /run/investigation.md | jq .'",      # a pipeline payload must not be re-quoted
 ])
 def test_inline_bash_c_viewer_still_allowed(cmd):
-    assert permission.decide_bash(cmd, policy=GATHER).allow
-    assert permission.decide_bash(cmd, policy=MAIN).allow
+    assert permission.decide_bash(cmd, policy=GATHER, run_dir=_RUN, defender_dir=_DFN).allow
+    assert permission.decide_bash(cmd, policy=MAIN, run_dir=_RUN, defender_dir=_DFN).allow
 
 
 @pytest.mark.parametrize("cmd", [
     # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
-    # unwrap fix must not quote the `|` or otherwise break the pipeline.
-    "timeout 30 tail -1 f.json | jq '.'",
-    "timeout 5 jq '.x' f.json",
+    # unwrap fix must not quote the `|` or otherwise break the pipeline. (#535: in-shape operands)
+    "timeout 30 tail -1 /run/investigation.md | jq '.'",
+    "timeout 5 cat /run/investigation.md",
 ])
 def test_timeout_prefix_keeps_legit_pipeline(cmd):
-    assert permission.decide_bash(cmd, policy=MAIN).allow
-    assert permission.decide_bash(cmd, policy=GATHER).allow
+    assert permission.decide_bash(cmd, policy=MAIN, run_dir=_RUN, defender_dir=_DFN).allow
+    assert permission.decide_bash(cmd, policy=GATHER, run_dir=_RUN, defender_dir=_DFN).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -336,14 +343,13 @@ def test_gather_drops_find():
 
 
 def test_gather_keeps_compute_and_adapter():
-    # Compute is jq on-disk + the adapter (native ES|QL / defender-sql aggregation);
-    # the residual reduce-by-hand coreutils set (datamash/uniq/cut/…) was removed.
-    for cmd in ("jq '.hits|length' /tmp/p.json",
-                "jq '[.hits[].user]|group_by(.)|map(length)' /tmp/p.json",
-                "defender-elastic query 'x' --raw",
-                "cat /tmp/p.json | defender-sql 'SELECT count(*) FROM data'"):
+    # #535: compute is the adapter (native ES|QL) + defender-sql/jq over an IN-ROOT payload streamed
+    # via an anchored `cat {RUN}/…`; jq is stdin-compute-only and out-of-root /tmp is now denied.
+    for cmd in ("defender-elastic query 'x' --raw",
+                "cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
+                "cat /run/gather_raw/l-001/1.json | jq '.hits|length'"):
         assert permission.decide_bash(
-            cmd, policy=GATHER,
+            cmd, policy=GATHER, run_dir=_RUN, defender_dir=_DFN,
         ).allow, cmd
 
 
