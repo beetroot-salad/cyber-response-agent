@@ -70,12 +70,15 @@ def _ident(run_dir: Path) -> dict:
 
 def _policy_fields(p: AgentPolicy) -> tuple:
     """Stable, cache-independent projection of an AgentPolicy for parity comparison.
-    `bash_allow` holds compiled `re.Pattern`s whose `==` is identity (True across builds
-    only via CPython's re-cache) — compare their SOURCE strings instead."""
+    `bash_allow` / `write_allow` hold compiled `re.Pattern`s whose `==` is identity (True
+    across builds only via CPython's re-cache) — compare their SOURCE strings instead.
+    INCLUDES write_allow (#545 footgun B) so a write-scope divergence projects unequal; the
+    additive read_shapes (the intended #545 delta) stays out of this parity projection."""
     return (
         tuple(pat.pattern for pat in p.bash_allow),
         p.jq_operand_gated, p.adapters, p.adapter_sql_pipe,
-        p.raw_reads, tuple(p.read_roots), tuple(p.read_confine), p.deny_reason,
+        p.raw_reads, tuple(p.read_roots), tuple(p.read_confine),
+        tuple(pat.pattern for pat in p.write_allow), p.deny_reason,
     )
 
 

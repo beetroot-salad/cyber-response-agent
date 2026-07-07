@@ -196,11 +196,14 @@ def _patterns(policy) -> list[str]:
 
 def _policy_fields(p) -> tuple:
     """Stable, cache-independent projection of an AgentPolicy for field-for-field parity
-    (bash_allow's compiled Patterns → their source strings)."""
+    (bash_allow / write_allow compiled Patterns → their source strings). INCLUDES write_allow
+    (#545 footgun B) so a write-scope divergence is caught; the additive read_shapes is the
+    intended #545 delta, tested separately, so it stays out of this parity projection."""
     return (
         tuple(pat.pattern for pat in p.bash_allow),
         p.jq_operand_gated, p.adapters, p.adapter_sql_pipe,
-        p.raw_reads, tuple(p.read_roots), tuple(p.read_confine), p.deny_reason,
+        p.raw_reads, tuple(p.read_roots), tuple(p.read_confine),
+        tuple(pat.pattern for pat in p.write_allow), p.deny_reason,
     )
 
 
@@ -336,8 +339,11 @@ def test_bind_gather_lead_id_channel(tmp_path):
     params = set(inspect.signature(bind).parameters)
     assert "lead_id" not in params
     assert "query_id" not in params
-    # spec-assumption: bind's parameters are exactly {defn, run_dir, scope}.
-    assert params == {"defn", "run_dir", "scope"}
+    # #545 supersedes the #538 step-one 3-param assumption: bind gains the `salt` (decision 1a,
+    # the carried untrusted-data trust token) + `repo_root` (decision 2, the lead-author
+    # worktree) seams. It still carries NO per-dispatch lead_id/query_id — those stay per-run-vs-
+    # per-dispatch separated, stamped by the wrapper post-bind.
+    assert params == {"defn", "run_dir", "scope", "salt", "repo_root"}
     # bind itself leaves the per-dispatch lead_id unset; the wrapper stamps it post-bind.
     deps = bind(GATHER_DEF, tmp_path)
     assert isinstance(deps, GatherDeps)
@@ -581,13 +587,17 @@ def test_compile_policy_projects_only_toolset_bits(tmp_path):
     assert with_adapters.adapters is True
 
 
-def test_gate_decisions_unchanged(tmp_path):
-    """SURVIVAL ANCHOR: for representative probes, decide_bash/decide_read fed the
-    bind(defn,run).policy return the SAME Decision they return fed today's authored policy —
-    'the gate does not change in step one', verified through the REAL gate."""
+def test_gate_bash_parity_read_tightened(tmp_path):
+    """#545 supersedes the #538 step-one 'gate unchanged' anchor: the BASH lane is still
+    field-for-field equal between bind(MAIN).policy and the authored policy_for('main') (the
+    reroute preserves it), but the READ lane is DELIBERATELY tightened — bind ships the
+    read_shapes filename filter (read↔bash parity) while policy_for stays the broad legacy API.
+    Verified through the REAL gate; the tight read behaviour itself is owned by the
+    test_read_shapes_* / read_gate_bash_lane_parity demands (test_bind_wiring_545.py)."""
     dfn = PATHS.defender_dir
     bound = bind(MAIN_DEF, tmp_path).policy
     authored = permission.policy_for("main", run_dir=tmp_path, defender_dir=dfn)
+    # BASH: unchanged by the reroute — bind reproduces policy_for's allowlist exactly.
     for cmd in (
         f"cat {tmp_path}/investigation.md",       # anchored viewer under run_dir
         "defender-elastic query x --raw",         # a data-source adapter (main may not)
@@ -597,11 +607,19 @@ def test_gate_decisions_unchanged(tmp_path):
             permission.decide_bash(cmd, policy=bound, run_dir=tmp_path, defender_dir=dfn).allow
             == permission.decide_bash(cmd, policy=authored, run_dir=tmp_path, defender_dir=dfn).allow
         )
-    for p in (tmp_path / "alert.json", dfn / "SKILL.md", tmp_path.parent / "outside.txt"):
+    # READ: the run-dir + out-of-roots probes still agree (read_shapes admits the run-dir branch;
+    # both deny outside the roots) …
+    for p in (tmp_path / "alert.json", tmp_path.parent / "outside.txt"):
         assert (
             permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
             == permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
         )
+    # … but a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
+    # defender_dir, outside lessons/skills/examples) is where the read gates DIVERGE: bind's
+    # read_shapes filter DENIES it (parity with the bash cat lane), the broad policy_for ALLOWS.
+    skill_md = dfn / "SKILL.md"
+    assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
+    assert permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
 
 
 # ============================================================================

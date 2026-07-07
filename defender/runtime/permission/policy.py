@@ -72,6 +72,15 @@ class AgentPolicy:
       agent may write nothing (every read-only/predictor stage). Because the operand is
       `resolve()`d before matching, a `..` escape is collapsed away and can't match a
       pattern, so the allowlist is a true path set, not a string prefix (`build_write_allow`).
+    - `read_shapes` — the read-tool FILENAME filter: anchored `re.Pattern`s `fullmatch`ed
+      against the RESOLVED read path (`decide_read`). When NON-empty, an in-roots read is
+      additionally required to match one of these — the read-tool twin of the bash `cat`
+      lane's anchored file-operand grammar (`policies._common._file_operand`), so the read
+      tool admits exactly the filename set `cat` does (#545 read↔bash parity; a non-`.md`
+      corpus file readable by neither). Empty (the default) → no filename filter, so the
+      read gate stays root-only (every non-reader agent + the legacy `policy_for` API). The
+      run dir is admitted through the grammar's own run-dir branch, so run-dir scratch is
+      unfiltered; the filter bites the corpus surface.
     - `deny_reason` — the fall-through deny message shown to the model.
     """
 
@@ -83,4 +92,5 @@ class AgentPolicy:
     read_roots: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
     write_allow: tuple[re.Pattern[str], ...] = ()
+    read_shapes: tuple[re.Pattern[str], ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON

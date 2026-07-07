@@ -125,70 +125,107 @@ _NUM_FLAG = r"-[A-Za-z0-9]+"           # tail/head: `-5`/`-1`/`-n`/`-c`
 _JQ_KV_FLAG = r"(?:--arg|--argjson) [^ ]+ [^ ]+"
 
 
-def _reader_program_patterns(run: str, dfn: str) -> list[str]:
+# The reader viewer program set + its canonical emit order. `compile_policy` builds
+# `bash_allow` from the DECLARED subset of these (a `BashGrammar.viewers` naming only
+# `("cat",)` compiles JUST the cat grammar — #545 makes the viewer CONTENTS load-bearing,
+# not merely their non-emptiness), and iterates this fixed order so the emitted tuple is
+# order-stable regardless of the declaring def's tuple order (the field-for-field parity
+# `bind(MAIN_DEF).bash_allow == policy_for('main').bash_allow` compares an ordered tuple).
+_VIEWER_ORDER = ("cat", "wc", "tail", "head", "grep", "ls", "cd", "jq")
+
+# The full main/gather viewer set (`policy_for` / the kept `reader_patterns` API build all
+# of these) — the reader defs declare exactly this set, so their compiled lane == the API's.
+READER_VIEWERS = _VIEWER_ORDER
+
+
+def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
     """The anchored per-program stage grammars (raw regex strings, `fullmatch`ed by
-    `bash._stage_shape_ok` against the space-joined tokens)."""
+    `bash._stage_shape_ok` against the space-joined tokens), keyed by program name so a
+    grammar can compile just the subset a `BashGrammar` declares."""
     f = _file_operand(run, dfn)
     d = _dir_operand(run, dfn)
     pat = r"[^ ]+"  # a free-text grep search pattern / a jq filter program (one token)
-    return [
+    return {
         # single file-reader + the read/format viewers: PROG (flag)* FILE* — the file
         # operands are OPTIONAL (`*`, not `+`): a viewer reading STDIN in a downstream
         # pipe stage (`… | grep foo`, `… | wc -l`, `… | head -5`) names no file, so it
         # must still match. Any file operand that IS present is anchored; an out-of-root
         # operand still fails `fullmatch` (it matches neither a flag nor `{f}`), so the
         # `*` re-admits the stdin shape without widening file access.
-        rf"cat(?: {_VIEW_FLAG})*(?: {f})*",
-        rf"wc(?: {_VIEW_FLAG})*(?: {f})*",
-        rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
-        rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
+        "cat": rf"cat(?: {_VIEW_FLAG})*(?: {f})*",
+        "wc": rf"wc(?: {_VIEW_FLAG})*(?: {f})*",
+        "tail": rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
+        "head": rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
         # grep: safe-flags, one free-text PATTERN (may look like a path), anchored FILE*
-        rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
+        "grep": rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
         # ls/cd: anchored DIR operand (recon confined to the read roots). ls REQUIRES a
         # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon).
-        rf"ls(?: {_VIEW_FLAG})*(?: {d})+",
-        rf"cd(?: {d})?",
+        "ls": rf"ls(?: {_VIEW_FLAG})*(?: {d})+",
+        "cd": rf"cd(?: {d})?",
         # jq: stdin-compute-only — safe boolean flags + file-free `--arg`/`--argjson`
         # key/value flags + exactly one filter, NO file slot.
-        rf"jq(?: (?:{_JQ_FLAG}|{_JQ_KV_FLAG}))*(?: {pat})",
-    ]
+        "jq": rf"jq(?: (?:{_JQ_FLAG}|{_JQ_KV_FLAG}))*(?: {pat})",
+    }
 
 
-def _shim_names() -> list[str]:
-    """The program-only allowlist: the non-adapter `defender-*` shims (corpus/query
-    tooling + the sanctioned stdin `defender-sql`) plus the argument-inert viewers
-    (`echo`/`true`) that open no file. Each is allowed with any trailing args — the
-    argv is de-quoted + expansion-free and `shell=False` keeps it inert; a
-    `$(...)`/backtick/`VAR=` stage is still rejected by `bash._stage_unsafe`. Data-source
-    adapters are NOT here (they route structurally, `bash._decide_adapter`)."""
+def _shim_names(shims: frozenset[str]) -> list[str]:
+    """The program-only allowlist for the DECLARED shims plus the argument-inert viewers
+    (`echo`/`true`) that open no file. Each is allowed with any trailing args — the argv
+    is de-quoted + expansion-free and `shell=False` keeps it inert; a `$(...)`/backtick/
+    `VAR=` stage is still rejected by `bash._stage_unsafe`. `echo`/`true` are always
+    admitted (inert regardless of the declared shim set). Data-source adapters are NOT
+    here (they route structurally, `bash._decide_adapter`)."""
     argument_inert_viewers = {"echo", "true"}
-    return sorted(set(NON_ADAPTER_SHIMS) | argument_inert_viewers)
+    return sorted(shims | argument_inert_viewers)
 
 
 @lru_cache(maxsize=1)
-def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
-    """The main/gather bash reader allowlist, ANCHORED to `run_dir` + the defender
-    corpus (#535). Every viewer's file/dir operand must resolve — textually, no
-    `resolve()` — under those roots; jq is stdin-compute-only; the program-only shims
-    open no model-supplied path. Baked into `AgentPolicy.bash_allow` per run by
-    `policy_for`, so the reader lane (`bash._decide_readers`) stays a uniform
-    per-stage `bash_allow` match with no role branch.
+def reader_patterns_for(
+    run_dir: Path, defender_dir: Path, viewers: frozenset[str], shims: frozenset[str],
+) -> tuple[re.Pattern[str], ...]:
+    """The main/gather bash reader allowlist for a DECLARED viewer/shim set, ANCHORED to
+    `run_dir` + the defender corpus (#535). Only the viewers in `viewers` (and the shims in
+    `shims`, plus the inert `echo`/`true`) compile a grammar — so a `BashGrammar` naming a
+    tighter viewer set gets a tighter lane (#545 makes the declared CONTENTS load-bearing).
+    Viewers emit in the canonical `_VIEWER_ORDER`, shims sorted, so the tuple is order-stable
+    for the field-for-field parity checks. Every viewer's file/dir operand must resolve —
+    textually, no `resolve()` — under the roots; jq is stdin-compute-only; the program-only
+    shims open no model-supplied path.
 
-    Memoized on `(run_dir, defender_dir)`: the compiled tuple is a pure function of
-    the roots + the process-static denylist (`bash_policy._policy` is itself cached),
-    and `policy_for('gather', …)` is called once per gather DISPATCH (many per run) —
-    so without the cache each dispatch recompiles the whole ~14-pattern allowlist for a
-    per-run-constant value.
-
-    `maxsize=1`, not unbounded: within a run the key is invariant (main's setup call
-    and every gather dispatch share this one `(run_dir, defender_dir)`), so a single
-    slot serves every hit; a new run just evicts the prior entry instead of retaining
-    it forever. An unbounded cache (`maxsize=None` / `@cache`) keyed on `run_dir` would
-    grow one never-evicted ~14-`Pattern` entry per run in any long-lived multi-run
-    process (the e2e replay suite, the eval harness's temp trees) — a latent leak that
-    the one-run-per-process production `run.py` merely hides. Mirrors the sibling
+    Memoized on `(run_dir, defender_dir, viewers, shims)`: the compiled tuple is a pure
+    function of the roots + declared sets + the process-static denylist (`bash_policy._policy`
+    is itself cached), and `bind(GATHER_DEF, …)` is called once per gather DISPATCH (many per
+    run) — so without the cache each dispatch recompiles the whole ~14-pattern allowlist for a
+    per-run-constant value. `maxsize=1`, not unbounded: within a run main + every gather
+    dispatch share ONE `(run_dir, defender_dir, viewers, shims)` key (both reader defs declare
+    the full set), so a single slot serves every hit; a new run evicts the prior entry rather
+    than retaining a ~14-`Pattern` entry per run forever (the latent leak an unbounded cache
+    would grow in the e2e replay suite / eval harness temp trees). Mirrors the sibling
     `bash_policy._policy`'s `@lru_cache(maxsize=1)`."""
     run, dfn = str(run_dir), str(defender_dir)
-    programs = _reader_program_patterns(run, dfn)
-    shims = [rf"{re.escape(n)}(?: .*)?" for n in _shim_names()]
-    return tuple(re.compile(rf"^{p}$") for p in (*programs, *shims))
+    grammars = _viewer_program_patterns(run, dfn)
+    programs = [grammars[name] for name in _VIEWER_ORDER if name in viewers]
+    shim_pats = [rf"{re.escape(n)}(?: .*)?" for n in _shim_names(shims)]
+    return tuple(re.compile(rf"^{p}$") for p in (*programs, *shim_pats))
+
+
+def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
+    """The FULL main/gather bash reader allowlist (every viewer + the non-adapter shims),
+    ANCHORED to `run_dir` + the defender corpus (#535). The kept gate API + the `policy_for`
+    lane: a thin full-set alias over `reader_patterns_for` so the canonical spelling has one
+    builder. Baked into `AgentPolicy.bash_allow` per run, so the reader lane
+    (`bash._decide_readers`) stays a uniform per-stage `bash_allow` match with no role branch."""
+    return reader_patterns_for(
+        run_dir, defender_dir, frozenset(READER_VIEWERS), frozenset(NON_ADAPTER_SHIMS),
+    )
+
+
+def reader_read_shapes(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
+    """The read-tool FILENAME filter for a main/gather reader agent — the read-tool twin of
+    the bash `cat` lane's file-operand grammar (`_file_operand`). `decide_read` `fullmatch`es
+    a RESOLVED read path against this, so the read tool admits exactly the filename set `cat`
+    does (#545 read↔bash parity): a run-dir path OR a tight corpus `.md`, minus the secret/
+    ground-truth denylist. ONE grammar source shared with `reader_patterns`' cat operand — no
+    second, drifting filename grammar. Threaded as a shape-builder on the reader
+    `AgentDefinition`s' `read_shapes`, compiled per-run by `compile_policy`."""
+    return (re.compile(rf"^{_file_operand(str(run_dir), str(defender_dir))}$"),)
