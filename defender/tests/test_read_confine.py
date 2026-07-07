@@ -28,7 +28,6 @@ import pytest
 from defender.learning.core import config
 from defender.runtime import permission
 from defender.runtime.permission import AgentPolicy
-from defender.runtime.permission.policies._common import viewer_patterns
 
 _DEFENDER = config.REPO_ROOT / "defender"
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
@@ -40,10 +39,10 @@ _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 _BENIGN_CONFINE = (_ENV_DIR,)
 
-# The judge's jq shape (any jq invocation; operands path-gated separately) and the
-# main/gather global viewer allowlist — mirrors of the production policies.
+# The judge's jq shape (any jq invocation; operands path-gated separately). The
+# main/gather viewer allowlist is now PER-RUN + anchored (#535), so it is built via
+# `policy_for(run_dir=…, defender_dir=…)` in the tests below rather than a module const.
 _JQ = re.compile(r"^jq(?: .*)?$")
-_VIEWERS = viewer_patterns()
 
 
 def _policy(*, read_confine=(), bash_allow=(), jq_operand_gated=False, raw_reads=False, read_roots=()):
@@ -196,12 +195,19 @@ def test_actor_all_generic_readers_denied(cmd):
     assert not permission.decide_bash(cmd, policy=_policy(bash_allow=())).allow, cmd
 
 
-def test_reduction_is_per_policy_not_global():
-    """the global viewer allowlist (main/gather's `bash_allow`) still permits cat/grep. The reader reduction
-    is per-policy (actor/judge carry a narrower `bash_allow`), NOT a global removal — main/gather unaffected."""
-    glob = _policy(bash_allow=_VIEWERS)
-    assert permission.decide_bash("cat /tmp/x", policy=glob).allow
-    assert permission.decide_bash("grep foo /tmp/x", policy=glob).allow
+def test_reduction_is_per_policy_not_global(tmp_path):
+    """the reader reduction is per-policy, NOT a global removal: an actor policy with empty
+    `bash_allow` denies every bash reader, while main's (now anchored — #535) viewer allowlist still
+    permits an IN-ROOT cat/grep. The narrowing lives in the policy, not the gate. (Out-of-root now
+    denies for main too — the anchoring is comprehensively pinned in test_read_confine_bash.py.)"""
+    run, dfn = tmp_path / "run", tmp_path / "defender"
+    run.mkdir()
+    dfn.mkdir()
+    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    inv = run / "investigation.md"
+    assert not permission.decide_bash(f"cat {inv}", policy=_policy(bash_allow=())).allow   # actor: no bash reader
+    assert permission.decide_bash(f"cat {inv}", policy=main).allow                          # main: in-root ok
+    assert permission.decide_bash(f"grep foo {inv}", policy=main).allow
 
 
 # ============================================================================
@@ -310,35 +316,50 @@ def test_judge_jq_comparison_dir_via_read_roots_allowed(tmp_path):
 
 
 # ============================================================================
-# D. regression — main/gather byte-for-byte unchanged
+# D. main/gather — the bash reader lane is now PER-RUN + anchored (#535)
+#    (superseding this file's earlier "byte-for-byte unchanged" regression: the
+#    anchored allow/deny matrix is comprehensively owned by test_read_confine_bash.py;
+#    these pin the policy_for wiring + that decide_read is unaffected.)
 # ============================================================================
 
-def test_main_global_viewers_unchanged():
-    """MAIN keeps the full viewer allowlist (`bash_allow` = viewers, not operand-gated) — cat/grep
-    still allowed. The per-agent reader reduction does not touch main."""
-    main = permission.policy_for("main")
+def test_main_viewers_now_anchored(tmp_path):
+    """#535: MAIN keeps a viewer allowlist, but its operands are now ANCHORED to the run dir +
+    corpus — an IN-ROOT cat is allowed, an out-of-root cat is denied (was: any operand allowed).
+    Not jq-operand-gated (jq is stdin-compute-only). Full matrix: test_read_confine_bash.py."""
+    run, dfn = tmp_path / "run", tmp_path / "defender"
+    run.mkdir()
+    dfn.mkdir()
+    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
     assert main.bash_allow
     assert not main.jq_operand_gated
-    assert permission.decide_bash("cat /tmp/x", policy=main).allow
-    assert permission.decide_bash("grep foo /tmp/x", policy=main).allow
+    assert permission.decide_bash(f"cat {run}/investigation.md", policy=main).allow
+    assert not permission.decide_bash("cat /tmp/x", policy=main).allow
 
 
-def test_gather_stream_plumbing_unchanged():
-    """GATHER's compute lane is untouched: cat|defender-sql and adapter|defender-sql and on-disk jq still
-    allowed — for gather cat/jq are stream plumbing, not reads to fold away (deferred slice)."""
-    gather = permission.policy_for("gather")
-    assert permission.decide_bash("cat /tmp/p.json | defender-sql 'SELECT count(*) FROM data'", policy=gather).allow
+def test_gather_stream_plumbing_anchored(tmp_path):
+    """#535: GATHER's compute lane still works over IN-ROOT payloads — cat {run}/… | defender-sql,
+    the standalone adapter, cat {run}/… | jq — but jq is stdin-only and an out-of-root /tmp operand
+    is now denied (the demonstrated bypass this slice closes)."""
+    run, dfn = tmp_path / "run", tmp_path / "defender"
+    run.mkdir()
+    dfn.mkdir()
+    gather = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    raw = f"{run}/gather_raw/l/0.json"
+    assert permission.decide_bash(
+        f"cat {raw} | defender-sql 'SELECT count(*) FROM data'", policy=gather).allow
     assert permission.decide_bash("defender-elastic query 'x' --raw", policy=gather).allow
-    assert permission.decide_bash("jq '.hits|length' /tmp/p.json", policy=gather).allow
+    assert permission.decide_bash(f"cat {raw} | jq '.hits|length'", policy=gather).allow
+    assert not permission.decide_bash("jq '.hits|length' /tmp/p.json", policy=gather).allow
 
 
 def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
-    """the confine field is inert for main: corpus allow, outside deny, gather_raw clamp — all unchanged."""
+    """the confine field is inert for main: decide_read (unchanged by #535, which only touches the
+    bash lane) still allows the corpus, denies outside, and clamps gather_raw."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l").mkdir(parents=True)
     dfn = tmp_path / "defender"
     (dfn / "skills").mkdir(parents=True)
-    main = permission.policy_for("main")
+    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
     assert permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(Path("/etc/passwd"), run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(run / "gather_raw" / "l" / "0.json", run_dir=run, defender_dir=dfn, policy=main).allow

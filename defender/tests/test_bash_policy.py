@@ -11,11 +11,11 @@ import pytest
 from defender.runtime import bash_policy
 
 
-def test_policy_exposes_viewers_and_per_agent_capability():
-    viewers = bash_policy.viewers()
-    assert {"jq", "cat", "grep"} <= viewers
-    # `find` was dropped (#379) — it must not be a viewer.
-    assert "find" not in viewers
+def test_policy_exposes_per_agent_capability():
+    # The reader-lane program set moved into permission/policies/_common.py
+    # (reader_patterns) with the #535 anchoring — bash_policy no longer exposes a
+    # `viewers` list, so this loader owns only the per-agent capability + denylist.
+    assert not hasattr(bash_policy, "viewers")
     # Adapters: gather may, main may not.
     assert bash_policy.adapters_allowed("gather")
     assert not bash_policy.adapters_allowed("main")
@@ -41,8 +41,6 @@ def test_fails_closed_to_defaults_when_json_unreadable(tmp_path):
     # anything. Uses the _load_policy(path) seam directly — no monkeypatching.
     policy = bash_policy._load_policy(tmp_path / "does-not-exist.json")
     assert policy is bash_policy._FALLBACK_POLICY
-    assert "jq" in policy["bash"]["viewers"]
-    assert "find" not in policy["bash"]["viewers"]
     assert ".env" in policy["read_deny"]["substrings"]
     assert policy["bash"]["agents"]["main"]["adapters"] is False
 

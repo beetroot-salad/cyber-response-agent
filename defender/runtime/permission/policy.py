@@ -11,12 +11,17 @@ the raw command string — so the classic raw-string fail-opens (`jq "$(cmd)"`
 matching a quoted-arg pattern and then expanding under a shell) cannot occur, and
 `shell=False` execution keeps the args inert (the regex gates program/shape only).
 
-Command **shape** is the allowlist's job; operand **path-containment** is not — a
-regex cannot see a symlink/`..` target resolved against a dynamic run-dir prefix.
-Containment stays `resolve()`-based: the read gate (`files.decide_read`) and the
-judge's `jq` file-operand path-gate (`bash._jq_reads_within_roots`, enabled by
-`jq_operand_gated`). The shared security invariants — the secret/ground-truth read
-denylist and the `gather_raw` raw-read clamp — stay global / capability-bit driven
+Command **shape** is the allowlist's job, and — since #535 — so is operand
+**path-containment** for the runtime agents: main/gather bake the run's read roots
+into their `bash_allow` regex (`policies._common.reader_patterns`), so a viewer's
+file operand must TEXTUALLY sit under `{run_dir}` or a tight corpus `.md` and a `..`
+segment is rejected literally (the bash lane does no `resolve()`, so a symlink target
+is closed by the write-side invariant that no allowed tool creates a symlink, not by
+the regex; see `_common`). The judge keeps the complementary `resolve()`-based `jq`
+file-operand path-gate (`bash._jq_reads_within_roots`, enabled by `jq_operand_gated`),
+since its `jq` legitimately opens files; main/gather `jq` is stdin-compute-only, so it
+has no file operand to gate. The shared security invariants — the secret/ground-truth
+read denylist and the `gather_raw` raw-read clamp — stay global / capability-bit driven
 and are applied for every agent regardless of `bash_allow`.
 """
 
@@ -44,8 +49,9 @@ class AgentPolicy:
       adapters are NOT expressed here — they route structurally (see `adapters`).
     - `jq_operand_gated` — when True, a `jq` stage's file operands must resolve
       within the policy's read roots (the judge's path-gated `jq`; see
-      `bash._jq_reads_within_roots`). False (main/gather) leaves `jq` operands
-      unconfined on the bash lane — deferred, jq dual-use.
+      `bash._jq_reads_within_roots`). False for main/gather because their `jq` is
+      stdin-compute-only (no file operand to gate — #535); their reader lane instead
+      confines the file-OPENING viewers (`cat`/`grep`/…) via the anchored `bash_allow`.
     - `adapters` — may invoke a data-source adapter (captured transparently).
     - `adapter_sql_pipe` — may run the `adapter --raw | defender-sql '<SQL>'` pipe.
     - `raw_reads` — may read / `jq` `gather_raw/**` (the MAIN loop may not; the

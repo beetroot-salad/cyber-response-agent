@@ -315,15 +315,17 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
             lines.append(
                 "→ COUNTS come from a query envelope's `total`, not this file: to count "
                 "a subset, re-query with the narrowing filter and read its `total`. Use "
-                "the on-disk sample only to read field shape, e.g.:\n"
-                f"  jq '.hits[0]' {abs_payload}"
+                "the on-disk sample only to read field shape, e.g. (jq reads STDIN — pipe "
+                "the file in, don't pass it as an operand):\n"
+                f"  cat {abs_payload} | jq '.hits[0]'"
             )
         else:
             lines.append(f"full payload: {abs_payload}")
             lines.append(
                 "→ compute every value over the full payload on disk (jq, grep, the Grep "
-                "tool); never count or read answers off the samples above, e.g.:\n"
-                f"  jq '[.hits[] | select(.message | test(\"<substr>\"))] | length' {abs_payload}"
+                "tool); never count or read answers off the samples above. jq reads STDIN "
+                "— pipe the file in, don't pass it as an operand, e.g.:\n"
+                f"  cat {abs_payload} | jq '[.hits[] | select(.message | test(\"<substr>\"))] | length'"
             )
     return "\n".join(lines) + "\n"
 
@@ -515,7 +517,12 @@ def main(argv: list[str]) -> int:
     sys.stdout.write(passthrough)
     sys.stderr.write(stderr)
     if record["payload_path"]:
-        print(f"[record_query] raw payload: {record['payload_path']}", file=sys.stderr)
+        # Report the payload path ABSOLUTE: the bash/read tools resolve relative to the
+        # repo root (not run_dir), and the #535 reader anchor only admits absolute
+        # in-root operands — so the relative table FK would be un-`cat`-able. Mirrors the
+        # in-process capture note (tools_gather._payload_note).
+        abs_payload = Path(run_dir_arg) / record["payload_path"]
+        print(f"[record_query] raw payload: {abs_payload}", file=sys.stderr)
     return record["exit_code"]
 
 
