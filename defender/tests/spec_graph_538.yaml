@@ -1,0 +1,371 @@
+schema_version: 1
+design: defender/docs/agent-definition-single-source.md  # issue #538
+base: 8771c2c  # spec branch forked from main @ 8771c2c; write-code-from-spec diffs against this
+# Scope: BOTH deliverables (user-confirmed) — (1) tool-free predictors [ship now], (2) AgentDefinition
+# consolidation [step-one projection; #535 reshaping deferred]. Resolved forks in handoff.forks.
+#
+# Assumed module layout (provenance: design — write-code-from-spec reconciles):
+#   defender/runtime/agent_definition.py : AgentDefinition, ToolSet, BashGrammar, RunScope,
+#                                          bind, resolve_roots, compile_policy
+#   defender/runtime/agents.py           : AGENTS registry + MAIN_DEF/GATHER_DEF/JUDGE_DEF/
+#                                          ACTOR_DEF/ORACLE_DEF/VERIFY_DEF
+#   build_agent_core stays in runtime/driver.py, signature swaps spec->AgentDefinition.
+
+axes: [role, run_dir, corpus_dir]          # the axis registry (R0 membership)
+
+# ─────────────────────────────────────────────────────────────────────────────
+demands:
+
+  # ── Type/seam shapes ──
+  - {id: agentdefinition_shape, kind: seam, form: test,
+     outcome: {nl: "AgentDefinition is a frozen dataclass with role: AgentRole, model: Callable[[],str], effort: str|None, tools: ToolSet, corpus_dirs: tuple[str,...], read_shapes: tuple[ReadShape,...], deny_reason: str."},
+     binds: [AgentDefinition]}
+  - {id: agentdefinition_frozen, kind: seam, form: test,
+     outcome: {nl: "AgentDefinition is frozen: mutating .tools/.role/.model raises FrozenInstanceError, so bind/build cannot corrupt a shared definition."},
+     binds: [AgentDefinition]}
+  - {id: toolset_shape, kind: seam, form: test,
+     outcome: {nl: "ToolSet is a frozen dataclass: read: bool=False, bash: BashGrammar|None=None, write: bool=False."},
+     binds: [ToolSet]}
+  - {id: bashgrammar_shape, kind: seam, form: test,
+     outcome: {nl: "BashGrammar is a frozen dataclass: shims,viewers: tuple[str,...]=(); adapters,adapter_sql_pipe,jq_operand_gated: bool=False."},
+     binds: [BashGrammar]}
+  - {id: read_shapes_field, kind: seam, form: test,
+     outcome: {nl: "AgentDefinition carries a read_shapes tuple field (default ()); the FIELD exists and is a tuple. Its filtering semantics are #535-dependent (see read_shapes_semantics clause)."},
+     binds: [AgentDefinition]}
+
+  # ── #0 return contract (resolved: dispatch-on-role) ──
+  - {id: bind_returns_role_subtype, kind: behavior, form: test,
+     outcome: {nl: "bind(defn, run_dir, scope=RunScope()) returns the AgentDeps subtype for defn.role (main->AgentDeps, gather->GatherDeps, judge->JudgeDeps, actor->ActorDeps, oracle->OracleDeps, verify->VerifierDeps) with defender_dir==PATHS.defender_dir, run_id==run_dir.name, a fresh uuid salt, and policy==compile_policy(defn.tools, defn.read_shapes, roots, defn.deny_reason)."},
+     binds: ["interacts(bind->AgentDeps)", AgentDeps],
+     rejected: [{nl: "return a bare AgentDeps for every agent (the design snippet) — breaks gather isinstance capture, actor read_confine, and role identity"}]}
+  - {id: bind_gather_isinstance_preserved, kind: behavior, form: test,
+     outcome: {nl: "bind(GATHER_DEF, run_dir) returns an object for which isinstance(x, GatherDeps) is True and x.role is AgentRole.GATHER, so the adapter-capture narrow at tools.py:195 stays live."},
+     binds: ["interacts(bind->AgentDeps)", GatherDeps]}
+  - {id: bind_actor_read_confine, kind: seam, form: test,
+     outcome: {nl: "bind(ACTOR_DEF, run_dir, scope=<confine>) returns an ActorDeps carrying the required read_confine (matching scope's confine), i.e. bind supplies the subtype's extra required field."},
+     binds: ["interacts(bind->AgentDeps)", ActorDeps]}
+  - {id: bind_gather_lead_id_channel, kind: seam, form: test,
+     outcome: {nl: "bind stays per-run and has no lead param; gather's per-dispatch lead_id/query_id enter via a thin wrapper over bind (a documented per-dispatch seam), not via bind's signature."},
+     binds: ["interacts(bind->AgentDeps)", GatherDeps],
+     rejected: [{nl: "give bind a lead_id parameter — conflates per-run and per-dispatch scopes"}]}
+
+  # ── build_agent_core: exact registration ──
+  - {id: build_registers_exact_toolset, kind: behavior, form: test,
+     outcome: {nl: "build_agent_core(defn) registers EXACTLY the present tools in defn.tools and nothing else; the always-on register_tools bash+read_file branch is deleted. Ordering: bash, read_file, write_file, edit_file. Positive control: a read+bash+write agent registers ['bash','read_file','write_file','edit_file']."},
+     binds: ["interacts(build_agent_core->registered_toolset)", registered_toolset]}
+  - {id: registration_order_bash_before_read, kind: behavior, form: test,
+     outcome: {nl: "registered tool order is bash before read_file (the current pinned order), NOT ToolSet's dataclass field order (read, bash, write) — a read+bash agent pins ['bash','read_file']."},
+     binds: [registered_toolset]}
+  - {id: toolset_exact_combos, kind: domain-outcome, form: test,
+     outcome: {nl: "each (read,bash,write) combination maps to exactly its tools: ToolSet(read=True,bash=None,write=False)->['read_file']; ToolSet(read=False,bash=BashGrammar(),write=True)->['bash','write_file','edit_file']."},
+     binds: [registered_toolset]}
+  - {id: toolset_bash_none_vs_empty, kind: behavior, form: test,
+     outcome: {nl: "bash=None registers NO bash tool ('bash' not in tools); bash=BashGrammar() (empty grammar) DOES register the bash tool — absence vs present-but-empty are observably distinct."},
+     binds: [registered_toolset, "ToolSet"]}
+
+  # ── Tool-free predictors (negatives + controls) ──
+  - {id: oracle_empty_toolset, kind: negative, form: test,
+     outcome: {nl: "build_agent_core(ORACLE_DEF) with tools=ToolSet() registers NOTHING: list(agent._function_toolset.tools) == [] (no read_file, no bash, no write_file/edit_file). Positive control: main registers read_file, proving the mechanism fired and the empty list is not vacuous."},
+     binds: ["interacts(build_agent_core->registered_toolset)"]}
+  - {id: verify_empty_toolset, kind: negative, form: test,
+     outcome: {nl: "build_agent_core(VERIFY_DEF) with tools=ToolSet() registers NOTHING: tools == []. Positive control: judge (read=True) registers read_file."},
+     binds: ["interacts(build_agent_core->registered_toolset)"]}
+  - {id: oracle_no_escape_hatch, kind: negative, form: test,
+     outcome: {nl: "oracle built via ToolSet() has NO read_file even when its run_dir holds source_refs.yaml/real values — absence is structural, not a runtime gate. Positive control: an agent with read=True over the same run_dir DOES register read_file."},
+     binds: ["interacts(build_agent_core->registered_toolset)"]}
+
+  # ── compile_policy: step-one characterization (gate unchanged) ──
+  - {id: compile_policy_oracle_verify_denyall, kind: behavior, form: test,
+     outcome: {nl: "compile_policy(ToolSet(), (), roots, deny_reason) for oracle/verify projects a deny-all AgentPolicy: bash_allow==(), jq_operand_gated==False, adapters==False, adapter_sql_pipe==False, raw_reads==False, read_roots==(), read_confine==(), deny_reason==the agent's reason — equal to today's _ORACLE_POLICY/_VERIFY_POLICY."},
+     binds: ["interacts(compile_policy->AgentPolicy)", AgentPolicy]}
+  - {id: compile_policy_main, kind: behavior, form: test,
+     outcome: {nl: "compile_policy(main.tools=ToolSet(read=True,bash=BashGrammar(shims,viewers),write=True), ..., roots) reproduces today's main policy: [p.pattern for p in bash_allow] == [p.pattern for p in reader_patterns(run_dir,defender_dir)]; adapters==False, adapter_sql_pipe==False, raw_reads==False, jq_operand_gated==False, read_roots==() (step-one)."},
+     binds: ["interacts(compile_policy->AgentPolicy)", "read_roots.access[bash]"]}
+  - {id: compile_policy_gather, kind: behavior, form: test,
+     outcome: {nl: "compile_policy(gather.tools=ToolSet(read=True,bash=BashGrammar(viewers,adapters=True,adapter_sql_pipe=True))) reproduces today's gather policy: bash_allow patterns == reader_patterns(run,dfn); adapters==True, adapter_sql_pipe==True, raw_reads==True, read_roots==() (step-one)."},
+     binds: ["interacts(compile_policy->AgentPolicy)"]}
+  - {id: compile_policy_judge, kind: behavior, form: test,
+     outcome: {nl: "compile_policy(judge.tools=ToolSet(read=True,bash=BashGrammar(jq_operand_gated=True)), roots=scope.add_dir) reproduces _judge_policy: jq_operand_gated==True, raw_reads==True, read_confine==(), read_roots==the scope add-dirs, adapters==False, adapter_sql_pipe==False, bash_allow.pattern includes '^jq(?: .*)?$'."},
+     binds: ["interacts(compile_policy->AgentPolicy)", "read_roots.access[bash]"]}
+  - {id: compile_policy_actor, kind: behavior, form: test,
+     outcome: {nl: "compile_policy(actor.tools=ToolSet(read=True,bash=BashGrammar()), scope=<scripts,confine>) reproduces _actor_policy: bash_allow == one anchored 'python3 <script> ...' pattern per pinned script, raw_reads==False, read_confine==the per-leg lesson dirs, adapters==False."},
+     binds: ["interacts(compile_policy->AgentPolicy)"]}
+  - {id: compile_policy_projects_only_toolset_bits, kind: behavior, form: test,
+     outcome: {nl: "compile_policy emits no capability the ToolSet did not declare: ToolSet(read=True, bash=None) -> bash_allow==() and adapters==False; a bit set only when its ToolSet/BashGrammar source bit is set. (Safe-by-construction: policy projects the toolset, never widens it.)"},
+     binds: ["interacts(compile_policy->AgentPolicy)"]}
+  - {id: gate_decisions_unchanged, kind: parity, form: test,
+     outcome: {nl: "For representative probe paths/commands, decide_bash/decide_read fed the bind(defn,run).policy return the SAME Decision they return fed today's authored policy for that agent — the 'decide_bash/decide_read do not change in step one' survival, verified through the real gate."},
+     binds: [decide_bash, decide_read]}
+
+  # ── resolve_roots ──
+  - {id: resolve_roots_per_run_no_bleed, kind: uniqueness, form: test,
+     outcome: {nl: "resolve_roots(run_A, corpus_dirs, scope) then resolve_roots(run_B, corpus_dirs, scope) yield run-anchored roots with no cross-run bleed: a run_A-specific root is NOT in run_B's roots (guards the #497/#534-family @cache-on-run_dir hazard)."},
+     binds: ["interacts(resolve_roots->roots)", roots]}
+  - {id: resolve_roots_corpus_resolution, kind: behavior, form: test,
+     outcome: {nl: "resolve_roots resolves corpus_dirs to absolutes under defender_dir; corpus_dirs=() yields only the run-derived roots (no corpus dirs added)."},
+     binds: ["interacts(resolve_roots->roots)"]}
+  - {id: corpus_dirs_excludes_gather_summaries, kind: behavior, form: test,
+     outcome: {nl: "AGENTS[MAIN].corpus_dirs == ('lessons','skills','examples') and does NOT contain 'gather_summaries' (a run-root path, not a defender_dir corpus dir). Positive control: a {run_dir}/gather_summaries/x.md read stays allowed via the run-root anchor."},
+     binds: [corpus_dirs, "AGENTS_registry.domain.distinguished[main]"]}
+
+  # ── AGENTS registry (R2) + guard ──
+  - {id: agents_six_distinct, kind: uniqueness, form: test,
+     outcome: {nl: "AGENTS has exactly 6 entries, set(AGENTS.keys()) == set(AgentRole) == {MAIN,GATHER,JUDGE,ACTOR,ORACLE,VERIFIER}, and every value is an AgentDefinition — no silent last-wins drop. (Note enum member is VERIFIER; the def keys on AgentRole.VERIFIER.)"},
+     binds: [AGENTS_registry]}
+  - {id: agents_duplicate_role_raises, kind: negative, form: test,
+     outcome: {nl: "GUARD: constructing the registry from a tuple with two AgentDefinitions sharing a role RAISES (e.g. ValueError), rather than the dict-comp's silent last-wins overwrite. Positive control: the 6 distinct defs build the registry successfully."},
+     binds: [AGENTS_registry],
+     rejected: [{nl: "silent last-wins (today's dict-comp)"}, {nl: "dedupe keeping first"}]}
+
+  # ── model / effort (R4) ──
+  - {id: model_thunk_liveness, kind: domain-outcome, form: test,
+     outcome: {nl: "AgentDefinition.model is a zero-arg thunk called at build time; setting DEFENDER_MODEL after the definition is constructed changes what defn.model() returns (late resolution), so a --model/env override is honored. An eager str would freeze the value at import."},
+     binds: ["model_knob.domain"]}
+  - {id: model_via_env_channel, kind: domain-outcome, form: test,
+     outcome: {nl: "The explicit --model CLI arg reaches the zero-arg thunk by being routed through DEFENDER_MODEL: with DEFENDER_MODEL set to a sentinel, bind/build resolves the main model to the sentinel."},
+     binds: ["model_knob.domain.alternatives[--model]"]}
+  - {id: effort_none_vs_None_distinct, kind: domain-outcome, form: test,
+     outcome: {nl: "effort=None (omit the reasoning knob) and effort='none' (Fireworks reasoning DISABLED) are distinct: they produce different model_settings; 'none' is not coerced to None."},
+     binds: ["effort_knob.domain.distinguished[none]"]}
+  - {id: effort_none_claude_crossing, kind: domain-outcome, form: test,
+     outcome: {nl: "#527 crossing, NOT defused by tool-freeness: oracle's definition with effort='none' + a claude-* model thunk builds the model BEFORE tool registration, so build_for_effort raises (ValueError -> FatalConfigError, exit 2). Positive control: effort='none' + a fireworks/glm model builds fine."},
+     binds: ["effort_knob.domain.alternatives[claude-star]"]}
+  - {id: effort_live_on_toolfree, kind: domain-outcome, form: test,
+     outcome: {nl: "even with ToolSet() (nothing registered), the tool-free agent still carries effort-derived model_settings and issues exactly one model request — effort is consumed at build regardless of the empty toolset (F-BUILD-ORDER: driver.py:204 precedes :213)."},
+     binds: ["effort_knob.domain"]}
+
+  # ── request limits (R4) + guard ──
+  - {id: request_limit_one, kind: domain-outcome, form: test,
+     outcome: {nl: "ORACLE_REQUEST_LIMIT == 1 and VERIFY_REQUEST_LIMIT == 1 (down from 6): no tool is callable, so no headroom above 1 is needed."},
+     binds: ["ORACLE_REQUEST_LIMIT.domain.distinguished[1]", "VERIFY_REQUEST_LIMIT.domain.distinguished[1]"]}
+  - {id: request_limit_one_sufficient, kind: behavior, form: test,
+     outcome: {nl: "driving the oracle stage with a single-turn replay COMPLETES under request_limit=1 (1 request is sufficient, not merely non-crashing) — the tool-free predictor makes exactly one model request."},
+     binds: ["ORACLE_REQUEST_LIMIT.domain.distinguished[1]"]}
+  - {id: request_limit_reject_below_one, kind: negative, form: test,
+     outcome: {nl: "GUARD: request_limit of 0 or negative is rejected (raises), because 0 starves the single prediction request. Positive control: request_limit==1 runs the one prediction to completion."},
+     binds: ["ORACLE_REQUEST_LIMIT.domain.distinguished[0]"],
+     rejected: [{nl: "coerce <1 silently to 1"}]}
+
+  # ── R5 subtraction / survival ──
+  - {id: agentspec_removed_migrated, kind: survival, form: test,
+     outcome: {nl: "AgentSpec is removed: no residual `AgentSpec(` under defender/ (production and tests migrated); build_agent_core accepts an AgentDefinition and derives the writers bit from tools.write, so its former callers still build their agents."},
+     binds: ["interacts(build_agent_core->registered_toolset)"]}
+  - {id: factories_replaced_by_bind, kind: survival, form: test,
+     outcome: {nl: "the six per-agent policy factories + for_scope/for_run/policy_for are replaced by bind: for each agent, bind(AGENTS[role], run_dir, scope) produces deps whose policy equals today's factory output (covered per-agent by compile_policy_* + bind_returns_role_subtype); every current deps-construction site obtains an equivalent AgentDeps via bind."},
+     binds: [bind]}
+  - {id: main_keeps_tools, kind: survival, form: test,
+     outcome: {nl: "landing oracle/verify ToolSet() does not squeeze main: main's ToolSet(read=True, bash=BashGrammar(shims,viewers), write=True) still registers ['bash','read_file','write_file','edit_file'] — the operator agent is unchanged."},
+     binds: ["interacts(build_agent_core->registered_toolset)"]}
+
+  # ── guard: corpus traversal ──
+  - {id: guard_corpus_traversal, kind: negative, form: test,
+     outcome: {nl: "GUARD: resolve_roots raises (e.g. ValueError) if a corpus_dirs entry contains '..' or is an absolute path (path-traversal defense on the confinement primitive). Positive control: a clean relative name like 'lessons' resolves to a real absolute under defender_dir."},
+     binds: ["interacts(resolve_roots->roots)"],
+     rejected: [{nl: "silently drop/normalize the traversal entry"}]}
+
+  # ── deferred (clauses/waivers) ──
+  - {id: r3_parity_535, kind: parity, form: waiver,
+     outcome: {nl: "The read_file/bash 'one roots set, two surfaces' parity (decide_read and the bash lane confine to the SAME roots) is the #535 END STATE. At step-one main/gather intentionally diverge (bash lane tight-to-corpus via reader_patterns; decide_read broad because read_roots==()). Asserting surface-parity here would fail the intended step-one behavior. Deferred to #535; step-one preserves whatever parity/divergence exists today via the per-agent compile_policy characterization + gate_decisions_unchanged."},
+     binds: ["read_roots.access[read-tool]", "read_roots.access[bash]"]}
+  - {id: read_shapes_semantics, kind: seam, form: waiver,
+     outcome: {nl: "read_shapes filtering SEMANTICS (the ~6 tight filename grammars) are #535-dependent and not exercised here; only the FIELD's existence/type is pinned (read_shapes_field). Deferred to #535."},
+     binds: [AgentDefinition]}
+
+# ─────────────────────────────────────────────────────────────────────────────
+structure:
+  axes: [role, run_dir, corpus_dir]
+
+  actors:
+    - {id: bind,             frame: leg,         provenance: design}
+    - {id: resolve_roots,    frame: leg,         provenance: design}
+    - {id: compile_policy,   frame: leg,         provenance: design}
+    - {id: build_agent_core, frame: leg,         provenance: code}    # modify: spec->AgentDefinition
+    - {id: agents_collector, frame: composition, provenance: design}  # fans 6 defs into AGENTS
+    - {id: run_investigation, frame: composition, provenance: code}   # main deps site (driver.py:437)
+    - {id: gather_dispatch,   frame: composition, provenance: code}   # gather deps site (tools_gather.py:316)
+
+  boundaries:
+    - {id: AgentDefinition, provenance: design, facets: {}}
+    - {id: ToolSet,         provenance: design, facets: {}}
+    - {id: BashGrammar,     provenance: design, facets: {}}
+    - {id: AgentDeps,       provenance: code,   facets: {}}   # modify: produced by bind, subtype per role
+    - {id: GatherDeps,      provenance: code,   facets: {}}
+    - {id: ActorDeps,       provenance: code,   facets: {}}
+    - id: registered_toolset
+      provenance: code    # modify: presence derives from ToolSet, not the always-on branch
+      facets:
+        identity:
+          key_axes: [role]
+          evidence: {nl: "the registered tool list is per-agent, ordered; read off list(agent._function_toolset.tools) (grounding §D) — bash,read_file,write_file,edit_file"}
+          sharing: unique-key
+    - id: AgentPolicy
+      provenance: code    # modify: now a derived projection of ToolSet+roots
+      facets:
+        payload:
+          parts: []       # not an LLM payload; 8 scalar/tuple fields projected from the ToolSet
+          invariants: []
+          nl: "the 8-field gate policy (bash_allow, jq_operand_gated, adapters, adapter_sql_pipe, raw_reads, read_roots, read_confine, deny_reason), projected field-for-field from the ToolSet + roots"
+    - id: roots
+      provenance: design
+      facets:
+        identity:
+          key_axes: [run_dir, corpus_dir]
+          evidence: {nl: "resolved read roots are RunPaths-derived + corpus absolutes; keyed by run_dir so two runs get distinct roots (grounding §8 _resolved_read_roots + _common anchors)"}
+          sharing: unique-key
+    - id: AGENTS_registry
+      provenance: design
+      facets:
+        identity:
+          key_axes: [role]
+          evidence: {nl: "AGENTS = {d.role: d for d in (...)} keyed by role; dict-comp last-wins drops a duplicate silently (design shape, doc:118-122)"}
+          sharing: unique-key
+        domain:
+          type: enum
+          refinement: {nl: "the 6 AgentRole members"}
+          default: main
+          distinguished: [main, gather, judge, actor, oracle, verify]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: read_roots
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            read-tool: {trust: derived, constraints: [confine, denylist, raw-clamp]}
+            bash:      {trust: derived, constraints: [confine, denylist, raw-clamp]}
+    - id: model_knob
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "a routable model name produced by a zero-arg thunk; late-resolved"}
+          default: glm-5.2
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives:
+            - {value: --model, crosses_validation: true}       # routed via DEFENDER_MODEL
+            - {value: claude-star, crosses_validation: true}   # crosses effort validation (see effort_knob)
+    - id: effort_knob
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "reasoning effort; provider-specific vocabulary"}
+          default: low
+          distinguished: [none]        # 'none' (Fireworks reasoning-off) distinct from None (omit knob)
+          falsy_valid: true            # None omits the knob — a valid, non-default member
+          documented_alternatives:
+            - {value: claude-star, crosses_validation: true}   # effort='none' INVALID on Anthropic -> raises
+    - id: ORACLE_REQUEST_LIMIT
+      provenance: code
+      facets:
+        domain: {type: int, refinement: {nl: "model-request backstop; floor 1"}, default: 6,
+                 distinguished: [0, 1], falsy_valid: false, documented_alternatives: []}
+    - id: VERIFY_REQUEST_LIMIT
+      provenance: code
+      facets:
+        domain: {type: int, refinement: {nl: "model-request backstop; floor 1"}, default: 6,
+                 distinguished: [0, 1], falsy_valid: false, documented_alternatives: []}
+    - id: corpus_dirs
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "relative corpus names under defender_dir; '..'/absolute rejected"}
+          default: ""
+          distinguished: []
+          falsy_valid: true
+          documented_alternatives: []
+    # removed elements (R5)
+    - {id: AgentSpec,             provenance: code, facets: {}}   # remove
+    - {id: policy_factories,      provenance: code, facets: {}}   # remove: 6 _xxx_policy + for_scope/for_run/policy_for
+    - {id: register_tools_alwayson, provenance: code, facets: {}} # remove: the unconditional bash+read_file branch
+    - {id: decide_bash,           provenance: code, facets: {}}   # unchanged (survival anchor)
+    - {id: decide_read,           provenance: code, facets: {}}   # unchanged (survival anchor)
+
+  interacts:
+    - {from: bind,             to: AgentDeps,          mode: write,  via: api, provenance: design, sends: policy}
+    - {from: bind,             to: GatherDeps,         mode: write,  via: api, provenance: design}
+    - {from: bind,             to: ActorDeps,          mode: write,  via: api, provenance: design}
+    - {from: bind,             to: resolve_roots,      mode: invoke, via: api, provenance: design}
+    - {from: bind,             to: compile_policy,     mode: invoke, via: api, provenance: design}
+    - {from: resolve_roots,    to: roots,              mode: write,  via: api, provenance: design, interpolates: [run_dir, corpus_dir]}
+    - {from: compile_policy,   to: AgentPolicy,        mode: write,  via: api, provenance: design}
+    - {from: build_agent_core, to: registered_toolset, mode: write,  via: api, provenance: code,   interpolates: [role]}
+    - {from: build_agent_core, to: model_knob,         mode: read,   via: api, provenance: code}
+    - {from: build_agent_core, to: effort_knob,        mode: read,   via: env, provenance: code}
+    - {from: agents_collector, to: AGENTS_registry,    mode: write,  via: api, provenance: design, interpolates: [role]}
+    - {from: build_agent_core, to: ORACLE_REQUEST_LIMIT, mode: read, via: env, provenance: code}
+    - {from: build_agent_core, to: VERIFY_REQUEST_LIMIT, mode: read, via: env, provenance: code}
+    - {from: resolve_roots,    to: corpus_dirs,        mode: read,   via: api, provenance: design}
+    # dual-via read surface (R3) — parity deferred to #535 (r3_parity_535 waiver)
+    - {from: build_agent_core, to: read_roots,         mode: read,   via: read-tool, provenance: code}
+    - {from: build_agent_core, to: read_roots,         mode: read,   via: bash,      provenance: code}
+    # removals (R5)
+    - {from: build_agent_core, to: AgentSpec,          mode: remove, via: api, provenance: code}
+    - {from: bind,             to: policy_factories,   mode: remove, via: api, provenance: design}
+    - {from: build_agent_core, to: register_tools_alwayson, mode: remove, via: api, provenance: code}
+
+  drives:
+    - {from: agents_collector,  to: bind,             provenance: design, multiplicity: serial}
+    - {from: run_investigation, to: bind,             provenance: code,   multiplicity: serial}
+    - {from: gather_dispatch,   to: bind,             provenance: code,   multiplicity: concurrent}  # per-lead
+
+# ─────────────────────────────────────────────────────────────────────────────
+gate:
+  evaluated:
+    - {rule: R0, fired: true}   # holes: bind-return (resolved F1), model channel (resolved F2), compile_policy target (resolved F3), read_shapes semantics (clause); corpus/gather_summaries contradiction resolved
+    - {rule: R1, fired: false}  # no LLM payload-facet edge in the delta; AgentPolicy is a scalar projection, not a roles-disjoint prompt
+    - {rule: R2, fired: true}   # AGENTS_registry (role key) + roots (run_dir key, cross-run bleed)
+    - {rule: R3, fired: true}   # read_roots dual-via; parity is #535 end-state -> waiver, step-one preserves today's behavior
+    - {rule: R4, fired: true}   # effort {none, claude-crossing}, request-limit {0,1}, model {--model, claude-star}
+    - {rule: R5, fired: true}   # AgentSpec, policy factories, always-on branch removed; safe-by-construction judgment CONSIDERED (no-escape-hatch minted)
+
+  obligations:
+    - {rule: R2, element: AGENTS_registry, witness: "role-keyed dict; a duplicate role silently drops a definition", discharged_by: agents_six_distinct}
+    - {rule: R2, element: AGENTS_registry, witness: "no construction-time guard against duplicate roles", discharged_by: agents_duplicate_role_raises}
+    - {rule: R2, element: roots, witness: "per-run roots must not bleed across runs via a corpus-only cache key (#497/#534 family)", discharged_by: resolve_roots_per_run_no_bleed}
+    - {rule: R3, element: "read_roots.access[bash]", witness: "the bash lane must reproduce today's anchored grammar (step-one), else main/gather read confinement regresses", discharged_by: compile_policy_main}
+    - {rule: R3, element: "read_roots.access[read-tool]", witness: "read-tool vs bash surface parity is #535 end-state; step-one divergence preserved", discharged_by: r3_parity_535}
+    - {rule: R4, element: "effort_knob.domain.alternatives[claude-star]", witness: "effort='none' fatal under a claude-* override, survives tool-freeness (model built before tools)", discharged_by: effort_none_claude_crossing}
+    - {rule: R4, element: "effort_knob.domain.distinguished[none]", witness: "'none' (reasoning-off) must not collapse to None", discharged_by: effort_none_vs_None_distinct}
+    - {rule: R4, element: "ORACLE_REQUEST_LIMIT.domain.distinguished[1]", witness: "the drop to 1 must be sufficient for the single prediction, not merely non-crashing", discharged_by: request_limit_one_sufficient}
+    - {rule: R4, element: "ORACLE_REQUEST_LIMIT.domain.distinguished[0]", witness: "the falsy member 0 starves the single request", discharged_by: request_limit_reject_below_one}
+    - {rule: R4, element: "model_knob.domain.alternatives[--model]", witness: "--model must reach the zero-arg thunk (routed via env)", discharged_by: model_via_env_channel}
+    - {rule: R5, element: AgentSpec, witness: "sole reader build_agent_core + 3 construction sites + harness_b tests must migrate", discharged_by: agentspec_removed_migrated}
+    - {rule: R5, element: policy_factories, witness: "the six factories + for_scope/for_run must be replaced by bind with equivalent deps", discharged_by: factories_replaced_by_bind}
+    - {rule: R5, element: register_tools_alwayson, witness: "removing the always-on branch must not strip main's tools; must yield oracle/verify [] (no escape hatch)", discharged_by: oracle_no_escape_hatch}
+    - {rule: R5, element: register_tools_alwayson, witness: "R5 judgment: no caller constructible with more capability than its ToolSet declares", discharged_by: compile_policy_projects_only_toolset_bits}
+
+  holes:
+    - {rule: R0, element: "interacts(bind->AgentDeps)", resolution: "F1: bind dispatches on defn.role to the AgentDeps subtype; gather lead_id via a thin per-dispatch wrapper over bind", resolved_to: bind_returns_role_subtype}
+    - {rule: R0, element: "interacts(compile_policy->AgentPolicy)", resolution: "F3: step-one characterization — reproduce today's per-agent policies field-for-field; R3 parity deferred to #535", resolved_to: compile_policy_main}
+    - {rule: R0, element: "model_knob.domain.alternatives[--model]", resolution: "F2: route --model through DEFENDER_MODEL so the zero-arg thunk sees it", resolved_to: model_via_env_channel}
+    - {rule: R0, element: "read_roots.access[read-tool]", resolution: "F3: read/bash parity is #535 end-state, waived at step-one", resolved_to: r3_parity_535}
+    - {rule: R0, element: AgentDefinition, resolution: "read_shapes filtering semantics deferred to #535; field-only pinned", resolved_to: read_shapes_semantics}
+    - {rule: R0, element: corpus_dirs, resolution: "design/code contradiction resolved: corpus_dirs = lessons/skills/examples only; gather_summaries is a run-root path", resolved_to: corpus_dirs_excludes_gather_summaries}
+
+  pre_discharged:
+    - {rule: R3, element: "read_roots.access[bash]", by: compile_policy_judge}   # judge jq path-gate (the #517 canonical) preserved by the judge characterization
+
+handoff:
+  forks:
+    - "F1 bind return type — RESOLVED: bind dispatches on defn.role to the AgentDeps subtype (not the design snippet's bare AgentDeps). gather's per-dispatch lead_id enters via a thin wrapper over bind (bind stays per-run). Preserves isinstance-driven adapter capture (tools.py:195), role identity, and actor's required read_confine."
+    - "F3 compile_policy target — RESOLVED: step-one characterization. compile_policy reproduces today's authored per-agent AgentPolicy field-for-field (decide_bash/decide_read unchanged). The read_file/bash one-roots-two-surfaces parity + read_roots=corpus is the #535 end-state, deferred as the r3_parity_535 waiver; asserting it now would fail the intended step-one behavior."
+    - "F2 --model channel — RESOLVED: --model routes through DEFENDER_MODEL so AgentDefinition.model stays a zero-arg import-time thunk."
+    - "Guards — RESOLVED (all three demanded): duplicate role raises (agents_duplicate_role_raises), corpus_dirs traversal raises (guard_corpus_traversal), request_limit<1 rejected (request_limit_reject_below_one)."
+    - "Brief flip-list corrected: actor's pin STAYS ['bash','read_file'] (actor keeps tools); the pin that flips to empty is test_verify_forward_engine.py:123, NOT test_actor_pydantic_engine.py:218. The design doc's flip-list (lines 168-170) is wrong on both."
+  deviations:
+    - "Collapsed step-4 diff — alignment done inline by the lead, not a separate diff agent (small enough after strong-author reconciliation)."
+    - "Manual formal-slot validation — no spec_graph linter exists yet (#537); kinds/forms/modes/vias/invariants hand-checked against schema.md."
+    - "compile_policy_main/gather characterize against the existing reader_patterns() as the authoritative reference; if the implementation absorbs reader_patterns, the implementer updates the reference (noted in the test)."
+    - "Strong author (Opus) ran at full capability — the unknown-unknown region is NOT degraded."
+    - "Two demands are pinned as structural/value assertions rather than target drives (both legitimate, their observable IS a constant/absence): request_limit_one asserts ORACLE/VERIFY_REQUEST_LIMIT==1 (the edited constants); agentspec_removed_migrated walks the source tree for a residual `AgentSpec(`. The behavioral halves (single-request run; build_agent_core-from-AgentDefinition) are separately driven by request_limit_one_sufficient and build_registers_exact_toolset."
+  assumptions:   # seams the design leaves ambiguous — write-code-from-spec reconciles these against the impl
+    - "Module layout: AgentDefinition/ToolSet/BashGrammar/RunScope/bind/resolve_roots/compile_policy/build_registry in defender/runtime/agent_definition.py; AGENTS + the six *_DEF in defender/runtime/agents.py; build_agent_core stays in runtime/driver.py."
+    - "RunScope is the unified per-invocation carriage (superset of the judge's _ToolScope + actor's _ActorScope): fields add_dirs (judge comparison roots → read_roots), read_confine (actor gray-box confine), scripts (actor pinned lesson scripts → one bash_allow pattern each), ticket_cli (benign judge). All default empty."
+    - "resolve_roots(run_dir, corpus_dirs, scope) returns a rich `roots` value exposing resolved corpus absolutes as `.corpus_roots`; compile_policy(tools, read_shapes, roots, deny_reason) projects it into an AgentPolicy."
+    - "build_registry(defs) is the guarded collector that raises ValueError (message names 'role') on a duplicate role, instead of the dict-comp's silent last-wins."
+    - "build_agent_core keeps its current keyword args (deps_type/instructions/logger/agent_id/make_model) but takes an AgentDefinition positionally in place of AgentSpec, deriving writers from tools.write and model/effort from defn.model()/defn.effort."
+    - "bind's parameters are exactly {defn, run_dir, scope} — no lead_id; gather's per-dispatch lead_id enters via a thin wrapper that stamps it post-bind."
+    - "The request_limit<1 floor is realized as usage-limit starvation through the real run (request_limit=0 → UsageLimitExceeded), not a silent coerce-to-1; the guard_corpus_traversal error message names the offending 'corpus' entry."
