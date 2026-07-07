@@ -6,7 +6,7 @@ argument-hint: "[issue # or design doc path]"
 
 # Write code from spec
 
-The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `review`. Inputs: the issue or design doc, and the approved test suite — committed on the branch by write-tests, or sitting in the working tree.
+The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `review`. Inputs: the issue or design doc, and the approved spec — the tests plus `spec_graph_*.yaml`, committed on the branch by write-tests.
 
 One rule sits above the rest and makes this phase the mirror of write-tests: **you make the code match the tests, never the tests match the code.** The suite is the contract the human approved. If a test looks wrong, that is a spec question, not a green-the-build task — surface it (§2), don't quietly edit it. A suite you weakened to pass is no longer a spec.
 
@@ -21,11 +21,15 @@ Confirm you're in the worktree (`git rev-parse --show-toplevel`) before step 1. 
 
 ## 1. Plan against the spec
 
+**Gate the inputs first.** The spec must exist as a discrete, committed, reviewable artifact *before* any implementation: check that the spec ref's diff (`git diff --stat <base>..<spec-ref>`) touches only test files and `spec_graph_*.yaml`. If the tests are uncommitted, or the spec commit mixes in source, stop and kick it back to write-tests. This is not ceremony: #527 and #534 both co-committed tests+impl, and both shipped bug classes whose lessons were already encoded in the spec skill — a spec phase that never ran discretely can't bite.
+
 Load the issue/design (`gh issue view <n> --comments`, or read the doc) for intent, then read the committed tests — they are the precise version. The tests already encode the resolved forks: each one names an injected fault or input and the observable outcome the code must produce, and each drives a specific entry point through specific injection seams. Before writing anything, know:
 
 - the entry point(s) under test and their signatures,
 - the seams the fakes enter through (a `deps` param, a constructor arg) — the implementation must expose *exactly* those; a test can't reach a seam the code doesn't offer,
 - the return-value / error / side-effect contract each test asserts.
+
+Then read `spec_graph_*.yaml` alongside the tests: the implementation must **realize its address space** — expose exactly the declared seams, build payloads with the declared part-structure (`parts: {system: const, user: template}` means the template is never *also* the system prompt), interpolate every axis the identity facets require. A structural mismatch — an address the code never realizes, or code structure the spec never declared — is a spec question, exactly like a wrong-looking test.
 
 The prose says why; the tests say what. Where they disagree, the approved tests win — or it's a fork to surface.
 
