@@ -21,7 +21,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import driver, observe, tools  # noqa: E402
+from defender.runtime import driver, observe, permission, tools  # noqa: E402
 
 _GI = _DEFENDER / "tests" / "gather_invocation"
 
@@ -82,7 +82,10 @@ def test_gather_dispatch_via_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-sonnet-4-6")
     lead_id, system = "l-007", params["system"]
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    deps = tools.AgentDeps(run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt", policy=tools._MAIN_POLICY)
+    deps = tools.AgentDeps(
+        run_dir=run_dir, defender_dir=sb, run_id="gtest", salt="sALt",
+        policy=permission.policy_for("main", run_dir=run_dir, defender_dir=sb),
+    )
 
     def factory(agent_id):
         return driver.build_gather_agent(sb, logger, agent_id)

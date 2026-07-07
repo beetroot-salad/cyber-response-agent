@@ -34,10 +34,12 @@ hooks). The gates:
   is then a **deny-by-default, per-agent regex allowlist** over the tokenized argv
   (#522): each agent's `AgentPolicy.bash_allow` is a tuple of anchored `re.Pattern`s
   matched per stage, and a non-adapter command is allowed iff every stage matches
-  one. Main/gather build theirs from the viewer/​shim program names in
-  `runtime/bash_policy.json` (`permission/policies/{main,gather}.py`); judge/actor
-  build theirs in their pipeline modules (the judge's path-gated `jq` + closed-ticket
-  read, the actor's pinned lesson scripts). `bash_policy.json` also carries the
+  one. Main/gather build theirs PER-RUN from the viewer/​shim program names in
+  `runtime/bash_policy.json`, with the viewer file operands **anchored** to the run
+  dir + corpus so the bash lane confines reads the same way `decide_read` does (#535 —
+  `policy_for(agent, run_dir, defender_dir)` bakes the anchors; `jq` is stdin-compute-only
+  there); judge/actor build theirs in their pipeline modules (the judge's path-gated
+  `jq` + closed-ticket read, the actor's pinned lesson scripts). `bash_policy.json` also carries the
   capability bits + the read denylist; the adapter/non-adapter shim taxonomy still
   comes from `_cmd_segments.py` and the main-loop deny *reasons* from their policy
   files / `block_main_loop_raw_access.py`.

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -204,8 +205,13 @@ def test_role_flip_adapter_is_role_dependent():
     above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
     nested-gather replay; this pins the role-dependence the driver must thread."""
     cmd = "defender-elastic query foo --raw"
-    assert not permission.decide_bash(cmd, policy=permission.policy_for("main")).allow
-    assert permission.decide_bash(cmd, policy=permission.policy_for("gather")).allow
+    # policy_for is per-run since #535; the adapter deny/allow is role-driven, not root-driven,
+    # so synthetic absolute roots suffice for this contrast.
+    run, dfn = Path("/run"), Path("/dfn")
+    assert not permission.decide_bash(
+        cmd, policy=permission.policy_for("main", run_dir=run, defender_dir=dfn)).allow
+    assert permission.decide_bash(
+        cmd, policy=permission.policy_for("gather", run_dir=run, defender_dir=dfn)).allow
 
 
 # --- nested-gather replay: drives the two-table capture path ---------------

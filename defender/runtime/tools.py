@@ -83,10 +83,10 @@ def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = ""
 
 
 # Per-agent gate policy is DATA, not a role branch: the gate keys on `deps.policy`.
-# Runtime agents get theirs from bash_policy.json here; a learning-loop agent (the
+# Runtime agents build theirs PER-RUN via `permission.policy_for(agent, run_dir=…,
+# defender_dir=…)` (#535 anchors the reader lane to the run's roots — there is no
+# module-level MAIN/GATHER default to inherit unconfined); a learning-loop agent (the
 # judge) constructs its own AgentPolicy in its own module and passes it in.
-_MAIN_POLICY = permission.policy_for("main")
-_GATHER_POLICY = permission.policy_for("gather")
 
 
 @dataclass(frozen=True)
@@ -139,10 +139,11 @@ class GatherDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
-    # STATIC policy → the subtype safely carries its own default (unlike the per-scope
-    # judge/actor). kw_only to match the base field it overrides, so bare construction
-    # `GatherDeps(run_dir, defender_dir, run_id, salt)` still gets _GATHER_POLICY.
-    policy: permission.AgentPolicy = field(default=_GATHER_POLICY, kw_only=True)
+    # Since #535 the gather reader lane is anchored PER-RUN, so gather has no static
+    # policy default (like the per-scope judge/actor): `policy` is REQUIRED from the
+    # base (kw_only), built via `permission.policy_for("gather", run_dir=…, defender_dir=…)`
+    # at the construction site. A bare `GatherDeps(run_dir, defender_dir, run_id, salt)`
+    # is now a construction-time TypeError, not a silent unconfined MAIN/GATHER.
     lead_id: str = ""
     query_id: str | None = None
 

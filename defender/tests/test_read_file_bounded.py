@@ -19,7 +19,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import tools  # noqa: E402
+from defender.runtime import permission, tools  # noqa: E402
 
 CAP = tools._read_char_cap()
 
@@ -100,7 +100,8 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
     agent = Agent(deps_type=tools.AgentDeps)
     tools.register_tools(agent)
     deps = tools.AgentDeps(
-        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt, policy=tools._MAIN_POLICY
+        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt,
+        policy=permission.policy_for("main", run_dir=run_dir, defender_dir=_DEFENDER),
     )
     result = asyncio.run(agent.run("go", deps=deps, model=FunctionModel(_model_fn)))
 

@@ -13,11 +13,14 @@ against `" ".join(argv)` (the de-quoted, expansion-free tokens from
 matches some pattern. Matching the parsed argv (not the raw string) is what makes
 this safe: a raw-string pattern would have to encode bash's quoting/expansion
 grammar (`jq "$(cmd)"` matches `^jq "[^"]*"$` yet expands under a shell), whereas
-the tokens are already normalized and `shell=False` keeps the args inert — the
-allowlist gates program/shape only. Command **shape** is the pattern's job;
-operand **path-containment** is NOT (a regex can't resolve a symlink/`..` target
-against a dynamic run-dir prefix): the judge's `jq` file operands are
-`resolve()`-gated separately (`jq_operand_gated` → `_jq_reads_within_roots`).
+the tokens are already normalized and `shell=False` keeps the args inert. Since #535
+the main/gather patterns also ANCHOR their operands: a viewer's file/dir operand must
+textually sit under `{run_dir}` or a tight corpus `.md`, and a `..` segment is rejected
+literally (built by `policies._common.reader_patterns` from the run's roots — the bash
+lane does no `resolve()`, so the symlink residual is closed by the no-symlink-writer
+invariant, not the regex). The judge keeps the complementary `resolve()`-based `jq`
+file-operand gate (`jq_operand_gated` → `_jq_reads_within_roots`) because its `jq`
+legitimately opens files; main/gather `jq` is stdin-compute-only.
 
   - main / gather — the read-only viewers + non-adapter `defender-*` shims
     (`policies/main.py`, `policies/gather.py`); gather additionally routes a
@@ -170,19 +173,39 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
         return None
 
 
-def policy_for(agent: str) -> AgentPolicy:
-    """Build the `AgentPolicy` for a runtime agent ('main' | 'gather') — a thin
+def _require_read_root(name: str, p: Path) -> None:
+    """A per-run read root must be an absolute, non-filesystem-root path — the
+    anchored reader allowlist is baked from it, so an empty (`Path('')`→`.`) or `/`
+    root would anchor the pattern to the cwd / the whole filesystem (= read
+    anything). Fail LOUD (safe-by-construction: `policy_for` can't mint an unconfined
+    policy)."""
+    p = Path(p)
+    if not p.is_absolute() or len(p.parts) < 2:
+        raise ValueError(
+            f"policy_for {name!r} must be an absolute non-root directory, got {p!r}"
+        )
+
+
+def policy_for(agent: str, *, run_dir: Path, defender_dir: Path) -> AgentPolicy:
+    """Build the PER-RUN `AgentPolicy` for a runtime agent ('main' | 'gather') — a thin
     dispatcher to that agent's own policy file (`policies/main.py`,
-    `policies/gather.py`), each of which owns its `bash_allow` regex allowlist,
-    capability bits, and deny reason. Learning-loop agents (judge, actor) build
-    their own `AgentPolicy` in their pipeline modules rather than going through this
-    runtime-agent factory."""
+    `policies/gather.py`), each of which bakes the anchored reader allowlist from
+    `run_dir` + `defender_dir` (#535) plus its capability bits and deny reason.
+
+    Both roots are REQUIRED and validated (`_require_read_root`): a runtime-agent
+    policy can no longer be minted in the legacy unconfined state — there is no
+    module-level MAIN/GATHER default and no silent `^cat .*$` fallback, so a missing
+    or degenerate root is a construction-time error, not a `cat /etc/passwd` bypass.
+    Learning-loop agents (judge, actor) build their own `AgentPolicy` in their
+    pipeline modules rather than going through this runtime-agent factory."""
+    _require_read_root("run_dir", run_dir)
+    _require_read_root("defender_dir", defender_dir)
     from .policies import gather as _gather, main as _main
 
     if agent == "main":
-        return _main.main_policy()
+        return _main.main_policy(run_dir, defender_dir)
     if agent == "gather":
-        return _gather.gather_policy()
+        return _gather.gather_policy(run_dir, defender_dir)
     raise ValueError(f"no runtime Bash policy for agent {agent!r}")
 
 

@@ -223,7 +223,7 @@ def test_grep_recursive_denied(env):
     """grep -r secret /etc {RUN} → DENY: -r/-R walks a dir operand (and follows symlinks), reading
     files the anchor can't bound."""
     # rejected: allow -r/-R over an in-root dir
-    assert not _bash(env, f"grep -r secret /etc", "gather").allow
+    assert not _bash(env, "grep -r secret /etc", "gather").allow
 
 
 def test_grep_free_text_pattern_not_anchored(env):

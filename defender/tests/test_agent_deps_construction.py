@@ -6,11 +6,12 @@ inheritable `_MAIN_POLICY` default from the deps base: a security-critical subty
 no longer be born in the MAIN-shaped (fail-open) state by omitting `policy`. This suite
 pins the CONSTRUCTION contract:
 
-  - requiredness / safe-by-construction — `AgentDeps` and its per-scope subtypes
-    (`JudgeDeps`, `ActorDeps`) RAISE when constructed without `policy` (kw-only); the
-    unsafe MAIN state is unconstructable, not silently inherited,
-  - the deliberate exception — `GatherDeps` keeps its own STATIC `_GATHER_POLICY`
-    default (its policy is not per-call), so its bare construction still works,
+  - requiredness / safe-by-construction — `AgentDeps` and its subtypes (`JudgeDeps`,
+    `ActorDeps`, and — since #535 — `GatherDeps`) RAISE when constructed without `policy`
+    (kw-only); the unsafe MAIN state is unconstructable, not silently inherited,
+  - GatherDeps is per-run since #535 — its bash reader lane is anchored to the run's
+    roots, so it no longer carries a static default (it inherits the base's required
+    kw-only policy, built via `policy_for('gather', run_dir, defender_dir)` at its site),
   - the `for_scope(scope, run_dir)` factory — identity fields (defender_dir via the
     `PATHS` primitive, run_id == run_dir.name), the scope→policy input surface, and
     PARITY: the factory-built policy equals the shipped builder's output field-for-field,
@@ -40,14 +41,19 @@ from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope  # no
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
 from defender.learning.pipeline.judge.run import _ToolScope  # noqa: E402
-from defender.runtime import tools  # noqa: E402
+from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 
-# The two policies the deps base + gather subtype reference (imported from where the
-# production code sources them, not re-derived).
-_MAIN_POLICY = tools._MAIN_POLICY
-_GATHER_POLICY = tools._GATHER_POLICY
+# Representative per-run main/gather policies for the construction tests. Since #535
+# there is no module-level tools._MAIN_POLICY/_GATHER_POLICY — a runtime-agent policy
+# is built PER-RUN via `policy_for(run_dir, defender_dir)` (the reader lane is anchored
+# to the run's roots). These synthetic absolute roots only anchor the bash lane, which
+# these CONSTRUCTION tests don't exercise (enforcement is pinned in
+# test_read_confine_bash.py); their capability SHAPE (read_confine/raw_reads) is what
+# the guarded negatives below assert.
+_MAIN_POLICY = permission.policy_for("main", run_dir=Path("/run"), defender_dir=Path("/dfn"))
+_GATHER_POLICY = permission.policy_for("gather", run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
 # Real repo-relative script/confine paths — `_actor_policy`'s `_script_pattern` does
 # `script.resolve().relative_to(REPO_ROOT)`, so synthetic paths outside the repo raise.
@@ -120,24 +126,26 @@ def test_policy_is_keyword_only(tmp_path):
 
 
 # ============================================================================
-# B. GatherDeps — the deliberate exception keeps its STATIC default (subtraction guard)
+# B. GatherDeps — per-run since #535: policy REQUIRED (no static default), like the judge
 # ============================================================================
 
-def test_gather_deps_keeps_static_gather_default(tmp_path):
-    """GatherDeps(4 identity fields) with NO policy= still constructs and gets its OWN
-    static default `_GATHER_POLICY` (NOT MAIN, NOT the removed base default) — gather's
-    policy is static, so a default is safe where the per-scope subtypes' would not be."""
-    # rejected: GatherDeps also made required (drop its default for uniformity)
-    deps = tools.GatherDeps(**_ident(tmp_path))
+def test_gather_deps_requires_policy(tmp_path):
+    """#535: GatherDeps(4 identity fields) with NO policy= now RAISES. The gather reader lane is
+    anchored PER-RUN, so gather no longer carries a static default — it inherits the base's required
+    kw-only policy (exactly like the per-scope judge/actor), and the unconfined state is
+    unconstructable rather than silently inherited."""
+    # rejected: keep a static _GATHER_POLICY default (a run-less, unanchored gather policy)
+    with pytest.raises(TypeError):
+        tools.GatherDeps(**_ident(tmp_path))
+
+
+def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
+    """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an
+    explicit per-run policy (`policy_for('gather', run_dir, defender_dir)`) — .policy is that
+    policy, role is GATHER, lead_id is carried."""
+    deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=_GATHER_POLICY)
     assert deps.policy is _GATHER_POLICY
     assert deps.role is AgentRole.GATHER
-
-
-def test_gather_deps_prod_construction_with_lead_id(tmp_path):
-    """Orphaned-consumer pin (tools_gather.py:315): GatherDeps(4 identity fields, lead_id=...)
-    with no policy= constructs unchanged — .policy is _GATHER_POLICY, lead_id is carried."""
-    deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001")
-    assert deps.policy is _GATHER_POLICY
     assert deps.lead_id == "l-001"
 
 

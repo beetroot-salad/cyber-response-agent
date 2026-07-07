@@ -23,6 +23,7 @@ from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from . import circuit_breaker
+from . import permission
 # Import the `tools` MODULE (not just the names) so the gather tool closure can
 # resolve `_run_gather` as a module attribute at call time — that is the
 # reference tests/e2e/test_replay_skeleton.py monkeypatches
@@ -315,6 +316,11 @@ async def _run_gather(
     gdeps = GatherDeps(
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         run_id=deps.run_id, salt=deps.salt, lead_id=lead_id,
+        # Per-run anchored gather policy (#535): the reader lane is confined to this
+        # run's roots, and raw_reads lets gather read its own gather_raw/**.
+        policy=permission.policy_for(
+            "gather", run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        ),
     )
     prompt = _gather_prompt(deps, request, catalog)
     try:

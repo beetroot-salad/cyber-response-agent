@@ -29,12 +29,12 @@ from pydantic_ai.usage import UsageLimits
 from . import compaction
 from . import observe
 from . import orient
+from . import permission
 from . import providers
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
 from .providers import BuiltModel
 from .tools import (
-    _MAIN_POLICY,
     AgentDeps,
     GatherDeps,
     register_gather_tool,
@@ -436,7 +436,8 @@ async def run_investigation(
     agent = build_agent(defender_dir, logger, make_model, main_model=model_name)
     deps = AgentDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-        salt=salt, policy=_MAIN_POLICY,
+        salt=salt,
+        policy=permission.policy_for("main", run_dir=run_dir, defender_dir=defender_dir),
     )
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
