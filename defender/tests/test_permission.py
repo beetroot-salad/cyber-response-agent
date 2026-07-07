@@ -317,18 +317,21 @@ def test_alert_is_untrusted():
 
 
 # --- write -----------------------------------------------------------------
+# decide_write now REQUIRES an explicit `policy` (parity with decide_read); its
+# `write_confine` widens the allowed write roots beyond run_dir (the lead-author
+# corpus writer). Empty write_confine (every existing agent) is run_dir only.
 
 def test_write_outside_run_dir_denied(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    d = permission.decide_write(tmp_path / "evil.txt", "x", run_dir=run_dir)
+    d = permission.decide_write(tmp_path / "evil.txt", "x", run_dir=run_dir, policy=permission.AgentPolicy())
     assert not d.allow
 
 
 def test_write_report_allowed(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    d = permission.decide_write(run_dir / "report.md", "disposition: benign\n", run_dir=run_dir)
+    d = permission.decide_write(run_dir / "report.md", "disposition: benign\n", run_dir=run_dir, policy=permission.AgentPolicy())
     assert d.allow
 
 
@@ -337,9 +340,85 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
     run_dir.mkdir()
     # A ```yaml fence is rejected by the invlang surface check (Rule 0).
     bad = "```yaml\nfoo: bar\n```\n"
-    d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir)
+    d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir, policy=permission.AgentPolicy())
     assert not d.allow
     assert "invlang validation" in d.reason
+
+
+def test_decide_write_requires_policy(tmp_path):
+    """decide_write now requires an explicit policy — omitting it is a TypeError, so no caller
+    silently gets the wrong (default) write scope. Mirrors decide_read's required-policy contract."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(TypeError):
+        permission.decide_write(run_dir / "x.md", "b\n", run_dir=run_dir)  # no policy=
+
+
+def test_write_confine_allows_skills_denies_sibling(tmp_path):
+    """write_confine widens the write roots to the corpus skills tree: a write under it is
+    allowed (positive control — real, would-be-committed content); a sibling under defender/ but
+    OUTSIDE the confine (lessons) is denied on the same policy (guarded negative)."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skills = tmp_path / "defender" / "skills"
+    (skills / "elastic").mkdir(parents=True)
+    (tmp_path / "defender" / "lessons").mkdir(parents=True)
+    pol = permission.AgentPolicy(write_confine=(skills,))
+    assert permission.decide_write(skills / "elastic" / "x.md", "b\n", run_dir=run_dir, policy=pol).allow
+    assert not permission.decide_write(tmp_path / "defender" / "lessons" / "z.md", "b\n", run_dir=run_dir, policy=pol).allow
+
+
+def test_write_confine_run_dir_still_allowed(tmp_path):
+    """run_dir stays a write root even with a non-empty write_confine (the confine WIDENS,
+    it does not replace run_dir)."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skills = tmp_path / "defender" / "skills"
+    skills.mkdir(parents=True)
+    pol = permission.AgentPolicy(write_confine=(skills,))
+    assert permission.decide_write(run_dir / "report.md", "disposition: benign\n", run_dir=run_dir, policy=pol).allow
+
+
+def test_write_confine_traversal_escape_denied(tmp_path):
+    """a `..` escape out of the confine is denied after resolve() collapses it (parity with the
+    read gate's traversal close)."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skills = tmp_path / "defender" / "skills"
+    skills.mkdir(parents=True)
+    (tmp_path / "defender" / "lessons").mkdir(parents=True)
+    pol = permission.AgentPolicy(write_confine=(skills,))
+    escape = skills / ".." / "lessons" / "z.md"
+    assert not permission.decide_write(escape, "b\n", run_dir=run_dir, policy=pol).allow
+
+
+def test_write_empty_confine_is_run_dir_only(tmp_path):
+    """empty write_confine (every existing agent: main/gather/judge/actor/oracle/verify) → writes
+    confined to run_dir only, byte-for-byte with today's decide_write. A defender_dir path is
+    denied — the field is inert when empty."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dfn = tmp_path / "defender" / "skills"
+    dfn.mkdir(parents=True)
+    pol = permission.AgentPolicy()  # write_confine=()
+    assert permission.decide_write(run_dir / "report.md", "x\n", run_dir=run_dir, policy=pol).allow
+    assert not permission.decide_write(dfn / "x.md", "x\n", run_dir=run_dir, policy=pol).allow
+    # rejected: empty confine falls back to defender_dir (would grant EVERY agent corpus writes)
+
+
+def test_write_confine_investigation_validation_still_fires(tmp_path):
+    """investigation.md invlang validation is keyed on the filename, so it still fires for a write
+    admitted via write_confine (not just run_dir). Positive control: a plain .md alongside it is
+    allowed (the validation is filename-scoped, not a blanket .md check)."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skills = tmp_path / "defender" / "skills"
+    skills.mkdir(parents=True)
+    pol = permission.AgentPolicy(write_confine=(skills,))
+    d = permission.decide_write(skills / "investigation.md", "```yaml\nfoo: bar\n```\n", run_dir=run_dir, policy=pol)
+    assert not d.allow
+    assert "invlang validation" in d.reason
+    assert permission.decide_write(skills / "note.md", "plain text\n", run_dir=run_dir, policy=pol).allow
 
 
 # --- gather subagent: compute + adapter surface ---
