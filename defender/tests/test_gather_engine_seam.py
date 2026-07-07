@@ -2,7 +2,7 @@
 decision/prompt helpers:
 
   - #1 the gather subagent's read-only tool surface (bash + read_file, no file
-    writers), via `register_tools(writers=False)`;
+    writers), via `register_tools` fed the gather `ToolSet`;
   - #2 the gather-specific bash deny message (not main-loop-worded);
   - #4 the progressive-disclosure descriptor-catalog prompt header.
 """
@@ -17,6 +17,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import permission, tools  # noqa: E402
+from defender.runtime.agent_definition import BashGrammar, ToolSet  # noqa: E402
 
 
 # --- #1: gather's read-only tool surface -----------------------------------
@@ -34,12 +35,14 @@ class _ToolRecorder:
         return fn
 
 
-def test_register_tools_writers_flag_gates_file_writers():
+def test_register_tools_registers_exactly_the_toolset():
+    # #538: registration derives from the ToolSet — gather's read + bash grammar (no write)
+    # registers the read-only pair; main's read + bash + write registers the full four.
     ro = _ToolRecorder()
-    tools.register_tools(ro, writers=False)
+    tools.register_tools(ro, ToolSet(read=True, bash=BashGrammar()))
     assert ro.names == ["bash", "read_file"]  # gather: read-only pair, no writers
     full = _ToolRecorder()
-    tools.register_tools(full, writers=True)  # main: the full four
+    tools.register_tools(full, ToolSet(read=True, bash=BashGrammar(), write=True))  # main: the full four
     assert full.names == ["bash", "read_file", "write_file", "edit_file"]
 
 

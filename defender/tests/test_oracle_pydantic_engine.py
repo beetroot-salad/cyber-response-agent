@@ -136,8 +136,9 @@ def test_oracle_agent_is_read_only_no_writers():
         )
     finally:
         logger.close()
-    # read-only: the oracle never writes (and, in practice, never reads either)
-    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
+    # #538: the oracle is TOOL-FREE — ORACLE_DEF registers an empty ToolSet(), so there is no
+    # read_file to peek at answer-bearing artifacts (nor any bash); the tool list is empty.
+    assert list(agent._function_toolset.tools) == []
 
 
 def test_build_oracle_agent_disables_glm_reasoning(monkeypatch):

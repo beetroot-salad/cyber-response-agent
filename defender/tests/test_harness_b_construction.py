@@ -2,17 +2,14 @@
 
 The PydanticAI runtime ("Harness B") builds its agents at three near-duplicate
 `Agent(...)` sites today (`driver.build_agent` MAIN, `driver._build_subagent`
-GATHER, `engine_pydantic.build_judge_agent` JUDGE). This refactor collapses them
-onto one `build_agent_core(spec, ...)` fed by a per-agent `AgentSpec(model, effort?,
-writers)`, and replaces the provider's `settings(role)` with the single
-`settings_for_effort(effort_for_role(role))` path.
-
-These tests are the SPEC (written before the code) — they pin observable behavior at
-the real entry points. The not-yet-written targets are referenced as attributes
-(`driver.AgentSpec`, `driver.build_agent_core`, `driver.spec_for_role`,
-`driver._main_extra_capabilities`, `providers.effort_for_role`) so this module still
-IMPORTS and COLLECTS; each unimplemented target reds at call time with AttributeError,
-the expected pre-implementation state.
+GATHER, `engine_pydantic.build_judge_agent` JUDGE). #493 collapsed them onto one
+`build_agent_core(...)` site + the single `settings_for_effort(effort_for_role(role))`
+path; **#538 then folded the per-agent config into an `AgentDefinition`** — so
+`build_agent_core` now takes an `AgentDefinition` (its `ToolSet` drives registration),
+and the old `AgentSpec` / `spec_for_role` are gone (their shape is now pinned by
+`test_agent_definition.py`, and each agent's `AgentDefinition` lives in
+`runtime.agents`). What remains here covers the provider effort/settings seam and the
+three callers surviving the collapse.
 
 Resolved design forks (see issue #493 comment thread):
   - EFFORT OMIT = **None-canonical**. `effort_for_role` returns `str | None`; None is
@@ -37,7 +34,6 @@ that parameter seam and env vars (`monkeypatch.setenv`), never `monkeypatch.seta
 """
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 
 import pytest
@@ -51,6 +47,11 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import driver, observe, providers  # noqa: E402
+from defender.runtime.agent_definition import (  # noqa: E402
+    AgentDefinition,
+    BashGrammar,
+    ToolSet,
+)
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
@@ -93,25 +94,8 @@ def logger(tmp_path):
         lg.close()
 
 
-# ============================================================================
-# AgentSpec — the per-agent config value object
-# ============================================================================
-
-def test_agent_spec_defaults_effort_none_and_writers_false():
-    """AgentSpec(model=...) with effort/writers omitted → effort is None (omit the knob)
-    and writers is False (read-only is the SAFE default; only MAIN opts into writers)."""
-    spec = driver.AgentSpec(model="glm-5.2")
-    assert spec.model == "glm-5.2"
-    assert spec.effort is None
-    assert spec.writers is False
-
-
-def test_agent_spec_is_frozen():
-    """AgentSpec is a frozen dataclass → mutating a field raises FrozenInstanceError, so
-    an agent's config can't drift after construction."""
-    spec = driver.AgentSpec(model="glm-5.2", effort="low", writers=True)
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        spec.effort = "high"  # type: ignore[misc]
+# NOTE: the AgentSpec value-object tests moved to test_agent_definition.py (#538 folded
+# AgentSpec into AgentDefinition — shape + frozenness are pinned there).
 
 
 # ============================================================================
@@ -151,7 +135,7 @@ def test_effort_for_role_fireworks_main_env_override(monkeypatch):
 def test_effort_for_role_fireworks_env_default_sentinel_normalizes_to_None(monkeypatch):
     """Env DEFENDER_MAIN_REASONING_EFFORT=default → effort_for_role returns None (the
     single omit representation), NOT the string "default". None-canonicalization is the
-    resolved fork: one omit spelling reaches AgentSpec.effort.
+    resolved fork: one omit spelling reaches the definition's effort.
     # rejected: return "default" — that would keep two omit spellings (None and "default")."""
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
     assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) is None
@@ -209,16 +193,16 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
 # build_agent_core — the single construction site
 # ============================================================================
 
-def test_build_agent_core_threads_spec_model_and_effort_to_make_model(logger):
-    """build_agent_core resolves the model via make_model(spec.model, spec.effort) — the
-    (name, effort) seam — and pairs the returned model + settings onto the Agent
-    (observable via agent.model / agent.model_settings)."""
+def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
+    """build_agent_core resolves the model via make_model(defn.model(), defn.effort) — the
+    (name, effort) seam, calling the def's model THUNK — and pairs the returned model +
+    settings onto the Agent (observable via agent.model / agent.model_settings)."""
     sentinel = {"SENTINEL": "s"}
     fake, calls = _capture_make_model(settings=sentinel)
-    spec = driver.AgentSpec(model="glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=AgentDeps, instructions="x", logger=logger,
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
     assert calls == [("glm-5.2", "low")]
@@ -226,27 +210,29 @@ def test_build_agent_core_threads_spec_model_and_effort_to_make_model(logger):
     assert agent.model_settings == sentinel
 
 
-def test_build_agent_core_writers_false_registers_read_only_pair(logger):
-    """spec.writers=False → build_agent_core registers ONLY the read-only pair; no file
+def test_build_agent_core_registers_read_only_pair(logger):
+    """A read + bash ToolSet → build_agent_core registers ONLY the read-only pair; no file
     writers reach a read-only agent (the security-relevant default)."""
     fake, _ = _capture_make_model()
-    spec = driver.AgentSpec(model="glm-5.2", effort=None, writers=False)
+    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort=None,
+                           tools=ToolSet(read=True, bash=BashGrammar()))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=AgentDeps, instructions="x", logger=logger,
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=fake,
         )
     assert list(agent._function_toolset.tools) == ["bash", "read_file"]
 
 
-def test_build_agent_core_writers_true_registers_write_tools(logger):
-    """spec.writers=True → the full four tools incl. write_file/edit_file (MAIN's authoring
-    surface). The writers bit is the one build-time permission the spec carries."""
+def test_build_agent_core_registers_write_tools(logger):
+    """A read + bash + write ToolSet → the full four tools incl. write_file/edit_file (MAIN's
+    authoring surface). The writers bit is the one build-time permission the def carries."""
     fake, _ = _capture_make_model()
-    spec = driver.AgentSpec(model="glm-5.2", effort="low", writers=True)
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low",
+                           tools=ToolSet(read=True, bash=BashGrammar(), write=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            spec, deps_type=AgentDeps, instructions="x", logger=logger,
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
     assert list(agent._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
@@ -258,10 +244,10 @@ def test_build_agent_core_propagates_make_model_error(logger):
     not as a half-built agent that 401s mid-run."""
     def boom(model, effort):
         raise RuntimeError("no key")
-    spec = driver.AgentSpec(model="glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
     with pytest.raises(RuntimeError), override_allow_model_requests(False):
         driver.build_agent_core(
-            spec, deps_type=AgentDeps, instructions="x", logger=logger,
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=boom,
         )
 
@@ -275,39 +261,12 @@ def test_build_agent_core_extra_capabilities_default_is_immutable_empty():
     assert isinstance(default, tuple)
 
 
-# ============================================================================
-# spec_for_role — MAIN + GATHER producers (the judge builds its spec from config)
-# ============================================================================
-
-def test_spec_for_role_main_glm_is_low_and_writers(monkeypatch):
-    """spec_for_role(MAIN, "glm-5.2") → AgentSpec("glm-5.2", effort="low", writers=True):
-    the passed main model, its role-default effort, and MAIN's writers opt-in."""
-    monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    spec = driver.spec_for_role(AgentRole.MAIN, "glm-5.2")
-    assert spec == driver.AgentSpec(model="glm-5.2", effort="low", writers=True)
-
-
-def test_spec_for_role_gather_uses_gather_model_and_is_read_only(monkeypatch):
-    """spec_for_role(GATHER, main_model) IGNORES the passed main model and uses
-    gather_model() (its own cheaper model), effort "none", writers=False. Passing the
-    MAIN model must NOT leak into the gather spec.
-    # rejected: gather inherits the main model — gather runs its own DEFENDER_GATHER_MODEL."""
-    monkeypatch.delenv("DEFENDER_GATHER_MODEL", raising=False)
-    monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
-    spec = driver.spec_for_role(AgentRole.GATHER, "glm-5.2")
-    assert spec.model == driver.gather_model()
-    assert spec.effort == "none"
-    assert spec.writers is False
-
-
-def test_spec_for_role_main_on_anthropic_omits_effort(monkeypatch):
-    """The production gotcha: spec_for_role(MAIN, "claude-sonnet-4-6") → effort None
-    (writers=True). On the --model claude-* override path the main agent must stay
-    UNCAPPED (cache-only, no anthropic_effort), exactly as today — a wrong default here
-    silently caps or uncaps a live agent."""
-    spec = driver.spec_for_role(AgentRole.MAIN, "claude-sonnet-4-6")
-    assert spec.effort is None
-    assert spec.writers is True
+# NOTE: the old `spec_for_role` producer is gone (#538) — MAIN/GATHER are now
+# `driver.MAIN_DEF` / `driver.GATHER_DEF` (shape pinned in test_agent_definition.py), and
+# `build_agent` / `build_gather_agent` re-bind the per-invocation model+effort onto them.
+# Its intents survive here: gather-ignores-the-main-model is structural (build_gather_agent
+# takes no main model), and the effort defaults/omit are pinned by the effort_for_role tests
+# above + the construction tests below.
 
 
 # ============================================================================

@@ -71,9 +71,10 @@ def effort_for_role(name: str, role: AgentRole) -> str | None:
     """The role's default reasoning effort for the infra serving `name`, as a canonical
     `str | None` (`None` = omit the knob). The top-level router (mirrors `build_for_effort`):
     routes the name to its provider — failing loud on an unknown name, before any role
-    dispatch — then defers to the provider's own `effort_for_role`. `spec_for_role`
-    reads this to fill `AgentSpec.effort`, so MAIN-on-Anthropic omits effort while
-    MAIN-on-Fireworks caps it at the env-resolved default."""
+    dispatch — then defers to the provider's own `effort_for_role`. `build_agent` /
+    `build_gather_agent` read this to bind an `AgentDefinition`'s per-invocation effort, so
+    MAIN-on-Anthropic omits effort while MAIN-on-Fireworks caps it at the env-resolved
+    default."""
     return provider_for(name).effort_for_role(role)
 
 

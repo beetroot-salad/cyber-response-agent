@@ -15,7 +15,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ from . import observe
 from . import orient
 from . import permission
 from . import providers
+from .agent_definition import AgentDefinition, BashGrammar, ToolSet
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
 from .providers import BuiltModel
@@ -43,6 +44,7 @@ from .tools import (
 
 from defender._env import env_bool
 from defender._run_paths import RunPaths
+from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     check_budgets,
@@ -151,25 +153,13 @@ def gather_model() -> str:
     return os.environ.get("DEFENDER_GATHER_MODEL") or DEFAULT_GATHER_MODEL
 
 
-# The single agent-construction unit + site (#493). `AgentSpec` is the per-agent
-# CONFIG (model + optional effort + the one build-time permission bit, writers);
-# `build_agent_core` is the ONE `Agent(...)` site every caller funnels through (MAIN,
-# GATHER, and — via a thin wrapper — the JUDGE), collapsing three near-duplicate build
-# sites into one. `logger` / `agent_id` stay separate params, NOT spec fields: they're
+# The single agent-construction unit + site (#493, generalized by #538). Each agent's
+# CONFIG is now its `AgentDefinition` (`agent_definition.py`) — the model thunk + effort
+# + the `ToolSet` that drives registration; `build_agent_core` is the ONE `Agent(...)`
+# site every caller funnels through (MAIN, GATHER, and — via `_pydantic_stage` — the
+# learning stages). `logger` / `agent_id` stay separate params, NOT def fields: they're
 # per-run / per-dispatch observability wiring (one shared RequestLogger fans across
 # main + N gathers, keyed by agent_id), not static config.
-
-
-@dataclass(frozen=True)
-class AgentSpec:
-    """The per-agent construction config. `effort=None` OMITS the reasoning knob (the
-    model's own default — the canonical omit spelling); `writers=False` is the SAFE,
-    read-only default (only MAIN opts into the file writers). Frozen so an agent's
-    config can't drift after construction."""
-
-    model: str
-    effort: str | None = None
-    writers: bool = False
 
 
 # The model-construction seam: `(name, effort) -> BuiltModel`. Tests inject a fake (a
@@ -182,7 +172,7 @@ MakeModel = Callable[[str, str | None], BuiltModel]
 
 
 def build_agent_core(
-    spec: AgentSpec,
+    defn: AgentDefinition,
     *,
     deps_type: type,
     instructions: str,
@@ -191,17 +181,20 @@ def build_agent_core(
     extra_capabilities: Sequence[Any] = (),
     make_model: MakeModel = providers.build_for_effort,
 ) -> Agent[Any, str]:
-    """Construct one agent + register its generic tool slice — the single build site.
+    """Construct one agent + register EXACTLY its `AgentDefinition`'s toolset — the
+    single build site.
 
-    Resolves the model via `make_model(spec.model, spec.effort)`; wires the shared
-    budget/observability hooks FIRST (so observability wraps any capability-rewritten
-    request) then `extra_capabilities` (MAIN's compaction ProcessHistory; the empty
-    default keeps a no-capability build byte-identical); and registers the generic
-    tools gated by `spec.writers`. Layered per-caller extras (MAIN's `gather` dispatch
-    tool) stay at the call site — they are not construction. No defensive catch: a
-    `make_model` fault (unroutable name / missing key / bad effort) surfaces at the
-    build, not as a half-built agent that 401s mid-run."""
-    built = make_model(spec.model, spec.effort)
+    Resolves the model via `make_model(defn.model(), defn.effort)` — `defn.model` is a
+    zero-arg thunk, so a late `--model` / `$DEFENDER_MODEL` override is honored here, not
+    frozen at import; wires the shared budget/observability hooks FIRST (so observability
+    wraps any capability-rewritten request) then `extra_capabilities` (MAIN's compaction
+    ProcessHistory; the empty default keeps a no-capability build byte-identical); and
+    registers the tools `defn.tools` declares present (a pure-prediction `ToolSet()`
+    registers NOTHING). Layered per-caller extras (MAIN's `gather` dispatch tool) stay at
+    the call site — they are not construction. No defensive catch: a `make_model` fault
+    (unroutable name / missing key / bad effort) surfaces at the build, not as a
+    half-built agent that 401s mid-run."""
+    built = make_model(defn.model(), defn.effort)
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,
@@ -210,32 +203,59 @@ def build_agent_core(
         model_settings=built.settings,
         retries=DEFAULT_TOOL_RETRIES,
     )
-    register_tools(agent, writers=spec.writers)
+    register_tools(agent, defn.tools)
     return agent
-
-
-def spec_for_role(role: AgentRole, main_model: str | None = None) -> AgentSpec:
-    """The MAIN / GATHER spec producer — role → `AgentSpec` (the role's own model, its
-    role-default effort, its writers policy). MAIN runs `main_model` (resolved via
-    `resolve_main_model`) and opts into writers; GATHER IGNORES the main model and runs
-    its own cheaper `gather_model()`, read-only — passing the main model must not leak
-    into the gather spec. Effort comes from `providers.effort_for_role(name, role)`, so
-    MAIN-on-Anthropic omits effort (stays uncapped, exactly as today) while
-    MAIN-on-Fireworks caps at the env default. (The judge is not role-keyed — it builds
-    its `AgentSpec` from per-direction-leg config directly.)"""
-    if role is AgentRole.MAIN:
-        name = resolve_main_model(main_model)
-        return AgentSpec(name, providers.effort_for_role(name, role), writers=True)
-    name = gather_model()
-    return AgentSpec(name, providers.effort_for_role(name, role), writers=False)
 
 
 def resolve_main_model(explicit: str | None = None) -> str:
     """The MAIN-agent model name: an explicit override (run.py's ``--model``), else
     ``$DEFENDER_MODEL``, else ``DEFAULT_MODEL``. The single read of ``DEFENDER_MODEL`` —
-    every entry point (run.py, ``spec_for_role``, ``run_investigation``) routes through
-    here so the env var and its default don't get re-read with drifting fallbacks."""
+    every entry point (run.py, ``build_agent``, ``run_investigation``, and ``MAIN_DEF``'s
+    model thunk) routes through here so the env var and its default don't get re-read with
+    drifting fallbacks."""
     return explicit or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
+
+
+# The two runtime agents' definitions (#538). The reader-lane program set below is the
+# DECLARATIVE signal that main/gather are reader agents; `compile_policy` delegates the
+# actual per-run anchored allowlist to `permission.policies._common.reader_patterns`
+# (the #535 anchoring), so this content documents intent and only its non-emptiness is
+# load-bearing at step one (the #545 end-state compiles the grammar directly). The
+# corpus dirs are the tight `.md` roots under `defender_dir` a reader may open.
+_READER_VIEWERS = ("cat", "grep", "tail", "head", "wc", "ls", "cd", "jq")
+_CORPUS_DIRS = ("lessons", "skills", "examples")
+
+# MAIN — the orchestrator: reader lane + the file writers (it authors investigation.md /
+# report.md), no data-source adapters (it dispatches gather). `model` is the live thunk
+# so a `--model` / `$DEFENDER_MODEL` override resolves at build; `effort` is the Fireworks
+# GLM default (production re-binds both per invocation in `build_agent`, preserving the
+# model-dependent effort for the claude escape hatch).
+MAIN_DEF = AgentDefinition(
+    role=AgentRole.MAIN,
+    model=resolve_main_model,
+    effort="low",
+    tools=ToolSet(
+        read=True,
+        bash=BashGrammar(shims=tuple(NON_ADAPTER_SHIMS), viewers=_READER_VIEWERS),
+        write=True,
+    ),
+    corpus_dirs=_CORPUS_DIRS,
+    deny_reason=permission.FALLTHROUGH_DENY_REASON,
+)
+
+# GATHER — the data-access subagent: reader lane + adapters + the `adapter | defender-sql`
+# pipe, read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off.
+GATHER_DEF = AgentDefinition(
+    role=AgentRole.GATHER,
+    model=gather_model,
+    effort="none",
+    tools=ToolSet(
+        read=True,
+        bash=BashGrammar(viewers=_READER_VIEWERS, adapters=True, adapter_sql_pipe=True),
+    ),
+    corpus_dirs=_CORPUS_DIRS,
+    deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
+)
 
 
 def _gather_instructions(defender_dir: Path) -> str:
@@ -249,14 +269,18 @@ def build_gather_agent(
     """The single-agent gather (#340) — the production gather for the PydanticAI
     engine. One agent runs find→execute(one server-side ES|QL aggregation)→verify and
     auto-captures its own adapter calls (no finder/executor split). Built through the
-    single `build_agent_core` site from the GATHER spec: the read-only tool pair (bash +
-    read_file, `writers=False` — it measures and returns a summary, never authors
-    investigation.md/report.md, so denying the file writers keeps it in lane), its own
-    cheaper `gather_model()`, and NO layered `gather` dispatch tool (a gather must not
-    dispatch itself). Loads `skills/gather/SKILL.md`. One per dispatch so `agent_id`
-    binds to the lead/measurement."""
+    single `build_agent_core` site from `GATHER_DEF`: the read-only reader lane + adapters
+    (no file writers — it measures and returns a summary, never authors
+    investigation.md/report.md), its own cheaper `gather_model()`, and NO layered `gather`
+    dispatch tool (a gather must not dispatch itself). Loads `skills/gather/SKILL.md`. One
+    per dispatch so `agent_id` binds to the lead/measurement. The resolved model name is read
+    ONCE and both `model` + `effort` are re-bound onto the def from it (mirroring `build_agent`),
+    so the built model and its effort can't disagree on a mid-build env change — a
+    `DEFENDER_GATHER_MODEL=claude-*` override omits the Fireworks-only `none` knob, exactly as
+    today, while the static def carries the Fireworks default."""
+    name = gather_model()
     return build_agent_core(
-        spec_for_role(AgentRole.GATHER),
+        replace(GATHER_DEF, model=lambda: name, effort=providers.effort_for_role(name, AgentRole.GATHER)),
         deps_type=GatherDeps,
         instructions=_gather_instructions(defender_dir),
         logger=logger,
@@ -381,16 +405,19 @@ def build_agent(
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None,
 ) -> Agent[AgentDeps, str]:
-    """The MAIN loop agent — built through the single `build_agent_core` site from the
-    MAIN spec (writers + the role-default effort + MAIN's compaction capability), then
-    the `gather` dispatch tool layered on (MAIN-only; construction stays generic).
+    """The MAIN loop agent — built through the single `build_agent_core` site from
+    `MAIN_DEF` (the reader lane + file writers + MAIN's compaction capability), then the
+    `gather` dispatch tool layered on (MAIN-only; construction stays generic).
     `main_model` resolves via `resolve_main_model` (run.py's `--model` /
-    `$DEFENDER_MODEL` / `DEFAULT_MODEL`)."""
+    `$DEFENDER_MODEL` / `DEFAULT_MODEL`) and is bound onto the def's model thunk, with the
+    effort re-derived for that model (so the claude-* override stays uncapped, exactly as
+    today)."""
     extra = _main_extra_capabilities()
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
+    name = resolve_main_model(main_model)
     agent = build_agent_core(
-        spec_for_role(AgentRole.MAIN, main_model),
+        replace(MAIN_DEF, model=lambda: name, effort=providers.effort_for_role(name, AgentRole.MAIN)),
         deps_type=AgentDeps,
         instructions=_main_instructions(defender_dir),
         logger=logger,

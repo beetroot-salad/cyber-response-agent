@@ -13,12 +13,11 @@ per-direction discriminator AND the lead id keeps the concurrent ``RequestLogger
 on one file (see ``oracle/run.invoke_oracle``).
 
 The oracle emits a single YAML document and calls NO tools — its whole input is inlined in the
-user prompt. Its policy is locked down to match: data-source adapters, the ``adapter | defender-
-sql`` pipe, ``gather_raw`` raw reads, writes, and arbitrary shell are all denied (the
-``["bash", "read_file"]`` pair ``build_agent_core`` always registers stays available but unused —
-the model simply never issues a call). ``ORACLE_REQUEST_LIMIT`` is a tiny backstop: a clean
-projection is one model request; the headroom only absorbs a stray denied tool call GLM might
-attempt before it re-emits the YAML.
+user prompt. Since #538 that tool-freeness is STRUCTURAL: its ``ORACLE_DEF`` registers an empty
+``ToolSet()`` (no ``read_file``, no ``bash``), so the pure per-lead projector has no tool to peek at
+answer-bearing artifacts with — the barrier is closed by construction, not by the model choosing
+never to call one — and the request cap drops to 1 (no tool can be called, so a clean projection is
+exactly one model request). Its ``_ORACLE_POLICY`` stays deny-all as belt-and-suspenders.
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when the oracle
 actually runs (``core/subagents.ClaudePrintSubagents.oracle``), never at loop import.
@@ -29,18 +28,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
+from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import AgentDeps
 
-# The oracle calls no tools, so a clean per-lead projection is a SINGLE model request. This cap is
-# only a backstop: it leaves a little headroom for a stray tool call GLM might attempt (the
-# deny-all policy bounces it with ModelRetry, costing one extra request) before it re-emits the
-# YAML. Kept tiny — a genuinely looping oracle should quarantine the run, not burn a budget.
-ORACLE_REQUEST_LIMIT = 6
+# The oracle is TOOL-FREE (#538): ORACLE_DEF registers an empty toolset, so no tool can be called
+# and a clean per-lead projection is exactly ONE model request — no headroom above 1 is needed
+# (dropped 6→1). A genuinely looping oracle should quarantine the run, not burn a budget.
+ORACLE_REQUEST_LIMIT = 1
 
 _ORACLE_DENY_REASON = (
     "Blocked: the oracle is a pure per-lead projection — its entire input is inlined in the user "
@@ -81,6 +81,20 @@ _ORACLE_POLICY = AgentPolicy(
     adapter_sql_pipe=False,
     raw_reads=False,
     read_roots=(),
+    deny_reason=_ORACLE_DENY_REASON,
+)
+
+
+# The oracle's AgentDefinition (#538): TOOL-FREE (``tools=ToolSet()`` — the build site registers
+# nothing, closing the ``read_file`` answer-key affordance structurally). ``model``/``effort`` are the
+# declarative stage defaults (glm-5.2, reasoning off); each fan-out call re-binds its own per-lead
+# model/effort in ``build_stage_agent``. Collected into ``runtime.agents.AGENTS`` and used by the
+# stage harness to register the empty toolset and by ``bind`` for the deny-all policy.
+ORACLE_DEF = AgentDefinition(
+    role=AgentRole.ORACLE,
+    model=lambda: ORACLE_MODEL,
+    effort=ORACLE_EFFORT,
+    tools=ToolSet(),
     deny_reason=_ORACLE_DENY_REASON,
 )
 

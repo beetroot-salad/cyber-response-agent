@@ -5,9 +5,9 @@ Mirror of the read-only predictors' engines (``pipeline/oracle_engine.py``,
 specifics (its deps identity + an AgentPolicy that confines the CORPUS WRITERS to
 ``defender/skills`` and grants a scoped ``rm`` of drafts) live here, and the generic
 in-process transport it shares with the four predictors lives in
-``pipeline/_pydantic_stage.py``. The lead author is the FIRST *writer* on that harness, so
-it opts into two knobs the predictors leave at their defaults: ``writers=True`` (register the
-``write_file``/``edit_file`` tools) and ``require_output=False`` (a writer legitimately ends
+``pipeline/_pydantic_stage.py``. The lead author is the FIRST *writer* on that harness: its
+``LEAD_AUTHOR_DEF`` ToolSet grants the ``write_file``/``edit_file`` tools (``write=True``, registered
+from the def by role — #538), and it opts into ``require_output=False`` (a writer legitimately ends
 with empty final prose — its output is the committed tree, not a returned verdict).
 
 ONE engine serves BOTH lead-author modes — the per-run catalog/skill author (``lead_author``)
@@ -44,6 +44,7 @@ from defender.learning.core.config import RunUnprocessable
 from defender.learning.leads.path_validation import SKILLS_REL
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
+from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy, build_write_allow
@@ -131,6 +132,22 @@ class LeadAuthorDeps(AgentDeps):
         )
 
 
+# The lead author's AgentDefinition (#538). It is the loop's FIRST writer, so its ToolSet grants
+# the file writers (write=True → write_file/edit_file) on top of read + the scoped bash rm — the
+# build site registers all four from this. ``model``/``effort`` are the declarative stage defaults;
+# each spawn re-binds its own per-run model/effort in ``build_stage_agent``. The real per-spawn
+# policy (the worktree-scoped ``write_allow`` + ``rm`` matcher) is built by ``LeadAuthorDeps.for_run``
+# / ``_lead_author_policy`` — NOT ``compile_policy``/``bind`` — since it needs the worktree's
+# ``defender_dir``; this def is only the toolset source in ``AGENTS`` (the lead author is not bound).
+LEAD_AUTHOR_DEF = AgentDefinition(
+    role=AgentRole.LEAD_AUTHOR,
+    model=lambda: config.LEAD_AUTHOR_MODEL,
+    effort=config.LEAD_AUTHOR_EFFORT,
+    tools=ToolSet(read=True, bash=BashGrammar(), write=True),
+    deny_reason=_LEAD_AUTHOR_DENY_REASON,
+)
+
+
 def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the make_model test seam; every param is load-bearing per-call state
     *,
     prompt_path: Path,
@@ -147,10 +164,12 @@ def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the 
 ) -> str:
     """Run one lead-author spawn in-process and return the model's final text (the caller ignores
     it — the real output is the committed tree). Builds the writer ``LeadAuthorDeps`` (worktree
-    ``defender_dir`` + skills ``write_allow``) and delegates to the shared ``run_stage`` with
-    ``writers=True`` (register the file writers) and ``require_output=False`` (an empty final is a
-    valid writer outcome). ``learning_run_dir`` is where the RequestLogger trace lands; distinct
-    ``trace_name``s (batch_id + pid) keep concurrent spawns from racing on one file."""
+    ``defender_dir`` + skills ``write_allow``) and delegates to the shared ``run_stage``. The file
+    writers are registered from ``LEAD_AUTHOR_DEF``'s ToolSet (``write=True``, looked up by role in
+    ``build_stage_agent`` — #538); this stage only opts into ``require_output=False`` (an empty final
+    is a valid writer outcome — its output is the committed tree, not a returned verdict).
+    ``learning_run_dir`` is where the RequestLogger trace lands; distinct ``trace_name``s (batch_id +
+    pid) keep concurrent spawns from racing on one file."""
     deps = LeadAuthorDeps.for_run(learning_run_dir, repo_root)
     return run_stage(
         stage="lead_author",
@@ -158,7 +177,7 @@ def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the 
         trace_name=trace_name, label=label, user=user,
         learning_run_dir=learning_run_dir, deps=deps,
         request_limit=request_limit, make_model=make_model,
-        writers=True, require_output=False,
+        require_output=False,
         wall_clock_timeout=wall_clock_timeout,
     )
 

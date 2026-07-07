@@ -134,9 +134,17 @@ def _capture_query(
     advances the per-system counter and may raise RunAborted via the run-wide kill
     switch (caught by the driver, which writes the partial trace)."""
     argv, model_query_id = _extract_query_id(argv)
+    lead = deps.lead_id
+    if lead is None:
+        # A bind-produced gather deps is per-run only (lead_id unset); the gather dispatch
+        # stamps the real lead before any adapter runs, so an unstamped deps reaching capture
+        # is a wiring bug, not model input. Fail loud with a hard error — a ModelRetry here is
+        # unfixable by the model (the lead stays None across retries), so it would only burn the
+        # tool-retry budget into an UnexpectedModelBehavior crash instead of surfacing the bug.
+        raise RuntimeError("internal: gather reached adapter capture without a dispatched lead_id")
     try:
         passthrough, stderr, record = _capture(
-            deps.run_dir, deps.lead_id, argv, env=env,
+            deps.run_dir, lead, argv, env=env,
             query_id=model_query_id or deps.query_id,
         )
     except ValueError as e:

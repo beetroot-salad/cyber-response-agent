@@ -283,22 +283,20 @@ def test_run_stage_require_output_matrix(tmp_path):
         assert _go(False, "real story", "pc") == "real story"   # positive control
 
 
-def test_writers_flag_registers_file_writers(tmp_path):
-    """writers=True registers the file writers so the lead author can Write/Edit the corpus;
-    writers=False (the predictors) does not. Mirrors the four-tool in-process surface — no
-    Glob/Grep exist, so discovery is driver-precomputed and only these four are registered."""
+def test_lead_author_registers_file_writers(tmp_path):
+    """The lead author is the loop's first writer: build_stage_agent(LeadAuthorDeps) registers the
+    file writers (write_file/edit_file) on top of read + bash — the four-tool in-process surface.
+    #538: the toolset comes from the agent's AgentDefinition by role (LEAD_AUTHOR_DEF's write=True
+    ToolSet), not a `writers` flag. (The read-only predictors registering NOTHING is pinned in
+    test_agent_definition.)"""
     logger = observe.RequestLogger(tmp_path / "toolset.jsonl")
     try:
         w = _pydantic_stage.build_stage_agent(
             LeadAuthorDeps, _prompt(tmp_path), "m", None, logger, "la",
-            make_model=_fake_model(_replay("")), writers=True)
-        r = _pydantic_stage.build_stage_agent(
-            LeadAuthorDeps, _prompt(tmp_path), "m", None, logger, "la",
-            make_model=_fake_model(_replay("")), writers=False)
+            make_model=_fake_model(_replay("")))
     finally:
         logger.close()
     assert list(w._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
-    assert list(r._function_toolset.tools) == ["bash", "read_file"]
 
 
 # ===========================================================================
@@ -372,10 +370,11 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
 def test_writer_contentless_final_after_write_is_success(tmp_path):
     """The lead author is a writer: it works via write_file/rm and may end with a CONTENT-LESS
     final (whitespace — a truly-empty "" is rejected by pydantic-ai before the guard, so the
-    observable content-less case is whitespace). Through the real transport (writers=True,
-    require_output=False), a write_file tool call THEN a content-less final returns that text (not
-    RunUnprocessable) and the write landed — proving writers=True registered the file writers and a
-    content-less final != a failed run. (Production leans on the prompt to emit a one-line summary,
+    observable content-less case is whitespace). Through the real transport (LEAD_AUTHOR_DEF's
+    write-enabled toolset + require_output=False), a write_file tool call THEN a content-less final
+    returns that text (not RunUnprocessable) and the write landed — proving the def registered the
+    file writers and a content-less final != a failed run. (Production leans on the prompt to emit a
+    one-line summary,
     so the normal final is non-empty; this pins the require_output=False safety valve.)"""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     rel = "defender/skills/gather/queries/foo/e.md"
