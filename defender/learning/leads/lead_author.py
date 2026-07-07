@@ -98,7 +98,6 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
 )
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
-    RUN_LOG_FILE,
     _log,
     _loop_commit_body,
     _spawn_author_agent,
@@ -107,8 +106,8 @@ from defender.learning.leads._lead_spine import (
 
 
 # The per-run queue lock + prompt. The shared spawn/verify/commit spine and its constants
-# (PENDING_DIR / RUN_LOG_FILE / model / timeout / the ``lead-author`` logger / the coarse
-# skills allowlist) live in ``_lead_spine``; the cross-run pitfalls curation mode now lives
+# (PENDING_DIR / the ``lead-author`` logger) live in ``_lead_spine``, which routes the spawn
+# to the in-process PydanticAI engine (GLM); the cross-run pitfalls curation mode now lives
 # in ``pitfalls_curator`` (#455 Part 2 / #513).
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
@@ -317,8 +316,10 @@ def invoke_agent(
     *,
     repo_root: Path = REPO_ROOT,
 ) -> int:
-    """Spawn ``claude -p`` via ``_spawn_author_agent`` with the lead-author prompt. Returns
-    rc (124 on a runner timeout / spawn failure). ``repo_root`` is the batch worktree."""
+    """Run the lead-author spawn via ``_spawn_author_agent`` (the in-process PydanticAI GLM engine)
+    with the lead-author prompt. Returns rc (124 on a per-run fault; a systemic config fault
+    propagates). ``repo_root`` is the batch worktree — where the agent's file writers land; the
+    case ``run_dir`` is the observability trace anchor."""
     pending_drafts = pending_drafts or []
     user_prompt = (
         f"run_dir: {run_dir}\n"
@@ -334,6 +335,7 @@ def invoke_agent(
         batch_id=run_dir.name,
         user_prompt=user_prompt,
         repo_root=repo_root,
+        learning_run_dir=run_dir,
         log_label="claude",
     )
 
@@ -576,10 +578,11 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
 
     rc = deps.invoke_agent(run_dir, handoffs, pending_drafts)
     if rc != 0:
-        # The agent crashed / timed out (the worktree is a throwaway the drain discards).
-        # Return rc=2 — the drain quarantines the marker to failed/ for a human; the run
-        # log under _pending_leads/ is the diagnostic.
-        _log(f"FATAL: claude exited rc={rc}; see {RUN_LOG_FILE} (drain will quarantine)")
+        # A per-run fault — the agent timed out / errored (the worktree is a throwaway the drain
+        # discards). Return rc=2 — the drain quarantines the marker to failed/ for a human; the
+        # per-spawn RequestLogger trace under the run dir is the diagnostic. (A systemic config
+        # fault does not reach here — it propagates from the engine as exit 2.)
+        _log(f"FATAL: lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
     # Scope gate over the working tree, then the loop commits pathspec-scoped. A scope-gate
@@ -692,13 +695,18 @@ Preconditions
 State files written under ``<run_dir>/lead_author/``
   done           sentinel on successful completion; makes the run a no-op.
 
-On a non-zero ``claude`` exit this returns rc=2 and the lead-author drain quarantines
-the run's marker to the author-queue's ``failed/`` dir (surfaced for a human, not
-dropped); the run log under ``_pending_leads/`` is the diagnostic.
+On a per-run fault this returns rc=2 and the lead-author drain quarantines the run's
+marker to the author-queue's ``failed/`` dir (surfaced for a human, not dropped); the
+per-spawn RequestLogger trace under the run dir is the diagnostic. (A systemic config
+fault — no key / unroutable model / bad effort — propagates from the in-process engine
+as exit 2 instead, halting the drain rather than quarantining every marker.)
 
 Environment
-  LEAD_AUTHOR_MODEL                          claude model id (default claude-sonnet-4-6)
-  LEAD_AUTHOR_TIMEOUT_SECONDS                spawn timeout (default 1800)
+  LEAD_AUTHOR_MODEL                          in-process model id (default glm-5.2; any
+                                             provider providers.provider_for routes)
+  LEAD_AUTHOR_EFFORT                          reasoning effort (default low)
+  LEAD_AUTHOR_TIMEOUT_SECONDS                per-spawn wall-clock ceiling (default 1800)
+  LEAD_AUTHOR_REQUEST_LIMIT                   tool-loop request cap (default 250)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
                                              system-skill lift queue (default 5)
 """

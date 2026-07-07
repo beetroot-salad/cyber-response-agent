@@ -55,6 +55,16 @@ def _resolved_read_roots(
     )
 
 
+def _resolved_write_roots(policy: AgentPolicy, run_dir: Path) -> tuple[Path, ...]:
+    """The resolved roots a WRITE must land within for `policy`: the run dir always (every
+    agent authors its own case artifacts), plus the agent's `write_confine` (the corpus
+    subtree a writer may author — the lead author's `defender/skills`). Empty confine (the
+    default) is run-dir-only — inert for every read-only/predictor agent and the main loop.
+    The mirror of `_resolved_read_roots`; may raise `OSError`/`RuntimeError` from `resolve()`
+    (a symlink cycle) — the caller FAILS CLOSED."""
+    return tuple(r.resolve() for r in (Path(run_dir), *policy.write_confine))
+
+
 def read_allowed_path(
     path: str | Path, *, run_dir: Path | None, defender_dir: Path | None,
     policy: AgentPolicy,
@@ -140,9 +150,16 @@ def is_untrusted_read(path: Path) -> bool:
     return p.name == "alert.json" or RAW_MARKER in str(p)
 
 
-def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
-    """Allow/deny a write of `proposed_text` to `path`, porting the
-    `Write(<run_dir>/**)` path allow + `invlang_validate`.
+def decide_write(
+    path: Path, proposed_text: str, *, run_dir: Path, policy: AgentPolicy
+) -> Decision:
+    """Allow/deny a write of `proposed_text` to `path` — a **deny-by-default allowlist** (the
+    write mirror of `decide_read`). A write must resolve INSIDE one of the allowed roots: the
+    run dir (every agent's own case artifacts) OR, when the policy declares a `write_confine`,
+    that corpus subtree (the lead author's `defender/skills`). Empty `write_confine` keeps
+    writes run-dir-only — the legacy behavior, inert for the main loop / read-only stages.
+    `resolve()` collapses `..`/symlinks so an allowed-root prefix can't be escaped; a
+    `resolve()` error (a symlink cycle) FAILS CLOSED rather than propagating out of the gate.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);
@@ -150,12 +167,16 @@ def decide_write(path: Path, proposed_text: str, *, run_dir: Path) -> Decision:
     invlang — the in-process equivalent of the hook's exit-2 feedback.
     """
     path = Path(path)
-    run_dir = Path(run_dir).resolve()
-    if not _is_within(path.resolve(), run_dir):
+    try:
+        rp = path.resolve()
+        roots = _resolved_write_roots(policy, run_dir)
+    except (OSError, RuntimeError):
+        return Decision(False, f"Blocked: {path} could not be resolved (failing closed).")
+    if not any(_is_within(rp, root) for root in roots):
         return Decision(
             False,
-            f"Blocked: writes must stay inside the run dir ({run_dir}); "
-            f"{path} is outside it.",
+            "Blocked: writes must stay inside the run dir or this agent's write "
+            f"confine; {path} is outside them.",
         )
 
     if path.name == "investigation.md":

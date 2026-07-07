@@ -251,11 +251,14 @@ def test_write_gate_resolve_vs_rm_regex_asymmetry_is_accepted(tmp_path):
 # ===========================================================================
 
 def test_run_stage_require_output_matrix(tmp_path):
-    """The blast-radius guard for the four shipped read-only stages. With an EMPTY final text:
-    require_output OMITTED → RunUnprocessable; =True → RunUnprocessable; =False → returns "".
-    The DEFAULT is unchanged, so judge/actor/oracle/verify (which never pass the flag) still
-    quarantine an empty verdict — the new path is opt-in. Positive control: require_output=False
-    with NON-empty output returns that text verbatim (the flag suppresses only the empty guard)."""
+    """The blast-radius guard for the four shipped read-only stages. With a CONTENT-LESS final text
+    (whitespace — the observable proxy for a reasoning model that burned its whole budget in the
+    thinking channel and emitted no real prose; a TRULY-empty "" is rejected by pydantic-ai itself
+    before this guard, so whitespace is what actually reaches it): require_output OMITTED →
+    RunUnprocessable; =True → RunUnprocessable; =False → returns the content-less text as-is. The
+    DEFAULT is unchanged, so judge/actor/oracle/verify (which never pass the flag) still quarantine
+    a content-less verdict — the new path is opt-in. Positive control: require_output=False with
+    NON-empty output returns that text verbatim (the flag suppresses only the content-less guard)."""
     deps = LeadAuthorDeps.for_run(_run_dir(tmp_path), _worktree(tmp_path))
 
     def _go(require, text, tag):
@@ -269,10 +272,10 @@ def test_run_stage_require_output_matrix(tmp_path):
 
     with override_allow_model_requests(False):
         with pytest.raises(RunUnprocessable):
-            _go(None, "", "default")            # default unchanged — regression guard
+            _go(None, "  ", "default")            # default unchanged — regression guard
         with pytest.raises(RunUnprocessable):
-            _go(True, "", "true")
-        assert _go(False, "", "false") == ""    # opt-in suppresses the empty guard
+            _go(True, "  ", "true")
+        assert _go(False, "  ", "false") == "  "  # opt-in suppresses the content-less guard
         assert _go(False, "real story", "pc") == "real story"   # positive control
 
 
@@ -342,20 +345,23 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
     assert os.getcwd() == before
 
 
-def test_writer_empty_final_after_write_is_success(tmp_path):
-    """The lead author is a writer: it works via write_file/rm and may end with an EMPTY final
-    text. Through the real transport (writers=True, require_output=False), a write_file tool call
-    THEN an empty final returns "" (not RunUnprocessable) and the write landed — proving
-    writers=True registered the file writers and an empty final != a failed run."""
+def test_writer_contentless_final_after_write_is_success(tmp_path):
+    """The lead author is a writer: it works via write_file/rm and may end with a CONTENT-LESS
+    final (whitespace — a truly-empty "" is rejected by pydantic-ai before the guard, so the
+    observable content-less case is whitespace). Through the real transport (writers=True,
+    require_output=False), a write_file tool call THEN a content-less final returns that text (not
+    RunUnprocessable) and the write landed — proving writers=True registered the file writers and a
+    content-less final != a failed run. (Production leans on the prompt to emit a one-line summary,
+    so the normal final is non-empty; this pins the require_output=False safety valve.)"""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     rel = "defender/skills/gather/queries/foo/e.md"
-    fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "")
+    fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
     with override_allow_model_requests(False):
         out = _run_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="e.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
             make_model=_fake_model(fn))
-    assert out == ""
+    assert out == "  "
     assert (wt / "defender" / "skills" / "gather" / "queries" / "foo" / "e.md").read_text() == "X"
 
 

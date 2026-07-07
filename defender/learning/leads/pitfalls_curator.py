@@ -28,6 +28,7 @@ from defender.learning.author import shared as _author_shared
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.leads._lead_spine import (
+    PENDING_DIR,
     _log,
     _loop_commit_body,
     _spawn_author_agent,
@@ -77,9 +78,10 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
 
 
 def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
-    """Spawn the pitfalls curator via ``_spawn_author_agent``. The coarse ``_ALLOWLIST``
-    (Edit/Write ``defender/skills/**``) already covers execution.md; the ``rm`` grant goes
-    unused (the curator only edits)."""
+    """Spawn the pitfalls curator via ``_spawn_author_agent`` (the in-process GLM engine). The
+    lead-author write_confine (``defender/skills``) already covers execution.md; the ``rm`` grant
+    goes unused (the curator only edits). Cross-run, so it has no case run_dir — its observability
+    trace anchors at ``PENDING_DIR`` (the stable queue dir the pitfalls state already lives under)."""
     user_prompt = (
         f"skills_dir: {SKILLS_REL}\n"
         f"pitfalls_handoffs ({len(handoffs)}):\n"
@@ -90,6 +92,7 @@ def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
+        learning_run_dir=PENDING_DIR,
         log_label="pitfalls curator",
     )
 

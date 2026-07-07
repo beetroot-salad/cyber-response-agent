@@ -233,6 +233,18 @@ def _grep_lines(text: str, pattern: str) -> str:
     return "\n".join(line for line in text.splitlines() if pattern in line)
 
 
+def _resolve_operand(deps: AgentDeps, path: str) -> Path:
+    """Resolve a file-tool operand against the agent's repo root (`deps.defender_dir.parent`),
+    matching the bash lane's cwd (`_tool_bash` runs the executor at `deps.defender_dir.parent`).
+    A repo-relative operand — the lead-author writer's handoff paths (`defender/skills/…`) —
+    then lands in the agent's own tree (its worktree), not the ambient process cwd; an absolute
+    operand is unchanged (the read-only stages + the main loop pass absolute run-dir paths, so
+    this is inert for them). Closes the file-vs-bash resolution differential the bash lane never
+    had — the gate still `resolve()`s the result, so a `..` escape past the confine is still denied."""
+    p = Path(path)
+    return p if p.is_absolute() else deps.defender_dir.parent / p
+
+
 def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
     """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
     untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
@@ -240,13 +252,13 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     existence oracle. An optional `pattern` folds grep into the read (return only
     the matching lines): search never widens the read surface — the confine gates
     the PATH before any scan — so a `pattern` over a denied path still raises."""
+    p = _resolve_operand(deps, path)
     decision = permission.decide_read(
-        Path(path), run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         policy=deps.policy,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p = Path(path)
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
@@ -267,20 +279,22 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
 
 
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
-    """Logic for the `write_file` tool: a validated run-dir write."""
+    """Logic for the `write_file` tool: a validated write (run dir + the policy's
+    write_confine — the lead-author writer authors its corpus subtree)."""
+    p = _resolve_operand(deps, path)
     decision = permission.decide_write(
-        Path(path), content, run_dir=deps.run_dir
+        p, content, run_dir=deps.run_dir, policy=deps.policy
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    Path(path).write_text(content)
+    p.write_text(content)
     return f"wrote {path} ({len(content)} bytes)"
 
 
 def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str) -> str:
     """Logic for the `edit_file` tool: the create-only / not-found / non-unique
     guards, then a validated write."""
-    p = Path(path)
+    p = _resolve_operand(deps, path)
     current = p.read_text() if p.is_file() else ""
     if not old_string and p.is_file():
         # Empty old_string against an existing file would replace the WHOLE
@@ -302,7 +316,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
             "one, or use write_file to replace the whole file."
         )
     new_text = current.replace(old_string, new_string, 1) if old_string else new_string
-    decision = permission.decide_write(p, new_text, run_dir=deps.run_dir)
+    decision = permission.decide_write(p, new_text, run_dir=deps.run_dir, policy=deps.policy)
     if not decision.allow:
         raise ModelRetry(decision.reason)
     p.write_text(new_text)

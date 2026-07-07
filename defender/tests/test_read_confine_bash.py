@@ -513,12 +513,18 @@ def test_bash_redirect_write_denied(env):
 
 def test_write_report_still_allowed(env):
     """decide_write({RUN}/report.md) → ALLOW: the sanctioned write path is unchanged (regression)."""
-    assert permission.decide_write(env.run / "report.md", "disposition: benign\n", run_dir=env.run).allow
+    assert permission.decide_write(
+        env.run / "report.md", "disposition: benign\n",
+        run_dir=env.run, policy=permission.AgentPolicy(),
+    ).allow
 
 
 def test_write_investigation_invalid_invlang_denied(env):
     """decide_write({RUN}/investigation.md, <invalid invlang>) → DENY: the invlang gate is unchanged."""
-    d = permission.decide_write(env.run / "investigation.md", "```yaml\nfoo: bar\n```\n", run_dir=env.run)
+    d = permission.decide_write(
+        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n",
+        run_dir=env.run, policy=permission.AgentPolicy(),
+    )
     assert not d.allow
 
 

@@ -92,6 +92,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     writers: bool = False,
+    require_output: bool = True,
     wall_clock_timeout: int = SUBAGENT_TIMEOUT,
 ) -> str:
     """Run one in-process stage to completion and return its model's final text VERBATIM.
@@ -135,12 +136,16 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     finally:
         logger.close()
     out = str(result.output or "")
-    if not out.strip():
+    if require_output and not out.strip():
         # A reasoning model (GLM@low, the shipped default) can burn its whole budget in the
         # thinking channel and emit an EMPTY final text part without tripping the request /
         # usage cap. An empty story or verdict is never valid; quarantine this run (the same
         # per-run disposition a claude -p stage gets from an empty/failed exit) rather than
         # letting ``""`` flow on to the oracle/judge — for the actor, is_skip_story("") is
         # False, so an empty story would otherwise be graded as a real (empty) one.
+        #
+        # A WRITER stage opts OUT (``require_output=False``): the lead author's output is the
+        # committed tree, not the returned text — it does its work through write_file/edit_file/rm
+        # tool calls and legitimately ends with an empty final part.
         raise RunUnprocessable(f"{stage} ({label}) returned empty output")
     return out

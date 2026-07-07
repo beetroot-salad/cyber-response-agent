@@ -19,3 +19,4 @@ class AgentRole(Enum):
     ACTOR = "actor"    # the learning-loop adversarial/benign story actor (PydanticAI)
     ORACLE = "oracle"  # the learning-loop per-lead telemetry oracle (PydanticAI)
     VERIFIER = "verifier"  # the author-time forward-check gate (PydanticAI)
+    LEAD_AUTHOR = "lead_author"  # the offline skills/catalog author + pitfalls curator (PydanticAI, writer)

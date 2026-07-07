@@ -63,6 +63,11 @@ class AgentPolicy:
       whole corpus. The gray-box confine (#512): a confined actor sees only its
       lesson corpora, never the judge's grading rubric. Empty (the default) keeps
       the legacy `{run_dir, defender_dir, *read_roots}` — inert for main/gather.
+    - `write_confine` — extra allowed WRITE roots beyond `{run_dir}` (the mirror of
+      `read_confine` for the write gate): a writer agent that authors a corpus subtree
+      declares it here (the lead author's `defender/skills`). Empty (the default) keeps
+      writes run-dir-only — inert for every read-only/predictor agent and the main loop,
+      which write only their own run dir.
     - `deny_reason` — the fall-through deny message shown to the model.
     """
 
@@ -73,4 +78,5 @@ class AgentPolicy:
     raw_reads: bool = False
     read_roots: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
+    write_confine: tuple[Path, ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON

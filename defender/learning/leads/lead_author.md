@@ -153,3 +153,4 @@ You commit nothing. Make your edits and `rm`s in the working tree; when you fini
   were computed by the driver — read them, don't
   recompute. Their content carries the same measurement discipline as
   the catalog (see above).
+- **Finish with a one-line summary.** End your turn with a single line naming what you changed (e.g. `Promoted 2 query templates; discarded 1 draft.`) or `No changes.` for a skip-only tick. Do not end with an empty message — your edits are the work, but a terminal summary line is required.
