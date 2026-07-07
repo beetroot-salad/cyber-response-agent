@@ -7,9 +7,9 @@ key-sourcing + fault mapping) with a ``FunctionModel`` injected through the ``ma
 seam, under ``override_allow_model_requests(False)`` so any real provider call raises. Pins the
 port's load-bearing decisions:
 
-- write_confine confines the corpus writers; the ``rm`` bash grant confines draft deletion —
-  cross-surface parity, with the deliberately-accepted resolve()-vs-regex asymmetry.
-- ``LeadAuthorDeps.for_run`` binds the WORKTREE's defender_dir + write_confine (never the main
+- write_allow (a flat defender/skills/**.md pattern) confines the corpus writers; the ``rm`` bash
+  grant confines draft deletion — cross-surface parity, both lanes now confining ``..`` traversal.
+- ``LeadAuthorDeps.for_run`` binds the WORKTREE's defender_dir + write_allow (never the main
   checkout) and cannot be born without a policy (safe-by-construction, #536).
 - a repo-relative file op resolves against the WORKTREE repo_root, not the process cwd (F2),
   without leaking the process cwd.
@@ -120,8 +120,8 @@ def _spawn(**over):
 # LeadAuthorDeps.for_run — worktree binding + safe-by-construction
 # ===========================================================================
 
-def test_for_run_binds_worktree_defender_dir_and_write_confine(tmp_path):
-    """for_run stamps the WORKTREE's defender_dir + write_confine, NOT PATHS.defender_dir (the
+def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
+    """for_run stamps the WORKTREE's defender_dir + write_allow, NOT PATHS.defender_dir (the
     main checkout). Asserted through the real gates: with these deps, a read AND write of the
     worktree skills tree is allowed. Guarded negatives prove the worktree binding is
     load-bearing — the SAME op bound to the main checkout is denied (the ``_for_run``-reuse bug
@@ -129,26 +129,26 @@ def test_for_run_binds_worktree_defender_dir_and_write_confine(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     deps = LeadAuthorDeps.for_run(rd, wt)
     assert deps.defender_dir == wt / "defender"
-    assert deps.policy.write_confine == (wt / "defender" / "skills",)
+    assert len(deps.policy.write_allow) == 1  # one flat skills-corpus pattern, anchored to the worktree
     assert deps.role is AgentRole.LEAD_AUTHOR
     skill = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "x.md"
     # positive: the worktree binding lets the agent write + read its own corpus
-    assert permission.decide_write(skill, "body\n", run_dir=rd, policy=deps.policy).allow
+    assert permission.decide_write(skill, "body\n", policy=deps.policy).allow
     assert permission.decide_read(skill, run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
     # guarded negatives: bound to the MAIN checkout instead, both ops fail
     main_pol = _lead_author_policy(config.REPO_ROOT / "defender" / "skills")
-    assert not permission.decide_write(skill, "body\n", run_dir=rd, policy=main_pol).allow
+    assert not permission.decide_write(skill, "body\n", policy=main_pol).allow
     assert not permission.decide_read(skill, run_dir=rd, defender_dir=config.REPO_ROOT / "defender", policy=deps.policy).allow
 
 
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
     """Safe-by-construction (#536 required-policy): a LeadAuthorDeps built WITHOUT a policy is a
     TypeError — a writer subtype can't silently inherit the MAIN policy by omission. Positive
-    control: for_run supplies the lead-author policy (write_confine non-empty; adapters/raw off)."""
+    control: for_run supplies the lead-author policy (write_allow non-empty; adapters/raw off)."""
     with pytest.raises(TypeError):
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x", salt="s")
     deps = LeadAuthorDeps.for_run(_run_dir(tmp_path), _worktree(tmp_path))
-    assert deps.policy.write_confine  # non-empty
+    assert deps.policy.write_allow  # non-empty
     assert deps.policy.adapters is False
     assert deps.policy.raw_reads is False
 
@@ -158,12 +158,15 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 # ===========================================================================
 
 def test_lead_author_policy_shape():
-    """write_confine=(skills,), exactly ONE bash matcher (the rm grant — discovery is
-    driver-precomputed, no Glob/Grep), read_confine empty (reads under defender_dir stay
-    allowed), every other capability bit off."""
+    """write_allow = one flat skills/**.md pattern, exactly ONE bash matcher (the rm grant —
+    discovery is driver-precomputed, no Glob/Grep), read_confine empty (reads under defender_dir
+    stay allowed), every other capability bit off."""
     skills = Path("/wt/defender/skills")
     pol = _lead_author_policy(skills)
-    assert pol.write_confine == (skills,)
+    assert len(pol.write_allow) == 1
+    # the one pattern admits a skills .md and denies a non-.md sibling (the corpus-code tightening)
+    assert pol.write_allow[0].fullmatch(str(skills / "elastic" / "x.md"))
+    assert not pol.write_allow[0].fullmatch(str(skills / "invlang" / "validate.py"))
     assert pol.read_confine == ()
     assert len(pol.bash_allow) == 1
     assert pol.adapters is False
@@ -210,7 +213,7 @@ def test_rm_command_substitution_denied():
 
 def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
     """Parity: the corpus is mutable via TWO surfaces — the file writers (decide_write +
-    write_confine) and rm (bash lane + bash_allow). An out-of-scope mutation is denied on BOTH:
+    write_allow) and rm (bash lane + bash_allow). An out-of-scope mutation is denied on BOTH:
     a write_file to defender/lessons AND ``rm defender/lessons/x`` are each denied. Positive
     controls: the SAME op to defender/skills is ALLOWED on both lanes (the mechanism fires, the
     boundary is real). A constraint on one surface but absent on its sibling is the fail-open."""
@@ -220,30 +223,31 @@ def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
     skills_ok = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "y.md"
     lessons = wt / "defender" / "lessons" / "z.md"
     # write surface
-    assert permission.decide_write(skills_ok, "b\n", run_dir=rd, policy=pol).allow            # positive control
-    assert not permission.decide_write(lessons, "b\n", run_dir=rd, policy=pol).allow           # negative
+    assert permission.decide_write(skills_ok, "b\n", policy=pol).allow            # positive control
+    assert not permission.decide_write(lessons, "b\n", policy=pol).allow           # negative
     # rm (bash) surface — repo-relative spellings the matcher recognizes
     assert permission.decide_bash("rm defender/skills/gather/queries/foo/_draft/y.md", policy=pol).allow  # positive
     assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol).allow             # negative
 
 
-def test_write_gate_resolve_vs_rm_regex_asymmetry_is_accepted(tmp_path):
-    """A DELIBERATELY-accepted asymmetry, pinned so a future change surfaces here. An operand
-    that lexically starts defender/skills/ but ``..``-escapes it: decide_write resolve()s the
-    ``..`` and DENIES (lands outside write_confine); the rm matcher gates the SHAPE only
-    (operands unconfined) so ``rm defender/skills/../lessons/x.md`` matches and is ALLOWED.
-    Containment for the rm surface is the loop's git scope gate + worktree isolation, not the
-    regex. Positive controls: the in-scope baseline both surfaces accept."""
+def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
+    """Both mutation surfaces confine ``..`` traversal (the review-hardened rm matcher, finding #1).
+    An operand that lexically starts defender/skills/ but ``..``-escapes it is denied on BOTH lanes:
+    decide_write resolve()s the ``..`` and lands outside write_allow → DENY; the rm matcher rejects a
+    ``..`` segment TEXTUALLY (the bash lane does no resolve()) → DENY. This closes the prior
+    accepted asymmetry, where ``rm defender/skills/../lessons/x.md`` was allowed and could delete a
+    file OUTSIDE the worktree that the loop's git scope gate (worktree ``git status`` only) never
+    sees. Positive controls: the in-scope ``_draft`` baseline both surfaces still accept."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = LeadAuthorDeps.for_run(rd, wt).policy
     escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
-    assert not permission.decide_write(escape, "b\n", run_dir=rd, policy=pol).allow
-    assert permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol).allow
+    assert not permission.decide_write(escape, "b\n", policy=pol).allow
+    assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol).allow
+    # a ..-escape via the absolute spelling is denied too
+    assert not permission.decide_bash(f"rm {wt}/defender/skills/../../etc/passwd", policy=pol).allow
     ok = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "z.md"
-    assert permission.decide_write(ok, "b\n", run_dir=rd, policy=pol).allow
+    assert permission.decide_write(ok, "b\n", policy=pol).allow
     assert permission.decide_bash("rm defender/skills/gather/queries/foo/_draft/z.md", policy=pol).allow
-    # rejected: tighten the rm regex to resolve()-confine its operand — a regex can't resolve a
-    #           dynamic prefix (mirrors the actor's pinned-script model); the git gate is the net
 
 
 # ===========================================================================
@@ -306,7 +310,7 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     resolve-against-deps both pass). Process cwd is chdir'd to a DECOY dir that ITSELF holds a
     defender/skills tree; the model issues write_file('defender/skills/.../new.md', body)
     through the REAL _run_author_pydantic(repo_root=<worktree>). The file must land under the
-    WORKTREE (allowed by write_confine) with content==body, and NOTHING is written under the
+    WORKTREE (allowed by write_allow) with content==body, and NOTHING is written under the
     decoy — the write resolves against repo_root, never the ambient cwd. (The bash lane already
     runs at the worktree via _tool_bash cwd=deps.defender_dir.parent; the FILE tools must too.)"""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
@@ -325,6 +329,26 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     assert landed.is_file()                                       # positive: real write, in the worktree
     assert landed.read_text() == "BODY-42"
     assert not (decoy / rel).exists()                             # negative: never the ambient cwd
+
+
+def test_write_into_new_subtree_creates_parents(tmp_path):
+    """A promote/lift into a not-yet-existing skills subtree must succeed (the file writers mkdir
+    their approved path's parents, mirroring the claude -p Write they replace) — NOT raise an
+    uncaught FileNotFoundError that run_stage maps to RunUnprocessable, quarantining the whole tick
+    and discarding every valid edit. `newsys/` does not exist in the worktree; the write must create
+    it and land the file, and the run must complete (out == 'done')."""
+    wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
+    rel = "defender/skills/newsys/queries/auth.md"           # newsys/ absent in the worktree
+    assert not (wt / "defender" / "skills" / "newsys").exists()
+    fn = _tool_then_text([("write_file", {"path": rel, "content": "PROMOTED"})], "done")
+    with override_allow_model_requests(False):
+        out = _run_author_pydantic(
+            prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="newdir.jsonl",
+            label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
+            make_model=_fake_model(fn))
+    assert out == "done"
+    landed = wt / "defender" / "skills" / "newsys" / "queries" / "auth.md"
+    assert landed.read_text() == "PROMOTED"
 
 
 def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):

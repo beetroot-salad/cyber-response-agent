@@ -512,18 +512,20 @@ def test_bash_redirect_write_denied(env):
 
 
 def test_write_report_still_allowed(env):
-    """decide_write({RUN}/report.md) → ALLOW: the sanctioned write path is unchanged (regression)."""
+    """decide_write({RUN}/report.md) → ALLOW: the sanctioned main-loop write path is unchanged
+    (regression). Main declares its run-dir subtree as its write_allow."""
+    pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
     assert permission.decide_write(
-        env.run / "report.md", "disposition: benign\n",
-        run_dir=env.run, policy=permission.AgentPolicy(),
+        env.run / "report.md", "disposition: benign\n", policy=pol,
     ).allow
 
 
 def test_write_investigation_invalid_invlang_denied(env):
-    """decide_write({RUN}/investigation.md, <invalid invlang>) → DENY: the invlang gate is unchanged."""
+    """decide_write({RUN}/investigation.md, <invalid invlang>) → DENY: the invlang gate is unchanged
+    (the run-dir write_allow admits the path, then invlang denies the content)."""
+    pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
     d = permission.decide_write(
-        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n",
-        run_dir=env.run, policy=permission.AgentPolicy(),
+        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n", policy=pol,
     )
     assert not d.allow
 

@@ -9,7 +9,6 @@
     "defender/tests/test_block_main_loop_raw_access.py:_cmd_segments.all_defender_shims": "boundary-ok: enumerates the bin/ dir (filesystem); stubbed for determinism",
     "defender/tests/test_block_main_loop_raw_access.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
     "defender/tests/test_inject_system_skill_description.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
-    "defender/tests/test_lead_author.py:lead_author._author_runner.invoke_claude_print_raw": "boundary-ok: stubs the claude -p spawn to capture the prompt the real invoke_agent builds",
     "defender/tests/test_record_lead.py:os.fdopen": "boundary-ok: os.fdopen syscall, fault-injection (disk full)",
     "defender/tests/test_record_lead.py:sys.stdin": "boundary-ok: hook reads sys.stdin (the real interface)",
     "defender/tests/test_record_query.py:Path.write_text": "boundary-ok: Path.write_text, fault-injection (one-shot write failure)",

@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +46,7 @@ from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy
+from defender.runtime.permission import AgentPolicy, build_write_allow
 from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
@@ -62,22 +61,39 @@ def _rm_skills_pattern(skills_dir: Path) -> re.Pattern[str]:
     """The lead author's ONE bash grant: ``rm`` of a SINGLE path under ``defender/skills``
     (promote = write the established template + rm the draft; discard = rm the draft). Mirrors the
     actor's ``_script_pattern`` — an anchored regex over the tokenized argv (operands are unconfined
-    on the bash lane, so the skills prefix is baked into the pattern; the loop's git scope gate is
-    the containment net). Two spellings: the fixed repo-relative ``defender/skills/…`` (the agent
-    runs with cwd=worktree and issues repo-relative paths, and a tmp worktree is NOT under
-    ``REPO_ROOT`` so we can't derive it from ``skills_dir.relative_to(REPO_ROOT)``) and the absolute
-    ``<worktree>/defender/skills/…``. Single path, no flags — one draft removed at a time."""
+    on the bash lane, so the skills prefix is baked into the pattern). Two spellings: the fixed
+    repo-relative ``defender/skills/…`` (the agent runs with cwd=worktree and issues repo-relative
+    paths, and a tmp worktree is NOT under ``REPO_ROOT`` so we can't derive it from
+    ``skills_dir.relative_to(REPO_ROOT)``) and the absolute ``<worktree>/defender/skills/…``.
+
+    The operand is one-or-more ``/``-separated segments and every segment is TEXTUALLY not ``..``
+    (the same anti-traversal shape ``policies._common._SEG`` uses on the reader lane): the bash lane
+    does no ``resolve()``, so a ``..`` must be rejected literally here — else ``rm defender/skills/../
+    <anything>`` would escape the worktree and delete a file the loop's git scope gate (which only
+    diffs the worktree's own ``git status``) can never see. Single path, no flags — one draft at a
+    time."""
     spellings = "|".join(re.escape(s) for s in (SKILLS_REL.rstrip("/"), str(skills_dir)))
-    return re.compile(rf"^rm (?:{spellings})/\S+$")
+    # One path segment that is not a `..` traversal and carries no `/` or real space — the same
+    # shape as `policies._common._SEG`. Excluding the real space keeps a multi-path `rm a b` from
+    # matching as one long "segment" (a token boundary is a real space; an in-token space is the
+    # `_TOKEN_SPACE` \x00 sentinel, which `[^/ ]` still admits, so a space-in-filename draft works).
+    seg = r"(?!\.\.(?:/|$))[^/ ]+"
+    return re.compile(rf"^rm (?:{spellings})(?:/{seg})+$")
 
 
 def _lead_author_policy(skills_dir: Path) -> AgentPolicy:
-    """The lead author's declarative gate policy. ``write_confine=(skills_dir,)`` confines the file
-    writers to the skills tree; ``bash_allow`` is the single rm-of-drafts matcher (discovery is
-    driver-precomputed — the handoffs carry explicit path triples + neighbors — so no Glob/Grep and
-    no discovery matchers are needed). ``read_confine`` is empty: reads under ``defender_dir`` stay
-    allowed by ``decide_read``'s defaults (it reads the catalog + sibling skills). Every other
-    capability bit is off. Rebuilt per spawn because ``skills_dir`` is the worktree's."""
+    """The lead author's declarative gate policy. ``write_allow`` is a single flat pattern admitting
+    ``defender/skills/**.md`` ONLY (the corpus is ``.md`` — SKILL.md / execution.md / query
+    templates): the file writers may author a skills ``.md`` and NOTHING else. This is tighter than
+    a bare skills-subtree grant — it denies a write to the ``invlang``/``connect`` Python code that
+    also lives under ``skills`` (which the loop's ``.md``-only scope gate would only catch at commit,
+    after the worktree already carries the edit) — and, being a flat allowlist rather than a run-dir
+    root, it does NOT grant the writer its ``run_dir`` (nor the pitfalls curator its ``PENDING_DIR``).
+    ``bash_allow`` is the single rm-of-drafts matcher (discovery is driver-precomputed — the handoffs
+    carry explicit path triples + neighbors — so no Glob/Grep and no discovery matchers are needed).
+    ``read_confine`` is empty: reads under ``defender_dir`` stay allowed by ``decide_read``'s defaults
+    (it reads the catalog + sibling skills). Every other capability bit is off. Rebuilt per spawn
+    because ``skills_dir`` is the worktree's."""
     return AgentPolicy(
         bash_allow=(_rm_skills_pattern(skills_dir),),
         jq_operand_gated=False,
@@ -86,7 +102,7 @@ def _lead_author_policy(skills_dir: Path) -> AgentPolicy:
         raw_reads=False,
         read_roots=(),
         read_confine=(),
-        write_confine=(skills_dir,),
+        write_allow=(build_write_allow(skills_dir, suffix=".md"),),
         deny_reason=_LEAD_AUTHOR_DENY_REASON,
     )
 
@@ -100,20 +116,18 @@ class LeadAuthorDeps(AgentDeps):
 
     @classmethod
     def for_run(cls, run_dir: Path, repo_root: Path) -> LeadAuthorDeps:
-        """The lead author's front door. It CANNOT use the base ``AgentDeps._for_run`` (which
-        hardcodes ``defender_dir=PATHS.defender_dir``, the MAIN checkout): the drain edits a
+        """The lead author's front door. Delegates to the shared ``AgentDeps._for_run`` spine
+        (run_id/salt/policy stamp) but overrides its ``defender_dir`` default: the drain edits a
         throwaway git WORKTREE, so the gate must resolve reads/writes against ``repo_root/defender``
-        — else every worktree write is denied against the wrong tree. Stamps the worktree
-        ``defender_dir`` + a worktree-derived ``write_confine`` (``defender/skills``) so the agent
-        can author the very corpus it was handed. ``run_dir`` is the trace anchor + a benign extra
-        read/write root (NOT the worktree root, so it can't widen ``write_confine``)."""
+        — else every worktree write is denied against the wrong tree. The worktree-derived
+        ``write_allow`` (``defender/skills/**.md``) lets the agent author the very corpus it was
+        handed, and ONLY that — unlike the old run-dir-rooted write confine, the flat allowlist does
+        NOT make ``run_dir`` writable (so a per-run author can't clobber the source case's artifacts,
+        nor the pitfalls curator its ``PENDING_DIR`` queue state). ``run_dir`` is only the trace
+        anchor + a read root here."""
         defender_dir = repo_root / "defender"
-        return cls(
-            run_dir=run_dir,
-            defender_dir=defender_dir,
-            run_id=run_dir.name,
-            salt=uuid.uuid4().hex,
-            policy=_lead_author_policy(defender_dir / "skills"),
+        return cls._for_run(
+            run_dir, _lead_author_policy(defender_dir / "skills"), defender_dir=defender_dir,
         )
 
 
@@ -133,7 +147,7 @@ def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the 
 ) -> str:
     """Run one lead-author spawn in-process and return the model's final text (the caller ignores
     it — the real output is the committed tree). Builds the writer ``LeadAuthorDeps`` (worktree
-    ``defender_dir`` + skills ``write_confine``) and delegates to the shared ``run_stage`` with
+    ``defender_dir`` + skills ``write_allow``) and delegates to the shared ``run_stage`` with
     ``writers=True`` (register the file writers) and ``require_output=False`` (an empty final is a
     valid writer outcome). ``learning_run_dir`` is where the RequestLogger trace lands; distinct
     ``trace_name``s (batch_id + pid) keep concurrent spawns from racing on one file."""

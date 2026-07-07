@@ -79,7 +79,7 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
 
 def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
     """Spawn the pitfalls curator via ``_spawn_author_agent`` (the in-process GLM engine). The
-    lead-author write_confine (``defender/skills``) already covers execution.md; the ``rm`` grant
+    lead-author write_allow (``defender/skills/**.md``) already covers execution.md; the ``rm`` grant
     goes unused (the curator only edits). Cross-run, so it has no case run_dir — its observability
     trace anchors at ``PENDING_DIR`` (the stable queue dir the pitfalls state already lives under)."""
     user_prompt = (

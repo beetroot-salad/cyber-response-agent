@@ -49,7 +49,6 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import runner as _author_runner  # noqa: F401  (re-exported: the per-run invoke_agent tests patch this runner seam; the spawn lives in _lead_spine)
 from defender.learning.author import shared as _author_shared
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
