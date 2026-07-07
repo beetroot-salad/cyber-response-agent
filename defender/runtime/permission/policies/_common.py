@@ -23,6 +23,7 @@ grammar, so it can't smuggle an out-of-root read past a clean trailing operand).
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
@@ -52,12 +53,20 @@ def _deny_lookahead() -> str:
         BASENAME (`s in rp.name`): `<sub>` then non-`/` chars up to the token boundary —
         so a parent dir that merely CONTAINS the text (a pytest tmp named
         `…ground_truth…/`) does not over-reject a `lessons/ok.md` under it;
-      - a denied DIR (`.ssh`) counts as any path COMPONENT (`d in rp.parts`)."""
-    subs = "|".join(re.escape(s) for s in bash_policy.read_deny_substrings())
-    dirs = "|".join(re.escape(d) for d in bash_policy.read_deny_dirs())
-    basename_sub = rf"(?![^ ]*(?:{subs})[^/ ]*(?: |$))"
-    dir_component = rf"(?![^ ]*/(?:{dirs})(?=/| |$))"
-    return basename_sub + dir_component
+      - a denied DIR (`.ssh`) counts as any path COMPONENT (`d in rp.parts`).
+
+    An EMPTY axis contributes NO lookahead (not an empty `(?:)` alternation, which
+    would match at every position and flip the negative lookahead to reject every
+    operand — silently bricking the whole reader lane). Empty denylist ⇒ nothing
+    denied here, exactly like `files._denylisted` returning False."""
+    subs = [re.escape(s) for s in bash_policy.read_deny_substrings()]
+    dirs = [re.escape(d) for d in bash_policy.read_deny_dirs()]
+    lookahead = ""
+    if subs:
+        lookahead += rf"(?![^ ]*(?:{'|'.join(subs)})[^/ ]*(?: |$))"
+    if dirs:
+        lookahead += rf"(?![^ ]*/(?:{'|'.join(dirs)})(?=/| |$))"
+    return lookahead
 
 
 def _under(root: str) -> str:
@@ -107,6 +116,14 @@ _JQ_FLAG = r"-[rjcnesRaSCM]+"          # safe jq boolean short flags (NO f/L fil
 _VIEW_FLAG = r"-[A-Za-z]+"             # cat/wc/ls: any short flag (none open a 2nd file)
 _NUM_FLAG = r"-[A-Za-z0-9]+"           # tail/head: `-5`/`-1`/`-n`/`-c`
 
+# jq's file-FREE key/value flags: `--arg NAME VALUE` / `--argjson NAME VALUE` bind a
+# shell var into the filter as a STRING/JSON literal — they open NO file (unlike the
+# denied `--rawfile`/`--slurpfile`/`--argfile`/`-f`/`-L`), so the VALUE is inert even
+# when it looks like a path. Two operand tokens, neither anchored (neither is read).
+# This is the idiomatic safe way to pass a bound `${uid}`/`${host}` into a jq filter,
+# which the gather query templates use (skills/gather/queries/host-state/…).
+_JQ_KV_FLAG = r"(?:--arg|--argjson) [^ ]+ [^ ]+"
+
 
 def _reader_program_patterns(run: str, dfn: str) -> list[str]:
     """The anchored per-program stage grammars (raw regex strings, `fullmatch`ed by
@@ -115,18 +132,25 @@ def _reader_program_patterns(run: str, dfn: str) -> list[str]:
     d = _dir_operand(run, dfn)
     pat = r"[^ ]+"  # a free-text grep search pattern / a jq filter program (one token)
     return [
-        # single file-reader + the read/format viewers: PROG (flag)* FILE+
-        rf"cat(?: {_VIEW_FLAG})*(?: {f})+",
-        rf"wc(?: {_VIEW_FLAG})*(?: {f})+",
-        rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})+",
-        rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})+",
-        # grep: safe-flags, one free-text PATTERN (may look like a path), anchored FILE+
-        rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})+",
-        # ls/cd: anchored DIR operand (recon confined to the read roots)
+        # single file-reader + the read/format viewers: PROG (flag)* FILE* — the file
+        # operands are OPTIONAL (`*`, not `+`): a viewer reading STDIN in a downstream
+        # pipe stage (`… | grep foo`, `… | wc -l`, `… | head -5`) names no file, so it
+        # must still match. Any file operand that IS present is anchored; an out-of-root
+        # operand still fails `fullmatch` (it matches neither a flag nor `{f}`), so the
+        # `*` re-admits the stdin shape without widening file access.
+        rf"cat(?: {_VIEW_FLAG})*(?: {f})*",
+        rf"wc(?: {_VIEW_FLAG})*(?: {f})*",
+        rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
+        rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
+        # grep: safe-flags, one free-text PATTERN (may look like a path), anchored FILE*
+        rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
+        # ls/cd: anchored DIR operand (recon confined to the read roots). ls REQUIRES a
+        # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon).
         rf"ls(?: {_VIEW_FLAG})*(?: {d})+",
         rf"cd(?: {d})?",
-        # jq: stdin-compute-only — safe boolean flags + exactly one filter, NO file slot
-        rf"jq(?: {_JQ_FLAG})*(?: {pat})",
+        # jq: stdin-compute-only — safe boolean flags + file-free `--arg`/`--argjson`
+        # key/value flags + exactly one filter, NO file slot.
+        rf"jq(?: (?:{_JQ_FLAG}|{_JQ_KV_FLAG}))*(?: {pat})",
     ]
 
 
@@ -141,13 +165,20 @@ def _shim_names() -> list[str]:
     return sorted(set(NON_ADAPTER_SHIMS) | argument_inert_viewers)
 
 
+@lru_cache(maxsize=None)
 def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
     """The main/gather bash reader allowlist, ANCHORED to `run_dir` + the defender
     corpus (#535). Every viewer's file/dir operand must resolve — textually, no
     `resolve()` — under those roots; jq is stdin-compute-only; the program-only shims
     open no model-supplied path. Baked into `AgentPolicy.bash_allow` per run by
     `policy_for`, so the reader lane (`bash._decide_readers`) stays a uniform
-    per-stage `bash_allow` match with no role branch."""
+    per-stage `bash_allow` match with no role branch.
+
+    Memoized on `(run_dir, defender_dir)`: the compiled tuple is a pure function of
+    the roots + the process-static denylist (`bash_policy._policy` is itself cached),
+    and `policy_for('gather', …)` is called once per gather DISPATCH (many per run) —
+    so without the cache each dispatch recompiles the whole ~14-pattern allowlist for a
+    per-run-constant value."""
     run, dfn = str(run_dir), str(defender_dir)
     programs = _reader_program_patterns(run, dfn)
     shims = [rf"{re.escape(n)}(?: .*)?" for n in _shim_names()]

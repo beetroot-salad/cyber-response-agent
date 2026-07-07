@@ -126,6 +126,18 @@ def test_gather_allows_quoted_jq_comparisons(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
+    # Same regression for MAIN — the gather variants above route through a gather_raw path MAIN's
+    # raw clamp denies, so cover MAIN over an in-root NON-raw artifact instead. Without this, no MAIN
+    # test carries a comparison-bearing jq filter, so a main-only over-tightening of redirect
+    # detection (`>=`/`<=` misread as a redirect) would slip through green.
+    '''cat /run/investigation.md | jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' ''',
+    '''cat /run/investigation.md | jq '[.hosts[] | select(.trust_edges_out | length > 0)]' ''',
+])
+def test_main_allows_quoted_jq_comparisons(cmd):
+    assert permission.decide_bash(cmd, policy=MAIN, run_dir=_RUN, defender_dir=_DFN).allow
+
+
+@pytest.mark.parametrize("cmd", [
     "jq '.x' f.json > /tmp/out",            # real stdout redirect outside quotes
     "cat f.json 1> /tmp/out",               # explicit fd redirect
     "jq '.x' f.json >> /tmp/out",           # append redirect

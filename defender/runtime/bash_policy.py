@@ -1,9 +1,11 @@
 """Loader for the declarative Bash/Read gate policy (`bash_policy.json`).
 
 The policy is the deny-by-default allowlist the in-process gate
-(`runtime/permission.py`) consults: the read-only viewer programs, the per-agent
-adapter capability, and the read denylist. It is data, not code — onboarding a
-viewer or a denied path is a JSON edit, no gate logic change (#379).
+(`runtime/permission.py`) consults: the per-agent adapter capability and the read
+denylist. It is data, not code — onboarding an adapter capability or a denied path
+is a JSON edit, no gate logic change (#379). The reader-lane program set (which
+viewers, in what anchored shape) moved into `permission/policies/_common.py`
+(`reader_patterns`) with the #535 anchoring — it is no longer a JSON list.
 
 Fail-closed: if the committed JSON is missing or corrupt, we fall back to the
 built-in defaults below (which mirror the JSON) and warn, rather than crash the
@@ -25,7 +27,6 @@ _POLICY_PATH = Path(__file__).with_name("bash_policy.json")
 # is the source of truth for edits, this is the fail-closed safety net.
 _FALLBACK_POLICY: dict = {
     "bash": {
-        "viewers": ["jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "true"],
         "agents": {
             "main": {"adapters": False, "adapter_sql_pipe": False, "raw_reads": False},
             "gather": {"adapters": True, "adapter_sql_pipe": True, "raw_reads": True},
@@ -56,11 +57,6 @@ def _load_policy(path: Path) -> dict:
 @lru_cache(maxsize=1)
 def _policy() -> dict:
     return _load_policy(_POLICY_PATH)
-
-
-def viewers() -> frozenset[str]:
-    """Read-only utility programs allowed in any composition, both agents."""
-    return frozenset(_policy()["bash"]["viewers"])
 
 
 def adapters_allowed(agent: str) -> bool:

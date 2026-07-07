@@ -220,10 +220,16 @@ def test_grep_dash_e_promotes_positional_to_file(env):
 
 
 def test_grep_recursive_denied(env):
-    """grep -r secret /etc {RUN} → DENY: -r/-R walks a dir operand (and follows symlinks), reading
-    files the anchor can't bound."""
-    # rejected: allow -r/-R over an in-root dir
+    """grep -r secret {RUN}/gather_raw → DENY: -r/-R walks a dir operand (and follows symlinks out of
+    root), reading files the trailing-operand anchor can't bound. The dir is IN-ROOT on purpose — a
+    naive `grep -r secret /etc` would deny on the out-of-root operand no matter what `_GREP_FLAG`
+    does, so it can't see a regression that admits `r`/`R`; anchoring the deny on `-r` itself (in-root
+    dir + an out-of-root variant) is what pins that `r`/`R` stays out of the safe-flag class."""
+    # rejected: allow -r/-R over an in-root dir (recursive walk / symlink follow escapes the anchor)
+    assert not _bash(env, f"grep -r secret {env.run}/gather_raw", "gather").allow
+    assert not _bash(env, f"grep -R secret {env.run}/gather_raw", "gather").allow
     assert not _bash(env, "grep -r secret /etc", "gather").allow
+    assert _bash(env, f"grep secret {env.run}/investigation.md", "gather").allow  # positive control (no -r)
 
 
 def test_grep_free_text_pattern_not_anchored(env):
@@ -269,6 +275,52 @@ def test_jq_stdin_compute_only_allowed(env):
     assert _bash(env, cmd, "gather").allow
 
 
+def test_jq_stdin_arg_and_argjson_allowed(env):
+    """cat {RUN}/… | jq -r --arg uid "0" '<filter>' → ALLOW: `--arg`/`--argjson NAME VALUE` bind a
+    shell var into the filter as a STRING/JSON literal and open NO file, so they are safe on the
+    stdin-only jq lane. This is the shape the gather query template ships
+    (skills/gather/queries/host-state/container-identity-and-uid.md) — the gate must not deny its own
+    documented workflow. The VALUE is inert even when it looks like a path (`--arg` never reads it)."""
+    # rejected: admit only boolean jq short flags (denies `--arg`, breaking the passwd/uid template)
+    tmpl = (f"cat {env.run}/gather_raw/l-001/0.json | "
+            "jq -r --arg uid \"0\" '.entries[] | select(split(\":\")[2] == $uid)'")
+    assert _bash(env, tmpl, "gather").allow
+    assert _bash(env, f"cat {env.run}/report.md | jq --argjson n 5 '.hits[:$n]'", "gather").allow
+    # a path-LOOKING --arg VALUE is a bound string, not a file read → still allowed
+    assert _bash(env, f"cat {env.run}/report.md | jq --arg p /etc/passwd '.'", "gather").allow
+    # but a FILE-opening jq flag stays denied even alongside --arg (no widening of the file lane)
+    assert not _bash(env, f"cat {env.run}/report.md | jq --arg u 0 --rawfile y /etc/passwd '.'", "gather").allow
+
+
+# ===========================================================================  #
+# D2. Stdin-consuming viewers in a pipe: a downstream stage names NO file        #
+# ===========================================================================  #
+
+def test_stdin_consuming_viewers_in_pipe_allowed(env):
+    """`<in-root reader | shim> | grep/wc/head/tail/cat` → ALLOW: a downstream viewer reads STDIN and
+    names no file operand, so the anchored file grammar must be OPTIONAL (`{f}*`, not `{f}+`). These
+    are common in-root read/filter idioms the pre-#535 `^{name}(?: .*)?$` viewers allowed; only `jq`/
+    `defender-sql` survived the migration, silently dropping grep/wc/head/tail/cat stdin forms."""
+    # rejected: require >=1 anchored file operand (`{f}+`), denying every piped-into viewer
+    for cmd in (f"cat {env.run}/investigation.md | grep -n resolved",
+                f"tail -50 {env.run}/investigation.md | grep err",
+                f"grep foo {env.run}/investigation.md | head -5",
+                f"cat {env.run}/investigation.md | wc -l",
+                "defender-lessons --tags | grep auth",
+                "defender-lessons --tags | wc -l",
+                f"cat {env.run}/investigation.md | tail -5"):
+        assert _bash(env, cmd, "gather").allow, cmd
+        assert _bash(env, cmd, "main").allow, cmd
+
+
+def test_stdin_viewer_second_stage_still_anchors_files(env):
+    """The `{f}*` relaxation must NOT admit an out-of-root FILE on a downstream stage: a viewer that
+    names a file still has it anchored. `… | grep foo /etc/passwd` and `… | cat /etc/passwd` DENY."""
+    assert not _bash(env, f"cat {env.run}/investigation.md | grep foo /etc/passwd", "gather").allow
+    assert not _bash(env, f"cat {env.run}/investigation.md | cat /etc/passwd", "gather").allow
+    assert not _bash(env, f"cat {env.run}/investigation.md | wc -l /etc/passwd", "gather").allow
+
+
 # ===========================================================================  #
 # E. Cross-surface PARITY: bash denies everything decide_read denies            #
 # ===========================================================================  #
@@ -302,10 +354,18 @@ def test_parity_captured_env_in_run_dir(env):
 
 
 def test_parity_ssh_dir_component(env):
-    """A path with an `.ssh` component is denied on both surfaces (dir-component denylist)."""
-    p = f"{env.dfn}/.ssh/id_rsa"
+    """A path with an `.ssh` component is denied on both surfaces (dir-component denylist). The path is
+    UNDER the run root on purpose — otherwise the corpus/run shape gate denies it first and the
+    `.ssh` dir_component lookahead is never exercised; here `{RUN}/.ssh/id_rsa` and `ls {RUN}/.ssh`
+    are in-SHAPE (a run-dir path), so ONLY the dir-component denylist can deny them.
+    Positive control: `{RUN}/investigation.md` (same root, no `.ssh`) is allowed on both surfaces."""
+    p = f"{env.run}/.ssh/id_rsa"
     assert not _read(env, p, "gather").allow
     assert not _bash(env, f"cat {p}", "gather").allow
+    assert not _bash(env, f"grep k {p}", "gather").allow
+    assert not _bash(env, f"ls {env.run}/.ssh", "gather").allow
+    assert not _bash(env, f"cat {env.dfn}/.ssh/id_rsa", "gather").allow  # out-of-shape variant also denies
+    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow  # positive control
 
 
 def test_parity_corpus_over_strictness_is_safe_direction(env):
@@ -317,6 +377,54 @@ def test_parity_corpus_over_strictness_is_safe_direction(env):
     docs = f"{env.dfn}/docs/learning-loop.md"
     assert _read(env, docs, "gather").allow          # read_file allows all of defender_dir
     assert not _bash(env, f"cat {docs}", "gather").allow  # bash is tighter (agent uses read_file)
+
+
+def test_corpus_md_named_secret_denied(env):
+    """A `.md`-named secret UNDER a corpus subdir — `{DFN}/lessons/credentials.md` — passes the corpus
+    `.md` SHAPE gate, so the basename-substring denylist is the ONLY thing that can deny it. Unlike
+    the out-of-corpus `ground_truth.yaml`/`.env` parity cases (which the shape gate denies first),
+    this exercises `_deny_lookahead`'s basename axis in isolation on BOTH surfaces.
+    Positive control: `{DFN}/lessons/notes.md` (same subdir, benign name) is allowed on both."""
+    # rejected: drop the basename-substring lookahead (a `credentials.md`/`.env.md` in-corpus leaks)
+    for secret in (f"{env.dfn}/lessons/credentials.md",
+                   f"{env.dfn}/skills/elastic/ground_truth.md",
+                   f"{env.dfn}/lessons/x.env.md"):
+        assert not _bash(env, f"cat {secret}", "gather").allow, secret
+        assert not _read(env, secret, "gather").allow, secret
+    assert _bash(env, f"{'cat'} {env.dfn}/lessons/notes.md", "gather").allow  # positive control
+
+
+@pytest.mark.parametrize("axis", ["substring", "dir"])
+def test_denylist_parity_bash_matches_decide_read(env, axis):
+    """For every configured denylist entry, an OTHERWISE-in-shape in-root operand carrying it denies on
+    BOTH the bash lane and decide_read (the two surfaces agree). Iterating the live denylist (not a
+    hardcoded sample) keeps the regex `_deny_lookahead` and Python `files._denylisted` from drifting:
+    add a new substring/dir to bash_policy.json and this pins both surfaces honor it."""
+    from defender.runtime import bash_policy
+    if axis == "substring":
+        for sub in bash_policy.read_deny_substrings():
+            p = f"{env.run}/sub/{sub}xyz"          # denied substring inside an in-root basename
+            assert not _bash(env, f"cat {p}", "gather").allow, p
+            assert not _read(env, p, "gather").allow, p
+    else:
+        for d in bash_policy.read_deny_dirs():
+            p = f"{env.run}/{d}/inner.json"        # denied dir as an in-root path component
+            assert not _bash(env, f"cat {p}", "gather").allow, p
+            assert not _read(env, p, "gather").allow, p
+
+
+def test_empty_denylist_does_not_brick_reader_lane(tmp_path, monkeypatch):
+    """A regression guard for the empty-denylist footgun: if `read_deny.substrings` (or dirs) is ever
+    emptied, `_deny_lookahead` must contribute NO lookahead — an empty `(?:)` alternation would match
+    everywhere and flip the negative lookahead to DENY every operand, silently bricking the lane."""
+    from defender.runtime.permission.policies import _common
+    monkeypatch.setattr(_common.bash_policy, "read_deny_substrings", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
+    monkeypatch.setattr(_common.bash_policy, "read_deny_dirs", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
+    assert _common._deny_lookahead() == ""     # no clause, not `(?:)` deny-all
+    # end-to-end (fresh roots dodge reader_patterns' cache): an in-root read still ALLOWS
+    run, dfn = tmp_path / "run", tmp_path / "dfn"
+    pol = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    assert permission.decide_bash(f"cat {run}/x.md", policy=pol, run_dir=run, defender_dir=dfn).allow
 
 
 # ===========================================================================  #

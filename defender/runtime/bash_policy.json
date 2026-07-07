@@ -8,10 +8,11 @@
     "names. `find` was dropped (template discovery is Read/Grep now), which removed",
     "the one tool that needed arg-level deny rules.",
     "",
-    "viewers  = read-only utilities allowed in any composition, both agents.",
-    "           The non-adapter defender-* shims are added from the taxonomy",
-    "           (hooks/_cmd_segments.NON_ADAPTER_SHIMS), the single source of truth",
-    "           for the adapter/non-adapter split, so they are NOT re-listed here.",
+    "The reader-lane program set + its anchored operand grammar live in",
+    "permission/policies/_common.py (reader_patterns) since #535 — NOT a JSON list.",
+    "The non-adapter defender-* shims come from the taxonomy",
+    "(hooks/_cmd_segments.NON_ADAPTER_SHIMS), the single source of truth for the",
+    "adapter/non-adapter split.",
     "adapters = whether the agent may invoke a data-source adapter (defender-<sys>",
     "           or scripts/adapters/<sys>_cli.py). main: no (dispatch gather);",
     "           gather: yes, captured transparently.",
@@ -28,7 +29,6 @@
   ],
   "version": 1,
   "bash": {
-    "viewers": ["jq", "cat", "tail", "head", "ls", "wc", "echo", "cd", "grep", "true"],
     "agents": {
       "main": {"adapters": false, "adapter_sql_pipe": false, "raw_reads": false},
       "gather": {"adapters": true, "adapter_sql_pipe": true, "raw_reads": true}

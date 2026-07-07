@@ -100,10 +100,12 @@ class AgentDeps:
     `isinstance`.
 
     `policy` is REQUIRED (keyword-only, no inheritable default): a security-critical
-    subtype can no longer be born MAIN-shaped by omitting it. Static-policy subtypes
-    (`GatherDeps`) carry their own default; per-scope subtypes (`JudgeDeps`, `ActorDeps`)
-    build theirs through a `for_scope` factory over `_for_run`. A subtype supplying
-    neither is a construction-time `TypeError`, not a silent MAIN."""
+    subtype can no longer be born MAIN-shaped by omitting it. Every subtype supplies
+    `policy` at its construction site — the per-run runtime agents (`GatherDeps`, and the
+    main loop's bare `AgentDeps`) via `permission.policy_for(agent, run_dir, defender_dir)`
+    (#535 anchors their reader lane per-run, so there is no static default), and the
+    per-scope learning agents (`JudgeDeps`, `ActorDeps`) via a `for_scope` factory over
+    `_for_run`. A subtype supplying none is a construction-time `TypeError`, not a silent MAIN."""
 
     run_dir: Path
     defender_dir: Path

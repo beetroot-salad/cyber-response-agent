@@ -174,15 +174,23 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
 
 
 def _require_read_root(name: str, p: Path) -> None:
-    """A per-run read root must be an absolute, non-filesystem-root path — the
-    anchored reader allowlist is baked from it, so an empty (`Path('')`→`.`) or `/`
-    root would anchor the pattern to the cwd / the whole filesystem (= read
-    anything). Fail LOUD (safe-by-construction: `policy_for` can't mint an unconfined
-    policy)."""
+    """A per-run read root must be an absolute, non-filesystem-root, whitespace-free
+    path — the anchored reader allowlist is baked from it, so an empty (`Path('')`→`.`)
+    or `/` root would anchor the pattern to the cwd / the whole filesystem (= read
+    anything). A root containing whitespace cannot be represented either: the shape
+    matcher maps a token's own spaces to `_TOKEN_SPACE`, but the anchor embeds
+    `re.escape(root)` with a literal space, so the two never align and EVERY in-root
+    read would silently deny. Fail LOUD in all three cases (safe-by-construction:
+    `policy_for` can't mint an unconfined — or a silently-bricked — policy)."""
     p = Path(p)
     if not p.is_absolute() or len(p.parts) < 2:
         raise ValueError(
             f"policy_for {name!r} must be an absolute non-root directory, got {p!r}"
+        )
+    if any(ch.isspace() for ch in str(p)):
+        raise ValueError(
+            f"policy_for {name!r} root must not contain whitespace (the textual bash "
+            f"reader anchor cannot represent it), got {p!r}"
         )
 
 
