@@ -6,7 +6,7 @@ argument-hint: "[issue # or design doc path]"
 
 # Write code from spec
 
-The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `review`. Inputs: the issue or design doc, and the approved test suite — committed on the branch by write-tests, or sitting in the working tree.
+The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `review`. Inputs: the issue or design doc, and the approved spec — the tests plus `spec_graph_*.yaml`, committed on the branch by write-tests.
 
 One rule sits above the rest and makes this phase the mirror of write-tests: **you make the code match the tests, never the tests match the code.** The suite is the contract the human approved. If a test looks wrong, that is a spec question, not a green-the-build task — surface it (§2), don't quietly edit it. A suite you weakened to pass is no longer a spec.
 
@@ -15,17 +15,21 @@ One rule sits above the rest and makes this phase the mirror of write-tests: **y
 Never implement in the main checkout. This phase edits source, runs the full test/lint suite, pushes, and re-pushes fixes across a multi-minute CI loop — all of which must not touch the developer's working tree or race another card's edits (in this repo, parallel edit-agents sharing one worktree have silently clobbered each other's uncommitted work via a stray `git stash`/`git checkout`).
 
 - **Orchestrator flow:** the worktree already exists — `write-tests` created it and committed the approved tests there, and `write-code-from-spec → review` share it (`card.worktree_path`, branch `flow/issue-<n>`). Adopt that tree; don't make a second one.
-- **Manual flow:** create one before writing any code — `git worktree add ../wt-issue-<n> -b <branch>` (or `EnterWorktree`) — and do everything below inside it.
+- **Manual flow:** adopt the branch that carries the committed spec — `git worktree add ../wt-issue-<n> <spec-branch>` (or `EnterWorktree` onto it) — and do everything below inside it. Minting a fresh `-b` branch from main leaves §1 with no spec commits to gate.
 
 Confirm you're in the worktree (`git rev-parse --show-toplevel`) before step 1. On failure the tree is *kept*, not removed, so `claude --resume` and retry reuse the exact state (§5); only a cancel discards it.
 
 ## 1. Plan against the spec
+
+**Gate the inputs first.** The spec must exist as a discrete, committed, reviewable artifact *before* any implementation: check that the spec ref's diff (`git diff --stat <base>...<spec-ref>` — three-dot, so commits that landed on `<base>` after the spec forked don't masquerade as spec changes) touches only test files and `spec_graph_*.yaml`. The spec ref is the branch tip write-tests committed (orchestrator: `flow/issue-<n>`); the artifact's `base:` field records the fork point. If the tests are uncommitted, or the spec commit mixes in source, stop and kick it back to write-tests. This is not ceremony: #527 and #534 both co-committed tests+impl, and #534 shipped bug classes whose lessons were already encoded in the spec skill — a spec phase that never ran discretely can't bite.
 
 Load the issue/design (`gh issue view <n> --comments`, or read the doc) for intent, then read the committed tests — they are the precise version. The tests already encode the resolved forks: each one names an injected fault or input and the observable outcome the code must produce, and each drives a specific entry point through specific injection seams. Before writing anything, know:
 
 - the entry point(s) under test and their signatures,
 - the seams the fakes enter through (a `deps` param, a constructor arg) — the implementation must expose *exactly* those; a test can't reach a seam the code doesn't offer,
 - the return-value / error / side-effect contract each test asserts.
+
+Then read `spec_graph_*.yaml` alongside the tests (vocabulary and address forms: `.claude/skills/write-tests/references/schema.md`): the implementation must **realize its address space** — expose exactly the declared seams, build payloads with the declared part-structure (a `parts` list of `{role, source}` entries means the template is never *also* the system prompt), interpolate every axis the identity facets require. Reconcile at the address-space altitude — seams, payload parts, identity axes, domain members; internal helpers and private modules are not "invented scope". A structural mismatch — an address the code never realizes, or contract-level structure the spec never declared — is a spec question, exactly like a wrong-looking test.
 
 The prose says why; the tests say what. Where they disagree, the approved tests win — or it's a fork to surface.
 
