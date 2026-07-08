@@ -1,0 +1,506 @@
+schema_version: 1
+design: >-
+  Port the four learning-loop lesson curators (A findings/lessons, B actor-tradecraft,
+  C env-benign, D env-adversarial) from `claude -p` (claude-sonnet-4-6) to in-process
+  PydanticAI GLM-5.2@low, mirroring the lead-author port (#543). One AgentRole.CORPUS_AUTHOR
+  with a per-spawn AgentPolicy (corpus-scoped write_allow + flat bash reader/forward-check/rm
+  allowlist). Route both invocation sites (curator.py:invoke_curator_agent for B/C/D and
+  lessons/run.py:invoke_agent for A) through a new curator_engine.run_curator_stage wrapper
+  (require_output=True + AUTHOR_RESULT marker parse). Fix the author_actor_env dispatch KeyError.
+  Add a batch-granular dead-letter queue so a poison batch is quarantined after N attempts
+  instead of retried every tick forever.
+base: 0184af46917e2e9526dd7d825b16230735aad125   # origin/main @ #546 (bind/compile_policy landed)
+
+# ---------------------------------------------------------------------------
+# DEMANDS — the spec proper (resolved: design-extracted + enrichment + gate-minted)
+# ---------------------------------------------------------------------------
+demands:
+
+  # --- Return contract (demand #0) + the AUTHOR_RESULT parse surface ---
+  - id: return-contract
+    kind: behavior
+    form: test
+    outcome: {nl: "The ported invoke seam keeps its signature invoke_agent(rows, batch_id, cfg) -> dict returning {committed:[bare-id-strings], consumed_skip:[{id,reason}], (curator A also held_forward_bad:[{finding_id,reason}]), commit_message:str}; on any authoring failure it raises AuthorError so _author_to_author maps it to rc 2. The returned dict — not run_stage's text — is the whole output."}
+    binds: ["interacts(curator_A->run_stage).response", "invoke_seam"]
+  - id: marker-parse-relocated
+    kind: shape
+    form: test
+    outcome: {nl: "run_curator_stage parses AUTHOR_RESULT out of run_stage's returned TEXT via extract_marked_result (balanced-brace walk from the LAST marker occurrence) + json.loads; a missing marker or invalid JSON raises AuthorError (never returns text where the envelope expects a dict)."}
+    binds: ["author_result_marker", "interacts(curator_A->run_stage).response"]
+  - id: marker-empty-commit-msg
+    kind: behavior
+    form: test
+    outcome: {nl: "A parsed result with non-empty committed but an empty/whitespace-only commit_message raises AuthorError (rc 2) — never a silent empty-message commit."}
+    binds: ["author_result_marker"]
+  - id: marker-trailer-guarded
+    kind: behavior
+    form: test
+    outcome: {nl: "A commit_message that already carries a Generation:/trailer key is rejected by commit_corpus's trailer guard as AuthorError — model-authored text cannot smuggle a provenance trailer."}
+    binds: ["author_result_marker", "envelope"]
+  - id: marker-malformed-types
+    kind: behavior
+    form: test
+    outcome: {nl: "A structurally-wrong result (committed not a list, non-string/empty-string ids, a consumed_skip entry missing its reason) raises AuthorError, not a silent bad/partial commit."}
+    binds: ["author_result_marker"]
+
+  # --- In-process transport + fault mapping ---
+  - id: inproc-transport
+    kind: seam
+    form: test
+    outcome: {nl: "Each curator drives the LLM through curator_engine.run_curator_stage (in-process PydanticAI run_stage), not runner.invoke_claude_print; no `claude -p` subprocess is spawned and a RequestLogger trace is written."}
+    binds: ["interacts(curator_A->run_stage)", "run_curator_stage"]
+  - id: require-output-true
+    kind: behavior
+    form: test
+    outcome: {nl: "run_curator_stage runs run_stage with require_output=True, so an empty final text (GLM spent its budget in the thinking channel) becomes RunUnprocessable before any parse — the empty final is never treated as a valid empty commit. (Diverges deliberately from the lead author's require_output=False, because the curator's final text carries the load-bearing AUTHOR_RESULT marker.)"}
+    binds: ["run_stage", "run_curator_stage"]
+  - id: fault-perrun-authorerror
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A per-run authoring fault (RunUnprocessable from run_stage: timeout / usage-limit / model error / empty final; or an unparseable AUTHOR_RESULT) is wrapped as AuthorError so run_batch returns rc 2 and the drain logs 'queue intact, retry next tick'. The wrap is RunUnprocessable/parse-error ONLY."}
+    binds: ["fault_map"]
+  - id: fault-systemic-propagates
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A systemic FatalConfigError (unroutable model / missing key / AGENTS[role] miss surfaced as build ValueError) or StageAbort ESCAPES run_curator_stage uncaught and propagates to exit 2 (_SYSTEMIC_FAULTS) — a deployment-wide misconfig fails once, loudly, and is never wrapped into an rc-2 retry loop."}
+    binds: ["fault_map"]
+  - id: request-limit-generous
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "Each curator runs under a NEW generous per-curator REQUEST_LIMIT knob (default 250, mirroring LEAD_AUTHOR_REQUEST_LIMIT) — not a read-only-sized cap; exceeding it → UsageLimitExceeded → RunUnprocessable (per-run). The subprocess path had NO request cap, so a small cap would kill a multi-file curator on its 2nd tool call."}
+    binds: ["request_limit.domain"]
+
+  # --- Metered key sourcing ---
+  - id: key-sourced-before-spawn
+    kind: behavior
+    form: test
+    outcome: {nl: "run_curator_stage calls source_first_party_key(model) BEFORE the run_stage spawn (the drain runs under subscription_env which strips provider keys); an unroutable model / missing key raises FatalConfigError up front (propagates, systemic) rather than a mid-spawn 401 or a timeout-masked miss."}
+    binds: ["source_key.metered_key"]
+    rejected: [{nl: "rely on the subprocess env=curator_agent_env implicit sourcing — gone once in-process"}]
+  - id: trace-anchor-before-partition
+    kind: behavior
+    form: test
+    outcome: {nl: "The batch_id / trace anchor is established before the agent spawn so a partial failure still leaves a complete, locatable trace (distinct concern from key ordering — both hold)."}
+    binds: ["source_key.batch_id"]
+
+  # --- Config flip (domain) ---
+  - id: model-flip-glm
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "AUTHOR_MODEL / AUTHOR_ACTOR_MODEL / AUTHOR_ENV_MODEL default to glm-5.2 and AUTHOR_EFFORT / AUTHOR_ACTOR_EFFORT / AUTHOR_ENV_EFFORT to low. Leaving claude-sonnet-4-6 while routing in-process would silently move curator billing from the subscription to the metered first-party key."}
+    binds: ["AUTHOR_MODEL.domain", "AUTHOR_ACTOR_MODEL.domain", "AUTHOR_ENV_MODEL.domain"]
+  - id: model-override-crosses
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "Overriding AUTHOR_*_MODEL back to a claude-* model with effort=low stays valid (low is a valid effort on both the Anthropic and Fireworks providers) — the documented A/B override does not fail at build."}
+    binds: ["AUTHOR_MODEL.domain.alternatives[claude-sonnet-4-6]"]
+
+  # --- Role + per-spawn policy ---
+  - id: one-corpus-author-role
+    kind: seam
+    form: test
+    outcome: {nl: "A single AgentRole.CORPUS_AUTHOR + CORPUS_AUTHOR_DEF (ToolSet(read=True, bash=BashGrammar(), write=True)) registered in AGENTS serves all four curators; A's held_forward_bad divergence lives in the envelope's per-curator result partition, not the engine."}
+    binds: ["role_def"]
+  - id: per-spawn-policy-not-bind
+    kind: seam
+    form: test
+    outcome: {nl: "The curator's write_allow/bash_allow are built PER-SPAWN from the worktree corpus_dir (CuratorDeps.for_run → _corpus_author_policy), like LeadAuthorDeps.for_run — NOT via compile_policy/bind, whose write_allow would root at run_dir."}
+    binds: ["role_def", "write_gate"]
+  - id: safe-by-construction-corpus-scope
+    kind: negative
+    form: test
+    outcome: {nl: "A CORPUS_AUTHOR spawn cannot be constructed with a run_dir-rooted or whole-defender_dir write_allow (footgun A regression): the deps factory requires a corpus_dir and yields a write_allow confined to <corpus>/**.md. Positive control: a CuratorDeps built for defender/lessons-actor/ admits an in-corpus .md write."}
+    binds: ["write_gate", "role_def"]
+
+  # --- Write gate (negatives + positive controls; every write surface) ---
+  - id: write-in-corpus-admitted
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control: the agent may write_file AND edit_file a <corpus>/<name>.md under its own corpus — the write is admitted and the file lands."}
+    binds: ["interacts(corpus_agent->lessons_actor_corpus)", "write_gate.write_file", "write_gate.edit_file"]
+  - id: write-cross-corpus-denied
+    kind: negative
+    form: test
+    outcome: {nl: "A write_file OR edit_file to a DIFFERENT corpus than the spawn's own (curator A→lessons-actor/, B→lessons/ or lessons-environment/) is DENIED (ModelRetry). Paired positive control: the same write into the spawn's OWN corpus succeeds. Both write_file and edit_file bound."}
+    binds: ["write_gate.write_file", "write_gate.edit_file", "lessons_corpus", "lessons_actor_corpus", "lessons_env_corpus"]
+  - id: write-non-md-denied
+    kind: negative
+    form: test
+    outcome: {nl: "A write of a non-.md file (.py, .txt, no extension) under the corpus is DENIED (build_write_allow suffix='.md'). Positive control: the sibling .md write succeeds."}
+    binds: ["write_gate.write_file", "write_gate.edit_file"]
+  - id: write-outside-worktree-denied
+    kind: negative
+    form: test
+    outcome: {nl: "A write to run_dir, the _pending queue dir, or anywhere outside <corpus>/**.md is DENIED — the flat allowlist does NOT grant run_dir (unlike a run-dir-rooted confine). Positive control: the in-corpus .md write succeeds."}
+    binds: ["write_gate.write_file"]
+  - id: write-traversal-symlink-denied
+    kind: negative
+    form: test
+    outcome: {nl: "A `..` traversal path and a symlink under the corpus pointing outside are both DENIED by decide_write's RESOLVED-path fullmatch, on both write_file and edit_file. Positive control: the direct in-corpus .md write succeeds."}
+    binds: ["write_gate.write_file", "write_gate.edit_file"]
+
+  # --- Bash gate: forward-check + rm + corpus-anchored viewers (Q1 option 3) ---
+  - id: bash-forward-check-admitted
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control: the curator's OWN forward-check command is admitted on the bash lane — A: python3 <verifier> .../verify_forward/{batch,forward}.py …; B: .../verify_forward/{batch,actor}.py …; C/D: .../verify_forward/env.py …. Each curator's bash_allow carries only ITS verifier scripts."}
+    binds: ["bash_gate.forward_check"]
+  - id: bash-wrong-forward-check-denied
+    kind: negative
+    form: test
+    outcome: {nl: "A curator running a DIFFERENT curator's forward-check (curator A invoking verify_forward/actor.py) is DENIED — the verifier grant is per-curator. Positive control: A's own verify_forward/forward.py is admitted."}
+    binds: ["bash_gate.forward_check"]
+  - id: bash-rm-scoped-admitted
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control: a single-path `rm <corpus>/<name>.md` of the spawn's own corpus is admitted (promote/discard a draft)."}
+    binds: ["bash_gate.rm"]
+  - id: bash-rm-abuse-denied
+    kind: negative
+    form: test
+    outcome: {nl: "rm with flags (-rf, -v), rm of multiple paths, rm cross-corpus, rm with a literal `..` operand, and rm of an absolute path outside the corpus are ALL DENIED (single path, no flags, anti-`..` textual, corpus-anchored). Positive control: the single-draft in-corpus rm succeeds."}
+    binds: ["bash_gate.rm"]
+  - id: bash-nav-viewers-corpus-anchored
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control: ls/grep/cat of the spawn's OWN corpus (e.g. `grep -l ... defender/lessons-actor/<name>.md`, `ls defender/lessons-actor/`) is admitted — the agent enumerates existing lessons to fold duplicates via the bash reader lane, since there is no Glob/Grep tool in-process."}
+    binds: ["bash_gate.nav", "corpus_nav"]
+  - id: bash-nav-outside-corpus-denied
+    kind: negative
+    form: test
+    outcome: {nl: "cat/grep/ls of anything OUTSIDE the spawn's corpus — another corpus, a `..` traversal operand, or an absolute path like /etc/passwd — is DENIED: the hand-built viewer pattern carries NO automatic secret denylist, so its corpus-anchored operand (anti-`..`) is the sole containment. Positive control: the in-corpus grep/ls/cat succeeds."}
+    binds: ["bash_gate.nav", "corpus_nav"]
+  - id: bash-arbitrary-program-denied
+    kind: negative
+    form: test
+    outcome: {nl: "Any bash command that is not a whitelisted viewer / the curator's forward-check / the scoped rm — git commit, bare python, curl, cat of a secret — is DENIED (deny-by-default). Positive control: the sanctioned forward-check and in-corpus viewer succeed."}
+    binds: ["bash_gate", "bash_gate.forward_check"]
+  - id: prompts-drop-absent-tools
+    kind: behavior
+    form: test
+    outcome: {nl: "The four ported curator prompts do not instruct the agent to use the absent Glob/Grep tools; corpus enumeration is expressed as bash ls/grep on the corpus — so the mandated whole-corpus fold/description pass is actually executable in-process (its silent death would ship green with permanent duplicate lessons)."}
+    binds: ["corpus_nav"]
+
+  # --- Trace uniqueness + persistence (R2 / #527) ---
+  - id: trace-per-spawn-distinct
+    kind: uniqueness
+    form: test
+    outcome: {nl: "Each curator spawn's RequestLogger trace lands on a distinct path (batch_id + pid), so two curators — or C then D into the shared lessons-environment corpus — in one drain tick never truncate each other's trace (RequestLogger opens in truncate mode)."}
+    binds: ["trace_file.identity"]
+  - id: trace-persistent-not-worktree
+    kind: behavior
+    form: test
+    outcome: {nl: "The curator trace lands in persistent shared state (a pending/state dir), not the throwaway per-batch worktree, so it survives branch cleanup."}
+    binds: ["trace_file.identity"]
+
+  # --- State-root / forward-check bundle (the deepest cross-file fault) ---
+  - id: forward-check-resolves-off-state-root
+    kind: behavior
+    form: test
+    outcome: {nl: "The in-process forward-check subprocess resolves its source-case bundle off DEFENDER_LEARNING_STATE_DIR, not the throwaway worktree's empty runs/. With the state root pinned into the agent's bash-tool env, a GOOD lesson's forward-check reads the real source case (positive control); without the pin every lesson would silently resolve an empty bundle and revert — the #425 mode. run_common.run_env does not carry the var, so the port pins it explicitly (the in-process twin of curator_agent_env)."}
+    binds: ["state_root_env", "interacts(corpus_agent->forward_check)"]
+
+  # --- Dispatch bug fix (survival) ---
+  - id: dispatch-author-actor-env
+    kind: behavior
+    form: test
+    outcome: {nl: "_CURATOR_MODULES maps 'author_actor_env' -> 'defender.learning.author.benign_actor.env'; driving the REAL dispatch (_run_curator_module / _maybe_trigger_author, not an injected fake trigger) for the adversarial-env direction imports and runs its run_batch WITHOUT KeyError."}
+    binds: ["curator_modules"]
+  - id: dispatch-at-threshold-no-crash
+    kind: survival
+    form: test
+    outcome: {nl: "With the adversarial-env observation queue at LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD, author_drain dispatches curator D and completes without wedging the whole drain on an uncaught KeyError (the subscript at orchestrate.py:340 sits outside the SubprocessError/OSError try). Positive control: the other three curators still dispatch."}
+    binds: ["curator_modules", "interacts(author_drain->curator_D)"]
+
+  # --- Dead-letter queue (batch-granular; new mechanism) ---
+  - id: dlq-attempt-bump
+    kind: behavior
+    form: test
+    outcome: {nl: "A per-run authoring fault (RunUnprocessable / unparseable AUTHOR_RESULT) increments an `attempts` counter on the batch's queue rows, persisted across ticks. Positive control: a SUCCESSFUL batch never increments attempts (and does not carry a stale counter forward)."}
+    binds: ["queue_row.attempts", "dlq"]
+  - id: dlq-quarantine-at-threshold
+    kind: behavior
+    form: test
+    outcome: {nl: "When a batch's rows reach LEARNING_AUTHOR_MAX_ATTEMPTS (new knob, default 3), the rows are moved to a deadletter.jsonl sidecar (carrying the failure reason + attempt count) and removed from the active queue — the move-aside shape of _quarantine_marker, at the queue-row level."}
+    binds: ["dlq", "queue_row.attempts"]
+  - id: dlq-batch-granular
+    kind: behavior
+    form: test
+    outcome: {nl: "The quarantine is batch-granular: because rc 2 originates before any per-row fault attribution exists, all to_author rows share the fault and dead-letter as a unit."}
+    binds: ["dlq"]
+    rejected: [{nl: "isolate the single poison finding — needs net-new per-finding fault attribution, out of scope for a port"}]
+  - id: dlq-does-not-block-subsequent
+    kind: survival
+    form: test
+    outcome: {nl: "Once a poison batch is dead-lettered, it no longer blocks the queue: a following clean batch of new findings authors and commits normally."}
+    binds: ["dlq", "envelope"]
+  - id: dlq-systemic-exempt
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "Systemic faults (FatalConfigError/StageAbort → exit 2) do NOT bump attempts or dead-letter; lock contention (rc 0, never ran) and dirty-corpus pre-flight (rc 2, environment) also do NOT count toward the attempt budget — only a per-run authoring fault does."}
+    binds: ["dlq", "fault_map"]
+
+  # --- Envelope survival with the in-process invoke (R5) ---
+  - id: survival-partial-write-rollback
+    kind: survival
+    form: test
+    outcome: {nl: "If the in-process agent writes some lesson files then run_stage raises RunUnprocessable mid-batch, the clean-scope + rollback still leaves the corpus git-clean and the queue NOT rotated (findings retryable) — no partial commit, no silent double-author on re-drain."}
+    binds: ["envelope"]
+  - id: survival-committed-dirty-crosscheck
+    kind: survival
+    form: test
+    outcome: {nl: "verify_agent_state's committed⇔corpus-dirty cross-check still holds with the in-process invoke: committed:[] + dirty corpus → AuthorError/rc2; committed:[id] + clean corpus → AuthorError/rc2."}
+    binds: ["envelope"]
+  - id: survival-scope-gate-strays
+    kind: survival
+    form: test
+    outcome: {nl: "A file the agent wrote OUTSIDE the corpus that the policy admitted-or-missed is caught by verify_agent_state's scope gate → AuthorError (NEW strays only; a sibling curator's pre-existing baseline stray is not blamed)."}
+    binds: ["envelope"]
+  - id: survival-idempotent-redrain
+    kind: survival
+    form: test
+    outcome: {nl: "A re-drain of an already-committed batch does not double-commit or double-append (idempotency: findings already cited in an existing lesson's source ids are skipped) — preserved under the in-process invoke."}
+    binds: ["envelope"]
+  - id: survival-agent-no-git
+    kind: survival
+    form: test
+    outcome: {nl: "The in-process agent runs NO git; the loop remains the sole committer (commit_corpus pathspec-scoped, Generation:+trailer). The agent's toolset has no git grant on the bash lane."}
+    binds: ["envelope", "bash_gate"]
+
+  # --- Removal / conservation (R5) ---
+  - id: runner-teardown
+    kind: survival
+    form: test
+    outcome: {nl: "After the port, runner.invoke_claude_print / curator_allowed_tools / curator_agent_env have no production callers; resolve_verifier_python survives (the four curators still build python3 <verifier> bash grants); the transaction envelope (run_batch/_author_to_author/commit_corpus/rotate_queue) is unchanged."}
+    binds: ["runner_teardown", "envelope"]
+
+  # --- Env-corpus shared sink (R2) ---
+  - id: env-corpus-two-writers-distinct
+    kind: uniqueness
+    form: test
+    outcome: {nl: "Curators C (benign) and D (adversarial) both write defender/lessons-environment/ but in separate batches serialized under the one-drainer flock; their writes land on distinct lesson paths (or fold into existing) and their per-direction commit trailers (Benign-Actor-Model: vs Actor-Env-Model:) and generation counters stay distinct."}
+    binds: ["lessons_env_corpus.identity"]
+
+# ---------------------------------------------------------------------------
+# STRUCTURE — the address space
+# ---------------------------------------------------------------------------
+structure:
+  axes: [curator, corpus, batch_id, pid, lesson_stem]
+
+  actors:
+    - {id: author_drain,   frame: composition, provenance: code}    # fans the four curators (serial)
+    - {id: curator_A,      frame: leg, provenance: code}            # findings -> lessons/
+    - {id: curator_B,      frame: leg, provenance: code}            # actor    -> lessons-actor/
+    - {id: curator_C,      frame: leg, provenance: code}            # env-benign -> lessons-environment/
+    - {id: curator_D,      frame: leg, provenance: code}            # env-adversarial -> lessons-environment/
+    - {id: corpus_agent,   frame: leg, provenance: design}          # the in-process GLM spawn (writes .md, runs bash)
+    - {id: run_curator_stage, frame: leg, provenance: design}       # the new wrapper (mirror run_author_stage)
+
+  boundaries:
+    - id: invoke_seam
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:CURATOR_PROMPT}          # the curator's prompt.md
+            - {role: user,   source: template:CURATOR_USER, slots: {rows: queue_rows, lessons_dir: corpus, verifier_cmd: forward_check}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "the user turn carries batch_id + lessons_dir + the queued findings/observations JSON; the ported prompts drop Glob/Grep and enumerate via bash"
+    - id: author_result_marker
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: user, source: template:AUTHOR_RESULT, slots: {committed: committed, consumed_skip: consumed_skip, commit_message: commit_message}}
+          invariants: [all-slots-bound]
+          nl: "the AUTHOR_RESULT: JSON the model emits as its final text; the ported invoke seam parses it out of run_stage's return (the parse relocated out of the retired transport)"
+    - id: run_stage
+      provenance: code
+      facets: {}
+    - id: run_curator_stage
+      provenance: design
+      facets: {}
+    - id: fault_map
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "run_stage's raise modes mapped to a curator disposition"}
+          default: RunUnprocessable
+          distinguished: [RunUnprocessable, FatalConfigError, StageAbort, empty-final, parse-error]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: source_key
+      provenance: code
+      facets: {}
+    - id: role_def
+      provenance: design
+      facets: {}
+    - id: write_gate
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            write-tool: {trust: derived, constraints: [confine]}   # write_file + edit_file: resolved-path fullmatch vs <corpus>/**.md
+    - id: bash_gate
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bash: {trust: attacker-influenced, constraints: [confine, denylist]}  # flat bash_allow: viewers/forward-check/rm, anti-.., corpus-anchored
+    - id: lessons_corpus
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lesson_stem]
+          evidence: {nl: "one <name>.md per lesson under defender/lessons/, read off the curator prompt + commit_corpus pathspec"}
+          sharing: unique-key
+    - id: lessons_actor_corpus
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lesson_stem]
+          evidence: {nl: "one <name>.md per lesson under defender/lessons-actor/"}
+          sharing: unique-key
+    - id: lessons_env_corpus
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lesson_stem]
+          evidence: {nl: "one <name>.md per lesson under defender/lessons-environment/; TWO writers (curator C benign + curator D adversarial), serialized by the one-drainer flock"}
+          sharing: unique-key
+    - id: corpus_nav
+      provenance: design
+      facets: {}
+    - id: trace_file
+      provenance: design
+      facets:
+        identity:
+          key_axes: [batch_id, pid]
+          evidence: {nl: "RequestLogger writes learning_run_dir/{trace_name}; lead author uses {batch_id}.{pid}.trace.jsonl to avoid concurrent-spawn truncation (RequestLogger opens truncate)"}
+          sharing: unique-key
+    - id: state_root_env
+      provenance: code
+      facets: {}
+    - id: forward_check
+      provenance: code
+      facets: {}
+    - id: curator_modules
+      provenance: code
+      facets: {}
+    - id: dlq
+      provenance: design
+      facets: {}
+    - id: queue_row
+      provenance: code
+      facets:
+        identity:
+          key_axes: [batch_id]
+          evidence: {nl: "findings.jsonl / *_observations.jsonl rows; NEW `attempts` field bumped on per-run authoring fault"}
+          sharing: serialized-append
+    - id: envelope
+      provenance: code
+      facets: {}
+    - id: runner_teardown
+      provenance: code
+      facets: {}
+    - id: AUTHOR_MODEL
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the findings curator's model id"}
+          default: glm-5.2
+          distinguished: [glm-5.2]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: claude-sonnet-4-6, crosses_validation: true}   # effort low valid on Anthropic too
+    - id: AUTHOR_ACTOR_MODEL
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "actor curator model"}, default: glm-5.2, distinguished: [glm-5.2], falsy_valid: false, documented_alternatives: []}
+    - id: AUTHOR_ENV_MODEL
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "env curator model (shared by C and D)"}, default: glm-5.2, distinguished: [glm-5.2], falsy_valid: false, documented_alternatives: []}
+    - id: request_limit
+      provenance: design
+      facets:
+        domain: {type: int, refinement: {nl: "per-curator in-process request cap (subprocess had none)"}, default: 250, distinguished: [250], falsy_valid: false, documented_alternatives: []}
+
+  interacts:
+    - {from: curator_A, to: run_curator_stage, mode: invoke, via: api, provenance: design}
+    - {from: curator_A, to: run_stage, mode: invoke, via: api, provenance: design, sends: payload, transport: llm}
+    - {from: curator_A, to: run_stage, mode: read, via: api, provenance: design}     # .response = AUTHOR_RESULT text
+    - {from: run_curator_stage, to: source_key, mode: invoke, via: api, provenance: design}
+    - {from: corpus_agent, to: lessons_corpus,        mode: write, via: fs, provenance: design, interpolates: [lesson_stem]}
+    - {from: corpus_agent, to: lessons_actor_corpus,  mode: write, via: fs, provenance: design, interpolates: [lesson_stem]}
+    - {from: corpus_agent, to: lessons_env_corpus,    mode: write, via: fs, provenance: design, interpolates: [lesson_stem]}
+    - {from: corpus_agent, to: lessons_env_corpus,    mode: write, via: fs, provenance: code,   interpolates: [lesson_stem]}   # 2nd writer (D)
+    - {from: corpus_agent, to: write_gate,  mode: write,  via: write-tool, provenance: design}
+    - {from: corpus_agent, to: bash_gate,   mode: invoke, via: bash, provenance: design}
+    - {from: corpus_agent, to: forward_check, mode: invoke, via: bash, provenance: design}
+    - {from: forward_check, to: state_root_env, mode: read, via: env, provenance: code}
+    - {from: corpus_agent, to: trace_file, mode: write, via: fs, provenance: design, interpolates: [batch_id, pid]}
+    - {from: curator_A, to: AUTHOR_MODEL, mode: read, via: env, provenance: code}
+    - {from: curator_B, to: AUTHOR_ACTOR_MODEL, mode: read, via: env, provenance: code}
+    - {from: curator_C, to: AUTHOR_ENV_MODEL, mode: read, via: env, provenance: code}
+    - {from: curator_D, to: AUTHOR_ENV_MODEL, mode: read, via: env, provenance: code}
+    - {from: curator_A, to: request_limit, mode: read, via: env, provenance: design}
+    - {from: author_drain, to: curator_modules, mode: read, via: fs, provenance: code}
+    - {from: author_drain, to: curator_D, mode: invoke, via: api, provenance: code}
+    - {from: curator_A, to: queue_row, mode: write, via: fs, provenance: code}
+    - {from: curator_A, to: dlq, mode: write, via: fs, provenance: design, interpolates: [batch_id]}
+    - {from: run_curator_stage, to: runner_teardown, mode: remove, via: api, provenance: design}
+
+  drives:
+    - {from: author_drain, to: curator_A, provenance: code, multiplicity: serial}
+    - {from: author_drain, to: curator_B, provenance: code, multiplicity: serial}
+    - {from: author_drain, to: curator_C, provenance: code, multiplicity: serial}
+    - {from: author_drain, to: curator_D, provenance: code, multiplicity: serial}
+
+# ---------------------------------------------------------------------------
+# GATE — every rule, every run
+# ---------------------------------------------------------------------------
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}
+  obligations:
+    - {rule: R1, element: "interacts(curator_A->run_stage).payload", witness: "the user turn (rows + lessons_dir + verifier_cmd) is sent to run_stage with no shape demand — all-slots-bound + roles-disjoint", discharged_by: marker-parse-relocated}
+    - {rule: R1, element: "author_result_marker", witness: "the AUTHOR_RESULT the model returns is parsed but its shape/keys unpinned", discharged_by: marker-malformed-types}
+    - {rule: R2, element: "lessons_env_corpus.identity", witness: "two writers (C, D) into one corpus root — key coverage + distinctness", discharged_by: env-corpus-two-writers-distinct}
+    - {rule: R2, element: "trace_file.identity", witness: "RequestLogger truncate-mode writes collide across spawns unless keyed by batch_id+pid (#527 escape)", discharged_by: trace-per-spawn-distinct}
+    - {rule: R3, element: "write_gate.access[write-tool]", witness: "write_file and edit_file must enforce the same corpus/**.md confine (parity across both write surfaces)", discharged_by: write-cross-corpus-denied}
+    - {rule: R3, element: "bash_gate.access[bash]", witness: "the bash lane's rm + viewers must be corpus-anchored + anti-.. with no denylist safety net", discharged_by: bash-nav-outside-corpus-denied}
+    - {rule: R4, element: "AUTHOR_MODEL.domain", witness: "the model flip glm-5.2 + effort low, and the claude-* crossing override", discharged_by: model-flip-glm}
+    - {rule: R4, element: "request_limit.domain", witness: "the new in-process request cap has no subprocess equivalent — a too-small default kills a multi-tool curator", discharged_by: request-limit-generous}
+    - {rule: R5, element: "runner_teardown", witness: "invoke_claude_print/curator_allowed_tools/curator_agent_env removed; resolve_verifier_python + the envelope must survive", discharged_by: runner-teardown}
+    - {rule: R5, element: "envelope", witness: "the kept transaction envelope must still roll back / cross-check / stay idempotent under the new in-process invoke", discharged_by: survival-partial-write-rollback}
+    - {rule: R5, element: "write_gate", witness: "the write confine TIGHTENS — a curator must not be constructible with a run_dir-rooted write_allow (footgun A safe-by-construction)", discharged_by: safe-by-construction-corpus-scope}
+  holes:
+    - {rule: R0, element: corpus_nav, resolution: "RESOLVED (human Q1): flat per-curator bash reader allowlist (option 3) — ls/grep/cat anchored to the curator's own corpus, no _CORPUS_SUBDIRS mutation; prompts rewritten Glob/Grep->bash", resolved_to: bash-nav-viewers-corpus-anchored}
+    - {rule: R0, element: fault_map, resolution: "RESOLVED (forced + human Q2): per-run RunUnprocessable->AuthorError->rc2 (dict return leaves no rc-124 lane); wrap RunUnprocessable/parse-error ONLY so systemic faults escape to exit 2; ADD batch-granular DLQ so a poison batch quarantines after N attempts instead of retrying forever", resolved_to: fault-perrun-authorerror}
+    - {rule: R0, element: state_root_env, resolution: "RESOLVED: pin DEFENDER_LEARNING_STATE_DIR into the in-process agent's bash-tool env (the in-process twin of curator_agent_env); mechanism (run_env vs explicit) is impl, behavior pinned", resolved_to: forward-check-resolves-off-state-root}
+    - {rule: R0, element: trace_file, resolution: "RESOLVED: per-spawn {batch_id}.{pid} name in persistent shared state (pending dir), not the worktree", resolved_to: trace-persistent-not-worktree}
+    - {rule: R0, element: dlq, resolution: "RESOLVED (human Q2 + grounding): batch-granular, deadletter.jsonl sidecar + per-row attempts field + LEARNING_AUTHOR_MAX_ATTEMPTS default 3; per-finding isolation rejected (needs net-new fault attribution)", resolved_to: dlq-quarantine-at-threshold}
+  pre_discharged: []
+
+# ---------------------------------------------------------------------------
+# HANDOFF
+# ---------------------------------------------------------------------------
+handoff:
+  forks:
+    - "Q1 corpus navigation: precompute-manifest vs extend-reader-lane vs (chosen) flat per-curator bash reader allowlist. RESOLVED by the user to option 3 — cleanest (zero blast radius on the shared _CORPUS_SUBDIRS / live MAIN-GATHER runtime; mirrors claude -p's per-agent allowed_tools). Prompts get a small Glob/Grep->bash rewrite."
+    - "Q2 per-batch failure contract: rc-2-retry-forever vs dead-letter-queue. RESOLVED by the user to ADD a DLQ. rc mapping itself is FORCED to RunUnprocessable->AuthorError->rc2 (invoke_agent returns a dict, so no rc-124 lane like the lead author's); the DLQ rides on top via a per-row attempts counter + deadletter.jsonl, batch-granular. Systemic faults still exit 2."
+    - "Silent branch caught in diff: the lifecycle lens asserted rc124 for RunUnprocessable while dependency+strong asserted rc2 — resolved to rc2 (architecturally forced); the ~4 lifecycle rc124 stubs were dropped."
+    - "Resolved without the human: commit_corpus git-failure -> AuthorError/rc2 (preserve today, low impact); source_key naming collision -> two distinct demands (metered-key ordering + batch_id/trace anchor); rotate_queue atomic-replace crash -> OUT OF SCOPE (kept envelope, unchanged by the port)."
+  deviations:
+    - "Formal-slot validation is a MANUAL hand-check against schema.md (no spec_graph linter yet, #537)."
+    - "One CORPUS_AUTHOR role confirmed sufficient for all four curators (strong-author verdict): A's held_forward_bad divergence lives in the envelope's result partition, not the engine."
+    - "The DLQ + state-root pin + trace-persistence + request-limit knob + prompt rewrites make this MORE than a behavior-preserving flag-flip — the reviewer's attention should weight those net-new mechanisms."
+    - "A/B quality eval (sonnet vs glm@low on lesson authoring) is deferred (measurement, not port behavior) — flagged as the port's main quality risk, not a demand."
