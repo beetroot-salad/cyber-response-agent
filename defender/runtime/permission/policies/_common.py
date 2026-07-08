@@ -220,6 +220,7 @@ def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str],
     )
 
 
+@lru_cache(maxsize=1)
 def reader_read_shapes(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
     """The read-tool FILENAME filter for a main/gather reader agent — the read-tool twin of
     the bash `cat` lane's file-operand grammar (`_file_operand`). `decide_read` `fullmatch`es
@@ -227,5 +228,18 @@ def reader_read_shapes(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[st
     does (#545 read↔bash parity): a run-dir path OR a tight corpus `.md`, minus the secret/
     ground-truth denylist. ONE grammar source shared with `reader_patterns`' cat operand — no
     second, drifting filename grammar. Threaded as a shape-builder on the reader
-    `AgentDefinition`s' `read_shapes`, compiled per-run by `compile_policy`."""
-    return (re.compile(rf"^{_file_operand(str(run_dir), str(defender_dir))}$"),)
+    `AgentDefinition`s' `read_shapes`, compiled per-run by `compile_policy`.
+
+    The grammar anchors on the RESOLVED roots. `decide_read` matches `str(path.resolve())`
+    (canonicalized — `..` and symlinks collapsed), so a pattern built from an UNRESOLVED
+    `run_dir` (a symlinked `$DEFENDER_RUNS_BASE`, macOS `/tmp` → `/private/tmp`) would never
+    match the resolved read path — denying the agent its own run-dir files while the textual
+    bash `cat` lane still admits them (a parity + functional break). Resolving here matches
+    the canonicalization `decide_read` already applies to both the path and its read roots
+    (`files._resolved_read_roots`); the bash `cat` lane stays UNRESOLVED on purpose (it
+    matches the operand the model literally typed, so it must not canonicalize). Memoized
+    (`maxsize=1`) like the sibling `reader_patterns_for`: main + every gather dispatch share
+    one `(run_dir, defender_dir)` key per run, so the resolve()/compile happens once."""
+    return (
+        re.compile(rf"^{_file_operand(str(run_dir.resolve()), str(defender_dir.resolve()))}$"),
+    )
