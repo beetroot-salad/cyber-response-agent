@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pydantic_ai import RunContext
@@ -23,7 +23,6 @@ from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from . import circuit_breaker
-from . import permission
 # Import the `tools` MODULE (not just the names) so the gather tool closure can
 # resolve `_run_gather` as a module attribute at call time — that is the
 # reference tests/e2e/test_replay_skeleton.py monkeypatches
@@ -321,14 +320,20 @@ async def _run_gather(
     # per-lead cap would not bound gather's own requests. Cost still folds in — the
     # request log (observe.write_trace) sums every instance's usage independently.
     gagent = gather_factory(f"gather:{lead_id}")
-    gdeps = GatherDeps(
-        run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        run_id=deps.run_id, salt=deps.salt, lead_id=lead_id,
-        # Per-run anchored gather policy (#535): the reader lane is confined to this
-        # run's roots, and raw_reads lets gather read its own gather_raw/**.
-        policy=permission.policy_for(
-            "gather", run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        ),
+    # Gather deps via the single bind() seam (#545): compile_policy reproduces the authored
+    # gather policy field-for-field (the #535-anchored reader lane + raw_reads for its own
+    # gather_raw/**) AND adds the read↔bash filename filter, and carries the PARENT run's salt
+    # so the subagent's read tags + return wrapper ride the run's ONE untrusted-data token (a
+    # fresh uuid4 would tag the gather return with a salt the main loop does not distrust). bind
+    # is per-run (lead_id unset), so re-stamp this dispatch's lead_id + the parent's identity
+    # (run_id/defender_dir) that bind derives from run_dir / defaults to PATHS. Imported lazily —
+    # GATHER_DEF lives in driver, whose import path funnels back through this module.
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.driver import GATHER_DEF
+    gbase = bind(GATHER_DEF, deps.run_dir, salt=deps.salt)
+    assert isinstance(gbase, GatherDeps)  # bind(GATHER_DEF) → GatherDeps (_deps_class); narrows for lead_id
+    gdeps = replace(
+        gbase, run_id=deps.run_id, defender_dir=deps.defender_dir, lead_id=lead_id,
     )
     prompt = _gather_prompt(deps, request, catalog)
     try:

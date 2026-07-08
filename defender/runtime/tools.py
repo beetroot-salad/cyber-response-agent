@@ -119,17 +119,23 @@ class AgentDeps:
     @classmethod
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
-        *, defender_dir: Path = PATHS.defender_dir,
+        *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
     ) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (run_id as the
-        run dir's basename, a fresh salt) and stamp the caller's `policy`. The shared spine
-        behind each subtype's `for_scope`. `defender_dir` defaults to the `PATHS` primitive
-        (the MAIN checkout's `<repo>/defender` — the read-only predictors + main loop), but
-        a writer that edits a throwaway git WORKTREE (the lead author) overrides it with its
-        worktree `<wt>/defender` so the gate resolves reads/writes against the right tree."""
+        run dir's basename, the salt) and stamp the caller's `policy`. The shared spine
+        behind each subtype's `for_scope` and `bind`. `salt` is the untrusted-data trust
+        token: `None` mints a FRESH uuid4 (the stages' behaviour, distinct per call), a
+        carried value is threaded verbatim — the MAIN/GATHER reroute passes the run's ONE
+        persisted salt so the tool-output wrapper and orient's alert wrapper stay coherent
+        (a fresh uuid4 would split the tag and fail the injection defence open). `defender_dir`
+        defaults to the `PATHS` primitive (the MAIN checkout's `<repo>/defender` — the
+        read-only predictors + main loop), but a writer that edits a throwaway git WORKTREE
+        (the lead author) overrides it with its worktree `<wt>/defender` so the gate resolves
+        reads/writes against the right tree."""
+        resolved_salt = salt if salt is not None else uuid.uuid4().hex
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
-            run_id=run_dir.name, salt=uuid.uuid4().hex, policy=policy,
+            run_id=run_dir.name, salt=resolved_salt, policy=policy,
         )
 
 

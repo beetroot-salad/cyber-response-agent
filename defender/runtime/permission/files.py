@@ -119,7 +119,14 @@ def decide_read(
 
     The gather_raw clamp is now a policy bit: the main loop (raw_reads=False)
     consumes the gather summary, never the raw payload; the gather subagent and the
-    judge (raw_reads=True) read their own gather_raw to verify / refute."""
+    judge (raw_reads=True) read their own gather_raw to verify / refute.
+
+    On top of the roots, a reader agent (main/gather) carries a `read_shapes` filename
+    filter (#545): the resolved path must additionally `fullmatch` one of those anchored
+    grammars — the read-tool twin of the bash `cat` lane's file-operand grammar, so a
+    non-`.md` corpus file readable by neither surface. The run-dir branch of that grammar
+    keeps run-dir scratch unfiltered; empty `read_shapes` (every non-reader agent + the
+    legacy `policy_for` API) leaves the gate root-only."""
     p = Path(path)
     try:
         rp = p.resolve()
@@ -132,6 +139,18 @@ def decide_read(
             "Blocked: reads are limited to the run dir, the defender corpus (or "
             "this agent's read confine), and its declared roots; "
             f"{p} is outside them.",
+        )
+    # Read-tool↔bash-lane filename parity (#545): a reader agent's `read_shapes` admits
+    # exactly the filename set its bash `cat` lane does, so a corpus file the bash lane
+    # rejects (a non-`.md` under defender/) is not readable via the read tool either. Run-dir
+    # paths match the grammar's own run-dir branch, so scratch stays unfiltered; an empty
+    # `read_shapes` (non-reader agents / the legacy API) applies no filter.
+    if policy.read_shapes and not any(pat.fullmatch(str(rp)) for pat in policy.read_shapes):
+        return Decision(
+            False,
+            f"Blocked: {rp.name} is not a readable file for this agent — corpus reads are "
+            "limited to the tight filename grammar the bash cat lane enforces (a .md file "
+            "under lessons/skills/examples); read your run dir for anything else.",
         )
     # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
     # still denied (substrings match the filename, dirs match any path component).
@@ -156,7 +175,9 @@ def is_untrusted_read(path: Path) -> bool:
 
 
 def decide_write(
-    path: Path, proposed_text: str, *, policy: AgentPolicy
+    path: Path, proposed_text: str = "", *,
+    run_dir: Path | None = None, defender_dir: Path | None = None,
+    policy: AgentPolicy,
 ) -> Decision:
     """Allow/deny a write of `proposed_text` to `path` — a **flat, deny-by-default allowlist**
     (the write twin of `bash_allow`): the RESOLVED path must `fullmatch` one of the agent's
@@ -165,6 +186,12 @@ def decide_write(
     (every read-only / predictor stage) denies all writes. `resolve()` collapses `..`/symlinks
     before the match so a pattern is a true path set, not a string prefix an operand can escape;
     a `resolve()` error (a symlink cycle) FAILS CLOSED rather than propagating out of the gate.
+
+    `run_dir`/`defender_dir` are the OPTIONAL run roots (uniform with `decide_read`/`decide_bash`):
+    when both are supplied, a write target must ALSO resolve within the agent's READ surface —
+    a writer never authors a path it could not read (`write_allow ⊆ read roots`, the invariant
+    `edit_file` relies on). Skipped when omitted (the run-dir tool callers, already confined by
+    `write_allow`); mirrors `decide_bash`'s optional-roots shape.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);
@@ -181,6 +208,19 @@ def decide_write(
             False,
             "Blocked: writes are limited to this agent's declared paths "
             f"(its write allowlist); {path} is not one of them.",
+        )
+    # Defense-in-depth (write ⊆ read): when the run roots are supplied, the write target must
+    # also sit inside the agent's read surface — no writer authors a path it could not read
+    # back. Reuses the read-lane containment (read_confine / read_roots / denylist), fails
+    # closed on a resolve error. A no-op for every real writer (its write_allow already sits
+    # within its read roots); it only closes a hypothetical write_allow that escapes them.
+    if run_dir is not None and defender_dir is not None and not read_allowed_path(
+        rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy
+    ):
+        return Decision(
+            False,
+            f"Blocked: {path} is outside this agent's read surface — a write must land "
+            "somewhere the agent could also read (write ⊆ read).",
         )
 
     if path.name == "investigation.md":

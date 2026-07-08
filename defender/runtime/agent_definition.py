@@ -15,12 +15,15 @@ This module is the primitive layer:
     confine + pinned scripts, benign-judge ticket cli).
   - ``resolve_roots`` → ``ResolvedRoots`` — folds a run + corpus names + scope into
     the resolved read roots.
-  - ``compile_policy`` — projects a ``ToolSet`` + roots into the gate's ``AgentPolicy``
-    (STEP ONE: reproduces today's per-agent policy field-for-field, so
-    ``decide_bash`` / ``decide_read`` do not change; the #545 read/bash reshaping is
-    deferred).
-  - ``bind`` — the single resolution seam: ``resolve_roots`` → ``compile_policy`` →
-    the role's ``AgentDeps`` subtype.
+  - ``compile_policy`` — projects a ``ToolSet`` + roots into the gate's ``AgentPolicy``:
+    the reader ``bash_allow`` is compiled from the grammar's declared viewer/shim contents
+    and the read-tool ``read_shapes`` filename filter from the def's shape-builders (#545 —
+    read↔bash parity, one grammar source), so ``bind``'s policy is the production end-state,
+    not a step-one characterization.
+  - ``bind`` — the single deps + policy resolution seam for all seven roles:
+    ``resolve_roots`` → ``compile_policy`` → the role's ``AgentDeps`` subtype, carrying the
+    run's salt (MAIN/GATHER keep the persisted trust token; the stages mint a fresh one) and
+    — for the lead-author writer — the worktree ``repo_root`` its write scope anchors on.
   - ``build_registry`` — the guarded collector behind ``agents.AGENTS``.
 
 Kept LIGHT on purpose: it imports only the permission gate types + the repo-layout
@@ -41,7 +44,7 @@ from defender._paths import PATHS
 
 from .agent_role import AgentRole
 from .permission import AgentPolicy, build_write_allow
-from .permission.policies._common import reader_patterns
+from .permission.policies._common import reader_patterns_for
 
 if TYPE_CHECKING:
     from .tools import AgentDeps
@@ -100,15 +103,18 @@ class AgentDefinition:
     drive the gate via ``compile_policy``. Frozen, so ``bind``/``build`` can't corrupt a
     shared definition.
 
-    ``read_shapes`` carries the ~6 tight filename grammars (#545); at step one only the
-    FIELD exists — its filtering semantics are deferred (the r3/read_shapes waiver)."""
+    ``read_shapes`` is a tuple of per-run shape-builders ``(run_dir, defender_dir) ->
+    tuple[re.Pattern]`` (#545 — decision 3): ``compile_policy`` resolves each against the run's
+    roots into the read-tool filename filter ``decide_read`` enforces. The reader defs carry
+    ``reader_read_shapes`` so the read tool admits exactly the filename set the bash ``cat`` lane
+    does (one grammar source); empty (every non-reader stage) leaves the read gate root-only."""
 
     role: AgentRole
     model: Callable[[], str]
     effort: str | None
     tools: ToolSet = ToolSet()
     corpus_dirs: tuple[str, ...] = ()
-    read_shapes: tuple[Any, ...] = ()
+    read_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON
 
 
@@ -187,14 +193,16 @@ def resolve_roots(
     )
 
 
-# ── ToolSet → AgentPolicy (step-one characterization) ────────────────────────
+# ── ToolSet → AgentPolicy ────────────────────────────────────────────────────
 
 def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
-    """Compile a ``BashGrammar`` + roots into the gate's anchored ``bash_allow`` tuple,
-    reproducing today's per-agent allowlist exactly (STEP ONE):
+    """Compile a ``BashGrammar`` + roots into the gate's anchored ``bash_allow`` tuple:
 
-      - a reader agent (``viewers``/``shims`` present, main/gather) → the anchored
-        per-run ``reader_patterns``;
+      - a reader agent (``viewers``/``shims`` present, main/gather) → the anchored per-run
+        reader lane built from the grammar's DECLARED viewers/shims CONTENTS (#545 — a
+        tighter ``BashGrammar.viewers`` compiles a tighter lane, so the contents are
+        load-bearing, not merely their non-emptiness); the reader defs declare the full
+        set, so their lane equals the kept ``reader_patterns`` / ``policy_for`` API;
       - the judge (``jq_operand_gated``) → its pinned ``jq`` (+ benign ticket) patterns;
       - the actor (``scope.scripts``) → one anchored ``python3 <script>`` pattern each.
 
@@ -203,7 +211,10 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
     subtypes) so parity is guaranteed with zero regex duplication/drift."""
     patterns: list[Any] = []
     if bash.viewers or bash.shims:
-        patterns.extend(reader_patterns(roots.run_dir, roots.defender_dir))
+        patterns.extend(reader_patterns_for(
+            roots.run_dir, roots.defender_dir,
+            frozenset(bash.viewers), frozenset(bash.shims),
+        ))
     if bash.jq_operand_gated:
         from defender.learning.pipeline.judge.engine_pydantic import _judge_policy
         patterns.extend(_judge_policy(roots.read_roots, roots.ticket_cli).bash_allow)
@@ -214,7 +225,10 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def compile_policy(
-    tools: ToolSet, read_shapes: tuple[Any, ...], roots: ResolvedRoots, deny_reason: str
+    tools: ToolSet,
+    read_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
+    roots: ResolvedRoots,
+    deny_reason: str,
 ) -> AgentPolicy:
     """Project a ``ToolSet`` + resolved ``roots`` into the gate's ``AgentPolicy`` — the
     derived runtime artifact ``decide_bash``/``decide_read`` key on.
@@ -224,9 +238,10 @@ def compile_policy(
     adapters or path-gated ``jq`` reads ``gather_raw``; main/actor/oracle/verify do not),
     ``write_allow`` is the run-dir write subtree when the ToolSet grants writers (main —
     the #543 write gate; the read-only stages get none), and the read roots/confine come
-    from the scope. STEP ONE reproduces today's per-agent policy field-for-field, so the
-    gate is unchanged; ``read_shapes`` filtering is the #545-deferred half (the field is
-    carried, not yet consumed here)."""
+    from the scope. ``read_shapes`` (#545 — decision 3) is CONSUMED here: each shape-builder
+    the def carries is resolved against the run's roots into the read-tool filename filter
+    (``decide_read`` then admits exactly the filename set the bash ``cat`` lane does). Empty
+    ``read_shapes`` ⇒ no filter (the legacy root-only read gate, for every non-reader stage)."""
     bash = tools.bash
     if bash is None:
         adapters = adapter_sql_pipe = jq_gated = False
@@ -245,6 +260,9 @@ def compile_policy(
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
         write_allow=(build_write_allow(roots.run_dir),) if tools.write else (),
+        read_shapes=tuple(
+            pat for build in read_shapes for pat in build(roots.run_dir, roots.defender_dir)
+        ),
         deny_reason=deny_reason,
     )
 
@@ -275,18 +293,62 @@ def _deps_class(role: AgentRole) -> type[AgentDeps]:
     if role is AgentRole.VERIFIER:
         from defender.learning.author.verify_forward.engine import VerifierDeps
         return VerifierDeps
+    if role is AgentRole.LEAD_AUTHOR:
+        from defender.learning.leads.lead_author_engine import LeadAuthorDeps
+        return LeadAuthorDeps
     raise ValueError(f"no AgentDeps subtype for role {role!r}")
 
 
-def bind(defn: AgentDefinition, run_dir: Path, *, scope: RunScope = _DEFAULT_SCOPE) -> AgentDeps:
+def bind(
+    defn: AgentDefinition, run_dir: Path, *,
+    scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, repo_root: Path | None = None,
+) -> AgentDeps:
     """Resolve a definition for a run into ready-to-use ``AgentDeps``: resolve the roots,
-    compile the policy, then construct the role's ``AgentDeps`` subtype carrying it (via
-    the shared ``_for_run`` spine — fresh salt, ``defender_dir`` from ``PATHS``,
-    ``run_id`` = the run dir basename). Stays PER-RUN — no ``lead_id`` parameter; gather's
-    per-dispatch id rides a thin wrapper that stamps it post-bind."""
+    compile the policy, then construct the role's ``AgentDeps`` subtype carrying it (via the
+    shared ``_for_run`` spine — ``run_id`` = the run dir basename).
+
+    ``salt`` is the untrusted-data trust token (decision 1a): ``None`` mints a fresh uuid4
+    (the stages' behaviour), a carried value is threaded verbatim so the MAIN/GATHER reroute
+    keeps the run's ONE persisted salt across the deps' tool-output wrapper AND orient's alert
+    wrapper (a fresh uuid4 there would split the tag and fail the injection defence open).
+
+    ``LEAD_AUTHOR`` is the writer (decision 2): its policy is the worktree-anchored
+    ``defender/skills/**.md`` write scope + the scoped ``rm``-of-drafts grant (NOT the generic
+    run-dir ``write_allow`` ``compile_policy`` would emit), so bind reuses its authoritative
+    ``_lead_author_policy`` builder — the same cross-layer reuse ``_bash_allow`` makes for the
+    judge/actor — and REQUIRES ``repo_root`` (the worktree) to anchor it: fail loud without it,
+    never a silent ``PATHS.defender_dir``/run-dir fallback that would author the main checkout.
+    Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
+    stamps it post-bind."""
+    if defn.role is AgentRole.LEAD_AUTHOR:
+        if repo_root is None:
+            raise ValueError(
+                "bind(LEAD_AUTHOR_DEF, …) requires repo_root — the worktree root its "
+                "defender/skills write scope anchors on; there is no safe default (a "
+                "PATHS/run-dir fallback would author the main checkout, not the worktree)."
+            )
+        from defender.learning.leads.lead_author_engine import (
+            LeadAuthorDeps,
+            _lead_author_policy,
+        )
+        defender_dir = repo_root / "defender"
+        policy = _lead_author_policy(defender_dir / "skills")
+        return LeadAuthorDeps._for_run(
+            run_dir, policy, defender_dir=defender_dir, salt=salt,
+        )
+    if defn.role is AgentRole.ACTOR and not scope.read_confine:
+        # Footgun A (R5 safe-by-construction): an empty read_confine falls back to the whole
+        # defender_dir (files._resolved_read_roots), reopening the #512 gray-box rubric leak —
+        # bind must fail loud, never silently mint an unconfined actor. Mirrors _ActorScope's
+        # required-read_confine kw-only field: the actor scope must NAME its confine explicitly.
+        raise ValueError(
+            "bind(ACTOR_DEF, …) requires a non-empty read_confine in the RunScope — an empty "
+            "confine widens the actor's reads to the whole defender_dir (the #512 gray-box "
+            "rubric leak); name the lesson-corpus confine explicitly (there is no unconfined actor)."
+        )
     roots = resolve_roots(run_dir, defn.corpus_dirs, scope)
     policy = compile_policy(defn.tools, defn.read_shapes, roots, defn.deny_reason)
-    return _deps_class(defn.role)._for_run(run_dir, policy)
+    return _deps_class(defn.role)._for_run(run_dir, policy, salt=salt)
 
 
 def build_registry(defs: tuple[AgentDefinition, ...]) -> dict[AgentRole, AgentDefinition]:

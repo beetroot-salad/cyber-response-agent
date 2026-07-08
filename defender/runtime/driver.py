@@ -31,9 +31,10 @@ from . import observe
 from . import orient
 from . import permission
 from . import providers
-from .agent_definition import AgentDefinition, BashGrammar, ToolSet
+from .agent_definition import AgentDefinition, BashGrammar, ToolSet, bind
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
+from .permission.policies._common import READER_VIEWERS, reader_read_shapes
 from .providers import BuiltModel
 from .tools import (
     AgentDeps,
@@ -216,13 +217,13 @@ def resolve_main_model(explicit: str | None = None) -> str:
     return explicit or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
 
 
-# The two runtime agents' definitions (#538). The reader-lane program set below is the
-# DECLARATIVE signal that main/gather are reader agents; `compile_policy` delegates the
-# actual per-run anchored allowlist to `permission.policies._common.reader_patterns`
-# (the #535 anchoring), so this content documents intent and only its non-emptiness is
-# load-bearing at step one (the #545 end-state compiles the grammar directly). The
-# corpus dirs are the tight `.md` roots under `defender_dir` a reader may open.
-_READER_VIEWERS = ("cat", "grep", "tail", "head", "wc", "ls", "cd", "jq")
+# The two runtime agents' definitions (#538). The declared viewer/shim CONTENTS are now
+# load-bearing (#545): `compile_policy` compiles `bash_allow` from exactly the declared
+# `READER_VIEWERS` + non-adapter shims (via `permission.policies._common.reader_patterns_for`,
+# the #535 anchoring), and the `read_shapes` builder gives the read tool the matching filename
+# filter (`reader_read_shapes`, read↔bash parity). Both defs declare the FULL reader set, so
+# their compiled lane equals the kept `policy_for` API. The corpus dirs are the tight `.md`
+# roots under `defender_dir` a reader may open.
 _CORPUS_DIRS = ("lessons", "skills", "examples")
 
 # MAIN — the orchestrator: reader lane + the file writers (it authors investigation.md /
@@ -236,24 +237,31 @@ MAIN_DEF = AgentDefinition(
     effort="low",
     tools=ToolSet(
         read=True,
-        bash=BashGrammar(shims=tuple(NON_ADAPTER_SHIMS), viewers=_READER_VIEWERS),
+        bash=BashGrammar(shims=tuple(NON_ADAPTER_SHIMS), viewers=READER_VIEWERS),
         write=True,
     ),
     corpus_dirs=_CORPUS_DIRS,
+    read_shapes=(reader_read_shapes,),
     deny_reason=permission.FALLTHROUGH_DENY_REASON,
 )
 
 # GATHER — the data-access subagent: reader lane + adapters + the `adapter | defender-sql`
-# pipe, read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off.
+# pipe, read-only (no writers). Declares the same viewers + non-adapter shims as main (so its
+# bound lane equals `policy_for('gather')`), plus its read↔bash filename filter. Runs its own
+# cheaper `gather_model()`, reasoning off.
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
     tools=ToolSet(
         read=True,
-        bash=BashGrammar(viewers=_READER_VIEWERS, adapters=True, adapter_sql_pipe=True),
+        bash=BashGrammar(
+            shims=tuple(NON_ADAPTER_SHIMS), viewers=READER_VIEWERS,
+            adapters=True, adapter_sql_pipe=True,
+        ),
     ),
     corpus_dirs=_CORPUS_DIRS,
+    read_shapes=(reader_read_shapes,),
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
 )
 
@@ -461,11 +469,14 @@ async def run_investigation(
     make_model = make_model or providers.build_for_effort
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     agent = build_agent(defender_dir, logger, make_model, main_model=model_name)
-    deps = AgentDeps(
-        run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-        salt=salt,
-        policy=permission.policy_for("main", run_dir=run_dir, defender_dir=defender_dir),
-    )
+    # MAIN deps via the single bind() seam (#545): compile_policy reproduces the authored
+    # main policy field-for-field AND adds the read↔bash filename filter (read_shapes), and
+    # the run's PERSISTED salt is carried in (never a fresh uuid4) so the deps' tool-output
+    # wrapper and orient's alert wrapper tag with the ONE salt the agent is told to distrust —
+    # a split salt would fail the injection defence open. `run_id` is the caller's identity
+    # (run.py mints run_dir=base/run_id, so it equals run_dir.name in production; the replay
+    # harness passes a distinct label), re-stamped over bind's run_dir-basename default.
+    deps = replace(bind(MAIN_DEF, run_dir, salt=salt), run_id=run_id)
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
