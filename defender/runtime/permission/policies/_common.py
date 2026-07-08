@@ -131,6 +131,14 @@ _JQ_KV_FLAG = r"(?:--arg|--argjson) [^ ]+ [^ ]+"
 # not merely their non-emptiness), and iterates this fixed order so the emitted tuple is
 # order-stable regardless of the declaring def's tuple order (the field-for-field parity
 # `bind(MAIN_DEF).bash_allow == policy_for('main').bash_allow` compares an ordered tuple).
+# INVARIANT (load-bearing — see #547, #540): every program here is a READ-ONLY viewer,
+# and every shim in `NON_ADAPTER_SHIMS` opens no writable path — so NOTHING on the bash
+# surface can create a symlink/hardlink (the write lane is `write_text`, regular files
+# only). That is why the reap-time run_dir link scrub (#547) is deferred to the #540
+# isolate: with no sanctioned writer there is no live way to plant a link a trusted
+# host-side consumer (visualizer / learning loop) would follow out of `run_dir`. Admit a
+# program that writes bytes to a chosen path, unpacks a tree (`tar -x`, `cp`), or is a
+# brokered subprocess, and you break this invariant — land the #547 scrub in that change.
 _VIEWER_ORDER = ("cat", "wc", "tail", "head", "grep", "ls", "cd", "jq")
 
 # The full main/gather viewer set (`policy_for` / the kept `reader_patterns` API build all
