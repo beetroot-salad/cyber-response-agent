@@ -30,7 +30,8 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
 # Put the workspace root on sys.path so `defender.*` namespace imports
 # resolve whether this file is imported or run directly (it has a __main__
-# block — the author drives it as a `claude -p` Bash subprocess).
+# block — the author drives it as an in-process agent's Bash subprocess, the
+# forward-check running in-process on GLM).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
@@ -43,7 +44,7 @@ from defender.learning.author.verify_forward.shared import (  # noqa: E402
 # Resolve the run bundle + queue off DEFAULT_PATHS (which honors
 # DEFENDER_LEARNING_STATE_DIR) rather than this file's worktree ``__file__``: the
 # author drains run this in a throwaway ``git worktree`` that has no runs/_pending, and
-# the curator agent pins the state root in our env (curator_agent_env, #425).
+# the curator agent pins the state root into our env (via ``run_common.run_env`` / ``deps.state_root``, #425).
 PENDING_FILE = DEFAULT_PATHS.actor_observations.file
 PROMPT_PATH = HERE / "actor.md"
 

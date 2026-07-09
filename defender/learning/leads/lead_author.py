@@ -25,7 +25,7 @@ Lifecycle, per tick (one queued run dir):
      synthesize ``_draft/`` skeletons for executed-but-uncatalogued verbs.
   4. Capture the pre-agent stray baseline (paths outside ``defender/skills/``*.md).
   5. Build per-lead handoff blocks + pending system-skill drafts.
-  6. Spawn ``claude -p`` with a no-git allowlist (Edit/Write ``defender/skills/`` +
+  6. Spawn the in-process (PydanticAI) author with a no-git allowlist (Edit/Write ``defender/skills/`` +
      ``rm`` drafts). Non-zero exit ⇒ return rc=2; the drain quarantines the marker.
   7. Loop-side scope gate (``_verify_skills_state``) over one ``git status`` read:
      no strays outside scope, no protected-surface mutation, no established/SKILL.md
@@ -335,7 +335,7 @@ def invoke_agent(
         user_prompt=user_prompt,
         repo_root=repo_root,
         learning_run_dir=run_dir,
-        log_label="claude",
+        log_label="lead author",
     )
 
 

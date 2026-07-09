@@ -1,10 +1,10 @@
 """Executable spec for issue #492 — the shared judge-verdict preamble normalizer.
 
 A reasoning-model judge sometimes prepends prose ("Let me analyze...\\n\\n") before its
-YAML verdict. Today only the in-process PydanticAI engine trims that, at its own return
-boundary (`_extract_yaml_doc`), so the DEFAULT `claude -p` engine and the eval harness
-dead-letter a valid verdict. The fix moves the trim into a SHARED, schema-agnostic
-primitive both convergence points call:
+YAML verdict. Trimming it at only one parse site leaves the others dead-lettering an
+otherwise-valid verdict. The fix moves the trim into a SHARED, schema-agnostic primitive
+both convergence points — the in-process engine's return boundary (`_extract_yaml_doc`)
+and the eval harness — call:
 
   * E1  `validate.strip_yaml_preamble(text) -> str`  — drop leading lines until the
         remainder parses to a YAML MAPPING; fail-closed (return input unchanged) when

@@ -64,7 +64,7 @@ from defender.learning.core.persist import (  # noqa: E402
     _anchor_with_case_key,
 )
 from defender.learning.core.subagents import (  # noqa: E402
-    ClaudePrintSubagents,
+    InProcessSubagents,
     Subagents,
     is_skip_story,
 )
@@ -84,7 +84,7 @@ from defender.learning.core.validate import (  # noqa: E402
 from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
-    "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "ClaudePrintSubagents", "Subagents",
+    "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "InProcessSubagents", "Subagents",
     "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
     "main", "is_held_out", "read_ground_truth",
     "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",

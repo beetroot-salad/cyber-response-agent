@@ -3,7 +3,7 @@
 One in-process PydanticAI call per lead (``pipeline/oracle_engine._run_oracle_pydantic``, GLM
 5.2 with reasoning disabled), fanned out concurrently and reassembled into the
 ``{projections: [{lead_id, events}]}`` doc the validator + judge consume. The transport rides a
-REQUIRED ``oracle_fn`` DI seam — the composition root (``ClaudePrintSubagents.oracle``) is the
+REQUIRED ``oracle_fn`` DI seam — the composition root (``InProcessSubagents.oracle``) is the
 single place that names the production engine, mirroring the judge's ``judge_fn``; the
 prompt-assembly / sampling / parsing helpers live in ``sample.py``.
 """
@@ -60,7 +60,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path, learning_run_dir: Path,
     Returns the serialized YAML string.
 
     ``oracle_fn`` is REQUIRED (the mirror of ``invoke_judge``'s ``judge_fn``): the composition root
-    ``ClaudePrintSubagents.oracle`` names the production engine (``_run_oracle_pydantic``) in one
+    ``InProcessSubagents.oracle`` names the production engine (``_run_oracle_pydantic``) in one
     place, and every other caller — the secondary harness, tests — routes through that adapter or
     injects its own fn, so this module never imports the pydantic-ai graph.
     """

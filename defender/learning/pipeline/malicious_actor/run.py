@@ -26,7 +26,7 @@ from defender.learning.core.config import (
     RunUnprocessable,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.RunUnprocessable`
 )
 from defender.learning.core.persist import derive_alert_rule_key
-from defender.learning.core.runner import _section
+from defender.learning.pipeline._prompt import _section
 from defender.learning.pipeline.malicious_actor import mitre_corpus
 
 # How many leading non-blank lines to scan for a ``SKIP:`` line. A reasoning model (GLM@low,
@@ -82,7 +82,7 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
         + _section("mitre_menu", menu_text)
     )
     # DI seam that owns its default (CLAUDE.md conventions): the in-process actor engine in
-    # production; ClaudePrintSubagents / tests pass an explicit actor_fn.
+    # production; InProcessSubagents / tests pass an explicit actor_fn.
     from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
     actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
     return actor_fn(

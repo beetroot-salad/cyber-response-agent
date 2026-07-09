@@ -41,8 +41,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
-# Resolve `defender.*` imports whether run directly (the curator drives this as a
-# `claude -p` Bash subprocess) or imported — mirrors actor.py/forward.py. core.config
+# Resolve `defender.*` imports whether run directly (the curator drives this as an
+# in-process agent's Bash subprocess) or imported — mirrors actor.py/forward.py. core.config
 # is stdlib-only, so importing it here adds no pyyaml dependency to the orchestrator.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))

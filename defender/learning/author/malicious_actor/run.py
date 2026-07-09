@@ -25,7 +25,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-from defender.learning.author import runner as _runner
+from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
     ACTOR_MODEL,
@@ -60,7 +60,7 @@ def invoke_agent(
     (``verify_forward/batch.py``), so it hands the agent both command templates and pins both
     verifier scripts on the in-process curator's bash lane. The commit-trailer provenance is stamped
     by the loop, not the agent, so nothing trailer-related goes in the prompt."""
-    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    verifier_py = resolve_verifier_python(cfg.repo_root)
     rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
     extra_prompt = (
         f"verify_forward_command: {verifier_py} {rel}actor.py "

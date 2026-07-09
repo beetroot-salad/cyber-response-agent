@@ -17,9 +17,9 @@ batch id, trace anchor, repo_root) is threaded through ``run_author_stage``'s ar
 engine module. Both spawn through ``_lead_spine._spawn_author_agent``, which delegates here.
 
 Unlike the pipeline stages (invoked in-process BY the orchestrator, which sources the metered key
-up front), the lead-author drain runs under ``config.subscription_env`` — the curator env strips
-every provider key — so ``run_author_stage`` re-sources its own Fireworks key from ``.env`` before
-the engine runs (``config.source_first_party_key``, the same seam ``verify_forward`` uses). A
+up front), the lead-author drain runs in a throwaway worktree carrying only the ambient credential
+(or none), so ``run_author_stage`` re-sources its own Fireworks key from ``.env`` before the engine
+runs (``config.source_first_party_key``, the same seam ``verify_forward`` uses). A
 CONFIG fault (no key / unroutable model / a cross-provider effort like ``claude-* + none``) raises
 ``FatalConfigError`` and is left to PROPAGATE: a deployment-wide misconfig then fails ONCE, loudly
 (systemic exit 2), rather than being mapped to rc 124 and quarantining every queued marker
@@ -187,8 +187,8 @@ def run_author_stage(  # noqa: PLR0913 — the spawn contract (5 per-mode inputs
     whole spine-facing path both lead-author modes share, so ``_spawn_author_agent`` stays a thin
     lazy-import wrapper.
 
-    Sources the key here (not the transport) because the drain strips every provider key from its
-    env (``config.subscription_env``); ``source_first_party_key`` re-reads it from
+    Sources the key here (not the transport) because the drain worktree carries only the ambient
+    credential (or none); ``source_first_party_key`` re-reads the metered key from
     ``.env`` / ``$DEFENDER_ENV_FILE`` — reaching the MAIN checkout's ``.env`` even from the
     throwaway worktree.
 

@@ -12,7 +12,7 @@ is unchanged.
 
 Borrowed collaborators are imported from their canonical homes — ``LeadAuthorError``
 from ``lead_extraction``, ``persist`` / ``config`` / ``LoopPaths`` from ``core``, and
-the runner from ``author.runner`` — NOT re-read off ``pitfalls_curator``. That keeps
+the engine from ``lead_author_engine`` — NOT re-read off ``pitfalls_curator``. That keeps
 this an independent encoding of intent and leaves the move free to source those
 symbols however it likes (in particular, it does not force the new module to
 re-export them). The shared spawn/verify/commit spine (#511's ``_spawn_author_agent``
@@ -241,15 +241,14 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Pat
 
 # ---------------------------------------------------------------------------
 # _invoke_pitfalls_agent — the real spawn wiring. run_pitfalls injects a fake
-# invoke, so this body is otherwise never exercised; capture the RunnerOptions +
-# user_prompt at the shared runner seam (the mode has no DI seam for the spawn).
+# invoke, so this body is otherwise never exercised; capture the kwargs (user_prompt
+# etc.) the spawn forwards at the shared engine seam (the mode has no DI seam for the spawn).
 # ---------------------------------------------------------------------------
 
 
 def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
-    """Patch the in-process engine seam the shared spawn spine calls (the GLM port replaced the
-    ``invoke_claude_print_raw`` capture). ``_spawn_author_agent`` looks up ``run_author_stage`` on
-    the engine module at call time, so patching the module attr is seen regardless of where the
+    """Patch the in-process engine seam the shared spawn spine calls. ``_spawn_author_agent`` looks
+    up ``run_author_stage`` on the engine module at call time, so patching the module attr is seen regardless of where the
     spine lands. Captures the kwargs the pitfalls spawn forwards + returns a canned rc / raises."""
     from defender.learning.leads import lead_author_engine  # the port target
 

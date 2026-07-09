@@ -3,7 +3,7 @@
 
 ``author_actor.py`` (actor tradecraft) and ``author_actor_benign.py`` (the two
 environment-lessons directions) are the same curator: lock the queue, lock the
-repo, clean-scope check, partition the batch, hand the survivors to a ``claude -p``
+repo, clean-scope check, partition the batch, hand the survivors to an in-process (PydanticAI)
 curator agent, cross-check the working tree it left against git, commit that corpus
 with the provenance trailers, then rotate the queue. Only the corpus directory, queue
 paths, outcome policy, commit trailer, generation counter, curator-agent prompt/model,
@@ -103,7 +103,7 @@ class CuratorConfig:
     # invocation reads, so the recorded model matches the model the actor ran at (#449).
     actor_model: str
     log_prefix: str
-    # Curator agent (claude -p) wiring.
+    # Curator agent (in-process PydanticAI) wiring.
     author_prompt: Path
     author_model: str
     author_timeout: int
@@ -214,29 +214,8 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # Agent invocation — shared scaffolding; directions supply the forward-check
-# prompt lines + allowed-tools entries (the one place the contract differs).
+# prompt lines (the one place the contract differs).
 # ---------------------------------------------------------------------------
-
-
-def curator_allowed_tools(cfg: CuratorConfig, extra_tools: str) -> str:
-    """The curator agent's tool allowlist.
-
-    Read is scoped to the corpus + the checked-in schema docs — NOT the run bundles,
-    which live at the shared state root outside the corpus. The row JSON carries the
-    authoring payload and ``_partition_pre_author`` validates the source case exists
-    (holding a missing bundle), so the agent never needs to read case data; denying it
-    also matches prod OS-confinement, where a read outside the corpus would fail anyway
-    (follow-up to #425). Glob/Grep stay open for corpus navigation (search, not
-    full-content reads). ``extra_tools`` carries the direction's verifier ``Bash(...)``
-    grants; the ``rm`` grant stays for dev iteration (prod confines writes to the corpus
-    at the OS layer — ``docs/platform-design.md`` §4.7)."""
-    return (
-        f"Read({cfg.corpus_dir_rel}**),Read(defender/docs/**),Glob,Grep,"
-        f"Edit({cfg.corpus_dir_rel}**),Write({cfg.corpus_dir_rel}**),"
-        f"{extra_tools}"
-        f"Bash(rm {cfg.corpus_dir_rel}*.md),"
-        f"Bash(rm {cfg.corpus_dir}/*.md)"
-    )
 
 
 def invoke_curator_agent(
@@ -259,7 +238,7 @@ def invoke_curator_agent(
     model, and there is no intermediate un-stamped commit it could leave behind (issue #321). Routed
     through ``curator_engine.run_curator_stage`` (imported lazily — it pulls the pydantic-ai graph),
     which sources the metered key, drives the in-process spawn under ``require_output=True``, and
-    relocates the ``AUTHOR_RESULT`` marker parse out of the retired ``claude -p`` transport. The
+    parses the ``AUTHOR_RESULT`` marker from the returned text (via ``curator_engine.extract_marked_result``). The
     RequestLogger trace lands in the persistent shared ``pending_dir`` (not the throwaway worktree),
     keyed ``{batch_id}.{pid}`` so two curators in one drain tick never truncate each other's trace;
     ``DEFENDER_LEARNING_STATE_DIR`` is pinned into the in-process bash-tool env by ``run_common.run_env``

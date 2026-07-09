@@ -7,10 +7,9 @@ wall-clock check. **Warning-only** — always exits 0, never blocks the
 agent (the same posture as soc-agent's enforcer; hard enforcement can
 be switched on later by returning 2).
 
-Run identification: the defender spawns one ``claude -p`` per run, so
+Run identification: the defender runs one in-process agent per run, so
 the run dir is the single ``DEFENDER_RUN_DIR`` env var that run.py
-exports into the claude process (and thus into hook subshells). No
-session→run map is needed. If the var is unset or not a directory the
+exports into the process. No session→run map is needed. If the var is unset or not a directory the
 hook is a silent no-op.
 
 Counters live in ``{run_dir}/budget.json``, incremented under an

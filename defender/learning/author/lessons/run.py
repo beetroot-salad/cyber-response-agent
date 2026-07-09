@@ -66,7 +66,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import curator as _curator
-from defender.learning.author import runner as _runner
+from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
@@ -246,7 +246,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     message it returns as data) and the loop is the sole committer (``commit_lessons``)."""
     from defender.learning.author import curator_engine
 
-    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    verifier_py = resolve_verifier_python(cfg.repo_root)
     rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
     user_prompt = (
         f"batch_id: {batch_id}\n"

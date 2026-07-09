@@ -1,7 +1,7 @@
 """The judge on the in-process PydanticAI engine — a drop-in ``judge_fn``.
 
-The judge was the first learning-loop agent to run in-process on PydanticAI rather than
-the shared ``claude -p`` transport. Everything judge-specific lives HERE, in the judge's own
+The judge was the first learning-loop agent to run in-process on PydanticAI, on the shared
+in-process transport (``pipeline/_pydantic_stage``). Everything judge-specific lives HERE, in the judge's own
 directory: its deps identity, its permission policy (data), its one bit of custom logic (the
 benign closed-ticket matcher), and its thin ``judge_fn``. The generic in-process transport it
 shares with the actor — agent construction, the request-capped one-shot drive, the
@@ -9,7 +9,7 @@ error-mapping ladder — lives in ``pipeline/_pydantic_stage.py``; this module o
 judge's specifics and delegates.
 
 This module pulls the pydantic-ai graph (via ``_pydantic_stage``), so it is imported LAZILY —
-only when a judge actually runs (``core/subagents.ClaudePrintSubagents.judge``), never at loop
+only when a judge actually runs (``core/subagents.InProcessSubagents.judge``), never at loop
 import.
 """
 from __future__ import annotations

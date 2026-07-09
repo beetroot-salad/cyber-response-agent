@@ -368,17 +368,18 @@ def test_env_corpus_two_writers_distinct(tmp_path: Path):
 
 
 # ===========================================================================
-# runner-teardown  (R5 removal/conservation; STRUCTURAL — RED until the port lands)
+# runner-teardown  (R5 removal/conservation; STRUCTURAL conservation guard)
 # ===========================================================================
 
 
 def test_runner_teardown_structural():
-    """STRUCTURAL. After the port, no production module under ``defender/learning/author``
-    references the retired ``claude -p`` transport — ``invoke_claude_print`` /
-    ``curator_allowed_tools`` / ``curator_agent_env`` — while ``resolve_verifier_python``
-    SURVIVES with its four curator callers (each still builds a ``python3 <verifier>``
-    bash grant). AST-walk of Name/Attribute references (not docstrings/comments), so the
-    check is about real callers. RED against HEAD (the symbols are still wired in)."""
+    """STRUCTURAL. No production module under ``defender/learning/author`` references the
+    removed ``claude -p`` transport symbols — ``invoke_claude_print`` /
+    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted) — while
+    ``resolve_verifier_python`` SURVIVES with its four curator callers (each still builds a
+    ``python3 <verifier>`` bash grant). AST-walk of Name/Attribute references (not
+    docstrings/comments), so the check is about real callers — a conservation guard against
+    re-introducing the transport."""
     import defender.learning.author.shared as _anchor  # any author module → the package dir
 
     author_dir = Path(_anchor.__file__).resolve().parent

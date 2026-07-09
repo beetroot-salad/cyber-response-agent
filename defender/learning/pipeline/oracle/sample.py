@@ -1,6 +1,6 @@
 """Per-lead telemetry oracle: input building, sample scrubbing, output assembly.
 
-The oracle runs once per lead (``_loop_subagents.ClaudePrintSubagents.oracle`` fans
+The oracle runs once per lead (``_loop_subagents.InProcessSubagents.oracle`` fans
 the calls out concurrently). Each call sees only its own lead — sanitized
 ``what_to_summarize`` + queries + one scrubbed sample event — and emits the lead's
 predicted result as a signed diff over the baseline (``<standard environment noise>``):

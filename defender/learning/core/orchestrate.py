@@ -53,7 +53,7 @@ from defender.learning.core.persist import (
     read_pitfalls,
 )
 from defender.learning.tickets.ticket_enrichment import enrich_case_ticket
-from defender.learning.core.subagents import ClaudePrintSubagents, Subagents, is_skip_story
+from defender.learning.core.subagents import InProcessSubagents, Subagents, is_skip_story
 from defender.learning.core.validate import (
     normalize_disposition,
     normalize_judge_yaml,
@@ -389,8 +389,8 @@ def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -
     direction fan-out AND before the oracle's per-lead fan-out, so there is no ``os.environ`` race
     — and only for the models the directions that will run actually use (the union of each leg's
     oracle + judge + actor model, deduped; sourcing one provider twice is idempotent). Fails loud
-    here (→ exit 2) rather than 401-ing mid-stage; only the ``claude -p`` curators stay on the
-    subscription (see ``source_first_party_key``).
+    here (→ exit 2) rather than 401-ing mid-stage; the curators run in-process too and source
+    their own metered key (see ``source_first_party_key``).
 
     The oracle + judge are ALWAYS sourced — both run for every non-skip direction, in the learning
     loop and the secondary harness alike. ``include_actor=False`` skips only the actor model, for
@@ -419,7 +419,7 @@ def run_one(
     Safe to run concurrently across processes (each direction leg serializes its
     shared queue writes on a flock)."""
     if agents is None:
-        agents = ClaudePrintSubagents()
+        agents = InProcessSubagents()
 
     run_id = run_dir.name
     _log(f"run_id={run_id} step=normalize")

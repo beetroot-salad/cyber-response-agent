@@ -8,8 +8,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Runtime investigation loop (PydanticAI migration off `claude -p`; see
-# docs/runtime-pydanticai-migration.md). Kept out of the core deps so
+# Runtime investigation loop (in-process PydanticAI). Kept out of the core deps so
 # learning-loop / CI installs (which are SIEM- and runtime-free) don't pull
 # the Anthropic + MCP stack. Slim variant + extras: anthropic is the default
 # provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.2, selected
@@ -43,7 +42,7 @@ dev = [
 # learning/ — in isolation or in a full run — without per-file sys.path hacks.
 pythonpath = [".."]
 markers = [
-    "llm: spawns a real claude -p subprocess (skip in CI with -m 'not llm')",
+    "llm: makes a real (metered) in-process model request (skip in CI with -m 'not llm')",
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
 ]

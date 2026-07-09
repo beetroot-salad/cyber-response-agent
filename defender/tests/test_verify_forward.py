@@ -198,7 +198,7 @@ def test_load_observation_missing_id_raises(tmp_path):
 # state root (DEFENDER_LEARNING_STATE_DIR), not the worktree they run in.
 # The verifiers freeze their paths from DEFAULT_PATHS at import, so each case
 # is driven in a fresh subprocess with the env var pinned (the curator agent
-# pins it via curator_agent_env; here we set it directly).
+# pins it into the bash-tool env via run_common.run_env; here we set it directly).
 # ---------------------------------------------------------------------------
 
 
@@ -210,14 +210,6 @@ def _run_with_state(snippet: str, state_dir: Path, cwd: Path) -> subprocess.Comp
         [sys.executable, "-c", snippet],
         env=env, cwd=str(cwd), capture_output=True, text=True,
     )
-
-
-def test_curator_agent_env_pins_state_root():
-    from defender.learning.core.config import curator_agent_env
-
-    env = curator_agent_env(Path("/shared/state"))
-    assert env["DEFENDER_LEARNING_STATE_DIR"] == "/shared/state"
-    assert "ANTHROPIC_API_KEY" not in env
 
 
 def test_forward_resolves_bundle_off_state_root(tmp_path: Path):

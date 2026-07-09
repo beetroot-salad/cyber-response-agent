@@ -3,7 +3,7 @@
 Drives the REAL `_run_judge_pydantic` (deps build + policy-driven gate + real
 read_file/bash tools + observe trace) with a `FunctionModel` injected through the
 judge's `make_model` DI seam, under `override_allow_model_requests(False)` so any real
-provider call raises. Plus the engine-flag routing in ClaudePrintSubagents.judge.
+provider call raises. Plus the engine-flag routing in InProcessSubagents.judge.
 """
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ def test_judge_policy_ticket_read_through_the_gate(tmp_path):
     ).allow
 
 
-# --- ClaudePrintSubagents.judge always runs the in-process judge -----------
+# --- InProcessSubagents.judge always runs the in-process judge -----------
 
 _SENTINEL = object()
 
@@ -282,7 +282,7 @@ def test_subagents_judge_runs_pydantic_engine(monkeypatch, tmp_path):
         return _YAML
 
     monkeypatch.setattr(subagents, "invoke_judge", _spy)  # lint-monkeypatch: ok — spy the judge_fn routing decision
-    sub = subagents.ClaudePrintSubagents()
+    sub = subagents.InProcessSubagents()
     tail = (tmp_path, tmp_path / "story.md", tmp_path / "tel.yaml", tmp_path)
 
     sub.judge(ADVERSARIAL_WIRING, *tail)

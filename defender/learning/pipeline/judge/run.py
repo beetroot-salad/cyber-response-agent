@@ -17,7 +17,7 @@ from pathlib import Path
 from defender.learning import lead_repository
 from defender._run_paths import RunPaths
 from defender.learning.core.config import JudgeWiring
-from defender.learning.core.runner import _section
+from defender.learning.pipeline._prompt import _section
 from defender.learning.pipeline.judge.compare import (
     build_comparison,
     parse_investigation_companion,

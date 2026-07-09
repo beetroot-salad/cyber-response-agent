@@ -20,7 +20,7 @@ never to call one — and the request cap drops to 1 (no tool can be called, so 
 exactly one model request). ``bind(ORACLE_DEF)`` compiles a deny-all policy as belt-and-suspenders.
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when the oracle
-actually runs (``core/subagents.ClaudePrintSubagents.oracle``), never at loop import.
+actually runs (``core/subagents.InProcessSubagents.oracle``), never at loop import.
 """
 from __future__ import annotations
 

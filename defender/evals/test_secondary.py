@@ -2,7 +2,7 @@
 
 Covers the pure helpers (eligibility, generation parsing, catch-rate
 math, summary formatting) plus worktree idempotency on a real git
-repo fixture. Avoids spawning ``claude -p`` — actor / oracle / judge
+repo fixture. Avoids real model calls — actor / oracle / judge
 calls are out of scope here and are exercised by manual end-to-end
 runs.
 """
@@ -387,7 +387,7 @@ def test_module_import_does_not_reexec():
 def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
     """A RunUnprocessable from the oracle must surface as SecondaryError.
 
-    The oracle now runs IN-PROCESS (PydanticAI), dispatched through the ClaudePrintSubagents
+    The oracle now runs IN-PROCESS (PydanticAI), dispatched through the InProcessSubagents
     adapter like the judge: run_stage maps a hung / timed-out / model-errored per-lead call to
     ``RunUnprocessable`` (there is no subprocess to raise TimeoutExpired). Left uncaught it would
     escape the per-alert handler in run_secondary() and abort the whole harness before the summary
@@ -409,7 +409,7 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
         class RunUnprocessable(Exception):
             pass
 
-        class ClaudePrintSubagents:
+        class InProcessSubagents:
             def oracle(self, *_a, **_kw):
                 raise FakeLoop.RunUnprocessable("per-lead oracle timed out")
 
@@ -454,7 +454,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
 
         lead_repository = _FakeLR
         ADVERSARIAL_WIRING = object()  # opaque — the judge stub ignores it
-        ClaudePrintSubagents = _FakeSubagents
+        InProcessSubagents = _FakeSubagents
 
         @staticmethod
         def is_skip_story(text):

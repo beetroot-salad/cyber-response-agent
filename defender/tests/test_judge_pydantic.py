@@ -36,17 +36,19 @@ def test_source_first_party_key_sonnet_sources_anthropic_and_overrides(tmp_path,
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-fromdotenv"
 
 
-def test_source_first_party_key_preserves_subscription_for_siblings(tmp_path, monkeypatch):
-    # THE mixed-billing invariant: after sourcing the metered key into os.environ,
-    # subscription_env() (what every sibling `claude -p` runs under) STILL returns a
-    # dict without it, so siblings keep billing the subscription. This is the whole
-    # reason mixed billing within one run is safe with zero sibling changes.
+def test_source_first_party_key_does_not_leak_to_tool_env(tmp_path, monkeypatch):
+    # After sourcing the metered key into os.environ, the bash-tool subprocess env
+    # (run_common.run_env) STILL strips it — a tool subprocess runs data-source shims,
+    # never LLM calls, so no billable key belongs in it. This is why sourcing the key
+    # in-process is safe.
     env = _write_env(tmp_path, ANTHROPIC_API_KEY="sk-ant-fromdotenv")
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(env))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder-for-cleanup")
     config.source_first_party_key("claude-sonnet-4-6")
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-fromdotenv"  # the in-process stage sees it
-    assert "ANTHROPIC_API_KEY" not in config.subscription_env()    # siblings do not
+    from defender.run_common import run_env
+    tool_env = run_env(tmp_path / "defender", tmp_path / "run")
+    assert "ANTHROPIC_API_KEY" not in tool_env  # the tool subprocess does not
 
 
 def test_source_first_party_key_glm_sources_fireworks(tmp_path, monkeypatch):

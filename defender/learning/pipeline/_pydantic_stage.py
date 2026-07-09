@@ -1,5 +1,5 @@
 """The in-process PydanticAI transport shared by every learning-loop stage that runs
-in-process — the twin of ``core/runner.py::_run_claude`` (the ``claude -p`` transport).
+in-process — it replaced the removed ``claude -p`` subprocess transport.
 
 The judge was the first in-process stage, so this generic transport was born inline in
 ``pipeline/judge/engine_pydantic.py``: the ``RequestLogger`` setup, the ``build_agent_core``
@@ -110,7 +110,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     event loop), and map faults: an unroutable model / unsupported effort raised at build is a
     run-independent CONFIG fault (``FatalConfigError`` → exit 2, never dead-lettering every run
     for it); a timeout / usage-limit / model error after retries quarantines the single run
-    (``RunUnprocessable``), the same per-run disposition the sibling ``claude -p`` stages get
+    (``RunUnprocessable``), the same per-run disposition the removed ``claude -p`` stages got
     from a non-zero exit; ``StageAbort`` / ``FatalConfigError`` from the run are systemic and
     re-raised. ``stage`` is the human stage name in those messages (``judge`` / ``actor``);
     ``label`` is the per-leg observability id (``agent_id`` + the ``step=`` log line).
@@ -146,7 +146,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
         # A reasoning model (GLM@low, the shipped default) can burn its whole budget in the
         # thinking channel and emit an EMPTY final text part without tripping the request /
         # usage cap. An empty story or verdict is never valid; quarantine this run (the same
-        # per-run disposition a claude -p stage gets from an empty/failed exit) rather than
+        # per-run disposition a ``claude -p`` stage got from an empty/failed exit) rather than
         # letting ``""`` flow on to the oracle/judge — for the actor, is_skip_story("") is
         # False, so an empty story would otherwise be graded as a real (empty) one.
         #

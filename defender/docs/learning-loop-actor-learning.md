@@ -381,9 +381,9 @@ key, and post-hoc revision would invite circular reasoning ("read
 lessons, swap to techniques whose lessons I happen to like").
 
 **Trace capture is part of the actor-grep PR, not assumed.** The
-current actor stage runs as a plain `claude -p` text invocation in
-`defender/learning/loop.py` and persists only the story output — no
-tool trace today. The actor-grep PR adds:
+actor stage originally ran as a plain `claude -p` text invocation in
+`defender/learning/loop.py` and persisted only the story output — no
+tool trace (it now runs in-process on PydanticAI, like every other stage). The actor-grep PR adds:
 
 - `claude -p --output-format stream-json` on the actor stage to
   capture per-tool-call events,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared run-dir + per-run-salt resolution for the defender PostToolUse hooks.
 
-The defender spawns one ``claude -p`` per run and exports
+The defender runs one in-process agent per run and exports
 ``DEFENDER_RUN_DIR`` into the process (run.py), so both the budget
 enforcer and the tag hook anchor on that single env var rather than a
 session→run map. Centralizing the lookup here keeps the contract (env

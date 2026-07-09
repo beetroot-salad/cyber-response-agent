@@ -36,7 +36,7 @@ flowchart LR
 
 ## Learning Loop
 
-The learning loop runs off-process: after the runtime loop exits, `run.py` drops a learn-queue marker (skip with `--no-learn`), and a worker drains the queue via `defender/learning/loop.py --learn-drain`. The disposition routes each run into one or both counterfactual directions — hexagons are `claude -p` agents, rectangles are deterministic code:
+The learning loop runs off-process: after the runtime loop exits, `run.py` drops a learn-queue marker (skip with `--no-learn`), and a worker drains the queue via `defender/learning/loop.py --learn-drain`. The disposition routes each run into one or both counterfactual directions — hexagons are in-process LLM stages (PydanticAI), rectangles are deterministic code:
 
 ```mermaid
 flowchart TD
@@ -90,7 +90,7 @@ cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[d
 
 `run.py` re-execs into `defender/.venv/bin/python3`, so it works regardless of which python is on PATH.
 
-Live runs additionally need a provider API key (Anthropic by default; Fireworks for the GLM/Kimi paths) and the SIEM/host adapters reachable (see `defender/skills/{system}/SKILL.md`). The learning loop's stages run as `claude -p`, so it also needs the `claude` CLI installed and authenticated.
+Live runs additionally need a provider API key (Anthropic by default; Fireworks for the GLM/Kimi paths) and the SIEM/host adapters reachable (see `defender/skills/{system}/SKILL.md`). The learning loop's stages run in-process on PydanticAI too, billing the same provider key — there is no separate `claude` CLI dependency.
 
 ## Running The Agent
 
@@ -126,7 +126,7 @@ The runtime agent has no unit tests — it's evaluated by running real alerts an
 cd defender && .venv/bin/python -m pytest tests/ -q -m "not llm and not live"
 ```
 
-The `llm`/`live` markers gate tests that spawn a real `claude -p` or need live
+The `llm`/`live` markers gate tests that make a real (metered) model request or need live
 infrastructure; CI runs `-m "not llm and not live"`.
 
 ## Repository Conventions

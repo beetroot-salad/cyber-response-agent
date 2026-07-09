@@ -30,5 +30,5 @@ re-coining.
     defender/.venv/bin/python defender/evals/harness_lead.py \
         defender/evals/scenarios_lead/underfold-sshd-narrowing
 
-The lead-author spawns `claude -p` (subscription); this is a live agent run,
+The lead-author runs in-process on PydanticAI (metered key); this is a live agent run,
 so treat the verdict as one sample. Re-run for confidence.

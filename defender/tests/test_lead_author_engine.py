@@ -131,7 +131,7 @@ def _spawn(**over):
     kw = dict(
         system_prompt_file=Path("/tmp/does-not-matter-lae.md"),
         batch_id="run-A", user_prompt="u", repo_root=Path("/tmp/wt"),
-        learning_run_dir=Path("/tmp/rd"), log_label="claude", log=lambda *a, **k: None,
+        learning_run_dir=Path("/tmp/rd"), log_label="lead author", log=lambda *a, **k: None,
         source_key=lambda model, label: None, run_author=lambda **kw: "",
     )
     kw.update(over)
@@ -557,5 +557,5 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
         run_author_stage(
             system_prompt_file=_prompt(tmp_path), batch_id="run-A", user_prompt="u",
             repo_root=_worktree(tmp_path), learning_run_dir=_run_dir(tmp_path),
-            log_label="claude", log=lambda *a, **k: None,
+            log_label="lead author", log=lambda *a, **k: None,
             model="gpt-4-turbo", run_author=lambda **kw: "x")
