@@ -184,11 +184,13 @@ export interface SessionHostConfig {
   command?: string; // required for kind="command"/"tmux"
 }
 
-/** Per-headless-stage claude tuning (§9.9). Both fields optional — an unset field falls back to
- *  `Config.defaults`, and an empty/unset value omits the flag (the CLI's own default applies). */
+/** Per-stage claude tuning (§9.9) — the three headless stages take it on the `claude -p` argv, the
+ *  interactive `discuss` stage on its session-host launch. Resolution is per-field: an UNSET field
+ *  (`undefined`) falls back to `Config.defaults`; an EMPTY string ("") omits the flag so the CLI's own
+ *  default applies — an explicit "" therefore overrides `defaults` rather than inheriting it. */
 export interface StageTuning {
-  model?: string; // claude --model; "" / unset = CLI default
-  effort?: string; // claude --effort <low|medium|high|xhigh|max>; "" / unset = CLI default
+  model?: string; // claude --model; "" = omit (CLI default), unset = inherit Config.defaults
+  effort?: string; // claude --effort <low|medium|high|xhigh|max>; "" = omit, unset = inherit Config.defaults
 }
 
 /** The one injected config object (§9.9) — never global, never re-read in the hot path. */

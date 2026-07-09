@@ -46,7 +46,7 @@ describe("headlessArgv — setsid claude -p … --session-id … --output-format
       "--output-format",
       "json",
       "--permission-mode",
-      "acceptEdits",
+      "auto",
       "--add-dir",
       "/run/wt/owner__repo/issue-5",
     ]);
@@ -79,6 +79,12 @@ describe("headlessArgv — setsid claude -p … --session-id … --output-format
     expect(argv).not.toContain("--model");
     expect(argv.slice(-2)).toEqual(["--effort", "max"]);
   });
+
+  it("emits --model alone when the effort is unset (each flag is independently omittable)", () => {
+    const argv = headlessArgv(run, card, "sid-1", fakeConfig({ stages: { write_tests: { model: "opus" } } }));
+    expect(argv).not.toContain("--effort");
+    expect(argv.slice(-2)).toEqual(["--model", "opus"]);
+  });
 });
 
 describe("stageTuning — per-field resolution: stage override → defaults → CLI default", () => {
@@ -92,11 +98,19 @@ describe("stageTuning — per-field resolution: stage override → defaults → 
     expect(stageTuning("review", cfg)).toEqual({ model: "sonnet", effort: "" });
     expect(stageTuning("write_tests", fakeConfig())).toEqual({ model: "", effort: "" });
   });
+
+  it("an explicit '' at the stage level overrides defaults (omit), it does not inherit them (?? — not ||)", () => {
+    // Guards the documented unset-vs-empty distinction: model "" omits the flag even though defaults set opus;
+    // the unset effort still inherits defaults. A `||` refactor would wrongly make "" fall through to opus.
+    const cfg = fakeConfig({ defaults: { model: "opus", effort: "high" }, stages: { review: { model: "" } } });
+    expect(stageTuning("review", cfg)).toEqual({ model: "", effort: "high" });
+  });
 });
 
 describe("tuningArgv — the shared --model/--effort flags (headless argv + session host)", () => {
   it("emits both flags, only the set one, or neither", () => {
     expect(tuningArgv("discuss", fakeConfig({ stages: { discuss: { model: "opus", effort: "xhigh" } } }))).toEqual(["--model", "opus", "--effort", "xhigh"]);
+    expect(tuningArgv("discuss", fakeConfig({ stages: { discuss: { model: "opus" } } }))).toEqual(["--model", "opus"]);
     expect(tuningArgv("discuss", fakeConfig({ stages: { discuss: { effort: "high" } } }))).toEqual(["--effort", "high"]);
     expect(tuningArgv("discuss", fakeConfig())).toEqual([]);
   });

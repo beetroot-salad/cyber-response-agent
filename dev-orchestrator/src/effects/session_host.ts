@@ -4,9 +4,12 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CardState, Config } from "../contract";
+import type { CardState, Config, RunStage } from "../contract";
 import { tuningArgv } from "./claude";
 import { repoConfigFor } from "./git";
+
+// The one interactive stage (§2) — its per-stage tuning is resolved from `stages.discuss` / `defaults`.
+const INTERACTIVE_STAGE: RunStage = "discuss";
 
 type CardRef = Pick<CardState, "repo" | "issue_number" | "worktree_path">;
 interface Launch {
@@ -29,7 +32,7 @@ export function sessionHostArgv(cfg: Config, card: CardRef, launch: Launch): str
     .replace(/\{cwd\}/g, openCwd(card, cfg))
     .replace(/\{resume\}/g, resume)
     .replace(/\{sid\}/g, launch.sid)
-    .replace(/\{tuning\}/g, tuningArgv("discuss", cfg).join(" "))
+    .replace(/\{tuning\}/g, tuningArgv(INTERACTIVE_STAGE, cfg).join(" "))
     .split(/\s+/)
     .filter(Boolean);
 }
@@ -38,7 +41,7 @@ export function sessionHostArgv(cfg: Config, card: CardRef, launch: Launch): str
  *  OUTSIDE the repo (in the run root) so the tracked .vscode/ is never mutated. */
 export function vscodeWorkspaceDoc(cfg: Config, card: CardRef, launch: Launch) {
   const resume = launch.resume ? `--resume ${launch.resume} ` : "";
-  const tuning = tuningArgv("discuss", cfg);
+  const tuning = tuningArgv(INTERACTIVE_STAGE, cfg);
   const tuningStr = tuning.length ? ` ${tuning.join(" ")}` : "";
   return {
     folders: [{ path: openCwd(card, cfg) }],

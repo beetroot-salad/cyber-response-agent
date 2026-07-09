@@ -12,7 +12,7 @@ export function fakeConfig(over: Partial<Config> = {}): Config {
     pollMs: 30000,
     workerTickMs: 1000,
     port: 8765,
-    permissionMode: "acceptEdits",
+    permissionMode: "auto",
     defaults: { model: "", effort: "" },
     stages: {},
     repos: [{ name: "owner/repo", root: "/clone/owner/repo", base: "origin/main" }],

@@ -32,7 +32,9 @@ export function loadConfig(): Config {
   return {
     ...base,
     ...file,
-    // Deep-merge the nested blocks so a file that sets only one sub-field keeps the base for the rest.
+    // Merge the nested blocks so a file that sets only one field keeps the base for the rest. `defaults`
+    // and `sessionHost` merge per sub-field; `stages` merges per stage-key (a file's stage object replaces
+    // the base's wholesale — the per-field model/effort fallback then happens in stageTuning, not here).
     defaults: { ...base.defaults, ...file.defaults },
     stages: { ...base.stages, ...file.stages },
     sessionHost: { ...base.sessionHost, ...file.sessionHost },
