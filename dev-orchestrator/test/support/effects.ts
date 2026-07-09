@@ -36,6 +36,7 @@ export class FakeEffects implements Effects {
   // Poll-loop data sources (configured per test).
   private worktrees: string[] = [];
   private issues: IssueRef[] = [];
+  private listFailures = 0;
   private readonly prStates = new Map<number, PrState>();
 
   /** Inject a fault: the named seam(s) throw when next invoked (still recorded). */
@@ -59,6 +60,13 @@ export class FakeEffects implements Effects {
   /** What `gh.issueList()` will return (the poll intake source). */
   setIssues(issues: IssueRef[]): this {
     this.issues = [...issues];
+    return this;
+  }
+
+  /** How many per-repo list failures `gh.issueList()` reports (default 0) — models the real gh
+   *  swallowing a repo blip while still returning the rest, so the poller can count it. */
+  setListFailures(n: number): this {
+    this.listFailures = n;
     return this;
   }
 
@@ -182,9 +190,9 @@ export class FakeEffects implements Effects {
       this.record("gh.issueCreate", input);
       return { issue_number: this.ghIssueN++ };
     },
-    issueList: (input: { repo?: string; label?: string }): IssueRef[] => {
-      this.record("gh.issueList", input);
-      return [...this.issues];
+    issueList: (input: { repo?: string; label?: string }): { issues: IssueRef[]; failures: number } => {
+      this.record("gh.issueList", input); // failOn("gh.issueList") throws here → the total-failure path
+      return { issues: [...this.issues], failures: this.listFailures };
     },
     prStatus: (input: { repo: string; pr_number: number }): PrState => {
       this.record("gh.prStatus", input);

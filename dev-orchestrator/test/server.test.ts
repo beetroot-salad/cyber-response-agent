@@ -4,7 +4,7 @@
 // is a 200 no-op (never a 4xx), a malformed event is 400, the can't-happen breach is 409.
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { App, DB } from "../src/contract";
+import type { App, DB, PollHealth } from "../src/contract";
 import { makeApp } from "../src/server";
 import { fakeConfig } from "./support/config";
 import { seedCard, seedRun } from "./support/arrange";
@@ -15,10 +15,12 @@ import { getCard, latestRun, listBoard } from "./support/read";
 let db: DB;
 let fx: FakeEffects;
 let app: App;
+let health: PollHealth; // makeApp holds this reference; a test can mutate it to simulate a poll pass
 beforeEach(() => {
   db = createTestDb();
   fx = new FakeEffects();
-  app = makeApp(db, fx, fakeConfig());
+  health = { ran: false, errors: 0, at: null, okAt: null };
+  app = makeApp(db, fx, fakeConfig(), health);
 });
 
 async function rpc(op: string, args?: unknown): Promise<{ status: number; body: any }> {
@@ -34,11 +36,20 @@ async function rpc(op: string, args?: unknown): Promise<{ status: number; body: 
 }
 
 describe("queries", () => {
-  it("getBoard → 200, the read model for every non-archived card", async () => {
+  it("getBoard → 200, the read model for every non-archived card + the poll health", async () => {
     seedCard(db, { id: "c1", stage: "backlog" });
     const { status, body } = await rpc("getBoard");
     expect(status).toBe(200);
-    expect(body.map((c: { id: string }) => c.id)).toEqual(["c1"]);
+    expect(body.cards.map((c: { id: string }) => c.id)).toEqual(["c1"]);
+    expect(body.poll).toEqual({ ran: false, errors: 0, at: null, okAt: null }); // fresh boot = neutral
+  });
+
+  it("getBoard echoes the LIVE poll health, so the board can show 'polling failed'", async () => {
+    health.ran = true;
+    health.errors = 1;
+    health.at = "2026-07-09T00:00:00Z";
+    const { body } = await rpc("getBoard");
+    expect(body.poll).toEqual({ ran: true, errors: 1, at: "2026-07-09T00:00:00Z", okAt: null });
   });
 
   it("getCard → 200 { card, runs }", async () => {

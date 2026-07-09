@@ -48,19 +48,22 @@ export function makeGhEffects(cfg: Config) {
       return { issue_number: parseIssueNumberFromUrl(runGh(argv)) };
     },
     // The poller calls this repo-agnostically ({ label }), so list every configured repo and union.
-    issueList(input: { repo?: string; label?: string }): IssueRef[] {
+    // A per-repo blip skips that repo but is COUNTED (SB-I) so the poller can tell a real failure
+    // apart from an empty repo — a silently-swallowed [] otherwise looks identical to "no issues".
+    issueList(input: { repo?: string; label?: string }): { issues: IssueRef[]; failures: number } {
       const label = input.label ?? cfg.label;
       const repos = input.repo ? cfg.repos.filter((r) => r.name === input.repo) : cfg.repos;
-      const out: IssueRef[] = [];
+      const issues: IssueRef[] = [];
+      let failures = 0;
       for (const repo of repos) {
         try {
           const json = runGh(["issue", "list", "-R", repo.name, "--label", label, "--state", "open", "--json", "number,title"]);
-          out.push(...parseIssueList(json, repo.name));
+          issues.push(...parseIssueList(json, repo.name));
         } catch {
-          /* a per-repo list blip skips that repo, never the whole poll (SB-I) */
+          failures += 1;
         }
       }
-      return out;
+      return { issues, failures };
     },
     prStatus(input: { repo: string; pr_number: number }): PrState {
       return parsePrState(runGh(["pr", "view", String(input.pr_number), "-R", input.repo, "--json", "state"]));

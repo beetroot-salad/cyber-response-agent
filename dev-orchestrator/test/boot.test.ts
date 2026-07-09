@@ -4,7 +4,7 @@
 // collaborator injected, so this pins the ordering with zero real I/O (no subprocess, no socket).
 
 import { describe, expect, it } from "bun:test";
-import type { BootDeps, Config, Effects, PollSummary, ReconcileSummary } from "../src/contract";
+import type { BootDeps, Config, Effects, PollHealth, PollSummary, ReconcileSummary } from "../src/contract";
 import { boot } from "../src/boot";
 import { createTestDb } from "./support/db";
 import { FakeEffects } from "./support/effects";
@@ -16,10 +16,11 @@ interface Recorded {
   serve: { port: number } | null;
   drainOpts: { pool: number } | null;
   pollOpts: { label?: string } | null;
+  health: PollHealth | null;
 }
 
-function recordingDeps(): { deps: BootDeps; rec: Recorded } {
-  const rec: Recorded = { order: [], every: [], serve: null, drainOpts: null, pollOpts: null };
+function recordingDeps(poll: PollSummary = { intook: 0, merged: 0, closed: 0, errors: 0 }): { deps: BootDeps; rec: Recorded } {
+  const rec: Recorded = { order: [], every: [], serve: null, drainOpts: null, pollOpts: null, health: null };
   const deps: BootDeps = {
     openDb: () => {
       rec.order.push("openDb");
@@ -40,10 +41,11 @@ function recordingDeps(): { deps: BootDeps; rec: Recorded } {
     pollOnce: async (_db, _fx, opts): Promise<PollSummary> => {
       rec.order.push("poll");
       rec.pollOpts = opts;
-      return { intook: 0, merged: 0, closed: 0 };
+      return poll;
     },
-    makeApp: (_db, _fx, _cfg) => {
+    makeApp: (_db, _fx, _cfg, health) => {
       rec.order.push("makeApp");
+      rec.health = health;
       return { fetch: () => new Response("ok") };
     },
     serve: (opts) => {
@@ -93,5 +95,15 @@ describe("boot ordering — reconcile before any loop or the server", () => {
     for (const e of rec.every) await e.fn();
     expect(rec.drainOpts).toEqual({ pool: 3 });
     expect(rec.pollOpts).toEqual({ label: "flow" });
+  });
+
+  it("the poll timer feeds health into makeApp — ran flips true and errors surface", async () => {
+    const { deps, rec } = recordingDeps({ intook: 0, merged: 0, closed: 0, errors: 2 });
+    boot(fakeConfig({ label: "flow" }), deps);
+    expect(rec.health).toEqual({ ran: false, errors: 0, at: null, okAt: null }); // makeApp sees the neutral start
+    for (const e of rec.every) await e.fn(); // fire the timers (incl. the poll)
+    expect(rec.health?.ran).toBe(true);
+    expect(rec.health?.errors).toBe(2); // the SAME object makeApp holds now reflects the failing poll
+    expect(rec.health?.okAt).toBeNull(); // errors>0 → last-ok NOT advanced
   });
 });

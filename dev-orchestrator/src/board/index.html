@@ -78,6 +78,12 @@
   .col-count{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 7px; min-width:22px; text-align:center; }
   .col-body{ padding:10px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; scrollbar-width:thin; }
   .col-body:empty::after{ content:"—"; color:var(--ink-3); font-family:var(--mono); font-size:12px; display:block; text-align:center; padding:12px 0; }
+  /* empty board + a failed poll: a large error, not the quiet empty columns */
+  .board-error{ flex:1; min-height:52vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:40px 20px; }
+  .board-error .be-mark{ font-size:44px; line-height:1; color:var(--fail); }
+  .board-error .be-title{ font-family:var(--mono); font-weight:700; font-size:20px; color:var(--ink); letter-spacing:-.01em; }
+  .board-error .be-sub{ font-family:var(--sans); font-size:13.5px; color:var(--ink-2); max-width:340px; line-height:1.5; }
+  .board-error .be-sub code{ font-family:var(--mono); font-size:12.5px; background:var(--col); border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
   .col-collapse{ background:transparent; border:none; color:var(--ink-3); cursor:pointer; font-size:15px; line-height:1; padding:0 4px 0 0; margin:-1px 0 0 -2px; }
   .col-collapse:hover{ color:var(--ink); }
   .col.collapsed{ flex:0 0 46px; width:46px; cursor:pointer; }
@@ -164,6 +170,8 @@
   .ledger{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:9px 18px; border-top:1px solid var(--line); background:var(--panel); font-family:var(--mono); font-size:11px; color:var(--ink-3); }
   .ledger .sync{ display:inline-flex; align-items:center; gap:7px; color:var(--ink-2); }
   .ledger .sync .cdot{ width:7px; height:7px; border-radius:999px; background:var(--done); animation:pulse 2.4s ease-in-out infinite; }
+  .ledger .sync.failed{ color:var(--fail); }
+  .ledger .sync.failed .cdot{ background:var(--fail); animation:none; }
   .ledger-toggle{ font-family:var(--mono); font-size:11px; color:var(--ink-2); background:transparent; border:1px solid var(--line-2); border-radius:6px; padding:3px 9px; cursor:pointer; }
   .ledger-toggle:hover{ border-color:var(--ink-3); color:var(--ink); }
   .legend{ display:flex; gap:13px; flex-wrap:wrap; margin-left:auto; }
@@ -265,7 +273,7 @@
 <main class="board" id="board"></main>
 
 <footer class="ledger">
-  <span class="sync"><span class="cdot"></span>polling <code>gh</code> · 30s</span>
+  <span class="sync" id="syncStatus"><span class="cdot"></span>polling <code>gh</code> · 30s</span>
   <span id="syncAge">last synced 12s ago</span>
   <span id="counts"></span>
   <span>workers 2/2</span>
@@ -315,6 +323,7 @@
 
   // ---------- state + transport ----------
   let CARDS=[];
+  let POLL=null; // last-poll health from getBoard — { ran, errors, at, okAt }
   let repoFilter="all repos", showDone=false, openCardId=null;
   let drawerActionFns=[];
   const COLLAPSIBLE=new Set(["backlog"]); const collapsed=new Set(["backlog"]);
@@ -330,7 +339,7 @@
 
   async function refresh(){
     const {status,body}=await rpc("getBoard");
-    if(status===200 && Array.isArray(body)){ CARDS=body; render(); maybeSyncDrawer(); setSync(); }
+    if(status===200 && body && Array.isArray(body.cards)){ CARDS=body.cards; POLL=body.poll||null; render(); maybeSyncDrawer(); setSync(); }
   }
 
   // Dispatch a UI event guarded by the card's believed (stage,status). A stale CAS is a safe no-op.
@@ -387,6 +396,15 @@
   }
   function render(){
     const vis=visible();
+    const failed=!!(POLL&&POLL.ran&&POLL.errors>0);
+    updateSyncStatus(failed);
+    // Empty board + a failed poll → a large error (else the quiet empty columns read as "all clear").
+    if(failed&&CARDS.length===0){
+      board.innerHTML=`<div class="board-error"><div class="be-mark">⚠</div><div class="be-title">Polling failed</div><div class="be-sub">can’t reach GitHub — check <code>gh auth status</code></div></div>`;
+      $("#summary").innerHTML=""; $("#counts").textContent="0 active";
+      $("#doneToggle").textContent=showDone?"hide done":"show done (0)"; syncRepoFilter();
+      return;
+    }
     const stages=STAGES.filter(s=>s.key!=="done"||showDone);
     board.innerHTML=stages.map(s=>{
       const cs=vis.filter(c=>c.stage===s.key);
@@ -509,6 +527,15 @@
   let toastT; function toast(msg){ const t=$("#toast"); t.innerHTML=`<span class="tk">▸</span> ${esc(msg)}`; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2400); }
   let lastSync=Date.now(); function setSync(){ lastSync=Date.now(); }
   setInterval(()=>{ const age=Math.round((Date.now()-lastSync)/1000); $("#syncAge").textContent=age<2?"synced":"last synced "+age+"s ago"; },1000);
+
+  // ---------- poll health (footer status) ----------
+  function ago(iso){ if(!iso) return ""; const s=Math.max(0,Math.round((Date.now()-Date.parse(iso))/1000)); return s<60?s+"s ago":Math.round(s/60)+"m ago"; }
+  function updateSyncStatus(failed){
+    const el=$("#syncStatus"); if(!el) return;
+    el.classList.toggle("failed",failed);
+    if(failed){ const ok=POLL&&POLL.okAt?` · last ok ${ago(POLL.okAt)}`:""; el.innerHTML=`<span class="cdot"></span>polling failed${ok}`; }
+    else el.innerHTML=`<span class="cdot"></span>polling <code>gh</code> · 30s`;
+  }
 
   // ---------- events ----------
   document.addEventListener("click",e=>{
