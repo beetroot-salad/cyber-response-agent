@@ -11,11 +11,14 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
-# `defender.*` namespace imports resolve.
-from defender.runtime import permission
-from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+# `defender.*` namespace imports resolve. `MAIN_DEF`/`GATHER_DEF` live in `driver`,
+# which imports `pydantic_ai` at module load — hence the guard above.
+from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 # The gate is policy-driven (it keys on an AgentPolicy, not a role). Since #535 the
 # runtime-agent reader policy is compiled PER-RUN — `compile_policy_for(<DEF>, run_dir,

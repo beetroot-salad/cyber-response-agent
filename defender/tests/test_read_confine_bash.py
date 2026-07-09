@@ -31,9 +31,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from defender.runtime import permission
-from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
+from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #

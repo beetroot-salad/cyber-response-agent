@@ -25,11 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning.core import config
-from defender.runtime import permission
-from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
-from defender.runtime.permission import AgentPolicy
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
+from defender.learning.core import config  # noqa: E402
+from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.permission import AgentPolicy  # noqa: E402
 
 _DEFENDER = config.REPO_ROOT / "defender"
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
