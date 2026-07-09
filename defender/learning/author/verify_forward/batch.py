@@ -5,10 +5,11 @@ Usage::
 
     verify_batch.py <verify_script.py> <lesson_path>=<id>[=<direction>] [...]
 
-``<verify_script.py>`` is one of the existing single-check scripts
-(``verify_forward.py`` for defender findings, ``verify_forward_actor.py``
-for actor lessons) — each takes ``<lesson_path> <id>`` and prints ``GOOD``
-or ``BAD`` on its last stdout line. This driver runs one such check per
+``<verify_script.py>`` is one of the two sibling single-check scripts
+(``forward.py`` for defender findings, ``actor.py`` for actor lessons) and
+nothing else — the argument is PINNED to that set (``resolve_check_script``),
+since this driver executes it. Each takes ``<lesson_path> <id>`` and prints
+``GOOD`` or ``BAD`` on its last stdout line. This driver runs one such check per
 pair **concurrently** (a thread pool over subprocesses) and prints one
 result line per pair, so a curator agent runs its whole first verification
 pass with a single tool call instead of a serial shell loop.
@@ -57,6 +58,19 @@ MAX_WORKERS = VERIFY_BATCH_WORKERS
 # Per-check ceiling; above the single-check VERIFIER_TIMEOUT so a child that hits its
 # own timeout reports BAD/ERROR rather than being killed here.
 CHILD_TIMEOUT = VERIFY_BATCH_TIMEOUT
+
+# The ONLY single-check scripts this driver may execute. `<verify_script.py>` is a
+# command-line argument solely because two curators share one driver (the findings
+# curator passes `forward.py`, the actor curator `actor.py`), so its legitimate domain
+# is this two-element set — but the curator's bash allowlist can only pin the *program*
+# token (`curator_engine._verifier_pattern` admits `python3 <batch.py> <anything>`),
+# never the argument. Without this pin the driver is a confused deputy: a curator whose
+# `write_allow` admits `<corpus>/**.md` can author a `.md` holding python and have it
+# executed here, escaping the deny-by-default gate that is its entire containment. The
+# curators consume LLM-authored findings derived from attacker-influenced telemetry, so
+# that path is prompt-injection-reachable. Resolve both sides — a relative operand is
+# resolved against the child's cwd (the batch worktree), where this file also lives.
+_ALLOWED_CHECKS = frozenset({"forward.py", "actor.py"})
 
 
 def _parse_pair(arg: str) -> tuple[str, str, str | None]:
@@ -107,6 +121,19 @@ def _run_one(
     return verdict, ""
 
 
+def resolve_check_script(script: str) -> Path | None:
+    """The pinned single-check script `script` names, or None if it names anything else.
+
+    Membership is decided on the RESOLVED path against the resolved sibling set, not on
+    the basename: a basename test would admit `../../elsewhere/forward.py`, and a string
+    test would miss the repo-relative spelling the curator actually types."""
+    resolved = Path(script).resolve()
+    allowed = {(HERE / name).resolve() for name in _ALLOWED_CHECKS}
+    if resolved not in allowed or not resolved.is_file():
+        return None
+    return resolved
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
@@ -115,10 +142,15 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 64
-    script = argv[1]
-    if not Path(script).is_file():
-        print(f"verify_batch: verify script not found: {script}", file=sys.stderr)
+    check = resolve_check_script(argv[1])
+    if check is None:
+        print(
+            f"verify_batch: refusing to run {argv[1]!r} — <verify_script.py> must be "
+            f"one of {sorted(_ALLOWED_CHECKS)} next to this driver",
+            file=sys.stderr,
+        )
         return 64
+    script = str(check)
     pairs = [_parse_pair(a) for a in argv[2:]]
 
     results: list[tuple[str, str, str, str]] = [
