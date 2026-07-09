@@ -23,6 +23,8 @@ Confirm you're in the worktree (`git rev-parse --show-toplevel`) before step 1. 
 
 **Gate the inputs first.** The spec must exist as a discrete, committed, reviewable artifact *before* any implementation: check that the spec ref's diff (`git diff --stat <base>...<spec-ref>` — three-dot, so commits that landed on `<base>` after the spec forked don't masquerade as spec changes) touches only test files and `spec_graph_*.yaml`. The spec ref is the branch tip write-tests committed (orchestrator: `flow/issue-<n>`); the artifact's `base:` field records the fork point. If the tests are uncommitted, or the spec commit mixes in source, stop and kick it back to write-tests. This is not ceremony: #527 and #534 both co-committed tests+impl, and #534 shipped bug classes whose lessons were already encoded in the spec skill — a spec phase that never ran discretely can't bite.
 
+**Then gate the spec's granularity, not just its shape.** Run `defender/.venv/bin/python scripts/spec_graph/check_binds.py <artifact>` and `check_actors.py <artifact> --base <base>` over the committed graph (`scripts/spec_graph/README.md`). A prose⊄binds orphan (an invariant the tests will silently drop) or an unmodelled `relocates PATHS` driver (an execution context the spec never tested) is a **spec defect**, exactly like a wrong-looking test — surface it (§2) and kick it back to write-tests; don't implement against a spec you already know is coarse. If the graph carries a conscious `binds_waivers:`/`actor_waivers:` entry for the finding, that's a resolved decision — proceed.
+
 Load the issue/design (`gh issue view <n> --comments`, or read the doc) for intent, then read the committed tests — they are the precise version. The tests already encode the resolved forks: each one names an injected fault or input and the observable outcome the code must produce, and each drives a specific entry point through specific injection seams. Before writing anything, know:
 
 - the entry point(s) under test and their signatures,
@@ -48,6 +50,11 @@ Then mirror the *rest* of CI locally **before shipping** — here CI is far more
 - the baseline-ratcheted custom lints under `scripts/lint/lint_*.py` (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a *new* finding, and each has an inline-suppression escape hatch documented in its own module.
 
 Running these locally collapses the CI-repair loop in §4 from minutes-per-round to seconds. (Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree.)
+
+**Close the two loops the graph couldn't.** Now that the code exists, two granularity checks run against reality rather than the spec:
+
+- **Re-run `check_actors.py <artifact> --base <base>`** — the census now diffs over the *real* implementation, so it catches an execution context the code reaches that the spec never modelled (a caller you added, or a guard you introduced that makes an existing harness/subprocess context newly load-bearing — the lead-author-harness class). An unmodelled `relocates PATHS` driver is a spec question (§bounded, kick back), not a green-the-build edit.
+- **Probe any guard the change adds or tightens** — the input-partition slice `check_binds`/`check_actors` structurally cannot see. State the guard's invariant (e.g. `resolve(operand)` stays within `resolve(root)`) and fuzz it, and treat a surviving mutation of the guard's own checks (delete the `..` reject, the whitespace reject) as an under-tested partition. This is the impl-time lane — the invalid domain is defined by the invariant, not by the code's existing branches, so characterizing "same as the old guard" imports the old guard's blind spots.
 
 Fix the cause, not the test. If making the code honest genuinely requires a test to change — the spec had a bug, or a fork was never actually resolved — stop and kick it back to the human as a spec question; shipping code that passes a quietly-loosened test defeats the whole pipeline.
 
