@@ -9,7 +9,7 @@ lesson scripts the leg may run) is data threaded through ``_run_actor_pydantic``
 ``_ActorScope``, not two engine modules.
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when an actor
-actually runs (``core/subagents.ClaudePrintSubagents.actor``), never at loop import.
+actually runs (``core/subagents.InProcessSubagents.actor``), never at loop import.
 """
 from __future__ import annotations
 

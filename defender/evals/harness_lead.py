@@ -213,7 +213,7 @@ def main() -> int:
         expect = json.loads((scenario / "expect.json").read_text())
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    # Materialize OUTSIDE the repo. `claude -p` resolves relative tool paths and
+    # Materialize OUTSIDE the repo. The in-process agent's Bash tool resolves relative tool paths and
     # `git` against the project root it discovers by walking up from cwd — so a
     # temp tree nested inside this repo makes the agent edit/commit the REAL repo
     # instead of the sandbox. A system-temp dir (its own git repo, no enclosing

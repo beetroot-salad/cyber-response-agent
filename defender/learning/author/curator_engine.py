@@ -16,9 +16,9 @@ engine module. Each curator's invoke seam (``lessons.run.invoke_agent`` for A,
 
 Two divergences from the lead author:
 
-  - ``run_curator_stage`` returns the PARSED ``AUTHOR_RESULT`` dict, not an int rc — the
-    marker parse RELOCATED out of the retired ``claude -p`` transport (``runner.invoke_claude_print``)
-    into this wrapper. A per-run ``RunUnprocessable`` (timeout / usage-limit / model error /
+  - ``run_curator_stage`` returns the PARSED ``AUTHOR_RESULT`` dict, not an int rc — the marker
+    parse (``extract_marked_result``) lives in this wrapper, on the returned final text. A per-run
+    ``RunUnprocessable`` (timeout / usage-limit / model error /
     empty final) OR an unparseable marker maps to ``AuthorError`` (→ the envelope's rc 2, the
     single-run quarantine the drain retries); a systemic ``FatalConfigError`` / ``StageAbort``
     PROPAGATES (exit 2, never wrapped) — the same systemic-vs-per-run split ``run_stage`` and the
@@ -47,7 +47,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from defender._paths import DefenderPaths
-from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
@@ -60,6 +59,53 @@ from defender.runtime.permission import AgentPolicy, build_write_allow
 from defender.runtime.tools import AgentDeps
 
 AuthorError = _shared.AuthorError
+
+
+# ---------------------------------------------------------------------------
+# AUTHOR_RESULT marker extraction (relocated here from the retired claude -p
+# transport — this wrapper is its sole consumer; see run_curator_stage below).
+# ---------------------------------------------------------------------------
+
+
+def extract_marked_result(text: str, marker: str) -> str | None:
+    """Return the JSON object body following the last ``marker`` occurrence.
+
+    Walks forward from the opening brace counting balanced braces while
+    respecting JSON string quoting; this handles nested objects/arrays
+    that a non-greedy regex would truncate. Returns ``None`` if no
+    marker or no balanced object is found. ``marker`` is treated as a
+    literal prefix; trailing whitespace before ``{`` is tolerated.
+    """
+    pat = re.compile(re.escape(marker) + r"\s*(?=\{)")
+    matches = list(pat.finditer(text))
+    if not matches:
+        return None
+    return _find_balanced_json_object(text, matches[-1].end())
+
+
+def _find_balanced_json_object(text: str, start: int) -> str | None:
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 # The verify_forward scripts' repo-relative offset (trailing slash), owned once by DefenderPaths. A
 # curator's bash_allow admits ITS forward-check scripts by this repo-relative spelling (what the
@@ -294,9 +340,9 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     / ``commit_message``, + curator A's ``held_forward_bad``). The whole path all four invoke seams
     share, so ``lessons.run.invoke_agent`` / ``curator.invoke_curator_agent`` stay thin.
 
-    Sources the key here (not the transport) because the drain strips every provider key from its env
-    (``config.subscription_env``); ``source_first_party_key`` re-reads it from ``.env`` — reaching the
-    MAIN checkout's ``.env`` even from the throwaway worktree. A CONFIG fault (no key / unroutable
+    Sources the key here (not the transport) because the drain worktree carries only the ambient
+    credential (or none); ``source_first_party_key`` re-reads the metered key from ``.env`` — reaching
+    the MAIN checkout's ``.env`` even from the throwaway worktree. A CONFIG fault (no key / unroutable
     model / cross-provider effort) raises ``FatalConfigError`` and is left to PROPAGATE (systemic,
     exit 2), never wrapped into the per-run rc-2 lane.
 
@@ -334,10 +380,10 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
         # A per-run authoring fault only — the envelope maps AuthorError to rc 2 (queue intact,
         # retry / DLQ). StageAbort / FatalConfigError are NOT caught here (systemic exit-2 lane).
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e
-    # The AUTHOR_RESULT parse relocated out of the retired claude -p transport into the wrapper:
-    # balanced-brace walk from the LAST marker; a missing marker or invalid JSON is an authoring
-    # fault (never return the raw text where the envelope expects a dict).
-    body = _runner.extract_marked_result(text, "AUTHOR_RESULT:")
+    # Parse AUTHOR_RESULT out of the returned text: balanced-brace walk from the LAST marker; a
+    # missing marker or invalid JSON is an authoring fault (never return the raw text where the
+    # envelope expects a dict).
+    body = extract_marked_result(text, "AUTHOR_RESULT:")
     if body is None:
         if not text.strip():
             # An empty final is caught as RunUnprocessable by the real transport's

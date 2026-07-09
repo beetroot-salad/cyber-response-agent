@@ -4,7 +4,7 @@ Drives the REAL `_run_actor_pydantic` (deps build + policy-driven gate + observe
 `FunctionModel` injected through the actor's `make_model` DI seam, under
 `override_allow_model_requests(False)` so any real provider call raises. Plus the actor's
 distinctive tool surface — the two pinned lessons-script matchers and the no-`read_roots`
-read scope — and the ClaudePrintSubagents.actor routing.
+read scope — and the InProcessSubagents.actor routing.
 """
 from __future__ import annotations
 
@@ -234,7 +234,7 @@ def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
     assert agent.model_settings["extra_body"]["reasoning_effort"] == "low"
 
 
-# --- ClaudePrintSubagents.actor / .actor_benign run the in-process engine -------
+# --- InProcessSubagents.actor / .actor_benign run the in-process engine -------
 
 def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
@@ -254,7 +254,7 @@ def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
     monkeypatch.setattr(subagents, "invoke_actor", _spy_actor)  # lint-monkeypatch: ok — spy the actor_fn routing decision
     monkeypatch.setattr(subagents, "invoke_actor_benign", _spy_benign)  # lint-monkeypatch: ok — spy the actor_fn routing decision
 
-    sub = subagents.ClaudePrintSubagents()
+    sub = subagents.InProcessSubagents()
     sub.actor(tmp_path, tmp_path)
     assert captured["actor_fn"] is _run_actor_pydantic
     sub.actor_benign(tmp_path, tmp_path, "5712")

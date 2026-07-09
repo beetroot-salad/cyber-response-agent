@@ -842,9 +842,8 @@ def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path):
 
 
 def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
-    """Patch the in-process engine seam the spawn spine calls (the GLM port replaced the old
-    ``invoke_claude_print_raw`` capture). ``_spawn_author_agent`` looks up ``run_author_stage`` on
-    the engine module at call time, so patching the module attr is seen. Captures the kwargs the
+    """Patch the in-process engine seam the spawn spine calls. ``_spawn_author_agent`` looks up
+    ``run_author_stage`` on the engine module at call time, so patching the module attr is seen. Captures the kwargs the
     spawn forwards to the engine + returns a canned rc / raises."""
     from defender.learning.leads import lead_author_engine  # the port target
 

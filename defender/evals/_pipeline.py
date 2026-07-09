@@ -195,7 +195,7 @@ def run_head_oracle_and_judge(
     # Fireworks key, which this actor-frozen path never uses).
     loop_mod._prepare_engines_for(["adversarial"], include_actor=False)
 
-    # Dispatch the oracle + judge through the SAME ClaudePrintSubagents adapter the learning loop
+    # Dispatch the oracle + judge through the SAME InProcessSubagents adapter the learning loop
     # uses (the composition root that names the in-process engines), then wrap their RunUnprocessable
     # — raised on timeout / model error — which would otherwise escape the per-alert handler in
     # run_secondary() and abort the harness mid-loop with no summary written. The oracle fans one
@@ -203,7 +203,7 @@ def run_head_oracle_and_judge(
     # (run_stage maps a per-lead timeout/model error to RunUnprocessable — no subprocess to raise
     # TimeoutExpired).
     try:
-        oracle_yaml = loop_mod.ClaudePrintSubagents().oracle(
+        oracle_yaml = loop_mod.InProcessSubagents().oracle(
             head_run_dir, actor_story_path, staging_dir
         )
     except loop_mod.RunUnprocessable as e:
@@ -215,7 +215,7 @@ def run_head_oracle_and_judge(
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
 
     try:
-        judge_yaml = loop_mod.ClaudePrintSubagents().judge(
+        judge_yaml = loop_mod.InProcessSubagents().judge(
             loop_mod.ADVERSARIAL_WIRING,
             head_run_dir,
             actor_story_path,

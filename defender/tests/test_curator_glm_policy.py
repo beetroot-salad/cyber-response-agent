@@ -30,7 +30,7 @@ Gate signatures confirmed from ``permission/files.py`` + ``permission/bash.py``:
 
 Bash operand spelling ASSUMED repo-relative (``defender/<corpus>/...``): the agent's bash runs at
 cwd=worktree (``tools._tool_bash`` cwd=``deps.defender_dir.parent``), the demand examples are
-repo-relative (``ls defender/lessons-actor/``), and the current ``claude -p`` grants + forward-check
+repo-relative (``ls defender/lessons-actor/``), and the current in-process bash grants + forward-check
 commands are repo-relative (``Bash(rm defender/lessons/*.md)``; ``… defender/learning/author/
 verify_forward/forward.py``). A correct port must admit that form (else every in-worktree
 enumeration is silently denied). Writes are spelling-agnostic — a repo-relative operand is

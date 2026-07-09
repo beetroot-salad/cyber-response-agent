@@ -23,10 +23,10 @@ to 1 (no tool can be called). ``_VERIFY_POLICY`` stays deny-all as belt-and-susp
 
 Unlike the pipeline stages (invoked in-process BY the orchestrator, which sources the metered key
 up front), the forward-check runs as a CLI ``python3`` SUBPROCESS spawned by the curator agent
-(``verify_forward/{forward,actor}.py``, fanned out by ``batch.py``). The curator's env strips every
-provider key (``config.curator_agent_env`` → ``subscription_env``), so each verify subprocess
-re-sources its own Fireworks key from ``.env`` before this engine runs — see the CLI ``main``s,
-which call ``config.source_first_party_key`` (the same seam ``ops/replay_actor.py`` uses).
+(``verify_forward/{forward,actor}.py``, fanned out by ``batch.py``). The verify subprocess carries
+only the ambient credential (or none), so each verify subprocess re-sources its own Fireworks key
+from ``.env`` before this engine runs — see the CLI ``main``s, which call
+``config.source_first_party_key`` (the same seam ``ops/replay_actor.py`` uses).
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when a forward-check
 actually runs, never at import of ``forward.py`` / ``actor.py`` (whose pure helpers, e.g.
@@ -175,8 +175,8 @@ def forward_check(  # noqa: PLR0913 — the CLI-facing verify contract (5 inputs
     parsed ``GOOD``/``BAD`` verdict — the whole CLI-facing path both ``forward.py`` and ``actor.py``
     share, so their ``main``s stay a thin wrapper.
 
-    Sources the key here (not the transport) because the curator strips every provider key from the
-    verify subprocess's env (``config.curator_agent_env``); ``source_first_party_key`` re-reads it
+    Sources the key here (not the transport) because the verify subprocess carries only the ambient
+    credential (or none); ``source_first_party_key`` re-reads the metered key
     from ``.env`` / ``$DEFENDER_ENV_FILE`` — reaching the MAIN checkout's ``.env`` even from the
     curator's throwaway worktree (``_first_party_key._main_repo_root``). Maps every engine fault to a
     clean ``SystemExit`` (a config fault → no key / unroutable model; an unprocessable run → timeout

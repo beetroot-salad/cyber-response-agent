@@ -46,7 +46,6 @@ def tmp_repo(tmp_path: Path):
         "author/lessons/run.py",
         "author/lessons/prompt.md",
         "author/shared.py",
-        "author/runner.py",
         "author/verify_forward/forward.py",
         "author/verify_forward/forward.md",
     ):

@@ -18,7 +18,7 @@ from defender.learning.core.config import (
     LESSONS_ENV_RETRIEVE_SCRIPT,
     LESSONS_ENVIRONMENT_DIR,
 )
-from defender.learning.core.runner import _section
+from defender.learning.pipeline._prompt import _section
 from defender.learning.tickets import ticket_seeds
 
 
@@ -60,7 +60,7 @@ def invoke_actor_benign(
         (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n")
         user += _section("past_tickets", menu_text)
     # DI seam that owns its default (CLAUDE.md conventions): the in-process actor engine in
-    # production; ClaudePrintSubagents / tests pass an explicit actor_fn.
+    # production; InProcessSubagents / tests pass an explicit actor_fn.
     from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
     actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
     return actor_fn(

@@ -1,6 +1,6 @@
 """Unit tests for the actor lessons curator.
 
-Covers the deterministic pre/post-flight without spawning ``claude -p``. The
+Covers the deterministic pre/post-flight without a real model call. The
 transaction envelope lives in ``_author_curator``; ``author_actor`` supplies the
 actor ``CuratorConfig``. Tests drive the engine with a config pointed at a tmp repo
 and an injected ``invoke_agent`` — no module-global monkeypatching: git, repo lock,
@@ -74,7 +74,7 @@ def _isolate(tmp_path: Path):
 def _cfg(ctx: dict, invoke_agent) -> curator.CuratorConfig:
     """The production actor config, repointed at the tmp repo (the factory derives the
     queue + corpus paths from ``LoopPaths(repo_root=...)``, matching ctx exactly) and
-    given an injected ``invoke_agent`` so no ``claude -p`` runs."""
+    given an injected ``invoke_agent`` so no real agent runs."""
     return dataclasses.replace(
         aa.build_actor_config(LoopPaths(repo_root=ctx["repo"])),
         invoke_agent=invoke_agent,
@@ -313,20 +313,6 @@ def test_missing_source_bundle_is_held_not_authored(tmp_path: Path):
     assert len(rows_left) == 1
     assert rows_left[0]["observation_id"] == "gone/0"
     assert rows_left[0]["held_reason"] == "source_bundle_missing"
-
-
-def test_curator_allowed_tools_scopes_read(tmp_path: Path):
-    """The curator's Read grant is scoped to the corpus + checked-in docs, never the run
-    bundles at the state root (#425 follow-up)."""
-    cfg = _cfg(_isolate(tmp_path), lambda *a: {})
-    tools = curator.curator_allowed_tools(cfg, extra_tools="Bash(echo:*),")
-    assert "Read," not in tools  # no bare/unrestricted Read
-    assert f"Read({cfg.corpus_dir_rel}**)" in tools
-    assert "Read(defender/docs/**)" in tools
-    assert "runs/" not in tools  # the run bundles are unreadable
-    # Corpus edit/write + the injected verifier grant survive.
-    assert f"Edit({cfg.corpus_dir_rel}**)" in tools
-    assert "Bash(echo:*)" in tools
 
 
 # ---------------------------------------------------------------------------

@@ -437,10 +437,10 @@ def test_request_limit_generous_default_and_threaded(tmp_path):
 # ===========================================================================
 
 def test_key_sourced_before_spawn(tmp_path):
-    """run_curator_stage calls source_key(model) BEFORE the transport spawn (the drain runs under
-    subscription_env, which strips provider keys) — so a metered-billing spawn never precedes its
+    """run_curator_stage calls source_key(model) BEFORE the in-process spawn (the drain worktree
+    carries only the ambient credential) — so a metered-billing spawn never precedes its
     key. Ordered spy proves the order; the key is sourced for the configured model. Up-front: a
-    key fault raises before the spawn, so the transport never runs."""
+    key fault raises before the spawn, so the engine never runs."""
     events: list[tuple[str, object]] = []
     _stage(
         tmp_path, model="glm-5.2",

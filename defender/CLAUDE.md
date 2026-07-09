@@ -146,14 +146,13 @@ defender/
       oracle/           # run.py (per-lead fan-out) + prompt.md + sample.py (redaction/parsing helpers)
       judge/            # run.py (one wiring-parametrized driver) + malicious.md/benign.md prompts + compare.py (projection↔actual join)
     author/             # findings → lessons curators (per author) + shared transaction machinery
-      curator.py runner.py shared.py branch.py   # the transaction envelope + git/gh (branch.py: per-batch git worktree off origin/main + per-prefix writer lease + 1 PR/batch)
+      curator.py curator_engine.py shared.py branch.py   # the transaction envelope + git/gh (curator_engine.py: in-process PydanticAI curator transport; branch.py: per-batch git worktree off origin/main + per-prefix writer lease + 1 PR/batch)
       lessons/          # run.py + prompt.md — the main curator: folds queued findings into defender/lessons/
       malicious_actor/  # run.py + prompt.md — adversarial-actor lessons curator (→ lessons-actor/)
       benign_actor/     # run.py + prompt.md + env.py — environment-lessons curator (→ lessons-environment/)
       verify_forward/   # forward.py/.md (author-time same-case regression gate) + actor.py/.md + env.py + shared.py + batch.py
     core/               # cross-cutting plumbing (NOT the flow): the flow lives in pipeline/
-      runner.py         # the claude -p transport (shared by every stage)
-      subagents.py      # the Subagents port + ClaudePrintSubagents adapter (composes the pipeline invoke_* fns)
+      subagents.py      # the Subagents port + InProcessSubagents adapter (composes the pipeline invoke_* fns)
       orchestrate.py config.py persist.py validate.py directions.py prologue.py
     leads/              # offline lead-author sub-loop: lead_author.{py,md}, lead_neighbors.py, lead_render.py
     tickets/            # ticket_seeds.py + ticket_enrichment.py (case-history seeding/enrichment)

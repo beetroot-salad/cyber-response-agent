@@ -16,7 +16,7 @@ them apart:
   one current cause; `StageAbort` is its base so future systemic faults have a
   home.
 - **`RunUnprocessable`** — this one run's data/content is bad (malformed
-  `report.md` / judge YAML, missing artifact, a `claude -p` non-zero rc). Raised
+  `report.md` / judge YAML, missing artifact, a per-run model/stage error). Raised
   only inside `run_one`'s call graph (the per-run pipeline + its validators).
 
 Before #443 there was a single type, `LoopError`, with `FatalConfigError` as its

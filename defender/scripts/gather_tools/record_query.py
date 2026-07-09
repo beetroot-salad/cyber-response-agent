@@ -16,7 +16,7 @@ The other two flags default themselves, so the subagent doesn't echo
 boilerplate:
 
   * ``--run-dir`` defaults to ``$DEFENDER_RUN_DIR`` (exported by run.py;
-    one ``claude -p`` per run). Pass it explicitly only outside a run.
+    one run per process). Pass it explicitly only outside a run.
   * ``--system`` is derived from the inner adapter invocation — the
     ``defender-<system>`` shim token (or a ``<system>_cli.py`` path).
     Pass it explicitly to override an undetectable case.

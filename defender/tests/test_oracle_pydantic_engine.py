@@ -4,7 +4,7 @@ Drives the REAL `_run_oracle_pydantic` (deps build + deny-all gate + observe tra
 `FunctionModel` injected through the oracle's `make_model` DI seam, under
 `override_allow_model_requests(False)` so any real provider call raises. Plus the oracle's
 distinctive shape — a deny-all policy (it calls no tools), the GLM `reasoning_effort="none"`
-lever this port ships ("thinking=None": reasoning DISABLED, not omitted), the ClaudePrintSubagents
+lever this port ships ("thinking=None": reasoning DISABLED, not omitted), the InProcessSubagents
 routing, and the per-lead concurrent fan-out contract that the shared harness does NOT cover.
 """
 from __future__ import annotations
@@ -170,7 +170,7 @@ def test_oracle_ships_glm_reasoning_disabled_by_default():
         assert config.ORACLE_EFFORT == "none"
 
 
-# --- ClaudePrintSubagents.oracle runs the in-process engine ----------------------------
+# --- InProcessSubagents.oracle runs the in-process engine ----------------------------
 
 def test_subagents_oracle_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
@@ -182,7 +182,7 @@ def test_subagents_oracle_runs_pydantic_engine(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subagents, "invoke_oracle", _spy_oracle)  # lint-monkeypatch: ok — spy the oracle_fn routing decision
 
-    sub = subagents.ClaudePrintSubagents()
+    sub = subagents.InProcessSubagents()
     out = sub.oracle(tmp_path / "run", tmp_path / "story.md", tmp_path / "lrd")
     assert out == "projections: []\n"
     assert captured["oracle_fn"] is _run_oracle_pydantic

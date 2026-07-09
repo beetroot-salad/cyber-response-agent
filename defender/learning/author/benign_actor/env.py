@@ -25,7 +25,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-from defender.learning.author import runner as _runner
+from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author.benign_actor import run as _benign
 from defender.learning.core.config import AUTHOR_ENV_REQUEST_LIMIT, DEFAULT_PATHS, LoopPaths
 
@@ -39,7 +39,7 @@ def invoke_agent(
     ``resolve_verifier_python`` reference) so the adversarial entry point self-contains its
     forward-check grant rather than borrowing the benign module's; the two directions drain in
     separate serialized batches with distinct commit trailers + generation counters."""
-    verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    verifier_py = resolve_verifier_python(cfg.repo_root)
     forward_check_command = (
         f"{verifier_py} {_benign.VERIFY_SCRIPT_REL} "
         f"--corpus {cfg.corpus_dir_rel} --pending {cfg.pending_file_rel}"

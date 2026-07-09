@@ -363,7 +363,7 @@ ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "low")
 BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
 # The oracle runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered first-party path,
 # the mirror of the actor/judge migrations (all three in-process stages share the metered key;
-# the curators stay on claude -p). Each call is a MECHANICAL per-lead projection: it sees only its
+# the curators run in-process too). Each call is a MECHANICAL per-lead projection: it sees only its
 # own lead — sanitized what_to_summarize + queries + one scrubbed sample — and emits a signed
 # baseline-diff, with no cross-lead matching to reason about. So reasoning is DISABLED: `none` is
 # the explicit string that forwards reasoning_effort="none" (NOT Python None, which OMITS the knob
@@ -443,8 +443,8 @@ SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "glm-5.2")
 VERIFIER_EFFORT = os.environ.get("LEARNING_VERIFIER_EFFORT", "low")
 # Per-check wall-clock ceiling for the in-process forward-check (threaded into
-# `_pydantic_stage.run_stage` as its `wall_clock_timeout`, the in-process twin of the old
-# `claude -p` subprocess timeout). Kept BELOW the batch child ceiling so a batched check
+# `_pydantic_stage.run_stage` as its `wall_clock_timeout`, the in-process stage
+# wall-clock timeout). Kept BELOW the batch child ceiling so a batched check
 # reports its own BAD/ERROR before verify_forward/batch.py kills it.
 VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 # Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
@@ -455,8 +455,8 @@ VERIFY_BATCH_TIMEOUT = env_int("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
 # The three lesson curators (findings / actor-tradecraft / environment) run IN-PROCESS on
 # PydanticAI (GLM 5.2, Fireworks) — the metered first-party path, mirroring the lead-author
 # port (#543). `glm-5.2 @ low` matches the defender MAIN + verifier (the corpus these curators
-# write is what the defender reads), and keeping the curators on the subscription `claude -p`
-# while routing in-process would silently move their billing to the metered key. A strong-author
+# write is what the defender reads); the curators run in-process on the metered key (there is
+# no subscription `claude -p` path anymore). A strong-author
 # A/B overrides via LEARNING_AUTHOR_*_MODEL / LEARNING_AUTHOR_*_EFFORT (any provider
 # `providers.provider_for` routes — e.g. claude-sonnet-4-6 @ low; `low` is a valid effort on both
 # the Anthropic and Fireworks providers). NB `none` is a Fireworks-only effort: an Anthropic A/B
@@ -549,7 +549,7 @@ class RunUnprocessable(Exception):
     """This run's data/content is unprocessable — stop processing THIS run.
 
     The per-run data failures the loop overwhelmingly raises: a malformed
-    ``report.md`` / judge YAML, a missing artifact, a ``claude -p`` non-zero rc.
+    ``report.md`` / judge YAML, a missing artifact, a per-run model/stage error.
     Raised only inside ``run_one``'s call graph (the per-run pipeline + its
     validators). Its disposition depends on the unit of work:
 
@@ -590,23 +590,6 @@ def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
 _log = make_logger("loop")  # this module's own logger
 
 
-def subscription_env() -> dict[str, str]:
-    """Env for a ``claude -p`` call: strip every billable provider key
-    (``providers.api_key_vars()`` — ``ANTHROPIC_API_KEY``, ``FIREWORKS_API_KEY``, …) so
-    the call bills against the subscription, never a metered first-party key (reserved
-    for the in-process PydanticAI stages — see defender/run.py). Stripping ALL of them
-    (not just Anthropic's, matching ``run_common.run_env``) keeps ``source_first_party_key``'s
-    mixed-billing invariant true for every provider: a metered key sourced into
-    ``os.environ`` can never reach a sibling ``claude -p``, whatever provider the in-process
-    stage runs on."""
-    from defender.runtime import providers
-
-    env = dict(os.environ)
-    for var in providers.api_key_vars():
-        env.pop(var, None)
-    return env
-
-
 def source_first_party_key(model: str, *, label: str = "judge") -> None:
     """Source an in-process PydanticAI stage's metered first-party key into ``os.environ``
     (idempotent) so the stage can authenticate against the first-party API. The provider is
@@ -614,13 +597,12 @@ def source_first_party_key(model: str, *, label: str = "judge") -> None:
     FIREWORKS_API_KEY). ``label`` names the stage in the log/error text (``judge`` / ``actor``
     / ``engine`` for a mixed prep).
 
-    Mixed billing within one run is SAFE: the in-process stages (the actor, oracle, and judge)
-    run on the metered key, but every OTHER stage (the curators) shells out to ``claude -p``
-    under ``subscription_env``, which COPIES ``os.environ`` and pops every provider key — so
-    setting it here can never reach a subscription sibling, and they keep billing the
-    subscription. A ``.env`` key takes precedence over the ambient value (for Anthropic the
-    ambient is the subscription credential, which 401s against the first-party REST API). Fail
-    loud (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
+    The metered key sourced here authenticates the in-process PydanticAI stages; it never
+    leaks into a tool subprocess, because every bash-tool subprocess a stage spawns gets a
+    key-stripped env from ``run_common.run_env`` (which pops ``providers.api_key_vars()``). A
+    ``.env`` key takes precedence over the ambient value (for Anthropic the ambient is the
+    subscription credential, which 401s against the first-party REST API). Fail loud
+    (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
     rather than 401-ing mid-stage."""
     # provider_for imports no pydantic-ai backend (declarative routing), so this is
     # safe in the SIEM-free learn worker; _first_party_key is neutral (no run.py).
@@ -647,23 +629,3 @@ def source_first_party_key(model: str, *, label: str = "judge") -> None:
         f"the in-process PydanticAI {label} (model {model!r}) needs {var} — set it in "
         "<repo>/.env or $DEFENDER_ENV_FILE (the in-process stage bills the first-party API)."
     )
-
-
-def curator_agent_env(state_root: Path) -> dict[str, str]:
-    """``subscription_env`` with ``DEFENDER_LEARNING_STATE_DIR`` pinned to the
-    drain's resolved state root, for spawning a curator ``claude -p`` agent.
-
-    The author drains run in a throwaway ``git worktree`` off ``origin/main``
-    (#420/#423), which has no ``runs/``/``_pending/`` (gitignored). The curator
-    agent's forward-check verifiers (``verify_forward/*.py``) run as Bash
-    subprocesses that re-derive their paths from ``DEFAULT_PATHS`` — i.e. from
-    their own worktree ``__file__`` — so under the default in-repo state they
-    resolve the (empty) worktree bundle and fail. Pinning the env var here hands
-    them the shared state root the same way the off-process worker hands it to a
-    separately-spawned renderer (see ``learning_state_root``); a freshly-imported
-    verifier then honors it via ``_env_state_dir``. Idempotent under out-of-repo
-    state, where ``state_root`` is already the value the parent inherited (#425).
-    """
-    env = subscription_env()
-    env["DEFENDER_LEARNING_STATE_DIR"] = str(state_root)
-    return env

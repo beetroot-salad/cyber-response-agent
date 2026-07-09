@@ -1,8 +1,8 @@
 # Runtime loop
 
-The online investigation. `python3 defender/run.py <alert.json>` spawns
-`claude -p` against `defender/SKILL.md`; the agent works through the loop in
-a run dir and exits. `run.py` handles everything after (projection,
+The online investigation. `python3 defender/run.py <alert.json>` runs the
+in-process PydanticAI driver against `defender/SKILL.md`; the agent works through
+the loop in a run dir and exits. `run.py` handles everything after (projection,
 transcript, learning loop).
 
 `defender/SKILL.md` is the authoritative spec. This file summarizes the

@@ -17,7 +17,8 @@ The defender runs *alongside* the production plugin in `soc-agent/`. It
 shares some framings (the invlang on-disk shape, the `++/+/-/--` assessment
 vocabulary) and some tools (the SIEM/host adapters), but it has its own
 runtime loop and is **not loaded as a Claude Code plugin** — it is driven by
-`defender/run.py`, which spawns `claude -p` against `defender/SKILL.md`.
+`defender/run.py`, which runs the in-process PydanticAI driver (`runtime/driver.py`)
+against `defender/SKILL.md`.
 
 ## The two loops
 
@@ -66,7 +67,7 @@ See `content/runtime-loop.md` §Hooks.
 | | `soc-agent/` | `defender/` |
 |---|---|---|
 | Status | Production plugin (v3) | Experimental PoC |
-| Loaded as | Claude Code plugin | `claude -p` via `run.py` |
+| Loaded as | Claude Code plugin | in-process PydanticAI driver via `run.py` |
 | Loop | CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT | ORIENT → PLAN → GATHER → ANALYZE → REPORT |
 | Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Deliberately none (learning-loop-first) |
 | Learning | Post-mortem leads pipeline (slice-1) | The headlining experiment — full actor/judge/oracle loop |

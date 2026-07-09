@@ -1,10 +1,11 @@
-"""Subagent seam: ``claude -p`` invocation today, Claude Agent SDK tomorrow.
+"""Subagent seam over the in-process PydanticAI stages.
 
 ``Subagents`` is the port — orchestration depends only on it ("give me the actor's
-story", "project the telemetry", "judge the encounter"). ``ClaudePrintSubagents`` is the
+story", "project the telemetry", "judge the encounter"). ``InProcessSubagents`` is the
 adapter that assembles each step's inputs and delegates to the per-stage ``invoke_*``
-free functions under ``pipeline/``. A future ``SdkSubagents`` swaps the adapter without
-touching orchestration, validators, persistence, or the test fakes.
+free functions under ``pipeline/``, each of which runs its stage in-process on PydanticAI.
+A future transport swaps the adapter without touching orchestration, validators,
+persistence, or the test fakes.
 
 ``is_skip_story`` is re-exported here so orchestration imports both the seam and the
 SKIP predicate from one place.
@@ -23,7 +24,7 @@ from defender.learning.pipeline.judge.run import invoke_judge
 from defender.learning.pipeline.malicious_actor.run import invoke_actor, is_skip_story
 from defender.learning.pipeline.oracle.run import invoke_oracle
 
-__all__ = ["ClaudePrintSubagents", "Subagents", "is_skip_story"]
+__all__ = ["InProcessSubagents", "Subagents", "is_skip_story"]
 
 
 class Subagents(Protocol):
@@ -36,10 +37,9 @@ class Subagents(Protocol):
               projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
 
 
-class ClaudePrintSubagents:
+class InProcessSubagents:
     """Default adapter — assembles each step's inputs; the actor, oracle, and judge all run
-    in-process on PydanticAI (metered key). (Name kept for the ``claude -p`` curators the loop
-    still shells out to elsewhere.)"""
+    in-process on PydanticAI (metered key)."""
 
     def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
         # The actor runs in-process on PydanticAI (metered key); the composition root picks the
