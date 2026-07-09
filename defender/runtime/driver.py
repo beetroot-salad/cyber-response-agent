@@ -221,9 +221,8 @@ def resolve_main_model(explicit: str | None = None) -> str:
 # load-bearing (#545): `compile_policy` compiles `bash_allow` from exactly the declared
 # `READER_VIEWERS` + non-adapter shims (via `permission.policies._common.reader_patterns_for`,
 # the #535 anchoring), and the `read_shapes` builder gives the read tool the matching filename
-# filter (`reader_read_shapes`, read↔bash parity). Both defs declare the FULL reader set, so
-# their compiled lane equals the kept `policy_for` API. The corpus dirs are the tight `.md`
-# roots under `defender_dir` a reader may open.
+# filter (`reader_read_shapes`, read↔bash parity). Both defs declare the FULL reader set. The
+# corpus dirs are the tight `.md` roots under `defender_dir` a reader may open.
 _CORPUS_DIRS = ("lessons", "skills", "examples")
 
 
@@ -257,9 +256,8 @@ MAIN_DEF = AgentDefinition(
 )
 
 # GATHER — the data-access subagent: reader lane + adapters + the `adapter | defender-sql`
-# pipe, read-only (no writers). Declares the same viewers + non-adapter shims as main (so its
-# bound lane equals `policy_for('gather')`), plus its read↔bash filename filter. Runs its own
-# cheaper `gather_model()`, reasoning off.
+# pipe, read-only (no writers). Declares the same viewers + non-adapter shims as main, plus its
+# read↔bash filename filter. Runs its own cheaper `gather_model()`, reasoning off.
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,

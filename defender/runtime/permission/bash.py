@@ -174,8 +174,8 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
 
 
 def require_anchor_root(what: str, p: Path) -> None:
-    """The ONE per-run anchor-root guard, shared by `bind` (agent_definition) and `policy_for`
-    (this module) so the security check never drifts between them. `p` must be ABSOLUTE, not the
+    """The ONE per-run anchor-root guard for `bind` / `compile_policy_for` (agent_definition),
+    so the security check never drifts between call sites. `p` must be ABSOLUTE, not the
     filesystem root, `..`-free, and whitespace-free; `what` names the offending input in the error.
 
     The anchored reader allowlist is baked from `root.resolve()`, so an empty (`Path('')`→`.`) or
@@ -198,37 +198,6 @@ def require_anchor_root(what: str, p: Path) -> None:
             f"{what} must not contain whitespace (the textual bash reader anchor cannot "
             f"represent it), got {p!r}"
         )
-
-
-def _require_read_root(name: str, p: Path) -> None:
-    """`policy_for`'s per-run root guard: delegates to the shared `require_anchor_root` (the ONE
-    root-anchor validator — see there for the absolute/`..`/whitespace rationale) with the
-    `policy_for {name!r}` framing, so `policy_for` can't mint an unconfined or silently-bricked
-    policy and a future hardening lands in one place."""
-    require_anchor_root(f"policy_for {name!r} root", p)
-
-
-def policy_for(agent: str, *, run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    """Build the PER-RUN `AgentPolicy` for a runtime agent ('main' | 'gather') — a thin
-    dispatcher to that agent's own policy file (`policies/main.py`,
-    `policies/gather.py`), each of which bakes the anchored reader allowlist from
-    `run_dir` + `defender_dir` (#535) plus its capability bits and deny reason.
-
-    Both roots are REQUIRED and validated (`_require_read_root`): a runtime-agent
-    policy can no longer be minted in the legacy unconfined state — there is no
-    module-level MAIN/GATHER default and no silent `^cat .*$` fallback, so a missing
-    or degenerate root is a construction-time error, not a `cat /etc/passwd` bypass.
-    Learning-loop agents (judge, actor) build their own `AgentPolicy` in their
-    pipeline modules rather than going through this runtime-agent factory."""
-    _require_read_root("run_dir", run_dir)
-    _require_read_root("defender_dir", defender_dir)
-    from .policies import gather as _gather, main as _main
-
-    if agent == "main":
-        return _main.main_policy(run_dir, defender_dir)
-    if agent == "gather":
-        return _gather.gather_policy(run_dir, defender_dir)
-    raise ValueError(f"no runtime Bash policy for agent {agent!r}")
 
 
 def _allow(

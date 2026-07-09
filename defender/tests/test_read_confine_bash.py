@@ -4,14 +4,14 @@ Spec (write-tests) for the anchored-read migration: gather/main move from a
 program-only bash allowlist (`^cat(?: .*)?$`, ANY operand) to a **per-run,
 full-line regex allowlist whose file operands are ANCHORED** to the run dir +
 corpus — so the bash lane confines reads the SAME way `decide_read` (the read_file
-tool) already does. Closes a demonstrated bypass: today
-`decide_bash("cat /etc/passwd", policy=policy_for("gather")).allow is True`.
+tool) already does. Closes a demonstrated bypass: pre-#535
+`decide_bash("cat /etc/passwd", policy=compile_policy_for(GATHER_DEF, …)).allow` was True.
 
 Entry points under test (the per-run contract this spec pins):
-  - `policy_for(agent, *, run_dir, defender_dir)` — per-run factory; RAISES without
-    roots (safe-by-construction: no unconfined fallback). NEW signature; today it is
-    `policy_for(agent)` with module-level MAIN/GATHER, so these error RED until the
-    per-run factory lands.
+  - `compile_policy_for(<DEF>, run_dir, *, defender_dir)` — the policy-only half of `bind`
+    (#551); RAISES on a missing run_dir / degenerate root (safe-by-construction: no
+    unconfined fallback). The MAIN/GATHER reader defs anchor their lane per-run off these
+    roots.
   - `decide_bash(command, *, policy, run_dir, defender_dir) -> BashDecision`
     (.allow / .reason / .adapter_argv / .sql_pipe).
 
@@ -31,7 +31,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from defender.runtime import permission
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
+from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -50,8 +54,8 @@ def env(tmp_path):
     (dfn / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True)
     (dfn / "examples").mkdir()
     (dfn / "fixtures" / "held-out" / "m01").mkdir(parents=True)
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
-    gather = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
     return SimpleNamespace(run=run, dfn=dfn, main=main, gather=gather)
 
 
@@ -66,32 +70,31 @@ def _read(env, path, which="gather"):
 
 
 # ===========================================================================  #
-# A. Safe-by-construction: the per-run factory cannot build an unconfined policy #
+# A. Safe-by-construction: the compile seam cannot build an unconfined policy    #
 # ===========================================================================  #
 
-def test_policy_for_requires_run_dir():
-    """policy_for('gather') with NO run_dir RAISES → the confined factory can't be built
-    in the legacy unconfined state (no silent `^cat .*$` fallback)."""
+def test_compile_policy_for_requires_run_dir():
+    """compile_policy_for(GATHER_DEF) with NO run_dir RAISES → the confined reader policy can't
+    be built in an unconfined state (run_dir is a required positional, no silent fallback)."""
     # rejected: return a permissive default policy (re-opens the cat /etc/passwd bypass)
     with pytest.raises((TypeError, ValueError)):
-        permission.policy_for("gather")
+        compile_policy_for(GATHER_DEF)
 
 
-def test_policy_for_requires_defender_dir(tmp_path):
-    """policy_for('main', run_dir=…) missing defender_dir RAISES — both roots are load-bearing
-    for the anchored corpus patterns, neither may default."""
-    # rejected: default defender_dir to a repo-relative guess
-    with pytest.raises((TypeError, ValueError)):
-        permission.policy_for("main", run_dir=tmp_path)
+def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
+    """An empty-string / '/' root — run_dir OR an explicit defender_dir — must RAISE, not anchor
+    the reader lane to the CWD / filesystem root (which would allow reading anything). The shared
+    `require_anchor_root` guard rejects both.
 
-
-def test_policy_for_rejects_empty_run_dir(tmp_path):
-    """An empty-string / '/' run_dir must RAISE, not anchor the pattern to the filesystem root
-    (which would allow reading anything)."""
+    (Unlike the retired `policy_for`, `compile_policy_for`'s `defender_dir` legitimately DEFAULTS
+    to the PATHS checkout when omitted — a real confined tree, not unconfined — so an OMITTED
+    defender_dir is allowed; only a degenerate EXPLICIT root is rejected.)"""
     # rejected: accept '' or '/' and produce a root-anchored (=everything) policy
     for bad in ("", "/"):
         with pytest.raises((TypeError, ValueError)):
-            permission.policy_for("gather", run_dir=Path(bad), defender_dir=tmp_path)
+            compile_policy_for(GATHER_DEF, run_dir=Path(bad), defender_dir=tmp_path)
+        with pytest.raises((TypeError, ValueError)):
+            compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=Path(bad))
 
 
 # ===========================================================================  #
@@ -369,10 +372,10 @@ def test_parity_ssh_dir_component(env):
 
 
 def test_parity_corpus_non_listed_denied_on_both_lanes(env):
-    """Read↔bash PARITY on a non-listed corpus file (#545/#546, propagated to `policy_for` by
-    #551): a corpus file NOT under the tight lessons/skills/examples/**.md grammar
+    """Read↔bash PARITY on a non-listed corpus file (#545/#546, propagated to the compiled reader
+    policy by #551): a corpus file NOT under the tight lessons/skills/examples/**.md grammar
     ({DFN}/docs/x.md) is DENIED on BOTH the read tool (the `read_shapes` filename filter
-    `policy_for` now carries as a `bind` alias) AND the bash cat lane (the operand grammar). The
+    `compile_policy_for` carries) AND the bash cat lane (the operand grammar). The
     pre-#546 'read broad, bash tight' asymmetry is CLOSED — the two surfaces now agree. Positive
     control: a tight-corpus lessons/**.md is allowed on both."""
     docs = f"{env.dfn}/docs/learning-loop.md"
@@ -427,7 +430,7 @@ def test_empty_denylist_does_not_brick_reader_lane(tmp_path, monkeypatch):
     assert _common._deny_lookahead() == ""     # no clause, not `(?:)` deny-all
     # end-to-end (fresh roots dodge reader_patterns' cache): an in-root read still ALLOWS
     run, dfn = tmp_path / "run", tmp_path / "dfn"
-    pol = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    pol = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
     assert permission.decide_bash(f"cat {run}/x.md", policy=pol, run_dir=run, defender_dir=dfn).allow
 
 

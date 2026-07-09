@@ -28,7 +28,6 @@ from .bash import (
     ADAPTER_STANDALONE_REASON,
     BashDecision,
     decide_bash,
-    policy_for,
     require_anchor_root,
 )
 from .decision import Decision
@@ -50,6 +49,5 @@ __all__ = [
     "decide_read",
     "decide_write",
     "is_untrusted_read",
-    "policy_for",
     "require_anchor_root",
 ]

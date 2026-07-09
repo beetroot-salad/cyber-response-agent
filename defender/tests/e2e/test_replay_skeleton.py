@@ -32,6 +32,8 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender.runtime import permission, tools as runtime_tools
+from defender.runtime.agent_definition import compile_policy_for
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.scripts.gather_tools import record_query
 from defender.skills.invlang.validate import validate_companion
 
@@ -207,13 +209,13 @@ def test_role_flip_adapter_is_role_dependent():
     above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
     nested-gather replay; this pins the role-dependence the driver must thread."""
     cmd = "defender-elastic query foo --raw"
-    # policy_for is per-run since #535; the adapter deny/allow is role-driven, not root-driven,
+    # compile_policy_for is per-run since #535; the adapter deny/allow is role-driven, not root-driven,
     # so synthetic absolute roots suffice for this contrast.
     run, dfn = Path("/run"), Path("/dfn")
     assert not permission.decide_bash(
-        cmd, policy=permission.policy_for("main", run_dir=run, defender_dir=dfn)).allow
+        cmd, policy=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)).allow
     assert permission.decide_bash(
-        cmd, policy=permission.policy_for("gather", run_dir=run, defender_dir=dfn)).allow
+        cmd, policy=compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)).allow
 
 
 # --- nested-gather replay: drives the two-table capture path ---------------

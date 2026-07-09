@@ -10,7 +10,7 @@ pins the CONSTRUCTION contract:
     (kw-only); the unsafe MAIN state is unconstructable, not silently inherited,
   - GatherDeps is per-run since #535 — its bash reader lane is anchored to the run's
     roots, so it no longer carries a static default (it inherits the base's required
-    kw-only policy, built via `policy_for('gather', run_dir, defender_dir)` at its site).
+    kw-only policy, built via `bind(GATHER_DEF, run_dir, defender_dir=…)` at its site).
 
 The per-stage `for_scope`/`for_run` DEPS FACTORIES this suite once pinned were RETIRED by
 #551 — every production deps site now obtains its `AgentDeps` via the single `bind` seam, so
@@ -33,18 +33,20 @@ pytest.importorskip("pydantic_ai")
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
-from defender.runtime import permission, tools  # noqa: E402
+from defender.runtime import tools  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 # Representative per-run main/gather policies for the construction tests. Since #535
 # there is no module-level tools._MAIN_POLICY/_GATHER_POLICY — a runtime-agent policy
-# is built PER-RUN via `policy_for(run_dir, defender_dir)` (the reader lane is anchored
-# to the run's roots; since #551 `policy_for` is a `bind` alias). These synthetic absolute
+# is compiled PER-RUN via `compile_policy_for(<DEF>, run_dir, defender_dir=…)` (the reader lane is
+# anchored to the run's roots — the policy-only half of `bind`). These synthetic absolute
 # roots only anchor the bash lane, which these CONSTRUCTION tests don't exercise (enforcement
 # is pinned in test_read_confine_bash.py); their capability SHAPE (read_confine/raw_reads) is
 # what the guarded negatives below assert.
-_MAIN_POLICY = permission.policy_for("main", run_dir=Path("/run"), defender_dir=Path("/dfn"))
-_GATHER_POLICY = permission.policy_for("gather", run_dir=Path("/run"), defender_dir=Path("/dfn"))
+_MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
+_GATHER_POLICY = compile_policy_for(GATHER_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
 
 def _ident(run_dir: Path) -> dict:
@@ -114,7 +116,7 @@ def test_gather_deps_requires_policy(tmp_path):
 
 def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
     """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an
-    explicit per-run policy (`policy_for('gather', run_dir, defender_dir)`) — .policy is that
+    explicit per-run policy (`compile_policy_for(GATHER_DEF, run_dir, defender_dir=…)`) — .policy is that
     policy, role is GATHER, lead_id is carried."""
     deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=_GATHER_POLICY)
     assert deps.policy is _GATHER_POLICY

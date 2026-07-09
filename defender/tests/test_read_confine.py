@@ -25,9 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning.core import config
-from defender.runtime import permission
-from defender.runtime.permission import AgentPolicy
+pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+
+from defender.learning.core import config  # noqa: E402
+from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.permission import AgentPolicy  # noqa: E402
 
 _DEFENDER = config.REPO_ROOT / "defender"
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
@@ -41,7 +45,7 @@ _BENIGN_CONFINE = (_ENV_DIR,)
 
 # The judge's jq shape (any jq invocation; operands path-gated separately). The
 # main/gather viewer allowlist is now PER-RUN + anchored (#535), so it is built via
-# `policy_for(run_dir=…, defender_dir=…)` in the tests below rather than a module const.
+# `compile_policy_for(<DEF>, run_dir=…, defender_dir=…)` in the tests below rather than a module const.
 _JQ = re.compile(r"^jq(?: .*)?$")
 
 
@@ -203,7 +207,7 @@ def test_reduction_is_per_policy_not_global(tmp_path):
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     inv = run / "investigation.md"
     assert not permission.decide_bash(f"cat {inv}", policy=_policy(bash_allow=())).allow   # actor: no bash reader
     assert permission.decide_bash(f"cat {inv}", policy=main).allow                          # main: in-root ok
@@ -319,7 +323,7 @@ def test_judge_jq_comparison_dir_via_read_roots_allowed(tmp_path):
 # D. main/gather — the bash reader lane is now PER-RUN + anchored (#535)
 #    (superseding this file's earlier "byte-for-byte unchanged" regression: the
 #    anchored allow/deny matrix is comprehensively owned by test_read_confine_bash.py;
-#    these pin the policy_for wiring + that decide_read is unaffected.)
+#    these pin the compile_policy_for wiring + that decide_read is unaffected.)
 # ============================================================================
 
 def test_main_viewers_now_anchored(tmp_path):
@@ -329,7 +333,7 @@ def test_main_viewers_now_anchored(tmp_path):
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert main.bash_allow
     assert not main.jq_operand_gated
     assert permission.decide_bash(f"cat {run}/investigation.md", policy=main).allow
@@ -343,7 +347,7 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
-    gather = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
     raw = f"{run}/gather_raw/l/0.json"
     assert permission.decide_bash(
         f"cat {raw} | defender-sql 'SELECT count(*) FROM data'", policy=gather).allow
@@ -355,14 +359,14 @@ def test_gather_stream_plumbing_anchored(tmp_path):
 def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
     """the confine field is inert for main: decide_read still allows the corpus, denies outside, and
     clamps gather_raw. The corpus-readable probe is a tight-corpus `.md` (`skills/**.md`) — since
-    #551 `policy_for('main')` is a `bind(MAIN_DEF)` alias carrying the read↔bash `read_shapes`
+    #551 `compile_policy_for(MAIN_DEF)` carries the read↔bash `read_shapes`
     filter, so a bare `SKILL.md` directly under defender_dir (outside lessons/skills/examples) is
     now denied on the read tool exactly as the bash cat lane denies it (#545/#546 parity)."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l").mkdir(parents=True)
     dfn = tmp_path / "defender"
     (dfn / "skills" / "elastic").mkdir(parents=True)
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert permission.decide_read(dfn / "skills" / "elastic" / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow  # non-tight corpus → denied (read_shapes)
     assert not permission.decide_read(Path("/etc/passwd"), run_dir=run, defender_dir=dfn, policy=main).allow

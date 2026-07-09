@@ -152,13 +152,15 @@ def test_capture_adapter_sql_pipe_aggregates(tmp_path, stub):
     # defender-sql shim. The adapter query is audited (queries row + by-ref
     # payload); the SQL runs over the FULL payload, not the truncated passthrough.
     pytest.importorskip("duckdb")  # the shim's interpreter needs duckdb (runtime extra)
-    from defender.runtime import permission, tools
+    from defender.runtime import tools
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.driver import GATHER_DEF
 
     deps = tools.GatherDeps(
         run_dir=tmp_path, defender_dir=_DEFENDER_DIR, run_id="r", salt="s",
         lead_id="l-001",
         # gather policy is per-run since #535 (no static default) — build it from the run's roots.
-        policy=permission.policy_for("gather", run_dir=tmp_path, defender_dir=_DEFENDER_DIR),
+        policy=compile_policy_for(GATHER_DEF, run_dir=tmp_path, defender_dir=_DEFENDER_DIR),
     )
     out = tools._capture_adapter_sql(
         deps, _argv(stub, "ok"), ["defender-sql", "SELECT len(hits) AS n FROM data"],
