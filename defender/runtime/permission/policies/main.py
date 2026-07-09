@@ -1,24 +1,20 @@
-"""The MAIN loop's Bash policy.
+"""The MAIN loop's Bash policy — now a thin `bind(MAIN_DEF)` alias (#551).
 
 The main loop orchestrates; it does not touch data sources. Its bash surface is
 the read-only viewers + non-adapter `defender-*` shims only — no data-source
 adapter (it dispatches gather for that) and no `gather_raw/` reads (it consumes
-the gather summary). Since #535 the reader lane is PER-RUN and ANCHORED: the
-viewer file operands must resolve (textually) under `run_dir` + the defender
-corpus, so the bash lane confines reads the same way `files.decide_read` already
-does. See `..policy.AgentPolicy` for the field contract and `._common` for the
-anchoring grammar.
+the gather summary). Since #535 the reader lane is PER-RUN and ANCHORED; #551
+finishes the consolidation by making `bind`/`compile_policy` the SINGLE policy
+source, so `main_policy` is demoted to a one-line alias delegating to it (NOT a
+second builder kept honest by a parity test). This module now owns only the MAIN
+fall-through deny reason (which `MAIN_DEF` carries) + that alias.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from defender.runtime import bash_policy
-
-from ..files import build_write_allow
 from ..policy import AgentPolicy
-from ._common import reader_patterns
 
 # Fall-through in `claude -p` meant "ask the user"; headless we have no prompt, so
 # an unrecognized main-loop command fails closed (deny).
@@ -30,21 +26,14 @@ FALLTHROUGH_DENY_REASON = (
 
 
 def main_policy(run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    """The MAIN policy anchored to this run's read roots (#535). `run_dir` +
-    `defender_dir` bake the reader allowlist's operand anchors, so a main policy is
-    per-run — there is no unconfined module-level default to inherit.
+    """The MAIN policy anchored to this run's read roots (#535) — a thin `compile_policy_for(MAIN_DEF)`
+    alias (#551 — the single policy source): `compile_policy` bakes the anchored reader
+    allowlist + the run-dir `write_allow` + the read↔bash filename `read_shapes` filter, so
+    the returned policy is exactly what the bound MAIN loop runs (no drift, no parity test).
+    Uses `compile_policy_for` (the policy-only half of `bind`) rather than `bind(...).policy`, so
+    no deps object / uuid4 salt is minted just to read one field. Imported lazily — `MAIN_DEF`
+    lives in `driver`, whose import path funnels back through this package."""
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.driver import MAIN_DEF
 
-    `write_allow` declares the one write surface the main loop owns: its run-dir
-    subtree (`investigation.md` / `report.md` and any other case artifact it authors).
-    A single anchored pattern over the resolved run dir — exact parity with the prior
-    run-dir write confinement, now expressed as the flat write allowlist every writer
-    uses (`decide_write`)."""
-    return AgentPolicy(
-        bash_allow=reader_patterns(run_dir, defender_dir),
-        jq_operand_gated=False,  # jq is stdin-compute-only here — no file operand to gate (#535)
-        adapters=bash_policy.adapters_allowed("main"),
-        adapter_sql_pipe=bash_policy.adapter_sql_pipe_allowed("main"),
-        raw_reads=bash_policy.raw_reads_allowed("main"),
-        write_allow=(build_write_allow(run_dir),),
-        deny_reason=FALLTHROUGH_DENY_REASON,
-    )
+    return compile_policy_for(MAIN_DEF, run_dir, defender_dir=defender_dir)

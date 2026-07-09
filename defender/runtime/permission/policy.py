@@ -13,7 +13,7 @@ matching a quoted-arg pattern and then expanding under a shell) cannot occur, an
 
 Command **shape** is the allowlist's job, and — since #535 — so is operand
 **path-containment** for the runtime agents: main/gather bake the run's read roots
-into their `bash_allow` regex (`policies._common.reader_patterns`), so a viewer's
+into their `bash_allow` regex (`policies._common.reader_patterns_for`), so a viewer's
 file operand must TEXTUALLY sit under `{run_dir}` or a tight corpus `.md` and a `..`
 segment is rejected literally (the bash lane does no `resolve()`, so a symlink target
 is closed by the write-side invariant that no allowed tool creates a symlink, not by

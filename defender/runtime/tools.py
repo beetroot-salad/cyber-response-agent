@@ -312,7 +312,9 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     `write_allow` (the agent's declared paths — the main loop's run dir, the
     lead-author writer's `defender/skills/**.md` corpus)."""
     p = _resolve_operand(deps, path)
-    decision = permission.decide_write(p, content, policy=deps.policy)
+    decision = permission.decide_write(
+        p, content, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
     if not decision.allow:
         raise ModelRetry(decision.reason)
     # Mirror Claude Code's Write (which the claude -p stages used): create missing
@@ -364,7 +366,9 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
             "one, or use write_file to replace the whole file."
         )
     new_text = current.replace(old_string, new_string, 1) if old_string else new_string
-    decision = permission.decide_write(p, new_text, policy=deps.policy)
+    decision = permission.decide_write(
+        p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
     if not decision.allow:
         raise ModelRetry(decision.reason)
     # Create-into-a-new-subtree parity with write_file (and Claude Code's Edit): mkdir

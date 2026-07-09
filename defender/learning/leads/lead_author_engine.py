@@ -44,10 +44,10 @@ from defender.learning.core.config import RunUnprocessable
 from defender.learning.leads.path_validation import SKILLS_REL
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
+from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy, build_write_allow
+from defender.runtime.permission import build_write_allow
 from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
@@ -82,68 +82,50 @@ def _rm_skills_pattern(skills_dir: Path) -> re.Pattern[str]:
     return re.compile(rf"^rm (?:{spellings})(?:/{seg})+$")
 
 
-def _lead_author_policy(skills_dir: Path) -> AgentPolicy:
-    """The lead author's declarative gate policy. ``write_allow`` is a single flat pattern admitting
-    ``defender/skills/**.md`` ONLY (the corpus is ``.md`` — SKILL.md / execution.md / query
-    templates): the file writers may author a skills ``.md`` and NOTHING else. This is tighter than
-    a bare skills-subtree grant — it denies a write to the ``invlang``/``connect`` Python code that
-    also lives under ``skills`` (which the loop's ``.md``-only scope gate would only catch at commit,
-    after the worktree already carries the edit) — and, being a flat allowlist rather than a run-dir
-    root, it does NOT grant the writer its ``run_dir`` (nor the pitfalls curator its ``PENDING_DIR``).
-    ``bash_allow`` is the single rm-of-drafts matcher (discovery is driver-precomputed — the handoffs
-    carry explicit path triples + neighbors — so no Glob/Grep and no discovery matchers are needed).
-    ``read_confine`` is empty: reads under ``defender_dir`` stay allowed by ``decide_read``'s defaults
-    (it reads the catalog + sibling skills). Every other capability bit is off. Rebuilt per spawn
-    because ``skills_dir`` is the worktree's."""
-    return AgentPolicy(
-        bash_allow=(_rm_skills_pattern(skills_dir),),
-        jq_operand_gated=False,
-        adapters=False,
-        adapter_sql_pipe=False,
-        raw_reads=False,
-        read_roots=(),
-        read_confine=(),
-        write_allow=(build_write_allow(skills_dir, suffix=".md"),),
-        deny_reason=_LEAD_AUTHOR_DENY_REASON,
-    )
+def _lead_author_write_shape(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
+    """The lead author's write scope (#551 — its ``write_shapes`` builder, resolved by
+    ``compile_policy`` into ``write_allow``): a single flat pattern admitting
+    ``<defender_dir>/skills/**.md`` ONLY (the corpus is ``.md`` — SKILL.md / execution.md / query
+    templates), anchored on the run's ``defender_dir`` (the WORKTREE ``bind`` threads in). The file
+    writers may author a skills ``.md`` and NOTHING else. Tighter than a bare skills-subtree grant —
+    it denies a write to the ``invlang``/``connect`` Python code that also lives under ``skills``
+    (which the loop's ``.md``-only scope gate would only catch at commit, after the worktree already
+    carries the edit) — and, being a flat allowlist rather than a run-dir root, it does NOT grant the
+    writer its ``run_dir`` (nor the pitfalls curator its ``PENDING_DIR``). Reads under
+    ``defender_dir`` stay allowed by ``decide_read``'s defaults (it reads the catalog + siblings —
+    LEAD_AUTHOR_DEF carries no ``read_confine`` and no ``read_shapes``)."""
+    return (build_write_allow(defender_dir / "skills", suffix=".md"),)
 
 
 @dataclass(frozen=True)
 class LeadAuthorDeps(AgentDeps):
     """The lead author's per-spawn deps — a plain ``AgentDeps`` shape with a WRITER ``policy``.
-    ``role`` is a LEAD_AUTHOR identity label — the gate keys on ``policy``, not this."""
+    ``role`` is a LEAD_AUTHOR identity label — the gate keys on ``policy``, not this. Built via the
+    single ``bind`` seam (#551 — ``bind(LEAD_AUTHOR_DEF, run, defender_dir=<wt>/defender)``, which
+    threads the worktree tree into BOTH the policy anchor and this deps' ``defender_dir`` field, so
+    reads/writes resolve against the throwaway worktree, never the MAIN checkout)."""
 
     role: ClassVar[AgentRole] = AgentRole.LEAD_AUTHOR
 
-    @classmethod
-    def for_run(cls, run_dir: Path, repo_root: Path) -> LeadAuthorDeps:
-        """The lead author's front door. Delegates to the shared ``AgentDeps._for_run`` spine
-        (run_id/salt/policy stamp) but overrides its ``defender_dir`` default: the drain edits a
-        throwaway git WORKTREE, so the gate must resolve reads/writes against ``repo_root/defender``
-        — else every worktree write is denied against the wrong tree. The worktree-derived
-        ``write_allow`` (``defender/skills/**.md``) lets the agent author the very corpus it was
-        handed, and ONLY that — unlike the old run-dir-rooted write confine, the flat allowlist does
-        NOT make ``run_dir`` writable (so a per-run author can't clobber the source case's artifacts,
-        nor the pitfalls curator its ``PENDING_DIR`` queue state). ``run_dir`` is only the trace
-        anchor + a read root here."""
-        defender_dir = repo_root / "defender"
-        return cls._for_run(
-            run_dir, _lead_author_policy(defender_dir / "skills"), defender_dir=defender_dir,
-        )
 
-
-# The lead author's AgentDefinition (#538). It is the loop's FIRST writer, so its ToolSet grants
-# the file writers (write=True → write_file/edit_file) on top of read + the scoped bash rm — the
-# build site registers all four from this. ``model``/``effort`` are the declarative stage defaults;
-# each spawn re-binds its own per-run model/effort in ``build_stage_agent``. The real per-spawn
-# policy (the worktree-scoped ``write_allow`` + ``rm`` matcher) is built by ``LeadAuthorDeps.for_run``
-# / ``_lead_author_policy`` — NOT ``compile_policy``/``bind`` — since it needs the worktree's
-# ``defender_dir``; this def is only the toolset source in ``AGENTS`` (the lead author is not bound).
+# The lead author's AgentDefinition (#538/#551). It is the loop's FIRST writer, so its ToolSet grants
+# the file writers (write=True → write_file/edit_file) on top of read + the scoped bash rm
+# (``BashGrammar(skills_rm=True)`` — ``compile_policy`` anchors the ``rm``-of-drafts matcher on the
+# run's worktree ``skills``). The build site registers all four from this. ``write_shapes`` is the
+# worktree-anchored ``skills/**.md`` write scope as DATA (resolved by ``compile_policy`` — the write
+# twin of ``read_shapes``), and ``requires_explicit_tree=True`` makes ``bind`` fail loud without an
+# explicit NON-PATHS worktree ``defender_dir`` (the main-checkout-authoring state is UNBUILDABLE,
+# checked generically — no role branch). So the lead author is now BOUND like every other role
+# (#551 — the bespoke ``LeadAuthorDeps.for_run`` + ``_lead_author_policy`` front door retired).
+# ``model``/``effort`` are the declarative stage defaults; each spawn re-binds its own per-run
+# model/effort in ``build_stage_agent``.
 LEAD_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.LEAD_AUTHOR,
     model=lambda: config.LEAD_AUTHOR_MODEL,
     effort=config.LEAD_AUTHOR_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar(), write=True),
+    tools=ToolSet(read=True, bash=BashGrammar(skills_rm=True), write=True),
+    write_shapes=(_lead_author_write_shape,),
+    requires_explicit_tree=True,
     deny_reason=_LEAD_AUTHOR_DENY_REASON,
 )
 
@@ -163,14 +145,16 @@ def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """Run one lead-author spawn in-process and return the model's final text (the caller ignores
-    it — the real output is the committed tree). Builds the writer ``LeadAuthorDeps`` (worktree
-    ``defender_dir`` + skills ``write_allow``) and delegates to the shared ``run_stage``. The file
-    writers are registered from ``LEAD_AUTHOR_DEF``'s ToolSet (``write=True``, looked up by role in
+    it — the real output is the committed tree). Builds the writer ``LeadAuthorDeps`` via the single
+    ``bind`` seam (#551 — ``defender_dir=<worktree>/defender`` threads the throwaway worktree into
+    both the policy anchor and the deps field, so the skills ``write_allow`` + ``rm`` grant + reads
+    all resolve against the worktree) and delegates to the shared ``run_stage``. The file writers are
+    registered from ``LEAD_AUTHOR_DEF``'s ToolSet (``write=True``, looked up by role in
     ``build_stage_agent`` — #538); this stage only opts into ``require_output=False`` (an empty final
     is a valid writer outcome — its output is the committed tree, not a returned verdict).
     ``learning_run_dir`` is where the RequestLogger trace lands; distinct ``trace_name``s (batch_id +
     pid) keep concurrent spawns from racing on one file."""
-    deps = LeadAuthorDeps.for_run(learning_run_dir, repo_root)
+    deps = bind(LEAD_AUTHOR_DEF, learning_run_dir, defender_dir=repo_root / "defender")
     return run_stage(
         stage="lead_author",
         prompt_path=prompt_path, model=model, effort=effort,

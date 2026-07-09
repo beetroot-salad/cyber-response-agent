@@ -21,7 +21,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.author.verify_forward.engine import (  # noqa: E402
-    _VERIFY_POLICY,
+    VERIFY_DEF,
     VerifierDeps,
     _run_verify_pydantic,
     forward_check,
@@ -30,6 +30,7 @@ from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import FatalConfigError, RunUnprocessable  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
@@ -94,7 +95,9 @@ def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
 # --- the deny-all policy through the full gate -----------------------------------
 
 def test_verify_policy_denies_adapters_and_shell():
-    pol = _VERIFY_POLICY
+    # #551: the standalone `_VERIFY_POLICY` constant retired; `bind(VERIFY_DEF)` compiles the
+    # same deny-all policy over VERIFY_DEF's empty ToolSet.
+    pol = bind(VERIFY_DEF, Path("/tmp/verify-run")).policy
     assert pol.adapters is False
     assert pol.raw_reads is False
     assert pol.read_roots == ()

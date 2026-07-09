@@ -1,22 +1,20 @@
-"""The GATHER subagent's Bash policy.
+"""The GATHER subagent's Bash policy — now a thin `bind(GATHER_DEF)` alias (#551).
 
 Gather IS the data-access layer: it may run a data-source adapter directly
 (captured transparently) or as the sanctioned `adapter --raw | defender-sql
 '<SQL>'` aggregation pipe, and it may read / `jq` its own `gather_raw/**`. Its
 reader surface (`bash_allow`) is the same anchored viewers/shims as main (#535);
 the difference is capability bits (adapters + raw_reads), routed structurally
-(`bash._decide_adapter`) and via the run-dir anchor (gather's `gather_raw` reads
-fall under the run root, and its `raw_reads` bit skips the main-loop raw clamp).
+(`bash._decide_adapter`) and via the run-dir anchor. #551 makes `bind`/`compile_policy`
+the SINGLE policy source, so `gather_policy` is demoted to a one-line alias over it; this
+module now owns only the GATHER fall-through deny reason (which `GATHER_DEF` carries).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from defender.runtime import bash_policy
-
 from ..policy import AgentPolicy
-from ._common import reader_patterns
 
 # Gather IS the data layer, so the main-loop "dispatch gather" advice is nonsensical
 # here — it may run the adapter directly, plus read-only viewers; everything else
@@ -30,14 +28,14 @@ GATHER_FALLTHROUGH_DENY_REASON = (
 
 
 def gather_policy(run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    """The GATHER policy anchored to this run's read roots (#535). Same anchored
-    reader lane as main; `raw_reads=True` lets gather read its own `gather_raw/**`
-    (under the run root) that the main loop is clamped off."""
-    return AgentPolicy(
-        bash_allow=reader_patterns(run_dir, defender_dir),
-        jq_operand_gated=False,  # jq is stdin-compute-only here — no file operand to gate (#535)
-        adapters=bash_policy.adapters_allowed("gather"),
-        adapter_sql_pipe=bash_policy.adapter_sql_pipe_allowed("gather"),
-        raw_reads=bash_policy.raw_reads_allowed("gather"),
-        deny_reason=GATHER_FALLTHROUGH_DENY_REASON,
-    )
+    """The GATHER policy anchored to this run's read roots (#535) — a thin
+    `compile_policy_for(GATHER_DEF)` alias (#551 — the single policy source): `compile_policy`
+    bakes the same anchored reader lane as main plus the gather capability bits (adapters +
+    `raw_reads` for its own `gather_raw/**`), so the returned policy is exactly what the bound
+    gather subagent runs. Uses `compile_policy_for` (the policy-only half of `bind`) rather than
+    `bind(...).policy`, so no deps object / uuid4 salt is minted just to read one field. Imported
+    lazily — `GATHER_DEF` lives in `driver`."""
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.driver import GATHER_DEF
+
+    return compile_policy_for(GATHER_DEF, run_dir, defender_dir=defender_dir)

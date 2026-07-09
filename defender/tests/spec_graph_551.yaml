@@ -1,0 +1,531 @@
+schema_version: 1
+design: "#551 (defender/docs/agent-definition-consolidation-step-three.md)"
+base: e0993ae   # SHA the spec branch forked from — write-code-from-spec diffs against it
+
+# Executable spec for AgentDefinition consolidation step three: make bind/compile_policy the sole
+# production policy seam for all 7 roles, retire the parallel factory path, thread defender_dir,
+# add write_shapes (write twin of read_shapes), wire the write⊆read guard.
+#
+# Entry points are PURE functions (bind/compile_policy/resolve_roots -> deps/policy/roots; and the
+# gate decide_bash/decide_read/decide_write -> Decision). The durable suite is behavioral decide_*
+# assertions — no LLM, no fault-injection fakes. The #545 parity_* tests (test_bind_wiring_545.py etc.)
+# are migration scaffolding removed WITH the factories by write-code-from-spec; this spec re-encodes
+# their durable behavior and pins the NEW behavior (write⊆read active, non-PATHS defender_dir threaded
+# into BOTH policy and deps, requires_confine as data). handoff.deviations records the reduced modes.
+
+# scripts/spec_graph/check_binds.py waivers — a demand whose prose threads a modelled concept
+# it deliberately does NOT bind (the concept is covered by a sibling demand's node). Each entry
+# is a conscious triage, not a silent gap. (The gather salt orphan was NOT waived — it was a real
+# under-binding and is now bound on d3_gather_threads_not_restamps.)
+binds_waivers:
+  d1_lead_author_via_bind: [defender_tree]        # tree coverage via d3_bind_threads_defender_dir_into_deps_field
+  d6_writers_pass_roots: [defender_tree]          # tree coverage via d3_* ; this demand pins the write⊆read wiring
+  d7_lead_author_main_tree_unbuildable: [defender_tree]  # the PATHS-equal case is bound via requires_explicit_tree
+
+demands:
+  # ── Demand #0 — the return-value contract (resolve FIRST) ──────────────────
+  - id: d0_bind_return_contract
+    kind: behavior
+    form: test
+    outcome: {nl: "bind(defn, run_dir, *, scope, salt, defender_dir=None) returns the role's AgentDeps
+      subtype whose .policy is compile_policy(defn.tools, defn.read_shapes, defn.write_shapes,
+      resolve_roots(run_dir, defn.corpus_dirs, scope, tree), defn.deny_reason) where tree resolves to
+      the passed defender_dir or PATHS; .run_id == run_dir.name; .salt is the passed salt verbatim or a
+      fresh uuid4 when None; .defender_dir is the SAME resolved tree the policy was baked against (never
+      PATHS when a worktree tree was threaded). NO separate repo_root kwarg — lead-author passes its
+      worktree via the unified defender_dir param (decision Q2, full data-drive)."}
+    binds: ["bind", "compile_policy", "resolve_roots"]
+
+  # ── D1 — all seven roles obtain deps via bind ──────────────────────────────
+  - id: d1_judge_via_bind
+    kind: behavior
+    form: test
+    outcome: {nl: "the JUDGE production site builds deps via bind(JUDGE_DEF, run_dir, scope=RunScope(
+      add_dirs, ticket_cli)); the policy is jq_operand_gated with raw_reads, read_roots == add_dirs,
+      and (benign) the pinned --require-closed ticket pattern."}
+    binds: ["bind", "read_surface.access[bash-jq]"]
+  - id: d1_actor_via_bind
+    kind: behavior
+    form: test
+    outcome: {nl: "the ACTOR production site builds deps via bind(ACTOR_DEF, run_dir, scope=RunScope(
+      scripts, read_confine)); the policy has one python3-<script> bash pattern per pinned script,
+      read_confine == the confine (replacing the defender_dir base), raw_reads False."}
+    binds: ["bind", "read_surface.access[bash-cat]"]
+  - id: d1_oracle_via_bind
+    kind: survival
+    form: test
+    outcome: {nl: "the ORACLE production site (_run_oracle_pydantic) builds deps via bind(ORACLE_DEF,
+      run_dir) yielding a deny-all policy; the per-lead fan-out completes."}
+    binds: ["bind", "_ORACLE_POLICY"]
+  - id: d1_verifier_via_bind
+    kind: survival
+    form: test
+    outcome: {nl: "the VERIFIER production site (_run_verify_pydantic) builds deps via bind(VERIFY_DEF,
+      source_run_dir) yielding deny-all; BOTH forward-checks (forward + actor, one shared engine)
+      complete."}
+    binds: ["bind", "_VERIFY_POLICY"]
+  - id: d1_lead_author_via_bind
+    kind: survival
+    form: test
+    outcome: {nl: "the LEAD_AUTHOR production site (_run_author_pydantic) builds deps via bind(
+      LEAD_AUTHOR_DEF, run_dir, defender_dir=<worktree>/defender) flowing through
+      resolve_roots->compile_policy (no early-return); BOTH modes (lead_author + pitfalls_curator)
+      author the worktree skills. _lead_author_policy is deleted (its write scope + rm grant now come
+      from compile_policy via write_shapes)."}
+    binds: ["bind", "_deps_class", "_lead_author_policy"]
+  - id: d1_stages_mint_fresh_salt
+    kind: behavior
+    form: test
+    outcome: {nl: "a stage bound with salt=None gets a fresh 32-hex uuid4 (two binds differ); a carried
+      salt is threaded verbatim; MAIN and GATHER carry the run's persisted salt."}
+    binds: ["bind", "salt.domain.distinguished[none_mints]", "salt.domain.distinguished[carried]"]
+  - id: d1_base_for_run_spine_survives
+    kind: survival
+    form: test
+    outcome: {nl: "the five stage for_scope/for_run front doors are gone (grep-empty in the stage
+      modules) but the BASE AgentDeps._for_run spine SURVIVES — bind calls it; an over-eager
+      subtraction that deletes the base breaks bind itself."}
+    binds: ["bind"]
+  - id: d1_no_factory_in_stage_modules
+    kind: behavior
+    form: test
+    outcome: {nl: "grep for `_for_run(` / `for_scope(` / `for_run(` outside bind and the tests returns
+      nothing in the five stage modules — every production deps site obtains AgentDeps via bind."}
+    binds: ["bind"]
+
+  # ── D2 — write scope as data (write_shapes; lead-author fork removed) ───────
+  - id: d2_write_shapes_field
+    kind: seam
+    form: test
+    outcome: {nl: "AgentDefinition carries write_shapes: a tuple of (run_dir, defender_dir)->patterns
+      builders; compile_policy resolves each against roots into write_allow (exactly as read_shapes);
+      empty write_shapes ⇒ empty write_allow."}
+    binds: ["compile_policy", "write_scope"]
+  - id: d2_main_write_shape_anchors_run_dir
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "MAIN write_shape uses roots.RUN_DIR: decide_write admits run_dir/x.md and DENIES
+      defender_dir/skills/x.md — a defender_dir-anchored shape would let MAIN author the corpus."}
+    binds: ["write_scope.domain.distinguished[main]", "read_surface.access[write]"]
+  - id: d2_lead_author_write_shape_anchors_skills
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "LEAD_AUTHOR write_shape uses roots.DEFENDER_DIR/skills suffix .md: decide_write
+      admits <wt>/defender/skills/gather/x.md but DENIES run_dir/x.md (wrong root) and skills/x.txt
+      (wrong suffix); positive control: the sanctioned skills/**.md write IS admitted."}
+    binds: ["write_scope.domain.distinguished[lead_author]", "read_surface.access[write]"]
+  - id: d2_write_shape_resolves_symlinked_root
+    kind: parity
+    form: test
+    outcome: {nl: "under a symlinked base, decide_write of a real-path target is admitted — write_shape
+      anchors are RESOLVED (the write twin of reader_read_shapes' #546 .resolve()); a shape that
+      forgot resolve() bricks every write behind a symlink."}
+    binds: ["read_surface.access[write]"]
+  - id: d2_main_lead_shapes_no_cross_contamination
+    kind: negative
+    form: test
+    outcome: {nl: "MAIN's suffix-less run-dir shape admits any basename under run_dir; LEAD's .md
+      skills shape admits only skills/**.md — neither def's shape widens into the other's root/suffix
+      (positive control: each admits its own sanctioned write)."}
+    binds: ["write_scope.domain.distinguished[main]", "write_scope.domain.distinguished[lead_author]"]
+  - id: d2_lead_author_rm_scope
+    kind: negative
+    form: test
+    outcome: {nl: "the bound lead-author's decide_bash admits `rm <wt>/defender/skills/<draft>` (positive
+      control) but DENIES a bare/general `rm -rf /` and an `rm` of a path outside the skills subtree,
+      and `rm defender/skills/../../x` (textual `..` rejected, no symlink follow)."}
+    binds: ["read_surface.access[bash-cat]", "write_scope.domain.distinguished[lead_author]"]
+  - id: d2_lead_author_early_return_removed
+    kind: survival
+    form: test
+    outcome: {nl: "the LEAD_AUTHOR early-return in bind is gone; bind(LEAD_AUTHOR_DEF) reaches the
+      _deps_class(LEAD_AUTHOR) tail and returns LeadAuthorDeps via the uniform spine."}
+    binds: ["bind", "_deps_class"]
+
+  # ── D3 — defender_dir threaded through resolve_roots AND _for_run (deps) ────
+  - id: d3_resolve_roots_defender_dir_param
+    kind: seam
+    form: test
+    outcome: {nl: "resolve_roots takes defender_dir: Path = PATHS.defender_dir (no longer hardcodes it);
+      ResolvedRoots.defender_dir is the passed value."}
+    binds: ["resolve_roots", "defender_tree"]
+  - id: d3_bind_threads_defender_dir_into_deps_field
+    kind: parity
+    form: test
+    outcome: {nl: "bind(MAIN_DEF, run_dir, defender_dir=wt).defender_dir == wt (NOT PATHS) — bind
+      threads defender_dir into BOTH resolve_roots (policy anchor) AND _for_run (deps field), so
+      deps.defender_dir and the policy's read/bash/write anchors are ONE tree."}
+    binds: ["bind", "defender_tree", "read_surface.access[read-tool]"]
+  - id: d3_partial_thread_bricks_worktree_reads
+    kind: negative
+    form: test
+    outcome: {nl: "a policy anchored on tree A while decide_read/decide_bash are called with
+      defender_dir=tree B (A!=B, the split) DENIES every corpus read on BOTH surfaces — the total
+      functional brick the canonical-PATHS parity suite cannot exhibit; positive control: one tree
+      admits the corpus read."}
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]", "defender_tree"]
+  - id: d3_lead_author_worktree_anchor
+    kind: behavior
+    form: test
+    outcome: {nl: "bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt/defender) yields deps.defender_dir ==
+      wt/defender AND the policy's write_allow + read surface anchor on wt/defender, not
+      PATHS.defender_dir."}
+    binds: ["bind", "defender_tree", "write_scope.domain.distinguished[lead_author]"]
+  - id: d3_main_gather_non_paths_defender_dir
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "bind(MAIN_DEF/GATHER_DEF, run_dir, defender_dir=<non-PATHS worktree>) anchors the
+      policy's read/bash surface on the passed defender_dir, not PATHS."}
+    binds: ["defender_tree.domain.distinguished[non_paths]", "bind"]
+  - id: d3_paths_equal_behavior_preserving
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "positive control: with defender_dir == PATHS.defender_dir the compiled policy is
+      identical to today's — the threading is behavior-preserving for every current caller."}
+    binds: ["defender_tree.domain.default", "bind"]
+  - id: d3_main_driver_threads_param_into_bind
+    kind: behavior
+    form: test
+    outcome: {nl: "run_investigation threads its defender_dir param into bind (so prompt tree == gate
+      tree), not only into build_agent/_user_prompt while bind anchors PATHS."}
+    binds: ["run_investigation", "bind"]
+  - id: d3_gather_threads_not_restamps
+    kind: parity
+    form: test
+    outcome: {nl: "the GATHER dispatch builds deps as bind(GATHER_DEF, deps.run_dir, salt=deps.salt,
+      defender_dir=deps.defender_dir) and DROPS the replace(defender_dir=…) restamp — the policy
+      anchors and the deps field are one tree (no restamp-only split)."}
+    binds: ["gather_dispatch", "read_surface.access[bash-cat]", "defender_tree", "salt.domain.distinguished[carried]"]
+  - id: d3_corpus_traversal_guard_survives
+    kind: survival
+    form: test
+    outcome: {nl: "resolve_roots still RAISES ValueError on a '..'/absolute corpus name after
+      _resolve_corpus_dir stops hardcoding PATHS — the traversal defense is on the NAME, independent
+      of which tree it anchors."}
+    binds: ["resolve_roots", "corpus_traversal_guard"]
+
+  # ── D4 — actor confine precondition as data (+ requires_repo_root twin: FORK) ─
+  - id: d4_requires_confine_data
+    kind: seam
+    form: test
+    outcome: {nl: "the actor's empty-read_confine fail-loud is a requires_confine bool on
+      AgentDefinition (True on ACTOR_DEF), checked generically in bind."}
+    binds: ["bind", "requires_confine"]
+  - id: d4_actor_empty_confine_raises
+    kind: negative
+    form: test
+    outcome: {nl: "bind(ACTOR_DEF, run_dir) with the default empty read_confine RAISES — no unconfined
+      ActorDeps is ever constructed (the #512 gray-box rubric-leak safe-by-construction); positive
+      control: with a non-empty confine bind SUCCEEDS."}
+    binds: ["bind", "requires_confine.domain.distinguished[true]"]
+  - id: d4_actor_with_confine_no_widen
+    kind: behavior
+    form: test
+    outcome: {nl: "positive control: bind(ACTOR_DEF, scope=<non-empty confine>) succeeds; policy
+      .read_confine == the confine and the resolved read roots do NOT include the whole defender_dir."}
+    binds: ["bind", "read_surface.access[read-tool]"]
+  - id: d4_main_empty_confine_ok
+    kind: behavior
+    form: test
+    outcome: {nl: "positive control: bind(MAIN_DEF, run_dir) with the default empty confine SUCCEEDS —
+      requires_confine is False for main; main legitimately reads defender_dir."}
+    binds: ["bind", "requires_confine.domain.default"]
+  - id: d4_no_role_branch_in_bind
+    kind: negative
+    form: test
+    outcome: {nl: "NO `if defn.role is AgentRole.X` branch remains in bind — BOTH per-role preconditions
+      are data: a synthetic NON-actor def with requires_confine=True + empty confine raises, and a
+      synthetic def with requires_explicit_tree=True + no defender_dir raises, each via the generic data
+      check, not a role identity check."}
+    binds: ["bind", "requires_confine", "requires_explicit_tree"]
+  - id: d4_lead_author_no_tree_raises
+    kind: negative
+    form: test
+    outcome: {nl: "after the early-return is deleted, bind(LEAD_AUTHOR_DEF, run_dir) with NO defender_dir
+      RAISES via the requires_explicit_tree data bit (checked generically, not a role branch) — never a
+      silent PATHS/run_dir fallback authoring the MAIN checkout; positive control: with an explicit
+      worktree tree bind SUCCEEDS."}
+    binds: ["bind", "requires_explicit_tree.domain.distinguished[true]"]   # RESOLVED (Q2 full data-drive)
+
+  # ── D5 — the parallel factory path retires ─────────────────────────────────
+  - id: d5_oracle_verify_denyall_via_compile_policy
+    kind: survival
+    form: test
+    outcome: {nl: "_ORACLE_POLICY/_VERIFY_POLICY as production constructors are gone; bind(ORACLE_DEF)
+      and bind(VERIFY_DEF) still yield deny-all policies via compile_policy over an empty ToolSet."}
+    binds: ["bind", "_ORACLE_POLICY", "_VERIFY_POLICY"]
+  - id: d5_judge_actor_bash_lane_preserved
+    kind: survival
+    form: test
+    outcome: {nl: "the judge jq lane (jq_operand_gated, operands confined to scope.add_dirs, ticket
+      --require-closed) and the actor python3-<script> lane are unchanged by the factory retirement —
+      _judge_policy/_actor_policy are KEPT as compile_policy._bash_allow's internal pattern helpers
+      (decision Q1, keep-as-helpers); only their JudgeDeps.for_scope/ActorDeps.for_scope front-doors
+      are deleted. decide_bash for judge/actor is identical."}
+    binds: ["read_surface.access[bash-jq]", "read_surface.access[bash-cat]"]
+  - id: d5_actor_read_confine_not_leaked_from_builder
+    kind: negative
+    form: test
+    outcome: {nl: "the bound actor's policy.read_confine == scope.read_confine, NOT the read_confine=()
+      that compile_policy passes to the actor bash-pattern builder — conflating them collapses the
+      actor to an empty confine (whole defender_dir, the #512 leak); positive control: the confine is
+      the named corpus."}
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]"]
+  - id: d5_policy_for_is_bind_alias
+    kind: survival
+    form: test
+    outcome: {nl: "policy_for/main_policy/gather_policy survive only as bind aliases (not a second
+      source): policy_for('main'/'gather', run_dir, defender_dir) == bind(<DEF>).policy over ALL
+      fields INCLUDING read_shapes (old main_policy set read_shapes=(); the alias now carries
+      reader_read_shapes — a non-.md corpus read via policy_for('main') flips allow->deny)."}
+    binds: ["bind", "policy_for", "read_surface.access[read-tool]"]   # read_shapes-flip = hole H4
+  - id: d5_reader_patterns_for_kept
+    kind: survival
+    form: test
+    outcome: {nl: "the parametrized reader_patterns_for STAYS (compile_policy._bash_allow caller) so
+      every bound main/gather reader lane is unchanged; the full-set reader_patterns alias may go."}
+    binds: ["read_surface.access[bash-cat]"]
+
+  # ── D6 — wire the write ⊆ read guard ───────────────────────────────────────
+  - id: d6_writers_pass_roots
+    kind: seam
+    form: test
+    outcome: {nl: "both writer call sites (tools.py write_file/edit_file) call decide_write with
+      run_dir=deps.run_dir and defender_dir=deps.defender_dir, activating the write⊆read guard."}
+    binds: ["read_surface.access[write]"]
+  - id: d6_guard_denies_escape
+    kind: negative
+    form: test
+    outcome: {nl: "with both roots supplied, decide_write DENIES a target matching write_allow but
+      resolving OUTSIDE the read surface (an escaping write_allow) — the guard's reason to exist;
+      positive control below is d6_guard_noop."}
+    binds: ["read_surface.access[write]"]
+  - id: d6_guard_noop_for_real_writers
+    kind: behavior
+    form: test
+    outcome: {nl: "positive control: with both roots supplied, a MAIN write under run_dir and a
+      LEAD_AUTHOR write under <wt>/skills/x.md are STILL allowed — the guard is a no-op for every real
+      writer (D6 behavior-preserving)."}
+    binds: ["read_surface.access[write]"]
+  - id: d6_guard_needs_worktree_defender_dir
+    kind: parity
+    form: test
+    outcome: {nl: "(D6 × the deps/policy split) the write⊆read guard admits <wt>/skills/x.md ONLY when
+      deps.defender_dir is the worktree tree the write_allow anchors on; if deps=PATHS (the split) the
+      legit lead-author write DENIES — the split is observable on WRITES, not only reads."}
+    binds: ["read_surface.access[write]", "defender_tree"]
+
+  # ── R3 read↔bash filename + symlink parity ─────────────────────────────────
+  - id: r3_read_bash_filename_parity
+    kind: parity
+    form: test
+    outcome: {nl: "for a reader agent, decide_read and the bash cat lane agree on the SAME probe files
+      (a corpus .md admitted by both; a non-.md corpus file denied by both) — the read_shapes filter
+      == the cat operand grammar."}
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]"]
+  - id: r3_symlinked_base_admits
+    kind: parity
+    form: test
+    outcome: {nl: "under a SYMLINKED run base (link->real), decide_read of a run-dir file is ADMITTED
+      (resolves through the link) and agrees with the bash cat lane — the #546 fixture the #545 suite
+      lacked (all its fixtures were canonical)."}
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]"]
+  - id: r3_symlink_pointing_out_denies
+    kind: negative
+    form: test
+    outcome: {nl: "a symlink INSIDE the roots pointing OUT: decide_read DENIES (resolves outside) — and
+      the bash cat lane denies too (textual `..`/no-follow); positive control r3_symlinked_base_admits."}
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]"]
+
+  # ── R2 isolation ───────────────────────────────────────────────────────────
+  - id: r2_resolve_roots_per_pair_distinct
+    kind: uniqueness
+    form: test
+    outcome: {nl: "two different (run_dir, defender_dir) pairs bound through bind get DISTINCT resolved
+      read_confine/anchors — one run's confine never appears in another's policy, and no corpus-only
+      cache-key bleed across defender_dir values (the #497/#534 hazard)."}
+    binds: ["resolve_roots", "defender_tree"]
+
+  # ── R5 safe-by-construction judgment extension (FORK-bearing) ──────────────
+  - id: r5_tools_write_write_shapes_agree
+    kind: negative
+    form: test          # RESOLVED Q3 — assert (fail-loud)
+    outcome: {nl: "compile_policy RAISES on an inconsistent AgentDefinition: write=True with empty
+      write_shapes (a writer with no scope -> would deny all writes), OR write=False with a non-empty
+      write_shape (dead scope). Positive control: MAIN/LEAD (write=True + non-empty shape) and the
+      read-only stages (write=False + empty) both compile clean."}
+    binds: ["compile_policy", "write_scope"]
+
+  # ── D7 — bind input-validation seam (RESOLVED Q4 — harden) ─────────────────
+  - id: d7_bind_validates_roots
+    kind: seam
+    form: test
+    outcome: {nl: "bind validates its root inputs (run_dir, defender_dir, and each scope
+      read_confine/add_dirs/scripts member) are absolute, non-degenerate paths — reusing the
+      _require_read_root-style shape check policy_for already applies; a relative or empty-string root
+      RAISES rather than silently anchoring CWD."}
+    binds: ["bind"]
+  - id: d7_bind_rejects_degenerate_confine
+    kind: negative
+    form: test
+    outcome: {nl: "bind(ACTOR_DEF, scope=RunScope(read_confine=(Path(''),), …)) RAISES — the emptiness
+      guard alone would pass it (Path('') resolves to CWD, the actor reads the repo root); the
+      root-validity check rejects it. Positive control: a real absolute corpus confine succeeds."}
+    binds: ["bind", "d7_bind_validates_roots"]
+  - id: d7_lead_author_main_tree_unbuildable
+    kind: negative
+    form: test
+    outcome: {nl: "bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=PATHS.defender_dir) RAISES — a
+      requires_explicit_tree role must be given an explicit NON-PATHS worktree tree, so the
+      main-checkout-authoring state is UNBUILDABLE (not merely well-behaved when configured right).
+      Positive control: an explicit worktree tree (!= PATHS) succeeds."}
+    binds: ["bind", "requires_explicit_tree", "write_scope.domain.distinguished[lead_author]"]
+  - id: r5_requires_confine_default_documented
+    kind: negative
+    form: waiver          # H5 — recorded risk, not tested: the design keeps default False
+    outcome: {nl: "WAIVER: requires_confine (and requires_explicit_tree) default False, so a NEW
+      confined/worktree role that forgets the bit is silently built open. The design keeps the
+      permissive default, shifting safety onto the def author + build_registry review; not tested."}
+    binds: ["requires_confine.domain.default"]
+
+structure:
+  axes: [run_dir, defender_tree]
+  actors:
+    - {id: bind,             frame: composition, provenance: code}   # modified: +defender_dir thread, -role branches
+    - {id: compile_policy,   frame: leg,         provenance: code}   # modified: +write_shapes
+    - {id: resolve_roots,    frame: leg,         provenance: code}   # modified: +defender_dir param
+    - {id: run_investigation, frame: composition, provenance: code}  # modified: thread defender_dir into bind
+    - {id: gather_dispatch,  frame: composition, provenance: code}   # modified: thread not restamp
+    - {id: tool_write_file,  frame: leg,         provenance: code}   # modified: pass roots to decide_write
+    - {id: tool_edit_file,   frame: leg,         provenance: code}   # modified: pass roots to decide_write
+    - {id: policy_for,       frame: leg,         provenance: code}   # modified: -> bind alias
+  boundaries:
+    - id: read_surface
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            read-tool:  {trust: derived, constraints: [resolve-containment, confine-replaces-base, read_shapes-filter, denylist, raw-clamp]}
+            bash-cat:   {trust: attacker-influenced, constraints: [textual-anchor, no-follow, corpus-md-suffix, denylist]}
+            bash-jq:    {trust: attacker-influenced, constraints: [resolve-containment, denylist, jq-operand-gate]}
+            write:      {trust: derived, constraints: [write_allow-fullmatch, write-subseteq-read]}
+    - id: write_scope
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "per-writer write shape resolved by compile_policy from write_shapes"}
+          default: none
+          distinguished: [main, lead_author]
+          falsy_valid: true          # empty write_shapes ⇒ empty write_allow (read-only stages)
+          documented_alternatives: []
+        identity:
+          key_axes: [run_dir, defender_tree]
+          evidence: {nl: "MAIN write shape anchors roots.run_dir (no suffix); LEAD anchors roots.defender_dir/skills suffix .md — read off compile_policy + the def write_shapes"}
+          sharing: unique-key
+    - id: defender_tree
+      provenance: design
+      facets:
+        domain:
+          type: path
+          refinement: {nl: "the tree the gate anchors reads/writes on; must equal deps.defender_dir"}
+          default: PATHS.defender_dir
+          distinguished: [non_paths]     # a worktree tree (the lead-author drain; any threaded caller)
+          falsy_valid: false
+          documented_alternatives:
+            - {value: non_paths, crosses_validation: true}   # a worktree tree must stay valid through the gate
+        identity:
+          key_axes: [defender_tree]
+          evidence: {nl: "two anchors — resolve_roots.defender_dir (policy) and _for_run defender_dir (deps) — must be the SAME tree; bind threads both"}
+          sharing: unique-key
+    - id: requires_confine
+      provenance: design
+      facets:
+        domain: {type: bool, refinement: {nl: "actor must name a non-empty read_confine"}, default: false,
+                 distinguished: [true], falsy_valid: true, documented_alternatives: []}
+    - id: requires_explicit_tree
+      provenance: design           # RESOLVED Q2 — a data bit (True on LEAD_AUTHOR_DEF), checked generically
+      facets:
+        domain: {type: bool, refinement: {nl: "the role must be given an explicit NON-PATHS defender_dir; None or PATHS RAISES"}, default: false,
+                 distinguished: [true], falsy_valid: true, documented_alternatives: []}
+    - id: salt
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "untrusted-data trust token; None mints uuid4"}, default: none,
+                 distinguished: [none_mints, carried], falsy_valid: false, documented_alternatives: []}
+    - id: corpus_traversal_guard
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "corpus name with '..' or absolute RAISES ValueError"}, default: none,
+                 distinguished: [dotdot, absolute], falsy_valid: false, documented_alternatives: []}
+    # ── removed / demoted elements (R5) ──
+    - {id: _ORACLE_POLICY,     provenance: code, facets: {}}   # remove: fold into empty-ToolSet compile_policy
+    - {id: _VERIFY_POLICY,     provenance: code, facets: {}}   # remove
+    - {id: _lead_author_policy, provenance: code, facets: {}}  # remove: logic -> compile_policy via write_shapes
+    - {id: _deps_class,        provenance: code, facets: {}}   # modify: LEAD_AUTHOR arm now live
+  interacts:
+    - {from: bind, to: read_surface, mode: invoke, via: api, provenance: design}
+    - {from: compile_policy, to: write_scope, mode: write, via: api, provenance: design, interpolates: [run_dir, defender_tree]}
+    - {from: resolve_roots, to: defender_tree, mode: read, via: api, provenance: design}
+    - {from: bind, to: defender_tree, mode: write, via: api, provenance: design, interpolates: [defender_tree]}  # both anchors
+    - {from: tool_write_file, to: read_surface, mode: write, via: fs, provenance: design}
+    - {from: tool_edit_file, to: read_surface, mode: write, via: fs, provenance: design}
+    - {from: run_investigation, to: bind, mode: invoke, via: api, provenance: code}
+    - {from: gather_dispatch, to: bind, mode: invoke, via: api, provenance: code}
+    - {from: policy_for, to: bind, mode: invoke, via: api, provenance: code}     # demoted alias
+    - {from: bind, to: _ORACLE_POLICY, mode: remove, via: api, provenance: code}
+    - {from: bind, to: _VERIFY_POLICY, mode: remove, via: api, provenance: code}
+    - {from: bind, to: _lead_author_policy, mode: remove, via: api, provenance: code}
+  drives:
+    - {from: run_investigation, to: bind, provenance: code, multiplicity: serial}
+    - {from: gather_dispatch, to: bind, provenance: code, multiplicity: serial}
+
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # holes: requires_repo_root default unknown (H2); write co-constraint (H3); repo_root=main policy (H6); + reconciliation ran
+    - {rule: R1, fired: false}   # no LLM/payload edge in this pure-function delta; policy is not a parts-payload
+    - {rule: R2, fired: true}    # write_scope + defender_tree identity: two anchors must agree; per-pair isolation
+    - {rule: R3, fired: true}    # read_surface reached by 4 vias — the crown: write⊆read, read↔cat filename, symlink, tree-anchor parity
+    - {rule: R4, fired: true}    # defender_tree / requires_confine / write_scope / salt / requires_repo_root distinguished members
+    - {rule: R5, fired: true}    # 3 factories + 2 constants removed; base _for_run conserved; 4 safe-by-construction extensions
+  obligations:
+    - {rule: R3, element: "read_surface.access[write]", witness: "write⊆read guard dormant today (writers pass no roots); wire + pin escape-denied/noop", discharged_by: d6_guard_denies_escape}
+    - {rule: R3, element: "read_surface.access[read-tool] vs [bash-cat]", witness: "symlinked-base parity fixture the #545 suite lacked (all canonical)", discharged_by: r3_symlinked_base_admits}
+    - {rule: R3, element: "defender_tree", witness: "deps.defender_dir (via _for_run) and policy anchor (via resolve_roots) must be one tree — bind threads only resolve_roots per the design note", discharged_by: d3_bind_threads_defender_dir_into_deps_field}
+    - {rule: R2, element: "defender_tree.identity", witness: "the two tree anchors are a shared sink that must land on one value; a split bricks every worktree read/write", discharged_by: d3_partial_thread_bricks_worktree_reads}
+    - {rule: R4, element: "defender_tree.domain.distinguished[non_paths]", witness: "every #545 fixture is canonical PATHS; a non-PATHS tree is an untested column", discharged_by: d3_main_gather_non_paths_defender_dir}
+    - {rule: R4, element: "requires_confine.domain.distinguished[true]", witness: "the fail-loud must survive the altitude change to a data bit", discharged_by: d4_actor_empty_confine_raises}
+    - {rule: R4, element: "write_scope.domain.distinguished[lead_author]", witness: "the .md-suffixed skills shape vs MAIN's run-dir shape", discharged_by: d2_lead_author_write_shape_anchors_skills}
+    - {rule: R5, element: "_lead_author_policy (removed)", witness: "the worktree write scope + rm grant must be reproduced by compile_policy via write_shapes", discharged_by: d1_lead_author_via_bind}
+    - {rule: R5, element: "AgentDeps._for_run (conserved)", witness: "the five front doors go but the base spine bind calls must stay", discharged_by: d1_base_for_run_spine_survives}
+    - {rule: R5, element: "policy_for (demoted)", witness: "the alias flips read_shapes ()->reader_read_shapes for its 12 test consumers — not transparent", discharged_by: d5_policy_for_is_bind_alias}
+    - {rule: R5, element: "bind (safe-by-construction: actor)", witness: "actor-empty-confine must be UNBUILDABLE, not merely well-behaved when configured right", discharged_by: d4_actor_empty_confine_raises}
+    - {rule: R5, element: "bind (safe-by-construction: lead-author tree)", witness: "lead-author-no-tree AND lead-author-main-checkout-tree must both be UNBUILDABLE (Q4 harden)", discharged_by: d7_lead_author_main_tree_unbuildable}
+    - {rule: R5, element: "bind (safe-by-construction: degenerate root)", witness: "a relative/empty-string root must raise, not silently anchor CWD (Q4 harden)", discharged_by: d7_bind_rejects_degenerate_confine}
+    - {rule: R5, element: "compile_policy (safe-by-construction: write co-constraint)", witness: "write=True⊗empty write_shapes (deny-all writer) must fail loud at build (Q3 assert)", discharged_by: r5_tools_write_write_shapes_agree}
+  holes:
+    - {rule: R0, element: "requires_explicit_tree (was requires_repo_root)", resolution: "Q2 FULL DATA-DRIVE: a requires_explicit_tree data bit (True on LEAD_AUTHOR_DEF), checked generically; lead-author's worktree unifies into the defender_dir param (repo_root kwarg dropped); no role branch remains.", resolved_to: d4_lead_author_no_tree_raises}
+    - {rule: R0, element: "compile_policy write=True ⊗ write_shapes", resolution: "Q3 ASSERT: compile_policy fails loud on write⊗write_shapes disagreement.", resolved_to: r5_tools_write_write_shapes_agree}
+    - {rule: R0, element: "read_surface.access[bash-jq] / [bash-cat] builder fate", resolution: "Q1 KEEP-AS-HELPERS: _judge_policy/_actor_policy stay as compile_policy._bash_allow's pattern source (not a second deps-policy path); only their for_scope front-doors are deleted.", resolved_to: d5_judge_actor_bash_lane_preserved}
+    - {rule: R0, element: "policy_for read_shapes flip", resolution: "RESOLVED by principle 1 (no question): policy_for becomes a true bind alias; its returned policy now carries read_shapes (correct — it's what the real agent gets); the ~1-2 gate tests asserting a non-.md read via policy_for('main') are fixed.", resolved_to: d5_policy_for_is_bind_alias}
+    - {rule: R5, element: "lead-author main-checkout tree", resolution: "Q4 HARDEN: bind makes the main-checkout state UNBUILDABLE (requires_explicit_tree + non-PATHS).", resolved_to: d7_lead_author_main_tree_unbuildable}
+    - {rule: R5, element: "degenerate confine / relative root", resolution: "Q4 HARDEN: bind gains a _require_read_root-style input-validation seam over all root inputs.", resolved_to: d7_bind_rejects_degenerate_confine}
+  pre_discharged:
+    - {rule: R4, element: "requires_confine.domain.default", by: d4_main_empty_confine_ok}
+    - {rule: R4, element: "salt.domain.distinguished[none_mints]", by: d1_stages_mint_fresh_salt}
+
+handoff:
+  forks:
+    - "Q1 judge/actor builders → KEEP as compile_policy helpers (only for_scope front-doors deleted); not a second source once nothing builds deps from them."
+    - "Q2 lead-author role branch → FULL DATA-DRIVE: requires_explicit_tree data bit + unify worktree into the defender_dir param (drop repo_root kwarg); strictly meets 'no if role is X branch in bind'."
+    - "Q3 write=True ⊗ write_shapes → ASSERT (compile_policy fails loud on disagreement)."
+    - "Q4 bind input hardening → HARDEN: reject main-checkout tree for a requires_explicit_tree role + degenerate/relative roots for any role (a new bind input-validation seam)."
+    - "policy_for read_shapes flip → resolved by principle 1 (no question): true bind alias; fix the ~1-2 affected gate tests."
+    - "deps.defender_dir threading → NOT a fork, a correctness fix folded in: the design note's D3 ('thread through resolve_roots') is under-specified — bind:351 must also thread defender_dir into _for_run or deps/policy split bricks worktree reads. Design note should be amended."
+  deviations:
+    - "Formal-slot validation is a manual hand-check against schema.md (no spec_graph linter yet, #537)."
+    - "corpus_roots is a DEAD field (computed by resolve_roots, never consumed by compile_policy) — the 'second anchor' at _resolve_corpus_dir:174 is inert; the live second anchor is _for_run's deps.defender_dir. Recorded so the reviewer does not chase the red herring."
+    - "FULL ceremony ran (no reduced small-delta mode): grounding Explore + 4 lensed Haiku enumerators + 1 Opus strong author + a separate diff/materialize pass. The strong author is the frontier backstop; it was NOT degraded."
+    - "48 tests ↔ 48 form:test demands (1:1); realized in defender/tests/test_bind_sole_seam_551.py. At HEAD: 27 RED-for-the-right-reason (TypeError on the new defender_dir/write_shapes params, AttributeError on requires_confine, assertion/DID-NOT-RAISE on the not-yet-wired guard/alias/hardening — never a collection error) + 21 GREEN characterization that must STAY green."
+    - "Four tests assert a SOURCE property rather than driving the target behaviorally (d1_no_factory_in_stage_modules = the R5 subtraction; d3_main_driver + d3_gather = the reroute wiring; the edit_file half of d6_writers_pass_roots) — a subtraction/wiring fact has no pure-behavioral witness in isolation. Precedent: #545's test_main_gather_production_routed_through_bind. The behavioral survival is separately pinned (d1_*_via_bind, d6 write_file raise)."
+    - "The design note's D3 was amended during this pass: it under-specified the threading (resolve_roots only); bind must also thread defender_dir into _for_run or deps/policy split. Not a fork — a correctness fix folded in."

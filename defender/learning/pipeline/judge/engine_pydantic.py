@@ -22,7 +22,13 @@ from typing import TYPE_CHECKING, ClassVar
 from defender.learning.core.config import JUDGE_EFFORT, JUDGE_MODEL
 from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
-from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
+from defender.runtime.agent_definition import (
+    AgentDefinition,
+    BashGrammar,
+    RunScope,
+    ToolSet,
+    bind,
+)
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
@@ -61,16 +67,6 @@ class JudgeDeps(AgentDeps):
     ``policy``, not this."""
 
     role: ClassVar[AgentRole] = AgentRole.JUDGE
-
-    @classmethod
-    def for_scope(cls, scope: _ToolScope, run_dir: Path) -> JudgeDeps:
-        """The judge's front door: build its deps from the tool ``scope`` (read roots =
-        the comparison + gather_raw add-dirs; the benign closed-ticket pins) over the base
-        ``_for_run``. ``scope.add_dir`` is the ``JudgeInvocation.add_dirs`` list; ``None``
-        only in a direct unit call → empty roots (a lone Path, unreachable in prod, also
-        yields ``()`` — preserved)."""
-        read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
-        return cls._for_run(run_dir, _judge_policy(read_roots, scope.ticket_cli))
 
 
 # The judge's bash lane is `jq` ONLY (any shape); its file operands are path-gated to
@@ -164,13 +160,19 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     """The PydanticAI ``judge_fn`` — the judge_fn protocol signature, so it drops into
     ``invoke_judge(..., judge_fn=_run_judge_pydantic)``.
 
-    Builds the judge's ``JudgeDeps`` from the tool ``scope`` (read roots = the comparison +
-    gather_raw add-dirs; the benign closed-ticket paths) and delegates to the shared
-    ``run_stage`` (agent build + one-shot drive + error mapping + trace logging). The model's
+    Builds the judge's ``JudgeDeps`` via the single ``bind`` seam (#551) from a ``RunScope``
+    carrying the tool ``scope`` (read roots = the comparison + gather_raw add-dirs; the benign
+    closed-ticket paths) and delegates to the shared ``run_stage`` (agent build + one-shot drive
+    + error mapping + trace logging). ``scope.add_dir`` is the ``JudgeInvocation.add_dirs`` list;
+    ``None``/a lone Path (a direct unit call, unreachable in prod) → empty roots. The model's
     final text is returned VERBATIM: any prose preamble a reasoning model prepends is left
     intact for the shared ``normalize_judge_yaml`` on the downstream validate path (every judge
     consumer — the live loop and the secondary harness — funnels through it) to strip."""
-    deps = JudgeDeps.for_scope(scope, learning_run_dir)
+    read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
+    deps = bind(
+        JUDGE_DEF, learning_run_dir,
+        scope=RunScope(add_dirs=read_roots, ticket_cli=scope.ticket_cli),
+    )
     return run_stage(
         stage="judge",
         prompt_path=prompt_path, model=model, effort=effort,

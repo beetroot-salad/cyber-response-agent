@@ -35,7 +35,7 @@ hooks). The gates:
   (#522): each agent's `AgentPolicy.bash_allow` is a tuple of anchored `re.Pattern`s
   matched per stage, and a non-adapter command is allowed iff every stage matches
   one. Main/gather build theirs PER-RUN in `permission/policies/_common.py`
-  (`reader_patterns`): the viewer program set (`cat`/`grep`/`jq`/`tail`/`head`/`wc`/`ls`/`cd`)
+  (`reader_patterns_for`): the viewer program set (`cat`/`grep`/`jq`/`tail`/`head`/`wc`/`ls`/`cd`)
   is spelled there as anchored per-program grammars, with the viewer file operands
   **anchored** to the run dir + corpus so the bash lane confines reads the same way
   `decide_read` does (#535 — `policy_for(agent, run_dir, defender_dir)` bakes the anchors;

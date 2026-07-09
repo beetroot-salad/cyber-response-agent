@@ -226,11 +226,21 @@ def resolve_main_model(explicit: str | None = None) -> str:
 # roots under `defender_dir` a reader may open.
 _CORPUS_DIRS = ("lessons", "skills", "examples")
 
+
+def _main_write_shape(run_dir: Path, defender_dir: Path) -> tuple[Any, ...]:
+    """MAIN's write scope (#551 — the write twin of `reader_read_shapes`): the run-dir subtree
+    (`investigation.md` / `report.md` + any case artifact it authors), resolved by `compile_policy`
+    into `write_allow`. Anchored on `run_dir` — NOT `defender_dir` — so MAIN can never author the
+    corpus (a `defender_dir`-anchored shape would let the main loop write skills/lessons)."""
+    return (permission.build_write_allow(run_dir),)
+
+
 # MAIN — the orchestrator: reader lane + the file writers (it authors investigation.md /
 # report.md), no data-source adapters (it dispatches gather). `model` is the live thunk
 # so a `--model` / `$DEFENDER_MODEL` override resolves at build; `effort` is the Fireworks
 # GLM default (production re-binds both per invocation in `build_agent`, preserving the
-# model-dependent effort for the claude escape hatch).
+# model-dependent effort for the claude escape hatch). Its `write_shapes` (the run-dir subtree)
+# is DATA `compile_policy` resolves into `write_allow` — the write twin of `read_shapes`.
 MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
@@ -242,6 +252,7 @@ MAIN_DEF = AgentDefinition(
     ),
     corpus_dirs=_CORPUS_DIRS,
     read_shapes=(reader_read_shapes,),
+    write_shapes=(_main_write_shape,),
     deny_reason=permission.FALLTHROUGH_DENY_REASON,
 )
 
@@ -473,10 +484,13 @@ async def run_investigation(
     # main policy field-for-field AND adds the read↔bash filename filter (read_shapes), and
     # the run's PERSISTED salt is carried in (never a fresh uuid4) so the deps' tool-output
     # wrapper and orient's alert wrapper tag with the ONE salt the agent is told to distrust —
-    # a split salt would fail the injection defence open. `run_id` is the caller's identity
-    # (run.py mints run_dir=base/run_id, so it equals run_dir.name in production; the replay
-    # harness passes a distinct label), re-stamped over bind's run_dir-basename default.
-    deps = replace(bind(MAIN_DEF, run_dir, salt=salt), run_id=run_id)
+    # a split salt would fail the injection defence open. `defender_dir` is threaded into bind
+    # (#551) so the gate anchors reads/writes on the SAME tree the prompt describes — prod passes
+    # a PATHS-equal value (behaviour-preserving), but a worktree/temp-tree run no longer validates
+    # against PATHS while the prompt names tree X. `run_id` is the caller's identity (run.py mints
+    # run_dir=base/run_id, so it equals run_dir.name in production; the replay harness passes a
+    # distinct label), re-stamped over bind's run_dir-basename default.
+    deps = replace(bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir), run_id=run_id)
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()

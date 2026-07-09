@@ -230,6 +230,7 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     model=lambda: config.AUTHOR_MODEL,
     effort=config.AUTHOR_EFFORT,
     tools=ToolSet(read=True, bash=BashGrammar(), write=True),
+    bindable=False,
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )
 
