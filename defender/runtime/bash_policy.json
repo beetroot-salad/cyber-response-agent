@@ -9,7 +9,7 @@
     "the one tool that needed arg-level deny rules.",
     "",
     "The reader-lane program set + its anchored operand grammar live in",
-    "permission/policies/_common.py (reader_patterns) since #535 — NOT a JSON list.",
+    "permission/policies/_common.py (reader_patterns_for) since #535 — NOT a JSON list.",
     "The non-adapter defender-* shims come from the taxonomy",
     "(hooks/_cmd_segments.NON_ADAPTER_SHIMS), the single source of truth for the",
     "adapter/non-adapter split.",

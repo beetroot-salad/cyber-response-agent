@@ -5,7 +5,7 @@ The policy is the deny-by-default allowlist the in-process gate
 denylist. It is data, not code — onboarding an adapter capability or a denied path
 is a JSON edit, no gate logic change (#379). The reader-lane program set (which
 viewers, in what anchored shape) moved into `permission/policies/_common.py`
-(`reader_patterns`) with the #535 anchoring — it is no longer a JSON list.
+(`reader_patterns_for`) with the #535 anchoring — it is no longer a JSON list.
 
 Fail-closed: if the committed JSON is missing or corrupt, we fall back to the
 built-in defaults below (which mirror the JSON) and warn, rather than crash the

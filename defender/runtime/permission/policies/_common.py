@@ -26,7 +26,6 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime import bash_policy
 
 # The corpus subdirs whose `.md` files a runtime agent may read on the bash lane —
@@ -129,8 +128,8 @@ _JQ_KV_FLAG = r"(?:--arg|--argjson) [^ ]+ [^ ]+"
 # `bash_allow` from the DECLARED subset of these (a `BashGrammar.viewers` naming only
 # `("cat",)` compiles JUST the cat grammar — #545 makes the viewer CONTENTS load-bearing,
 # not merely their non-emptiness), and iterates this fixed order so the emitted tuple is
-# order-stable regardless of the declaring def's tuple order (the field-for-field parity
-# `bind(MAIN_DEF).bash_allow == policy_for('main').bash_allow` compares an ordered tuple).
+# order-stable regardless of the declaring def's tuple order (the reader lane is a per-stage
+# ordered-tuple `bash_allow` match, so a stable emit order keeps it deterministic per run).
 # INVARIANT (load-bearing — see #547, #540): every program here is a READ-ONLY viewer,
 # and every shim in `NON_ADAPTER_SHIMS` opens no writable path — so NOTHING on the bash
 # surface can create a symlink/hardlink (the write lane is `write_text`, regular files
@@ -141,8 +140,8 @@ _JQ_KV_FLAG = r"(?:--arg|--argjson) [^ ]+ [^ ]+"
 # brokered subprocess, and you break this invariant — land the #547 scrub in that change.
 _VIEWER_ORDER = ("cat", "wc", "tail", "head", "grep", "ls", "cd", "jq")
 
-# The full main/gather viewer set (`policy_for` / the kept `reader_patterns` API build all
-# of these) — the reader defs declare exactly this set, so their compiled lane == the API's.
+# The full main/gather viewer set — the reader defs (MAIN_DEF / GATHER_DEF) declare exactly
+# this set, so `compile_policy` compiles their full reader lane via `reader_patterns_for`.
 READER_VIEWERS = _VIEWER_ORDER
 
 
@@ -217,26 +216,15 @@ def reader_patterns_for(
     return tuple(re.compile(rf"^{p}$") for p in (*programs, *shim_pats))
 
 
-def reader_patterns(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
-    """The FULL main/gather bash reader allowlist (every viewer + the non-adapter shims),
-    ANCHORED to `run_dir` + the defender corpus (#535). The kept gate API + the `policy_for`
-    lane: a thin full-set alias over `reader_patterns_for` so the canonical spelling has one
-    builder. Baked into `AgentPolicy.bash_allow` per run, so the reader lane
-    (`bash._decide_readers`) stays a uniform per-stage `bash_allow` match with no role branch."""
-    return reader_patterns_for(
-        run_dir, defender_dir, frozenset(READER_VIEWERS), frozenset(NON_ADAPTER_SHIMS),
-    )
-
-
 @lru_cache(maxsize=1)
 def reader_read_shapes(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
     """The read-tool FILENAME filter for a main/gather reader agent — the read-tool twin of
     the bash `cat` lane's file-operand grammar (`_file_operand`). `decide_read` `fullmatch`es
     a RESOLVED read path against this, so the read tool admits exactly the filename set `cat`
     does (#545 read↔bash parity): a run-dir path OR a tight corpus `.md`, minus the secret/
-    ground-truth denylist. ONE grammar source shared with `reader_patterns`' cat operand — no
-    second, drifting filename grammar. Threaded as a shape-builder on the reader
-    `AgentDefinition`s' `read_shapes`, compiled per-run by `compile_policy`.
+    ground-truth denylist. ONE grammar source shared with `reader_patterns_for`'s cat operand
+    (`_file_operand`) — no second, drifting filename grammar. Threaded as a shape-builder on the
+    reader `AgentDefinition`s' `read_shapes`, compiled per-run by `compile_policy`.
 
     The grammar anchors on the RESOLVED roots. `decide_read` matches `str(path.resolve())`
     (canonicalized — `..` and symlinks collapsed), so a pattern built from an UNRESOLVED

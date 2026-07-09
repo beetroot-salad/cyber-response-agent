@@ -9,8 +9,10 @@ port's load-bearing decisions:
 
 - write_allow (a flat defender/skills/**.md pattern) confines the corpus writers; the ``rm`` bash
   grant confines draft deletion — cross-surface parity, both lanes now confining ``..`` traversal.
-- ``LeadAuthorDeps.for_run`` binds the WORKTREE's defender_dir + write_allow (never the main
-  checkout) and cannot be born without a policy (safe-by-construction, #536).
+- ``bind(LEAD_AUTHOR_DEF, run, defender_dir=<wt>/defender)`` (the SINGLE seam since #551 — the
+  bespoke ``LeadAuthorDeps.for_run`` retired) threads the WORKTREE's defender_dir into both the
+  policy anchor + the deps field (never the main checkout — a PATHS tree is unbuildable), and the
+  deps cannot be born without a policy (safe-by-construction, #536).
 - a repo-relative file op resolves against the WORKTREE repo_root, not the process cwd (F2),
   without leaking the process cwd.
 - ``require_output=False`` lets a writer end with empty prose; the default (True) still
@@ -42,19 +44,39 @@ from defender.learning.core.config import (  # noqa: E402
     RunUnprocessable,
     StageAbort,
 )
-from defender.learning.leads.lead_author_engine import (  # noqa: E402  (the port target — missing until implemented)
+from defender.learning.leads.lead_author_engine import (  # noqa: E402
+    LEAD_AUTHOR_DEF,
     LeadAuthorDeps,
-    _lead_author_policy,
     _run_author_pydantic,
     run_author_stage,
 )
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline._pydantic_stage import run_stage  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _SKILLS_REL = "defender/skills"
+
+
+def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
+    """The lead-author deps via the SINGLE bind seam (#551 — replaces the retired
+    ``LeadAuthorDeps.for_run(run_dir, repo_root)``): bind threads the worktree tree
+    ``wt/defender`` into BOTH the policy anchor and the deps ``defender_dir`` field."""
+    deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender")
+    assert isinstance(deps, LeadAuthorDeps)
+    return deps
+
+
+def _lead_policy(skills_dir: Path) -> AgentPolicy:
+    """The lead-author policy anchored on ``skills_dir`` via bind (#551 — replaces the retired
+    ``_lead_author_policy(skills_dir)``). ``skills_dir.parent`` is a NON-PATHS worktree defender_dir
+    (LEAD_AUTHOR_DEF is ``requires_explicit_tree``, so a main-checkout tree is unbuildable — these
+    shape tests use a synthetic worktree; the rm matcher recognizes the repo-relative
+    ``defender/skills`` spelling regardless of the worktree location)."""
+    return bind(LEAD_AUTHOR_DEF, Path("/tmp/lead-run"), defender_dir=skills_dir.parent).policy
 
 
 def _replay(text: str, *, calls=()):
@@ -117,17 +139,18 @@ def _spawn(**over):
 
 
 # ===========================================================================
-# LeadAuthorDeps.for_run — worktree binding + safe-by-construction
+# bind(LEAD_AUTHOR_DEF, defender_dir=) — worktree binding + safe-by-construction
 # ===========================================================================
 
 def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
-    """for_run stamps the WORKTREE's defender_dir + write_allow, NOT PATHS.defender_dir (the
-    main checkout). Asserted through the real gates: with these deps, a read AND write of the
-    worktree skills tree is allowed. Guarded negatives prove the worktree binding is
-    load-bearing — the SAME op bound to the main checkout is denied (the ``_for_run``-reuse bug
-    would lock the agent out of the very tree it curates)."""
+    """bind stamps the WORKTREE's defender_dir + write_allow, NOT PATHS.defender_dir (the main
+    checkout). Asserted through the real gates: with these deps, a read AND write of the worktree
+    skills tree is allowed. Guarded negatives prove the worktree binding is load-bearing — the SAME
+    op bound to a DIFFERENT tree is denied, and calling the gate with a mismatched defender_dir (the
+    deps/policy split #551 forbids) denies the read (a stale-anchor bug would lock the agent out of
+    the very tree it curates)."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
-    deps = LeadAuthorDeps.for_run(rd, wt)
+    deps = _lead_deps(rd, wt)
     assert deps.defender_dir == wt / "defender"
     assert len(deps.policy.write_allow) == 1  # one flat skills-corpus pattern, anchored to the worktree
     assert deps.role is AgentRole.LEAD_AUTHOR
@@ -135,9 +158,10 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
     # positive: the worktree binding lets the agent write + read its own corpus
     assert permission.decide_write(skill, "body\n", policy=deps.policy).allow
     assert permission.decide_read(skill, run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
-    # guarded negatives: bound to the MAIN checkout instead, both ops fail
-    main_pol = _lead_author_policy(config.REPO_ROOT / "defender" / "skills")
-    assert not permission.decide_write(skill, "body\n", policy=main_pol).allow
+    # guarded negatives: a policy bound to a DIFFERENT worktree tree denies the write …
+    other_pol = _lead_deps(rd, tmp_path / "other").policy
+    assert not permission.decide_write(skill, "body\n", policy=other_pol).allow
+    # … and calling the gate with a mismatched defender_dir (the split) denies the read.
     assert not permission.decide_read(skill, run_dir=rd, defender_dir=config.REPO_ROOT / "defender", policy=deps.policy).allow
 
 
@@ -147,14 +171,14 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
     control: for_run supplies the lead-author policy (write_allow non-empty; adapters/raw off)."""
     with pytest.raises(TypeError):
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x", salt="s")
-    deps = LeadAuthorDeps.for_run(_run_dir(tmp_path), _worktree(tmp_path))
+    deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
     assert deps.policy.write_allow  # non-empty
     assert deps.policy.adapters is False
     assert deps.policy.raw_reads is False
 
 
 # ===========================================================================
-# _lead_author_policy — shape + the rm-of-drafts matcher (F3) + parity + asymmetry
+# the bound lead-author policy — shape + the rm-of-drafts matcher (F3) + asymmetry
 # ===========================================================================
 
 def test_lead_author_policy_shape():
@@ -162,7 +186,7 @@ def test_lead_author_policy_shape():
     discovery is driver-precomputed, no Glob/Grep), read_confine empty (reads under defender_dir
     stay allowed), every other capability bit off."""
     skills = Path("/wt/defender/skills")
-    pol = _lead_author_policy(skills)
+    pol = _lead_policy(skills)
     assert len(pol.write_allow) == 1
     # the one pattern admits a skills .md and denies a non-.md sibling (the corpus-code tightening)
     assert pol.write_allow[0].fullmatch(str(skills / "elastic" / "x.md"))
@@ -181,7 +205,7 @@ def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path
     the fixed SKILLS_REL, not skills_dir.relative_to(REPO_ROOT) (a tmp worktree is not under
     REPO_ROOT). The absolute <worktree>/defender/skills/... spelling is accepted too."""
     wt = _worktree(tmp_path)
-    pol = LeadAuthorDeps.for_run(_run_dir(tmp_path), wt).policy
+    pol = _lead_deps(_run_dir(tmp_path), wt).policy
     assert permission.decide_bash("rm defender/skills/elastic/_draft/x.md", policy=pol).allow
     assert permission.decide_bash(f"rm {wt}/defender/skills/elastic/_draft/x.md", policy=pol).allow
 
@@ -189,7 +213,7 @@ def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path
 def test_rm_outside_skills_denied():
     """rm of a path OUTSIDE defender/skills (lessons, an absolute system file) → denied: the
     skills prefix is baked into the anchored regex (operands are unconfined on the bash lane)."""
-    pol = _lead_author_policy(config.REPO_ROOT / "defender" / "skills")
+    pol = _lead_policy(Path("/tmp/lead-wt/defender/skills"))
     assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol).allow
     assert not permission.decide_bash("rm /etc/passwd", policy=pol).allow
 
@@ -197,7 +221,7 @@ def test_rm_outside_skills_denied():
 def test_rm_flags_and_multipath_denied():
     """F3: single-path rm only. ``rm -rf <skills>`` (a flag) and ``rm a b`` (multi-path) are
     DENIED — matching the old ``rm defender/skills/:*`` intent (one draft removed at a time)."""
-    pol = _lead_author_policy(config.REPO_ROOT / "defender" / "skills")
+    pol = _lead_policy(Path("/tmp/lead-wt/defender/skills"))
     assert not permission.decide_bash("rm -rf defender/skills/elastic", policy=pol).allow
     assert not permission.decide_bash("rm defender/skills/a.md defender/skills/b.md", policy=pol).allow
     # rejected: allow -f / multi-path because "it's all under skills" — the agent issues one rm
@@ -207,7 +231,7 @@ def test_rm_flags_and_multipath_denied():
 def test_rm_command_substitution_denied():
     """``rm $(...)`` is denied by _stage_unsafe (structural), independent of the operand — the
     gate never expands the substitution."""
-    pol = _lead_author_policy(config.REPO_ROOT / "defender" / "skills")
+    pol = _lead_policy(Path("/tmp/lead-wt/defender/skills"))
     assert not permission.decide_bash("rm $(echo defender/skills/x.md)", policy=pol).allow
 
 
@@ -218,7 +242,7 @@ def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
     controls: the SAME op to defender/skills is ALLOWED on both lanes (the mechanism fires, the
     boundary is real). A constraint on one surface but absent on its sibling is the fail-open."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
-    pol = LeadAuthorDeps.for_run(rd, wt).policy
+    pol = _lead_deps(rd, wt).policy
     (wt / "defender" / "lessons").mkdir(parents=True)
     skills_ok = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "y.md"
     lessons = wt / "defender" / "lessons" / "z.md"
@@ -239,7 +263,7 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     file OUTSIDE the worktree that the loop's git scope gate (worktree ``git status`` only) never
     sees. Positive controls: the in-scope ``_draft`` baseline both surfaces still accept."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
-    pol = LeadAuthorDeps.for_run(rd, wt).policy
+    pol = _lead_deps(rd, wt).policy
     escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
     assert not permission.decide_write(escape, "b\n", policy=pol).allow
     assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol).allow
@@ -263,7 +287,7 @@ def test_run_stage_require_output_matrix(tmp_path):
     DEFAULT is unchanged, so judge/actor/oracle/verify (which never pass the flag) still quarantine
     a content-less verdict — the new path is opt-in. Positive control: require_output=False with
     NON-empty output returns that text verbatim (the flag suppresses only the content-less guard)."""
-    deps = LeadAuthorDeps.for_run(_run_dir(tmp_path), _worktree(tmp_path))
+    deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
 
     def _go(require, text, tag):
         kw = {} if require is None else {"require_output": require}

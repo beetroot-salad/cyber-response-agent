@@ -19,7 +19,7 @@ Since #538 that tool-freeness is STRUCTURAL: ``VERIFY_DEF`` registers an empty `
 answer-key affordance the #534 review flagged; sharpest in the benign direction, where the recorded
 malicious call and the corrected benign target disagree, so a stray read CONTRADICTS the check). The
 no-toolset build closes it by construction rather than by prompt guarantee, and the request cap drops
-to 1 (no tool can be called). ``_VERIFY_POLICY`` stays deny-all as belt-and-suspenders.
+to 1 (no tool can be called). ``bind(VERIFY_DEF)`` compiles a deny-all policy as belt-and-suspenders.
 
 Unlike the pipeline stages (invoked in-process BY the orchestrator, which sources the metered key
 up front), the forward-check runs as a CLI ``python3`` SUBPROCESS spawned by the curator agent
@@ -53,10 +53,9 @@ from defender.learning.core.config import (
 from defender.learning.author.verify_forward.shared import parse_verdict
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ToolSet
+from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import AgentDeps
 
 # The forward-check is TOOL-FREE (#538): VERIFY_DEF registers an empty toolset, so no tool can be
@@ -81,41 +80,14 @@ class VerifierDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.VERIFIER
 
-    @classmethod
-    def for_run(cls, source_run_dir: Path) -> VerifierDeps:
-        """The forward-check's front door: its policy is a STATIC constant (``_VERIFY_POLICY``, no
-        per-check scope), so the factory takes only the run dir. Mirrors ``OracleDeps.for_run`` over
-        the base ``_for_run`` (#536's required-``policy`` contract — no inheritable MAIN default).
-        ``source_run_dir`` is the SOURCE run's dir; its trace / budget land beside the case being
-        regression-checked."""
-        return cls._for_run(source_run_dir, _VERIFY_POLICY)
-
-
-# The forward-check's declarative gate policy. Like the oracle's, it takes no per-check input, so it
-# is a module CONSTANT built once (not a function rebuilt per call). Deny-all: it predicts one
-# disposition from an all-inlined prompt — no ``bash_allow`` matchers, no adapters, no ``adapter |
-# defender-sql`` pipe, no ``gather_raw`` reads, no extra read roots. Every field is the deny/empty
-# default; they are named explicitly so the deny-all intent is legible (mirrors the actor/oracle
-# engines). Reads under ``defender_dir`` / the ``run_dir`` remain allowed by ``decide_read``'s
-# defaults; the verifier is PROMPTED not to issue one (all input inlined), but this is not gate-
-# enforced — and ``run_dir`` is the source run, whose ``source_refs.yaml`` holds the answer key. See
-# the module docstring.
-_VERIFY_POLICY = AgentPolicy(
-    bash_allow=(),
-    jq_operand_gated=False,
-    adapters=False,
-    adapter_sql_pipe=False,
-    raw_reads=False,
-    read_roots=(),
-    deny_reason=_VERIFY_DENY_REASON,
-)
-
 
 # The forward-check's AgentDefinition (#538): TOOL-FREE (``tools=ToolSet()`` — the build site
 # registers nothing, so there is no ``read_file`` to peek at the SOURCE run's ``source_refs.yaml``
 # answer key). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each check
 # re-binds its own per-call model/effort in ``build_stage_agent``. Collected into
-# ``runtime.agents.AGENTS``.
+# ``runtime.agents.AGENTS``; ``bind(VERIFY_DEF)`` compiles the deny-all policy over this empty
+# ``ToolSet`` (#551 — the standalone ``_VERIFY_POLICY`` constant + ``VerifierDeps.for_run`` front
+# door retired, so there is no second policy source to keep honest by a parity test).
 VERIFY_DEF = AgentDefinition(
     role=AgentRole.VERIFIER,
     model=lambda: VERIFIER_MODEL,
@@ -139,15 +111,16 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
 ) -> str:
     """Run one forward-check in-process and return the model's final text VERBATIM.
 
-    Builds the forward-check's deny-all ``VerifierDeps`` (via ``VerifierDeps.for_run``, carrying the
-    module-constant ``_VERIFY_POLICY``) and delegates to the shared ``run_stage`` (agent build +
-    one-shot drive + error mapping + trace logging). The caller (``forward.py`` / ``actor.py``)
+    Builds the forward-check's deny-all ``VerifierDeps`` via the single ``bind`` seam (#551 —
+    ``compile_policy`` over VERIFY_DEF's empty ``ToolSet`` emits the deny-all policy) and delegates
+    to the shared ``run_stage`` (agent build + one-shot drive + error mapping + trace logging). The
+    caller (``forward.py`` / ``actor.py``)
     parses the returned text with ``shared.parse_verdict``. A timeout / usage-limit / model error →
     ``RunUnprocessable`` (which the CLI ``main`` surfaces as a non-zero exit, reported by ``batch.py``
     as ERROR — the same disposition the old ``claude -p`` non-zero exit gave). ``source_run_dir`` is
     where the RequestLogger trace lands; distinct ``trace_name``s per lesson keep concurrent batch
     children from racing on one file."""
-    deps = VerifierDeps.for_run(source_run_dir)
+    deps = bind(VERIFY_DEF, source_run_dir)
     return run_stage(
         stage="verify_forward",
         prompt_path=prompt_path, model=model, effort=effort,

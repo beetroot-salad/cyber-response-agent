@@ -353,13 +353,17 @@ def test_gather_stream_plumbing_anchored(tmp_path):
 
 
 def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
-    """the confine field is inert for main: decide_read (unchanged by #535, which only touches the
-    bash lane) still allows the corpus, denies outside, and clamps gather_raw."""
+    """the confine field is inert for main: decide_read still allows the corpus, denies outside, and
+    clamps gather_raw. The corpus-readable probe is a tight-corpus `.md` (`skills/**.md`) — since
+    #551 `policy_for('main')` is a `bind(MAIN_DEF)` alias carrying the read↔bash `read_shapes`
+    filter, so a bare `SKILL.md` directly under defender_dir (outside lessons/skills/examples) is
+    now denied on the read tool exactly as the bash cat lane denies it (#545/#546 parity)."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l").mkdir(parents=True)
     dfn = tmp_path / "defender"
-    (dfn / "skills").mkdir(parents=True)
+    (dfn / "skills" / "elastic").mkdir(parents=True)
     main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
-    assert permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert permission.decide_read(dfn / "skills" / "elastic" / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert not permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow  # non-tight corpus → denied (read_shapes)
     assert not permission.decide_read(Path("/etc/passwd"), run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(run / "gather_raw" / "l" / "0.json", run_dir=run, defender_dir=dfn, policy=main).allow

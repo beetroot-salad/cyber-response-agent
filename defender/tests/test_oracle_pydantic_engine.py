@@ -24,10 +24,14 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
-from defender.learning.pipeline import oracle_engine  # noqa: E402
 from defender.learning.pipeline.oracle import run as oracle_run  # noqa: E402
-from defender.learning.pipeline.oracle_engine import OracleDeps, _run_oracle_pydantic  # noqa: E402
+from defender.learning.pipeline.oracle_engine import (  # noqa: E402
+    ORACLE_DEF,
+    OracleDeps,
+    _run_oracle_pydantic,
+)
 from defender.runtime import observe, permission  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
@@ -91,7 +95,9 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
 # --- the deny-all policy through the full gate (the oracle runs NO tools) --------------
 
 def test_oracle_policy_denies_everything():
-    pol = oracle_engine._ORACLE_POLICY
+    # #551: the standalone `_ORACLE_POLICY` constant retired; `bind(ORACLE_DEF)` compiles the
+    # same deny-all policy over ORACLE_DEF's empty ToolSet.
+    pol = bind(ORACLE_DEF, Path("/tmp/oracle-run")).policy
     assert pol.adapters is False
     assert pol.adapter_sql_pipe is False
     assert pol.raw_reads is False
@@ -110,9 +116,9 @@ def test_oracle_policy_denies_everything():
 # --- read scope: under defender_dir / run_dir defaults, with NO read_roots -------------
 
 def test_oracle_reads_under_defender_dir_without_read_roots(tmp_path):
-    pol = oracle_engine._ORACLE_POLICY
-    assert pol.read_roots == ()
     lrd = _lrd(tmp_path)
+    pol = bind(ORACLE_DEF, lrd).policy   # #551: deny-all via bind, not the retired _ORACLE_POLICY
+    assert pol.read_roots == ()
     # a file under defender_dir is allowed purely by the defender-corpus root (no read_roots)
     allowed = permission.decide_read(
         _DEFENDER_DIR / "SKILL.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol

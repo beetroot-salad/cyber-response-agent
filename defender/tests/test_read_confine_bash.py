@@ -368,15 +368,19 @@ def test_parity_ssh_dir_component(env):
     assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow  # positive control
 
 
-def test_parity_corpus_over_strictness_is_safe_direction(env):
-    """Corpus over-strictness (SF3): bash ⊆ read. A non-listed corpus file ({DFN}/docs/x.md) that
-    decide_read ALLOWS may be DENIED on the bash lane — stricter is safe (no bypass). The SECURITY
-    direction (bash denies everything read denies) is the invariant; this asymmetry is the accepted
-    fork resolution."""
-    # rejected: require exact bash==read parity (re-widens the operand grammar to all of defender_dir)
+def test_parity_corpus_non_listed_denied_on_both_lanes(env):
+    """Read↔bash PARITY on a non-listed corpus file (#545/#546, propagated to `policy_for` by
+    #551): a corpus file NOT under the tight lessons/skills/examples/**.md grammar
+    ({DFN}/docs/x.md) is DENIED on BOTH the read tool (the `read_shapes` filename filter
+    `policy_for` now carries as a `bind` alias) AND the bash cat lane (the operand grammar). The
+    pre-#546 'read broad, bash tight' asymmetry is CLOSED — the two surfaces now agree. Positive
+    control: a tight-corpus lessons/**.md is allowed on both."""
     docs = f"{env.dfn}/docs/learning-loop.md"
-    assert _read(env, docs, "gather").allow          # read_file allows all of defender_dir
-    assert not _bash(env, f"cat {docs}", "gather").allow  # bash is tighter (agent uses read_file)
+    assert not _read(env, docs, "gather").allow           # read tool: read_shapes denies non-tight corpus
+    assert not _bash(env, f"cat {docs}", "gather").allow  # bash cat lane denies it too — parity
+    ok = f"{env.dfn}/lessons/notes.md"
+    assert _read(env, ok, "gather").allow                 # positive control (tight corpus .md, read admits)
+    assert _bash(env, f"cat {ok}", "gather").allow        # … and the bash cat lane admits it too
 
 
 def test_corpus_md_named_secret_denied(env):

@@ -17,7 +17,7 @@ user prompt. Since #538 that tool-freeness is STRUCTURAL: its ``ORACLE_DEF`` reg
 ``ToolSet()`` (no ``read_file``, no ``bash``), so the pure per-lead projector has no tool to peek at
 answer-bearing artifacts with — the barrier is closed by construction, not by the model choosing
 never to call one — and the request cap drops to 1 (no tool can be called, so a clean projection is
-exactly one model request). Its ``_ORACLE_POLICY`` stays deny-all as belt-and-suspenders.
+exactly one model request). ``bind(ORACLE_DEF)`` compiles a deny-all policy as belt-and-suspenders.
 
 Imported LAZILY (pulls the pydantic-ai graph via ``_pydantic_stage``) — only when the oracle
 actually runs (``core/subagents.ClaudePrintSubagents.oracle``), never at loop import.
@@ -31,10 +31,9 @@ from typing import ClassVar
 from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ToolSet
+from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy
 from defender.runtime.tools import AgentDeps
 
 # The oracle is TOOL-FREE (#538): ORACLE_DEF registers an empty toolset, so no tool can be called
@@ -58,38 +57,14 @@ class OracleDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.ORACLE
 
-    @classmethod
-    def for_run(cls, run_dir: Path) -> OracleDeps:
-        """The oracle's front door: its policy is a STATIC constant (``_ORACLE_POLICY``, no
-        per-lead scope), so the factory takes only ``run_dir``. Mirrors ``JudgeDeps``/``ActorDeps``
-        ``for_scope`` over the base ``_for_run`` — the required policy is the backstop, this is the
-        front door (and the one owner of the identity wiring across the three in-process stages)."""
-        return cls._for_run(run_dir, _ORACLE_POLICY)
-
-
-# The oracle's declarative gate policy. Unlike the actor/judge policies (parameterized per leg by
-# their pinned scripts / read roots), the oracle's is a CONSTANT — it takes no per-lead input, so
-# it is built once here rather than rebuilt on every fan-out call. It locks the tool surface down:
-# no adapters, no ``adapter | defender-sql`` pipe, no ``gather_raw`` raw reads, no extra read
-# roots, and an EMPTY ``bash_allow`` (no bash reader surface at all — #522). (Reads under
-# ``defender_dir`` / the learning ``run_dir`` stay allowed by ``decide_read``'s defaults, but the
-# oracle never issues one — its whole input is inlined.)
-_ORACLE_POLICY = AgentPolicy(
-    bash_allow=(),
-    jq_operand_gated=False,
-    adapters=False,
-    adapter_sql_pipe=False,
-    raw_reads=False,
-    read_roots=(),
-    deny_reason=_ORACLE_DENY_REASON,
-)
-
 
 # The oracle's AgentDefinition (#538): TOOL-FREE (``tools=ToolSet()`` — the build site registers
 # nothing, closing the ``read_file`` answer-key affordance structurally). ``model``/``effort`` are the
 # declarative stage defaults (glm-5.2, reasoning off); each fan-out call re-binds its own per-lead
 # model/effort in ``build_stage_agent``. Collected into ``runtime.agents.AGENTS`` and used by the
-# stage harness to register the empty toolset and by ``bind`` for the deny-all policy.
+# stage harness to register the empty toolset and by ``bind`` for the deny-all policy (#551 — the
+# standalone ``_ORACLE_POLICY`` constant retired; ``compile_policy`` over this empty ``ToolSet``
+# emits the same deny-all, so there is no second policy source to keep honest by a parity test).
 ORACLE_DEF = AgentDefinition(
     role=AgentRole.ORACLE,
     model=lambda: ORACLE_MODEL,
@@ -111,13 +86,14 @@ def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature 
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The PydanticAI ``oracle_fn`` — drops into ``invoke_oracle_lead`` as ``oracle_fn=``. Builds
-    the oracle's ``OracleDeps`` (via ``OracleDeps.for_run``, carrying the locked-down
-    ``_ORACLE_POLICY``) and delegates to the shared ``run_stage`` (agent build + one-shot drive +
-    error mapping + per-lead trace logging). Returns the model's final YAML text VERBATIM
-    (``sample.parse_lead_events`` parses it downstream). A timeout / usage-limit / model error →
-    ``RunUnprocessable`` (quarantines the run — the same disposition a ``claude -p`` non-zero exit
-    gave, which the per-lead fan-out surfaces as a whole-direction failure)."""
-    deps = OracleDeps.for_run(learning_run_dir)
+    the oracle's ``OracleDeps`` via the single ``bind`` seam (#551 — ``compile_policy`` over
+    ORACLE_DEF's empty ``ToolSet`` emits the deny-all policy) and delegates to the shared
+    ``run_stage`` (agent build + one-shot drive + error mapping + per-lead trace logging). Returns
+    the model's final YAML text VERBATIM (``sample.parse_lead_events`` parses it downstream). A
+    timeout / usage-limit / model error → ``RunUnprocessable`` (quarantines the run — the same
+    disposition a ``claude -p`` non-zero exit gave, which the per-lead fan-out surfaces as a
+    whole-direction failure)."""
+    deps = bind(ORACLE_DEF, learning_run_dir)
     return run_stage(
         stage="oracle",
         prompt_path=prompt_path, model=model, effort=effort,

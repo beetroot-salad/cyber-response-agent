@@ -254,13 +254,22 @@ def _read_roots(tmp_path):
 
 
 def test_read_allows_in_root_corpus_and_run(tmp_path):
-    # The reads past runs actually make: alert/investigation/run artifacts under the
-    # run dir; SKILLs/lessons/scripts/SKILL.md under the defender corpus.
+    # The reads past runs actually make: alert/investigation/run artifacts under the run dir;
+    # tight-corpus `.md` under the defender corpus. Built with a MAIN policy ANCHORED on these
+    # roots (since #551 `policy_for('main')` is a `bind` alias carrying the read↔bash `read_shapes`
+    # filter, so the policy must anchor on the SAME roots the gate is called with — a mismatched
+    # anchor would deny every read). A run-dir file is admitted via the run-dir branch regardless
+    # of name; a corpus read must be a tight `.md` under lessons/skills/examples.
     run, dfn = _read_roots(tmp_path)
+    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
-              dfn / "SKILL.md", dfn / "skills" / "elastic" / "SKILL.md"):
+              dfn / "skills" / "elastic" / "SKILL.md"):
         assert permission.decide_read(
-            p, run_dir=run, defender_dir=dfn, policy=MAIN).allow, p
+            p, run_dir=run, defender_dir=dfn, policy=main).allow, p
+    # a bare SKILL.md directly under defender_dir (outside lessons/skills/examples) is NOT a tight
+    # corpus `.md`, so the reader read_shapes filter denies it — parity with the bash cat lane.
+    assert not permission.decide_read(
+        dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
 
 
 @pytest.mark.parametrize("path", [
@@ -302,13 +311,16 @@ def test_read_ssh_dir_inside_root_denied(tmp_path):
 
 
 def test_read_main_loop_gather_raw_clamped_gather_allowed(tmp_path):
-    # gather_raw is inside the run dir (allowlist-permitted), but the main loop is
-    # clamped off the raw payload (it consumes the summary); the gather subagent
-    # reads its own gather_raw to verify its result.
+    # gather_raw is inside the run dir (allowlist-permitted + admitted by the run-dir branch of
+    # read_shapes), but the main loop is clamped off the raw payload (it consumes the summary); the
+    # gather subagent reads its own gather_raw to verify its result. Policies anchored on THESE
+    # roots (policy_for is a bind alias carrying root-anchored read_shapes since #551).
     run, dfn = _read_roots(tmp_path)
+    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    gather = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
     raw = run / "gather_raw" / "l-001" / "0.json"
-    assert not permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=MAIN).allow
-    assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=GATHER).allow
+    assert not permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=main).allow
+    assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=gather).allow
 
 
 def test_alert_is_untrusted():

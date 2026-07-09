@@ -320,21 +320,21 @@ async def _run_gather(
     # per-lead cap would not bound gather's own requests. Cost still folds in — the
     # request log (observe.write_trace) sums every instance's usage independently.
     gagent = gather_factory(f"gather:{lead_id}")
-    # Gather deps via the single bind() seam (#545): compile_policy reproduces the authored
+    # Gather deps via the single bind() seam (#545/#551): compile_policy reproduces the authored
     # gather policy field-for-field (the #535-anchored reader lane + raw_reads for its own
-    # gather_raw/**) AND adds the read↔bash filename filter, and carries the PARENT run's salt
-    # so the subagent's read tags + return wrapper ride the run's ONE untrusted-data token (a
-    # fresh uuid4 would tag the gather return with a salt the main loop does not distrust). bind
-    # is per-run (lead_id unset), so re-stamp this dispatch's lead_id + the parent's identity
-    # (run_id/defender_dir) that bind derives from run_dir / defaults to PATHS. Imported lazily —
-    # GATHER_DEF lives in driver, whose import path funnels back through this module.
+    # gather_raw/**) AND adds the read↔bash filename filter, carries the PARENT run's salt so the
+    # subagent's read tags + return wrapper ride the run's ONE untrusted-data token (a fresh uuid4
+    # would tag the gather return with a salt the main loop does not distrust), AND is THREADED the
+    # parent's defender_dir so the policy anchor and deps.defender_dir field are ONE tree (#551 —
+    # no restamp split: the pre-#551 `replace(defender_dir=…)` left the policy anchored on PATHS
+    # while the field carried the parent tree, bricking any worktree run). bind is per-run
+    # (lead_id unset), so only the dispatch's lead_id + the parent's run_id (a distinct replay
+    # label) are re-stamped. Imported lazily — GATHER_DEF lives in driver.
     from defender.runtime.agent_definition import bind
     from defender.runtime.driver import GATHER_DEF
-    gbase = bind(GATHER_DEF, deps.run_dir, salt=deps.salt)
+    gbase = bind(GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir)
     assert isinstance(gbase, GatherDeps)  # bind(GATHER_DEF) → GatherDeps (_deps_class); narrows for lead_id
-    gdeps = replace(
-        gbase, run_id=deps.run_id, defender_dir=deps.defender_dir, lead_id=lead_id,
-    )
+    gdeps = replace(gbase, run_id=deps.run_id, lead_id=lead_id)
     prompt = _gather_prompt(deps, request, catalog)
     try:
         result = await gagent.run(

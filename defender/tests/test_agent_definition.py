@@ -70,21 +70,15 @@ from defender.learning.core import config  # noqa: E402
 from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VERIFY_REQUEST_LIMIT,
     VerifierDeps,
-    _VERIFY_POLICY,
 )
-from defender.learning.pipeline.actor_engine import ActorDeps, _actor_policy  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import (  # noqa: E402
-    JudgeDeps,
-    _judge_policy,
-)
+from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
+from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
 from defender.learning.pipeline.oracle_engine import (  # noqa: E402
     ORACLE_REQUEST_LIMIT,
     OracleDeps,
-    _ORACLE_POLICY,
 )
 from defender.runtime import driver, observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.permission.policies._common import reader_patterns  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps  # noqa: E402
 
@@ -106,7 +100,6 @@ from defender.runtime.agents import (  # noqa: E402
     ACTOR_DEF,
     AGENTS,
     GATHER_DEF,
-    JUDGE_DEF,
     MAIN_DEF,
     ORACLE_DEF,
     VERIFY_DEF,
@@ -194,29 +187,16 @@ def _patterns(policy) -> list[str]:
     return [p.pattern for p in policy.bash_allow]
 
 
-def _policy_fields(p) -> tuple:
-    """Stable, cache-independent projection of an AgentPolicy for field-for-field parity
-    (bash_allow / write_allow compiled Patterns → their source strings). INCLUDES write_allow
-    (#545 footgun B) so a write-scope divergence is caught; the additive read_shapes is the
-    intended #545 delta, tested separately, so it stays out of this parity projection."""
-    return (
-        tuple(pat.pattern for pat in p.bash_allow),
-        p.jq_operand_gated, p.adapters, p.adapter_sql_pipe,
-        p.raw_reads, tuple(p.read_roots), tuple(p.read_confine),
-        tuple(pat.pattern for pat in p.write_allow), p.deny_reason,
-    )
-
-
 # RunScope() is frozen, so one shared module-level singleton is a safe default anchored
 # in the signature (satisfies both the unanchored-default and the B008 gates).
 _DEFAULT_SCOPE = RunScope()
 
 
 def _compile(defn, run_dir, scope=_DEFAULT_SCOPE):
-    """Drive the real resolve_roots → compile_policy composition (the design snippet:
-    `compile_policy(defn.tools, defn.read_shapes, roots, defn.deny_reason)`)."""
+    """Drive the real resolve_roots → compile_policy composition (#551 — compile_policy grew a
+    `write_shapes` positional between `read_shapes` and `roots`, the write twin of read_shapes)."""
     roots = resolve_roots(run_dir, defn.corpus_dirs, scope)
-    return compile_policy(defn.tools, defn.read_shapes, roots, defn.deny_reason)
+    return compile_policy(defn.tools, defn.read_shapes, defn.write_shapes, roots, defn.deny_reason)
 
 
 # ============================================================================
@@ -286,32 +266,6 @@ def test_read_shapes_field():
 # #0 return contract — bind dispatches on defn.role to the AgentDeps subtype
 # ============================================================================
 
-def test_bind_returns_role_subtype(tmp_path):
-    """bind(defn, run_dir, scope=RunScope()) returns the AgentDeps subtype for defn.role
-    (main->AgentDeps, gather->GatherDeps, judge->JudgeDeps, actor->ActorDeps,
-    oracle->OracleDeps, verify->VerifierDeps), each with defender_dir==PATHS.defender_dir,
-    run_id==run_dir.name, a fresh 32-hex salt, and policy==compile_policy(...)."""
-    main = bind(MAIN_DEF, tmp_path)
-    assert type(main) is AgentDeps            # bare base for MAIN (not a subtype)
-    assert main.role is AgentRole.MAIN
-    assert isinstance(bind(GATHER_DEF, tmp_path), GatherDeps)
-    assert bind(GATHER_DEF, tmp_path).role is AgentRole.GATHER
-    judge = bind(JUDGE_DEF, tmp_path, scope=RunScope(add_dirs=(tmp_path / "cmp",)))
-    assert isinstance(judge, JudgeDeps)
-    assert judge.role is AgentRole.JUDGE
-    actor = bind(ACTOR_DEF, tmp_path, scope=RunScope(scripts=(_ENV_RETRIEVE,), read_confine=(_ENV_DIR,)))
-    assert isinstance(actor, ActorDeps)
-    assert actor.role is AgentRole.ACTOR
-    assert isinstance(bind(ORACLE_DEF, tmp_path), OracleDeps)
-    assert isinstance(bind(VERIFY_DEF, tmp_path), VerifierDeps)
-    # shared identity + policy contract (checked on MAIN)
-    assert main.defender_dir == PATHS.defender_dir
-    assert main.run_id == tmp_path.name
-    assert len(main.salt) == 32               # a fresh uuid4 hex
-    assert all(c in "0123456789abcdef" for c in main.salt)
-    assert _policy_fields(main.policy) == _policy_fields(_compile(MAIN_DEF, tmp_path))
-
-
 def test_bind_gather_isinstance_preserved(tmp_path):
     """bind(GATHER_DEF, run_dir) returns an object for which isinstance(x, GatherDeps) is
     True and x.role is AgentRole.GATHER, so the adapter-capture narrow at tools.py:195
@@ -339,11 +293,12 @@ def test_bind_gather_lead_id_channel(tmp_path):
     params = set(inspect.signature(bind).parameters)
     assert "lead_id" not in params
     assert "query_id" not in params
-    # #545 supersedes the #538 step-one 3-param assumption: bind gains the `salt` (decision 1a,
-    # the carried untrusted-data trust token) + `repo_root` (decision 2, the lead-author
-    # worktree) seams. It still carries NO per-dispatch lead_id/query_id — those stay per-run-vs-
-    # per-dispatch separated, stamped by the wrapper post-bind.
-    assert params == {"defn", "run_dir", "scope", "salt", "repo_root"}
+    # #551 supersedes the #545 `repo_root` seam: bind carries the `salt` (decision 1a, the carried
+    # untrusted-data trust token) + `defender_dir` (the unified tree the gate anchors on — the
+    # lead-author worktree threads through it, replacing the old `repo_root` kwarg). It still
+    # carries NO per-dispatch lead_id/query_id — those stay per-run-vs-per-dispatch separated,
+    # stamped by the wrapper post-bind.
+    assert params == {"defn", "run_dir", "scope", "salt", "defender_dir"}
     # bind itself leaves the per-dispatch lead_id unset; the wrapper stamps it post-bind.
     deps = bind(GATHER_DEF, tmp_path)
     assert isinstance(deps, GatherDeps)
@@ -480,95 +435,6 @@ def test_oracle_no_escape_hatch(logger, tmp_path):
 # compile_policy — step-one characterization (decide_bash/decide_read UNCHANGED)
 # ============================================================================
 
-def test_compile_policy_oracle_verify_denyall(tmp_path):
-    """compile_policy(ToolSet(), (), roots, deny_reason) for oracle/verify projects a deny-all
-    AgentPolicy: bash_allow==(), all capability bools False, read_roots==(), read_confine==(),
-    deny_reason set — field-for-field equal to today's _ORACLE_POLICY / _VERIFY_POLICY."""
-    for defn, authored in ((ORACLE_DEF, _ORACLE_POLICY), (VERIFY_DEF, _VERIFY_POLICY)):
-        pol = _compile(defn, tmp_path)
-        assert pol.bash_allow == ()
-        assert pol.jq_operand_gated is False
-        assert pol.adapters is False
-        assert pol.adapter_sql_pipe is False
-        assert pol.raw_reads is False
-        assert pol.read_roots == ()
-        assert pol.read_confine == ()
-        assert pol.deny_reason                                   # a real deny message
-        assert _policy_fields(pol) == _policy_fields(authored)   # equal to today's deny-all
-
-
-def test_compile_policy_main(tmp_path):
-    """STEP-ONE CHARACTERIZATION ANCHOR: compile_policy(main.tools, …, roots) reproduces
-    today's main policy — [p.pattern for p in bash_allow] == the reader_patterns(run,dfn)
-    strings; adapters/adapter_sql_pipe/raw_reads/jq_operand_gated all False; read_roots==()
-    (step one — the bash lane confines via the anchored allowlist, decide_read stays broad)."""
-    pol = _compile(MAIN_DEF, tmp_path)
-    expected = reader_patterns(tmp_path, PATHS.defender_dir)
-    assert _patterns(pol) == [p.pattern for p in expected]
-    assert pol.adapters is False
-    assert pol.adapter_sql_pipe is False
-    assert pol.raw_reads is False
-    assert pol.jq_operand_gated is False
-    assert pol.read_roots == ()   # step-one
-    # full field-for-field parity against the authored per-run main policy
-    authored = permission.policy_for("main", run_dir=tmp_path, defender_dir=PATHS.defender_dir)
-    assert _policy_fields(pol) == _policy_fields(authored)
-
-
-def test_compile_policy_gather(tmp_path):
-    """compile_policy(gather.tools=ToolSet(read=True, bash=BashGrammar(adapters=True,
-    adapter_sql_pipe=True))) reproduces today's gather policy: bash_allow patterns ==
-    reader_patterns(run,dfn); adapters==True, adapter_sql_pipe==True, raw_reads==True,
-    read_roots==() (step one)."""
-    pol = _compile(GATHER_DEF, tmp_path)
-    expected = reader_patterns(tmp_path, PATHS.defender_dir)
-    assert _patterns(pol) == [p.pattern for p in expected]
-    assert pol.adapters is True
-    assert pol.adapter_sql_pipe is True
-    assert pol.raw_reads is True
-    assert pol.read_roots == ()   # step-one
-    authored = permission.policy_for("gather", run_dir=tmp_path, defender_dir=PATHS.defender_dir)
-    assert _policy_fields(pol) == _policy_fields(authored)
-
-
-def test_compile_policy_judge(tmp_path):
-    """compile_policy(judge.tools=ToolSet(read=True, bash=BashGrammar(jq_operand_gated=True)),
-    roots carrying scope.add_dirs) reproduces _judge_policy: jq_operand_gated==True,
-    raw_reads==True, read_confine==(), read_roots==the scope add-dirs, adapters==False,
-    adapter_sql_pipe==False, and '^jq(?: .*)?$' is among the bash_allow patterns."""
-    cmp1, cmp2 = tmp_path / "cmp", tmp_path / "raw"
-    pol = _compile(JUDGE_DEF, tmp_path, RunScope(add_dirs=(cmp1, cmp2)))
-    assert pol.jq_operand_gated is True
-    assert pol.raw_reads is True
-    assert pol.read_confine == ()
-    assert pol.read_roots == (cmp1, cmp2)
-    assert pol.adapters is False
-    assert pol.adapter_sql_pipe is False
-    assert "^jq(?: .*)?$" in _patterns(pol)
-    # parity with the established builder for the same roots (no ticket = adversarial leg)
-    authored = _judge_policy(read_roots=(cmp1, cmp2), ticket_cli=None)
-    assert _policy_fields(pol) == _policy_fields(authored)
-
-
-def test_compile_policy_actor(tmp_path):
-    """compile_policy(actor.tools=ToolSet(read=True, bash=BashGrammar()), scope=<scripts,
-    confine>) reproduces _actor_policy: bash_allow == one anchored 'python3 <script> …'
-    pattern per pinned script, raw_reads==False, read_confine==the per-leg lesson dirs,
-    adapters==False, read_roots==()."""
-    scripts = (_ENV_RETRIEVE, _ACTOR_INDEX)
-    confine = (_ACTOR_DIR, _ENV_DIR)
-    pol = _compile(ACTOR_DEF, tmp_path, RunScope(scripts=scripts, read_confine=confine))
-    assert pol.raw_reads is False
-    assert pol.read_confine == confine
-    assert len(pol.bash_allow) == len(scripts)      # one anchored pattern per pinned script
-    assert pol.adapters is False
-    assert pol.read_roots == ()
-    for pat in _patterns(pol):
-        assert "python3" in pat                     # each is a python3 <script> matcher
-    authored = _actor_policy(scripts, read_confine=confine)
-    assert _policy_fields(pol) == _policy_fields(authored)
-
-
 def test_compile_policy_projects_only_toolset_bits(tmp_path):
     """SAFE-BY-CONSTRUCTION: compile_policy emits no capability the ToolSet did not declare.
     ToolSet(read=True, bash=None) -> bash_allow==() and adapters==False; a bit is set only
@@ -587,17 +453,16 @@ def test_compile_policy_projects_only_toolset_bits(tmp_path):
     assert with_adapters.adapters is True
 
 
-def test_gate_bash_parity_read_tightened(tmp_path):
-    """#545 supersedes the #538 step-one 'gate unchanged' anchor: the BASH lane is still
-    field-for-field equal between bind(MAIN).policy and the authored policy_for('main') (the
-    reroute preserves it), but the READ lane is DELIBERATELY tightened — bind ships the
-    read_shapes filename filter (read↔bash parity) while policy_for stays the broad legacy API.
-    Verified through the REAL gate; the tight read behaviour itself is owned by the
-    test_read_shapes_* / read_gate_bash_lane_parity demands (test_bind_wiring_545.py)."""
+def test_gate_bash_parity_read_convergent(tmp_path):
+    """#551: policy_for is now a bind ALIAS (no second policy source), so bind(MAIN).policy and
+    policy_for('main') AGREE on every probe — BASH and READ alike, including the read_shapes
+    filename filter policy_for used to lack. Verified through the REAL gate. (The pre-#551 read
+    DIVERGENCE — bind tight, policy_for broad — is gone; the tight read behaviour itself is owned
+    by the r3_* / d5_policy_for_is_bind_alias demands in test_bind_sole_seam_551.py.)"""
     dfn = PATHS.defender_dir
     bound = bind(MAIN_DEF, tmp_path).policy
     authored = permission.policy_for("main", run_dir=tmp_path, defender_dir=dfn)
-    # BASH: unchanged by the reroute — bind reproduces policy_for's allowlist exactly.
+    # BASH: bind reproduces policy_for's allowlist exactly (they are the same policy now).
     for cmd in (
         f"cat {tmp_path}/investigation.md",       # anchored viewer under run_dir
         "defender-elastic query x --raw",         # a data-source adapter (main may not)
@@ -607,19 +472,19 @@ def test_gate_bash_parity_read_tightened(tmp_path):
             permission.decide_bash(cmd, policy=bound, run_dir=tmp_path, defender_dir=dfn).allow
             == permission.decide_bash(cmd, policy=authored, run_dir=tmp_path, defender_dir=dfn).allow
         )
-    # READ: the run-dir + out-of-roots probes still agree (read_shapes admits the run-dir branch;
-    # both deny outside the roots) …
+    # READ: the run-dir + out-of-roots probes agree (read_shapes admits the run-dir branch; both
+    # deny outside the roots) …
     for p in (tmp_path / "alert.json", tmp_path.parent / "outside.txt"):
         assert (
             permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
             == permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
         )
-    # … but a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
-    # defender_dir, outside lessons/skills/examples) is where the read gates DIVERGE: bind's
-    # read_shapes filter DENIES it (parity with the bash cat lane), the broad policy_for ALLOWS.
+    # … and so does a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
+    # defender_dir, outside lessons/skills/examples): the read_shapes filter now on BOTH (policy_for
+    # carries it as a bind alias) DENIES it, in parity with the bash cat lane. No divergence.
     skill_md = dfn / "SKILL.md"
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
-    assert permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
+    assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
 
 
 # ============================================================================
@@ -634,9 +499,9 @@ def test_resolve_roots_per_run_no_bleed(tmp_path):
     run_a, run_b = tmp_path / "runA", tmp_path / "runB"
     run_a.mkdir()
     run_b.mkdir()
-    pa = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes,
+    pa = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes, MAIN_DEF.write_shapes,
                         resolve_roots(run_a, MAIN_DEF.corpus_dirs, RunScope()), MAIN_DEF.deny_reason)
-    pb = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes,
+    pb = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes, MAIN_DEF.write_shapes,
                         resolve_roots(run_b, MAIN_DEF.corpus_dirs, RunScope()), MAIN_DEF.deny_reason)
     na, nb = re.escape(str(run_a)), re.escape(str(run_b))
     pats_a, pats_b = _patterns(pa), _patterns(pb)
@@ -873,19 +738,6 @@ def test_agentspec_removed_migrated():
         if needle in py.read_text(encoding="utf-8", errors="ignore"):
             hits.append(str(py))
     assert hits == [], f"residual AgentSpec construction sites: {hits}"
-
-
-def test_factories_replaced_by_bind(tmp_path):
-    """The six per-agent policy factories + for_scope/for_run/policy_for are replaced by bind:
-    bind(AGENTS[role], run_dir) produces deps whose policy equals today's factory output
-    (main/gather via policy_for), and every deps-construction site obtains an equivalent
-    AgentDeps subtype via bind."""
-    for role_name, defn in (("main", MAIN_DEF), ("gather", GATHER_DEF)):
-        bound = bind(defn, tmp_path).policy
-        authored = permission.policy_for(role_name, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
-        assert _policy_fields(bound) == _policy_fields(authored)
-    # a current deps-construction site (gather dispatch) obtains its subtype via bind
-    assert isinstance(bind(GATHER_DEF, tmp_path), GatherDeps)
 
 
 def test_main_keeps_tools(logger):

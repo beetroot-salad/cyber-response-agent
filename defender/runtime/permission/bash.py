@@ -16,7 +16,7 @@ grammar (`jq "$(cmd)"` matches `^jq "[^"]*"$` yet expands under a shell), wherea
 the tokens are already normalized and `shell=False` keeps the args inert. Since #535
 the main/gather patterns also ANCHOR their operands: a viewer's file/dir operand must
 textually sit under `{run_dir}` or a tight corpus `.md`, and a `..` segment is rejected
-literally (built by `policies._common.reader_patterns` from the run's roots — the bash
+literally (built by `policies._common.reader_patterns_for` from the run's roots — the bash
 lane does no `resolve()`, so the symlink residual is closed by the no-symlink-writer
 invariant, not the regex). The judge keeps the complementary `resolve()`-based `jq`
 file-operand gate (`jq_operand_gated` → `_jq_reads_within_roots`) because its `jq`

@@ -21,7 +21,13 @@ from typing import ClassVar
 from defender.learning.core.config import ACTOR_EFFORT, ACTOR_MODEL, REPO_ROOT
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
+from defender.runtime.agent_definition import (
+    AgentDefinition,
+    BashGrammar,
+    RunScope,
+    ToolSet,
+    bind,
+)
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
@@ -71,13 +77,6 @@ class ActorDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.ACTOR
 
-    @classmethod
-    def for_scope(cls, scope: _ActorScope, run_dir: Path) -> ActorDeps:
-        """The actor's front door: build its deps from the tool ``scope`` (the pinned lesson
-        scripts + the leg's read ``confine``) over the base ``_for_run``. Mirrors the judge's
-        ``JudgeDeps.for_scope`` — the required policy is the backstop, this is the front door."""
-        return cls._for_run(run_dir, _actor_policy(scope.scripts, read_confine=scope.read_confine))
-
 
 def _script_pattern(script: Path) -> re.Pattern[str]:
     """Allow the actor's read-only lessons retrieval: a single-stage ``python[3] <script>
@@ -119,12 +118,16 @@ def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> 
 # corpora via ``read_file`` — so ``tools`` keeps the read + bash pair (``BashGrammar()`` registers the
 # bash tool; the per-leg pinned-script allowlist is compiled from the ``RunScope`` at bind, not
 # declared here). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each leg
-# re-binds its own per-call model/effort in ``build_stage_agent``.
+# re-binds its own per-call model/effort in ``build_stage_agent``. ``requires_confine=True`` makes
+# the empty-``read_confine`` fail-loud a DATA bit checked generically in ``bind`` (#551 — no role
+# branch): an empty confine widens the actor to the whole ``defender_dir``, reopening the #512
+# gray-box rubric leak, so bind refuses to mint an unconfined actor.
 ACTOR_DEF = AgentDefinition(
     role=AgentRole.ACTOR,
     model=lambda: ACTOR_MODEL,
     effort=ACTOR_EFFORT,
     tools=ToolSet(read=True, bash=BashGrammar()),
+    requires_confine=True,
     deny_reason=_ACTOR_DENY_REASON,
 )
 
@@ -142,12 +145,17 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The PydanticAI ``actor_fn`` — drops into ``invoke_actor``/``invoke_actor_benign`` as
-    ``actor_fn=``. Builds the actor's ``ActorDeps`` with its pinned-script policy from the tool
-    ``scope`` and delegates to the shared ``run_stage`` (agent build + one-shot drive + error
-    mapping + trace logging). Returns the model's final text VERBATIM — the story, or a
-    ``SKIP: …`` line. A timeout / usage-limit / model error → ``RunUnprocessable`` (quarantines
-    this run, the disposition a ``claude -p`` non-zero exit gave)."""
-    deps = ActorDeps.for_scope(scope, learning_run_dir)
+    ``actor_fn=``. Builds the actor's ``ActorDeps`` via the single ``bind`` seam (#551) from a
+    ``RunScope`` carrying the tool ``scope`` (the pinned lesson scripts + the leg's read
+    ``confine``, which bind fail-louds on when empty via ``requires_confine``) and delegates to
+    the shared ``run_stage`` (agent build + one-shot drive + error mapping + trace logging).
+    Returns the model's final text VERBATIM — the story, or a ``SKIP: …`` line. A timeout /
+    usage-limit / model error → ``RunUnprocessable`` (quarantines this run, the disposition a
+    ``claude -p`` non-zero exit gave)."""
+    deps = bind(
+        ACTOR_DEF, learning_run_dir,
+        scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
+    )
     return run_stage(
         stage="actor",
         prompt_path=prompt_path, model=model, effort=effort,
