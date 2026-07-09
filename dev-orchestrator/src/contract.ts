@@ -184,6 +184,13 @@ export interface SessionHostConfig {
   command?: string; // required for kind="command"/"tmux"
 }
 
+/** Per-headless-stage claude tuning (§9.9). Both fields optional — an unset field falls back to
+ *  `Config.defaults`, and an empty/unset value omits the flag (the CLI's own default applies). */
+export interface StageTuning {
+  model?: string; // claude --model; "" / unset = CLI default
+  effort?: string; // claude --effort <low|medium|high|xhigh|max>; "" / unset = CLI default
+}
+
 /** The one injected config object (§9.9) — never global, never re-read in the hot path. */
 export interface Config {
   runRoot: string; // sqlite db + wt/ worktrees + run/ pidfiles + *.code-workspace
@@ -193,7 +200,8 @@ export interface Config {
   workerTickMs: number; // drainQueue cadence
   port: number; // board + /rpc
   permissionMode: string; // claude -p --permission-mode for headless stages
-  model: string; // optional claude --model override; "" = CLI default
+  defaults: StageTuning; // fallback model + effort for any headless stage without a `stages` override
+  stages: Partial<Record<RunStage, StageTuning>>; // per-stage model + effort (write_tests/write_code/review; discuss is interactive)
   repos: RepoConfig[];
   sessionHost: SessionHostConfig;
 }

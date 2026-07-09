@@ -25,6 +25,16 @@ export function headlessPrompt(run: Pick<RunRow, "stage">, card: Pick<CardState,
   }
 }
 
+/** Resolve a stage's model + effort (§9.9): a `stages[stage]` override wins per-field, else
+ *  `defaults`, else "" (which omits the flag so the claude CLI applies its own default). */
+export function stageTuning(stage: RunStage, cfg: Config): { model: string; effort: string } {
+  const over = cfg.stages[stage] ?? {};
+  return {
+    model: over.model ?? cfg.defaults.model ?? "",
+    effort: over.effort ?? cfg.defaults.effort ?? "",
+  };
+}
+
 /** `setsid claude -p <prompt> --session-id <sid> --output-format json …` — the full spawn argv. */
 export function headlessArgv(run: Pick<RunRow, "stage">, card: CardRef, sessionId: string, cfg: Config): string[] {
   const argv = [
@@ -41,7 +51,9 @@ export function headlessArgv(run: Pick<RunRow, "stage">, card: CardRef, sessionI
     "--add-dir",
     card.worktree_path ?? "",
   ];
-  if (cfg.model) argv.push("--model", cfg.model);
+  const { model, effort } = stageTuning(run.stage, cfg);
+  if (model) argv.push("--model", model);
+  if (effort) argv.push("--effort", effort);
   return argv;
 }
 

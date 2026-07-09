@@ -956,7 +956,9 @@ recover the owning repo → its `repoRoot` for the `git -C` call.
 **Headless stage — `claude -p`, one process group.** `spawnHeadless(run, card, sessionId)`:
 - argv `headlessArgv(run, card, sessionId, cfg)` = `["setsid", "claude", "-p",
   headlessPrompt(run, card), "--session-id", sessionId, "--output-format", "json",
-  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path, …cfg.model?]`.
+  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path,
+  …stageTuning(run.stage, cfg) → (--model? / --effort?)]` — per-phase model + effort (§9.9),
+  each flag omitted when its resolved value is empty (the claude CLI's own default then applies).
   `setsid` makes the child a **session + group leader** (pgid == pid), so the reaper can
   `kill(-pid)` the whole tree (below) — the §6.4 "never a bare `kill(pid)`" rule.
 - `headlessPrompt(run, card)` is a **per-stage template keyed by `run.stage`** — the "skills own
@@ -1050,8 +1052,15 @@ pool = 2                      # headless worker slots (§3.2); discuss runs outs
 poll_ms = 30000               # §9.4 gh poll cadence (30–60s; 5000/hr REST budget)
 worker_tick_ms = 1000         # drainQueue cadence
 port = 8765                   # board + /rpc
-permission_mode = "acceptEdits"   # claude -p --permission-mode for headless stages
-model = ""                    # optional claude --model override; empty = CLI default
+permission_mode = "auto"      # claude -p --permission-mode for headless stages
+
+[defaults]                    # fallback claude tuning for any headless stage without an override
+model = ""                    # optional claude --model; empty = CLI default
+effort = ""                   # optional claude --effort <low|medium|high|xhigh|max>; empty = CLI default
+
+[stages.write_tests]          # per-headless-stage overrides (write_tests / write_code / review;
+model = "opus"                # discuss is interactive via the session host, so it takes no tuning)
+effort = "high"
 
 [[repo]]
 name = "owner/name"           # gh -R + the card.repo value
