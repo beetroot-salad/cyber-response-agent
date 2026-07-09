@@ -22,8 +22,9 @@ bunx tsc --noEmit # typecheck
 
 `FLOWDECK_CONFIG` points at a JSON config (design §9.9 — `runRoot`, `repos[]`, `label`,
 `pool`, `port`, `permissionMode`, `sessionHost`, and per-phase `defaults` / `stages` model +
-effort for the headless stages); without it, the §9.9 defaults apply (`~/.flowdeck`, no
-repos). The one process runs the worker + poll loops, serves the board, and exposes
+effort for each run-bearing stage — the headless stages take them on the `claude -p` argv,
+`discuss` on its interactive session launch); without it, the §9.9 defaults apply
+(`~/.flowdeck`, no repos). The one process runs the worker + poll loops, serves the board, and exposes
 `POST /rpc` (`getBoard` / `getCard` / `dispatchEvent` / `createIssue`). There is no CI job
 for this package yet — `bun test` + `bunx tsc --noEmit` is the local gate.
 

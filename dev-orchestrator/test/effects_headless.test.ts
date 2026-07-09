@@ -4,7 +4,7 @@
 // spawn (§9.7), so parseRunResult only surfaces what the run reported, never a second source.
 
 import { describe, expect, it } from "bun:test";
-import { headlessArgv, headlessPrompt, parseRunResult, stageTuning } from "../src/effects/claude";
+import { headlessArgv, headlessPrompt, parseRunResult, stageTuning, tuningArgv } from "../src/effects/claude";
 import { fakeConfig } from "./support/config";
 
 const card = { repo: "owner/repo", issue_number: 5, worktree_path: "/run/wt/owner__repo/issue-5" };
@@ -91,6 +91,14 @@ describe("stageTuning — per-field resolution: stage override → defaults → 
     const cfg = fakeConfig({ defaults: { model: "sonnet", effort: "" } });
     expect(stageTuning("review", cfg)).toEqual({ model: "sonnet", effort: "" });
     expect(stageTuning("write_tests", fakeConfig())).toEqual({ model: "", effort: "" });
+  });
+});
+
+describe("tuningArgv — the shared --model/--effort flags (headless argv + session host)", () => {
+  it("emits both flags, only the set one, or neither", () => {
+    expect(tuningArgv("discuss", fakeConfig({ stages: { discuss: { model: "opus", effort: "xhigh" } } }))).toEqual(["--model", "opus", "--effort", "xhigh"]);
+    expect(tuningArgv("discuss", fakeConfig({ stages: { discuss: { effort: "high" } } }))).toEqual(["--effort", "high"]);
+    expect(tuningArgv("discuss", fakeConfig())).toEqual([]);
   });
 });
 

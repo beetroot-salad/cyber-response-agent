@@ -35,6 +35,16 @@ export function stageTuning(stage: RunStage, cfg: Config): { model: string; effo
   };
 }
 
+/** A stage's `--model` / `--effort` flags (each omitted when empty). Shared by the headless argv
+ *  and the interactive session-host launch, so both honor the same per-stage tuning (§9.9). */
+export function tuningArgv(stage: RunStage, cfg: Config): string[] {
+  const { model, effort } = stageTuning(stage, cfg);
+  const argv: string[] = [];
+  if (model) argv.push("--model", model);
+  if (effort) argv.push("--effort", effort);
+  return argv;
+}
+
 /** `setsid claude -p <prompt> --session-id <sid> --output-format json …` — the full spawn argv. */
 export function headlessArgv(run: Pick<RunRow, "stage">, card: CardRef, sessionId: string, cfg: Config): string[] {
   const argv = [
@@ -51,9 +61,7 @@ export function headlessArgv(run: Pick<RunRow, "stage">, card: CardRef, sessionI
     "--add-dir",
     card.worktree_path ?? "",
   ];
-  const { model, effort } = stageTuning(run.stage, cfg);
-  if (model) argv.push("--model", model);
-  if (effort) argv.push("--effort", effort);
+  argv.push(...tuningArgv(run.stage, cfg));
   return argv;
 }
 

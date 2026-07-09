@@ -178,7 +178,7 @@ export interface RepoConfig {
 
 export type SessionHostKind = "vscode" | "command" | "tmux" | "embedded-pty";
 
-/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid} placeholders. */
+/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid}{tuning} placeholders. */
 export interface SessionHostConfig {
   kind: SessionHostKind;
   command?: string; // required for kind="command"/"tmux"
@@ -200,8 +200,8 @@ export interface Config {
   workerTickMs: number; // drainQueue cadence
   port: number; // board + /rpc
   permissionMode: string; // claude -p --permission-mode for headless stages
-  defaults: StageTuning; // fallback model + effort for any headless stage without a `stages` override
-  stages: Partial<Record<RunStage, StageTuning>>; // per-stage model + effort (write_tests/write_code/review; discuss is interactive)
+  defaults: StageTuning; // fallback model + effort for any run-bearing stage without a `stages` override
+  stages: Partial<Record<RunStage, StageTuning>>; // per-stage model + effort — headless stages via the claude -p argv, discuss via its session-host launch
   repos: RepoConfig[];
   sessionHost: SessionHostConfig;
 }
