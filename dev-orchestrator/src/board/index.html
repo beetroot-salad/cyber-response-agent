@@ -324,6 +324,7 @@
   // ---------- state + transport ----------
   let CARDS=[];
   let POLL=null; // last-poll health from getBoard — { ran, errors, at, okAt }
+  let DISCONNECTED=false, refreshFails=0; // board↔server reachability (rides out a single transient blip)
   let repoFilter="all repos", showDone=false, openCardId=null;
   let drawerActionFns=[];
   const COLLAPSIBLE=new Set(["backlog"]); const collapsed=new Set(["backlog"]);
@@ -339,13 +340,22 @@
 
   async function refresh(){
     const {status,body}=await rpc("getBoard");
-    if(status===200 && body && Array.isArray(body.cards)){ CARDS=body.cards; POLL=body.poll||null; render(); maybeSyncDrawer(); setSync(); }
+    if(status===200 && body && Array.isArray(body.cards)){
+      refreshFails=0; DISCONNECTED=false; CARDS=body.cards; POLL=body.poll||null; setSync();
+    } else {
+      // a failed getBoard = the board can't reach its own server; ride out one transient blip.
+      if(++refreshFails>=2) DISCONNECTED=true;
+    }
+    render(); maybeSyncDrawer();
   }
 
   // Dispatch a UI event guarded by the card's believed (stage,status). A stale CAS is a safe no-op.
   async function dispatch(card,event,note){
-    const {body}=await rpc("dispatchEvent",{cardId:card.id,event});
-    if(body && body.ok===false) toast("card moved on — refreshed");
+    const {status,body}=await rpc("dispatchEvent",{cardId:card.id,event});
+    // Never show success for a request that failed — a dead server / 4xx must read as an error, not the note.
+    if(status===0) toast("couldn’t reach the board — not applied");
+    else if(status>=400) toast(`couldn’t apply — ${body&&body.error?body.error:"server error"}`);
+    else if(body && body.ok===false) toast("card moved on — refreshed"); // stale CAS: a safe no-op
     else if(note) toast(note);
     await refresh();
   }
@@ -396,11 +406,15 @@
   }
   function render(){
     const vis=visible();
-    const failed=!!(POLL&&POLL.ran&&POLL.errors>0);
-    updateSyncStatus(failed);
-    // Empty board + a failed poll → a large error (else the quiet empty columns read as "all clear").
-    if(failed&&CARDS.length===0){
-      board.innerHTML=`<div class="board-error"><div class="be-mark">⚠</div><div class="be-title">Polling failed</div><div class="be-sub">can’t reach GitHub — check <code>gh auth status</code></div></div>`;
+    const pollFailed=!!(POLL&&POLL.ran&&POLL.errors>0);
+    updateSyncStatus();
+    // Empty board + a failed poll / a dead server → a large error (else the quiet empty columns read as
+    // "all clear"). With cards present we keep them visible and let the footer carry the warning.
+    if((DISCONNECTED||pollFailed)&&CARDS.length===0){
+      const panel=DISCONNECTED
+        ? `<div class="be-title">Can’t reach the board</div><div class="be-sub">the flowdeck server isn’t responding</div>`
+        : `<div class="be-title">Polling failed</div><div class="be-sub">can’t reach GitHub — check <code>gh auth status</code></div>`;
+      board.innerHTML=`<div class="board-error"><div class="be-mark">⚠</div>${panel}</div>`;
       $("#summary").innerHTML=""; $("#counts").textContent="0 active";
       $("#doneToggle").textContent=showDone?"hide done":"show done (0)"; syncRepoFilter();
       return;
@@ -530,10 +544,12 @@
 
   // ---------- poll health (footer status) ----------
   function ago(iso){ if(!iso) return ""; const s=Math.max(0,Math.round((Date.now()-Date.parse(iso))/1000)); return s<60?s+"s ago":Math.round(s/60)+"m ago"; }
-  function updateSyncStatus(failed){
+  function updateSyncStatus(){
     const el=$("#syncStatus"); if(!el) return;
-    el.classList.toggle("failed",failed);
-    if(failed){ const ok=POLL&&POLL.okAt?` · last ok ${ago(POLL.okAt)}`:""; el.innerHTML=`<span class="cdot"></span>polling failed${ok}`; }
+    const pollFailed=!!(POLL&&POLL.ran&&POLL.errors>0);
+    el.classList.toggle("failed",DISCONNECTED||pollFailed);
+    if(DISCONNECTED) el.innerHTML=`<span class="cdot"></span>disconnected — can’t reach the board`;
+    else if(pollFailed){ const ok=POLL&&POLL.okAt?` · last ok ${ago(POLL.okAt)}`:""; el.innerHTML=`<span class="cdot"></span>polling failed${ok}`; }
     else el.innerHTML=`<span class="cdot"></span>polling <code>gh</code> · 30s`;
   }
 
