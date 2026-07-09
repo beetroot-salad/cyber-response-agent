@@ -198,6 +198,7 @@ class CuratorDeps(AgentDeps):
     def for_run(
         cls, run_dir: Path, repo_root: Path,
         corpus_dir: Path, verifier_scripts: tuple[Path, ...],
+        *, state_root: Path | None = None,
     ) -> CuratorDeps:
         """The curator's front door. ``corpus_dir`` + ``verifier_scripts`` are POSITIONAL and
         REQUIRED — a CORPUS_AUTHOR cannot be constructed without naming the corpus it writes (the
@@ -205,12 +206,15 @@ class CuratorDeps(AgentDeps):
         ``write_allow``). Overrides ``_for_run``'s ``defender_dir`` default: the drain edits a
         throwaway git WORKTREE, so the gate resolves reads/writes against ``repo_root/defender``
         (else every worktree write is denied against the main checkout). ``run_dir`` is only the
-        trace anchor + a read root."""
+        trace anchor + a read root. ``state_root`` rides on the deps so the forward-check subprocess
+        resolves the real source-case bundle off ``DEFENDER_LEARNING_STATE_DIR`` (#425) — set into
+        the bash-tool env by ``run_common.run_env``, not a process-global mutation."""
         defender_dir = repo_root / "defender"
         return cls._for_run(
             run_dir,
             _corpus_author_policy(corpus_dir, verifier_scripts),
             defender_dir=defender_dir,
+            state_root=state_root,
         )
 
 
@@ -242,6 +246,7 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     repo_root: Path,
     corpus_dir: Path,
     verifier_scripts: tuple[Path, ...],
+    state_root: Path | None = None,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
     wall_clock_timeout: int = config.AUTHOR_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
@@ -252,7 +257,9 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     ``run_stage`` with ``require_output=True`` (the curator's final text carries the load-bearing
     marker, so an empty final is ``RunUnprocessable``, unlike the lead author's ``False``). The file
     writers are registered from ``CORPUS_AUTHOR_DEF``'s ToolSet by role in ``build_stage_agent``."""
-    deps = CuratorDeps.for_run(learning_run_dir, repo_root, corpus_dir, verifier_scripts)
+    deps = CuratorDeps.for_run(
+        learning_run_dir, repo_root, corpus_dir, verifier_scripts, state_root=state_root,
+    )
     return run_stage(
         stage="curator",
         prompt_path=prompt_path, model=model, effort=effort,
@@ -305,13 +312,11 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     graph — so no ``monkeypatch`` of module globals is needed."""
     log(f"spawn curator {batch_id} in-process (model={model}, effort={effort}, timeout={timeout}s)")
     source_key(model, label="curator")  # FatalConfigError PROPAGATES (systemic)
-    # Pin the shared state root into the process env (the in-process twin of the retired
-    # ``curator_agent_env``): the agent's bash tool copies ``os.environ`` into its subprocess env
-    # (``run_common.run_env``), so a forward-check spawned in the throwaway worktree resolves the
-    # REAL source-case bundle off ``DEFENDER_LEARNING_STATE_DIR`` rather than the worktree's empty
-    # ``runs/`` (#425 silent-revert). Idempotent under out-of-repo state (already this value).
-    if state_root is not None:
-        os.environ["DEFENDER_LEARNING_STATE_DIR"] = str(state_root)
+    # The shared state root rides on the curator deps (→ ``run_common.run_env`` sets
+    # ``DEFENDER_LEARNING_STATE_DIR`` for the bash-tool subprocess), so a forward-check spawned in
+    # the throwaway worktree resolves the REAL source-case bundle off it rather than the worktree's
+    # empty ``runs/`` (#425 silent-revert). Threaded through the deps — the in-process twin of the
+    # retired ``curator_agent_env`` env= — rather than mutating the process-global ``os.environ``.
     # Anchor the trace (batch_id + pid) BEFORE the spawn so a partial failure still leaves a
     # complete, per-spawn-distinct trace (RequestLogger opens truncate → two spawns into one drain
     # dir would clobber a shared name).
@@ -322,6 +327,7 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
             trace_name=trace_name, label=f"curator:{batch_id}", user=user_prompt,
             learning_run_dir=learning_run_dir, repo_root=repo_root,
             corpus_dir=corpus_dir, verifier_scripts=verifier_scripts,
+            state_root=state_root,
             request_limit=request_limit, wall_clock_timeout=timeout,
         )
     except RunUnprocessable as e:

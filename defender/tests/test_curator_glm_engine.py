@@ -139,6 +139,42 @@ def _stage(tmp_path: Path, **over):
 
 
 # ===========================================================================
+# state-root — carried on the deps into the bash-tool env, NOT a process global
+# ===========================================================================
+
+def test_state_root_threads_through_deps_not_os_environ(tmp_path, monkeypatch):
+    """The shared state root reaches the forward-check subprocess via the curator deps →
+    ``run_common.run_env`` (DEFENDER_LEARNING_STATE_DIR), the in-process twin of the retired
+    ``curator_agent_env`` ``env=``. The transport must NOT mutate the process-global
+    ``os.environ`` (a leak that contaminated sibling in-process runs/tests)."""
+    from defender.learning.author.curator_engine import CuratorDeps
+    from defender.runtime import tools
+
+    monkeypatch.delenv("DEFENDER_LEARNING_STATE_DIR", raising=False)
+    state = tmp_path / "state"
+    seen = {}
+    _stage(tmp_path, state_root=state, run_author=lambda **kw: seen.update(kw) or _AUTHOR_RESULT_OK)
+
+    # 1) the transport threads state_root down the seam (→ CuratorDeps.for_run), not the global
+    assert seen["state_root"] == state
+    assert "DEFENDER_LEARNING_STATE_DIR" not in os.environ
+
+    # 2) the deps carry it, and run_env projects it into the bash-tool subprocess env
+    deps = CuratorDeps.for_run(
+        _run_dir(tmp_path), _repo_root(tmp_path), _corpus(tmp_path), _verifiers(tmp_path),
+        state_root=state,
+    )
+    assert deps.state_root == state
+    assert tools._bash_env(deps)["DEFENDER_LEARNING_STATE_DIR"] == str(state)
+
+    # 3) a deps without a state root leaves the var unset (the runtime agents' behavior)
+    bare = CuratorDeps.for_run(
+        _run_dir(tmp_path), _repo_root(tmp_path), _corpus(tmp_path), _verifiers(tmp_path),
+    )
+    assert "DEFENDER_LEARNING_STATE_DIR" not in tools._bash_env(bare)
+
+
+# ===========================================================================
 # return-contract — the invoke seam's whole output is the PARSED dict, not text
 # ===========================================================================
 
