@@ -1,1 +1,5 @@
 node_modules/
+
+# Local board config (README: `FLOWDECK_CONFIG=./flowdeck.config.json bun start`).
+# Machine-specific — runRoot + repos[] are absolute paths on the developer's box.
+flowdeck.config.json
