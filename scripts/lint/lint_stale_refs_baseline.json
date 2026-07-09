@@ -1,10 +1,10 @@
 {
   "//": "lint_stale_refs baseline — references that survive a rename/delete in the PR diff. Fingerprint is file:ident. CI fails on a surviving reference absent here. Regenerate: python scripts/lint/lint_stale_refs.py --update-baseline. This baseline is normally empty (the check is diff-relative); an entry means a knowingly-tolerated stray reference. \"\" means un-triaged.",
   "entries": {
-    "defender/tests/spec_graph_538.yaml:_ORACLE_POLICY": "#551 retired the oracle/verify deny-all policy constant; spec_graph_538.yaml is the frozen #538 planning artifact whose past-tense prose names the symbol that PR replaced — historical record, not a live reference to reword.",
-    "defender/tests/spec_graph_538.yaml:for_run": "#551 retired the per-role deps front-door factory methods; the #538 spec graph describes replacing them with bind — correct history, tolerated.",
-    "defender/tests/spec_graph_538.yaml:for_scope": "#551 retired the judge/actor scope-taking deps factories; the #538 spec graph's demand + R5 witness name them as the things bind replaces — historical record, not a live reference.",
-    "defender/tests/spec_graph_538.yaml:reader_patterns": "#551 renamed the full-set reader-lane builder to its _for-suffixed twin; the #538 spec graph's past-tense characterization prose keeps the original name as history.",
-    "defender/tests/test_harness_b_construction.py:test_agent_definition": "Reference is to an existing sibling test module (still present in the tree), a gate over-match, not a stale symbol."
+    "defender/tests/spec_graph_538.yaml:policy_for": "This follow-up removes the policy_for alias; spec_graph_538.yaml is the frozen #538 planning artifact whose prose names policy_for among the per-agent factories bind replaces — historical record, not a live reference to reword.",
+    "defender/tests/spec_graph_551.yaml:policy_for": "This follow-up removes the policy_for alias #551 introduced; spec_graph_551.yaml is the frozen #551 spec whose demand/gate prose names it — correct history, tolerated.",
+    "defender/tests/spec_graph_551.yaml:main_policy": "This follow-up removes the main_policy alias; the frozen #551 spec's prose names it as a reader alias bind subsumes — historical record.",
+    "defender/tests/spec_graph_551.yaml:gather_policy": "This follow-up removes the gather_policy alias; the frozen #551 spec's prose names it as a reader alias bind subsumes — historical record.",
+    "defender/tests/spec_graph_551.yaml:_require_read_root": "This follow-up folds _require_read_root into the shared require_anchor_root; the frozen #551 spec's prose names the old guard shape — historical record."
   }
 }

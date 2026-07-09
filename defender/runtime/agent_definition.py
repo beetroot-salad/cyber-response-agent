@@ -33,8 +33,8 @@ Kept LIGHT on purpose: it imports only the permission gate types + the repo-layo
 primitive, never ``pydantic_ai`` — so ``driver`` can define MAIN/GATHER defs off it
 without pulling the learning graph. The one cross-layer reach (``bind`` returning the
 learning stages' ``AgentDeps`` subtypes, ``compile_policy`` reusing the judge/actor bash-pattern
-builders + the lead author's ``rm`` matcher) is done with LAZY, function-body imports (the
-``bash.policy_for`` idiom): no module-load cycle, and it only fires for those shapes.
+builders + the lead author's ``rm`` matcher) is done with LAZY, function-body imports: no
+module-load cycle, and it only fires for those shapes.
 """
 from __future__ import annotations
 
@@ -238,7 +238,7 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
         reader lane built from the grammar's DECLARED viewers/shims CONTENTS (#545 — a
         tighter ``BashGrammar.viewers`` compiles a tighter lane, so the contents are
         load-bearing, not merely their non-emptiness); the reader defs declare the full
-        set, so their lane equals the kept ``reader_patterns_for`` / ``policy_for`` API;
+        set, so their lane equals the ``reader_patterns_for`` builder;
       - the judge (``jq_operand_gated``) → its pinned ``jq`` (+ benign ticket) patterns;
       - the actor (``scope.scripts``) → one anchored ``python3 <script>`` pattern each.
 
@@ -378,9 +378,9 @@ def _deps_class(role: AgentRole) -> type[AgentDeps]:
 
 def _require_absolute_root(label: str, p: Path) -> None:
     """``bind``'s per-run root guard (run_dir / defender_dir / each scope read root): delegates
-    to the shared ``require_anchor_root`` (``permission.bash``) — ONE root-anchor validator for
-    both ``bind`` and ``policy_for``, so the absolute/``..``/whitespace rejection has a single
-    implementation and a future hardening lands in one place — with the ``bind {label}`` framing."""
+    to the shared ``require_anchor_root`` (``permission.bash``) — the ONE root-anchor validator,
+    so the absolute/``..``/whitespace rejection has a single implementation and a future
+    hardening lands in one place — with the ``bind {label}`` framing."""
     require_anchor_root(f"bind {label}", p)
 
 
@@ -398,10 +398,10 @@ def compile_policy_for(
 ) -> AgentPolicy:
     """Resolve + compile a definition's ``AgentPolicy`` WITHOUT minting deps — the policy-only
     half of ``bind`` (validate the roots, check the per-role DATA preconditions, resolve the
-    roots, compile the policy). The ``main_policy``/``gather_policy`` aliases need only ``.policy``
-    (no run_id/salt), so they call THIS rather than ``bind(...).policy`` — no discarded uuid4 salt
-    + deps object minted per call. ``bind`` = this + the ``_for_run`` deps mint, so the alias and
-    the bound policy are the SAME projection (no drift).
+    roots, compile the policy). A caller that needs only ``.policy`` (no run_id/salt) — the gate
+    tests — calls THIS rather than ``bind(...).policy``, so no discarded uuid4 salt + deps object
+    is minted per call. ``bind`` = this + the ``_for_run`` deps mint, so the policy-only projection
+    and the bound policy are IDENTICAL (no drift).
 
     ``defender_dir`` (#551) is the tree the gate anchors reads/writes on — ``None`` defaults to the
     ``PATHS`` primitive (the MAIN checkout), the LEAD_AUTHOR drain passes its throwaway

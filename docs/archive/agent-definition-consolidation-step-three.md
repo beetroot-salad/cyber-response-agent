@@ -1,5 +1,12 @@
 # `bind` as the sole policy seam — AgentDefinition consolidation step three (#551)
 
+> **Status: SHIPPED (#551 / PR #555) — archived historical design record.** The durable
+> spec is the code plus `defender/tests/spec_graph_551.yaml` + `test_bind_sole_seam_551.py`;
+> this doc is kept for rationale only and is not a description of current state. A follow-up
+> then removed the `policy_for` / `main_policy` / `gather_policy` compatibility aliases this
+> doc left in place (§"Test churn"), so `bind` / `compile_policy_for` is now the *only* way to
+> build a policy — see the note where those aliases are discussed below.
+
 **Status:** design — approved (ycochav). **Decision:** finish the migration #545/#546
 started: make `bind` / `compile_policy` the *single* production deps + policy source
 for all seven roles, retire the parallel factory path, and lift the per-role branches
@@ -164,6 +171,11 @@ Under principle 1, split by kind:
   an alias serves it without being a second source. `reader_patterns_for` stays (production
   — `_bash_allow` calls it); the unparametrized `reader_patterns` follows `main_policy`/
   `gather_policy` if it loses its last caller.
+  > **Follow-up (post-#555):** these three aliases were subsequently *removed*, not kept —
+  > production already built every policy through `bind`, so the aliases were a test/docs-only
+  > parallel surface. The twelve gate-test files now call `compile_policy_for(MAIN_DEF /
+  > GATHER_DEF, run_dir, defender_dir=…)` directly (the policy-only half of `bind`), leaving
+  > `bind` / `compile_policy_for` as the single seam this doc set out to establish.
 
 ### D6 — Wire the `write ⊆ read` guard
 

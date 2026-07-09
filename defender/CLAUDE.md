@@ -38,8 +38,8 @@ hooks). The gates:
   (`reader_patterns_for`): the viewer program set (`cat`/`grep`/`jq`/`tail`/`head`/`wc`/`ls`/`cd`)
   is spelled there as anchored per-program grammars, with the viewer file operands
   **anchored** to the run dir + corpus so the bash lane confines reads the same way
-  `decide_read` does (#535 — `policy_for(agent, run_dir, defender_dir)` bakes the anchors;
-  `jq` is stdin-compute-only there); the shim names come from the `_cmd_segments.py`
+  `decide_read` does (#535 — `compile_policy_for(<DEF>, run_dir, defender_dir)` / `bind` bakes
+  the anchors; `jq` is stdin-compute-only there); the shim names come from the `_cmd_segments.py`
   taxonomy (`NON_ADAPTER_SHIMS` + inert `echo`/`true`). Judge/actor build theirs in their
   pipeline modules (the judge's path-gated `jq` + closed-ticket read, the actor's pinned
   lesson scripts). `bash_policy.json` still carries the per-agent capability bits + the read

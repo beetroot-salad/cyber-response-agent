@@ -9,7 +9,7 @@ where the bash lane could `cat /etc/passwd` while the `read_file` tool was alrea
 confined (`files.decide_read`). The anchoring is TEXTUAL (a pure regex over the
 tokenized argv, matched per stage by `bash._stage_shape_ok`): the bash lane does
 no `resolve()`, so a `..` segment is rejected literally and the roots are baked in
-from the run's `run_dir`/`defender_dir` (`policy_for` is per-run, exactly like the
+from the run's `run_dir`/`defender_dir` (`compile_policy` is per-run, exactly like the
 judge's policy). Operand *path*-containment is the pattern's job here; the shared
 security invariants (the secret/ground-truth denylist and the `gather_raw` raw
 clamp) still apply globally in `bash.decide_bash` regardless of the allowlist.

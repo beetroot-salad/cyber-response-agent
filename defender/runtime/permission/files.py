@@ -125,8 +125,8 @@ def decide_read(
     filter (#545): the resolved path must additionally `fullmatch` one of those anchored
     grammars — the read-tool twin of the bash `cat` lane's file-operand grammar, so a
     non-`.md` corpus file readable by neither surface. The run-dir branch of that grammar
-    keeps run-dir scratch unfiltered; empty `read_shapes` (every non-reader agent + the
-    legacy `policy_for` API) leaves the gate root-only."""
+    keeps run-dir scratch unfiltered; empty `read_shapes` (every non-reader agent) leaves
+    the gate root-only."""
     p = Path(path)
     try:
         rp = p.resolve()

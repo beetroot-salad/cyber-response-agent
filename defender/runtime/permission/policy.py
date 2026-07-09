@@ -78,7 +78,7 @@ class AgentPolicy:
       lane's anchored file-operand grammar (`policies._common._file_operand`), so the read
       tool admits exactly the filename set `cat` does (#545 read↔bash parity; a non-`.md`
       corpus file readable by neither). Empty (the default) → no filename filter, so the
-      read gate stays root-only (every non-reader agent + the legacy `policy_for` API). The
+      read gate stays root-only (every non-reader agent). The
       run dir is admitted through the grammar's own run-dir branch, so run-dir scratch is
       unfiltered; the filter bites the corpus surface.
     - `deny_reason` — the fall-through deny message shown to the model.

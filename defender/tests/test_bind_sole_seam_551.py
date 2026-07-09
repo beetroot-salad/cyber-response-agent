@@ -19,8 +19,9 @@ The demand list, structure, and gate live in `spec_graph_551.yaml` beside this f
   - the writers (`tools._tool_write_file`/`_tool_edit_file`) pass `deps.run_dir`/
     `deps.defender_dir` to `decide_write`, activating the dormant write⊆read guard.
   - the parallel factory path retires: `_ORACLE_POLICY`/`_VERIFY_POLICY`/`_lead_author_policy`
-    go; `policy_for`/`main_policy`/`gather_policy` survive only as bind aliases (the alias now
-    carries `reader_read_shapes`, flipping a non-`.md` corpus read allow→deny — hole H4).
+    go; `compile_policy_for` (the policy-only half of `bind`) is the sole policy source and
+    carries `reader_read_shapes`, flipping a non-`.md` corpus read allow→deny (hole H4). [The
+    thin per-role reader/policy aliases #551 originally kept were removed in a follow-up.]
 
 The 4 resolved design decisions this suite is authored against:
   Q1 KEEP-AS-HELPERS: `_judge_policy`/`_actor_policy` stay as `compile_policy._bash_allow`'s
@@ -37,7 +38,7 @@ module IMPORTS cleanly and no test fails at collection. New-behaviour tests fail
 `bind(..., defender_dir=)` / `resolve_roots(..., defender_dir=)` TypeError (repo_root/3-arg
 today), `compile_policy(..., write_shapes, ...)` TypeError (4-arg today), `*.write_shapes` /
 `*.requires_confine` / `*.requires_explicit_tree` AttributeError, and behaviour assertions on
-the not-yet-wired write⊆read guard / the not-yet-anchoring policy_for alias / the not-yet-
+the not-yet-wired write⊆read guard / the not-yet-anchoring reader policy / the not-yet-
 hardened root validation. Every ad-hoc `AgentDefinition(...)` is built INSIDE a test body
 (a module-level construct with a new field would be a COLLECTION error, which the gate rejects).
 GREEN@HEAD characterization (must pass at HEAD and STAY green): the read↔cat filename + symlink
@@ -91,6 +92,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     ToolSet,
     bind,
     compile_policy,
+    compile_policy_for,
     resolve_roots,
 )
 from defender.runtime.agents import (  # noqa: E402
@@ -146,7 +148,7 @@ def _actor_scope() -> RunScope:
 
 def _reader_toolset() -> ToolSet:
     """A main/gather-shaped reader ToolSet — the full declared viewer/shim set, so a compiled
-    lane equals the kept `policy_for` API."""
+    lane equals the production main/gather reader lane."""
     return ToolSet(
         read=True,
         bash=BashGrammar(viewers=READER_VIEWERS, shims=tuple(NON_ADAPTER_SHIMS)),
@@ -683,13 +685,12 @@ def test_d5_actor_read_confine_not_leaked_from_builder(tmp_path):
     assert not permission.decide_read(_DEFENDER / "skills" / "gather" / "SKILL.md", run_dir=run, defender_dir=_DEFENDER, policy=apol).allow
 
 
-def test_d5_policy_for_is_bind_alias(tmp_path):
-    """d5_policy_for_is_bind_alias (survival): policy_for survives only as a bind alias — its returned
-    policy now carries reader_read_shapes (old main_policy set read_shapes=()), so a non-.md corpus
-    read via policy_for('main') flips allow→deny to MATCH bind(MAIN_DEF) (hole H4)."""
-    # RED@HEAD: policy_for('main') dispatches to main_policy (read_shapes=()) → the .py is admitted.
+def test_d5_compile_policy_for_read_shapes(tmp_path):
+    """d5_compile_policy_for_read_shapes (survival): `compile_policy_for` (the policy-only half of
+    `bind`) carries reader_read_shapes, so a non-.md corpus read flips allow→deny to MATCH
+    bind(MAIN_DEF) (hole H4). The retired broad reader factory set read_shapes=() and admitted it."""
     run = tmp_path / "run"
-    ppol = permission.policy_for("main", run_dir=run, defender_dir=_DEFENDER)
+    ppol = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=_DEFENDER)
     assert not permission.decide_read(_NON_MD, run_dir=run, defender_dir=_DEFENDER, policy=ppol).allow
     # positive control: the bound reader already denies the non-.md corpus file (the target behaviour).
     bpol = bind(MAIN_DEF, run).policy
@@ -882,8 +883,8 @@ def test_r5_tools_write_write_shapes_agree(tmp_path):
 
 def test_d7_bind_validates_roots(tmp_path):
     """d7_bind_validates_roots (seam): bind validates its root inputs — a relative or empty-string
-    root RAISES rather than silently anchoring CWD (the _require_read_root-style shape check
-    policy_for already applies); positive control: an absolute run_dir succeeds."""
+    root RAISES rather than silently anchoring CWD (the shared `require_anchor_root` shape check
+    that bind/compile_policy_for apply); positive control: an absolute run_dir succeeds."""
     assert isinstance(bind(MAIN_DEF, tmp_path / "run"), AgentDeps)  # positive control (absolute)
     # RED@HEAD: bind passes a relative run_dir straight to resolve_roots (anchors CWD); no validation.
     with pytest.raises((ValueError, TypeError)):

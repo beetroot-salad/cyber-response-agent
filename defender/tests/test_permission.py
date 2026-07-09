@@ -14,18 +14,21 @@ import pytest
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve.
 from defender.runtime import permission
+from defender.runtime.agent_definition import compile_policy_for
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 
 # The gate is policy-driven (it keys on an AgentPolicy, not a role). Since #535 the
-# runtime-agent factory is PER-RUN — `policy_for(agent, *, run_dir, defender_dir)`
-# bakes the anchored reader roots into the policy's `bash_allow` and RAISES without
-# them (safe-by-construction). These synthetic absolute roots anchor the reader lane;
+# runtime-agent reader policy is compiled PER-RUN — `compile_policy_for(<DEF>, run_dir,
+# defender_dir=…)` bakes the anchored reader roots into the policy's `bash_allow` and
+# RAISES without them (safe-by-construction). These synthetic absolute roots anchor the
+# reader lane;
 # the gate never stats them (only `decide_read` resolves), so they need not exist. The
 # per-run anchored-read behavior itself is specced in test_read_confine_bash.py; here
 # the bash tests exercise shim/adapter/unwrap/redirect shapes against the same policies.
 _RUN = Path("/run")
 _DFN = Path("/dfn")
-MAIN = permission.policy_for("main", run_dir=_RUN, defender_dir=_DFN)
-GATHER = permission.policy_for("gather", run_dir=_RUN, defender_dir=_DFN)
+MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
+GATHER = compile_policy_for(GATHER_DEF, run_dir=_RUN, defender_dir=_DFN)
 
 
 # --- bash, main loop -------------------------------------------------------
@@ -256,12 +259,12 @@ def _read_roots(tmp_path):
 def test_read_allows_in_root_corpus_and_run(tmp_path):
     # The reads past runs actually make: alert/investigation/run artifacts under the run dir;
     # tight-corpus `.md` under the defender corpus. Built with a MAIN policy ANCHORED on these
-    # roots (since #551 `policy_for('main')` is a `bind` alias carrying the read↔bash `read_shapes`
+    # roots (since #551 `compile_policy_for(MAIN_DEF)` carries the read↔bash `read_shapes`
     # filter, so the policy must anchor on the SAME roots the gate is called with — a mismatched
     # anchor would deny every read). A run-dir file is admitted via the run-dir branch regardless
     # of name; a corpus read must be a tight `.md` under lessons/skills/examples.
     run, dfn = _read_roots(tmp_path)
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
               dfn / "skills" / "elastic" / "SKILL.md"):
         assert permission.decide_read(
@@ -314,10 +317,10 @@ def test_read_main_loop_gather_raw_clamped_gather_allowed(tmp_path):
     # gather_raw is inside the run dir (allowlist-permitted + admitted by the run-dir branch of
     # read_shapes), but the main loop is clamped off the raw payload (it consumes the summary); the
     # gather subagent reads its own gather_raw to verify its result. Policies anchored on THESE
-    # roots (policy_for is a bind alias carrying root-anchored read_shapes since #551).
+    # roots (compile_policy_for carries root-anchored read_shapes since #551).
     run, dfn = _read_roots(tmp_path)
-    main = permission.policy_for("main", run_dir=run, defender_dir=dfn)
-    gather = permission.policy_for("gather", run_dir=run, defender_dir=dfn)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
     raw = run / "gather_raw" / "l-001" / "0.json"
     assert not permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=main).allow
     assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=gather).allow

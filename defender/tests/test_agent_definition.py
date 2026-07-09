@@ -94,6 +94,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     bind,
     build_registry,
     compile_policy,
+    compile_policy_for,
     resolve_roots,
 )
 from defender.runtime.agents import (  # noqa: E402
@@ -454,15 +455,16 @@ def test_compile_policy_projects_only_toolset_bits(tmp_path):
 
 
 def test_gate_bash_parity_read_convergent(tmp_path):
-    """#551: policy_for is now a bind ALIAS (no second policy source), so bind(MAIN).policy and
-    policy_for('main') AGREE on every probe — BASH and READ alike, including the read_shapes
-    filename filter policy_for used to lack. Verified through the REAL gate. (The pre-#551 read
-    DIVERGENCE — bind tight, policy_for broad — is gone; the tight read behaviour itself is owned
-    by the r3_* / d5_policy_for_is_bind_alias demands in test_bind_sole_seam_551.py.)"""
+    """#551: `compile_policy_for` (the policy-only half of `bind`) and `bind(MAIN).policy` AGREE
+    on every probe — BASH and READ alike, including the read_shapes filename filter. `bind` is
+    `compile_policy_for` + the deps mint, so the two are the SAME projection; this pins that they
+    never diverge, verified through the REAL gate. (The pre-#551 read DIVERGENCE — bind tight, the
+    old broad reader factory — is gone; the tight read behaviour itself is owned by the r3_* /
+    d5_compile_policy_for_read_shapes demands in test_bind_sole_seam_551.py.)"""
     dfn = PATHS.defender_dir
     bound = bind(MAIN_DEF, tmp_path).policy
-    authored = permission.policy_for("main", run_dir=tmp_path, defender_dir=dfn)
-    # BASH: bind reproduces policy_for's allowlist exactly (they are the same policy now).
+    authored = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=dfn)
+    # BASH: bind reproduces compile_policy_for's allowlist exactly (they are the same policy now).
     for cmd in (
         f"cat {tmp_path}/investigation.md",       # anchored viewer under run_dir
         "defender-elastic query x --raw",         # a data-source adapter (main may not)
@@ -480,8 +482,8 @@ def test_gate_bash_parity_read_convergent(tmp_path):
             == permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
         )
     # … and so does a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
-    # defender_dir, outside lessons/skills/examples): the read_shapes filter now on BOTH (policy_for
-    # carries it as a bind alias) DENIES it, in parity with the bash cat lane. No divergence.
+    # defender_dir, outside lessons/skills/examples): the read_shapes filter now on BOTH
+    # (compile_policy_for carries it) DENIES it, in parity with the bash cat lane. No divergence.
     skill_md = dfn / "SKILL.md"
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow

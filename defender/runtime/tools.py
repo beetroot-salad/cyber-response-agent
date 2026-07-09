@@ -84,10 +84,11 @@ def _format_bash_result(exit_code: int, stdout: str, stderr: str, note: str = ""
 
 
 # Per-agent gate policy is DATA, not a role branch: the gate keys on `deps.policy`.
-# Runtime agents build theirs PER-RUN via `permission.policy_for(agent, run_dir=…,
-# defender_dir=…)` (#535 anchors the reader lane to the run's roots — there is no
-# module-level MAIN/GATHER default to inherit unconfined); a learning-loop agent (the
-# judge) constructs its own AgentPolicy in its own module and passes it in.
+# Every agent's policy is compiled PER-RUN through the single `bind`/`compile_policy`
+# seam (#551) from its `AgentDefinition`: the runtime agents via `bind(MAIN_DEF/GATHER_DEF,
+# run_dir, defender_dir=…)` (#535 anchors the reader lane to the run's roots — there is no
+# module-level MAIN/GATHER default to inherit unconfined), the learning stages via
+# `bind(<ROLE>_DEF, …)` in their own engine modules.
 
 
 @dataclass(frozen=True)
@@ -101,12 +102,13 @@ class AgentDeps:
     `isinstance`.
 
     `policy` is REQUIRED (keyword-only, no inheritable default): a security-critical
-    subtype can no longer be born MAIN-shaped by omitting it. Every subtype supplies
-    `policy` at its construction site — the per-run runtime agents (`GatherDeps`, and the
-    main loop's bare `AgentDeps`) via `permission.policy_for(agent, run_dir, defender_dir)`
-    (#535 anchors their reader lane per-run, so there is no static default), and the
-    per-scope learning agents (`JudgeDeps`, `ActorDeps`) via a `for_scope` factory over
-    `_for_run`. A subtype supplying none is a construction-time `TypeError`, not a silent MAIN."""
+    subtype can no longer be born MAIN-shaped by omitting it. Every subtype's `policy` is
+    compiled at its construction site through the single `bind` seam (#551) — the per-run
+    runtime agents (`GatherDeps`, and the main loop's bare `AgentDeps`) via
+    `bind(MAIN_DEF/GATHER_DEF, run_dir, defender_dir=…)` (#535 anchors their reader lane
+    per-run, so there is no static default), and the learning stages (`JudgeDeps`,
+    `ActorDeps`, …) via `bind(<ROLE>_DEF, …)` in their engines. A subtype supplying none is a
+    construction-time `TypeError`, not a silent MAIN."""
 
     run_dir: Path
     defender_dir: Path
@@ -164,7 +166,7 @@ class GatherDeps(AgentDeps):
 
     # Since #535 the gather reader lane is anchored PER-RUN, so gather has no static
     # policy default (like the per-scope judge/actor): `policy` is REQUIRED from the
-    # base (kw_only), built via `permission.policy_for("gather", run_dir=…, defender_dir=…)`
+    # base (kw_only), built via `bind(GATHER_DEF, run_dir, defender_dir=…)` (#551)
     # at the construction site. A bare `GatherDeps(run_dir, defender_dir, run_id, salt)`
     # is now a construction-time TypeError, not a silent unconfined MAIN/GATHER.
     #
