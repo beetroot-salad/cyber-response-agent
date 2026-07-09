@@ -4,8 +4,12 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CardState, Config } from "../contract";
+import type { CardState, Config, RunStage } from "../contract";
+import { tuningArgv } from "./claude";
 import { repoConfigFor } from "./git";
+
+// The one interactive stage (§2) — its per-stage tuning is resolved from `stages.discuss` / `defaults`.
+const INTERACTIVE_STAGE: RunStage = "discuss";
 
 type CardRef = Pick<CardState, "repo" | "issue_number" | "worktree_path">;
 interface Launch {
@@ -18,7 +22,8 @@ function openCwd(card: CardRef, cfg: Config): string {
   return card.worktree_path ?? repoConfigFor(card.repo, cfg).root;
 }
 
-/** kind="command" / "tmux": fill the {cwd}{resume}{sid} template into an argv. */
+/** kind="command" / "tmux": fill the {cwd}{resume}{sid}{tuning} template into an argv. `{tuning}`
+ *  expands to discuss's `--model`/`--effort` (§9.9), empty when unset. */
 export function sessionHostArgv(cfg: Config, card: CardRef, launch: Launch): string[] {
   const tmpl = cfg.sessionHost.command;
   if (!tmpl) throw new Error("session_host.command is required for kind=command/tmux");
@@ -27,6 +32,7 @@ export function sessionHostArgv(cfg: Config, card: CardRef, launch: Launch): str
     .replace(/\{cwd\}/g, openCwd(card, cfg))
     .replace(/\{resume\}/g, resume)
     .replace(/\{sid\}/g, launch.sid)
+    .replace(/\{tuning\}/g, tuningArgv(INTERACTIVE_STAGE, cfg).join(" "))
     .split(/\s+/)
     .filter(Boolean);
 }
@@ -35,6 +41,8 @@ export function sessionHostArgv(cfg: Config, card: CardRef, launch: Launch): str
  *  OUTSIDE the repo (in the run root) so the tracked .vscode/ is never mutated. */
 export function vscodeWorkspaceDoc(cfg: Config, card: CardRef, launch: Launch) {
   const resume = launch.resume ? `--resume ${launch.resume} ` : "";
+  const tuning = tuningArgv(INTERACTIVE_STAGE, cfg);
+  const tuningStr = tuning.length ? ` ${tuning.join(" ")}` : "";
   return {
     folders: [{ path: openCwd(card, cfg) }],
     settings: { "task.allowAutomaticTasks": "on" },
@@ -44,7 +52,7 @@ export function vscodeWorkspaceDoc(cfg: Config, card: CardRef, launch: Launch) {
         {
           label: "flowdeck: claude session",
           type: "shell",
-          command: `claude ${resume}--session-id ${launch.sid}`,
+          command: `claude ${resume}--session-id ${launch.sid}${tuningStr}`,
           runOptions: { runOn: "folderOpen" },
           presentation: { reveal: "always", panel: "dedicated" },
           problemMatcher: [],

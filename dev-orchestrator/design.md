@@ -146,8 +146,8 @@ per-terminal code:
 ```toml
 [session_host]
 kind = "vscode"          # default; or "command" | "tmux" | "embedded-pty"
-# kind = "command": placeholders filled per launch
-command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid}"
+# kind = "command": placeholders filled per launch ({tuning} = discuss's --model/--effort, §9.9)
+command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid} {tuning}"
 session_id = "prearranged"    # board generates {sid}; else "watch-claude-dir"
 reports_completion = false    # false → resolve via the card's Done/Discard button
 ```
@@ -159,7 +159,8 @@ own workbench, which *strengthens* "minimize transitions": everyone gets a one-s
 
 **VS Code adapter — the folder-open task.** `code {cwd}` only *opens the folder*; the VS Code
 CLI can't run a command in the integrated terminal. So the adapter writes a task with
-`"runOptions": { "runOn": "folderOpen" }` that runs `claude {resume} --session-id {sid}`,
+`"runOptions": { "runOn": "folderOpen" }` that runs `claude {resume} --session-id {sid}` (plus
+discuss's `--model`/`--effort` when configured, §9.9),
 then `exec code <workspace>` → VS Code auto-runs it in a terminal panel on open. Two gotchas:
 (1) **Workspace Trust** must be granted for the tree and `task.allowAutomaticTasks` allowed —
 a one-time per-tree consent (folder-open tasks are gated as an attack surface); if the task
@@ -956,7 +957,9 @@ recover the owning repo → its `repoRoot` for the `git -C` call.
 **Headless stage — `claude -p`, one process group.** `spawnHeadless(run, card, sessionId)`:
 - argv `headlessArgv(run, card, sessionId, cfg)` = `["setsid", "claude", "-p",
   headlessPrompt(run, card), "--session-id", sessionId, "--output-format", "json",
-  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path, …cfg.model?]`.
+  "--permission-mode", cfg.permissionMode, "--add-dir", card.worktree_path,
+  …stageTuning(run.stage, cfg) → (--model? / --effort?)]` — per-phase model + effort (§9.9),
+  each flag omitted when its resolved value is empty (the claude CLI's own default then applies).
   `setsid` makes the child a **session + group leader** (pgid == pid), so the reaper can
   `kill(-pid)` the whole tree (below) — the §6.4 "never a bare `kill(pid)`" rule.
 - `headlessPrompt(run, card)` is a **per-stage template keyed by `run.stage`** — the "skills own
@@ -1050,8 +1053,15 @@ pool = 2                      # headless worker slots (§3.2); discuss runs outs
 poll_ms = 30000               # §9.4 gh poll cadence (30–60s; 5000/hr REST budget)
 worker_tick_ms = 1000         # drainQueue cadence
 port = 8765                   # board + /rpc
-permission_mode = "acceptEdits"   # claude -p --permission-mode for headless stages
-model = ""                    # optional claude --model override; empty = CLI default
+permission_mode = "auto"      # claude -p --permission-mode for headless stages
+
+[defaults]                    # fallback claude tuning for any headless stage without an override
+model = ""                    # optional claude --model; empty = CLI default
+effort = ""                   # optional claude --effort <low|medium|high|xhigh|max>; empty = CLI default
+
+[stages.write_tests]          # per-stage overrides for any run-bearing stage (discuss / write_tests /
+model = "opus"                # write_code / review). Headless stages take --model/--effort on the
+effort = "high"               # claude -p argv; discuss takes them on its interactive session launch.
 
 [[repo]]
 name = "owner/name"           # gh -R + the card.repo value
@@ -1060,7 +1070,8 @@ base = "origin/main"          # createWorktree base ref
 
 [session_host]                # §2 capability table
 kind = "vscode"               # | "command" | "tmux" | "embedded-pty"
-# command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid}"   # kind="command"
+# {tuning} expands to discuss's --model/--effort (from [stages.discuss] / [defaults]), empty when unset
+# command = "wezterm start --cwd {cwd} -- claude {resume} --session-id {sid} {tuning}"   # kind="command"
 ```
 
 Deferred to later slices (not 2b): the `embedded-pty` host (`Bun.Terminal`), SSE `/events` (§9.5),

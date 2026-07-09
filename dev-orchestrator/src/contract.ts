@@ -178,10 +178,19 @@ export interface RepoConfig {
 
 export type SessionHostKind = "vscode" | "command" | "tmux" | "embedded-pty";
 
-/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid} placeholders. */
+/** The §2 session-host adapter. `command` carries {cwd}{resume}{sid}{tuning} placeholders. */
 export interface SessionHostConfig {
   kind: SessionHostKind;
   command?: string; // required for kind="command"/"tmux"
+}
+
+/** Per-stage claude tuning (§9.9) — the three headless stages take it on the `claude -p` argv, the
+ *  interactive `discuss` stage on its session-host launch. Resolution is per-field: an UNSET field
+ *  (`undefined`) falls back to `Config.defaults`; an EMPTY string ("") omits the flag so the CLI's own
+ *  default applies — an explicit "" therefore overrides `defaults` rather than inheriting it. */
+export interface StageTuning {
+  model?: string; // claude --model; "" = omit (CLI default), unset = inherit Config.defaults
+  effort?: string; // claude --effort <low|medium|high|xhigh|max>; "" = omit, unset = inherit Config.defaults
 }
 
 /** The one injected config object (§9.9) — never global, never re-read in the hot path. */
@@ -193,7 +202,8 @@ export interface Config {
   workerTickMs: number; // drainQueue cadence
   port: number; // board + /rpc
   permissionMode: string; // claude -p --permission-mode for headless stages
-  model: string; // optional claude --model override; "" = CLI default
+  defaults: StageTuning; // fallback model + effort for any run-bearing stage without a `stages` override
+  stages: Partial<Record<RunStage, StageTuning>>; // per-stage model + effort — headless stages via the claude -p argv, discuss via its session-host launch
   repos: RepoConfig[];
   sessionHost: SessionHostConfig;
 }
