@@ -401,7 +401,9 @@ def test_prompts_drop_absent_tools():
     with permanent duplicate lessons, so the mandated whole-corpus fold must be executable in-process.
     (Lowercase `grep`/`ls`/`cat` — the bash programs — stay allowed; only the capitalized tool names
     are flagged.)"""
-    author_dir = Path(defender.__file__).resolve().parent / "learning" / "author"
+    # `defender` is a namespace package (no __init__.py), so `defender.__file__` is None; anchor
+    # off its package path instead (the robust idiom test_runner_teardown_structural also uses).
+    author_dir = Path(defender.__path__[0]).resolve() / "learning" / "author"
     prompts = sorted(author_dir.glob("*/prompt.md"))
     assert prompts, "no curator prompt.md files found under learning/author"
     tool_ref = re.compile(r"\b(?:Glob|Grep)\b")

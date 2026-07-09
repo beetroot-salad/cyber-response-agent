@@ -31,10 +31,13 @@ from defender.learning.core.config import (
     ACTOR_MODEL,
     AUTHOR_ACTOR_EFFORT,
     AUTHOR_ACTOR_MODEL,
+    AUTHOR_ACTOR_REQUEST_LIMIT,
     AUTHOR_ACTOR_TIMEOUT,
     DEFAULT_PATHS,
     LoopPaths,
 )
+
+VERIFY_FORWARD_DIR = "defender/learning/author/verify_forward"
 
 
 # All four model/wiring constants come from core.config (one source per env var,
@@ -54,25 +57,24 @@ def invoke_agent(
 ) -> dict:
     """Spawn the actor curator agent. Returns the parsed AUTHOR_RESULT dict.
 
-    The actor corpus forward-checks per-lesson (``verify_forward_actor.py``) with a
-    batch wrapper (``verify_batch.py``), so it hands the agent both command templates
-    and allows both verifier scripts. The commit-trailer provenance is stamped by the
-    loop, not the agent, so nothing trailer-related goes in the prompt."""
+    The actor corpus forward-checks per-lesson (``verify_forward/actor.py``) with a batch wrapper
+    (``verify_forward/batch.py``), so it hands the agent both command templates and pins both
+    verifier scripts on the in-process curator's bash lane. The commit-trailer provenance is stamped
+    by the loop, not the agent, so nothing trailer-related goes in the prompt."""
     verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    vf = cfg.repo_root / VERIFY_FORWARD_DIR
     extra_prompt = (
-        f"verify_forward_command: {verifier_py} defender/learning/author/verify_forward/actor.py "
+        f"verify_forward_command: {verifier_py} {VERIFY_FORWARD_DIR}/actor.py "
         f"<lesson_path> <observation_id>\n"
-        f"verify_batch_command: {verifier_py} defender/learning/author/verify_forward/batch.py "
-        f"defender/learning/author/verify_forward/actor.py "
+        f"verify_batch_command: {verifier_py} {VERIFY_FORWARD_DIR}/batch.py "
+        f"{VERIFY_FORWARD_DIR}/actor.py "
         f"<lesson_path>=<observation_id> [<lesson_path>=<observation_id> ...]\n"
-    )
-    extra_tools = (
-        f"Bash({verifier_py} defender/learning/author/verify_forward/batch.py:*),"
-        f"Bash({verifier_py} defender/learning/author/verify_forward/actor.py:*),"
     )
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt, extra_tools=extra_tools,
+        extra_prompt=extra_prompt,
+        verifier_scripts=(vf / "batch.py", vf / "actor.py"),
+        request_limit=AUTHOR_ACTOR_REQUEST_LIMIT,
     )
 
 

@@ -328,6 +328,11 @@ _CURATOR_MODULES = {
     "author": "defender.learning.author.lessons.run",
     "author_actor": "defender.learning.author.malicious_actor.run",
     "author_actor_benign": "defender.learning.author.benign_actor.run",
+    # The adversarial env direction (#298): drains the actor_environment_observations queue into
+    # the shared lessons-environment/ corpus via the benign_actor.env entry point. Absent this
+    # entry, the _CURATOR_MODULES[module_name] subscript (outside the SubprocessError/OSError try)
+    # raised KeyError and wedged the whole drain when the adversarial-env queue hit threshold.
+    "author_actor_env": "defender.learning.author.benign_actor.env",
 }
 
 

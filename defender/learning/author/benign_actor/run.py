@@ -39,6 +39,7 @@ from defender.learning.core.config import (
     ACTOR_MODEL,
     AUTHOR_ENV_EFFORT,
     AUTHOR_ENV_MODEL,
+    AUTHOR_ENV_REQUEST_LIMIT,
     AUTHOR_ENV_TIMEOUT,
     BENIGN_ACTOR_MODEL,
     DEFAULT_PATHS,
@@ -80,10 +81,11 @@ def invoke_agent(
     extra_prompt = (
         f"forward_check_command: {forward_check_command}\n"
     )
-    extra_tools = f"Bash({verifier_py} {VERIFY_SCRIPT_REL}:*),"
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt, extra_tools=extra_tools,
+        extra_prompt=extra_prompt,
+        verifier_scripts=(cfg.repo_root / VERIFY_SCRIPT_REL,),
+        request_limit=AUTHOR_ENV_REQUEST_LIMIT,
     )
 
 

@@ -265,7 +265,7 @@ def test_dispatch_at_threshold_drain_completes(tmp_path: Path, monkeypatch) -> N
     }
     for name, dotted in expected.items():
         box: list[str] = []
-        orch._run_curator_module(name, lambda mod: (box.append(mod.__name__), 0)[1])
+        orch._run_curator_module(name, lambda mod, box=box: (box.append(mod.__name__), 0)[1])
         assert box == [dotted]
 
 

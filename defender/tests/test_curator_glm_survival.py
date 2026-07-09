@@ -512,7 +512,7 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     assert cfg.repo_root == worktree
     assert cfg.state_root == state
     assert cfg.pending_dir == state / "_pending"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="subpath"):
         cfg.pending_dir.relative_to(worktree)     # persistent anchor NOT under the worktree
 
     # Stage anchor (RED): the trace lands under learning_run_dir, not repo_root.
@@ -533,7 +533,7 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     )
     assert captured["anchor"] == rd               # anchored at the persistent dir …
     trace_path = captured["anchor"] / captured["name"]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="subpath"):
         trace_path.relative_to(worktree)          # … so the trace is NOT under the worktree
 
 

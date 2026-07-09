@@ -495,5 +495,5 @@ def test_model_override_claude_low_crosses_validation(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     providers.build_for_effort("glm-5.2", "low")            # default builds
     providers.build_for_effort("claude-sonnet-4-6", "low")  # A/B override builds
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported Anthropic effort"):
         providers.build_for_effort("claude-sonnet-4-6", "none")  # Fireworks-only effort
