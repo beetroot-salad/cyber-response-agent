@@ -1,7 +1,7 @@
 <title>flowdeck — dev workflow board</title>
 <style>
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
+  html,body{margin:0;padding:0;height:100%}
 
   :root{
     --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -45,13 +45,17 @@
     --done-soft:   color-mix(in srgb, var(--done) 13%, transparent);
   }
 
-  body{ font-family:var(--sans); background:var(--ground); color:var(--ink); min-height:100vh; display:flex; flex-direction:column; -webkit-font-smoothing:antialiased; transition:padding-right .22s cubic-bezier(.4,0,.2,1); }
+  /* app-shell: the page is exactly the viewport and never scrolls — only the board (x) and columns (y) do */
+  body{ font-family:var(--sans); background:var(--ground); color:var(--ink); height:100%; overflow:hidden; display:flex; flex-direction:column; -webkit-font-smoothing:antialiased; transition:padding-right .22s cubic-bezier(.4,0,.2,1); }
   body.peek-open{ padding-right:440px; }
 
   /* ---------- top bar ---------- */
   .topbar{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:11px 18px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
   .brand{ display:flex; align-items:center; gap:9px; }
   .brand svg{ width:20px; height:20px; display:block; }
+  /* fill via CSS, not presentation attrs — var() doesn't resolve in fill="…", it falls back to black (invisible in dark) */
+  .brand svg rect{ fill:var(--ink-3); }
+  .brand svg rect.on{ fill:var(--accent); }
   .brand-name{ font-family:var(--mono); font-weight:700; font-size:14.5px; letter-spacing:-.01em; }
   .brand-sub{ font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink-3); border:1px solid var(--line-2); border-radius:5px; padding:2px 5px; }
 
@@ -64,19 +68,25 @@
   .controls{ display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; }
   select, .icon-btn{ font-family:var(--mono); font-size:12px; color:var(--ink-2); background:var(--panel); border:1px solid var(--line-2); border-radius:8px; padding:7px 10px; cursor:pointer; }
   select:hover, .icon-btn:hover{ border-color:var(--ink-3); }
+  #themeBtn{ display:inline-flex; align-items:center; justify-content:center; }
+  #themeBtn svg{ display:block; }
   .btn-new{ font-family:var(--sans); font-weight:600; font-size:12.5px; background:var(--ink); color:var(--panel); border:1px solid var(--ink); border-radius:8px; padding:8px 12px; cursor:pointer; }
   .btn-new:hover{ opacity:.9; }
 
   /* ---------- board ---------- */
-  .board{ flex:1; display:flex; gap:13px; padding:16px 18px 8px; overflow-x:auto; overflow-y:hidden; align-items:flex-start; scrollbar-width:thin; }
-  .col{ flex:0 0 264px; width:264px; background:var(--col); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; max-height:calc(100vh - 148px); }
+  /* safe center — columns sit centered when they fit, fall back to left-aligned + scrollable when they overflow */
+  .board{ flex:1; min-height:0; display:flex; justify-content:safe center; gap:13px; padding:16px 18px 8px; overflow-x:auto; overflow-y:hidden; overscroll-behavior:contain; align-items:flex-start; scrollbar-width:thin; }
+  /* max-height:100% of the (now definite-height) board — no magic viewport-minus-chrome number, so the column never runs past the visible area */
+  .col{ flex:0 0 264px; width:264px; background:var(--col); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; max-height:100%; }
   .col-head{ display:flex; align-items:baseline; gap:8px; padding:12px 13px 11px; border-bottom:1px solid var(--line); }
   .stage-key{ font-family:var(--mono); font-weight:700; font-size:13px; color:var(--ink); letter-spacing:-.01em; }
   .stage-role{ font-family:var(--mono); font-size:10px; color:var(--ink-3); display:inline-flex; align-items:center; gap:5px; opacity:0; transition:opacity .13s ease; }
   .col:hover .stage-role, .col:focus-within .stage-role{ opacity:1; }
   .stage-role .gdot{ width:5px; height:5px; border-radius:999px; background:var(--accent); }
   .col-count{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-3); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 7px; min-width:22px; text-align:center; }
-  .col-body{ padding:10px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; scrollbar-width:thin; }
+  /* min-height:0 lets this flex child shrink below its content so overflow-y:auto actually scrolls (else it just overflows the capped column) */
+  /* overscroll-behavior:contain stops the wheel from chaining out to the page; scrollbar-gutter:stable reserves the bar's width so it can't flicker on/off */
+  .col-body{ padding:10px; display:flex; flex-direction:column; gap:9px; overflow-y:auto; min-height:0; overscroll-behavior:contain; scrollbar-gutter:stable; scrollbar-width:thin; }
   .col-body:empty::after{ content:"—"; color:var(--ink-3); font-family:var(--mono); font-size:12px; display:block; text-align:center; padding:12px 0; }
   /* empty board + a failed poll: a large error, not the quiet empty columns */
   .board-error{ flex:1; min-height:52vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:40px 20px; }
@@ -168,19 +178,11 @@
 
   /* ---------- ledger footer ---------- */
   .ledger{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:9px 18px; border-top:1px solid var(--line); background:var(--panel); font-family:var(--mono); font-size:11px; color:var(--ink-3); }
-  .ledger .sync{ display:inline-flex; align-items:center; gap:7px; color:var(--ink-2); }
-  .ledger .sync .cdot{ width:7px; height:7px; border-radius:999px; background:var(--done); animation:pulse 2.4s ease-in-out infinite; }
-  .ledger .sync.failed{ color:var(--fail); }
-  .ledger .sync.failed .cdot{ background:var(--fail); animation:none; }
-  .ledger-toggle{ font-family:var(--mono); font-size:11px; color:var(--ink-2); background:transparent; border:1px solid var(--line-2); border-radius:6px; padding:3px 9px; cursor:pointer; }
+  /* trouble-only: empty when healthy (the "last synced …" clock already says the board is live) */
+  .ledger .sync{ display:inline-flex; align-items:center; gap:7px; color:var(--fail); }
+  .ledger .sync .cdot{ width:7px; height:7px; border-radius:999px; background:currentColor; }
+  .ledger-toggle{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-2); background:transparent; border:1px solid var(--line-2); border-radius:6px; padding:3px 9px; cursor:pointer; }
   .ledger-toggle:hover{ border-color:var(--ink-3); color:var(--ink); }
-  .legend{ display:flex; gap:13px; flex-wrap:wrap; margin-left:auto; }
-  .legend span{ display:inline-flex; align-items:center; gap:5px; }
-  .legend i{ width:9px; height:9px; display:inline-flex; align-items:center; justify-content:center; font-style:normal; }
-  .legend .lg-run{ border-radius:50%; background:var(--run); }
-  .legend .lg-gate{ background:var(--accent); transform:rotate(45deg); }
-  .legend .lg-fail{ color:var(--fail); font-weight:700; font-size:11px; }
-  .legend .lg-done{ color:var(--done); font-weight:700; font-size:11px; }
 
   /* ---------- scrim, drawer, modal ---------- */
   .scrim{ position:fixed; inset:0; background:rgba(8,10,15,.5); opacity:0; pointer-events:none; transition:opacity .18s ease; z-index:40; }
@@ -189,7 +191,8 @@
   .drawer.show{ transform:translateX(0); }
   .drawer-head{ display:flex; align-items:flex-start; gap:10px; padding:16px 18px 14px; border-bottom:1px solid var(--line); }
   .drawer-head .x{ margin-left:auto; }
-  .drawer-body{ padding:16px 18px 22px; overflow-y:auto; display:flex; flex-direction:column; gap:19px; }
+  /* flex:1 fills the space between head and pinned actions; min-height:0 lets it scroll a long run history instead of pushing the actions off-screen */
+  .drawer-body{ padding:16px 18px 22px; overflow-y:auto; display:flex; flex-direction:column; gap:19px; flex:1 1 auto; min-height:0; }
   .d-title{ font-family:var(--sans); font-weight:600; font-size:15.5px; line-height:1.3; margin:5px 0 0; text-wrap:balance; }
   .d-crumb{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; color:var(--ink-3); flex-wrap:wrap; }
   .d-statepill{ display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; font-weight:600; background:var(--s-soft); }
@@ -252,10 +255,10 @@
 <header class="topbar">
   <div class="brand">
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="2" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
-      <rect x="9.5" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
-      <rect x="17" y="4" width="5" height="16" rx="1.6" fill="var(--ink-3)"/>
-      <rect x="9.5" y="4" width="5" height="6.4" rx="1.6" fill="var(--accent)"/>
+      <rect x="2" y="4" width="5" height="16" rx="1.6"/>
+      <rect x="9.5" y="4" width="5" height="16" rx="1.6"/>
+      <rect x="17" y="4" width="5" height="16" rx="1.6"/>
+      <rect class="on" x="9.5" y="4" width="5" height="6.4" rx="1.6"/>
     </svg>
     <span class="brand-name">flowdeck</span>
     <span class="brand-sub">local</span>
@@ -266,24 +269,18 @@
       <option>all repos</option>
     </select>
     <button class="btn-new" id="newBtn">+ New issue</button>
-    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">◐</button>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/></svg></button>
   </div>
 </header>
 
 <main class="board" id="board"></main>
 
 <footer class="ledger">
-  <span class="sync" id="syncStatus"><span class="cdot"></span>polling <code>gh</code> · 30s</span>
+  <span class="sync" id="syncStatus"></span>
   <span id="syncAge">last synced 12s ago</span>
   <span id="counts"></span>
   <span>workers 2/2</span>
-  <span title="drag a card into a column, or focus it and press left/right">drag ↔ · ←→ to move</span>
   <button class="ledger-toggle" id="doneToggle"></button>
-  <div class="legend">
-    <span><i class="lg-run"></i>running</span>
-    <span><i class="lg-gate"></i>needs you</span>
-    <span><i class="lg-fail">✕</i>failed</span>
-  </div>
 </footer>
 
 <div class="scrim" id="scrim"></div>
@@ -414,12 +411,18 @@
       const panel=DISCONNECTED
         ? `<div class="be-title">Can’t reach the board</div><div class="be-sub">the flowdeck server isn’t responding</div>`
         : `<div class="be-title">Polling failed</div><div class="be-sub">can’t reach GitHub — check <code>gh auth status</code></div>`;
-      board.innerHTML=`<div class="board-error"><div class="be-mark">⚠</div>${panel}</div>`;
+      const errSig="err:"+(DISCONNECTED?"d":"")+(pollFailed?"p":"");
+      if(board.dataset.sig!==errSig){ board.dataset.sig=errSig; board.innerHTML=`<div class="board-error"><div class="be-mark">⚠</div>${panel}</div>`; }
       $("#summary").innerHTML=""; $("#counts").textContent="0 active";
       $("#doneToggle").textContent=showDone?"hide done":"show done (0)"; syncRepoFilter();
       return;
     }
     const stages=STAGES.filter(s=>s.key!=="done"||showDone);
+    // Only rebuild the DOM when the board actually changes — render() runs every 1.5s, and replacing
+    // board.innerHTML each tick recreates the scrolling .col-body, flashing ("blinking") the scrollbar
+    // and dropping any in-progress scroll.
+    const sig=repoFilter+"|"+showDone+"|"+[...collapsed].sort().join(",")+"||"+vis.map(c=>[c.stage,c.status,c.id,c.issue_number,c.repo,c.pr_number,(c.latest_run&&c.latest_run.session_id)||"",c.title].join("~")).join(";");
+    if(board.dataset.sig!==sig){ board.dataset.sig=sig;
     board.innerHTML=stages.map(s=>{
       const cs=vis.filter(c=>c.stage===s.key);
       if(collapsed.has(s.key)){
@@ -431,7 +434,7 @@
           <span class="stage-role">${s.gate?'<span class="gdot"></span>':""}${s.role}</span>
           <span class="col-count">${cs.length}</span></div>
         <div class="col-body">${cs.map(cardHTML).join("")}</div></section>`;
-    }).join("");
+    }).join(""); }
     const need=vis.filter(c=>c.status==="awaiting_human").length, run=vis.filter(c=>c.status==="running").length;
     $("#summary").innerHTML=`<span class="chip wait"><span class="cdot"></span>${need} need you</span><span class="chip run"><span class="cdot"></span>${run} running</span>`;
     const doneN=vis.filter(c=>c.stage==="done").length;
@@ -539,18 +542,21 @@
 
   // ---------- toast / sync clock ----------
   let toastT; function toast(msg){ const t=$("#toast"); t.innerHTML=`<span class="tk">▸</span> ${esc(msg)}`; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2400); }
+  // human-readable elapsed — seconds roll up to m/h/d so long gaps don't read as "340s ago"
+  function dur(s){ s=Math.max(0,Math.round(s)); if(s<60) return s+"s"; if(s<3600) return Math.round(s/60)+"m"; if(s<86400) return Math.round(s/3600)+"h"; return Math.round(s/86400)+"d"; }
   let lastSync=Date.now(); function setSync(){ lastSync=Date.now(); }
-  setInterval(()=>{ const age=Math.round((Date.now()-lastSync)/1000); $("#syncAge").textContent=age<2?"synced":"last synced "+age+"s ago"; },1000);
+  setInterval(()=>{ const age=Math.round((Date.now()-lastSync)/1000); $("#syncAge").textContent=age<2?"synced":"last synced "+dur(age)+" ago"; },1000);
 
   // ---------- poll health (footer status) ----------
-  function ago(iso){ if(!iso) return ""; const s=Math.max(0,Math.round((Date.now()-Date.parse(iso))/1000)); return s<60?s+"s ago":Math.round(s/60)+"m ago"; }
+  function ago(iso){ if(!iso) return ""; return dur((Date.now()-Date.parse(iso))/1000)+" ago"; }
   function updateSyncStatus(){
     const el=$("#syncStatus"); if(!el) return;
     const pollFailed=!!(POLL&&POLL.ran&&POLL.errors>0);
     el.classList.toggle("failed",DISCONNECTED||pollFailed);
+    // healthy = render nothing; "last synced …" already says the board is live. surface trouble only.
     if(DISCONNECTED) el.innerHTML=`<span class="cdot"></span>disconnected — can’t reach the board`;
     else if(pollFailed){ const ok=POLL&&POLL.okAt?` · last ok ${ago(POLL.okAt)}`:""; el.innerHTML=`<span class="cdot"></span>polling failed${ok}`; }
-    else el.innerHTML=`<span class="cdot"></span>polling <code>gh</code> · 30s`;
+    else el.innerHTML="";
   }
 
   // ---------- events ----------
