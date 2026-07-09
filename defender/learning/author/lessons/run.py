@@ -74,6 +74,7 @@ from defender.learning.core.config import (
     AUTHOR_REQUEST_LIMIT,
     AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
+    DefenderPaths,
     LoopPaths,
     make_logger,
     now_iso,
@@ -102,6 +103,9 @@ class AuthorConfig:
     repo_root: Path
     lessons_dir: Path
     lessons_dir_rel: str
+    # Forward-check verifier scripts dir (absolute, under repo_root) — resolved from the injected
+    # LoopPaths so it follows the batch worktree rather than being hand-built off repo_root.
+    verifier_dir: Path
     runs_dir: Path
     # Shared mutable-state root (``LoopPaths.state_root``) pinned as
     # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
@@ -137,6 +141,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         repo_root=paths.repo_root,
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
+        verifier_dir=paths.verify_forward_dir,
         runs_dir=paths.runs_dir,
         state_root=paths.state_root,
         pending_dir=paths.pending_dir,
@@ -241,13 +246,12 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     from defender.learning.author import curator_engine
 
     verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
-    vf = cfg.repo_root / "defender" / "learning" / "author" / "verify_forward"
+    rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {cfg.lessons_dir_rel}\n"
         f"--direction <direction> <lesson_path> <run_id>\n"
-        f"verify_batch_command: {verifier_py} defender/learning/author/verify_forward/batch.py "
-        f"defender/learning/author/verify_forward/forward.py "
+        f"verify_batch_command: {verifier_py} {rel}batch.py {rel}forward.py "
         f"<lesson_path>=<run_id>=<direction> [<lesson_path>=<run_id>=<direction> ...]\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
@@ -258,7 +262,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         batch_id=batch_id,
         user_prompt=user_prompt,
         corpus_dir=cfg.lessons_dir,
-        verifier_scripts=(vf / "batch.py", vf / "forward.py"),
+        verifier_scripts=(cfg.verifier_dir / "batch.py", cfg.verifier_dir / "forward.py"),
         repo_root=cfg.repo_root,
         learning_run_dir=cfg.pending_dir,
         state_root=cfg.state_root,

@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from defender._paths import DefenderPaths
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
@@ -60,12 +61,12 @@ from defender.runtime.tools import AgentDeps
 
 AuthorError = _shared.AuthorError
 
-# The verify_forward scripts live at this fixed repo-relative offset. A curator's bash_allow
-# admits ITS forward-check scripts by this repo-relative spelling (what the agent types, running
-# with cwd=worktree) OR the worktree-absolute one — derived from a FIXED offset rather than
-# ``script.relative_to(repo_root)`` because a tmp batch worktree is NOT under the main-checkout
-# REPO_ROOT (the same reason the lead author's ``_rm_skills_pattern`` uses a fixed ``SKILLS_REL``).
-_VERIFY_FORWARD_REL = "defender/learning/author/verify_forward"
+# The verify_forward scripts' repo-relative offset (trailing slash), owned once by DefenderPaths. A
+# curator's bash_allow admits ITS forward-check scripts by this repo-relative spelling (what the
+# agent types, running with cwd=worktree) OR the worktree-absolute one — the repo-relative form is a
+# FIXED offset rather than ``script.relative_to(repo_root)`` because a tmp batch worktree is NOT under
+# the main-checkout REPO_ROOT (the reason the lead author's ``_rm_skills_pattern`` uses ``SKILLS_REL``).
+_VERIFY_FORWARD_REL = DefenderPaths.verify_forward_dir_rel
 
 # One path segment that is NOT a `..` traversal: `..` as a WHOLE segment (followed by `/`, a
 # token-boundary space, or end-of-token) is rejected TEXTUALLY, since the bash lane never
@@ -140,7 +141,7 @@ def _verifier_pattern(script: Path) -> re.Pattern[str]:
     is ``python3`` or any ``…/python3`` (the resolved venv interpreter the forward-check needs for
     pyyaml). The shape of the actor's ``_script_pattern``; the pattern can't constrain the script's
     internals, so the pinned verify_forward scripts MUST stay read-only over the corpus/run bundle."""
-    rel = f"{_VERIFY_FORWARD_REL}/{script.name}"
+    rel = f"{_VERIFY_FORWARD_REL}{script.name}"  # _VERIFY_FORWARD_REL carries the trailing slash
     spellings = "|".join(re.escape(s) for s in (rel, str(script)))
     return re.compile(rf"^(?:[^ ]*/)?python3? (?:{spellings})(?: .*)?$")
 

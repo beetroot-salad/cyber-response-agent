@@ -48,7 +48,7 @@ def invoke_agent(
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
         extra_prompt=extra_prompt,
-        verifier_scripts=(cfg.repo_root / _benign.VERIFY_SCRIPT_REL,),
+        verifier_scripts=(cfg.verifier_dir / "env.py",),
         request_limit=AUTHOR_ENV_REQUEST_LIMIT,
     )
 
