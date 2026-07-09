@@ -73,11 +73,23 @@ export interface IssueRef {
 /** The state of a PR the poller checks for drift (§9.4). */
 export type PrState = "open" | "merged" | "closed";
 
-/** One poll pass's applied-transition counts (stale/no-op transitions are NOT counted). */
+/** One poll pass's applied-transition counts (stale/no-op transitions are NOT counted). `errors`
+ *  counts gh-observation failures this pass (issue-list + pr-status) — the signal that tells an
+ *  empty `[]` apart from a gh blip; a malformed-issue skip (§9.4) is validation, not counted here. */
 export interface PollSummary {
   intook: number;
   merged: number;
   closed: number;
+  errors: number;
+}
+
+/** The board-visible health of the poll loop (§9.4). Updated each pass; read by getBoard so the UI
+ *  can show "polling failed" without a silent no-op looking identical to an empty repo. */
+export interface PollHealth {
+  ran: boolean; // false until the first pass completes (a fresh boot is neutral, not "failed")
+  errors: number; // gh-observation failures on the last pass — >0 ⇒ polling is failing
+  at: string | null; // ISO of the last pass
+  okAt: string | null; // ISO of the last HEALTHY pass (errors===0) — drives "last ok … ago"
 }
 
 /** Every card-targeted event carries the (stage,status) the caller believes the card is
@@ -136,7 +148,7 @@ export interface Effects {
   kill(run: RunRow): void;
   gh: {
     issueCreate(input: { repo: string; title: string; body?: string }): { issue_number: number };
-    issueList(input: { repo?: string; label?: string }): IssueRef[]; // poll → intake
+    issueList(input: { repo?: string; label?: string }): { issues: IssueRef[]; failures: number }; // poll → intake (failures = repos whose list call threw)
     prStatus(input: { repo: string; pr_number: number }): PrState; // poll → drift
   };
   now(): string; // ISO-8601 UTC
@@ -258,7 +270,7 @@ export interface BootDeps {
   reconcile(db: DB, fx: Effects): ReconcileSummary;
   drainQueue(db: DB, fx: Effects, opts: { pool: number }): Promise<void>;
   pollOnce(db: DB, fx: Effects, opts: { label?: string }): Promise<PollSummary>;
-  makeApp(db: DB, fx: Effects, cfg: Config): App;
+  makeApp(db: DB, fx: Effects, cfg: Config, health: PollHealth): App;
   serve(opts: { port: number; fetch: FetchHandler }): unknown;
   every(ms: number, fn: () => void | Promise<void>): unknown; // self-rescheduling, non-overlapping timer
 }

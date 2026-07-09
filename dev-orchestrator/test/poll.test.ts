@@ -17,7 +17,7 @@ describe("pollOnce — intake", () => {
     const db = createTestDb();
     const fx = new FakeEffects().setIssues([]);
     const summary = await pollOnce(db, fx, { label: "flow" });
-    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 });
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0, errors: 0 });
     expect(listBoard(db)).toHaveLength(0);
   });
 
@@ -97,7 +97,7 @@ describe("pollOnce — drift", () => {
     const fx = new FakeEffects().setIssues([]).setPrState(52, "open");
     const card = withOpenPr(db, 52);
     const summary = await pollOnce(db, fx, {});
-    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 });
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0, errors: 0 });
     expect([getCard(db, card.id)?.stage, getCard(db, card.id)?.status]).toEqual(["review", "awaiting_human"]);
   });
 
@@ -135,7 +135,17 @@ describe("pollOnce — robustness (independent halves)", () => {
     const summary = await pollOnce(db, fx, { label: "flow" });
     expect(summary.intook).toBe(0); // list threw
     expect(summary.merged).toBe(1); // but drift is a separate half
+    expect(summary.errors).toBe(1); // the list throw is COUNTED — a genuinely empty [] would be errors:0
     expect(getCard(db, card.id)?.stage).toBe("done");
+  });
+
+  it("a per-repo list failure REPORTED by issueList (not thrown) is counted — the single-repo gh-fail path", async () => {
+    const db = createTestDb();
+    // The real gh.issueList swallows a repo blip and returns [] + failures:1 (it does NOT throw); this
+    // is the exact case that used to read as an empty repo. errors must surface it.
+    const fx = new FakeEffects().setIssues([]).setListFailures(1);
+    const summary = await pollOnce(db, fx, { label: "flow" });
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0, errors: 1 });
   });
 
   it("a gh.prStatus throw is swallowed — the pass resolves and the un-checked card is left intact", async () => {
@@ -143,7 +153,7 @@ describe("pollOnce — robustness (independent halves)", () => {
     const fx = new FakeEffects().setIssues([]).failOn("gh.prStatus");
     const card = seedCard(db, { stage: "review", status: "awaiting_human", pr_number: 80, worktree_path: "/wt/x" });
     const summary = await pollOnce(db, fx, {}); // must not reject
-    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 });
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0, errors: 1 }); // the prStatus throw is counted
     expect([getCard(db, card.id)?.stage, getCard(db, card.id)?.status]).toEqual(["review", "awaiting_human"]);
   });
 
@@ -153,7 +163,7 @@ describe("pollOnce — robustness (independent halves)", () => {
     seedCard(db, { stage: "review", status: "awaiting_human", pr_number: 81, worktree_path: "/wt/x" });
     seedCard(db, { stage: "review", status: "awaiting_human", pr_number: 82, worktree_path: "/wt/y" });
     const summary = await pollOnce(db, fx, {});
-    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0 }); // both threw, nothing applied
+    expect(summary).toEqual({ intook: 0, merged: 0, closed: 0, errors: 2 }); // both threw → both counted, nothing applied
     // The fake records each call BEFORE throwing, so BOTH cards being checked (count 2) proves the
     // try/catch sits INSIDE the drift loop — a catch hoisted to wrap the whole loop stops at 1.
     expect(fx.countOf("gh.prStatus")).toBe(2);

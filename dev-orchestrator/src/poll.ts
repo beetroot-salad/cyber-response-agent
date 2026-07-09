@@ -8,14 +8,19 @@ import type { CardState, DB, Effects, IssueRef, PollSummary } from "./contract";
 import { applyEvent, intake } from "./engine";
 
 export async function pollOnce(db: DB, fx: Effects, opts: { label?: string } = {}): Promise<PollSummary> {
-  const summary: PollSummary = { intook: 0, merged: 0, closed: 0 };
+  const summary: PollSummary = { intook: 0, merged: 0, closed: 0, errors: 0 };
 
   // --- intake half: list open issues, create a backlog card for each new one ---
   let issues: IssueRef[] = [];
   try {
-    issues = fx.gh.issueList({ label: opts.label });
+    // issueList swallows per-repo blips but REPORTS their count (SB-I) — so an empty list from a
+    // failed gh call is distinguishable from a genuinely empty repo. Add those to the error count.
+    const listed = fx.gh.issueList({ label: opts.label });
+    issues = listed.issues;
+    summary.errors += listed.failures;
   } catch {
-    // SB-I: a list-endpoint blip skips intake this pass, but drift below still runs.
+    // SB-I: a total list-effect failure skips intake this pass (drift below still runs), counted as one.
+    summary.errors += 1;
   }
   for (const iss of issues) {
     try {
@@ -43,7 +48,8 @@ export async function pollOnce(db: DB, fx: Effects, opts: { label?: string } = {
       }
       // "open" → no drift, no count.
     } catch {
-      // per-card gh.prStatus blip — leave the card intact and check the next.
+      // per-card gh.prStatus blip — leave the card intact, count the error, check the next.
+      summary.errors += 1;
     }
   }
 

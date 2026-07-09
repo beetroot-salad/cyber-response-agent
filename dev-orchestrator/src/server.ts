@@ -4,7 +4,7 @@
 // The read model (readBoard/readCard) is the pure DB projection (§9.3) — activity stays null here;
 // the live ~/.claude tail is a separate degradable overlay (a documented follow-up).
 
-import type { App, BoardCard, BoardRun, CardDetail, CardState, Config, DB, Effects, RunRow } from "./contract";
+import type { App, BoardCard, BoardRun, CardDetail, CardState, Config, DB, Effects, PollHealth, RunRow } from "./contract";
 import { AlreadyInFlightError, InvalidEventError } from "./contract";
 import { applyEvent, intake } from "./engine";
 
@@ -56,7 +56,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-async function handleRpc(req: Request, db: DB, fx: Effects): Promise<Response> {
+async function handleRpc(req: Request, db: DB, fx: Effects, health: PollHealth): Promise<Response> {
   let payload: { op?: string; args?: any };
   try {
     payload = (await req.json()) as { op?: string; args?: any };
@@ -67,7 +67,9 @@ async function handleRpc(req: Request, db: DB, fx: Effects): Promise<Response> {
   try {
     switch (op) {
       case "getBoard":
-        return json(readBoard(db));
+        // cards + last-poll health, so the board can show "polling failed" (an empty [] from a gh
+        // blip otherwise looks identical to an empty repo — §9.4).
+        return json({ cards: readBoard(db), poll: health });
       case "getCard": {
         const detail = readCard(db, args?.cardId);
         return detail ? json(detail) : json({ error: "card not found" }, 404);
@@ -91,11 +93,11 @@ async function handleRpc(req: Request, db: DB, fx: Effects): Promise<Response> {
 
 const BOARD_HTML = new URL("./board/index.html", import.meta.url);
 
-export function makeApp(db: DB, fx: Effects, _cfg: Config): App {
+export function makeApp(db: DB, fx: Effects, _cfg: Config, health: PollHealth): App {
   return {
     fetch(req: Request): Response | Promise<Response> {
       const url = new URL(req.url);
-      if (req.method === "POST" && url.pathname === "/rpc") return handleRpc(req, db, fx);
+      if (req.method === "POST" && url.pathname === "/rpc") return handleRpc(req, db, fx, health);
       if (req.method === "GET") return new Response(Bun.file(BOARD_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });
       return json({ error: "not found" }, 404);
     },
