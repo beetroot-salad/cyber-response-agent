@@ -82,7 +82,7 @@ from defender.runtime.permission.policies._common import (  # noqa: E402
     reader_patterns_for,
 )
 from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
-from defender.runtime.tools import AgentDeps, _tool_write_file  # noqa: E402
+from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
 
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
@@ -95,6 +95,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.runtime.agents import (  # noqa: E402
     ACTOR_DEF,
+    CORPUS_AUTHOR_DEF,
     GATHER_DEF,
     JUDGE_DEF,
     LEAD_AUTHOR_DEF,
@@ -401,6 +402,31 @@ def test_d2_lead_author_early_return_removed(tmp_path):
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
     assert isinstance(deps, LeadAuthorDeps)
     assert deps.run_id == run.name           # the uniform _for_run tail ran
+
+
+def test_d2_deps_class_maps_every_bindable_role(tmp_path):
+    """d2_deps_class_all_roles (migrated from test_bind_wiring_545): bind maps every BINDABLE role
+    to its AgentDeps subtype — none silently mismapped. The one role bind does NOT build is
+    CORPUS_AUTHOR (the #556 curator port): like the lead author it is a per-spawn writer, but its
+    policy needs the worktree `corpus_dir` + `verifier_scripts` that bind's RunScope cannot carry
+    (compiling it here would root its write_allow at run_dir), so it is constructed only via
+    `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy."""
+    cases = [
+        (bind(MAIN_DEF, tmp_path), AgentDeps),
+        (bind(GATHER_DEF, tmp_path), GatherDeps),
+        (bind(JUDGE_DEF, tmp_path), JudgeDeps),
+        (bind(ACTOR_DEF, tmp_path, scope=RunScope(read_confine=(tmp_path / "env",))), ActorDeps),
+        (bind(ORACLE_DEF, tmp_path), OracleDeps),
+        (bind(VERIFY_DEF, tmp_path), VerifierDeps),
+        (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
+         LeadAuthorDeps),
+    ]
+    # 8 roles total: the 7 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
+    assert len({role for role in AgentRole}) == 8
+    for deps, expected in cases:
+        assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
+    with pytest.raises((ValueError, TypeError)):
+        bind(CORPUS_AUTHOR_DEF, tmp_path)
 
 
 # ============================================================================

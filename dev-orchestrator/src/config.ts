@@ -15,8 +15,10 @@ function defaults(): Config {
     pollMs: Number(process.env.FLOWDECK_POLL_MS ?? 30000),
     workerTickMs: Number(process.env.FLOWDECK_WORKER_TICK_MS ?? 1000),
     port: Number(process.env.FLOWDECK_PORT ?? 8765),
-    permissionMode: process.env.FLOWDECK_PERMISSION_MODE ?? "acceptEdits",
-    model: process.env.FLOWDECK_MODEL ?? "",
+    permissionMode: process.env.FLOWDECK_PERMISSION_MODE ?? "auto",
+    // Global fallback (§9.9) — empty model/effort means "let the claude CLI pick its own default".
+    defaults: { model: process.env.FLOWDECK_MODEL ?? "", effort: process.env.FLOWDECK_EFFORT ?? "" },
+    stages: {},
     repos: [],
     sessionHost: { kind: "vscode" },
   };
@@ -30,6 +32,11 @@ export function loadConfig(): Config {
   return {
     ...base,
     ...file,
+    // Merge the nested blocks so a file that sets only one field keeps the base for the rest. `defaults`
+    // and `sessionHost` merge per sub-field; `stages` merges per stage-key (a file's stage object replaces
+    // the base's wholesale — the per-field model/effort fallback then happens in stageTuning, not here).
+    defaults: { ...base.defaults, ...file.defaults },
+    stages: { ...base.stages, ...file.stages },
     sessionHost: { ...base.sessionHost, ...file.sessionHost },
   };
 }

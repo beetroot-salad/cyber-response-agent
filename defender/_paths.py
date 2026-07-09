@@ -44,6 +44,10 @@ class DefenderPaths:
     lessons_dir_rel: ClassVar[str] = "defender/lessons/"
     lessons_actor_dir_rel: ClassVar[str] = "defender/lessons-actor/"
     lessons_environment_dir_rel: ClassVar[str] = "defender/lessons-environment/"
+    # The author-time forward-check verifier scripts (verify_forward/{batch,forward,actor,env}.py).
+    # The curators pin these on their bash lane as `python3 <script>` grants; the trailing slash is
+    # significant (the rel is the repo-relative command spelling the agent types, cwd=worktree).
+    verify_forward_dir_rel: ClassVar[str] = "defender/learning/author/verify_forward/"
 
     @property
     def defender_dir(self) -> Path:
@@ -52,6 +56,11 @@ class DefenderPaths:
     @property
     def learning_dir(self) -> Path:
         return self.defender_dir / "learning"
+
+    @property
+    def verify_forward_dir(self) -> Path:
+        """The author-time forward-check verifier scripts dir (absolute, root-relative)."""
+        return self.learning_dir / "author" / "verify_forward"
 
     @property
     def catalog_dir(self) -> Path:

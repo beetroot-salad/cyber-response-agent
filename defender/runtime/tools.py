@@ -113,6 +113,13 @@ class AgentDeps:
     run_id: str
     salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
+    # The shared learning-state root, threaded into the bash tool's subprocess env as
+    # DEFENDER_LEARNING_STATE_DIR (via `run_common.run_env`) so a curator's forward-check
+    # resolves the real source-case bundle off it, not the throwaway worktree's empty runs/
+    # (#425). None for the runtime agents (main/gather) that never spawn a state-root-bound
+    # subprocess — the in-process twin of the retired `curator_agent_env`, carried on the deps
+    # instead of mutating the process-global `os.environ`.
+    state_root: Path | None = field(default=None, kw_only=True)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -120,6 +127,7 @@ class AgentDeps:
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
         *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        state_root: Path | None = None,
     ) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (run_id as the
         run dir's basename, the salt) and stamp the caller's `policy`. The shared spine
@@ -136,6 +144,7 @@ class AgentDeps:
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
+            state_root=state_root,
         )
 
 
@@ -185,9 +194,11 @@ def _record_lesson_load(deps: AgentDeps, path: Path) -> None:
 
 
 def _bash_env(deps: AgentDeps) -> dict[str, str]:
-    """The runtime agent's shell environment — defined once in run_common.py."""
+    """The runtime agent's shell environment — defined once in run_common.py. `state_root`
+    (set only by the curator deps) reaches the forward-check subprocess as
+    DEFENDER_LEARNING_STATE_DIR through the deps, not a process-global env mutation."""
     from defender import run_common
-    return run_common.run_env(deps.defender_dir, deps.run_dir)
+    return run_common.run_env(deps.defender_dir, deps.run_dir, state_root=deps.state_root)
 
 
 def _tool_bash(deps: AgentDeps, command: str) -> str:

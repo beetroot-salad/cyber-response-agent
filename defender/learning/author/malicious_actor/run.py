@@ -31,8 +31,10 @@ from defender.learning.core.config import (
     ACTOR_MODEL,
     AUTHOR_ACTOR_EFFORT,
     AUTHOR_ACTOR_MODEL,
+    AUTHOR_ACTOR_REQUEST_LIMIT,
     AUTHOR_ACTOR_TIMEOUT,
     DEFAULT_PATHS,
+    DefenderPaths,
     LoopPaths,
 )
 
@@ -54,25 +56,23 @@ def invoke_agent(
 ) -> dict:
     """Spawn the actor curator agent. Returns the parsed AUTHOR_RESULT dict.
 
-    The actor corpus forward-checks per-lesson (``verify_forward_actor.py``) with a
-    batch wrapper (``verify_batch.py``), so it hands the agent both command templates
-    and allows both verifier scripts. The commit-trailer provenance is stamped by the
-    loop, not the agent, so nothing trailer-related goes in the prompt."""
+    The actor corpus forward-checks per-lesson (``verify_forward/actor.py``) with a batch wrapper
+    (``verify_forward/batch.py``), so it hands the agent both command templates and pins both
+    verifier scripts on the in-process curator's bash lane. The commit-trailer provenance is stamped
+    by the loop, not the agent, so nothing trailer-related goes in the prompt."""
     verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
     extra_prompt = (
-        f"verify_forward_command: {verifier_py} defender/learning/author/verify_forward/actor.py "
+        f"verify_forward_command: {verifier_py} {rel}actor.py "
         f"<lesson_path> <observation_id>\n"
-        f"verify_batch_command: {verifier_py} defender/learning/author/verify_forward/batch.py "
-        f"defender/learning/author/verify_forward/actor.py "
+        f"verify_batch_command: {verifier_py} {rel}batch.py {rel}actor.py "
         f"<lesson_path>=<observation_id> [<lesson_path>=<observation_id> ...]\n"
-    )
-    extra_tools = (
-        f"Bash({verifier_py} defender/learning/author/verify_forward/batch.py:*),"
-        f"Bash({verifier_py} defender/learning/author/verify_forward/actor.py:*),"
     )
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt, extra_tools=extra_tools,
+        extra_prompt=extra_prompt,
+        verifier_scripts=(cfg.verifier_dir / "batch.py", cfg.verifier_dir / "actor.py"),
+        request_limit=AUTHOR_ACTOR_REQUEST_LIMIT,
     )
 
 
@@ -88,6 +88,7 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
         state_root=paths.state_root,
         corpus_dir=paths.lessons_actor_dir,
         corpus_dir_rel=paths.lessons_actor_dir_rel,
+        verifier_dir=paths.verify_forward_dir,
         channel=paths.actor_observations,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,

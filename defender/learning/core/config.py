@@ -90,6 +90,12 @@ class LoopPaths:
         return self.defender.learning_dir
 
     @property
+    def verify_forward_dir(self) -> Path:
+        """The author-time forward-check verifier scripts dir — follows ``repo_root`` (the batch
+        worktree), so the curators pin the scripts under the tree they actually edit."""
+        return self.defender.verify_forward_dir
+
+    @property
     def lessons_dir(self) -> Path:
         return self.defender.lessons_dir
 
@@ -446,19 +452,38 @@ VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 VERIFY_BATCH_WORKERS = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
 VERIFY_BATCH_TIMEOUT = env_int("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
 
-# Findings (lessons/) curator agent. AUTHOR_EFFORT has no default (None = inherit the
-# global effort) — preserved exactly from the prior lessons/run.py behavior.
-AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
+# The three lesson curators (findings / actor-tradecraft / environment) run IN-PROCESS on
+# PydanticAI (GLM 5.2, Fireworks) — the metered first-party path, mirroring the lead-author
+# port (#543). `glm-5.2 @ low` matches the defender MAIN + verifier (the corpus these curators
+# write is what the defender reads), and keeping the curators on the subscription `claude -p`
+# while routing in-process would silently move their billing to the metered key. A strong-author
+# A/B overrides via LEARNING_AUTHOR_*_MODEL / LEARNING_AUTHOR_*_EFFORT (any provider
+# `providers.provider_for` routes — e.g. claude-sonnet-4-6 @ low; `low` is a valid effort on both
+# the Anthropic and Fireworks providers). NB `none` is a Fireworks-only effort: an Anthropic A/B
+# MUST set a Claude-valid effort, else build_for_effort raises → FatalConfigError (which the
+# curator spawn lets PROPAGATE, exit 2).
+# Findings (lessons/) curator agent.
+AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "glm-5.2")
 AUTHOR_TIMEOUT = env_int("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
-AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
+AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT", "low")  # low|medium|high|xhigh|max
 # Actor-tradecraft (lessons-actor/) curator agent.
-AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "claude-sonnet-4-6")
+AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
 AUTHOR_ACTOR_TIMEOUT = env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
 # Environment-lessons (lessons-environment/) curator agent — both env directions share it.
-AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "claude-sonnet-4-6")
+AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
 AUTHOR_ENV_TIMEOUT = env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
+# Per-curator in-process tool-loop request cap (default 250, mirroring LEAD_AUTHOR_REQUEST_LIMIT).
+# The retired `claude -p` subprocess had NO request cap, so a small cap would kill a multi-file
+# curator on its 2nd tool call; the AUTHOR_*_TIMEOUT wall-clock ceiling is the real backstop.
+AUTHOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_REQUEST_LIMIT", 250)
+AUTHOR_ACTOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ACTOR_REQUEST_LIMIT", 250)
+AUTHOR_ENV_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ENV_REQUEST_LIMIT", 250)
+# Batch-granular dead-letter budget: after this many per-run authoring faults on one batch, the
+# curator quarantines its rows to a `deadletter.jsonl` sidecar instead of retrying every tick
+# forever (the row-level analog of the lead author's LEAD_AUTHOR_MAX_RETRIES).
+LEARNING_AUTHOR_MAX_ATTEMPTS = env_int("LEARNING_AUTHOR_MAX_ATTEMPTS", 3)
 # Offline lead-author (skills/ catalog + system skills) agent, plus its sibling the pitfalls
 # curator (both share the _lead_spine spawn). Runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks)
 # — the FIRST *writer* among the in-process stages (the read-only judge/actor/oracle/verifier

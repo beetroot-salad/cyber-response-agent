@@ -65,3 +65,32 @@ describe("vscodeWorkspaceDoc — a folderOpen task, carried OUTSIDE the repo (§
     expect(doc.tasks.tasks[0].command).toContain("r9");
   });
 });
+
+describe("discuss tuning — the interactive session honors stages.discuss (§9.9)", () => {
+  const tuned = fakeConfig({ stages: { discuss: { model: "opus", effort: "xhigh" } } });
+
+  it("vscode: appends discuss's --model/--effort to the folderOpen claude task", () => {
+    const doc = vscodeWorkspaceDoc(tuned, card, { sid: "s1" });
+    expect(doc.tasks.tasks[0].command).toContain("--model opus");
+    expect(doc.tasks.tasks[0].command).toContain("--effort xhigh");
+  });
+
+  it("command/tmux: expands {tuning} into the argv", () => {
+    const cfg = fakeConfig({
+      sessionHost: { kind: "command", command: "claude --session-id {sid} {tuning}" },
+      stages: { discuss: { model: "opus", effort: "xhigh" } },
+    });
+    expect(sessionHostArgv(cfg, card, { sid: "s1" })).toEqual(["claude", "--session-id", "s1", "--model", "opus", "--effort", "xhigh"]);
+  });
+
+  it("leaves the interactive command untouched when no discuss tuning resolves", () => {
+    const doc = vscodeWorkspaceDoc(fakeConfig(), card, { sid: "s1" });
+    expect(doc.tasks.tasks[0].command).not.toContain("--model");
+    expect(doc.tasks.tasks[0].command).not.toContain("--effort");
+  });
+
+  it("a {tuning} placeholder collapses to nothing when no discuss tuning resolves", () => {
+    const cfg = fakeConfig({ sessionHost: { kind: "command", command: "claude --session-id {sid} {tuning}" } });
+    expect(sessionHostArgv(cfg, card, { sid: "s1" })).toEqual(["claude", "--session-id", "s1"]);
+  });
+});

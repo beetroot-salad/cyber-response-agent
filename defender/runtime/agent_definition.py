@@ -126,7 +126,13 @@ class AgentDefinition:
     (#551 — decision Q2), checked GENERICALLY in ``bind`` (no role branch): the actor's empty-
     ``read_confine`` fail-loud (True on ACTOR_DEF — an empty confine widens to the whole
     ``defender_dir``, the #512 gray-box leak), and the lead author's must-be-a-worktree tree
-    guard (True on LEAD_AUTHOR_DEF — a ``None``/``PATHS`` tree would author the MAIN checkout)."""
+    guard (True on LEAD_AUTHOR_DEF — a ``None``/``PATHS`` tree would author the MAIN checkout).
+
+    ``bindable`` (False on CORPUS_AUTHOR_DEF — #556) is the third such bit: a def whose per-spawn
+    policy needs run inputs ``RunScope`` cannot carry (the curator's worktree ``corpus_dir``) is
+    registered for its ToolSet alone and built by its own front door (``CuratorDeps.for_run``).
+    ``bind`` fails loud on it rather than mint a ``run_dir``-rooted ``write_allow``, and the
+    writer⟺``write_shapes`` co-constraint skips it — its write scope is resolved elsewhere."""
 
     role: AgentRole
     model: Callable[[], str]
@@ -137,6 +143,7 @@ class AgentDefinition:
     write_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...] = ()
     requires_confine: bool = False
     requires_explicit_tree: bool = False
+    bindable: bool = True
     deny_reason: str = _DEFAULT_DENY_REASON
 
 
@@ -404,6 +411,12 @@ def compile_policy_for(
     ``requires_explicit_tree`` (True on LEAD_AUTHOR_DEF) fails loud on a ``None``/``PATHS`` tree (a
     writer that must author a worktree, never the MAIN checkout — the main-checkout-authoring state
     is UNBUILDABLE)."""
+    if not defn.bindable:
+        raise ValueError(
+            f"bind({defn.role.name}_DEF, …) is not supported — this agent's per-spawn policy needs "
+            "run inputs RunScope cannot carry (its worktree corpus dir), so compiling it here would "
+            "root its write_allow at run_dir; build it via its own front door instead."
+        )
     _require_absolute_root("run_dir", run_dir)
     if defender_dir is not None:
         _require_absolute_root("defender_dir", defender_dir)
@@ -463,14 +476,17 @@ def build_registry(defs: tuple[AgentDefinition, ...]) -> dict[AgentRole, AgentDe
     """Fan a tuple of definitions into the role-keyed registry, RAISING (``ValueError``
     naming the ``role``) on a duplicate — the safe-by-construction replacement for the
     dict-comp's silent last-wins overwrite, which could drop an agent's whole
-    definition unnoticed. Also runs the writer⟺``write_shapes`` co-constraint on each def
+    definition unnoticed. Also runs the writer⟺``write_shapes`` co-constraint on each BINDABLE def
     (``_require_write_co_constraint``), so a misconfigured registered def fails loud at AGENTS
-    IMPORT rather than only when that role is first bound (#551 F9)."""
+    IMPORT rather than only when that role is first bound (#551 F9). A ``bindable=False`` def
+    (CORPUS_AUTHOR — #556) is exempt: it never reaches ``compile_policy``, so it carries no
+    ``write_shapes`` and its writer scope is built by its own per-spawn front door."""
     registry: dict[AgentRole, AgentDefinition] = {}
     for d in defs:
         if d.role in registry:
             raise ValueError(f"duplicate agent role {d.role!r} in the definition registry")
-        _require_write_co_constraint(d.tools, d.write_shapes)
+        if d.bindable:
+            _require_write_co_constraint(d.tools, d.write_shapes)
         registry[d.role] = d
     return registry
 

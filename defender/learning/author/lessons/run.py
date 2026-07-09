@@ -65,16 +65,18 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
+from defender.learning.author import curator as _curator
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     AUTHOR_EFFORT,
     AUTHOR_MODEL,
+    AUTHOR_REQUEST_LIMIT,
     AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
+    DefenderPaths,
     LoopPaths,
-    curator_agent_env,
     make_logger,
     now_iso,
 )
@@ -102,6 +104,9 @@ class AuthorConfig:
     repo_root: Path
     lessons_dir: Path
     lessons_dir_rel: str
+    # Forward-check verifier scripts dir (absolute, under repo_root) — resolved from the injected
+    # LoopPaths so it follows the batch worktree rather than being hand-built off repo_root.
+    verifier_dir: Path
     runs_dir: Path
     # Shared mutable-state root (``LoopPaths.state_root``) pinned as
     # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
@@ -137,6 +142,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         repo_root=paths.repo_root,
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
+        verifier_dir=paths.verify_forward_dir,
         runs_dir=paths.runs_dir,
         state_root=paths.state_root,
         pending_dir=paths.pending_dir,
@@ -226,57 +232,47 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
 
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
-    """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict.
+    """Spawn the in-process findings curator on GLM. Returns the parsed AUTHOR_RESULT dict.
 
-    Subprocess driver lives in ``_runner.invoke_claude_print`` —
-    shared with ``author_actor.py``. This wrapper builds the
-    defender-specific user prompt + allowed-tools spec and translates
-    ``RunnerError`` into ``AuthorError`` so the caller's error path is
-    unchanged.
-    """
+    Routed through ``curator_engine.run_curator_stage`` (imported lazily — it pulls the pydantic-ai
+    graph), shared with the actor/env curators: it sources the metered key, drives the in-process
+    spawn under ``require_output=True``, and relocates the ``AUTHOR_RESULT`` marker parse out of the
+    retired ``claude -p`` transport (a per-run fault / unparseable marker → ``AuthorError``, the
+    caller's rc-2 lane, unchanged). This wrapper builds the findings-specific user prompt + the pinned
+    forward-check verifier scripts (``verify_forward/{batch,forward}.py``); the curator's per-spawn
+    ``AgentPolicy`` (built in ``CuratorDeps.for_run``) confines writes to ``defender/lessons/**.md`` and
+    the bash lane to those verifiers + a scoped ``rm`` + the corpus viewers — the in-process analog of
+    the retired allowed-tools spec. The agent runs no git: it authors lesson content (+ a commit
+    message it returns as data) and the loop is the sole committer (``commit_lessons``)."""
+    from defender.learning.author import curator_engine
+
     verifier_py = _runner.resolve_verifier_python(cfg.repo_root)
+    rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
     user_prompt = (
         f"batch_id: {batch_id}\n"
-        f"lessons_dir: defender/lessons/\n"
+        f"lessons_dir: {cfg.lessons_dir_rel}\n"
         f"--direction <direction> <lesson_path> <run_id>\n"
-        f"verify_batch_command: {verifier_py} defender/learning/author/verify_forward/batch.py "
-        f"defender/learning/author/verify_forward/forward.py "
+        f"verify_batch_command: {verifier_py} {rel}batch.py {rel}forward.py "
         f"<lesson_path>=<run_id>=<direction> [<lesson_path>=<run_id>=<direction> ...]\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )
-    # The agent runs no git: it authors lesson content (+ a commit message it returns
-    # as data), and the loop is the sole committer (``commit_lessons``). The ``rm`` grant
-    # stays for dev iteration; prod fences the writable set to the corpus at the OS layer
-    # (``docs/platform-design.md`` §4.7).
-    allowed_tools = (
-        "Read,Glob,Grep,"
-        "Edit(defender/lessons/**),Write(defender/lessons/**),"
-        f"Bash({verifier_py} defender/learning/author/verify_forward/batch.py:*),"
-        f"Bash({verifier_py} defender/learning/author/verify_forward/forward.py:*),"
-        "Bash(rm defender/lessons/*.md),"
-        f"Bash(rm {cfg.lessons_dir}/*.md)"
-    )
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
-    options = _runner.RunnerOptions(
+    return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
-        allowed_tools=allowed_tools,
+        batch_id=batch_id,
+        user_prompt=user_prompt,
+        corpus_dir=cfg.lessons_dir,
+        verifier_scripts=(cfg.verifier_dir / "batch.py", cfg.verifier_dir / "forward.py"),
+        repo_root=cfg.repo_root,
+        learning_run_dir=cfg.pending_dir,
+        state_root=cfg.state_root,
+        log=_log,
         model=cfg.author_model,
         effort=cfg.author_effort,
-        timeout_seconds=cfg.author_timeout,
-        cwd=cfg.repo_root,
-        log_path=cfg.author_run_log,
-        result_marker="AUTHOR_RESULT:",
-        batch_id=batch_id,
-        # Pin the shared state root so the agent's forward-check Bash subprocesses
-        # (verify_forward/forward.py) resolve the run bundle off it, not the worktree
-        # they run in (#425).
-        env=curator_agent_env(cfg.state_root),
+        request_limit=AUTHOR_REQUEST_LIMIT,
+        timeout=cfg.author_timeout,
     )
-    try:
-        return _runner.invoke_claude_print(options, user_prompt, _log)
-    except _runner.RunnerError as e:
-        raise AuthorError(str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +511,15 @@ def _author_to_author(
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
+        # A per-run authoring fault (the in-process spawn's RunUnprocessable / an unparseable
+        # AUTHOR_RESULT). Bump the batch's attempt counter (and quarantine at the budget) BEFORE
+        # returning rc 2, so a poison findings batch stops blocking the queue — the same
+        # batch-granular dead-letter the observation curators get (findings rows key on finding_id).
         _log(f"FATAL: {e}")
+        _curator._dead_letter_or_bump(
+            to_author, queue_file=cfg.pending_file, pending_dir=cfg.pending_dir,
+            id_key="finding_id", reason=str(e),
+        )
         return 2, None, [], [], []
     try:
         _shared.verify_agent_state(
