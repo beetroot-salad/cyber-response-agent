@@ -118,7 +118,13 @@ def _viewer_patterns(corpus_dir: Path) -> tuple[re.Pattern[str], ...]:
     secret-denylist here, so the anchored operand is the sole containment."""
     f = _corpus_file_operand(corpus_dir)
     d = _corpus_dir_operand(corpus_dir)
-    pat = r"[^ ]+"  # a free-text grep search pattern (one token; may look like a path)
+    # A free-text grep search pattern (one token; may look like a path). The leading `(?!-)`
+    # is load-bearing: without it this slot swallows any `-`-prefixed token, so a file-opening
+    # option the `_VIEW_FLAG` `-f` exclusion is meant to block (`grep --file=<out-of-corpus>`,
+    # `grep --exclude-from=…`, `grep -r -f <corpus-probe>`) would fall through here and grep
+    # would OPEN an out-of-corpus file — the anchored operand is the sole containment on this
+    # denylist-free lane, so the search token must not be a flag.
+    pat = r"(?!-)[^ ]+"
     return (
         re.compile(rf"^cat(?: {_VIEW_FLAG})*(?: {f})+$"),
         re.compile(rf"^grep(?: {_VIEW_FLAG})*(?: {pat})(?: {f})+$"),
@@ -143,7 +149,12 @@ def _verifier_pattern(script: Path) -> re.Pattern[str]:
     internals, so the pinned verify_forward scripts MUST stay read-only over the corpus/run bundle."""
     rel = f"{_VERIFY_FORWARD_REL}{script.name}"  # _VERIFY_FORWARD_REL carries the trailing slash
     spellings = "|".join(re.escape(s) for s in (rel, str(script)))
-    return re.compile(rf"^(?:[^ ]*/)?python3? (?:{spellings})(?: .*)?$")
+    # `python3?(?:\.\d+)?` also admits a version-suffixed interpreter (`python3.11`): the prompt's
+    # command uses ``resolve_verifier_python``, which falls back to ``sys.executable`` (commonly a
+    # versioned launcher) when the `.venv/bin/python3` walk misses — a bare `python3?` would DENY
+    # the curator's own mandated forward-check. Containment is the pinned SCRIPT token, not the
+    # interpreter name, so broadening the interpreter half opens no new surface.
+    return re.compile(rf"^(?:[^ ]*/)?python3?(?:\.\d+)? (?:{spellings})(?: .*)?$")
 
 
 def _corpus_author_policy(

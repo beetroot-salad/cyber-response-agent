@@ -268,6 +268,12 @@ def test_bash_forward_check_admitted(tmp_path):
     a = _policy(wt, "A")
     assert permission.decide_bash(_verify_cmd("batch.py"), policy=a).allow
     assert permission.decide_bash(_verify_cmd("forward.py"), policy=a).allow
+    # A version-suffixed interpreter (resolve_verifier_python's sys.executable / env-override
+    # fallback commonly resolves to `.../python3.11`) is admitted — the SCRIPT token is the
+    # containment, not the interpreter name.
+    assert permission.decide_bash(
+        f"/usr/bin/python3.11 {_VERIFY_REL}/batch.py --pending q.jsonl --run-dir rd", policy=a
+    ).allow
     b = _policy(wt, "B")
     assert permission.decide_bash(_verify_cmd("batch.py"), policy=b).allow
     assert permission.decide_bash(_verify_cmd("actor.py"), policy=b).allow
@@ -345,6 +351,26 @@ def test_bash_nav_outside_corpus_denied(tmp_path):
     assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow
     assert permission.decide_bash(f"ls {rel}", policy=pol).allow
     assert permission.decide_bash(f"cat {rel}/x.md", policy=pol).allow
+
+
+def test_bash_grep_file_option_exfil_denied(tmp_path):
+    """A grep FILE-opening option must not smuggle an out-of-corpus read through the free-text
+    search slot. `_VIEW_FLAG` excludes short `-f`, but the search token slot would otherwise admit
+    any `-`-prefixed token, so `grep --file=<out-of-corpus>` / `--exclude-from=<...>` (grep OPENS
+    that file) and `grep -r -f <in-corpus-probe>` (no file operand → `-r` recurses the worktree cwd)
+    would exfiltrate arbitrary files this denylist-free lane's operand anchor is the sole guard
+    against. All must be DENIED; a plain in-corpus grep is the positive control."""
+    wt = _make_worktree(tmp_path)
+    pol = _policy(wt, "B")  # corpus lessons-actor/
+    rel = _rel("B")
+    for cmd in (
+        f"grep --file=/etc/passwd {rel}/probe.md",          # grep reads patterns FROM /etc/passwd
+        f"grep --exclude-from=/etc/passwd {rel}/probe.md",   # same file-open, different option
+        f"grep -r -f {rel}/probe.md",                        # -f eats the operand → -r recurses cwd
+        f"grep -rf {rel}/probe.md",                          # bundled form of the same
+    ):
+        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
+    assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow  # positive control
 
 
 def test_bash_arbitrary_program_denied(tmp_path):

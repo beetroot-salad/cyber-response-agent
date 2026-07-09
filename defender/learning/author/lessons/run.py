@@ -65,6 +65,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
+from defender.learning.author import curator as _curator
 from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
@@ -510,7 +511,15 @@ def _author_to_author(
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
+        # A per-run authoring fault (the in-process spawn's RunUnprocessable / an unparseable
+        # AUTHOR_RESULT). Bump the batch's attempt counter (and quarantine at the budget) BEFORE
+        # returning rc 2, so a poison findings batch stops blocking the queue — the same
+        # batch-granular dead-letter the observation curators get (findings rows key on finding_id).
         _log(f"FATAL: {e}")
+        _curator._dead_letter_or_bump(
+            to_author, queue_file=cfg.pending_file, pending_dir=cfg.pending_dir,
+            id_key="finding_id", reason=str(e),
+        )
         return 2, None, [], [], []
     try:
         _shared.verify_agent_state(

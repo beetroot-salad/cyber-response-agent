@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from defender._io import read_jsonl_rows
 from defender.learning.author import curator, shared
 from defender.learning.author.benign_actor import run as benign_run
 from defender.learning.core.config import LoopPaths
@@ -86,8 +87,10 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
     commits_before = _commit_count(tmp_repo)
+
+    def queued_ids() -> set[str]:
+        return {r["finding_id"] for r in read_jsonl_rows(tmp_repo.paths.pending_file)}
 
     def partial_then_raise(findings, batch_id, cfg):
         _write_lesson(tmp_repo, "half", "run-P/0")  # partial write, no git
@@ -96,8 +99,9 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
     # no partial commit — HEAD did not advance
     assert _commit_count(tmp_repo) == commits_before
-    # queue NOT rotated — the finding is retryable
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    # queue NOT rotated — the finding is retryable (its dead-letter attempts counter is bumped,
+    # but it stays queued and is not committed/consumed)
+    assert queued_ids() == {"run-P/0"}
     assert not tmp_repo.cfg.consumed_file.exists()
 
     # The leftover half.md sits UNCOMMITTED in the worktree; the clean-scope gate now
@@ -111,7 +115,7 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
                 "consumed_skip": [], "commit_message": "defender: lesson full"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 2  # blocked while dirty
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert queued_ids() == {"run-P/0"}  # still retryable — the dirty-corpus pre-flight bailed before authoring
 
     # The drain's rollback — discard the worktree leftovers.
     tmp_repo.run_git("reset", "--hard", "--quiet")

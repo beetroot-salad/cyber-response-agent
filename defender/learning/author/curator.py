@@ -367,37 +367,46 @@ def rotate_queue(
 # ---------------------------------------------------------------------------
 
 
-def _deadletter_file(cfg: CuratorConfig) -> Path:
+def _deadletter_file(queue_file: Path) -> Path:
     """The per-queue dead-letter sidecar under ``_pending`` — ``<queue>.deadletter.jsonl``,
     beside the active queue so a discovered sidecar is unambiguously this stream's."""
-    return cfg.channel.file.with_suffix(".deadletter.jsonl")
+    return queue_file.with_suffix(".deadletter.jsonl")
 
 
-def _dead_letter_or_bump(to_author: list[dict], cfg: CuratorConfig, *, reason: str) -> None:
+def _dead_letter_or_bump(
+    batch: list[dict], *, queue_file: Path, pending_dir: Path, id_key: str, reason: str,
+) -> None:
     """On a per-run authoring fault (``invoke_agent`` raised ``AuthorError`` — a ``RunUnprocessable``
     or an unparseable AUTHOR_RESULT, both relocated into that raise by ``run_curator_stage``), bump an
     ``attempts`` counter on the batch's active queue rows so a poison batch quarantines after
     ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying every tick forever.
 
-    Runs under the queue lock the envelope already holds (``run_batch_envelope`` acquires
-    ``cfg.channel.lock``), so it re-reads/rewrites the active queue WITHOUT re-locking — no
-    self-deadlock, and since this rc-2 fault path returns before ``rotate_queue``, this rewrite is the
-    queue's final state this tick. Batch-granular: rc 2 originates before any per-row attribution, so
-    ALL ``to_author`` rows share the fault. A row reaching the attempt budget moves — carrying its
-    reason + attempt count — to the ``deadletter.jsonl`` sidecar and out of the active queue (the
-    move-aside shape of the lead author's ``_quarantine_marker`` at the row level); the rest are
-    rewritten with the incremented counter. Held / pre-consumed rows (not in ``to_author``) are
-    preserved verbatim for the next tick's re-partition.
+    Config-agnostic on purpose: keyed by ``id_key`` (``observation_id`` for the actor/env curators,
+    ``finding_id`` for the findings curator) over the explicit ``queue_file`` + ``pending_dir``, so
+    BOTH the observation curators (``curator.py``) and the findings curator (``lessons/run.py``) share
+    the ONE dead-letter mechanism the spec binds every curator to — not just the three that route
+    through this module's envelope.
+
+    Runs under the queue lock the envelope already holds (``run_batch_envelope`` acquires the queue
+    lock), so it re-reads/rewrites the active queue WITHOUT re-locking — no self-deadlock, and since
+    this rc-2 fault path returns before ``rotate_queue``, this rewrite is the queue's final state this
+    tick. Batch-granular: rc 2 originates before any per-row attribution, so ALL ``batch`` rows share
+    the fault. A row reaching the attempt budget moves — carrying its reason + attempt count — to the
+    ``deadletter.jsonl`` sidecar and out of the active queue (the move-aside shape of the lead author's
+    ``_quarantine_marker`` at the row level); the rest are rewritten with the incremented counter.
+    Held / pre-consumed rows (not in ``batch``) are preserved verbatim for the next tick's
+    re-partition. The sidecar append lands BEFORE the active-queue rewrite so a crash between the two
+    writes duplicates a quarantined row (at-least-once) rather than losing the poison batch entirely.
 
     Only THIS per-run authoring fault bumps: systemic faults (``FatalConfigError`` / ``StageAbort``)
     escape uncaught and never reach here, and the dirty-corpus pre-flight (rc 2, environment) / lock
     contention (rc 0, never ran) return from the envelope before ``_author_to_author`` runs."""
-    batch_ids = {o["observation_id"] for o in to_author}
+    batch_ids = {o[id_key] for o in batch}
     max_attempts = config.LEARNING_AUTHOR_MAX_ATTEMPTS
     survivors: list[dict] = []
     quarantined: list[dict] = []
-    for row in read_jsonl_rows(cfg.channel.file):
-        if row.get("observation_id") not in batch_ids:
+    for row in read_jsonl_rows(queue_file):
+        if row.get(id_key) not in batch_ids:
             survivors.append(row)
             continue
         rec = dict(row)
@@ -407,10 +416,10 @@ def _dead_letter_or_bump(to_author: list[dict], cfg: CuratorConfig, *, reason: s
             quarantined.append(rec)
         else:
             survivors.append(rec)
-    write_atomic(cfg.channel.file, "".join(json.dumps(r) + "\n" for r in survivors))
     if quarantined:
-        cfg.pending_dir.mkdir(parents=True, exist_ok=True)
-        append_jsonl(_deadletter_file(cfg), quarantined)
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        append_jsonl(_deadletter_file(queue_file), quarantined)
+    write_atomic(queue_file, "".join(json.dumps(r) + "\n" for r in survivors))
 
 
 # ---------------------------------------------------------------------------
@@ -565,7 +574,10 @@ def _author_to_author(
         # AUTHOR_RESULT, both surfaced as AuthorError). Bump the batch's attempt counter (and
         # quarantine at the budget) BEFORE returning rc 2, so a poison batch stops blocking the queue.
         log(f"FATAL: {e}")
-        _dead_letter_or_bump(to_author, cfg, reason=str(e))
+        _dead_letter_or_bump(
+            to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
+            id_key="observation_id", reason=str(e),
+        )
         return 2, None, [], []
     try:
         _shared.verify_agent_state(
