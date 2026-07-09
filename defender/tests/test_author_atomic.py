@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from defender._io import read_jsonl_rows
 from defender.learning.author import shared
 
 
@@ -11,7 +12,6 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-K", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-K/0", run_id="run-K")
-    pre = tmp_repo.paths.pending_file.read_text()
 
     def boom(findings, batch_id, cfg):
         raise a.AuthorError("simulated agent failure")
@@ -19,12 +19,45 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     cfg = replace(tmp_repo.cfg, invoke_agent=boom)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre, "queue must survive agent failure"
+    # The finding is NOT lost on an agent failure — it survives in the queue, retryable. The
+    # dead-letter queue bumps its `attempts` counter (findings.jsonl gets the same batch-granular
+    # quarantine as the observation curators) but 1 < LEARNING_AUTHOR_MAX_ATTEMPTS, so it is NOT
+    # yet dead-lettered.
+    rows = read_jsonl_rows(tmp_repo.paths.pending_file)
+    assert {r["finding_id"] for r in rows} == {"run-K/0"}, "queue must survive agent failure"
+    assert [r.get("attempts") for r in rows] == [1]
+    assert not tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl").exists()
 
     # Lock must have been released — a follow-up tick can run.
     fh = shared.acquire_flock(tmp_repo.cfg.lock_file)
     assert fh is not None
     shared.release_flock(fh)
+
+
+def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
+    """The findings curator (A → defender/lessons/) gets the SAME batch-granular dead-letter as
+    the observation curators (spec: the ``curator_A -> dlq`` edge, findings.jsonl's NEW ``attempts``
+    field): a poison findings batch that faults every tick quarantines to the ``deadletter.jsonl``
+    sidecar after ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying forever and wedging the
+    ``defender/lessons/`` queue."""
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # (= the default; documents the budget)
+    a = tmp_repo.author
+    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
+    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
+
+    def boom(findings, batch_id, cfg):
+        raise a.AuthorError("simulated per-run authoring fault")
+
+    fault_cfg = replace(tmp_repo.cfg, invoke_agent=boom)
+    for _ in range(3):  # tick 1→attempts 1, tick 2→2, tick 3 reaches the budget
+        assert a.run_batch(cfg=fault_cfg) == 2
+
+    # Gone from the active queue, moved to the deadletter sidecar carrying its attempt count + reason.
+    assert read_jsonl_rows(tmp_repo.paths.pending_file) == []
+    dead = read_jsonl_rows(tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl"))
+    assert {r["finding_id"] for r in dead} == {"run-P/0"}
+    assert dead[0]["attempts"] == 3
+    assert "simulated per-run authoring fault" in dead[0]["deadletter_reason"]
 
 
 def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):

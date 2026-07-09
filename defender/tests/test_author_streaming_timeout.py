@@ -1,17 +1,41 @@
 """Streaming-loop timeout guarantee.
 
-Regression for the case where ``invoke_agent`` reads stream-json line
-by line: if the child process stalls mid-line (no newline arrives),
-a naive ``for raw in proc.stdout`` blocks indefinitely and
-``AUTHOR_TIMEOUT`` never fires. The reader must bound every read by
-the remaining deadline so the lock is released and the agent killed.
-"""
+Regression for the case where the ``claude -p`` runner reads stream-json line by line: if
+the child process stalls mid-line (no newline arrives), a naive ``for raw in proc.stdout``
+blocks indefinitely and the timeout never fires. The reader must bound every read by the
+remaining deadline so the lock is released and the agent killed.
+
+NOTE (curator GLM port): the four lesson curators now run IN-PROCESS on PydanticAI, so their
+``invoke_agent`` no longer spawns the ``claude -p`` subprocess these tests exercise. The runner's
+select-loop driver (``invoke_claude_print`` + ``_drive_subprocess``) is KEPT (still defined, still
+covered by ``test_runner_spawn_seam_is_honored``), so these timeout/deadlock guarantees are now
+driven against the runner DIRECTLY (the shim on ``runner.subprocess.Popen``) rather than through a
+curator's now-in-process seam — same assertions, decoupled from the retired transport wiring. The
+runner raises ``RunnerError`` (the curator wrapper used to translate it to ``AuthorError``)."""
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 
 import pytest
+
+
+def _drive_runner(runner, tmp_repo, *, timeout: int, prompt: str = "the prompt"):
+    """Drive the runner's subprocess select-loop DIRECTLY with a short deadline (the shim has
+    swapped ``claude`` for the fake child). Mirrors ``test_runner_spawn_seam_is_honored``'s direct
+    ``RunnerOptions`` construction; ``invoke_claude_print`` raises ``RunnerError`` on a timeout /
+    missing marker."""
+    options = runner.RunnerOptions(
+        system_prompt_file=tmp_repo.root / "prompt.md",
+        allowed_tools="Read",
+        model="claude-x",
+        effort=None,
+        timeout_seconds=timeout,
+        cwd=tmp_repo.root,
+        log_path=tmp_repo.root / "run.jsonl",
+        result_marker="AUTHOR_RESULT:",
+        batch_id="test",
+    )
+    return runner.invoke_claude_print(options, prompt, lambda _m: None)
 
 
 def _fake_claude_script(repo, *, behavior: str) -> str:
@@ -86,14 +110,13 @@ def shim_claude(tmp_repo, monkeypatch):
 
 
 def test_silent_hang_is_killed_by_wall_clock(tmp_repo, shim_claude, monkeypatch):
-    """Child emits one line then stops — AUTHOR_TIMEOUT must still fire."""
-    a = tmp_repo.author
-    cfg = replace(tmp_repo.cfg, author_timeout=2)  # seconds
+    """Child emits one line then stops — the runner's wall-clock deadline must still fire."""
+    runner = tmp_repo.author._runner
     shim_claude("silent_hang")
 
     t0 = time.monotonic()
-    with pytest.raises(a.AuthorError, match="timed out after 2s"):
-        a.invoke_agent([{"finding_id": "x"}], batch_id="test", cfg=cfg)
+    with pytest.raises(runner.RunnerError, match="timed out after 2s"):
+        _drive_runner(runner, tmp_repo, timeout=2)
     elapsed = time.monotonic() - t0
     # Generous upper bound: timeout=2s, select tick=1s, kill overhead.
     assert elapsed < 6.0, f"timeout did not fire promptly (elapsed={elapsed:.2f}s)"
@@ -101,32 +124,29 @@ def test_silent_hang_is_killed_by_wall_clock(tmp_repo, shim_claude, monkeypatch)
 
 def test_stdin_write_is_bounded_by_deadline(tmp_repo, shim_claude, monkeypatch):
     """Child never reads stdin; prompt > pipe buffer must not block writer."""
-    a = tmp_repo.author
-    cfg = replace(tmp_repo.cfg, author_timeout=2)
+    runner = tmp_repo.author._runner
     shim_claude("ignore_stdin")
 
-    # Findings list large enough that json.dumps(...) exceeds the
-    # default 64KiB Linux pipe buffer — forces the writer to wait
-    # for the child to drain stdin, which it never will.
-    big = {"finding_id": "x", "blob": "y" * (128 * 1024)}
+    # A prompt large enough to exceed the default 64KiB Linux pipe buffer — forces the writer
+    # to wait for the child to drain stdin, which it never will.
+    big_prompt = "y" * (128 * 1024)
 
     t0 = time.monotonic()
-    with pytest.raises(a.AuthorError, match="timed out after 2s"):
-        a.invoke_agent([big], batch_id="test", cfg=cfg)
+    with pytest.raises(runner.RunnerError, match="timed out after 2s"):
+        _drive_runner(runner, tmp_repo, timeout=2, prompt=big_prompt)
     elapsed = time.monotonic() - t0
     assert elapsed < 6.0, f"stdin-write deadlock — elapsed={elapsed:.2f}s"
 
 
 def test_stderr_flood_does_not_deadlock(tmp_repo, shim_claude, monkeypatch):
     """Child writes 256 KiB to stderr before stdout — reader drains both."""
-    a = tmp_repo.author
-    cfg = replace(tmp_repo.cfg, author_timeout=5)
+    runner = tmp_repo.author._runner
     shim_claude("stderr_flood")
 
-    # The fake never emits AUTHOR_RESULT, so we expect that specific
-    # error — but only if the reader completed without deadlock first.
-    with pytest.raises(a.AuthorError, match="did not emit AUTHOR_RESULT"):
-        a.invoke_agent([{"finding_id": "x"}], batch_id="test", cfg=cfg)
+    # The fake never emits AUTHOR_RESULT, so we expect that specific error — but only if the
+    # reader completed without deadlock first.
+    with pytest.raises(runner.RunnerError, match="did not emit AUTHOR_RESULT"):
+        _drive_runner(runner, tmp_repo, timeout=5)
 
 
 def test_runner_spawn_seam_is_honored(tmp_path):

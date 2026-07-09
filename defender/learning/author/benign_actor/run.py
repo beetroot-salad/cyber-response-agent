@@ -39,15 +39,19 @@ from defender.learning.core.config import (
     ACTOR_MODEL,
     AUTHOR_ENV_EFFORT,
     AUTHOR_ENV_MODEL,
+    AUTHOR_ENV_REQUEST_LIMIT,
     AUTHOR_ENV_TIMEOUT,
     BENIGN_ACTOR_MODEL,
     DEFAULT_PATHS,
+    DefenderPaths,
     LoopPaths,
     QueueChannel,
 )
 
 
-VERIFY_SCRIPT_REL = "defender/learning/author/verify_forward/env.py"
+# The env forward-check verifier, as the repo-relative command spelling the agent types (cwd=worktree)
+# — the offset owned once by DefenderPaths, not a hand-written literal.
+VERIFY_SCRIPT_REL = f"{DefenderPaths.verify_forward_dir_rel}env.py"
 
 # All model/wiring constants come from core.config (one source per env var, no
 # duplicated defaults — cf. #449). AUTHOR_ENV_* is the curator *agent* model/effort/
@@ -80,10 +84,11 @@ def invoke_agent(
     extra_prompt = (
         f"forward_check_command: {forward_check_command}\n"
     )
-    extra_tools = f"Bash({verifier_py} {VERIFY_SCRIPT_REL}:*),"
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt, extra_tools=extra_tools,
+        extra_prompt=extra_prompt,
+        verifier_scripts=(cfg.verifier_dir / "env.py",),
+        request_limit=AUTHOR_ENV_REQUEST_LIMIT,
     )
 
 
@@ -107,6 +112,7 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         state_root=paths.state_root,
         corpus_dir=paths.lessons_environment_dir,
         corpus_dir_rel=paths.lessons_environment_dir_rel,
+        verifier_dir=paths.verify_forward_dir,
         channel=channel,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,

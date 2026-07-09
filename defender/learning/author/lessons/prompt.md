@@ -67,16 +67,19 @@ For each finding, in order, decide one of:
 
 To decide, two passes — and you **must run both**, because the dimensions alone will not catch every fold:
 
-1. **Dimension pass (find the obvious same-key candidates).** Grep the frontmatter by the finding's dimensions:
+1. **Dimension pass (find the obvious same-key candidates).** List the corpus (`ls defender/lessons/`), then `grep` each lesson's frontmatter by the finding's dimensions (per named file — the bash lane does not expand a `*.md` glob):
 
    ```bash
-   defender-lessons 'source_signature:.*<rule-id>' 'telemetry_source:.*<sensor>'
+   ls defender/lessons/
+   grep -l 'source_signature:.*<rule-id>' defender/lessons/<name>.md
+   grep -l 'telemetry_source:.*<sensor>' defender/lessons/<name>.md
    ```
 
-2. **Description pass (catch cross-key near-duplicates).** The dimension pass misses a near-duplicate that teaches the *same defender mistake* but happens to be tagged on a different signature/sensor/tactic — and grep can't see that, because the keys don't overlap. So also enumerate the **whole corpus** and scan every description for a semantic twin, regardless of dimension overlap:
+2. **Description pass (catch cross-key near-duplicates).** The dimension pass misses a near-duplicate that teaches the *same defender mistake* but happens to be tagged on a different signature/sensor/tactic — and a keyed grep can't see that, because the keys don't overlap. So also enumerate the **whole corpus** and scan every `description` for a semantic twin, regardless of dimension overlap:
 
    ```bash
-   defender-lessons                     # <path>\t<description> for all lessons
+   ls defender/lessons/
+   grep '^description:' defender/lessons/<name>.md     # per lesson, or cat the file
    ```
 
    Read the body of any whose description is conceptually close to the finding, even when no dimension matched.

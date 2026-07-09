@@ -40,11 +40,11 @@ from collections.abc import Callable
 
 import yaml
 
-from defender.learning.author import runner as _runner
 from defender.learning.author import shared as _shared
-from defender._io import read_jsonl_rows
+from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
-from defender.learning.core.config import QueueChannel, curator_agent_env, make_logger
+from defender.learning.core import config
+from defender.learning.core.config import QueueChannel, make_logger
 from defender.learning.core.persist import rotate_queue_locked
 
 
@@ -80,6 +80,9 @@ class CuratorConfig:
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
+    # The forward-check verifier scripts dir (absolute, under repo_root) — resolved from the
+    # injected LoopPaths so it follows the batch worktree, not hand-built off repo_root.
+    verifier_dir: Path
     # Queue channel — file/consumed/lock for the stream this curator drains
     # (honors DEFENDER_LEARNING_STATE_DIR via DEFAULT_PATHS).
     channel: QueueChannel
@@ -242,17 +245,27 @@ def invoke_curator_agent(
     batch_id: str,
     *,
     extra_prompt: str,
-    extra_tools: str,
+    verifier_scripts: tuple[Path, ...],
+    request_limit: int,
 ) -> dict:
-    """Spawn the curator agent and return its parsed AUTHOR_RESULT dict.
+    """Spawn the in-process curator on GLM and return its parsed AUTHOR_RESULT dict.
 
-    ``extra_prompt`` carries the direction's forward-check command line(s); it is
-    spliced between the standard header and the observations. ``extra_tools`` carries
-    the direction's verifier ``Bash(...)`` allowances, spliced into the corpus-scoped
-    allowlist (``curator_allowed_tools``). The agent runs **no git**: it authors lesson
-    content (+ a commit message it returns as data), and the loop is the sole committer
-    (``commit_corpus``) — so the agent is handed neither the generation nor the model,
-    and there is no intermediate un-stamped commit it could leave behind (issue #321)."""
+    ``extra_prompt`` carries the direction's forward-check command line(s); it is spliced between
+    the standard header and the observations. ``verifier_scripts`` are the pinned
+    ``verify_forward/*.py`` the curator's bash lane may run (the in-process analog of the retired
+    ``extra_tools`` Bash grants); ``request_limit`` is the direction's per-curator cap. The agent
+    runs **no git**: it authors lesson content (+ a commit message it returns as data) and the loop
+    is the sole committer (``commit_corpus``) — so the agent is handed neither the generation nor the
+    model, and there is no intermediate un-stamped commit it could leave behind (issue #321). Routed
+    through ``curator_engine.run_curator_stage`` (imported lazily — it pulls the pydantic-ai graph),
+    which sources the metered key, drives the in-process spawn under ``require_output=True``, and
+    relocates the ``AUTHOR_RESULT`` marker parse out of the retired ``claude -p`` transport. The
+    RequestLogger trace lands in the persistent shared ``pending_dir`` (not the throwaway worktree),
+    keyed ``{batch_id}.{pid}`` so two curators in one drain tick never truncate each other's trace;
+    ``DEFENDER_LEARNING_STATE_DIR`` is pinned into the in-process bash-tool env by ``run_common.run_env``
+    (via ``cfg.state_root``) so the forward-check subprocess resolves the real source bundle (#425)."""
+    from defender.learning.author import curator_engine
+
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {cfg.corpus_dir_rel}\n"
@@ -260,27 +273,22 @@ def invoke_curator_agent(
         f"observations ({len(observations)}):\n"
         f"{json.dumps(observations, indent=2)}\n"
     )
-    allowed_tools = curator_allowed_tools(cfg, extra_tools)
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
-    options = _runner.RunnerOptions(
+    return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
-        allowed_tools=allowed_tools,
+        batch_id=batch_id,
+        user_prompt=user_prompt,
+        corpus_dir=cfg.corpus_dir,
+        verifier_scripts=verifier_scripts,
+        repo_root=cfg.repo_root,
+        learning_run_dir=cfg.pending_dir,
+        state_root=cfg.state_root,
+        log=make_logger(cfg.log_prefix),
         model=cfg.author_model,
         effort=cfg.author_effort,
-        timeout_seconds=cfg.author_timeout,
-        cwd=cfg.repo_root,
-        log_path=cfg.run_log,
-        result_marker="AUTHOR_RESULT:",
-        batch_id=batch_id,
-        # Pin the shared state root so the agent's forward-check Bash subprocesses
-        # (verify_forward/actor.py, verify_forward/env.py) resolve the run bundle off it,
-        # not the worktree they run in (#425).
-        env=curator_agent_env(cfg.state_root),
+        request_limit=request_limit,
+        timeout=cfg.author_timeout,
     )
-    try:
-        return _runner.invoke_claude_print(options, user_prompt, make_logger(cfg.log_prefix))
-    except _runner.RunnerError as e:
-        raise AuthorError(str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +360,66 @@ def rotate_queue(
         commit_sha=commit_sha,
         merge_concurrent=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue — batch-granular quarantine of a poison batch
+# ---------------------------------------------------------------------------
+
+
+def _deadletter_file(queue_file: Path) -> Path:
+    """The per-queue dead-letter sidecar under ``_pending`` — ``<queue>.deadletter.jsonl``,
+    beside the active queue so a discovered sidecar is unambiguously this stream's."""
+    return queue_file.with_suffix(".deadletter.jsonl")
+
+
+def _dead_letter_or_bump(
+    batch: list[dict], *, queue_file: Path, pending_dir: Path, id_key: str, reason: str,
+) -> None:
+    """On a per-run authoring fault (``invoke_agent`` raised ``AuthorError`` — a ``RunUnprocessable``
+    or an unparseable AUTHOR_RESULT, both relocated into that raise by ``run_curator_stage``), bump an
+    ``attempts`` counter on the batch's active queue rows so a poison batch quarantines after
+    ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying every tick forever.
+
+    Config-agnostic on purpose: keyed by ``id_key`` (``observation_id`` for the actor/env curators,
+    ``finding_id`` for the findings curator) over the explicit ``queue_file`` + ``pending_dir``, so
+    BOTH the observation curators (``curator.py``) and the findings curator (``lessons/run.py``) share
+    the ONE dead-letter mechanism the spec binds every curator to — not just the three that route
+    through this module's envelope.
+
+    Runs under the queue lock the envelope already holds (``run_batch_envelope`` acquires the queue
+    lock), so it re-reads/rewrites the active queue WITHOUT re-locking — no self-deadlock, and since
+    this rc-2 fault path returns before ``rotate_queue``, this rewrite is the queue's final state this
+    tick. Batch-granular: rc 2 originates before any per-row attribution, so ALL ``batch`` rows share
+    the fault. A row reaching the attempt budget moves — carrying its reason + attempt count — to the
+    ``deadletter.jsonl`` sidecar and out of the active queue (the move-aside shape of the lead author's
+    ``_quarantine_marker`` at the row level); the rest are rewritten with the incremented counter.
+    Held / pre-consumed rows (not in ``batch``) are preserved verbatim for the next tick's
+    re-partition. The sidecar append lands BEFORE the active-queue rewrite so a crash between the two
+    writes duplicates a quarantined row (at-least-once) rather than losing the poison batch entirely.
+
+    Only THIS per-run authoring fault bumps: systemic faults (``FatalConfigError`` / ``StageAbort``)
+    escape uncaught and never reach here, and the dirty-corpus pre-flight (rc 2, environment) / lock
+    contention (rc 0, never ran) return from the envelope before ``_author_to_author`` runs."""
+    batch_ids = {o[id_key] for o in batch}
+    max_attempts = config.LEARNING_AUTHOR_MAX_ATTEMPTS
+    survivors: list[dict] = []
+    quarantined: list[dict] = []
+    for row in read_jsonl_rows(queue_file):
+        if row.get(id_key) not in batch_ids:
+            survivors.append(row)
+            continue
+        rec = dict(row)
+        rec["attempts"] = int(row.get("attempts") or 0) + 1
+        if rec["attempts"] >= max_attempts:
+            rec["deadletter_reason"] = reason
+            quarantined.append(rec)
+        else:
+            survivors.append(rec)
+    if quarantined:
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        append_jsonl(_deadletter_file(queue_file), quarantined)
+    write_atomic(queue_file, "".join(json.dumps(r) + "\n" for r in survivors))
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +570,14 @@ def _author_to_author(
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
+        # A per-run authoring fault (the in-process spawn's RunUnprocessable / an unparseable
+        # AUTHOR_RESULT, both surfaced as AuthorError). Bump the batch's attempt counter (and
+        # quarantine at the budget) BEFORE returning rc 2, so a poison batch stops blocking the queue.
         log(f"FATAL: {e}")
+        _dead_letter_or_bump(
+            to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
+            id_key="observation_id", reason=str(e),
+        )
         return 2, None, [], []
     try:
         _shared.verify_agent_state(

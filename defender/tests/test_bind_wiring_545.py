@@ -74,6 +74,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.runtime.agents import (  # noqa: E402
     ACTOR_DEF,
+    CORPUS_AUTHOR_DEF,
     GATHER_DEF,
     JUDGE_DEF,
     MAIN_DEF,
@@ -237,13 +238,17 @@ def test_policy_fields_covers_write_allow():
 
 
 # ============================================================================
-# _deps_class maps all 7 roles (footgun C + decision 2)
+# _deps_class maps every bindable role (footgun C + decision 2)
 # ============================================================================
 
 def test_deps_class_all_seven_roles(tmp_path):
-    """deps_class_all_seven (RED@HEAD on LEAD_AUTHOR): bind maps every AgentRole to its
-    subtype and returns an instance of it. RED@HEAD: LEAD_AUTHOR has no _deps_class arm (and
-    no repo_root seam), so bind(LEAD_AUTHOR_DEF) raises a generic ValueError today."""
+    """deps_class_all_seven: bind maps every BINDABLE AgentRole to its subtype and returns an
+    instance of it — no bindable role silently mismapped. The one role bind does NOT build is
+    CORPUS_AUTHOR (the curator GLM port): like the lead author it is a per-spawn writer, but its
+    policy needs the worktree ``corpus_dir`` + ``verifier_scripts`` that ``bind``'s ``RunScope``
+    cannot carry (building it via ``compile_policy`` would root its ``write_allow`` at ``run_dir`` —
+    the footgun ``test_safe_by_construction_corpus_scope`` forbids), so it is constructed only via
+    ``CuratorDeps.for_run`` and ``bind(CORPUS_AUTHOR_DEF)`` FAILS LOUD rather than mint a wrong policy."""
     cases = [
         (bind(MAIN_DEF, tmp_path), AgentDeps),
         (bind(GATHER_DEF, tmp_path), GatherDeps),
@@ -253,10 +258,14 @@ def test_deps_class_all_seven_roles(tmp_path):
         (bind(VERIFY_DEF, tmp_path), VerifierDeps),
         (bind(LEAD_AUTHOR_DEF, tmp_path / "run", repo_root=tmp_path), LeadAuthorDeps),
     ]
-    # exactly one deps subtype per role member — no role left unmapped
-    assert len({role for role in AgentRole}) == 7
+    # 8 roles total: the 7 bindable ones (below) + CORPUS_AUTHOR (for_run-only, asserted to
+    # fail loud) — so every role is accounted for, none silently mismapped.
+    assert len({role for role in AgentRole}) == 8
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
+    # CORPUS_AUTHOR is not generically bindable — bind fails loud (never a run-dir-rooted CuratorDeps).
+    with pytest.raises((ValueError, TypeError)):
+        bind(CORPUS_AUTHOR_DEF, tmp_path)
 
 
 # ============================================================================
