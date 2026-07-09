@@ -188,10 +188,15 @@ def decide_write(
     a `resolve()` error (a symlink cycle) FAILS CLOSED rather than propagating out of the gate.
 
     `run_dir`/`defender_dir` are the OPTIONAL run roots (uniform with `decide_read`/`decide_bash`):
-    when both are supplied, a write target must ALSO resolve within the agent's READ surface —
-    a writer never authors a path it could not read (`write_allow ⊆ read roots`, the invariant
-    `edit_file` relies on). Skipped when omitted (the run-dir tool callers, already confined by
-    `write_allow`); mirrors `decide_bash`'s optional-roots shape.
+    when both are supplied, a write target must ALSO resolve within the agent's read CONTAINMENT
+    — its read roots (`read_confine`/`read_roots`/run dir/`defender_dir`) minus the secret/ground-
+    truth denylist (`read_allowed_path`), the `write_allow ⊆ read roots` invariant `edit_file`
+    relies on. NOTE this is containment + denylist, NOT the full `decide_read` gate: it does not
+    apply the gather_raw RAW clamp (shared with the judge's `jq` lane, which legitimately reads
+    raw), so a `raw_reads=False` writer whose `write_allow` admits a `gather_raw/` path is not
+    additionally blocked here — no real writer's `write_allow` reaches there. Skipped when omitted
+    (the run-dir tool callers, already confined by `write_allow`); mirrors `decide_bash`'s
+    optional-roots shape.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);
@@ -209,18 +214,19 @@ def decide_write(
             "Blocked: writes are limited to this agent's declared paths "
             f"(its write allowlist); {path} is not one of them.",
         )
-    # Defense-in-depth (write ⊆ read): when the run roots are supplied, the write target must
-    # also sit inside the agent's read surface — no writer authors a path it could not read
-    # back. Reuses the read-lane containment (read_confine / read_roots / denylist), fails
-    # closed on a resolve error. A no-op for every real writer (its write_allow already sits
+    # Defense-in-depth (write ⊆ read roots): when the run roots are supplied, the write target
+    # must also sit inside the agent's read CONTAINMENT — its read roots minus the secret/ground-
+    # truth denylist (`read_allowed_path`), fails closed on a resolve error. This is containment +
+    # denylist, NOT the full `decide_read` (no gather_raw RAW clamp — that lane is shared with the
+    # judge's jq, which may read raw). A no-op for every real writer (its write_allow already sits
     # within its read roots); it only closes a hypothetical write_allow that escapes them.
     if run_dir is not None and defender_dir is not None and not read_allowed_path(
         rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy
     ):
         return Decision(
             False,
-            f"Blocked: {path} is outside this agent's read surface — a write must land "
-            "somewhere the agent could also read (write ⊆ read).",
+            f"Blocked: {path} is outside this agent's read roots — a write must land within the "
+            "agent's read containment (write ⊆ read roots).",
         )
 
     if path.name == "investigation.md":

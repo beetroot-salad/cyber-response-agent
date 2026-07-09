@@ -173,25 +173,39 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
         return None
 
 
-def _require_read_root(name: str, p: Path) -> None:
-    """A per-run read root must be an absolute, non-filesystem-root, whitespace-free
-    path — the anchored reader allowlist is baked from it, so an empty (`Path('')`→`.`)
-    or `/` root would anchor the pattern to the cwd / the whole filesystem (= read
-    anything). A root containing whitespace cannot be represented either: the shape
-    matcher maps a token's own spaces to `_TOKEN_SPACE`, but the anchor embeds
-    `re.escape(root)` with a literal space, so the two never align and EVERY in-root
-    read would silently deny. Fail LOUD in all three cases (safe-by-construction:
-    `policy_for` can't mint an unconfined — or a silently-bricked — policy)."""
+def require_anchor_root(what: str, p: Path) -> None:
+    """The ONE per-run anchor-root guard, shared by `bind` (agent_definition) and `policy_for`
+    (this module) so the security check never drifts between them. `p` must be ABSOLUTE, not the
+    filesystem root, `..`-free, and whitespace-free; `what` names the offending input in the error.
+
+    The anchored reader allowlist is baked from `root.resolve()`, so an empty (`Path('')`→`.`) or
+    `/` root would anchor the pattern to the cwd / the whole filesystem (= read anything). A
+    `..`-laden root (`/x/../..`, parts len 4) passes a raw parts count yet resolves to `/` — the
+    same hazard, so it is rejected too. A root containing whitespace cannot be represented either:
+    the shape matcher maps a token's own spaces to `_TOKEN_SPACE`, but the anchor embeds
+    `re.escape(root)` with a literal space, so the two never align and EVERY in-root read would
+    silently deny. Fail LOUD in every case rather than mint an unconfined — or silently-bricked —
+    policy."""
     p = Path(p)
-    if not p.is_absolute() or len(p.parts) < 2:
+    if not p.is_absolute() or len(p.parts) < 2 or ".." in p.parts:
         raise ValueError(
-            f"policy_for {name!r} must be an absolute non-root directory, got {p!r}"
+            f"{what} must be an absolute non-root path with no '..' segment, got {p!r} — a "
+            "relative, filesystem-root, or ..-collapsing anchor would open reads to the CWD / "
+            "whole filesystem."
         )
     if any(ch.isspace() for ch in str(p)):
         raise ValueError(
-            f"policy_for {name!r} root must not contain whitespace (the textual bash "
-            f"reader anchor cannot represent it), got {p!r}"
+            f"{what} must not contain whitespace (the textual bash reader anchor cannot "
+            f"represent it), got {p!r}"
         )
+
+
+def _require_read_root(name: str, p: Path) -> None:
+    """`policy_for`'s per-run root guard: delegates to the shared `require_anchor_root` (the ONE
+    root-anchor validator — see there for the absolute/`..`/whitespace rationale) with the
+    `policy_for {name!r}` framing, so `policy_for` can't mint an unconfined or silently-bricked
+    policy and a future hardening lands in one place."""
+    require_anchor_root(f"policy_for {name!r} root", p)
 
 
 def policy_for(agent: str, *, run_dir: Path, defender_dir: Path) -> AgentPolicy:

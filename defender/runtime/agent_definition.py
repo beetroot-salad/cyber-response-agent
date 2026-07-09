@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any
 from defender._paths import PATHS
 
 from .agent_role import AgentRole
-from .permission import AgentPolicy
+from .permission import AgentPolicy, require_anchor_root
 from .permission.policies._common import reader_patterns_for
 
 if TYPE_CHECKING:
@@ -260,6 +260,28 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
     return tuple(patterns)
 
 
+def _require_write_co_constraint(
+    tools: ToolSet, write_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
+) -> None:
+    """The writer⟺``write_shapes`` co-constraint (Q3 — safe-by-construction): a writer ToolSet
+    (``write=True``) MUST declare non-empty ``write_shapes`` (else it would deny every write — a
+    dead writer) and a non-writer MUST declare NONE (a dead scope). ONE implementation, enforced
+    at TWO seams: ``build_registry`` runs it per registered def, so a production def typo (a new
+    writer that forgets ``write_shapes``, or a read-only def carrying a dead scope) fails loud at
+    AGENTS IMPORT — not at first ``bind`` — and ``compile_policy`` re-runs it defensively for
+    callers passing a raw ``tools``/``write_shapes`` pair (the direct-compile tests)."""
+    if tools.write and not write_shapes:
+        raise ValueError(
+            "a writer ToolSet (write=True) must declare non-empty write_shapes — an empty "
+            "write scope would deny every write (a dead writer)."
+        )
+    if not tools.write and write_shapes:
+        raise ValueError(
+            "write_shapes were declared but the ToolSet grants no writer (write=False) — "
+            "dead scope; drop the shapes or grant the writer."
+        )
+
+
 def compile_policy(
     tools: ToolSet,
     read_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
@@ -281,20 +303,13 @@ def compile_policy(
     ``write_shapes`` (#551 — decision 2) is the WRITE twin: each builder resolves into
     ``write_allow`` (MAIN → the run-dir subtree; LEAD_AUTHOR → ``<defender_dir>/skills/**.md``),
     so the per-writer write scope is DATA on the def, resolved against the caller's tree exactly
-    as ``read_shapes`` is. The co-constraint is ASSERTED (Q3 — safe-by-construction): a writer
-    ToolSet (``tools.write``) must declare non-empty ``write_shapes`` (else it would deny every
-    write — a dead writer) and a non-writer must declare NONE (a dead scope) — either mismatch
-    fails LOUD at build rather than shipping a silently-broken policy."""
-    if tools.write and not write_shapes:
-        raise ValueError(
-            "compile_policy: a writer ToolSet (write=True) must declare non-empty write_shapes "
-            "— an empty write scope would deny every write (a dead writer)."
-        )
-    if not tools.write and write_shapes:
-        raise ValueError(
-            "compile_policy: write_shapes were declared but the ToolSet grants no writer "
-            "(write=False) — dead scope; drop the shapes or grant the writer."
-        )
+    as ``read_shapes`` is. The co-constraint is ASSERTED (Q3 — safe-by-construction) via the
+    shared ``_require_write_co_constraint``: a writer ToolSet (``tools.write``) must declare
+    non-empty ``write_shapes`` (else it would deny every write — a dead writer) and a non-writer
+    must declare NONE (a dead scope). ``build_registry`` runs the SAME check on every registered
+    def at AGENTS import, so a production def typo fails loud there; this call is the defensive
+    twin for direct callers passing a raw ``tools``/``write_shapes`` pair."""
+    _require_write_co_constraint(tools, write_shapes)
     bash = tools.bash
     if bash is None:
         adapters = adapter_sql_pipe = jq_gated = False
@@ -355,58 +370,40 @@ def _deps_class(role: AgentRole) -> type[AgentDeps]:
 
 
 def _require_absolute_root(label: str, p: Path) -> None:
-    """A ``bind`` root input (run_dir / defender_dir / each scope read root) must be an
-    ABSOLUTE, non-filesystem-root, whitespace-free path (Q4 harden — the ``_require_read_root``
-    shape ``policy_for`` already applies, lifted onto ``bind``): the anchored reader/write
-    allowlist is baked from it, so a relative (``Path('')`` → ``.``, ``'relative/x'``) or ``/``
-    root would silently anchor CWD / the whole filesystem, and a whitespace root can't align
-    the token-space sentinel with the ``re.escape`` anchor (every in-root read would deny). Fail
-    LOUD in all three cases rather than mint a silently-open — or silently-bricked — policy."""
-    p = Path(p)
-    if not p.is_absolute() or len(p.parts) < 2:
-        raise ValueError(
-            f"bind {label} must be an absolute non-root path, got {p!r} — a relative or "
-            "filesystem-root anchor would open reads to the CWD / whole filesystem."
-        )
-    if any(ch.isspace() for ch in str(p)):
-        raise ValueError(
-            f"bind {label} must not contain whitespace (the textual bash reader anchor cannot "
-            f"represent it), got {p!r}"
-        )
+    """``bind``'s per-run root guard (run_dir / defender_dir / each scope read root): delegates
+    to the shared ``require_anchor_root`` (``permission.bash``) — ONE root-anchor validator for
+    both ``bind`` and ``policy_for``, so the absolute/``..``/whitespace rejection has a single
+    implementation and a future hardening lands in one place — with the ``bind {label}`` framing."""
+    require_anchor_root(f"bind {label}", p)
 
 
-def bind(
+def _resolved_tree(defender_dir: Path | None) -> Path:
+    """The gate-anchor tree: the caller's explicit ``defender_dir``, else the ``PATHS`` default
+    (the MAIN checkout). ONE owner for the 'which tree' default so ``compile_policy_for``'s policy
+    anchor and ``bind``'s ``deps.defender_dir`` field can never disagree (a split would brick every
+    worktree read/write)."""
+    return defender_dir if defender_dir is not None else PATHS.defender_dir
+
+
+def compile_policy_for(
     defn: AgentDefinition, run_dir: Path, *,
-    scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
-) -> AgentDeps:
-    """Resolve a definition for a run into ready-to-use ``AgentDeps``: validate the roots,
-    resolve them, compile the policy, then construct the role's ``AgentDeps`` subtype carrying
-    it (via the shared ``_for_run`` spine — ``run_id`` = the run dir basename).
+    scope: RunScope = _DEFAULT_SCOPE, defender_dir: Path | None = None,
+) -> AgentPolicy:
+    """Resolve + compile a definition's ``AgentPolicy`` WITHOUT minting deps — the policy-only
+    half of ``bind`` (validate the roots, check the per-role DATA preconditions, resolve the
+    roots, compile the policy). The ``main_policy``/``gather_policy`` aliases need only ``.policy``
+    (no run_id/salt), so they call THIS rather than ``bind(...).policy`` — no discarded uuid4 salt
+    + deps object minted per call. ``bind`` = this + the ``_for_run`` deps mint, so the alias and
+    the bound policy are the SAME projection (no drift).
 
-    ``salt`` is the untrusted-data trust token (decision 1a): ``None`` mints a fresh uuid4
-    (the stages' behaviour), a carried value is threaded verbatim so the MAIN/GATHER reroute
-    keeps the run's ONE persisted salt across the deps' tool-output wrapper AND orient's alert
-    wrapper (a fresh uuid4 there would split the tag and fail the injection defence open).
-
-    ``defender_dir`` (#551) is the tree the gate anchors reads/writes on — ``None`` defaults to
-    the ``PATHS`` primitive (the MAIN checkout; the runtime + read-only stages), the LEAD_AUTHOR
-    drain passes its throwaway ``<worktree>/defender`` (the unified tree param that replaces the
-    old ``repo_root`` kwarg — full data-drive, Q2). It is threaded into BOTH ``resolve_roots``
-    (the POLICY anchor) AND ``_for_run`` (the ``deps.defender_dir`` FIELD the runtime gate reads
-    for containment) so the two anchors are ONE tree: threading only the policy would leave
-    ``deps.defender_dir`` at ``PATHS`` and brick every worktree read/write.
-
-    The per-role preconditions are DATA (no ``if role is X`` branch — Q2): ``requires_confine``
-    (True on ACTOR_DEF) fails loud on an empty ``read_confine`` (an empty confine widens the
-    actor to the whole ``defender_dir`` — the #512 gray-box leak), and ``requires_explicit_tree``
-    (True on LEAD_AUTHOR_DEF) fails loud on a ``None``/``PATHS`` tree (a writer that must author a
-    worktree, never the MAIN checkout — Q4 makes the main-checkout state UNBUILDABLE). LEAD_AUTHOR
-    then flows through the same ``resolve_roots`` → ``compile_policy`` spine as every other role;
-    its worktree ``skills/**.md`` write scope + scoped ``rm`` grant come from ``compile_policy``
-    (its def's ``write_shapes`` + ``BashGrammar(skills_rm=True)``), not a bespoke early-return.
-
-    Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
-    stamps it post-bind."""
+    ``defender_dir`` (#551) is the tree the gate anchors reads/writes on — ``None`` defaults to the
+    ``PATHS`` primitive (the MAIN checkout), the LEAD_AUTHOR drain passes its throwaway
+    ``<worktree>/defender``. The per-role preconditions are DATA (no ``if role is X`` branch):
+    ``requires_confine`` (True on ACTOR_DEF) fails loud on an empty ``read_confine`` (an empty
+    confine widens the actor to the whole ``defender_dir`` — the #512 gray-box leak), and
+    ``requires_explicit_tree`` (True on LEAD_AUTHOR_DEF) fails loud on a ``None``/``PATHS`` tree (a
+    writer that must author a worktree, never the MAIN checkout — the main-checkout-authoring state
+    is UNBUILDABLE)."""
     _require_absolute_root("run_dir", run_dir)
     if defender_dir is not None:
         _require_absolute_root("defender_dir", defender_dir)
@@ -426,23 +423,54 @@ def bind(
             "worktree tree its write scope anchors on; a None/PATHS tree would author the MAIN "
             "checkout, not the worktree (the main-checkout-authoring state is unbuildable)."
         )
-    tree = defender_dir if defender_dir is not None else PATHS.defender_dir
-    roots = resolve_roots(run_dir, defn.corpus_dirs, scope, defender_dir=tree)
-    policy = compile_policy(
-        defn.tools, defn.read_shapes, defn.write_shapes, roots, defn.deny_reason,
+    roots = resolve_roots(
+        run_dir, defn.corpus_dirs, scope, defender_dir=_resolved_tree(defender_dir),
     )
-    return _deps_class(defn.role)._for_run(run_dir, policy, defender_dir=tree, salt=salt)
+    return compile_policy(defn.tools, defn.read_shapes, defn.write_shapes, roots, defn.deny_reason)
+
+
+def bind(
+    defn: AgentDefinition, run_dir: Path, *,
+    scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
+) -> AgentDeps:
+    """Resolve a definition for a run into ready-to-use ``AgentDeps``: compile the policy (via
+    ``compile_policy_for`` — the shared validate → resolve → compile half), then construct the
+    role's ``AgentDeps`` subtype carrying it (via the shared ``_for_run`` spine — ``run_id`` =
+    the run dir basename).
+
+    ``salt`` is the untrusted-data trust token (decision 1a): ``None`` mints a fresh uuid4
+    (the stages' behaviour), a carried value is threaded verbatim so the MAIN/GATHER reroute
+    keeps the run's ONE persisted salt across the deps' tool-output wrapper AND orient's alert
+    wrapper (a fresh uuid4 there would split the tag and fail the injection defence open).
+
+    ``defender_dir`` (#551) is the tree the gate anchors reads/writes on (see ``compile_policy_for``
+    for the ``None``→``PATHS`` default + the per-role preconditions). It is threaded into BOTH the
+    policy (``compile_policy_for``) AND ``_for_run`` (the ``deps.defender_dir`` FIELD the runtime
+    gate reads for containment) via the shared ``_resolved_tree``, so the two anchors are ONE tree:
+    threading only the policy would leave ``deps.defender_dir`` at ``PATHS`` and brick every
+    worktree read/write. LEAD_AUTHOR flows through this same spine as every other role — no bespoke
+    early-return.
+
+    Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
+    stamps it post-bind."""
+    policy = compile_policy_for(defn, run_dir, scope=scope, defender_dir=defender_dir)
+    return _deps_class(defn.role)._for_run(
+        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt,
+    )
 
 
 def build_registry(defs: tuple[AgentDefinition, ...]) -> dict[AgentRole, AgentDefinition]:
     """Fan a tuple of definitions into the role-keyed registry, RAISING (``ValueError``
     naming the ``role``) on a duplicate — the safe-by-construction replacement for the
     dict-comp's silent last-wins overwrite, which could drop an agent's whole
-    definition unnoticed."""
+    definition unnoticed. Also runs the writer⟺``write_shapes`` co-constraint on each def
+    (``_require_write_co_constraint``), so a misconfigured registered def fails loud at AGENTS
+    IMPORT rather than only when that role is first bound (#551 F9)."""
     registry: dict[AgentRole, AgentDefinition] = {}
     for d in defs:
         if d.role in registry:
             raise ValueError(f"duplicate agent role {d.role!r} in the definition registry")
+        _require_write_co_constraint(d.tools, d.write_shapes)
         registry[d.role] = d
     return registry
 
@@ -456,5 +484,6 @@ __all__ = [
     "bind",
     "build_registry",
     "compile_policy",
+    "compile_policy_for",
     "resolve_roots",
 ]

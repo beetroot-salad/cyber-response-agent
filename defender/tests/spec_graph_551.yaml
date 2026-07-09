@@ -13,6 +13,15 @@ base: e0993ae   # SHA the spec branch forked from — write-code-from-spec diffs
 # their durable behavior and pins the NEW behavior (write⊆read active, non-PATHS defender_dir threaded
 # into BOTH policy and deps, requires_confine as data). handoff.deviations records the reduced modes.
 
+# scripts/spec_graph/check_binds.py waivers — a demand whose prose threads a modelled concept
+# it deliberately does NOT bind (the concept is covered by a sibling demand's node). Each entry
+# is a conscious triage, not a silent gap. (The gather salt orphan was NOT waived — it was a real
+# under-binding and is now bound on d3_gather_threads_not_restamps.)
+binds_waivers:
+  d1_lead_author_via_bind: [defender_tree]        # tree coverage via d3_bind_threads_defender_dir_into_deps_field
+  d6_writers_pass_roots: [defender_tree]          # tree coverage via d3_* ; this demand pins the write⊆read wiring
+  d7_lead_author_main_tree_unbuildable: [defender_tree]  # the PATHS-equal case is bound via requires_explicit_tree
+
 demands:
   # ── Demand #0 — the return-value contract (resolve FIRST) ──────────────────
   - id: d0_bind_return_contract
@@ -186,7 +195,7 @@ demands:
     outcome: {nl: "the GATHER dispatch builds deps as bind(GATHER_DEF, deps.run_dir, salt=deps.salt,
       defender_dir=deps.defender_dir) and DROPS the replace(defender_dir=…) restamp — the policy
       anchors and the deps field are one tree (no restamp-only split)."}
-    binds: ["gather_dispatch", "read_surface.access[bash-cat]", "defender_tree"]
+    binds: ["gather_dispatch", "read_surface.access[bash-cat]", "defender_tree", "salt.domain.distinguished[carried]"]
   - id: d3_corpus_traversal_guard_survives
     kind: survival
     form: test

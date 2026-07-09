@@ -28,12 +28,14 @@ GATHER_FALLTHROUGH_DENY_REASON = (
 
 
 def gather_policy(run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    """The GATHER policy anchored to this run's read roots (#535) — a thin `bind(GATHER_DEF)`
-    alias (#551 — the single policy source): `compile_policy` bakes the same anchored reader
-    lane as main plus the gather capability bits (adapters + `raw_reads` for its own
-    `gather_raw/**`), so the returned policy is exactly what the bound gather subagent runs.
-    `bind` is imported lazily — `GATHER_DEF` lives in `driver`."""
-    from defender.runtime.agent_definition import bind
+    """The GATHER policy anchored to this run's read roots (#535) — a thin
+    `compile_policy_for(GATHER_DEF)` alias (#551 — the single policy source): `compile_policy`
+    bakes the same anchored reader lane as main plus the gather capability bits (adapters +
+    `raw_reads` for its own `gather_raw/**`), so the returned policy is exactly what the bound
+    gather subagent runs. Uses `compile_policy_for` (the policy-only half of `bind`) rather than
+    `bind(...).policy`, so no deps object / uuid4 salt is minted just to read one field. Imported
+    lazily — `GATHER_DEF` lives in `driver`."""
+    from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.driver import GATHER_DEF
 
-    return bind(GATHER_DEF, run_dir, defender_dir=defender_dir).policy
+    return compile_policy_for(GATHER_DEF, run_dir, defender_dir=defender_dir)

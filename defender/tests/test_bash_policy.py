@@ -13,7 +13,7 @@ from defender.runtime import bash_policy
 
 def test_policy_exposes_per_agent_capability():
     # The reader-lane program set moved into permission/policies/_common.py
-    # (reader_patterns) with the #535 anchoring — bash_policy no longer exposes a
+    # (reader_patterns_for) with the #535 anchoring — bash_policy no longer exposes a
     # `viewers` list, so this loader owns only the per-agent capability + denylist.
     assert not hasattr(bash_policy, "viewers")
     # Adapters: gather may, main may not.

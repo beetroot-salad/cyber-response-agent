@@ -26,13 +26,14 @@ FALLTHROUGH_DENY_REASON = (
 
 
 def main_policy(run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    """The MAIN policy anchored to this run's read roots (#535) — a thin `bind(MAIN_DEF)`
+    """The MAIN policy anchored to this run's read roots (#535) — a thin `compile_policy_for(MAIN_DEF)`
     alias (#551 — the single policy source): `compile_policy` bakes the anchored reader
     allowlist + the run-dir `write_allow` + the read↔bash filename `read_shapes` filter, so
     the returned policy is exactly what the bound MAIN loop runs (no drift, no parity test).
-    `bind` is imported lazily — `MAIN_DEF` lives in `driver`, whose import path funnels back
-    through this package."""
-    from defender.runtime.agent_definition import bind
+    Uses `compile_policy_for` (the policy-only half of `bind`) rather than `bind(...).policy`, so
+    no deps object / uuid4 salt is minted just to read one field. Imported lazily — `MAIN_DEF`
+    lives in `driver`, whose import path funnels back through this package."""
+    from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.driver import MAIN_DEF
 
-    return bind(MAIN_DEF, run_dir, defender_dir=defender_dir).policy
+    return compile_policy_for(MAIN_DEF, run_dir, defender_dir=defender_dir)

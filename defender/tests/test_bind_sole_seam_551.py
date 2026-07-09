@@ -500,11 +500,18 @@ def test_d3_main_driver_threads_param_into_bind():
 def test_d3_gather_threads_not_restamps():
     """d3_gather_threads_not_restamps (parity): the GATHER dispatch builds deps as
     bind(GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir) and DROPS the
-    replace(defender_dir=…) restamp — policy anchor and deps field are one tree (no restamp split)."""
+    replace(defender_dir=…) restamp — policy anchor and deps field are one tree (no restamp split),
+    and the PARENT run's salt is threaded in (a fresh uuid4 would split the run's ONE untrusted-data
+    trust token and fail the injection defence open — the #546 footgun)."""
     # RED@HEAD: bind(GATHER_DEF, …) has no defender_dir kwarg; the tree rides a replace() restamp.
     src = (PATHS.repo_root / "defender" / "runtime" / "tools_gather.py").read_text()
     assert re.search(r"bind\(\s*GATHER_DEF[^)]*defender_dir\s*=", src), \
         "the gather dispatch must thread defender_dir into bind(GATHER_DEF, …)"
+    # Salt-not-split (the #546 injection-defense footgun): the bind(GATHER_DEF, …) call must carry
+    # the parent run's salt (salt=deps.salt), never let bind mint a fresh uuid4 for the subagent.
+    assert re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=\s*deps\.salt", src), \
+        "the gather dispatch must thread the parent run's salt (salt=deps.salt) into " \
+        "bind(GATHER_DEF, …) — a fresh uuid4 would split the run's untrusted-data trust token"
     assert "defender_dir=deps.defender_dir, lead_id=" not in src, \
         "the replace(defender_dir=…) restamp must be dropped (bind anchors the tree)"
 

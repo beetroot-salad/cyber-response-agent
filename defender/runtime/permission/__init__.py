@@ -29,6 +29,7 @@ from .bash import (
     BashDecision,
     decide_bash,
     policy_for,
+    require_anchor_root,
 )
 from .decision import Decision
 from .files import build_write_allow, decide_read, decide_write, is_untrusted_read
@@ -50,4 +51,5 @@ __all__ = [
     "decide_write",
     "is_untrusted_read",
     "policy_for",
+    "require_anchor_root",
 ]
