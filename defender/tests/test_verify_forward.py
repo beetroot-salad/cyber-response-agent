@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 
 HERE = Path(__file__).resolve().parent
@@ -194,163 +190,28 @@ def test_load_observation_missing_id_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# #425 — the forward-check verifiers resolve the run bundle off the shared
-# state root (DEFENDER_LEARNING_STATE_DIR), not the worktree they run in.
-# The verifiers freeze their paths from DEFAULT_PATHS at import, so each case
-# is driven in a fresh subprocess with the env var pinned (the curator agent
-# pins it into the bash-tool env via run_common.run_env; here we set it directly).
+# (#558) The three subprocess `-c` state-root cases that used to live here —
+# test_forward_resolves_bundle_off_state_root / test_actor_resolves_story_and
+# _pending_off_state_root / test_env_case_entities_off_state_root — proved the
+# verifier MODULES import + resolve their bundle under a bare interpreter. That
+# constraint dies with the subprocess: the forward-check is now an in-process
+# @agent.tool that reads the bundle/pending/corpus off `CuratorDeps` (demands
+# d16/d17/d20 in spec_graph_558-forward-check-tool.yaml). The pure helpers those
+# cases exercised stay importable and behave unchanged — pinned by
+# test_forward_check_tool.py::test_m9_verify_forward_helpers_survive_as_a_library
+# (and the parser/context tests above). Deleted, not migrated in place.
 # ---------------------------------------------------------------------------
 
 
-def _run_with_state(snippet: str, state_dir: Path, cwd: Path) -> subprocess.CompletedProcess:
-    env = dict(os.environ)
-    env["DEFENDER_LEARNING_STATE_DIR"] = str(state_dir)
-    env["PYTHONPATH"] = str(_WS_ROOT)
-    return subprocess.run(
-        [sys.executable, "-c", snippet],
-        env=env, cwd=str(cwd), capture_output=True, text=True,
-    )
-
-
-def test_forward_resolves_bundle_off_state_root(tmp_path: Path):
-    """forward.RUNS_DIR + load_run_context follow DEFENDER_LEARNING_STATE_DIR, so the
-    bundle is found from a worktree cwd that has no runs/ of its own (#425)."""
-    state = tmp_path / "state"
-    run = state / "runs" / "run-X"
-    run.mkdir(parents=True)
-    (run / "investigation.md").write_text("TRANSCRIPT-BODY\n")
-    (run / "source_refs.yaml").write_text(yaml.safe_dump({"normalized_disposition": "benign"}))
-    worktree = tmp_path / "worktree"  # fresh checkout: no runs/
-    worktree.mkdir()
-
-    snippet = (
-        "from defender.learning.author.verify_forward import forward as vf;"
-        "t, d = vf.load_run_context('run-X');"
-        "print('RUNS_DIR', vf.RUNS_DIR);"
-        "print('OK' if ('TRANSCRIPT-BODY' in t and d == 'benign') else 'MISS')"
-    )
-    proc = _run_with_state(snippet, state, worktree)
-    assert proc.returncode == 0, proc.stderr
-    assert str(state / "runs") in proc.stdout
-    assert "OK" in proc.stdout
-
-
-def test_actor_resolves_story_and_pending_off_state_root(tmp_path: Path):
-    """actor.load_story + actor.PENDING_FILE follow the state root (#425)."""
-    state = tmp_path / "state"
-    run = state / "runs" / "run-Y"
-    run.mkdir(parents=True)
-    (run / "actor_story.md").write_text("ACTOR-STORY-BODY\n")
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
-
-    snippet = (
-        "from defender.learning.author.verify_forward import actor as a;"
-        "print('PENDING', a.PENDING_FILE);"
-        "print(a.load_story('defender/learning/runs/run-Y/'))"
-    )
-    proc = _run_with_state(snippet, state, worktree)
-    assert proc.returncode == 0, proc.stderr
-    assert str(state / "_pending" / "actor_observations.jsonl") in proc.stdout
-    assert "ACTOR-STORY-BODY" in proc.stdout
-
-
-def test_env_case_entities_off_state_root(tmp_path: Path):
-    """env.case_entities_arg(row, DEFAULT_PATHS.runs_dir) reads the source-case
-    prologue off the state root, the path main() uses (#425)."""
-    state = tmp_path / "state"
-    run = state / "runs" / "run-Z"
-    run.mkdir(parents=True)
-    (run / "investigation.md").write_text(
-        "```invlang\n"
-        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|process|process:nc|nc[1]|\n"
-        "```\n"
-    )
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
-
-    snippet = (
-        "from defender.learning.author.verify_forward import env as e;"
-        "row = {'source_run_dir': 'defender/learning/runs/run-Z/'};"
-        "print('ENTITIES', e.case_entities_arg(row, e.DEFAULT_PATHS.runs_dir))"
-    )
-    proc = _run_with_state(snippet, state, worktree)
-    assert proc.returncode == 0, proc.stderr
-    assert "ENTITIES process:nc" in proc.stdout
-
-
 # ---------------------------------------------------------------------------
-# batch.py pins its <verify_script.py> argument (the confused-deputy guard).
-#
-# The curator's bash allowlist can only pin the program token — `_verifier_pattern`
-# admits `python3 <batch.py> <anything>` — so the driver, which EXECUTES its first
-# positional, has to pin it itself. A curator's `write_allow` reaches `<corpus>/**.md`,
-# so an unpinned driver turns a `.md` write grant into arbitrary code execution.
+# (#558) The batch.py confused-deputy cases that used to live here — the
+# `resolve_check_script` / `batch_main_refuses_to_execute_an_arbitrary_script`
+# pins #565 added — die with `batch.py` itself. They guarded a driver whose first
+# positional was a script path it executed, reachable because the curator's bash
+# allowlist can only pin a program token, not its operands. The forward-check is an
+# in-process @agent.tool now: the check is bound onto the curator's deps at spawn, so
+# there is no script operand to pin. Pinned instead by
+# test_forward_check_tool.py::test_d3_no_program_operand_negative (the tool's schema
+# admits no program of the model's choosing) and ::test_d25_no_bash_grant_for_the_verifier
+# (the curator's bash allowlist admits no python interpreter at all).
 # ---------------------------------------------------------------------------
-
-from defender.learning.author.verify_forward import batch as vfb  # type: ignore[import-not-found]
-
-_BATCH_PY = Path(vfb.__file__).resolve()
-
-
-def test_resolve_check_script_accepts_the_two_sibling_checks():
-    for name in ("forward.py", "actor.py"):
-        for spelling in (str(_BATCH_PY.parent / name), f"{vfb.HERE}/./{name}"):
-            assert vfb.resolve_check_script(spelling) == _BATCH_PY.parent / name
-
-
-def test_resolve_check_script_refuses_a_corpus_md(tmp_path: Path):
-    """The escape shape: any file the curator may author is not a check script."""
-    lesson = tmp_path / "pwn.md"
-    lesson.write_text("# a lesson\n")
-    assert vfb.resolve_check_script(str(lesson)) is None
-
-
-def test_resolve_check_script_refuses_a_same_named_file_elsewhere(tmp_path: Path):
-    """Membership is on the resolved path, not the basename — `..`/traversal is refused."""
-    decoy = tmp_path / "forward.py"
-    decoy.write_text("print('GOOD')\n")
-    assert vfb.resolve_check_script(str(decoy)) is None
-    assert vfb.resolve_check_script(f"{vfb.HERE}/../../../../{decoy.name}") is None
-
-
-def test_resolve_check_script_refuses_a_missing_sibling(tmp_path: Path, monkeypatch):
-    """A pinned NAME that isn't on disk still fails closed (the eval temp tree copies
-    only some of the scripts)."""
-    monkeypatch.setattr(vfb, "HERE", tmp_path)  # lint-monkeypatch: ok — module-const path anchor, no DI seam exists
-    assert vfb.resolve_check_script(str(tmp_path / "forward.py")) is None
-
-
-def test_batch_main_refuses_to_execute_an_arbitrary_script(tmp_path: Path):
-    """End-to-end: the driver exits 64 and the trampolined file never runs."""
-    sentinel = tmp_path / "executed"
-    payload = tmp_path / "pwn.md"
-    payload.write_text(f"open({str(sentinel)!r}, 'w').write('x')\n")
-
-    proc = subprocess.run(
-        [sys.executable, str(_BATCH_PY), str(payload), "lesson.md=obs-1"],
-        capture_output=True, text=True, cwd=str(_WS_ROOT),
-    )
-    assert proc.returncode == 64, proc.stdout + proc.stderr
-    assert "refusing to run" in proc.stderr
-    assert not sentinel.exists(), "batch.py executed an unpinned script"
-
-
-def test_batch_main_still_spawns_a_pinned_check(tmp_path: Path):
-    """Positive control for the guard above: with a PINNED script the driver gets past
-    the pin and spawns it — here `forward.py` exits 1 on a missing lesson (before any
-    model call), which the driver reports as ERROR and summarizes. Without this, the
-    refusal test would also pass against a driver that never ran anything."""
-    proc = subprocess.run(
-        [
-            sys.executable, str(_BATCH_PY),
-            str(_BATCH_PY.parent / "forward.py"),
-            f"{tmp_path / 'absent.md'}=run-1=adversarial",
-        ],
-        capture_output=True, text=True, cwd=str(_WS_ROOT),
-    )
-    assert proc.returncode == 1, proc.stdout + proc.stderr
-    assert "refusing to run" not in proc.stderr
-    assert "ERROR" in proc.stdout
-    assert "BATCH: n_good=0 n_bad=0 n_error=1" in proc.stdout

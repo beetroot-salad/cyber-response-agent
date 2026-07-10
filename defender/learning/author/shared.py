@@ -521,3 +521,22 @@ def run_batch_envelope(
         return 0
     finally:
         release_flock(queue_lock)
+
+
+def build_curator_user_prompt(
+    rows: list[dict], batch_id: str, *, corpus_dir_rel: str, label: str
+) -> str:
+    """The user payload every curator sends its agent: the batch, its corpus, and the queued
+    rows verbatim. ``label`` names the row kind (``findings`` / ``observations``) — the only
+    thing that varied between the four curators' hand-rolled copies.
+
+    It carries NO forward-check command line. The check is an in-process tool bound to the
+    curator's deps at spawn (#558), so there is nothing here for the agent to substitute an
+    interpreter path or a script operand into; each row's own id and direction ride in the
+    rows below, where they already were."""
+    return (
+        f"batch_id: {batch_id}\n"
+        f"lessons_dir: {corpus_dir_rel}\n"
+        f"{label} ({len(rows)}):\n"
+        f"{json.dumps(rows, indent=2)}\n"
+    )

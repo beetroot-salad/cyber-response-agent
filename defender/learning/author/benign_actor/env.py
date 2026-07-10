@@ -16,7 +16,6 @@ dispatch (``_loop_orchestrate._run_curator_module``) or run directly.
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports
@@ -24,39 +23,16 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import curator as _curator
-from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author.benign_actor import run as _benign
-from defender.learning.core.config import AUTHOR_ENV_REQUEST_LIMIT, DEFAULT_PATHS, LoopPaths
-
-
-def invoke_agent(
-    observations: list[dict], batch_id: str, cfg: _curator.CuratorConfig
-) -> dict:
-    """The adversarial env direction's curator spawn. Identical in SHAPE to the benign direction —
-    both forward-check the whole batch via ``verify_forward/env.py`` into the SHARED
-    ``lessons-environment/`` corpus — but defined here (its own module, its own
-    ``resolve_verifier_python`` reference) so the adversarial entry point self-contains its
-    forward-check grant rather than borrowing the benign module's; the two directions drain in
-    separate serialized batches with distinct commit trailers + generation counters."""
-    verifier_py = resolve_verifier_python(cfg.repo_root)
-    forward_check_command = (
-        f"{verifier_py} {_benign.VERIFY_SCRIPT_REL} "
-        f"--corpus {cfg.corpus_dir_rel} --pending {cfg.pending_file_rel}"
-    )
-    extra_prompt = f"forward_check_command: {forward_check_command}\n"
-    return _curator.invoke_curator_agent(
-        cfg, observations, batch_id,
-        extra_prompt=extra_prompt,
-        verifier_scripts=(cfg.verifier_dir / "env.py",),
-        request_limit=AUTHOR_ENV_REQUEST_LIMIT,
-    )
+from defender.learning.core.config import DEFAULT_PATHS, LoopPaths
 
 
 def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
-    # The adversarial config defaults its ``invoke_agent`` to the benign module's (shared shape);
-    # swap in THIS module's so the adversarial spawn runs through the adversarial entry point.
-    cfg = replace(_benign.build_adversarial_config(paths), invoke_agent=invoke_agent)
+    # No `invoke_agent` override: once the forward-check became data (`ENV_CHECK` bound onto the
+    # deps), the two env directions' spawns are the SAME function — they differ only in the queue
+    # `build_adversarial_config` names. `_env_config` already defaults `invoke_agent` to the
+    # benign module's, so this direction inherits it rather than keeping a byte-identical copy.
+    cfg = _benign.build_adversarial_config(paths)
     return _benign.run_batch(hold_committed=hold_committed, cfg=cfg)
 
 

@@ -57,7 +57,8 @@ def _resolved_read_roots(
     gray-box confine — a confined actor sees only its lesson corpora, not the whole
     corpus); `run_dir` and the agent's `read_roots` still widen. Empty confine is
     the legacy `{run_dir, defender_dir, *read_roots}`. May raise `OSError` /
-    `RuntimeError` from `resolve()` (a symlink cycle) — every caller FAILS CLOSED."""
+    `RuntimeError` / `ValueError` from `resolve()` (a symlink cycle, an embedded NUL) —
+    every caller FAILS CLOSED."""
     base = policy.read_confine if policy.read_confine else (Path(defender_dir),)
     return tuple(
         r.resolve() for r in (Path(run_dir), *base, *policy.read_roots)
@@ -192,7 +193,8 @@ def decide_write(
     loop's run-dir subtree, the lead author's `defender/skills/**.md`). Empty `write_allow`
     (every read-only / predictor stage) denies all writes. `resolve()` collapses `..`/symlinks
     before the match so a pattern is a true path set, not a string prefix an operand can escape;
-    a `resolve()` error (a symlink cycle) FAILS CLOSED rather than propagating out of the gate.
+    a `resolve()` error (a symlink cycle, or an embedded NUL — `ValueError`, reachable from any
+    model-supplied operand) FAILS CLOSED rather than propagating out of the gate.
 
     `run_dir`/`defender_dir` are the OPTIONAL run roots (uniform with `decide_read`/`decide_bash`):
     when both are supplied, a write target must ALSO resolve within the agent's read CONTAINMENT

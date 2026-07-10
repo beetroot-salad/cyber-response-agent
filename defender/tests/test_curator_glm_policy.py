@@ -9,8 +9,8 @@ Design (mirror of the lead-author port #543): one ``AgentRole.CORPUS_AUTHOR`` + 
 ``CORPUS_AUTHOR_DEF`` (``ToolSet(read=True, bash=BashGrammar(), write=True)``) serves all four
 curators; the write_allow / bash_allow are built PER-SPAWN from the worktree ``corpus_dir``
 (``CuratorDeps.for_run`` → ``_corpus_author_policy``), NOT via ``compile_policy``/``bind`` (whose
-write_allow roots at ``run_dir``). Per curator: A→lessons/ (verifiers batch.py+forward.py),
-B→lessons-actor/ (batch.py+actor.py), C&D→lessons-environment/ (env.py).
+write_allow roots at ``run_dir``). Per curator: A→lessons/, B→lessons-actor/,
+C&D→lessons-environment/. Since #558 the forward-check is a bound tool, not a bash grant.
 
 What is driven, and how:
   * every test builds a REAL policy via ``_corpus_author_policy`` / ``CuratorDeps.for_run`` and
@@ -66,29 +66,19 @@ from defender.runtime.agents import AGENTS  # noqa: E402
 # Per-curator wiring (the seam contract's A/B/C/D partition) + worktree harness
 # ---------------------------------------------------------------------------
 
-# corpus subdir + the verifier scripts each curator's bash_allow may run. batch.py is
-# SHARED by A and B, so the per-curator discriminator is forward.py (A) vs actor.py (B)
-# vs env.py (C/D) — the wrong-forward-check negatives lean on that.
+# The corpus subdir each curator writes into (its ONLY per-spawn isolation surface).
 _CURATORS: dict[str, dict[str, object]] = {
-    "A": {"corpus": "lessons", "verifiers": ("batch.py", "forward.py")},
-    "B": {"corpus": "lessons-actor", "verifiers": ("batch.py", "actor.py")},
-    "C": {"corpus": "lessons-environment", "verifiers": ("env.py",)},
-    "D": {"corpus": "lessons-environment", "verifiers": ("env.py",)},
+    "A": {"corpus": "lessons"},
+    "B": {"corpus": "lessons-actor"},
+    "C": {"corpus": "lessons-environment"},
+    "D": {"corpus": "lessons-environment"},
 }
 
-_VERIFY_REL = "defender/learning/author/verify_forward"
-
-
 def _make_worktree(tmp_path: Path) -> Path:
-    """A tmp batch 'worktree': the three lesson corpora + the verify_forward scripts exist
-    so real writes land and (belt-and-suspenders) any ``.is_file()`` verifier check passes."""
+    """A tmp batch 'worktree': the three lesson corpora exist so real writes land."""
     root = tmp_path / "wt"
     for name in ("lessons", "lessons-actor", "lessons-environment"):
         (root / "defender" / name).mkdir(parents=True, exist_ok=True)
-    vf = root / "defender" / "learning" / "author" / "verify_forward"
-    vf.mkdir(parents=True, exist_ok=True)
-    for script in ("batch.py", "forward.py", "actor.py", "env.py"):
-        (vf / script).write_text("# verifier\n")
     return root
 
 
@@ -102,27 +92,22 @@ def _corpus(wt: Path, curator: str) -> Path:
     return wt / "defender" / str(_CURATORS[curator]["corpus"])
 
 
-def _verifiers(wt: Path, curator: str) -> tuple[Path, ...]:
-    base = wt / "defender" / "learning" / "author" / "verify_forward"
-    return tuple(base / v for v in _CURATORS[curator]["verifiers"])  # type: ignore[union-attr]
-
-
 def _deps(wt: Path, run_dir: Path, curator: str) -> CuratorDeps:
-    return CuratorDeps.for_run(run_dir, wt, _corpus(wt, curator), _verifiers(wt, curator))
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
+    return CuratorDeps.for_run(
+        run_dir, wt, _corpus(wt, curator),
+        check=FINDINGS_CHECK, runs_dir=wt / "runs",
+        pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset(),
+    )
 
 
 def _policy(wt: Path, curator: str):
-    return _corpus_author_policy(_corpus(wt, curator), _verifiers(wt, curator))
+    return _corpus_author_policy(_corpus(wt, curator))
 
 
 def _rel(curator: str) -> str:
     """The repo-relative corpus prefix the agent (cwd=worktree) types, e.g. defender/lessons-actor."""
     return f"defender/{_CURATORS[curator]['corpus']}"
-
-
-def _verify_cmd(script: str, args: str = "--pending q.jsonl --run-dir rd") -> str:
-    """A forward-check command in the shape the agent issues (bare python3 + repo-relative script)."""
-    return f"python3 {_VERIFY_REL}/{script} {args}"
 
 
 # --- write-surface drivers: bind write_file AND edit_file (both are decide_write) ---
@@ -156,10 +141,12 @@ def _admitted_on_both_write_surfaces(wt: Path, deps: CuratorDeps, corpus_name: s
 
 def test_one_corpus_author_role_serves_all_four(tmp_path):
     """one-corpus-author-role: a single AgentRole.CORPUS_AUTHOR + CORPUS_AUTHOR_DEF
-    (ToolSet read+bash+write) registered ONCE in AGENTS serves all four curators; A's
-    held_forward_bad divergence lives in the envelope, not a second engine/role."""
+    (ToolSet read+bash+write+forward_check) registered ONCE in AGENTS serves all four curators;
+    A's held_forward_bad divergence lives in the envelope, not a second engine/role."""
     assert CORPUS_AUTHOR_DEF.role is AgentRole.CORPUS_AUTHOR
-    assert CORPUS_AUTHOR_DEF.tools == ToolSet(read=True, bash=BashGrammar(), write=True)
+    assert CORPUS_AUTHOR_DEF.tools == ToolSet(
+        read=True, bash=BashGrammar(), write=True, forward_check=True
+    )
     assert AGENTS[AgentRole.CORPUS_AUTHOR] is CORPUS_AUTHOR_DEF  # registered once, no duplicate role
     wt, rd = _make_worktree(tmp_path), _run_dir(tmp_path)
     for curator in ("A", "B", "C", "D"):
@@ -187,7 +174,7 @@ def test_safe_by_construction_corpus_scope(tmp_path):
     _denied_on_both_write_surfaces(deps, "defender/lessons/x.md")  # NOT a sibling corpus
     _denied_on_both_write_surfaces(deps, str(rd / "x.md"))        # NOT run-dir-rooted
     with pytest.raises(TypeError):  # the factory cannot be built without naming the corpus
-        CuratorDeps.for_run(rd, wt)  # missing corpus_dir + verifier_scripts
+        CuratorDeps.for_run(rd, wt)  # missing corpus_dir (and the bound check)
 
 
 # ===========================================================================
@@ -260,38 +247,13 @@ def test_write_traversal_symlink_denied(tmp_path):
 # Bash gate — forward-check + rm + corpus-anchored viewers (Q1 option 3)
 # ===========================================================================
 
-def test_bash_forward_check_admitted(tmp_path):
-    """bash-forward-check-admitted: each curator's OWN forward-check is admitted on the bash lane,
-    and each carries ONLY its verifier scripts. A: batch.py+forward.py; B: batch.py+actor.py;
-    C/D: env.py."""
-    wt = _make_worktree(tmp_path)
-    a = _policy(wt, "A")
-    assert permission.decide_bash(_verify_cmd("batch.py"), policy=a).allow
-    assert permission.decide_bash(_verify_cmd("forward.py"), policy=a).allow
-    # A version-suffixed interpreter (resolve_verifier_python's sys.executable / env-override
-    # fallback commonly resolves to `.../python3.11`) is admitted — the SCRIPT token is the
-    # containment, not the interpreter name.
-    assert permission.decide_bash(
-        f"/usr/bin/python3.11 {_VERIFY_REL}/batch.py --pending q.jsonl --run-dir rd", policy=a
-    ).allow
-    b = _policy(wt, "B")
-    assert permission.decide_bash(_verify_cmd("batch.py"), policy=b).allow
-    assert permission.decide_bash(_verify_cmd("actor.py"), policy=b).allow
-    for curator in ("C", "D"):
-        assert permission.decide_bash(_verify_cmd("env.py"), policy=_policy(wt, curator)).allow
-
-
-def test_bash_wrong_forward_check_denied(tmp_path):
-    """bash-wrong-forward-check-denied: a curator running a DIFFERENT curator's forward-check is
-    DENIED — the verifier grant is per-curator. Paired positive: its own verifier is admitted."""
-    wt = _make_worktree(tmp_path)
-    a = _policy(wt, "A")  # verifiers batch.py + forward.py (NOT actor.py / env.py)
-    assert not permission.decide_bash(_verify_cmd("actor.py"), policy=a).allow
-    assert not permission.decide_bash(_verify_cmd("env.py"), policy=a).allow
-    assert permission.decide_bash(_verify_cmd("forward.py"), policy=a).allow  # positive control
-    b = _policy(wt, "B")  # verifiers batch.py + actor.py (NOT forward.py)
-    assert not permission.decide_bash(_verify_cmd("forward.py"), policy=b).allow
-    assert permission.decide_bash(_verify_cmd("actor.py"), policy=b).allow    # positive control
+# (#558) The two per-curator verifier-grant cases that lived here — bash-forward-check-admitted
+# and bash-wrong-forward-check-denied — are INVERTED by the port: the curator's bash allowlist now
+# admits no python interpreter at all, because a regex over argv pins the program token but not the
+# operands that program acts on (#565). Their replacements live in test_forward_check_tool.py:
+# ::test_d25_no_bash_grant_for_the_verifier (no interpreter admitted, for any curator) and
+# ::test_d25b_surviving_bash_lane_still_works (the rm + viewers survive). The per-curator variation
+# they asserted is now ::test_d2_check_bound_from_deps_not_operand — it rides on the deps.
 
 
 def test_bash_rm_scoped_admitted(tmp_path):
@@ -374,22 +336,23 @@ def test_bash_grep_file_option_exfil_denied(tmp_path):
 
 
 def test_bash_arbitrary_program_denied(tmp_path):
-    """bash-arbitrary-program-denied: any command that is not a whitelisted viewer / the curator's
-    forward-check / the scoped rm — git commit, bare python, curl, cat of a secret — is DENIED
-    (deny-by-default). The sanctioned forward-check + in-corpus viewer succeed (positive controls).
-    Also pins survival-agent-no-git: the toolset has no git grant."""
+    """bash-arbitrary-program-denied: any command that is not a whitelisted viewer or the scoped rm
+    — git commit, any python, curl, cat of a secret — is DENIED (deny-by-default). The in-corpus
+    viewer succeeds (positive control). Also pins survival-agent-no-git: the toolset has no git
+    grant. Since #558 there is no interpreter grant either: `python3 <anything>` is denied, so the
+    forward-check can only be reached through the bound `forward_check` tool."""
     wt = _make_worktree(tmp_path)
     pol = _policy(wt, "A")
     for cmd in (
         "git commit -m x",                 # no git grant (the loop is the sole committer)
-        "python3 -c pass",                 # bare python, not a pinned verifier
-        "python3 evil.py",                 # a non-verifier script
+        "python3 -c pass",                 # bare python
+        "python3 evil.py",                 # any script — there is no verifier grant left
         "curl http://evil.test",           # arbitrary network
         "cat /etc/passwd",                 # a secret, absolute
     ):
         assert not permission.decide_bash(cmd, policy=pol).allow, cmd
-    assert permission.decide_bash(_verify_cmd("forward.py"), policy=pol).allow      # positive control
     assert permission.decide_bash("cat defender/lessons/x.md", policy=pol).allow    # positive control
+    assert permission.decide_bash("rm defender/lessons/x.md", policy=pol).allow     # positive control
 
 
 # ===========================================================================
@@ -397,22 +360,22 @@ def test_bash_arbitrary_program_denied(tmp_path):
 # ===========================================================================
 
 def test_cross_curator_isolation(tmp_path):
-    """One CORPUS_AUTHOR role serves all four, so the ONLY isolation is the per-spawn corpus/verifier
-    scoping: curator A must DENY a write / rm / grep of B's corpus (lessons-actor/) and B's own
-    verifier (actor.py) on every surface, while ADMITTING its OWN lessons/ + forward.py."""
+    """One CORPUS_AUTHOR role serves all four, so the ONLY isolation is the per-spawn corpus
+    scoping: curator A must DENY a write / rm / grep of B's corpus (lessons-actor/) on every
+    surface, while ADMITTING its OWN lessons/. (Since #558 the forward-check is no longer a bash
+    grant, so it is not an isolation surface here; the tool's lesson operand is confined to the
+    spawn's own corpus — test_forward_check_tool.py::test_d19_lesson_path_confined_to_own_corpus.)"""
     wt, rd = _make_worktree(tmp_path), _run_dir(tmp_path)
     a_deps = _deps(wt, rd, "A")
     a_pol = a_deps.policy
-    # ADMIT own corpus + own forward-check (positive controls)
+    # ADMIT own corpus (positive controls)
     _admitted_on_both_write_surfaces(wt, a_deps, "lessons", stem="own")
     assert permission.decide_bash("rm defender/lessons/own.md", policy=a_pol).allow
     assert permission.decide_bash("grep needle defender/lessons/own.md", policy=a_pol).allow
-    assert permission.decide_bash(_verify_cmd("forward.py"), policy=a_pol).allow
-    # DENY B's corpus (write + rm + grep) and B's verifier
+    # DENY B's corpus (write + rm + grep)
     _denied_on_both_write_surfaces(a_deps, "defender/lessons-actor/x.md")
     assert not permission.decide_bash("rm defender/lessons-actor/x.md", policy=a_pol).allow
     assert not permission.decide_bash("grep needle defender/lessons-actor/x.md", policy=a_pol).allow
-    assert not permission.decide_bash(_verify_cmd("actor.py"), policy=a_pol).allow
 
 
 # ===========================================================================

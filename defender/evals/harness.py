@@ -15,11 +15,13 @@ The harness materializes the scenario into a fresh temp tree shaped
 like the real repo, points the author at it, runs it, and copies the
 post-run lessons + author logs into ``eval/results/<timestamp>-<scenario>/``.
 
-The author's ``REPO_ROOT`` is computed from the script's own file
-location, so the harness symlinks the real ``author.py`` /
-``verify_forward.py`` (and prompts) into the temp tree's
-``defender/learning/`` and runs that copy. Nothing under the real
-defender/ is touched.
+The curator is driven IN-PROCESS through an injected ``AuthorConfig`` rooted at
+the temp tree (``LoopPaths(repo_root=tmp)``) — no entry script is copied and no
+subprocess is spawned. It used to copy ``run.py`` / ``verify_forward/forward.py``
+into the temp tree purely so the copied entry's ``__file__``-derived ``REPO_ROOT``
+landed in tmp; the forward-check is an in-process tool reading its roots off the
+curator's deps now (#558), so the injected config does that job directly. Nothing
+under the real defender/ is touched.
 
 Hand-eyeball protocol: read ``results/<run>/lessons/`` against the
 findings + any pre-seeded lessons; the README.md in the scenario
@@ -28,33 +30,34 @@ states what "good" looks like.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
+import io
 import os
 import shutil
-import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 # Sibling import — this harness runs as a standalone script, so evals/ is on
 # sys.path[0]. Shared with harness_lead.py.
-from _harness_util import find_venv_py, init_git, run as _run
+from _harness_util import init_git
 
 from defender import _git  # _harness_util put the repo root on sys.path
 
 
 HERE = Path(__file__).resolve().parent      # .../defender/evals
-REAL_LEARNING = HERE.parent / "learning"    # .../defender/learning
-REAL_REPO_ROOT = REAL_LEARNING.parents[1]  # workspace root (worktree)
 RESULTS_DIR = HERE / "results"
 
-# Files the temp tree needs (copied, not symlinked) into the real script set,
-# at their post-reorg relative paths so the copied entry's REPO_ROOT lands in tmp.
-LEARNING_LINKS = [
-    "author/lessons/run.py",
-    "author/lessons/prompt.md",
-    "author/verify_forward/forward.py",
-    "author/verify_forward/forward.md",
-]
+
+@dataclass(frozen=True)
+class AuthorRun:
+    """One in-process curator drain: what the old subprocess `CompletedProcess` carried."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 def materialize(scenario: Path, tmp: Path) -> None:
@@ -62,13 +65,9 @@ def materialize(scenario: Path, tmp: Path) -> None:
     (tmp / "defender" / "learning" / "_pending").mkdir(parents=True)
     (tmp / "defender" / "lessons").mkdir(parents=True)
 
-    # Copy learning scripts + prompts. Symlinks would break author.py's
-    # REPO_ROOT computation (Path(__file__).resolve() follows the symlink).
+    # No entry scripts are copied: the curator runs in-process against an AuthorConfig
+    # rooted here, and its forward-check reads the roots off its deps.
     learning_dir = tmp / "defender" / "learning"
-    for rel in LEARNING_LINKS:
-        dst = learning_dir / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(REAL_LEARNING / rel, dst)
 
     # Copy findings.jsonl.
     src_findings = scenario / "findings.jsonl"
@@ -88,22 +87,30 @@ def materialize(scenario: Path, tmp: Path) -> None:
             shutil.copy(path, tmp / "defender" / "lessons" / path.name)
 
 
-def run_author(tmp: Path) -> tuple[subprocess.CompletedProcess, float]:
-    venv_py = find_venv_py(REAL_REPO_ROOT)
-    env = os.environ.copy()
-    env["LEARNING_VERIFIER_PYTHON"] = str(venv_py)
-    env["VERIFY_TIMING_LOG"] = str(tmp / "_verify_timing.log")
-    import time
+def run_author(tmp: Path) -> tuple[AuthorRun, float]:
+    """Drain the scenario's findings with the REAL curator, in-process, against `tmp`.
+
+    `LoopPaths(repo_root=tmp)` roots the corpus, the pending queue and the run bundles in the
+    temp tree; `build_author_config` turns that into the `AuthorConfig` the curator's own
+    entry point would have built for itself. The curator's stdout/stderr are captured so the
+    results dir keeps carrying them."""
+    from defender.learning.author.lessons import run as author
+    from defender.learning.core.config import LoopPaths
+
+    paths = LoopPaths(repo_root=tmp)
+    cfg = author.build_author_config(paths)
+    out, err = io.StringIO(), io.StringIO()
     t0 = time.monotonic()
-    proc = _run(
-        [str(venv_py), str(tmp / "defender" / "learning" / "author" / "lessons" / "run.py")],
-        cwd=tmp, env=env, check=False,
-    )
-    return proc, time.monotonic() - t0
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = author.run_batch(paths=paths, cfg=cfg)
+    except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
+        rc = 1
+        err.write(f"\n{type(e).__name__}: {e}\n")
+    return AuthorRun(rc, out.getvalue(), err.getvalue()), time.monotonic() - t0
 
 
-def capture_results(tmp: Path, scenario_name: str,
-                    proc: subprocess.CompletedProcess,
+def capture_results(tmp: Path, scenario_name: str, proc: AuthorRun,
                     wall_seconds: float | None = None) -> Path:
     ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = RESULTS_DIR / f"{ts}-{scenario_name}"
@@ -134,19 +141,12 @@ def capture_results(tmp: Path, scenario_name: str,
     (out / "rc.txt").write_text(str(proc.returncode))
 
     if wall_seconds is not None:
+        # The per-check verifier timing came from the deleted CLI's `_verify_timing.log`
+        # append; in-process the checks are visible in each source bundle's trace instead.
         effort = os.environ.get("LEARNING_AUTHOR_EFFORT", "(default)")
-        verifier_log = tmp / "_verify_timing.log"
-        verifier_text = verifier_log.read_text() if verifier_log.is_file() else ""
-        verifier_total = sum(
-            float(line.split()[-1])
-            for line in verifier_text.splitlines() if line.strip()
-        )
         (out / "timing.txt").write_text(
             f"wall_seconds={wall_seconds:.1f}\n"
-            f"verifier_seconds={verifier_total:.1f}\n"
-            f"curator_seconds={wall_seconds - verifier_total:.1f}\n"
             f"effort={effort}\n"
-            f"verifier_calls:\n{verifier_text}"
         )
 
     return out

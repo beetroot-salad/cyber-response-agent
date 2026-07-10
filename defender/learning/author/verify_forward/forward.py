@@ -1,60 +1,40 @@
-#!/usr/bin/env python3
-"""Forward-check Haiku gate for a single candidate lesson.
+"""The findings curator's forward check, as a library (#558).
 
-Usage: ``verify_forward.py [--direction adversarial|benign] <lesson_path> <run_id>``
+Predicts what the defender agent would conclude on a case with a candidate lesson loaded at
+PLAN time, and asks whether it still reaches the case's ground-truth disposition. Curator A
+(``defender/lessons/``) runs it through the in-process ``forward_check`` tool; ``checks.py``
+composes these helpers into the prompt payload. There is no CLI entry point — the check used
+to be a bash subprocess the curator typed, and pinning a program token could not constrain
+what that program did with its own operands (#558, #565).
 
-Reads the lesson file, the source case's investigation transcript at
-``defender/learning/runs/<run_id>/investigation.md``, and the recorded
-disposition from
-``defender/learning/runs/<run_id>/source_refs.yaml``. Runs the forward-check
-IN-PROCESS on PydanticAI (GLM 5.2, Fireworks — the metered first-party path, the
-mirror of the judge/actor/oracle migrations) with
-``defender/learning/author/verify_forward/forward.md`` as the system prompt, via
-the shared ``verify_forward/engine.forward_check``. Predicting with the defender's
-own model (``runtime/driver.DEFAULT_MODEL``) tightens this same-case regression
-proxy. Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
+The disposition handed to the verifier is direction-aware (see ``expected_disposition``): a
+benign-direction (FP) lesson is generated from a run the defender called ``malicious`` but
+which it exists to *correct toward* ``benign``, so the recorded ``malicious`` is exactly what
+it must NOT preserve.
 
-The disposition handed to the verifier is direction-aware (see
-``expected_disposition``): a benign-direction (FP) lesson is generated from a
-run the defender called ``malicious`` but which it exists to *correct toward*
-``benign``, so the recorded ``malicious`` is exactly what it must NOT preserve.
+Single rep — replication is for statistical TNR/TPR measurement, not per-edit gating (see
+``experiments/defender-author-verification/results/final.md``).
 
-Single rep — replication is for statistical TNR/TPR measurement, not
-per-edit gating (see ``experiments/defender-author-verification/results/final.md``).
+``runs_dir`` is a REQUIRED argument on every loader here, never a module constant: the
+curator imports this module from the main checkout while editing a throwaway worktree, so a
+default frozen at import would read the wrong tree.
 """
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
+from defender._run_paths import RunPaths
+from defender.learning.core.config import REPO_ROOT
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[3]
-# The run bundle (investigation.md + source_refs.yaml) is written under
-# DEFAULT_PATHS.runs_dir, which honors DEFENDER_LEARNING_STATE_DIR — out-of-repo
-# under concurrent runs. Resolve from the same seam the producer wrote to rather
-# than assuming the in-repo default. The module-level imports stay stdlib + core.config
-# (no pyyaml, no pydantic-ai), so this file imports under any interpreter — the GLM
-# engine is pulled LAZILY inside main() (see `forward_check`), which is what keeps the
-# tests/test_verify_forward subprocess cases (import + load_run_context) runtime-free.
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-from defender._run_paths import RunPaths  # noqa: E402
-from defender.learning.core.config import DEFAULT_PATHS  # noqa: E402
-from defender.learning.author.verify_forward.shared import data_section  # noqa: E402
-RUNS_DIR = DEFAULT_PATHS.runs_dir
 PROMPT_PATH = HERE / "forward.md"
 
 # Scoped, closed-only read of the cited covering policy for a benign forward-check
-# (issue #338) — same read-only adapter the seed sampler uses, kept pyyaml-free.
+# (issue #338) — same read-only adapter the seed sampler uses.
 _TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
 _POLICY_FETCH_TIMEOUT = 15
 _NO_CITED_POLICY = (
@@ -62,7 +42,7 @@ _NO_CITED_POLICY = (
 )
 
 
-def load_run_context(run_id: str, runs_dir: Path = RUNS_DIR) -> tuple[str, str]:
+def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     run_dir = runs_dir / run_id
     investigation = RunPaths(run_dir).investigation
     refs = run_dir / "source_refs.yaml"
@@ -111,7 +91,7 @@ def expected_disposition(direction: str, recorded: str) -> str:
     return recorded
 
 
-def _cited_case_ids(run_id: str, runs_dir: Path = RUNS_DIR) -> list[str]:
+def _cited_case_ids(run_id: str, *, runs_dir: Path) -> list[str]:
     """Case ids the benign actor was offered as covering-policy seeds, read from the
     source run's persisted `past_tickets.txt` menu (one `- {case_id}: …` line each).
     Empty when no menu was written (cold-start / no seeds offered)."""
@@ -155,7 +135,7 @@ def _fetch_closed_resolution(case_id: str) -> str | None:
 
 
 def load_cited_policy(
-    run_id: str, runs_dir: Path = RUNS_DIR, *, fetch_fn=_fetch_closed_resolution
+    run_id: str, *, runs_dir: Path, fetch_fn=_fetch_closed_resolution
 ) -> str:
     """The cited covering policies (closed cases) for a benign forward-check, rendered
     for the verifier prompt. The benign actor cites a past closed case as a covering
@@ -165,7 +145,7 @@ def load_cited_policy(
     non-fatal)."""
     lines = [
         f"- {case_id}: {res}"
-        for case_id in _cited_case_ids(run_id, runs_dir)
+        for case_id in _cited_case_ids(run_id, runs_dir=runs_dir)
         if (res := fetch_fn(case_id))
     ]
     if not lines:
@@ -174,69 +154,3 @@ def load_cited_policy(
         "Cited covering policies (closed cases; grounded conditions ride in the "
         "resolution):\n" + "\n".join(lines)
     )
-
-
-def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="verify_forward.py")
-    ap.add_argument(
-        "--direction",
-        default="adversarial",
-        choices=["adversarial", "benign"],
-        help=(
-            "learning direction of the finding (default: adversarial). A benign "
-            "finding targets the corrected `benign` disposition instead of the "
-            "recorded one — pass the finding row's `direction`."
-        ),
-    )
-    ap.add_argument("lesson_path")
-    ap.add_argument("run_id")
-    ns = ap.parse_args(argv[1:])
-    lesson_path = Path(ns.lesson_path).resolve()
-    run_id = ns.run_id
-    if not lesson_path.is_file():
-        print(f"verify_forward: lesson not found: {lesson_path}", file=sys.stderr)
-        return 1
-    transcript, recorded = load_run_context(run_id)
-    disposition = expected_disposition(ns.direction, recorded)
-    # A benign lesson routes to a cited covering policy; load it so the verifier can
-    # reproduce the close using that policy. Adversarial lessons cite no policy.
-    cited_policy = (
-        load_cited_policy(run_id) if ns.direction == "benign" else _NO_CITED_POLICY
-    )
-    # Instructions live in forward.md (the system prompt, passed as prompt_path); the user
-    # message is the case DATA only — the system/user split the sibling stages honor.
-    user_prompt = "\n\n".join((
-        data_section("CASE TRANSCRIPT (the original investigation, including its actual evidence and disposition)", transcript),
-        data_section("CANDIDATE LESSON", lesson_path.read_text()),
-        data_section("CASE GROUND-TRUTH DISPOSITION", disposition),
-        data_section("CITED COVERING POLICY (closed prior cases this lesson's routing may lean on; benign/FP lessons only — adversarial lessons cite none)", cited_policy),
-    ))
-    # Lazy import: pulls the pydantic-ai graph only when a check actually runs, so this
-    # module stays importable under any interpreter (the subprocess tests rely on that).
-    from defender.learning.author.verify_forward.engine import forward_check
-
-    t0 = time.monotonic()
-    verdict = forward_check(
-        prompt_path=PROMPT_PATH,
-        user=user_prompt,
-        source_run_dir=RUNS_DIR / run_id,
-        lesson_stem=lesson_path.stem,
-        error_prefix="verify_forward",
-    )
-    elapsed = time.monotonic() - t0
-    # Append timing for the harness to reconstruct verifier time. The
-    # path is opportunistic: if VERIFY_TIMING_LOG is set we use it,
-    # else fall back to a sibling file next to the script. Last line
-    # of stdout is still the verdict — author.md reads `last line` only.
-    log_path = os.environ.get("VERIFY_TIMING_LOG") or str(HERE / "_verify_timing.log")
-    try:
-        with open(log_path, "a") as fh:
-            fh.write(f"{lesson_path.name} {run_id} {elapsed:.2f}\n")
-    except OSError:
-        pass
-    print(verdict)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))

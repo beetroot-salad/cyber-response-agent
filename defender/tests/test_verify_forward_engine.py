@@ -24,10 +24,9 @@ from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VERIFY_DEF,
     VerifierDeps,
     _run_verify_pydantic,
-    forward_check,
 )
 from defender.learning.core import config  # noqa: E402
-from defender.learning.core.config import FatalConfigError, RunUnprocessable  # noqa: E402
+from defender.learning.core.config import RunUnprocessable  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -147,53 +146,3 @@ def test_build_verify_agent_applies_glm_effort(monkeypatch):
 # --- forward_check: the CLI orchestration both forward.py + actor.py share -------
 # forward_check owns two DI seams (`source_key` / `run_verify`) that default to the real
 # collaborators, so these inject fakes rather than monkeypatching module globals.
-
-
-def test_forward_check_sources_key_then_runs_and_parses(tmp_path):
-    sourced, ran = [], {}
-
-    def _spy_key(model, label):
-        sourced.append((model, label))
-
-    def _fake_run(**kw):
-        ran.update(kw)
-        return "reasoning\n\nVERDICT: BAD"
-
-    verdict = forward_check(
-        prompt_path=_prompt(tmp_path), user="u", source_run_dir=tmp_path,
-        lesson_stem="T1078", error_prefix="verify_forward",
-        source_key=_spy_key, run_verify=_fake_run,
-    )
-    assert verdict == "BAD"                                       # parsed from the transport's text
-    assert sourced == [(config.VERIFIER_MODEL, "verify_forward")]  # key sourced BEFORE the call
-    # wiring: the config defaults (glm-5.2 @ low, matching the defender) + a per-lesson trace
-    # name/label flow through to the transport
-    assert ran["model"] == config.VERIFIER_MODEL
-    assert ran["effort"] == config.VERIFIER_EFFORT
-    assert ran["wall_clock_timeout"] == config.VERIFIER_TIMEOUT
-    assert ran["source_run_dir"] == tmp_path
-    assert ran["user"] == "u"
-    assert "T1078" in ran["trace_name"]
-    assert "T1078" in ran["label"]
-
-
-def test_forward_check_config_fault_becomes_systemexit(tmp_path):
-    def _boom_key(model, label):
-        raise FatalConfigError("needs FIREWORKS_API_KEY")
-    with pytest.raises(SystemExit, match="FIREWORKS_API_KEY"):
-        forward_check(
-            prompt_path=_prompt(tmp_path), user="u", source_run_dir=tmp_path,
-            lesson_stem="L", error_prefix="verify_forward",
-            source_key=_boom_key,
-        )
-
-
-def test_forward_check_unprocessable_becomes_systemexit(tmp_path):
-    def _boom_run(**kw):
-        raise RunUnprocessable("model timed out")
-    with pytest.raises(SystemExit, match="did not complete"):
-        forward_check(
-            prompt_path=_prompt(tmp_path), user="u", source_run_dir=tmp_path,
-            lesson_stem="L", error_prefix="verify_forward_actor",
-            source_key=lambda model, label: None, run_verify=_boom_run,
-        )

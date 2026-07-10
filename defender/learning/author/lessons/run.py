@@ -48,7 +48,6 @@ corpus and pass no provenance trailers (issue #330).
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 import uuid
@@ -66,7 +65,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import curator as _curator
-from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author import shared as _shared
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
@@ -75,7 +73,6 @@ from defender.learning.core.config import (
     AUTHOR_REQUEST_LIMIT,
     AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
-    DefenderPaths,
     LoopPaths,
     make_logger,
     now_iso,
@@ -104,14 +101,7 @@ class AuthorConfig:
     repo_root: Path
     lessons_dir: Path
     lessons_dir_rel: str
-    # Forward-check verifier scripts dir (absolute, under repo_root) — resolved from the injected
-    # LoopPaths so it follows the batch worktree rather than being hand-built off repo_root.
-    verifier_dir: Path
     runs_dir: Path
-    # Shared mutable-state root (``LoopPaths.state_root``) pinned as
-    # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
-    # (#425) — a first-class field, not ``runs_dir.parent``.
-    state_root: Path
     pending_dir: Path
     pending_file: Path
     consumed_file: Path
@@ -142,9 +132,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         repo_root=paths.repo_root,
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
-        verifier_dir=paths.verify_forward_dir,
         runs_dir=paths.runs_dir,
-        state_root=paths.state_root,
         pending_dir=paths.pending_dir,
         pending_file=paths.pending_file,
         consumed_file=paths.pending_dir / "consumed.jsonl",
@@ -231,6 +219,14 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def build_user_prompt(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> str:
+    """The findings curator's user payload — the shared curator builder, with this curator's
+    corpus and row label."""
+    return _shared.build_curator_user_prompt(
+        findings, batch_id, corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
+    )
+
+
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
     """Spawn the in-process findings curator on GLM. Returns the parsed AUTHOR_RESULT dict.
 
@@ -238,42 +234,36 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     graph), shared with the actor/env curators: it sources the metered key, drives the in-process
     spawn under ``require_output=True``, and relocates the ``AUTHOR_RESULT`` marker parse out of the
     retired ``claude -p`` transport (a per-run fault / unparseable marker → ``AuthorError``, the
-    caller's rc-2 lane, unchanged). This wrapper builds the findings-specific user prompt + the pinned
-    forward-check verifier scripts (``verify_forward/{batch,forward}.py``); the curator's per-spawn
-    ``AgentPolicy`` (built in ``CuratorDeps.for_run``) confines writes to ``defender/lessons/**.md`` and
-    the bash lane to those verifiers + a scoped ``rm`` + the corpus viewers — the in-process analog of
-    the retired allowed-tools spec. The agent runs no git: it authors lesson content (+ a commit
-    message it returns as data) and the loop is the sole committer (``commit_lessons``)."""
-    from defender.learning.author import curator_engine
+    caller's rc-2 lane, unchanged). This wrapper builds the findings-specific user prompt and binds
+    the findings forward-check onto the deps; the curator's per-spawn ``AgentPolicy`` (built in
+    ``CuratorDeps.for_run``) confines writes to ``defender/lessons/**.md`` and the bash lane to a
+    scoped ``rm`` + the corpus viewers. The agent runs no git: it authors lesson content (+ a commit
+    message it returns as data) and the loop is the sole committer (``commit_lessons``).
 
-    verifier_py = resolve_verifier_python(cfg.repo_root)
-    rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
-    user_prompt = (
-        f"batch_id: {batch_id}\n"
-        f"lessons_dir: {cfg.lessons_dir_rel}\n"
-        f"--direction <direction> <lesson_path> <run_id>\n"
-        f"verify_batch_command: {verifier_py} {rel}batch.py {rel}forward.py "
-        f"<lesson_path>=<run_id>=<direction> [<lesson_path>=<run_id>=<direction> ...]\n"
-        f"findings ({len(findings)}):\n"
-        f"{json.dumps(findings, indent=2)}\n"
-    )
+    ``queued_ids`` are the batch's own source ``run_id``s — the forward-check tool confines the
+    model-supplied id to them, so a curator cannot check a lesson against an unrelated case's
+    transcript."""
+    from defender.learning.author import curator_engine
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
+
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
         batch_id=batch_id,
-        user_prompt=user_prompt,
+        user_prompt=build_user_prompt(findings, batch_id, cfg),
         corpus_dir=cfg.lessons_dir,
-        verifier_scripts=(cfg.verifier_dir / "batch.py", cfg.verifier_dir / "forward.py"),
+        check=FINDINGS_CHECK,
+        runs_dir=cfg.runs_dir,
+        pending=cfg.pending_file,
+        queued_ids=frozenset(str(f["run_id"]) for f in findings if f.get("run_id")),
         repo_root=cfg.repo_root,
         learning_run_dir=cfg.pending_dir,
-        state_root=cfg.state_root,
         log=_log,
         model=cfg.author_model,
         effort=cfg.author_effort,
         request_limit=AUTHOR_REQUEST_LIMIT,
         timeout=cfg.author_timeout,
     )
-
 
 # ---------------------------------------------------------------------------
 # Post-flight

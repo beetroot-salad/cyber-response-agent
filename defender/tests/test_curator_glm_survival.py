@@ -30,7 +30,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import yaml
 
 from defender._io import read_jsonl_rows
 from defender.learning.author import curator, shared
@@ -375,17 +374,20 @@ def test_env_corpus_two_writers_distinct(tmp_path: Path):
 def test_runner_teardown_structural():
     """STRUCTURAL. No production module under ``defender/learning/author`` references the
     removed ``claude -p`` transport symbols — ``invoke_claude_print`` /
-    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted) — while
-    ``resolve_verifier_python`` SURVIVES with its four curator callers (each still builds a
-    ``python3 <verifier>`` bash grant). AST-walk of Name/Attribute references (not
-    docstrings/comments), so the check is about real callers — a conservation guard against
-    re-introducing the transport."""
+    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted). AST-walk of Name/Attribute
+    references (not docstrings/comments), so the check is about real callers — a conservation
+    guard against re-introducing the transport.
+
+    NB #558 INVERTS the old ``resolve_verifier_python`` SURVIVES assertion that used to live
+    here (the forward-check is now an in-process tool, not a ``python3 <verifier>`` subprocess).
+    That inversion is now owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
+    _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml), which asserts
+    ZERO callers — so it is dropped from this #556 teardown guard rather than kept green here."""
     import defender.learning.author.shared as _anchor  # any author module → the package dir
 
     author_dir = Path(_anchor.__file__).resolve().parent
     torn_down = ("invoke_claude_print", "curator_allowed_tools", "curator_agent_env")
     referencing = {sym: set() for sym in torn_down}
-    verifier_callers: set[str] = set()
 
     for py in sorted(author_dir.rglob("*.py")):
         if py.name.startswith("test_"):
@@ -400,22 +402,11 @@ def test_runner_teardown_structural():
         for sym in torn_down:
             if sym in names:
                 referencing[sym].add(rel)
-        if "resolve_verifier_python" in names:
-            verifier_callers.add(rel)
 
     # Teardown: zero production references to the retired transport symbols.
     assert referencing["invoke_claude_print"] == set()
     assert referencing["curator_allowed_tools"] == set()
     assert referencing["curator_agent_env"] == set()
-
-    # Survives: the four curators (A/B/C/D) each still resolve a verifier python.
-    four_curators = {
-        "lessons/run.py",             # A — findings → defender/lessons/
-        "malicious_actor/run.py",     # B — actor tradecraft → defender/lessons-actor/
-        "benign_actor/run.py",        # C — env benign → defender/lessons-environment/
-        "benign_actor/env.py",        # D — env adversarial → defender/lessons-environment/
-    }
-    assert four_curators <= verifier_callers
 
 
 # ===========================================================================
@@ -429,6 +420,7 @@ def _spawn_curator(**over):
     overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
     ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
     running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
+    from defender.learning.author.verify_forward.checks import ENV_CHECK as _ENV_CHECK
     from defender.learning.author.curator_engine import (  # port target — missing until implemented
         run_curator_stage,
     )
@@ -438,7 +430,10 @@ def _spawn_curator(**over):
         batch_id="batch-C",
         user_prompt="u",
         corpus_dir=Path("/tmp/wt/defender/lessons-environment"),
-        verifier_scripts=(),
+        check=_ENV_CHECK,
+        runs_dir=Path("/tmp/state/runs"),
+        pending=Path("/tmp/state/_pending/environment_observations.jsonl"),
+        queued_ids=frozenset(),
         repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/state/_pending"),
         model="glm-5.2",
@@ -515,8 +510,7 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     paths = LoopPaths(repo_root=orig, state_dir=state).with_repo_root(worktree)
     cfg = benign_run.build_benign_config(paths)
     assert cfg.repo_root == worktree
-    assert cfg.state_root == state
-    assert cfg.pending_dir == state / "_pending"
+    assert cfg.pending_dir == state / "_pending"  # the state dir survives `with_repo_root`
     with pytest.raises(ValueError, match="subpath"):
         cfg.pending_dir.relative_to(worktree)     # persistent anchor NOT under the worktree
 
@@ -562,36 +556,10 @@ def _run_forward_snippet(snippet: str, *, state_dir: Path | None, cwd: Path):
     )
 
 
-def test_forward_check_resolves_off_state_root(tmp_path: Path):
-    """The in-process forward-check resolves its source-case bundle off
-    DEFENDER_LEARNING_STATE_DIR, not the throwaway worktree's empty ``runs/``. With the
-    state root pinned into the agent's bash-tool env, a lesson's forward-check reads the
-    REAL source case (positive control); WITHOUT the pin it resolves an empty/absent
-    bundle and cannot see the case — the #425 silent-revert mode. The port's job is to
-    ensure the var reaches this subprocess (the in-process twin of ``curator_agent_env``);
-    this pins the resolution behavior it must preserve."""
-    state = tmp_path / "state"
-    run = state / "runs" / "run-X"
-    run.mkdir(parents=True)
-    (run / "investigation.md").write_text("TRANSCRIPT-BODY\n")
-    (run / "source_refs.yaml").write_text(yaml.safe_dump({"normalized_disposition": "benign"}))
-    worktree = tmp_path / "worktree"  # a fresh origin/main checkout: no runs/ of its own
-    worktree.mkdir()
-
-    snippet = (
-        "from defender.learning.author.verify_forward import forward as vf;"
-        "t, d = vf.load_run_context('run-X');"
-        "print('RUNS_DIR', vf.RUNS_DIR);"
-        "print('OK' if ('TRANSCRIPT-BODY' in t and d == 'benign') else 'MISS')"
-    )
-
-    # Positive: state root pinned → the forward-check reads the real source case.
-    ppos = _run_forward_snippet(snippet, state_dir=state, cwd=worktree)
-    assert ppos.returncode == 0, ppos.stderr
-    assert str(state / "runs") in ppos.stdout
-    assert "OK" in ppos.stdout
-
-    # Negative: NO pin → the bundle resolves off the worktree/default, not the state root,
-    # so the real case is unreachable (the silent-revert failure the pin prevents).
-    pneg = _run_forward_snippet(snippet, state_dir=None, cwd=worktree)
-    assert "OK" not in pneg.stdout
+# (#558) test_forward_check_resolves_off_state_root lived here: it drove `vf.load_run_context`
+# in a bare-interpreter subprocess with DEFENDER_LEARNING_STATE_DIR pinned, proving the
+# forward-check SUBPROCESS resolved the real source bundle from a throwaway worktree (#425).
+# There is no subprocess and no `vf.RUNS_DIR` any more — the check reads `runs_dir` off the
+# curator's deps. The surviving contract is owned by
+# test_forward_check_tool.py::test_d16_bundle_resolves_from_deps (the deps-named bundle is read,
+# not a frozen module default) and ::test_d14_no_environ_mutation (no state-dir pin is written).

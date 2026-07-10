@@ -15,7 +15,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Self
+from typing import Any, ClassVar, Self
 
 from defender._clock import now_iso
 from defender._paths import PATHS
@@ -150,13 +150,6 @@ class AgentDeps:
     run_id: str
     salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
-    # The shared learning-state root, threaded into the bash tool's subprocess env as
-    # DEFENDER_LEARNING_STATE_DIR (via `run_common.run_env`) so a curator's forward-check
-    # resolves the real source-case bundle off it, not the throwaway worktree's empty runs/
-    # (#425). None for the runtime agents (main/gather) that never spawn a state-root-bound
-    # subprocess — the in-process twin of the retired `curator_agent_env`, carried on the deps
-    # instead of mutating the process-global `os.environ`.
-    state_root: Path | None = field(default=None, kw_only=True)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -164,7 +157,7 @@ class AgentDeps:
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
         *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
-        state_root: Path | None = None,
+        **subtype_fields: Any,
     ) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (run_id as the
         run dir's basename, the salt) and stamp the caller's `policy`. The shared spine
@@ -176,12 +169,17 @@ class AgentDeps:
         defaults to the `PATHS` primitive (the MAIN checkout's `<repo>/defender` — the
         read-only predictors + main loop), but a writer that edits a throwaway git WORKTREE
         (the lead author) overrides it with its worktree `<wt>/defender` so the gate resolves
-        reads/writes against the right tree."""
+        reads/writes against the right tree.
+
+        `subtype_fields` are a subtype's OWN required fields (the curator's corpus, bound check,
+        roots and verify transport), passed straight to the constructor so every deps — base
+        and subtype alike — is still born through this one spine. An unknown name is the
+        constructor's TypeError, which is the point: a subtype cannot be built half-configured."""
         resolved_salt = salt if salt is not None else uuid.uuid4().hex
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
-            state_root=state_root,
+            **subtype_fields,
         )
 
 
@@ -231,11 +229,9 @@ def _record_lesson_load(deps: AgentDeps, path: Path) -> None:
 
 
 def _bash_env(deps: AgentDeps) -> dict[str, str]:
-    """The runtime agent's shell environment — defined once in run_common.py. `state_root`
-    (set only by the curator deps) reaches the forward-check subprocess as
-    DEFENDER_LEARNING_STATE_DIR through the deps, not a process-global env mutation."""
+    """The runtime agent's shell environment — defined once in run_common.py."""
     from defender import run_common
-    return run_common.run_env(deps.defender_dir, deps.run_dir, state_root=deps.state_root)
+    return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
 def _tool_bash(deps: AgentDeps, command: str) -> str:
@@ -423,8 +419,8 @@ def register_tools(agent, tools: ToolSet) -> None:
     pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
-    edit_file` — independent of the `ToolSet` field order, so the pinned tool ordering
-    the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
+    edit_file, forward_check` — independent of the `ToolSet` field order, so the pinned tool
+    ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
     (a `BashGrammar()` with no programs still REGISTERS the tool — the gate then denies
     every command); the file writers are the `tools.write` opt-in (MAIN only)."""
 
@@ -461,6 +457,15 @@ def register_tools(agent, tools: ToolSet) -> None:
             """Replace the first occurrence of old_string with new_string in a run-dir
             file. The resulting full text is validated (invlang for investigation.md)."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
+
+    if tools.forward_check:
+        # Deferred import: the curator's tool pulls the verify transport (and the pydantic-ai
+        # graph under it), which imports this module. Registration runs at agent-build time,
+        # long after both modules are loaded, so the cycle never closes. Same shape as
+        # `register_gather_tool` — the tool body lives in the agent's own package, not here.
+        from defender.learning.author.verify_forward.tool import register_forward_check_tool
+
+        register_forward_check_tool(agent)
 
 
 # --- gather dispatch & in-process adapter capture ----------------------------

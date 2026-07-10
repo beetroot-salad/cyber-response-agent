@@ -389,7 +389,6 @@ def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
 import subprocess  # noqa: E402
 
 RETRIEVE = REAL_REPO / "defender" / "scripts" / "lessons" / "lessons_env_retrieve.py"
-VERIFY_ENV = LEARNING_SRC / "author" / "verify_forward" / "env.py"
 VENV_PY = REAL_REPO / "defender" / ".venv" / "bin" / "python3"
 _PY = str(VENV_PY) if VENV_PY.is_file() else sys.executable
 
@@ -464,12 +463,23 @@ def test_verify_env_case_entities_from_prologue_not_row(tmp_path: Path) -> None:
 
 
 def _run_verify_env(lesson: Path, obs_id: str, corpus: Path, pending: Path) -> str:
-    proc = subprocess.run(
-        [_PY, str(VERIFY_ENV), "--corpus", str(corpus), "--pending", str(pending),
-         str(lesson), obs_id],
-        capture_output=True, text=True, check=True,
+    """Drive the REAL environment forward-check in-process (#558 — it has no CLI any more).
+
+    The corpus, the pending queue and the runs dir arrive on the ``CheckContext`` exactly as the
+    curator's ``forward_check`` tool builds one from its deps. ``run_verify`` is never called:
+    the env check is a deterministic retrieval, so it touches no model."""
+    from defender.learning.author.verify_forward.checks import ENV_CHECK, CheckContext
+
+    def _never(**_kw):  # the env check must never reach the model transport
+        raise AssertionError("the deterministic env check called the verify transport")
+
+    ctx = CheckContext(
+        check=ENV_CHECK, lesson_path=lesson, lesson_text=lesson.read_text(),
+        source_id=obs_id, direction="adversarial",
+        runs_dir=lesson.parent, pending=pending, corpus_dir=corpus,
+        repo_root=REAL_REPO, check_index=0, run_verify=_never,
     )
-    return proc.stdout.strip().splitlines()[-1]
+    return ENV_CHECK.run(ctx)
 
 
 def test_verify_env_bad_when_lesson_selector_unsatisfiable(tmp_path: Path) -> None:

@@ -154,7 +154,7 @@ defender/
       lessons/          # run.py + prompt.md — the main curator: folds queued findings into defender/lessons/
       malicious_actor/  # run.py + prompt.md — adversarial-actor lessons curator (→ lessons-actor/)
       benign_actor/     # run.py + prompt.md + env.py — environment-lessons curator (→ lessons-environment/)
-      verify_forward/   # forward.py/.md (author-time same-case regression gate) + actor.py/.md + env.py + shared.py + batch.py
+      verify_forward/   # the curators' in-process forward_check tool: tool.py + checks.py + engine.py, over forward.py/.md + actor.py/.md + env.py + shared.py
     core/               # cross-cutting plumbing (NOT the flow): the flow lives in pipeline/
       subagents.py      # the Subagents port + InProcessSubagents adapter (composes the pipeline invoke_* fns)
       orchestrate.py config.py persist.py validate.py directions.py prologue.py

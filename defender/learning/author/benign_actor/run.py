@@ -33,7 +33,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
     ACTOR_MODEL,
@@ -43,15 +42,10 @@ from defender.learning.core.config import (
     AUTHOR_ENV_TIMEOUT,
     BENIGN_ACTOR_MODEL,
     DEFAULT_PATHS,
-    DefenderPaths,
     LoopPaths,
     QueueChannel,
 )
 
-
-# The env forward-check verifier, as the repo-relative command spelling the agent types (cwd=worktree)
-# — the offset owned once by DefenderPaths, not a hand-written literal.
-VERIFY_SCRIPT_REL = f"{DefenderPaths.verify_forward_dir_rel}env.py"
 
 # All model/wiring constants come from core.config (one source per env var, no
 # duplicated defaults — cf. #449). AUTHOR_ENV_* is the curator *agent* model/effort/
@@ -71,23 +65,16 @@ def invoke_agent(
 ) -> dict:
     """Spawn the environment curator agent. Returns the parsed AUTHOR_RESULT dict.
 
-    The env corpus forward-checks the whole batch in one pass
-    (``verify_forward_env.py --corpus --pending``), so it hands the agent that single
-    command. The commit-trailer provenance (including the per-direction trailer label)
-    is stamped by the loop, not the agent, so nothing trailer-related goes in the
-    prompt."""
-    verifier_py = resolve_verifier_python(cfg.repo_root)
-    forward_check_command = (
-        f"{verifier_py} {VERIFY_SCRIPT_REL} "
-        f"--corpus {cfg.corpus_dir_rel} --pending {cfg.pending_file_rel}"
-    )
-    extra_prompt = (
-        f"forward_check_command: {forward_check_command}\n"
-    )
+    Both env directions share one deterministic retrieval check, bound onto the curator's deps
+    here; the corpus and the pending queue it retrieves against ride on the deps too, so the
+    check reads the worktree the lesson was just written into. The commit-trailer provenance
+    (including the per-direction trailer label) is stamped by the loop, not the agent, so nothing
+    trailer-related goes in the prompt."""
+    from defender.learning.author.verify_forward.checks import ENV_CHECK
+
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt,
-        verifier_scripts=(cfg.verifier_dir / "env.py",),
+        check=ENV_CHECK,
         request_limit=AUTHOR_ENV_REQUEST_LIMIT,
     )
 
@@ -109,10 +96,8 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
         runs_dir=paths.runs_dir,
-        state_root=paths.state_root,
         corpus_dir=paths.lessons_environment_dir,
         corpus_dir_rel=paths.lessons_environment_dir_rel,
-        verifier_dir=paths.verify_forward_dir,
         channel=channel,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
