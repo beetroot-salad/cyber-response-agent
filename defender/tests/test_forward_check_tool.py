@@ -270,9 +270,12 @@ def test_d0_returns_text_protocol(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-1", "run-2", "run-3"})
     out = _run(deps, pairs)  # never raises for the per-pair RunUnprocessable
     lines = _lines(out)
-    assert lines[0].startswith("GOOD") and "run-1" in lines[0]
-    assert lines[1].startswith("BAD") and "run-2" in lines[1]
-    assert lines[2].startswith("ERROR") and "run-3" in lines[2]
+    assert lines[0].startswith("GOOD")
+    assert "run-1" in lines[0]
+    assert lines[1].startswith("BAD")
+    assert "run-2" in lines[1]
+    assert lines[2].startswith("ERROR")
+    assert "run-3" in lines[2]
     assert lines[-1].startswith("BATCH:")
     assert _counts(out) == (1, 1, 1)
 
@@ -382,7 +385,8 @@ def test_d3_no_program_operand_negative(tmp_path):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     out = _run(deps, [_fpair(scene, "run-1")])
-    assert _counts(out) == (1, 0, 0) and len(fake.calls) == 1
+    assert _counts(out) == (1, 0, 0)
+    assert len(fake.calls) == 1
 
 
 def test_d4_single_pair_is_a_length_one_batch(tmp_path):
@@ -470,7 +474,8 @@ def test_d7_one_check_fault_does_not_fail_the_batch(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-1", "run-2", "run-3"})
     lines = _lines(_run(deps, pairs))
     assert lines[0].startswith("GOOD")
-    assert lines[1].startswith("ERROR") and lines[1].strip() != "ERROR"  # a cause-specific detail
+    assert lines[1].startswith("ERROR")
+    assert lines[1].strip() != "ERROR"  # a cause-specific detail
     assert lines[2].startswith("BAD")  # the real verdict, not swept away by the sibling fault
 
 
@@ -488,9 +493,12 @@ def test_m14_raising_check_does_not_cancel_siblings(tmp_path):
     pairs = [_fpair(scene, r) for r in ("run-0", "run-1", "run-2")]
     deps = _deps(scene, run_verify=fake, queued={"run-0", "run-1", "run-2"})
     lines = _lines(_run(deps, pairs))
-    assert lines[0].startswith("ERROR") and "run-0" in lines[0]
-    assert lines[1].startswith("GOOD") and "run-1" in lines[1]  # sibling ran to completion
-    assert lines[2].startswith("BAD") and "run-2" in lines[2]   # sibling ran to completion
+    assert lines[0].startswith("ERROR")
+    assert "run-0" in lines[0]
+    assert lines[1].startswith("GOOD")
+    assert "run-1" in lines[1]  # sibling ran to completion
+    assert lines[2].startswith("BAD")
+    assert "run-2" in lines[2]   # sibling ran to completion
     assert fake.peak >= 2  # the siblings were genuinely in-flight when the raiser raised
 
 
@@ -505,7 +513,8 @@ def test_d8_per_check_timeout_is_one_pairs_error(tmp_path):
     pairs = [_fpair(scene, r) for r in ("run-1", "run-2")]
     deps = _deps(scene, run_verify=fake, queued={"run-1", "run-2"})
     lines = _lines(_run(deps, pairs))
-    assert lines[0].startswith("ERROR") and "run-1" in lines[0]
+    assert lines[0].startswith("ERROR")
+    assert "run-1" in lines[0]
     assert re.search(r"(?i)time", lines[0]), "the timeout detail is not timeout-specific"
     assert lines[1].startswith("GOOD")  # the batch completed past the timed-out pair
     assert _counts(_run(deps, pairs)) == (1, 0, 1)
@@ -947,7 +956,8 @@ def test_m11_source_id_confined_to_queued_rows(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-queued"})
     out = _run(deps, [Pair(lp_u, "run-unqueued", "adversarial")])
     lines = _lines(out)
-    assert lines[0].startswith("ERROR") and "run-unqueued" in lines[0]  # a data fault, not a deny
+    assert lines[0].startswith("ERROR")
+    assert "run-unqueued" in lines[0]  # a data fault, not a deny
     assert _counts(out) == (0, 0, 1)
     # the unrelated case's transcript reached NO out-edge (the bundle was never read)
     assert fake.calls == []  # transport never called → not in payload
@@ -1105,7 +1115,8 @@ def test_d23_curator_verifies_n_lessons_in_one_call(tmp_path):
     deps = _deps(scene, run_verify=fake, queued=set(rids))
     out = _run(deps, pairs)  # ONE call over N lessons → ONE output
     verdict_lines = [ln for ln in _lines(out) if not ln.startswith("BATCH:")]
-    assert len(verdict_lines) == 5 and _counts(out) == (5, 0, 0)
+    assert len(verdict_lines) == 5
+    assert _counts(out) == (5, 0, 0)
 
 
 def test_d24_eval_harness_scenario_still_runs(tmp_path):
@@ -1208,7 +1219,8 @@ def test_m16_user_prompt_builder_is_a_seam(tmp_repo):
         "batch-1",
         tmp_repo.cfg,
     )
-    assert isinstance(prompt, str) and "batch-1" in prompt
+    assert isinstance(prompt, str)
+    assert "batch-1" in prompt
 
 
 def test_d27_user_prompt_carries_no_command_template(tmp_repo):
@@ -1224,7 +1236,8 @@ def test_d27_user_prompt_carries_no_command_template(tmp_repo):
         assert token not in built, f"built user prompt still carries {token!r}"
     # POSITIVE CONTROL: the builder does emit the payload the agent needs, so the assertions
     # above are not passing against an empty string.
-    assert "batch-1" in built and "f-1" in built
+    assert "batch-1" in built
+    assert "f-1" in built
 
     # The second surface the same content could reach: the three system prompts.
     root = config.REPO_ROOT / "defender" / "learning" / "author"
@@ -1247,7 +1260,8 @@ def test_m9_verify_forward_helpers_survive_as_a_library(tmp_path):
     (runs / "r" / "source_refs.yaml").write_text("normalized_disposition: benign\n")
     # run-context loading
     transcript, disp = vf.load_run_context("r", runs_dir=runs)
-    assert "body" in transcript and disp == "benign"
+    assert "body" in transcript
+    assert disp == "benign"
     # expected-disposition selection
     assert vf.expected_disposition("benign", "malicious") == "benign"
     assert vf.expected_disposition("adversarial", "benign") == "benign"
@@ -1287,7 +1301,8 @@ def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):
         (scene.repo / "defender" / "lessons-actor" / "b.md").resolve(), "x",
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
     )
-    assert inside.allow and not outside.allow  # confined to the named corpus, not a wider tree
+    assert inside.allow  # confined to the named corpus, not a wider tree
+    assert not outside.allow
 
 
 def test_m15_verify_transport_is_a_deps_seam(tmp_path):

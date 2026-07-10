@@ -25,7 +25,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author.benign_actor import run as _benign
 from defender.learning.core.config import AUTHOR_ENV_REQUEST_LIMIT, DEFAULT_PATHS, LoopPaths
 
@@ -34,21 +33,17 @@ def invoke_agent(
     observations: list[dict], batch_id: str, cfg: _curator.CuratorConfig
 ) -> dict:
     """The adversarial env direction's curator spawn. Identical in SHAPE to the benign direction —
-    both forward-check the whole batch via ``verify_forward/env.py`` into the SHARED
-    ``lessons-environment/`` corpus — but defined here (its own module, its own
-    ``resolve_verifier_python`` reference) so the adversarial entry point self-contains its
-    forward-check grant rather than borrowing the benign module's; the two directions drain in
-    separate serialized batches with distinct commit trailers + generation counters."""
-    verifier_py = resolve_verifier_python(cfg.repo_root)
-    forward_check_command = (
-        f"{verifier_py} {_benign.VERIFY_SCRIPT_REL} "
-        f"--corpus {cfg.corpus_dir_rel} --pending {cfg.pending_file_rel}"
-    )
-    extra_prompt = f"forward_check_command: {forward_check_command}\n"
+    both bind the same deterministic ``ENV_CHECK`` and write into the SHARED
+    ``lessons-environment/`` corpus — but defined here (its own module) so the adversarial entry
+    point self-contains its spawn rather than borrowing the benign module's; the two directions
+    drain in separate serialized batches with distinct commit trailers + generation counters. The
+    corpus and pending queue the check retrieves against ride on ``cfg``, so the two directions
+    differ only in which queue they name."""
+    from defender.learning.author.verify_forward.checks import ENV_CHECK
+
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt,
-        verifier_scripts=(cfg.verifier_dir / "env.py",),
+        check=ENV_CHECK,
         request_limit=AUTHOR_ENV_REQUEST_LIMIT,
     )
 

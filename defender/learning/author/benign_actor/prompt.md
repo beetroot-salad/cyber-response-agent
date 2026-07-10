@@ -43,22 +43,18 @@ When you flip a `mutable: true` lesson to stale and the same `subject` already h
 
 ## Forward check
 
-After writing or rewriting a lesson file, run the exact command the orchestrator put in the user prompt under `forward_check_command:`:
+After writing or rewriting your lesson files, call `forward_check` with one pair per file: its `lesson_path` and the source row's `source_id` (its `observation_id`).
 
-```
-{forward_check_command} {lesson_path} {observation_id}
-```
-
-This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the environment retrieval with the **exact inputs the runtime actor uses** — the source case's canonical rule key and its actual prologue entities (re-extracted from the source investigation) — and confirms your lesson file is returned. Because it keys off the real prologue (not the keys you wrote), a selector you carried over from the observation that the prologue can't satisfy will fail here. It prints exactly `GOOD` or `BAD` on its last line.
+This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the environment retrieval with the **exact inputs the runtime actor uses** — the source case's canonical rule key and its actual prologue entities (re-extracted from the source investigation) — and confirms your lesson file is returned. Because it keys off the real prologue (not the keys you wrote), a selector you carried over from the observation that the prologue can't satisfy will fail here. The tool returns one `GOOD <path> <id>` / `BAD <path> <id>` / `ERROR <path> <id> <reason>` line per pair, then a `BATCH:` summary.
 
 - **GOOD** → the lesson is retrievable by the case it bears on; keep it.
-- **BAD** → the lesson cannot be retrieved for its own source case — almost always a mis-keyed anchor or selector (empty/wrong `alert_rule_ids`, a `class` slot narrower than the case entity, or an `identity` selector that the case prologue can't satisfy). One rewrite attempt allowed: re-read the observation, fix the frontmatter keys, re-run.
+- **BAD** → the lesson cannot be retrieved for its own source case — almost always a mis-keyed anchor or selector (empty/wrong `alert_rule_ids`, a `class` slot narrower than the case entity, or an `identity` selector that the case prologue can't satisfy). One rewrite attempt allowed: re-read the observation, fix the frontmatter keys, re-check that pair.
   - Second run `GOOD` → keep.
   - Still `BAD` → revert: `rm` the file (for a `new`) or re-Edit it back to its pre-batch content (for a `fold` — you read the original at the start of the batch), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
 
 Stale-only flips don't need a forward check — there's no new body to evaluate. For a fold where one observation passes and another fails on the same file, keep the passing edit and skip the failing one; each observation is gated independently.
 
-**Don't poll for completion.** Read each forward check's result directly from its own Bash call's output — running the checks concurrently is fine. Never gate progress on a shell wait-loop that counts sentinels (`until grep … "CHECK" …; do sleep …; done`): if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
+**Don't poll for completion.** The checks run concurrently inside one `forward_check` call and it returns every verdict at once. Never gate progress on a wait-loop that counts sentinels: if one check fails to emit its sentinel, the loop never satisfies and the whole tick hangs until the runner timeout.
 
 ## Discipline
 

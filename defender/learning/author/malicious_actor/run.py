@@ -25,7 +25,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-from defender.learning.author._verifier_python import resolve_verifier_python
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
     ACTOR_MODEL,
@@ -34,7 +33,6 @@ from defender.learning.core.config import (
     AUTHOR_ACTOR_REQUEST_LIMIT,
     AUTHOR_ACTOR_TIMEOUT,
     DEFAULT_PATHS,
-    DefenderPaths,
     LoopPaths,
 )
 
@@ -56,22 +54,14 @@ def invoke_agent(
 ) -> dict:
     """Spawn the actor curator agent. Returns the parsed AUTHOR_RESULT dict.
 
-    The actor corpus forward-checks per-lesson (``verify_forward/actor.py``) with a batch wrapper
-    (``verify_forward/batch.py``), so it hands the agent both command templates and pins both
-    verifier scripts on the in-process curator's bash lane. The commit-trailer provenance is stamped
-    by the loop, not the agent, so nothing trailer-related goes in the prompt."""
-    verifier_py = resolve_verifier_python(cfg.repo_root)
-    rel = DefenderPaths.verify_forward_dir_rel  # repo-relative command spelling (trailing slash)
-    extra_prompt = (
-        f"verify_forward_command: {verifier_py} {rel}actor.py "
-        f"<lesson_path> <observation_id>\n"
-        f"verify_batch_command: {verifier_py} {rel}batch.py {rel}actor.py "
-        f"<lesson_path>=<observation_id> [<lesson_path>=<observation_id> ...]\n"
-    )
+    The actor corpus forward-checks its lessons through the in-process ``forward_check`` tool; the
+    actor check is bound onto the curator's deps here. The commit-trailer provenance is stamped by
+    the loop, not the agent, so nothing trailer-related goes in the prompt."""
+    from defender.learning.author.verify_forward.checks import ACTOR_CHECK
+
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
-        extra_prompt=extra_prompt,
-        verifier_scripts=(cfg.verifier_dir / "batch.py", cfg.verifier_dir / "actor.py"),
+        check=ACTOR_CHECK,
         request_limit=AUTHOR_ACTOR_REQUEST_LIMIT,
     )
 

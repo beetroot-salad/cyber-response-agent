@@ -2,8 +2,8 @@
 
 Mirror of ``leads/lead_author_engine.py``: the curators' specifics (one ``CuratorDeps``
 identity + a per-spawn ``AgentPolicy`` that confines the corpus WRITERS to ``<corpus>/**.md``
-and grants a flat corpus-anchored reader/forward-check/rm bash lane) live here, and the
-generic in-process transport they share with the five other in-process stages lives in
+and grants a flat corpus-anchored reader/rm bash lane) live here, and the generic in-process
+transport they share with the five other in-process stages lives in
 ``pipeline/_pydantic_stage.py``.
 
 ONE engine serves all FOUR curators — findings (A → ``defender/lessons/``), actor-tradecraft
@@ -42,12 +42,13 @@ import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from defender._paths import DefenderPaths
 from defender.learning.author import shared as _shared
+from defender.learning.author.verify_forward.checks import ForwardCheck
+from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline._pydantic_stage import run_stage
@@ -107,13 +108,6 @@ def _find_balanced_json_object(text: str, start: int) -> str | None:
                 return text[start : i + 1]
     return None
 
-# The verify_forward scripts' repo-relative offset (trailing slash), owned once by DefenderPaths. A
-# curator's bash_allow admits ITS forward-check scripts by this repo-relative spelling (what the
-# agent types, running with cwd=worktree) OR the worktree-absolute one — the repo-relative form is a
-# FIXED offset rather than ``script.relative_to(repo_root)`` because a tmp batch worktree is NOT under
-# the main-checkout REPO_ROOT (the reason the lead author's ``_rm_skills_pattern`` uses ``SKILLS_REL``).
-_VERIFY_FORWARD_REL = DefenderPaths.verify_forward_dir_rel
-
 # One path segment that is NOT a `..` traversal: `..` as a WHOLE segment (followed by `/`, a
 # token-boundary space, or end-of-token) is rejected TEXTUALLY, since the bash lane never
 # resolve()s (copied from the lead author's `_rm_skills_pattern` / policies._common._SEG). A real
@@ -130,8 +124,8 @@ _VIEW_FLAG = r"-[a-eg-zA-Z]+"
 
 _CORPUS_AUTHOR_DENY_REASON = (
     "Blocked: the lesson curator writes/edits .md lessons under its OWN corpus only. It reads the "
-    "corpus (ls/grep/cat), runs its pinned forward-check verifier, and rm's a single draft it "
-    "promotes or discards — no writes outside the corpus, no other corpus, no arbitrary shell."
+    "corpus (ls/grep/cat) and rm's a single draft it promotes or discards — no writes outside the "
+    "corpus, no other corpus, no arbitrary shell. Forward-check with the forward_check tool."
 )
 
 
@@ -186,39 +180,20 @@ def _rm_pattern(corpus_dir: Path) -> re.Pattern[str]:
     return re.compile(rf"^rm (?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})+$")
 
 
-def _verifier_pattern(script: Path) -> re.Pattern[str]:
-    """Allow the curator's pinned forward-check: ``python[3] <script> <args…>`` whose script token
-    is ``script`` — matched by its repo-relative spelling (``defender/learning/author/verify_forward/
-    <name>.py``, what the agent types) OR its worktree-absolute one, both `re.escape`-d. The program
-    is ``python3`` or any ``…/python3`` (the resolved venv interpreter the forward-check needs for
-    pyyaml). The shape of the actor's ``_script_pattern``; the pattern can't constrain the script's
-    internals, so the pinned verify_forward scripts MUST stay read-only over the corpus/run bundle."""
-    rel = f"{_VERIFY_FORWARD_REL}{script.name}"  # _VERIFY_FORWARD_REL carries the trailing slash
-    spellings = "|".join(re.escape(s) for s in (rel, str(script)))
-    # `python3?(?:\.\d+)?` also admits a version-suffixed interpreter (`python3.11`): the prompt's
-    # command uses ``resolve_verifier_python``, which falls back to ``sys.executable`` (commonly a
-    # versioned launcher) when the `.venv/bin/python3` walk misses — a bare `python3?` would DENY
-    # the curator's own mandated forward-check. Containment is the pinned SCRIPT token, not the
-    # interpreter name, so broadening the interpreter half opens no new surface.
-    return re.compile(rf"^(?:[^ ]*/)?python3?(?:\.\d+)? (?:{spellings})(?: .*)?$")
-
-
-def _corpus_author_policy(
-    corpus_dir: Path, verifier_scripts: tuple[Path, ...]
-) -> AgentPolicy:
+def _corpus_author_policy(corpus_dir: Path) -> AgentPolicy:
     """The curator's declarative gate policy, built PER-SPAWN from the worktree ``corpus_dir``.
     ``write_allow`` is a single flat pattern admitting ``<corpus>/**.md`` ONLY (the corpus is
     ``.md``): the file writers may author a lesson ``.md`` under their own corpus and NOTHING else —
     not a sibling corpus, not the run dir (a flat allowlist, NOT a run-dir root, so ``run_dir`` /
-    ``_pending`` stay unwritable). ``bash_allow`` is the flat corpus-anchored lane: the curator's own
-    forward-check verifier(s), a single-draft ``rm``, and the ls/grep/cat viewers (no Glob/Grep tool
-    in-process). ``read_confine`` is empty — reads under ``defender_dir`` stay allowed by
+    ``_pending`` stay unwritable). ``bash_allow`` is the flat corpus-anchored lane: a single-draft ``rm``
+    and the ls/grep/cat viewers (no Glob/Grep tool in-process). It admits NO python interpreter —
+    the forward-check is the in-process ``forward_check`` tool (#558), because an allowlist that
+    pins a program token cannot constrain the operands that program then acts on (#565). ``read_confine`` is empty — reads under ``defender_dir`` stay allowed by
     ``decide_read``'s defaults (it reads sibling lessons + the schema docs). Every other capability
     bit off. Built DIRECTLY (not ``compile_policy``/``bind``, whose ``write_allow`` roots at run_dir)
     because it needs the worktree's ``corpus_dir``."""
     return AgentPolicy(
         bash_allow=(
-            *(_verifier_pattern(s) for s in verifier_scripts),
             _rm_pattern(corpus_dir),
             *_viewer_patterns(corpus_dir),
         ),
@@ -235,32 +210,56 @@ def _corpus_author_policy(
 
 @dataclass(frozen=True)
 class CuratorDeps(AgentDeps):
-    """The curator's per-spawn deps — a plain ``AgentDeps`` shape with a WRITER ``policy``.
-    ``role`` is a CORPUS_AUTHOR identity label — the gate keys on ``policy``, not this."""
+    """The curator's per-spawn deps — an ``AgentDeps`` with a WRITER ``policy``, plus everything
+    its ``forward_check`` tool reads. ``role`` is a CORPUS_AUTHOR identity label — the gate keys
+    on ``policy``, not this.
+
+    The four checks vary by DEPS, never by tool argument: ``check`` is bound here at spawn, so
+    the tool exposes no script operand the model could point at a program of its choosing. The
+    three roots are fields for the same reason ``corpus_dir`` is — a module constant frozen at
+    import reads the main checkout, while the curator edits a throwaway worktree.
+    """
 
     role: ClassVar[AgentRole] = AgentRole.CORPUS_AUTHOR
 
+    # kw_only: the base's `policy` is kw_only, so a positional field after it is a TypeError.
+    corpus_dir: Path = field(kw_only=True)
+    check: ForwardCheck = field(kw_only=True)
+    runs_dir: Path = field(kw_only=True)
+    pending: Path = field(kw_only=True)
+    # The source ids this batch actually queued. The tool confines the model-supplied `source_id`
+    # to this set, so a pair naming an unrelated case cannot load its transcript into the metered
+    # prompt or the trace.
+    queued_ids: frozenset[str] = field(kw_only=True)
+    # The verify transport. A pydantic-ai tool is handed only `(ctx, args)`, so a per-call deps
+    # field is the ONLY seam a fake can enter through without monkeypatching a module global.
+    run_verify: Callable[..., str] = field(kw_only=True)
+
     @classmethod
-    def for_run(
-        cls, run_dir: Path, repo_root: Path,
-        corpus_dir: Path, verifier_scripts: tuple[Path, ...],
-        *, state_root: Path | None = None,
+    def for_run(  # noqa: PLR0913 — the spawn's roots + its bound check + the transport seam
+        cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
+        *, check: ForwardCheck, runs_dir: Path, pending: Path,
+        queued_ids: frozenset[str], run_verify: Callable[..., str] = _run_verify_pydantic,
     ) -> CuratorDeps:
-        """The curator's front door. ``corpus_dir`` + ``verifier_scripts`` are POSITIONAL and
-        REQUIRED — a CORPUS_AUTHOR cannot be constructed without naming the corpus it writes (the
-        footgun-A safe-by-construction regression: no run-dir-rooted / whole-defender_dir
-        ``write_allow``). Overrides ``_for_run``'s ``defender_dir`` default: the drain edits a
-        throwaway git WORKTREE, so the gate resolves reads/writes against ``repo_root/defender``
+        """The curator's front door. ``corpus_dir`` and ``check`` are REQUIRED — a CORPUS_AUTHOR
+        cannot be constructed without naming the corpus that confines both its writes and its
+        forward-check lesson operand, nor without naming which check it runs (the footgun-A
+        safe-by-construction regression: no run-dir-rooted / whole-defender_dir ``write_allow``,
+        and no unbound check). Overrides ``_for_run``'s ``defender_dir`` default: the drain edits
+        a throwaway git WORKTREE, so the gate resolves reads/writes against ``repo_root/defender``
         (else every worktree write is denied against the main checkout). ``run_dir`` is only the
-        trace anchor + a read root. ``state_root`` rides on the deps so the forward-check subprocess
-        resolves the real source-case bundle off ``DEFENDER_LEARNING_STATE_DIR`` (#425) — set into
-        the bash-tool env by ``run_common.run_env``, not a process-global mutation."""
+        trace anchor + a read root."""
         defender_dir = repo_root / "defender"
         return cls._for_run(
             run_dir,
-            _corpus_author_policy(corpus_dir, verifier_scripts),
+            _corpus_author_policy(corpus_dir),
             defender_dir=defender_dir,
-            state_root=state_root,
+            corpus_dir=corpus_dir,
+            check=check,
+            runs_dir=runs_dir,
+            pending=pending,
+            queued_ids=queued_ids,
+            run_verify=run_verify,
         )
 
 
@@ -275,7 +274,7 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.CORPUS_AUTHOR,
     model=lambda: config.AUTHOR_MODEL,
     effort=config.AUTHOR_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar(), write=True),
+    tools=ToolSet(read=True, bash=BashGrammar(), write=True, forward_check=True),
     bindable=False,
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )
@@ -292,8 +291,11 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     learning_run_dir: Path,
     repo_root: Path,
     corpus_dir: Path,
-    verifier_scripts: tuple[Path, ...],
-    state_root: Path | None = None,
+    check: ForwardCheck,
+    runs_dir: Path,
+    pending: Path,
+    queued_ids: frozenset[str],
+    run_verify: Callable[..., str] = _run_verify_pydantic,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
     wall_clock_timeout: int = config.AUTHOR_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
@@ -303,9 +305,12 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     ``defender_dir`` + corpus ``write_allow`` + the flat bash lane) and delegates to the shared
     ``run_stage`` with ``require_output=True`` (the curator's final text carries the load-bearing
     marker, so an empty final is ``RunUnprocessable``, unlike the lead author's ``False``). The file
-    writers are registered from ``CORPUS_AUTHOR_DEF``'s ToolSet by role in ``build_stage_agent``."""
+    writers (and the ``forward_check`` tool) are registered from ``CORPUS_AUTHOR_DEF``'s ToolSet by
+    role in ``build_stage_agent``."""
     deps = CuratorDeps.for_run(
-        learning_run_dir, repo_root, corpus_dir, verifier_scripts, state_root=state_root,
+        learning_run_dir, repo_root, corpus_dir,
+        check=check, runs_dir=runs_dir, pending=pending,
+        queued_ids=queued_ids, run_verify=run_verify,
     )
     return run_stage(
         stage="curator",
@@ -324,17 +329,20 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     batch_id: str,
     user_prompt: str,
     corpus_dir: Path,
-    verifier_scripts: tuple[Path, ...],
+    check: ForwardCheck,
+    runs_dir: Path,
+    pending: Path,
+    queued_ids: frozenset[str],
     repo_root: Path,
     learning_run_dir: Path,
     log: Callable[[str], None],
-    state_root: Path | None = None,
     model: str = config.AUTHOR_MODEL,
     effort: str | None = config.AUTHOR_EFFORT,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
     timeout: int = config.AUTHOR_TIMEOUT,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
+    run_verify: Callable[..., str] = _run_verify_pydantic,
 ) -> dict:
     """Source the metered Fireworks key, run the in-process curator spawn on GLM, and return the
     PARSED ``AUTHOR_RESULT`` dict the transaction envelope consumes (``committed`` / ``consumed_skip``
@@ -353,28 +361,27 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     systemic ``FatalConfigError`` / ``StageAbort`` from ``source_key`` or ``run_stage``'s build is NOT
     caught here — it propagates as the systemic exit-2 lane.
 
-    ``source_key`` / ``run_author`` are DI seams that OWN their production defaults (the lead author's
-    shape): production calls with neither; tests inject fakes to exercise the orchestration (key
-    ordering + fault mapping + the relocated marker parse) without a metered key or the pydantic-ai
-    graph — so no ``monkeypatch`` of module globals is needed."""
+    ``source_key`` / ``run_author`` / ``run_verify`` are DI seams that OWN their production defaults
+    (the lead author's shape): production calls with none; tests inject fakes to exercise the
+    orchestration (key ordering + fault mapping + the relocated marker parse) without a metered key or
+    the pydantic-ai graph — so no ``monkeypatch`` of module globals is needed. ``run_verify`` rides all
+    the way onto the deps, since a pydantic-ai tool is handed only ``(ctx, args)``."""
     log(f"spawn curator {batch_id} in-process (model={model}, effort={effort}, timeout={timeout}s)")
+    # ONCE per spawn, for the whole batch: the nested forward-checks call the verify transport
+    # directly and source no key of their own (the retired CLI wrapper re-read `.env` per check).
     source_key(model, label="curator")  # FatalConfigError PROPAGATES (systemic)
-    # The shared state root rides on the curator deps (→ ``run_common.run_env`` sets
-    # ``DEFENDER_LEARNING_STATE_DIR`` for the bash-tool subprocess), so a forward-check spawned in
-    # the throwaway worktree resolves the REAL source-case bundle off it rather than the worktree's
-    # empty ``runs/`` (#425 silent-revert). Threaded through the deps — the in-process twin of the
-    # retired ``curator_agent_env`` env= — rather than mutating the process-global ``os.environ``.
     # Anchor the trace (batch_id + pid) BEFORE the spawn so a partial failure still leaves a
     # complete, per-spawn-distinct trace (RequestLogger opens truncate → two spawns into one drain
-    # dir would clobber a shared name).
+    # dir would clobber a shared name). The nested checks trace into the SOURCE bundle, a different
+    # directory, keyed on a per-check counter — in-process the pid no longer varies between them.
     trace_name = f"{batch_id}.{os.getpid()}.trace.jsonl"
     try:
         text = run_author(
             prompt_path=system_prompt_file, model=model, effort=effort,
             trace_name=trace_name, label=f"curator:{batch_id}", user=user_prompt,
             learning_run_dir=learning_run_dir, repo_root=repo_root,
-            corpus_dir=corpus_dir, verifier_scripts=verifier_scripts,
-            state_root=state_root,
+            corpus_dir=corpus_dir, check=check, runs_dir=runs_dir, pending=pending,
+            queued_ids=queued_ids, run_verify=run_verify,
             request_limit=request_limit, wall_clock_timeout=timeout,
         )
     except RunUnprocessable as e:

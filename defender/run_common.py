@@ -72,9 +72,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     return run_dir
 
 
-def run_env(
-    defender_dir: Path, run_dir: Path, *, state_root: Path | None = None,
-) -> dict[str, str]:
+def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     """The bash tool's subprocess environment. `bin/` goes first on PATH so the
     `defender-*` shims resolve by a single stable token regardless of cwd, venv
     path, or compound wrapping; the run-dir anchors the budget/tag accounting and
@@ -86,12 +84,10 @@ def run_env(
     engine authenticates in-process from `os.environ`, which this copy leaves
     untouched). Returns a fresh dict — never mutates `os.environ`.
 
-    `state_root`, when given, sets `DEFENDER_LEARNING_STATE_DIR` for the subprocess so a
-    curator's forward-check (spawned from a throwaway batch worktree) resolves the REAL
-    source-case bundle off the shared state root rather than the worktree's empty `runs/`
-    (#425). Threaded from `deps.state_root` (the in-process twin of the retired
-    `curator_agent_env`) rather than mutating the parent `os.environ` — the runtime agents
-    that don't set it (`state_root=None`) leave the var exactly as it was."""
+    Carried no `state_root` since #558: the only consumer was the curator's forward-check
+    subprocess, which pinned DEFENDER_LEARNING_STATE_DIR here to reach the real source-case
+    bundle from a throwaway worktree. The check is an in-process tool now and reads the
+    bundle straight off its deps, so there is no subprocess left to pin an env var for."""
     # Local import keeps this module engine-agnostic to import; providers' heavy
     # backends are lazy, so this pulls in no pydantic-ai.
     from defender.runtime import providers
@@ -103,8 +99,6 @@ def run_env(
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    if state_root is not None:
-        env["DEFENDER_LEARNING_STATE_DIR"] = str(state_root)
     return env
 
 

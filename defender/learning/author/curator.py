@@ -41,6 +41,7 @@ from collections.abc import Callable
 import yaml
 
 from defender.learning.author import shared as _shared
+from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
 from defender.learning.core import config
@@ -223,16 +224,14 @@ def invoke_curator_agent(
     observations: list[dict],
     batch_id: str,
     *,
-    extra_prompt: str,
-    verifier_scripts: tuple[Path, ...],
+    check: ForwardCheck,
     request_limit: int,
 ) -> dict:
     """Spawn the in-process curator on GLM and return its parsed AUTHOR_RESULT dict.
 
-    ``extra_prompt`` carries the direction's forward-check command line(s); it is spliced between
-    the standard header and the observations. ``verifier_scripts`` are the pinned
-    ``verify_forward/*.py`` the curator's bash lane may run (the in-process analog of the retired
-    ``extra_tools`` Bash grants); ``request_limit`` is the direction's per-curator cap. The agent
+    ``check`` is the direction's forward-check, bound onto the curator's deps at spawn — which is
+    what leaves the ``forward_check`` tool with no script operand to gate. ``request_limit`` is the
+    direction's per-curator cap. The agent
     runs **no git**: it authors lesson content (+ a commit message it returns as data) and the loop
     is the sole committer (``commit_corpus``) — so the agent is handed neither the generation nor the
     model, and there is no intermediate un-stamped commit it could leave behind (issue #321). Routed
@@ -240,28 +239,27 @@ def invoke_curator_agent(
     which sources the metered key, drives the in-process spawn under ``require_output=True``, and
     parses the ``AUTHOR_RESULT`` marker from the returned text (via ``curator_engine.extract_marked_result``). The
     RequestLogger trace lands in the persistent shared ``pending_dir`` (not the throwaway worktree),
-    keyed ``{batch_id}.{pid}`` so two curators in one drain tick never truncate each other's trace;
-    ``DEFENDER_LEARNING_STATE_DIR`` is pinned into the in-process bash-tool env by ``run_common.run_env``
-    (via ``cfg.state_root``) so the forward-check subprocess resolves the real source bundle (#425)."""
+    keyed ``{batch_id}.{pid}`` so two curators in one drain tick never truncate each other's trace.
+    The nested checks read the real source bundle straight off ``cfg.runs_dir`` (the shared state
+    root), so no ``DEFENDER_LEARNING_STATE_DIR`` needs pinning into any subprocess env (#425, #558)."""
     from defender.learning.author import curator_engine
 
-    user_prompt = (
-        f"batch_id: {batch_id}\n"
-        f"lessons_dir: {cfg.corpus_dir_rel}\n"
-        f"{extra_prompt}"
-        f"observations ({len(observations)}):\n"
-        f"{json.dumps(observations, indent=2)}\n"
-    )
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
         batch_id=batch_id,
-        user_prompt=user_prompt,
+        user_prompt=_shared.build_curator_user_prompt(
+            observations, batch_id, corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
+        ),
         corpus_dir=cfg.corpus_dir,
-        verifier_scripts=verifier_scripts,
+        check=check,
+        runs_dir=cfg.runs_dir,
+        pending=cfg.channel.file,
+        queued_ids=frozenset(
+            str(o["observation_id"]) for o in observations if o.get("observation_id")
+        ),
         repo_root=cfg.repo_root,
         learning_run_dir=cfg.pending_dir,
-        state_root=cfg.state_root,
         log=make_logger(cfg.log_prefix),
         model=cfg.author_model,
         effort=cfg.author_effort,

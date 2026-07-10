@@ -1,62 +1,30 @@
-#!/usr/bin/env python3
-"""Deterministic forward-check for a single candidate environment lesson.
+"""The environment curators\' forward check, as a library (#558).
 
-Usage: ``verify_forward_env.py [--corpus DIR] [--pending FILE] <lesson_path> <observation_id>``
+A DETERMINISTIC retrieval check, not an LLM judgment: it re-runs the environment retrieval
+with the exact inputs the runtime actor uses — the source case\'s canonical rule key and its
+actual prologue entities, re-extracted from the source investigation — and confirms the
+candidate lesson is returned. Because it keys off the real prologue (not the keys the curator
+wrote), a selector carried over from the observation that the prologue cannot satisfy fails
+here. Curators C (env-benign) and D (env-adversarial) share it via the in-process
+``forward_check`` tool; it spends no metered request and writes no trace.
 
-The environment-lesson analog of ``verify_forward_actor.py`` — but where
-the actor check is a Haiku judgment, this one is deterministic and free.
-The failure mode that matters for an environment lesson is **mis-keying**:
-a lesson the benign actor cannot retrieve for the case it bears on is dead
-weight. So the check re-runs the environment retrieval with the **exact
-inputs the runtime benign actor uses** — the source case's deterministic
-``alert_rule_key`` and its actual prologue entities (re-extracted from
-``{source_run_dir}/investigation.md``) — and confirms the lesson file is
-returned. Deriving the case entities from the prologue rather than echoing
-the observation's own selectors is load-bearing: if the judge carried a bad
-selector (an ``identity`` row absent from an FP prologue, or a double-prefixed
-``class`` like ``process:nc``) into both the observation and the lesson,
-echoing them would self-confirm GOOD while the runtime actor — which keys off
-the prologue — never retrieves it. A correctly-keyed lesson MUST come back; an
-empty/wrong rule anchor, an ``identity`` selector, or a ``class`` slot narrower
-than the case entity drops it.
-
-Resolves the observation row from the active pending queue (default
-``_pending/environment_observations.jsonl`` — the row is still present
-during the author run; the queue rotates only on AUTHOR_RESULT
-post-flight). Prints exactly ``GOOD`` or ``BAD`` on its last line.
+``corpus`` and ``runs_dir`` are arguments, never module constants. The corpus especially: the
+curator writes the lesson into a throwaway worktree, so a corpus frozen at import would
+retrieve against the main checkout and silently check the wrong lesson.
 """
 from __future__ import annotations
 
-import argparse
 import subprocess
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
-if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
-    sys.path.insert(0, _root)
-from defender._run_paths import resolve_run_bundle
-from defender.learning.core.config import DEFAULT_PATHS, LESSONS_ENV_RETRIEVE_SCRIPT, RunPaths
+from defender._run_paths import RunPaths, resolve_run_bundle
+from defender.learning.core.config import LESSONS_ENV_RETRIEVE_SCRIPT
 from defender.learning.core.prologue import extract_case_entities
-from defender.learning.author.verify_forward.shared import (
-    load_observation as _load_observation,
-)
 
-
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[3]
-# The env-retrieval script offset lives once in core.config (LESSONS_ENV_RETRIEVE_SCRIPT),
-# shared with the in-process actor's pinned-script matcher; reuse it rather than re-deriving.
+# The env-retrieval script offset lives once in core.config, shared with the in-process
+# actor\'s pinned-script matcher; reuse it rather than re-deriving.
 RETRIEVE = LESSONS_ENV_RETRIEVE_SCRIPT
-# Sourced from DEFAULT_PATHS (one shared LoopPaths) so the defaults can't drift from the
-# layout. The two differ on purpose: DEFAULT_PENDING is state-relative, so it honors
-# DEFENDER_LEARNING_STATE_DIR and stays worktree-immune (#425); DEFAULT_CORPUS is
-# repo-relative by design (lessons corpora never relocate with the state dir — see
-# LoopPaths) so it follows the worktree, which is what we want — the lesson being checked
-# is the one the curator just edited there. Production overrides both via --corpus/--pending.
-DEFAULT_PENDING = DEFAULT_PATHS.environment_observations.file
-DEFAULT_CORPUS = DEFAULT_PATHS.lessons_environment_dir
 
 
 def case_entities_arg(row: dict, runs_dir: Path) -> str:
@@ -77,7 +45,7 @@ def case_entities_arg(row: dict, runs_dir: Path) -> str:
     return extract_case_entities(RunPaths(resolve_run_bundle(runs_dir, src)).investigation)
 
 
-def _rule_ids_arg(rule_ids: object) -> str:
+def rule_ids_arg(rule_ids: object) -> str:
     if isinstance(rule_ids, list):
         return ",".join(str(r).strip() for r in rule_ids if str(r).strip())
     return str(rule_ids or "").strip()
@@ -104,41 +72,13 @@ def run_retrieval(rule_ids: str, entities: str, corpus: Path) -> list[str]:
     return paths
 
 
-def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="verify_forward_env.py")
-    ap.add_argument("--corpus", help="corpus dir the lesson was written to (default: defender/lessons-environment)")
-    ap.add_argument("--pending", help="pending queue jsonl (default: _pending/environment_observations.jsonl)")
-    ap.add_argument("lesson_path")
-    ap.add_argument("observation_id")
-    ns = ap.parse_args(argv[1:])
-
-    corpus = Path(ns.corpus) if ns.corpus else DEFAULT_CORPUS
-    pending = Path(ns.pending) if ns.pending else DEFAULT_PENDING
-    lesson_path = Path(ns.lesson_path).resolve()
-    if not lesson_path.is_file():
-        print(f"verify_forward_env: lesson not found: {lesson_path}", file=sys.stderr)
-        return 1
-
-    row = _load_observation(
-        ns.observation_id, pending, error_prefix="verify_forward_env"
-    )
-    # The canonical key (matches the runtime actor's --alert-rule-ids) — not the
-    # judge's free-read alert_rule_ids, and not whatever the curator keyed.
-    rule_ids = _rule_ids_arg(row.get("alert_rule_key"))
-    entities = case_entities_arg(row, DEFAULT_PATHS.runs_dir)
-
-    returned = run_retrieval(rule_ids, entities, corpus)
+def lesson_returned(lesson_path: Path, returned: list[str], *, repo_root: Path) -> bool:
+    """Whether the retrieval returned the lesson under check. The retrieval prints
+    repo-relative paths; match on basename too, since a validation corpus can sit outside
+    the repo root entirely."""
     try:
-        rel = str(lesson_path.relative_to(REPO_ROOT))
+        rel = str(lesson_path.relative_to(repo_root))
     except ValueError:
         rel = str(lesson_path)
-    # The retrieval prints repo-relative paths; match on basename too in case
-    # the corpus dir sits outside the repo root (e.g. a validation tmp dir).
     target_names = {rel, lesson_path.name}
-    hit = any(p in target_names or Path(p).name == lesson_path.name for p in returned)
-    print("GOOD" if hit else "BAD")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    return any(p in target_names or Path(p).name == lesson_path.name for p in returned)

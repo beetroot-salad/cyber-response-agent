@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -206,76 +204,14 @@ def test_load_observation_missing_id_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# batch.py pins its <verify_script.py> argument (the confused-deputy guard).
-#
-# The curator's bash allowlist can only pin the program token — `_verifier_pattern`
-# admits `python3 <batch.py> <anything>` — so the driver, which EXECUTES its first
-# positional, has to pin it itself. A curator's `write_allow` reaches `<corpus>/**.md`,
-# so an unpinned driver turns a `.md` write grant into arbitrary code execution.
+# (#558) The batch.py confused-deputy cases that used to live here — the
+# `resolve_check_script` / `batch_main_refuses_to_execute_an_arbitrary_script`
+# pins #565 added — die with `batch.py` itself. They guarded a driver whose first
+# positional was a script path it executed, reachable because the curator's bash
+# allowlist can only pin a program token, not its operands. The forward-check is an
+# in-process @agent.tool now: the check is bound onto the curator's deps at spawn, so
+# there is no script operand to pin. Pinned instead by
+# test_forward_check_tool.py::test_d3_no_program_operand_negative (the tool's schema
+# admits no program of the model's choosing) and ::test_d25_no_bash_grant_for_the_verifier
+# (the curator's bash allowlist admits no python interpreter at all).
 # ---------------------------------------------------------------------------
-
-from defender.learning.author.verify_forward import batch as vfb  # type: ignore[import-not-found]
-
-_BATCH_PY = Path(vfb.__file__).resolve()
-
-
-def test_resolve_check_script_accepts_the_two_sibling_checks():
-    for name in ("forward.py", "actor.py"):
-        for spelling in (str(_BATCH_PY.parent / name), f"{vfb.HERE}/./{name}"):
-            assert vfb.resolve_check_script(spelling) == _BATCH_PY.parent / name
-
-
-def test_resolve_check_script_refuses_a_corpus_md(tmp_path: Path):
-    """The escape shape: any file the curator may author is not a check script."""
-    lesson = tmp_path / "pwn.md"
-    lesson.write_text("# a lesson\n")
-    assert vfb.resolve_check_script(str(lesson)) is None
-
-
-def test_resolve_check_script_refuses_a_same_named_file_elsewhere(tmp_path: Path):
-    """Membership is on the resolved path, not the basename — `..`/traversal is refused."""
-    decoy = tmp_path / "forward.py"
-    decoy.write_text("print('GOOD')\n")
-    assert vfb.resolve_check_script(str(decoy)) is None
-    assert vfb.resolve_check_script(f"{vfb.HERE}/../../../../{decoy.name}") is None
-
-
-def test_resolve_check_script_refuses_a_missing_sibling(tmp_path: Path, monkeypatch):
-    """A pinned NAME that isn't on disk still fails closed (the eval temp tree copies
-    only some of the scripts)."""
-    monkeypatch.setattr(vfb, "HERE", tmp_path)  # lint-monkeypatch: ok — module-const path anchor, no DI seam exists
-    assert vfb.resolve_check_script(str(tmp_path / "forward.py")) is None
-
-
-def test_batch_main_refuses_to_execute_an_arbitrary_script(tmp_path: Path):
-    """End-to-end: the driver exits 64 and the trampolined file never runs."""
-    sentinel = tmp_path / "executed"
-    payload = tmp_path / "pwn.md"
-    payload.write_text(f"open({str(sentinel)!r}, 'w').write('x')\n")
-
-    proc = subprocess.run(
-        [sys.executable, str(_BATCH_PY), str(payload), "lesson.md=obs-1"],
-        capture_output=True, text=True, cwd=str(_WS_ROOT),
-    )
-    assert proc.returncode == 64, proc.stdout + proc.stderr
-    assert "refusing to run" in proc.stderr
-    assert not sentinel.exists(), "batch.py executed an unpinned script"
-
-
-def test_batch_main_still_spawns_a_pinned_check(tmp_path: Path):
-    """Positive control for the guard above: with a PINNED script the driver gets past
-    the pin and spawns it — here `forward.py` exits 1 on a missing lesson (before any
-    model call), which the driver reports as ERROR and summarizes. Without this, the
-    refusal test would also pass against a driver that never ran anything."""
-    proc = subprocess.run(
-        [
-            sys.executable, str(_BATCH_PY),
-            str(_BATCH_PY.parent / "forward.py"),
-            f"{tmp_path / 'absent.md'}=run-1=adversarial",
-        ],
-        capture_output=True, text=True, cwd=str(_WS_ROOT),
-    )
-    assert proc.returncode == 1, proc.stdout + proc.stderr
-    assert "refusing to run" not in proc.stderr
-    assert "ERROR" in proc.stdout
-    assert "BATCH: n_good=0 n_bad=0 n_error=1" in proc.stdout

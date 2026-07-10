@@ -442,15 +442,26 @@ SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 # `providers.provider_for` routes — e.g. claude-haiku-4-5 to A/B against the pre-migration gate).
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "glm-5.2")
 VERIFIER_EFFORT = os.environ.get("LEARNING_VERIFIER_EFFORT", "low")
-# Per-check wall-clock ceiling for the in-process forward-check (threaded into
-# `_pydantic_stage.run_stage` as its `wall_clock_timeout`, the in-process stage
-# wall-clock timeout). Kept BELOW the batch child ceiling so a batched check
-# reports its own BAD/ERROR before verify_forward/batch.py kills it.
+# Per-check wall-clock ceiling for the in-process forward-check, threaded into
+# `_pydantic_stage.run_stage` as its `wall_clock_timeout`. A deliberate 0 is honored (it times
+# the check out at once), so it must never be coerced with an `or DEFAULT`.
 VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
-# Batch forward-check fan-out (verify_forward/batch.py). CHILD timeout sits above the
-# single-check VERIFIER_TIMEOUT so a child reports BAD/ERROR rather than being killed.
+# How many forward-checks the curator's `forward_check` tool runs concurrently — the shipped
+# default, and the fallback `verify_batch_workers()` re-reads against at call time. The retired
+# batch driver also carried a CHILD timeout above VERIFIER_TIMEOUT so a subprocess could
+# self-time-out into a reportable ERROR rather than be killed; in-process, `run_stage`'s own
+# wait_for raises RunUnprocessable, leaving nothing for a second ceiling to do.
 VERIFY_BATCH_WORKERS = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
-VERIFY_BATCH_TIMEOUT = env_int("LEARNING_VERIFY_BATCH_TIMEOUT_SECONDS", 240)
+
+
+def verify_batch_workers() -> int:
+    """The forward-check fan-out bound, read at CALL time so an operator (or a test) can drive
+    it without a module reload. A zero bound FAILS LOUD: `asyncio.Semaphore(0)` would block
+    until the wall clock, where the retired `ThreadPoolExecutor(0)` raised immediately."""
+    n = env_int("LEARNING_VERIFY_BATCH_WORKERS", VERIFY_BATCH_WORKERS)
+    if n < 1:
+        raise FatalConfigError(f"LEARNING_VERIFY_BATCH_WORKERS must be >= 1; got {n}")
+    return n
 
 # The three lesson curators (findings / actor-tradecraft / environment) run IN-PROCESS on
 # PydanticAI (GLM 5.2, Fireworks) — the metered first-party path, mirroring the lead-author

@@ -34,25 +34,19 @@ When you flip a `mutable: true` lesson to stale and the same `subject` already h
 
 ## Forward check
 
-Each lesson file you write or rewrite is gated by a Haiku forward-check that prints `GOOD` or `BAD`. **Write all your candidate lesson files first, then verify the whole set in one batched call** — do not verify one-at-a-time as you go, and never spawn the checks in a shell `for` loop or a background poll-loop.
+Each lesson file you write or rewrite is gated by a forward-check that returns `GOOD` or `BAD`. **Write all your candidate lesson files first, then verify the whole set in one `forward_check` call** — do not verify one-at-a-time as you go, and never poll or loop.
 
-Run the batch driver the orchestrator put in the user prompt under `verify_batch_command:`, passing one `{lesson_path}={observation_id}` pair per file you wrote:
+Call `forward_check` with one pair per file you wrote: its `lesson_path` and the source row's `source_id` (its `observation_id`).
 
-```
-{absolute-python-path} defender/learning/verify_batch.py defender/learning/verify_forward_actor.py {lesson_a}={obs_a} {lesson_b}={obs_b} ...
-```
-
-`{observation_id}` is each source row's id. The driver runs all checks concurrently and prints one line per pair — `GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` — then a `BATCH:` summary. Read that single output; do not poll.
+The checks run concurrently and the tool returns one line per pair — `GOOD <path> <id>`, `BAD <path> <id>`, or `ERROR <path> <id> <reason>` — then a `BATCH:` summary. Read that single return value; do not poll.
 
 - **GOOD** → keep the file as-is.
-- **BAD** → one rewrite attempt allowed. Re-read the observation, sharpen the body, then re-check just that file (the single-file `verify_forward_command:` is fine for a one-off recheck, or re-run `verify_batch_command:` over the rewritten set).
+- **BAD** → one rewrite attempt allowed. Re-read the observation, sharpen the body, then re-check just that file (call `forward_check` with that one pair, or re-check the whole rewritten set).
   - If the recheck is GOOD, keep the file.
   - If still BAD, revert: `rm` the file (for a `new`) or re-Edit it back to its pre-batch content (for a `fold` — you read the original at the start of the batch), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
 - **ERROR** → treat as a non-verdict: re-run that pair once; if it errors again, revert the file (`rm` a `new`, re-Edit a `fold` back) and route the observation to `consumed_skip` with reason `forward_check_error:{one-line summary}`.
 
 Stale-only flips don't need a forward check — there's no new body to evaluate; omit them from the batch.
-
-For folds where one observation produces GOOD and another BAD on the same target file, keep the GOOD edit and skip the BAD one. Each observation is gated independently.
 
 ## Discipline
 

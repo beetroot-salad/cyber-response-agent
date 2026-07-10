@@ -100,6 +100,10 @@ class ToolSet:
     read: bool = False
     bash: BashGrammar | None = None
     write: bool = False
+    # The lesson curators' author-time forward check (#558). A tool rather than a bash
+    # grant because a bash allowlist pins a program token and cannot constrain the
+    # operands that program then acts on.
+    forward_check: bool = False
 
 
 @dataclass(frozen=True)

@@ -102,9 +102,16 @@ def _run_dir(tmp_path: Path) -> Path:
     return d
 
 
-def _verifiers(tmp_path: Path) -> tuple[Path, ...]:
-    base = _repo_root(tmp_path) / "defender" / "learning" / "author" / "verify_forward"
-    return (base / "batch.py", base / "actor.py")
+def _check_args(tmp_path: Path) -> dict:
+    """The forward-check binding every curator spawn carries: which check, and the roots it
+    reads. Bound on the deps at spawn (#558) — never a tool argument."""
+    from defender.learning.author.verify_forward.checks import ACTOR_CHECK
+    return dict(
+        check=ACTOR_CHECK,
+        runs_dir=tmp_path / "runs",
+        pending=tmp_path / "_pending" / "actor_observations.jsonl",
+        queued_ids=frozenset(),
+    )
 
 
 def _prompt(tmp_path: Path) -> Path:
@@ -123,7 +130,7 @@ def _stage(tmp_path: Path, **over):
         batch_id="batch-A",
         user_prompt="u",
         corpus_dir=_corpus(tmp_path),
-        verifier_scripts=_verifiers(tmp_path),
+        **_check_args(tmp_path),
         repo_root=_repo_root(tmp_path),
         learning_run_dir=_run_dir(tmp_path),
         model="glm-5.2",
@@ -139,39 +146,14 @@ def _stage(tmp_path: Path, **over):
 
 
 # ===========================================================================
-# state-root — carried on the deps into the bash-tool env, NOT a process global
+# (#558) `state_root` is gone from the curator deps and from `run_common.run_env`.
+# It existed ONLY so the forward-check SUBPROCESS could resolve the real source-case
+# bundle off DEFENDER_LEARNING_STATE_DIR from a throwaway worktree (#425). The check is
+# an in-process tool now and reads `runs_dir` / `pending` / `corpus_dir` straight off
+# `CuratorDeps`, so there is no subprocess env to pin. The surviving contract — the tool
+# mutates no process-global env, and still resolves the real bundle — is owned by
+# test_forward_check_tool.py::test_d14_no_environ_mutation and ::test_d16_bundle_resolves_from_deps.
 # ===========================================================================
-
-def test_state_root_threads_through_deps_not_os_environ(tmp_path, monkeypatch):
-    """The shared state root reaches the forward-check subprocess via the curator deps →
-    ``run_common.run_env`` (DEFENDER_LEARNING_STATE_DIR), the in-process twin of the retired
-    ``curator_agent_env`` ``env=``. The transport must NOT mutate the process-global
-    ``os.environ`` (a leak that contaminated sibling in-process runs/tests)."""
-    from defender.learning.author.curator_engine import CuratorDeps
-    from defender.runtime import tools
-
-    monkeypatch.delenv("DEFENDER_LEARNING_STATE_DIR", raising=False)
-    state = tmp_path / "state"
-    seen = {}
-    _stage(tmp_path, state_root=state, run_author=lambda **kw: seen.update(kw) or _AUTHOR_RESULT_OK)
-
-    # 1) the transport threads state_root down the seam (→ CuratorDeps.for_run), not the global
-    assert seen["state_root"] == state
-    assert "DEFENDER_LEARNING_STATE_DIR" not in os.environ
-
-    # 2) the deps carry it, and run_env projects it into the bash-tool subprocess env
-    deps = CuratorDeps.for_run(
-        _run_dir(tmp_path), _repo_root(tmp_path), _corpus(tmp_path), _verifiers(tmp_path),
-        state_root=state,
-    )
-    assert deps.state_root == state
-    assert tools._bash_env(deps)["DEFENDER_LEARNING_STATE_DIR"] == str(state)
-
-    # 3) a deps without a state root leaves the var unset (the runtime agents' behavior)
-    bare = CuratorDeps.for_run(
-        _run_dir(tmp_path), _repo_root(tmp_path), _corpus(tmp_path), _verifiers(tmp_path),
-    )
-    assert "DEFENDER_LEARNING_STATE_DIR" not in tools._bash_env(bare)
 
 
 # ===========================================================================
@@ -356,7 +338,7 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
     common = dict(
         model="m", effort=None, label="curator", user="u",
         learning_run_dir=_run_dir(tmp_path), repo_root=_repo_root(tmp_path),
-        corpus_dir=_corpus(tmp_path), verifier_scripts=_verifiers(tmp_path),
+        corpus_dir=_corpus(tmp_path), **_check_args(tmp_path),
         request_limit=4,
     )
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
