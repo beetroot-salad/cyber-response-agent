@@ -59,6 +59,16 @@ _DETAIL_MAX = 200
 # newline would forge extra result lines (`_field`).
 _WHITESPACE = re.compile(r"\s+")
 
+# The verdict tokens that lead every result line. Also the render-time `counts` keys.
+_VERDICTS = ("GOOD", "BAD", "ERROR")
+
+
+class _ProtocolError(RuntimeError):
+    """The rendered batch broke its own one-line-per-pair grammar — a BUILD bug (a result field
+    rendered without `_field`/`_one_line`), never a bad input. Raised so a forged verdict can
+    never reach the curator: the run quarantines rather than acting on a batch the tool cannot
+    vouch for."""
+
 
 # One lesson to check against one source row. Deliberately UNDOCUMENTED as far as the JSON
 # schema goes: a class docstring becomes the schema's `description`, and everything the model
@@ -196,7 +206,7 @@ def _render_batch(results: list[_Result]) -> str:
     through ``_field`` (and every detail through ``_one_line``), so a pair can render exactly
     one line and cannot forge a sibling verdict or the summary."""
     lines: list[str] = []
-    counts = {"GOOD": 0, "BAD": 0, "ERROR": 0}
+    counts = {v: 0 for v in _VERDICTS}
     for r in results:
         counts[r.verdict] += 1
         lp, idv = _field(r.pair.lesson_path), _field(r.pair.source_id)
@@ -209,7 +219,32 @@ def _render_batch(results: list[_Result]) -> str:
     lines.append(
         f"BATCH: n_good={counts['GOOD']} n_bad={counts['BAD']} n_error={counts['ERROR']}"
     )
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    _assert_wellformed(text, len(results))
+    return text
+
+
+def _assert_wellformed(text: str, n_results: int) -> None:
+    """Output-grammar tripwire: the rendered batch MUST be exactly one line per pair plus the
+    BATCH summary, each result line led by a verdict token. `_field` / `_one_line` make that true
+    by construction, so this never fires in a correct build — it exists to catch a FUTURE result
+    field rendered without escaping, before the extra line it produces can be read as a forged
+    verdict. `splitlines()` is deliberately the broadest notion of a line (it breaks on `\\x1c`,
+    `\\u2028`, … as well as `\\n`), so the check refutes any line break an escaper missed; every
+    one of those characters is inside `_field`'s `\\s` and `_one_line`'s `str.split`, so a real
+    render stays within it. A violation raises rather than returns — a batch the tool cannot
+    vouch for must not reach the curator."""
+    lines = text.splitlines()
+    if len(lines) != n_results + 1:
+        raise _ProtocolError(
+            f"rendered {len(lines)} lines for {n_results} pair(s) + summary — a result field "
+            "carried an unescaped line break"
+        )
+    if not lines[-1].startswith("BATCH:"):
+        raise _ProtocolError(f"summary line missing or displaced: {lines[-1]!r}")
+    for line in lines[:-1]:
+        if not line.startswith(tuple(f"{v} " for v in _VERDICTS)):
+            raise _ProtocolError(f"result line without a leading verdict token: {line!r}")
 
 
 async def run_forward_check(deps: CuratorDeps, pairs: list[Pair]) -> str:
