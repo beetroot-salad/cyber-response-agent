@@ -5,9 +5,15 @@ context (a hard 200K-token overflow). _bounded_read caps the returned view at
 the SAME constant that bounds record_query's passthrough, so a later read of
 the persisted payload can't defeat that cap. Under the ceiling a file comes
 back verbatim (every authored SKILL/lesson/doc fits with room to spare); over
-it, the head plus a notice carrying the true size and the filter-first
-resolution (jq/grep), since the overflowing files are single-document JSON
-dumps a line window can't page.
+it, the head plus a notice carrying the true size and a filter-first
+resolution, since the overflowing files are single-document JSON dumps a line
+window can't page.
+
+The resolution is spelled in the CALLER'S OWN bash lane (`_overflow_filter_hint`,
+keyed on `policy.operand_gated`): main/gather get the `jq`-on-disk advice, while
+the judge — which has neither `jq` nor a write tool — is told to aggregate in the
+pipe with `cat … | defender-sql`. A hint naming a program the agent cannot run is
+worse than no hint.
 """
 from __future__ import annotations
 
@@ -25,6 +31,30 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 
 CAP = tools._read_char_cap()
 
+# The reader-lane hint (main/gather). `_bounded_read` is hint-agnostic — the branch
+# lives in `_overflow_filter_hint`, pinned by the two tests just below.
+_MAIN_HINT = tools._overflow_filter_hint("/p.json", operand_gated=False)
+
+
+def test_overflow_hint_reader_lane_names_jq() -> None:
+    """main/gather keep `jq` (stdin-compute-only) AND a write tool, so the filter-on-disk,
+    write-the-result, read-that advice is the one that works for them."""
+    hint = tools._overflow_filter_hint("/run/gather_raw/l-1/0.json", operand_gated=False)
+    assert "jq" in hint
+    assert "/run/gather_raw/l-1/0.json" in hint
+    assert "write the result" in hint
+
+
+def test_overflow_hint_operand_gated_lane_names_defender_sql() -> None:
+    """The judge (`operand_gated`) has NO `jq` and NO write tool, so it must be told to
+    aggregate in the pipe. A hint naming a program it cannot run, and a step it cannot
+    take, is worse than none — this is the regression that branch exists to prevent."""
+    hint = tools._overflow_filter_hint("/run/gather_raw/l-1/0.json", operand_gated=True)
+    assert "defender-sql" in hint
+    assert "/run/gather_raw/l-1/0.json" in hint
+    assert "jq" not in hint
+    assert "write the result" not in hint
+
 
 def test_cap_matches_passthrough() -> None:
     """The read cap IS record_query's passthrough cap — one shared source so
@@ -36,23 +66,26 @@ def test_cap_matches_passthrough() -> None:
 
 def test_under_cap_verbatim() -> None:
     text = "a SKILL\nwith a few lines\n"
-    assert tools._bounded_read(text, "/x/SKILL.md") == text
+    assert tools._bounded_read(text, "/x/SKILL.md", filter_hint=_MAIN_HINT) == text
 
 
 def test_at_cap_verbatim() -> None:
     text = "x" * CAP
-    assert tools._bounded_read(text, "/x/f.json") == text
+    assert tools._bounded_read(text, "/x/f.json", filter_hint=_MAIN_HINT) == text
 
 
 def test_over_cap_truncates_head_and_appends_notice() -> None:
+    path = "/run/gather_raw/l-1/0.json"
     text = "y" * (CAP + 5000)
-    out = tools._bounded_read(text, "/run/gather_raw/l-1/0.json")
+    out = tools._bounded_read(
+        text, path, filter_hint=tools._overflow_filter_hint(path, operand_gated=False),
+    )
     head, _, note = out.partition("\n\n[read_file]")
     assert head == "y" * CAP  # head is exactly the first CAP chars, verbatim
     assert note  # a notice was appended
     assert "too large to read whole" in out
     assert "jq" in out
-    assert "/run/gather_raw/l-1/0.json" in out
+    assert path in out  # the hint carries the file it refers to
     # full size surfaced so the model knows the scale it can't see
     assert str(CAP + 5000) in out
 
@@ -61,13 +94,13 @@ def test_notice_reports_true_line_count() -> None:
     # a single giant line (the real payload shape) — line count is 1, and there
     # is no offset/limit paging suggestion because paging a 1-line file is a no-op
     blob = "z" * (CAP + 1000)
-    out = tools._bounded_read(blob, "/p.json")
+    out = tools._bounded_read(blob, "/p.json", filter_hint=_MAIN_HINT)
     assert "/ 1 line(s)" in out
     assert "offset" not in out
     assert "limit" not in out
     # a multi-line oversized file reports its real line count
     lined = ("line\n" * ((CAP // 5) + 200))
-    out2 = tools._bounded_read(lined, "/p.json")
+    out2 = tools._bounded_read(lined, "/p.json", filter_hint=_MAIN_HINT)
     assert f"/ {lined.count(chr(10)) + 1} line(s)" in out2
 
 
@@ -75,7 +108,7 @@ def test_char_slice_never_splits_multibyte() -> None:
     # a head ending on a multibyte boundary: slicing by char (not byte) keeps it
     # a valid str — re-encoding must not raise.
     text = "é" * (CAP + 100)
-    out = tools._bounded_read(text, "/p.json")
+    out = tools._bounded_read(text, "/p.json", filter_hint=_MAIN_HINT)
     head = out.split("\n\n[read_file]")[0]
     assert head == "é" * CAP
     head.encode("utf-8")  # would raise on a split surrogate; chars are intact

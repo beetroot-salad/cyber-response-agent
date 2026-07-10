@@ -89,7 +89,8 @@ class BashGrammar:                         # STATIC: which programs; which opera
     viewers:          tuple[str, ...] = ()  # cat, grep, tail, wc, find, ls, sed
     adapters:         bool = False          # gather: structural adapter routing
     adapter_sql_pipe: bool = False          # gather: adapter --raw | defender-sql
-    jq_operand_gated: bool = False          # LEGACY — judge only; deletion tracked under #535
+    operand_gated:    bool = False          # judge: cat's file operands path-gated at resolve()
+    raw_reads:        bool = False          # judge: declared (no adapters bit to imply it)
 ```
 
 Two things fall out. `AgentSpec.writers` becomes `tools.write`, and writes need **no
@@ -153,11 +154,12 @@ but load-bearing for the consolidation. Four points shape the `AgentDefinition`:
    (`lessons/`, `skills/<sys>/`, `examples/`, `gather_summaries/`) so they can't drift
    from the layout (`[[defender-paths-primitive]]`). Hence `corpus_dirs` (relative) in
    the definition; `bind` resolves absolutes.
-4. **`viewer_patterns()` / operand-extraction / `jq_operand_gated` retire for
-   gather/main.** `cat` is the sole file-reader; `jq` / `defender-sql` only consume a
-   pipe; `jq_operand_gated` survives only for the judge until the judge-off-`jq`
-   follow-up. So `BashGrammar` is a declarative program grammar that `bind` compiles
-   against the roots — not raw pre-compiled patterns.
+4. **`viewer_patterns()` / operand-extraction retire for gather/main.** `cat` is the sole
+   file-reader; `jq` / `defender-sql` only consume a pipe. The judge keeps a `resolve()`-based
+   operand gate (`operand_gated`), now pointed at `cat` rather than `jq` — its `gather_raw`
+   reaches it only through `read_roots`, which the textual anchors cannot express. So
+   `BashGrammar` is a declarative program grammar that `bind` compiles against the roots —
+   not raw pre-compiled patterns.
 
 ## Deliverables + sequencing
 
@@ -214,8 +216,13 @@ assuming the model chooses to cheat — the point is not to leave the barrier op
   `AgentPolicy` as the gate's resolved type (`compile_policy` projects into it) so the
   gate + its tests don't move and #538's tool-free part ships as a side effect. Fold
   `AgentPolicy` into the caps as a later clean-up.
-- **Judge off `jq`-over-files** (#535 follow-up): migrate to `cat {file} | jq` /
-  `read_file`, after which `jq_operand_gated` / `_jq_input_files` delete and the last
-  legacy field leaves `BashGrammar`.
+- **Judge off `jq`-over-files** (#535 follow-up) — **DONE.** The judge runs
+  `cat {file} | defender-sql '<SQL>'` / `read_file`. `_jq_input_files` + the jq option
+  grammar deleted; `jq_operand_gated` became `operand_gated`, retargeted from `jq` (whose
+  argv opens files via `-f`/`-L`/`--slurpfile`/`--rawfile`/`--argfile` and short-bundle arg
+  consumption, needing ~60 lines to decide "which files does this open?") to `cat` (no
+  arg-taking flag, ~10 lines). `raw_reads` moved from *inferred* to *declared* on
+  `BashGrammar`: the judge has neither `adapters` nor `adapter_sql_pipe` to imply it, and
+  the `defender-sql` shim is not the `adapter_sql_pipe` route.
 - **#540** — OS-sandbox the run as the real boundary; once it lands, operand-anchoring
   can relax to a pure program allowlist and the tight `read_shapes` grammars simplify.

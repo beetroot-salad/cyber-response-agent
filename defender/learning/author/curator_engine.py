@@ -222,7 +222,7 @@ def _corpus_author_policy(
             _rm_pattern(corpus_dir),
             *_viewer_patterns(corpus_dir),
         ),
-        jq_operand_gated=False,
+        operand_gated=False,
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=False,

@@ -103,7 +103,7 @@ def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> 
     (``bash._stage_unsafe``) applies to them too — closing the #500 matcher-skips-guard gap."""
     return AgentPolicy(
         bash_allow=tuple(_script_pattern(s) for s in scripts),
-        jq_operand_gated=False,
+        operand_gated=False,
         adapters=False,
         adapter_sql_pipe=False,
         raw_reads=False,

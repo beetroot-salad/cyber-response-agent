@@ -34,7 +34,7 @@ def _denylisted(rp: Path) -> bool:
     filename substring (`.env` / `cases.json` / `ground_truth` / `credentials`) or a
     denied path component (`.ssh`). Belt-and-suspenders that applies INSIDE every
     allowed root, on BOTH read surfaces: the read tool (`decide_read`) and the judge's
-    bash `jq` lane (`read_allowed_path`) — so the two surfaces can't disagree about a
+    bash operand lane (`read_allowed_path`) — so the two surfaces can't disagree about a
     denied file that resolves within-root (the held-out `ground_truth.yaml` under the
     defender corpus, a captured `.env` in the run dir)."""
     return any(d in set(rp.parts) for d in bash_policy.read_deny_dirs()) or any(
@@ -75,13 +75,13 @@ def read_allowed_path(
     policy: AgentPolicy,
 ) -> bool:
     """Whether a file operand resolves within `policy`'s read roots — the
-    containment half of `decide_read`, reused by the judge's bash-lane `jq`
+    containment half of `decide_read`, reused by the judge's bash-lane `cat`
     path-gate (`permission.bash`). FAILS CLOSED: a `resolve()` error (a symlink
     cycle) OR a missing root context (`run_dir`/`defender_dir` `None`) returns
     `False`, never raises. The secret/ground-truth denylist IS applied (parity with
-    `decide_read`, so `jq` can't read a denied file the read tool refuses — the
+    `decide_read`, so `cat` can't read a denied file the read tool refuses — the
     held-out `ground_truth.yaml`, a captured `.env`); the gather_raw RAW clamp is
-    NOT — a `jq` reader that may read raw (the judge, `raw_reads=True`) legitimately
+    NOT — a `cat` reader that may read raw (the judge, `raw_reads=True`) legitimately
     names a gather_raw path, and the bash gate owns the raw clamp for agents that
     may not."""
     if run_dir is None or defender_dir is None:
@@ -154,7 +154,7 @@ def decide_read(
         )
     # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
     # still denied (substrings match the filename, dirs match any path component).
-    # Shared with the bash `jq` lane (`read_allowed_path`) so both surfaces agree.
+    # Shared with the bash operand lane (`read_allowed_path`) so both surfaces agree.
     if _denylisted(rp):
         return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
     # No gather-payload-tool exemption here: that exemption is about a Bash
@@ -192,7 +192,7 @@ def decide_write(
     — its read roots (`read_confine`/`read_roots`/run dir/`defender_dir`) minus the secret/ground-
     truth denylist (`read_allowed_path`), the `write_allow ⊆ read roots` invariant `edit_file`
     relies on. NOTE this is containment + denylist, NOT the full `decide_read` gate: it does not
-    apply the gather_raw RAW clamp (shared with the judge's `jq` lane, which legitimately reads
+    apply the gather_raw RAW clamp (shared with the judge's `cat` lane, which legitimately reads
     raw), so a `raw_reads=False` writer whose `write_allow` admits a `gather_raw/` path is not
     additionally blocked here — no real writer's `write_allow` reaches there. Skipped when omitted
     (the run-dir tool callers, already confined by `write_allow`); mirrors `decide_bash`'s
@@ -218,7 +218,7 @@ def decide_write(
     # must also sit inside the agent's read CONTAINMENT — its read roots minus the secret/ground-
     # truth denylist (`read_allowed_path`), fails closed on a resolve error. This is containment +
     # denylist, NOT the full `decide_read` (no gather_raw RAW clamp — that lane is shared with the
-    # judge's jq, which may read raw). A no-op for every real writer (its write_allow already sits
+    # judge's cat, which may read raw). A no-op for every real writer (its write_allow already sits
     # within its read roots); it only closes a hypothetical write_allow that escapes them.
     if run_dir is not None and defender_dir is not None and not read_allowed_path(
         rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy

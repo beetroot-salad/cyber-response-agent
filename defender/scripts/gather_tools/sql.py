@@ -1,35 +1,56 @@
 #!/usr/bin/env python3
 """defender-sql — sandboxed SQL aggregation over a JSON payload on stdin.
 
-The gather subagent pipes a filter-only adapter's `--raw` output through
-this tool to aggregate it server-side-style instead of reducing the
-payload by hand:
+Two consumers, both piping a payload in rather than naming a file (this
+tool NEVER opens one):
 
-    defender-{system} query '<native filter>' --raw | defender-sql \\
-        "SELECT h.user AS user, count(*) c \\
-         FROM (SELECT unnest(result.hits) h FROM data) \\
-         GROUP BY user ORDER BY c DESC"
+  * **gather**, live — the tier-2 fallback for a source with no native
+    aggregating query language (see `skills/connect/cli-adapter.md` ->
+    "Prefer native aggregation"). A source that aggregates in its own
+    language (e.g. ES|QL) never needs it; that aggregation runs in the
+    source.
 
-It is the **tier-2 fallback** for a source with no native aggregating
-query language (see `skills/connect/cli-adapter.md` -> "Prefer native
-aggregation"). A source that can aggregate in its own language
-(a source whose own language aggregates, e.g. ES|QL) never needs it — that aggregation runs in the source.
+        defender-{system} query '<native filter>' | defender-sql \\
+            "SELECT h.user AS user, count(*) c \\
+             FROM (SELECT unnest(hits) h FROM data) \\
+             GROUP BY user ORDER BY c DESC"
+
+  * **the judge**, at rest — aggregating a captured payload to ground or
+    refute a projection, its `cat` operand path-gated to its read roots:
+
+        cat {run}/gather_raw/{lead}/{seq}.json | defender-sql \\
+            "SELECT count(*) FROM (SELECT unnest(hits) h FROM data) \\
+             WHERE h.user = 'alice'"
 
 The stdin JSON is exposed as a table named `data`, parsed with DuckDB's
 `read_json_auto` type inference (structs and lists preserved), so SQL
 written against it reads the same as `FROM read_json_auto('/dev/stdin')`.
-Input is one JSON value (e.g. the `--raw` envelope `{system, endpoint,
-args, result}`) or NDJSON / a JSON array (one value per row). Output is a
-JSON array of row objects on stdout.
+The payload IS the table: a top-level **object** yields one row whose
+columns are its keys; a top-level **array** (or NDJSON) yields one row per
+element. There is no wrapper envelope to reach through — an adapter's
+stdout is the payload verbatim. Output is a JSON array of row objects on
+stdout.
+
+Shapes an onboarded adapter actually emits today, and the idiom for each:
+
+    {index, total, returned, truncated, hits}  ->  unnest(hits)
+    {columns, row_count, values}   (ES|QL)     ->  unnest(values)
+    a flat object (cmdb/identity/...)          ->  SELECT * FROM data
+    a bare array of docs                       ->  SELECT ... FROM data
+
+`truncated`/`total` are load-bearing for absence checks: `hits` holds only
+the first `returned` rows, so "not in `hits`" means "absent" only when
+`truncated` is false. An empty payload is an input error (exit 2), never
+an empty result set — absence must be read off a query, not off silence.
 
 Sandbox: the payload is materialized into an in-memory table, then DuckDB
 is sealed — `enable_external_access=false` + `lock_configuration=true` —
 *before* the caller's SQL runs. So that SQL cannot read or write files,
 reach the network, load an extension, ATTACH another database, or
-re-enable any of it. This is what lets the tool be auto-approved for the
-gather subagent, which handles untrusted (injection-tagged) source data:
-the permission layer matches on the `defender-sql` token, and the sandbox
-— not the permission layer — is what bounds the SQL.
+re-enable any of it. This is what lets the tool be auto-approved for
+agents handling untrusted (injection-tagged) source data: the permission
+layer matches on the `defender-sql` token, and the sandbox — not the
+permission layer — is what bounds the SQL.
 """
 
 from __future__ import annotations
@@ -83,8 +104,12 @@ def _run(sql: str) -> int:
     # malformed input as a normal EXIT_INPUT_ERROR below.
     raw = sys.stdin.buffer.read()
     if not raw.strip():
-        print("defender-sql: no input on stdin (pipe an adapter's --raw output in).",
-              file=sys.stderr)
+        print(
+            "defender-sql: no input on stdin — the payload is empty. This is NOT an "
+            "empty result set: the query that produced it recorded no observation at "
+            "all, so nothing here supports a claim about what is present or absent.",
+            file=sys.stderr,
+        )
         return EXIT_INPUT_ERROR
 
     scratch = tempfile.mkdtemp(prefix="defender-sql-")

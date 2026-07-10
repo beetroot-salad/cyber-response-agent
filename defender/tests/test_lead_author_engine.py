@@ -196,7 +196,7 @@ def test_lead_author_policy_shape():
     assert pol.adapters is False
     assert pol.adapter_sql_pipe is False
     assert pol.raw_reads is False
-    assert pol.jq_operand_gated is False
+    assert pol.operand_gated is False
 
 
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):

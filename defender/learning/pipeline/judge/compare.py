@@ -8,7 +8,7 @@ that, per lead, places three columns side by side —
 
   [1] the oracle's projection (what the actor's story *would* have produced),
   [2] a real sample event from the actual payload (orientation; the judge queries the
-      full payload with jq for absence-checks), and
+      full payload with defender-sql for absence-checks), and
   [3] the defender's own per-lead reasoning from the invlang (`:T resolutions` belief
       movement + `:R authz`) — the "why" behind its read of this lead —
 
@@ -17,9 +17,9 @@ synthesis (hypotheses + final weights + conclusion) is rendered separately as co
 
 Everything here is read-only over the run dir (it never crashes the judge step: every
 column degrades to a labelled placeholder). The only write is `write_comparison_files`,
-into the learning state dir. The judge's read-only tool scope (jq/grep over the two
-add-dir'd payload trees, plus the benign closed-ticket matcher) is the in-process gate's
-concern — see `judge/engine_pydantic.py`.
+into the learning state dir. The judge's read-only tool scope (`cat … | defender-sql` and
+`read_file` over the two add-dir'd payload trees, plus the benign closed-ticket matcher) is
+the in-process gate's concern — see `judge/engine_pydantic.py`.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def parse_investigation_companion(run_dir: Path) -> dict:
     """Parse the run's investigation.md into a companion dict, or `{}` on any failure.
 
     A parse failure must never abort the judge — the judge can still ground against
-    the actuals via jq; it just loses the defender's recorded reasoning.
+    the actuals via defender-sql; it just loses the defender's recorded reasoning.
     """
     inv = RunPaths(Path(run_dir)).investigation
     if not inv.is_file():
@@ -222,8 +222,12 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         f"{c.real_sample}\n\n"
         "> The sample is ONE event, for shape orientation. To assert that a projected\n"
         "> entity is ABSENT (the refute primitive), query the FULL payload — never infer\n"
-        "> absence from the sample. Example:\n"
-        f">   jq '<filter>' {gather_raw}/{c.lead_id}/0.json\n\n"
+        "> absence from the sample, and check `truncated` before reading 0 as absence.\n"
+        "> Example:\n"
+        f">   cat {gather_raw}/{c.lead_id}/0.json | defender-sql \\\n"
+        ">     \"SELECT total, returned, truncated FROM data\"\n"
+        f">   cat {gather_raw}/{c.lead_id}/0.json | defender-sql \\\n"
+        ">     \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n\n"
         "## [3] What the defender concluded about this lead (invlang — the \"why\")\n"
         "### Belief movement (:T resolutions)\n"
         f"{res}\n\n"

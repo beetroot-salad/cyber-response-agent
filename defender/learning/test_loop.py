@@ -1759,7 +1759,7 @@ def test_write_comparison_files_one_per_lead(tmp_path: Path):
     txt = paths[0].read_text()
     assert "[1] Oracle projection" in txt
     assert "[3] What the defender" in txt
-    assert "gather_raw/l-001/0.json" in txt  # jq hint with the absolute payload path
+    assert "gather_raw/l-001/0.json" in txt  # defender-sql hint with the absolute payload path
     assert "scripted automation" in txt  # the per-lead belief-movement reasoning
 
 

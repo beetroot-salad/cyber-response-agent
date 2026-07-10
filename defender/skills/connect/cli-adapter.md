@@ -92,22 +92,27 @@ adapter's shape:
    — not a Lucene filter that returns documents.
 2. **Filter-only source** — expose the native filter passthrough and
    return the rows; the model aggregates them downstream with
-   `defender-sql` over the `--raw` output, which keeps it in SQL — a
-   language it knows. `defender-sql` exposes the piped payload as a table
-   named `data` (`read_json_auto` inference, so structs/lists work) and
-   runs the SQL in a sealed sandbox (no file/network access):
+   `defender-sql`, which keeps it in SQL — a language it knows.
+   `defender-sql` exposes the piped payload as a table named `data`
+   (`read_json_auto` inference, so structs/lists work) and runs the SQL in
+   a sealed sandbox (no file/network access):
 
    ```bash
-   defender-{system} query '<native filter>' --raw \
+   defender-{system} query '<native filter>' \
      | defender-sql "SELECT h.user AS user, count(*) c \
-         FROM (SELECT unnest(result.hits) h FROM data) \
+         FROM (SELECT unnest(hits) h FROM data) \
          GROUP BY user ORDER BY c DESC"
    ```
+
+   The adapter's stdout **is** the table — there is no wrapper envelope to
+   reach through. A top-level object yields one row whose columns are its
+   keys (so `unnest(hits)` for an `{index, total, returned, truncated,
+   hits}` payload); a top-level array yields one row per element.
 
    This downloads before it reduces, so it's the fallback, not the goal —
    reach for it only when the source genuinely can't aggregate. When a
    source lands here, record the concrete `defender-sql` recipe for *its*
-   row shape (the path into the `--raw` envelope, the columns) in that
+   row shape (the column that carries the rows, the fields on them) in that
    system's `execution.md`, where gather reads it at dispatch — not in the
    credential-free `SKILL.md`.
 3. **No query language** (pure REST / lookup) — key on an identifier and

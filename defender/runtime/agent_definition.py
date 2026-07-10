@@ -75,8 +75,15 @@ class BashGrammar:
         + the read-only viewers). Non-empty ⇒ this is a main/gather reader agent.
       - ``adapters`` — may invoke a data-source adapter (captured transparently).
       - ``adapter_sql_pipe`` — may run ``adapter --raw | defender-sql '<SQL>'``.
-      - ``jq_operand_gated`` — the judge's ``jq``-only lane (file operands path-gated
-        to the read roots).
+      - ``operand_gated`` — the judge's ``cat | defender-sql`` lane: every file operand
+        of a file-opening stage is path-gated to the read roots at ``resolve()`` time
+        (``bash._OPERAND_GATED_PROGRAMS``), which is what lets it reach ``gather_raw``
+        — a tree the textual anchors cannot see, since it is not under its ``run_dir``.
+      - ``raw_reads`` — may read ``gather_raw/**``. DECLARED, not inferred: ``adapters``/
+        ``adapter_sql_pipe`` imply it (gather owns the payloads it captures), but the
+        judge has neither and still must read raw, and the ``defender-sql`` *shim* is
+        not the ``adapter_sql_pipe`` *route*. Inferring it from the bash lane is how
+        the judge silently loses ``gather_raw`` to the clamp in ``bash.decide_bash``.
       - ``skills_rm`` — the lead author's scoped ``rm``-of-drafts grant: ``compile_policy``
         anchors the single ``rm <defender_dir>/skills/<draft>`` matcher on the run's
         ``defender_dir`` (the worktree). A per-run bash pattern like the actor's pinned
@@ -86,7 +93,8 @@ class BashGrammar:
     viewers: tuple[str, ...] = ()
     adapters: bool = False
     adapter_sql_pipe: bool = False
-    jq_operand_gated: bool = False
+    operand_gated: bool = False
+    raw_reads: bool = False
     skills_rm: bool = False
 
 
@@ -239,7 +247,8 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
         tighter ``BashGrammar.viewers`` compiles a tighter lane, so the contents are
         load-bearing, not merely their non-emptiness); the reader defs declare the full
         set, so their lane equals the ``reader_patterns_for`` builder;
-      - the judge (``jq_operand_gated``) → its pinned ``jq`` (+ benign ticket) patterns;
+      - the judge (``operand_gated``) → its pinned ``cat``/``defender-sql`` (+ benign
+        ticket) patterns;
       - the actor (``scope.scripts``) → one anchored ``python3 <script>`` pattern each.
 
     The judge/actor/lead-author patterns are REUSED from their authoritative pattern builders
@@ -251,7 +260,7 @@ def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
             roots.run_dir, roots.defender_dir,
             frozenset(bash.viewers), frozenset(bash.shims),
         ))
-    if bash.jq_operand_gated:
+    if bash.operand_gated:
         from defender.learning.pipeline.judge.engine_pydantic import _judge_policy
         patterns.extend(_judge_policy(roots.read_roots, roots.ticket_cli).bash_allow)
     if roots.scripts:
@@ -301,7 +310,7 @@ def compile_policy(
 
     A genuine projection: the capability bits come straight off the grammar (a bit is
     set only when its source bit is), ``raw_reads`` is derived (an agent that runs
-    adapters or path-gated ``jq`` reads ``gather_raw``; main/actor/oracle/verify do not),
+    adapters or the judge's path-gated ``cat`` reads ``gather_raw``; main/actor/oracle/verify do not),
     and the read roots/confine come from the scope. ``read_shapes`` (#545 — decision 3) is
     CONSUMED here: each shape-builder the def carries is resolved against the run's roots into
     the read-tool filename filter (``decide_read`` then admits exactly the filename set the bash
@@ -319,19 +328,20 @@ def compile_policy(
     _require_write_co_constraint(tools, write_shapes)
     bash = tools.bash
     if bash is None:
-        adapters = adapter_sql_pipe = jq_gated = False
+        adapters = adapter_sql_pipe = operand_gated = declared_raw = False
         bash_allow: tuple[Any, ...] = ()
     else:
         adapters = bash.adapters
         adapter_sql_pipe = bash.adapter_sql_pipe
-        jq_gated = bash.jq_operand_gated
+        operand_gated = bash.operand_gated
+        declared_raw = bash.raw_reads
         bash_allow = _bash_allow(bash, roots)
     return AgentPolicy(
         bash_allow=bash_allow,
-        jq_operand_gated=jq_gated,
+        operand_gated=operand_gated,
         adapters=adapters,
         adapter_sql_pipe=adapter_sql_pipe,
-        raw_reads=adapters or adapter_sql_pipe or jq_gated,
+        raw_reads=adapters or adapter_sql_pipe or declared_raw,
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
         write_allow=tuple(

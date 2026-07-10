@@ -52,15 +52,32 @@ _BASH_TIMEOUT_S = 120
 # record_query's own check.
 
 
-def _bounded_read(text: str, path: str) -> str:
+def _overflow_filter_hint(path: str, *, operand_gated: bool) -> str:
+    """The "this file is too big — here's how to reduce it" advice, keyed to the agent's
+    ACTUAL bash lane. The judge (`operand_gated`) has no `jq` and no write tool, so the
+    reader-lane advice ("jq it, write the result, read that") is doubly wrong for it: it
+    names a program it cannot run and a step it cannot take. Reducing in the pipe is the
+    whole shape of its surface."""
+    if operand_gated:
+        return (
+            "Aggregate it in the pipe rather than reading it: "
+            f'\n  cat {path} | defender-sql "SELECT count(*) FROM data"'
+        )
+    return (
+        "Filter it on disk (jq, defender-sql, grep, the Grep tool), write the result "
+        f"to a file, then read that:\n  jq '<filter>' {path}"
+    )
+
+
+def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
     """Bound a file read to the shared char cap (read at call time via
     `_read_char_cap()`). Under the cap → verbatim (the common case: every
     SKILL/lesson/doc fits with room to spare). Over it → the head, plus a notice
     carrying the FULL size (chars + lines, so the model knows the true scale it
-    can't see) and the only resolution that works on a payload this big: filter
-    on disk and read the filtered result. No paging — the files that overflow are
-    single-document JSON dumps (one giant line), so an offset/limit window is a
-    no-op; jq/grep is the way through. Slices by char, not byte, so a multibyte
+    can't see) and `filter_hint` — the only resolution that works on a payload this
+    big, spelled in the caller's own bash lane (`_overflow_filter_hint`). No paging —
+    the files that overflow are single-document JSON dumps (one giant line), so an
+    offset/limit window is a no-op. Slices by char, not byte, so a multibyte
     sequence is never split."""
     cap = _read_char_cap()
     if len(text) <= cap:
@@ -69,8 +86,7 @@ def _bounded_read(text: str, path: str) -> str:
     note = (
         f"\n\n[read_file] {len(text)} chars / {total_lines} line(s); showing the "
         f"first {cap}. This file is too large to read whole — do not "
-        "treat this head as complete. Filter it on disk (jq, grep, the Grep tool), "
-        f"write the result to a file, then read that:\n  jq '<filter>' {path}"
+        f"treat this head as complete. {filter_hint}"
     )
     return text[:cap] + note
 
@@ -301,7 +317,10 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     # Bound the in-context view BEFORE wrapping: an oversized payload read
     # whole would overflow the model's window (#303). Cap first so the head is
     # what gets tag-wrapped (injected text in it stays inert), not the full dump.
-    text = _bounded_read(text, path)
+    text = _bounded_read(
+        text, path,
+        filter_hint=_overflow_filter_hint(path, operand_gated=deps.policy.operand_gated),
+    )
     if permission.is_untrusted_read(p):
         # Attacker-influenced data — wrap so injected instructions inside it
         # are inert. Same delimiter as the rest of the system.
