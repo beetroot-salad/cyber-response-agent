@@ -152,6 +152,7 @@
   .mark.done::before{ content:"\2713"; color:var(--panel); font-weight:800; font-size:9px; animation:none; }
 
   .card-title{ font-family:var(--sans); font-weight:600; font-size:14px; line-height:1.32; margin:0; color:var(--ink); text-wrap:balance; }
+  .card-tail{ display:contents; }
 
   .card-meta{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3); display:flex; align-items:center; gap:6px; }
   .card-meta .pr{ color:var(--ink-2); text-decoration:none; }
@@ -383,6 +384,13 @@
       return `<div class="activity"><span class="act-step">▸ ${esc(r.activity.last_step)}</span><span class="act-data">${esc(r.activity.elapsed)}s</span></div>`;
     return "";
   }
+  // What activityHTML renders that render()'s structural sig does NOT track: the running run's live
+  // last_step/elapsed. (The discuss branch shows session_id, which the structural sig already covers.)
+  function actSig(c){
+    const r=c.latest_run;
+    if(c.stage!=="discuss"&&c.status==="running"&&r&&r.activity) return JSON.stringify([r.activity.last_step,r.activity.elapsed]);
+    return "";
+  }
   function metaHTML(c){
     const bits=[];
     if(c.pr_number) bits.push(`<a class="pr" href="${prUrl(c)}" target="_blank" rel="noopener">PR #${c.pr_number} ↗</a>`);
@@ -395,11 +403,32 @@
     const act=activityHTML(c);
     const meta=act?"":metaHTML(c);
     const repoTag=repoFilter==="all repos"?`<span class="repo-tag">${esc(c.repo)}</span>`:"";
-    return `<article class="card" data-status="${c.status}" data-id="${esc(c.id)}" draggable="true" tabindex="0" role="button" aria-label="issue ${c.issue_number}: ${esc(c.title)}">
+    return `<article class="card" data-status="${c.status}" data-id="${esc(c.id)}" data-asig="${esc(actSig(c))}" draggable="true" tabindex="0" role="button" aria-label="issue ${c.issue_number}: ${esc(c.title)}">
       <div class="card-top"><span class="issue">#${c.issue_number}</span>${repoTag}${markHTML(c.status)}</div>
       <h3 class="card-title">${esc(c.title)}</h3>
-      ${meta}${act}
+      <div class="card-tail">${meta}${act}</div>
     </article>`;
+  }
+  // Refresh running cards' live activity line in place. render()'s structural sig omits it on purpose
+  // (elapsed ticks every poll), and a full board rebuild for it would tear down .col-body and reset
+  // column scroll — the "blink" the sig guard prevents. Swapping only the card's tail avoids that.
+  function refreshActivity(vis){
+    const byId={}; vis.forEach(c=>{ byId[c.id]=c; });
+    board.querySelectorAll(".card").forEach(node=>{
+      const c=byId[node.dataset.id]; if(!c) return;
+      const sig=actSig(c);
+      if(node.dataset.asig===sig) return;   // activity unchanged since this card was last rendered
+      node.dataset.asig=sig;
+      const act=activityHTML(c);
+      const step=node.querySelector(".act-step"), data=node.querySelector(".act-data");
+      if(sig!==""&&act&&step&&data){
+        // same running-activity shape, new values — update text only (no node swap → no hover/opacity flicker)
+        const a=c.latest_run.activity; step.textContent="▸ "+a.last_step; data.textContent=a.elapsed+"s";
+      }else{
+        // appeared/disappeared (meta↔activity swap) — rebuild just this card's tail
+        const tail=node.querySelector(".card-tail"); if(tail) tail.innerHTML=(act?"":metaHTML(c))+act;
+      }
+    });
   }
   function render(){
     const vis=visible();
@@ -421,7 +450,7 @@
     // Only rebuild the DOM when the board actually changes — render() runs every 1.5s, and replacing
     // board.innerHTML each tick recreates the scrolling .col-body, flashing ("blinking") the scrollbar
     // and dropping any in-progress scroll.
-    const sig=repoFilter+"|"+showDone+"|"+[...collapsed].sort().join(",")+"||"+vis.map(c=>[c.stage,c.status,c.id,c.issue_number,c.repo,c.pr_number,(c.latest_run&&c.latest_run.session_id)||"",c.title].join("~")).join(";");
+    const sig=JSON.stringify([repoFilter,showDone,[...collapsed].sort(),vis.map(c=>[c.stage,c.status,c.id,c.issue_number,c.repo,c.pr_number,(c.latest_run&&c.latest_run.session_id)||"",c.title])]);
     if(board.dataset.sig!==sig){ board.dataset.sig=sig;
     board.innerHTML=stages.map(s=>{
       const cs=vis.filter(c=>c.stage===s.key);
@@ -435,6 +464,7 @@
           <span class="col-count">${cs.length}</span></div>
         <div class="col-body">${cs.map(cardHTML).join("")}</div></section>`;
     }).join(""); }
+    refreshActivity(vis);
     const need=vis.filter(c=>c.status==="awaiting_human").length, run=vis.filter(c=>c.status==="running").length;
     $("#summary").innerHTML=`<span class="chip wait"><span class="cdot"></span>${need} need you</span><span class="chip run"><span class="cdot"></span>${run} running</span>`;
     const doneN=vis.filter(c=>c.stage==="done").length;
@@ -543,16 +573,15 @@
   // ---------- toast / sync clock ----------
   let toastT; function toast(msg){ const t=$("#toast"); t.innerHTML=`<span class="tk">▸</span> ${esc(msg)}`; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2400); }
   // human-readable elapsed — seconds roll up to m/h/d so long gaps don't read as "340s ago"
-  function dur(s){ s=Math.max(0,Math.round(s)); if(s<60) return s+"s"; if(s<3600) return Math.round(s/60)+"m"; if(s<86400) return Math.round(s/3600)+"h"; return Math.round(s/86400)+"d"; }
+  function dur(s){ s=Math.max(0,Math.round(s)); if(s<60) return s+"s"; const m=Math.round(s/60); if(m<60) return m+"m"; const h=Math.round(s/3600); if(h<24) return h+"h"; return Math.round(s/86400)+"d"; }
   let lastSync=Date.now(); function setSync(){ lastSync=Date.now(); }
   setInterval(()=>{ const age=Math.round((Date.now()-lastSync)/1000); $("#syncAge").textContent=age<2?"synced":"last synced "+dur(age)+" ago"; },1000);
 
   // ---------- poll health (footer status) ----------
-  function ago(iso){ if(!iso) return ""; return dur((Date.now()-Date.parse(iso))/1000)+" ago"; }
+  function ago(iso){ if(!iso) return ""; const s=(Date.now()-Date.parse(iso))/1000; return Number.isFinite(s)?dur(s)+" ago":""; }
   function updateSyncStatus(){
     const el=$("#syncStatus"); if(!el) return;
     const pollFailed=!!(POLL&&POLL.ran&&POLL.errors>0);
-    el.classList.toggle("failed",DISCONNECTED||pollFailed);
     // healthy = render nothing; "last synced …" already says the board is live. surface trouble only.
     if(DISCONNECTED) el.innerHTML=`<span class="cdot"></span>disconnected — can’t reach the board`;
     else if(pollFailed){ const ok=POLL&&POLL.okAt?` · last ok ${ago(POLL.okAt)}`:""; el.innerHTML=`<span class="cdot"></span>polling failed${ok}`; }
