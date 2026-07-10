@@ -10,10 +10,15 @@ resolution, since the overflowing files are single-document JSON dumps a line
 window can't page.
 
 The resolution is spelled in the CALLER'S OWN bash lane (`_overflow_filter_hint`,
-keyed on `policy.operand_gated`): main/gather get the `jq`-on-disk advice, while
-the judge — which has neither `jq` nor a write tool — is told to aggregate in the
-pipe with `cat … | defender-sql`. A hint naming a program the agent cannot run is
-worse than no hint.
+derived from `policy.bash_allow` + `policy.write_allow`, never from a single capability
+bit). It is always a PIPE: every reader's `jq`/`defender-sql` is stdin-compute-only, so
+`jq '<filter>' <path>` is denied for main and gather and must never be advertised. main
+gets `cat … | jq` plus the write-the-result step; gather gets the same pipe WITHOUT that
+step (it has `jq` but no write tool); the judge gets `cat … | defender-sql` (no `jq` at
+all); a reader-less agent (actor / oracle / verify / curators) is pointed at
+`read_file(pattern=)`. A hint naming a program the agent cannot run, or a step it cannot
+take, is worse than no hint — so every branch is pinned against a REAL compiled policy,
+and the commands are asserted to pass that policy's own `decide_bash`.
 """
 from __future__ import annotations
 
@@ -25,35 +30,103 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import tools  # noqa: E402
-from defender.runtime.agent_definition import ToolSet, compile_policy_for  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.runtime import permission, tools  # noqa: E402
+from defender.runtime.agent_definition import (  # noqa: E402
+    RunScope, ToolSet, bind, compile_policy_for,
+)
+from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.permission import AgentPolicy  # noqa: E402
 
 CAP = tools._read_char_cap()
-
-# The reader-lane hint (main/gather). `_bounded_read` is hint-agnostic — the branch
-# lives in `_overflow_filter_hint`, pinned by the two tests just below.
-_MAIN_HINT = tools._overflow_filter_hint("/p.json", operand_gated=False)
+_PATH = "/run/gather_raw/l-1/0.json"
 
 
-def test_overflow_hint_reader_lane_names_jq() -> None:
-    """main/gather keep `jq` (stdin-compute-only) AND a write tool, so the filter-on-disk,
-    write-the-result, read-that advice is the one that works for them."""
-    hint = tools._overflow_filter_hint("/run/gather_raw/l-1/0.json", operand_gated=False)
+def _main_policy(tmp: Path) -> AgentPolicy:
+    return compile_policy_for(MAIN_DEF, run_dir=tmp / "run", defender_dir=_DEFENDER)
+
+
+def _gather_policy(tmp: Path) -> AgentPolicy:
+    return compile_policy_for(GATHER_DEF, run_dir=tmp / "run", defender_dir=_DEFENDER)
+
+
+def _judge_policy(tmp: Path) -> AgentPolicy:
+    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    return bind(JUDGE_DEF, tmp / "run", scope=RunScope(add_dirs=())).policy
+
+
+def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:
+    """Whether the agent's own gate would actually run `command` — the assertion that
+    turns "the hint mentions jq" into "the hint names a command this agent can run"."""
+    return permission.decide_bash(
+        command, policy=policy, run_dir=run_dir, defender_dir=_DEFENDER,
+    ).allow
+
+
+# The main-lane hint, for the `_bounded_read` tests below. `_bounded_read` stays
+# hint-agnostic — the branching lives in `_overflow_filter_hint`, pinned just below.
+_MAIN_HINT = "Reduce it in a pipe, write the result to a file, then read that"
+
+
+def _hinted_command(hint: str) -> str:
+    """The runnable command out of a hint, with the `<filter>` placeholder bound (a
+    literal `<` is a redirect token the parser rejects before the allowlist sees it)."""
+    return hint.rsplit("\n", 1)[1].strip().replace("'<filter>'", "'.a'")
+
+
+def test_overflow_hint_main_pipes_into_jq_and_names_the_write_sink(tmp_path) -> None:
+    """main has `jq` AND a write tool. The reducer must be PIPED: `jq '<filter>' <path>`
+    is denied (main/gather `jq` is stdin-compute-only), which the last assertion pins."""
+    run = tmp_path / "run"
+    pol = _main_policy(tmp_path)
+    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
     assert "jq" in hint
-    assert "/run/gather_raw/l-1/0.json" in hint
     assert "write the result" in hint
+    assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_operand_gated_lane_names_defender_sql() -> None:
-    """The judge (`operand_gated`) has NO `jq` and NO write tool, so it must be told to
-    aggregate in the pipe. A hint naming a program it cannot run, and a step it cannot
-    take, is worse than none — this is the regression that branch exists to prevent."""
-    hint = tools._overflow_filter_hint("/run/gather_raw/l-1/0.json", operand_gated=True)
+def test_overflow_hint_gather_pipes_into_jq_without_the_write_sink(tmp_path) -> None:
+    """gather has `jq` but NO write tool (`write_allow == ()`), so it must not be told to
+    write the filtered result to a file — a step it cannot take."""
+    run = tmp_path / "run"
+    pol = _gather_policy(tmp_path)
+    assert not pol.write_allow, "premise: gather has no writer"
+    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
+    assert "jq" in hint
+    assert "write the result" not in hint
+    assert _admits(pol, _hinted_command(hint), run)
+
+
+def test_overflow_hint_judge_pipes_into_defender_sql(tmp_path) -> None:
+    """The judge has NO `jq` and NO write tool, so it must be told to aggregate through
+    `defender-sql`. A hint naming a program it cannot run is worse than none."""
+    run = tmp_path / "run"
+    pol = _judge_policy(tmp_path)
+    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
     assert "defender-sql" in hint
-    assert "/run/gather_raw/l-1/0.json" in hint
     assert "jq" not in hint
     assert "write the result" not in hint
+    assert _admits(pol, _hinted_command(hint), run)
+
+
+def test_overflow_hint_reader_less_agent_points_at_read_file() -> None:
+    """The actor / oracle / verify / curators have an EMPTY bash lane: both `jq` and
+    `defender-sql` name programs they cannot run, so the only reducer left is the read
+    tool's own substring search."""
+    hint = tools._overflow_filter_hint(_PATH, AgentPolicy())
+    assert "jq" not in hint
+    assert "defender-sql" not in hint
+    assert "pattern=" in hint
+
+
+def test_overflow_hint_never_advertises_jq_over_a_file_operand(tmp_path) -> None:
+    """The regression this branch exists to prevent, stated directly: the pre-#569 hint
+    was `jq '<filter>' {path}`, which EVERY agent's gate denies — main/gather because
+    their `jq` takes no file operand, the judge because it has no `jq`."""
+    run = tmp_path / "run"
+    target = str(run / "big.json")
+    for pol in (_main_policy(tmp_path), _gather_policy(tmp_path), _judge_policy(tmp_path)):
+        assert not _admits(pol, f"jq '.a' {target}", run)
+        assert f"jq '<filter>' {target}" not in tools._overflow_filter_hint(target, pol)
 
 
 def test_cap_matches_passthrough() -> None:
@@ -74,11 +147,11 @@ def test_at_cap_verbatim() -> None:
     assert tools._bounded_read(text, "/x/f.json", filter_hint=_MAIN_HINT) == text
 
 
-def test_over_cap_truncates_head_and_appends_notice() -> None:
-    path = "/run/gather_raw/l-1/0.json"
+def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
+    path = _PATH
     text = "y" * (CAP + 5000)
     out = tools._bounded_read(
-        text, path, filter_hint=tools._overflow_filter_hint(path, operand_gated=False),
+        text, path, filter_hint=tools._overflow_filter_hint(path, _main_policy(tmp_path)),
     )
     head, _, note = out.partition("\n\n[read_file]")
     assert head == "y" * CAP  # head is exactly the first CAP chars, verbatim

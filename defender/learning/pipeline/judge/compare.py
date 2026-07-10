@@ -189,6 +189,17 @@ def _yaml_or(obj, placeholder: str) -> str:
     return yaml.safe_dump(obj, sort_keys=False, allow_unicode=True).rstrip()
 
 
+def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
+    """Every payload this lead actually wrote, absolute, in seq order — read off the
+    queries table's `raw_ref` rather than assuming `{lead_id}/0.json`. A lead that ran
+    N queries has `0.json … {N-1}.json`, and the judge cannot enumerate them itself
+    (`ls` is denied, and a `*.json` glob is inert under the shell=False executor). An
+    absence check over seq 0 alone is unsound the same way one over a `truncated`
+    payload is — the entity may sit in a sibling seq."""
+    paths = [str(q.raw_ref) for q in c.queries if q.raw_ref is not None]
+    return paths or [str(gather_raw / c.lead_id / "0.json")]
+
+
 def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     if c.note:
         head = f"# Lead {c.lead_id}  [{c.note}]"
@@ -212,6 +223,10 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     res = _yaml_or(c.resolutions, "(no belief-movement resolutions attributed to this lead)")
     authz = _yaml_or(c.authz, "(no authorization resolutions for this lead)")
 
+    payloads = _payload_paths(c, gather_raw)
+    payload_lines = "".join(f">   {p}\n" for p in payloads)
+    example = payloads[0]
+
     return (
         f"{head}\n\n"
         "## Queries executed\n"
@@ -222,12 +237,15 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         f"{c.real_sample}\n\n"
         "> The sample is ONE event, for shape orientation. To assert that a projected\n"
         "> entity is ABSENT (the refute primitive), query the FULL payload — never infer\n"
-        "> absence from the sample, and check `truncated` before reading 0 as absence.\n"
-        "> Example:\n"
-        f">   cat {gather_raw}/{c.lead_id}/0.json | defender-sql \\\n"
-        ">     \"SELECT total, returned, truncated FROM data\"\n"
-        f">   cat {gather_raw}/{c.lead_id}/0.json | defender-sql \\\n"
-        ">     \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n\n"
+        "> absence from the sample.\n"
+        f"> This lead's payloads ({len(payloads)}); an absence claim must cover ALL of them:\n"
+        f"{payload_lines}"
+        "> `DESCRIBE data` first: it runs on every shape and names the columns this payload\n"
+        "> actually has. Projecting one it lacks (`total` on an ES|QL or flat payload) is a\n"
+        "> Binder Error, not a 0. Where `truncated` IS a column, read it before reading 0\n"
+        "> as absence.\n"
+        f">   cat {example} | defender-sql \"DESCRIBE data\"\n"
+        f">   cat {example} | defender-sql \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n\n"
         "## [3] What the defender concluded about this lead (invlang — the \"why\")\n"
         "### Belief movement (:T resolutions)\n"
         f"{res}\n\n"

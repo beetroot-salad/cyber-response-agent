@@ -27,7 +27,7 @@ demands:
      outcome: {nl: "ToolSet is a frozen dataclass: read: bool=False, bash: BashGrammar|None=None, write: bool=False."},
      binds: [ToolSet]}
   - {id: bashgrammar_shape, kind: seam, form: test,
-     outcome: {nl: "BashGrammar is a frozen dataclass: shims,viewers: tuple[str,...]=(); adapters,adapter_sql_pipe,jq_operand_gated: bool=False."},
+     outcome: {nl: "BashGrammar is a frozen dataclass: shims,viewers: tuple[str,...]=(); adapters,adapter_sql_pipe,operand_gated,raw_reads: bool=False."},
      binds: [BashGrammar]}
   - {id: read_shapes_field, kind: seam, form: test,
      outcome: {nl: "AgentDefinition carries a read_shapes tuple field (default ()); the FIELD exists and is a tuple. Its filtering semantics are #535-dependent (see read_shapes_semantics clause)."},
@@ -76,16 +76,16 @@ demands:
 
   # ── compile_policy: step-one characterization (gate unchanged) ──
   - {id: compile_policy_oracle_verify_denyall, kind: behavior, form: test,
-     outcome: {nl: "compile_policy(ToolSet(), (), roots, deny_reason) for oracle/verify projects a deny-all AgentPolicy: bash_allow==(), jq_operand_gated==False, adapters==False, adapter_sql_pipe==False, raw_reads==False, read_roots==(), read_confine==(), deny_reason==the agent's reason — equal to today's _ORACLE_POLICY/_VERIFY_POLICY."},
+     outcome: {nl: "compile_policy(ToolSet(), (), roots, deny_reason) for oracle/verify projects a deny-all AgentPolicy: bash_allow==(), operand_gated==False, adapters==False, adapter_sql_pipe==False, raw_reads==False, read_roots==(), read_confine==(), deny_reason==the agent's reason — equal to today's _ORACLE_POLICY/_VERIFY_POLICY."},
      binds: ["interacts(compile_policy->AgentPolicy)", AgentPolicy]}
   - {id: compile_policy_main, kind: behavior, form: test,
-     outcome: {nl: "compile_policy(main.tools=ToolSet(read=True,bash=BashGrammar(shims,viewers),write=True), ..., roots) reproduces today's main policy: [p.pattern for p in bash_allow] == [p.pattern for p in reader_patterns(run_dir,defender_dir)]; adapters==False, adapter_sql_pipe==False, raw_reads==False, jq_operand_gated==False, read_roots==() (step-one)."},
+     outcome: {nl: "compile_policy(main.tools=ToolSet(read=True,bash=BashGrammar(shims,viewers),write=True), ..., roots) reproduces today's main policy: [p.pattern for p in bash_allow] == [p.pattern for p in reader_patterns(run_dir,defender_dir)]; adapters==False, adapter_sql_pipe==False, raw_reads==False, operand_gated==False, read_roots==() (step-one)."},
      binds: ["interacts(compile_policy->AgentPolicy)", "read_roots.access[bash]"]}
   - {id: compile_policy_gather, kind: behavior, form: test,
      outcome: {nl: "compile_policy(gather.tools=ToolSet(read=True,bash=BashGrammar(viewers,adapters=True,adapter_sql_pipe=True))) reproduces today's gather policy: bash_allow patterns == reader_patterns(run,dfn); adapters==True, adapter_sql_pipe==True, raw_reads==True, read_roots==() (step-one)."},
      binds: ["interacts(compile_policy->AgentPolicy)"]}
   - {id: compile_policy_judge, kind: behavior, form: test,
-     outcome: {nl: "compile_policy(judge.tools=ToolSet(read=True,bash=BashGrammar(jq_operand_gated=True)), roots=scope.add_dir) reproduces _judge_policy: jq_operand_gated==True, raw_reads==True, read_confine==(), read_roots==the scope add-dirs, adapters==False, adapter_sql_pipe==False, bash_allow.pattern includes '^jq(?: .*)?$'."},
+     outcome: {nl: "compile_policy(judge.tools=ToolSet(read=True,bash=BashGrammar(operand_gated=True,raw_reads=True)), roots=scope.add_dir) reproduces _judge_policy: operand_gated==True, raw_reads==True, read_confine==(), read_roots==the scope add-dirs, adapters==False, adapter_sql_pipe==False, bash_allow.pattern includes '^cat(?: [^ ]+)*$' and '^defender-sql(?: .*)?$'."},
      binds: ["interacts(compile_policy->AgentPolicy)", "read_roots.access[bash]"]}
   - {id: compile_policy_actor, kind: behavior, form: test,
      outcome: {nl: "compile_policy(actor.tools=ToolSet(read=True,bash=BashGrammar()), scope=<scripts,confine>) reproduces _actor_policy: bash_allow == one anchored 'python3 <script> ...' pattern per pinned script, raw_reads==False, read_confine==the per-leg lesson dirs, adapters==False."},
@@ -204,7 +204,7 @@ structure:
         payload:
           parts: []       # not an LLM payload; 8 scalar/tuple fields projected from the ToolSet
           invariants: []
-          nl: "the 8-field gate policy (bash_allow, jq_operand_gated, adapters, adapter_sql_pipe, raw_reads, read_roots, read_confine, deny_reason), projected field-for-field from the ToolSet + roots"
+          nl: "the 8-field gate policy (bash_allow, operand_gated, adapters, adapter_sql_pipe, raw_reads, read_roots, read_confine, deny_reason), projected field-for-field from the ToolSet + roots"
     - id: roots
       provenance: design
       facets:

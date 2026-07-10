@@ -84,11 +84,14 @@ _GATHER_PAYLOAD_TOKENS = (
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `cat`'s complete short-option set (coreutils). EVERY one is boolean — `cat` has no
-# arg-taking flag at all, and no long option is admitted by the operand-gated stage
-# grammars. That is the whole reason `cat` is the judge's file-opening program: "which
-# files does this argv open?" is answerable without reimplementing an option parser
-# (jq's `-f`/`-L`/`--slurpfile`/`--rawfile`/`--argfile` + short-bundle arg consumption
-# needed ~60 lines and three fail-closed branches to answer the same question).
+# arg-taking flag at all. That is the whole reason `cat` is the judge's file-opening
+# program: "which files does this argv open?" is answerable without reimplementing an
+# option parser (jq's `-f`/`-L`/`--slurpfile`/`--rawfile`/`--argfile` + short-bundle arg
+# consumption needed ~60 lines and three fail-closed branches to answer the same
+# question). This is the SOLE encoding of that option set: the judge's admitting pattern
+# (`engine_pydantic._CAT_PATTERN`) deliberately does not repeat it, so the grammar and
+# the extractor cannot drift apart. Anything else `-`-prefixed fails closed below, which
+# also covers a non-coreutils `cat` whose flags differ.
 _CAT_BOOL_BUNDLE = re.compile(r"-[AbeEnstTuv]+")
 
 
@@ -135,17 +138,35 @@ def _stage_unsafe(argv: list[str]) -> bool:
     return False
 
 
+# The deny for a command that does not LEX. Every other deny means "your command is not
+# a shape you may run"; this one means "your command may well be fine, but its line
+# breaks are not" — and the agent cannot tell those apart from the generic reason. It is
+# worth its own text because the failure is invisible in the command as written: the SQL
+# and ES|QL the agents are shown are rendered multi-line, and flattening is on them.
+UNTOKENIZABLE_REASON = (
+    "Blocked: the command could not be tokenized — an unbalanced quote or a trailing "
+    "`\\`. Each PHYSICAL LINE is lexed on its own (there is no shell to join them), so "
+    "a `\\` line-continuation and a newline inside a quoted argument both fail here, "
+    "even when the command is otherwise allowed. Rewrite it as a SINGLE line."
+)
+
+
 def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
     """Unwrap + parse `cmd` (already stripped) once into the `Pipeline` list, or
     None to fail closed — when `unwrap` rejects the wrapper, or the executor's
     decomposition raises on an operator/redirect it does not model (the shared
     `bash_exec.parse`, the whole point of #379: gate and executor decompose
-    identically). This is the single decomposition every branch below routes off."""
+    identically). This is the single decomposition every branch below routes off.
+
+    `UntokenizableCommand` PROPAGATES rather than flattening to None: it is the one
+    parse failure whose cause the caller can explain (`UNTOKENIZABLE_REASON`)."""
     inner = unwrap(cmd)
     if inner is None:
         return None
     try:
         return bash_exec.parse(inner)
+    except bash_exec.UntokenizableCommand:
+        raise
     except bash_exec.BashExecError:
         return None
 
@@ -241,19 +262,37 @@ _OPERAND_GATED_PROGRAMS: dict[str, Callable[[list[str]], list[str] | None]] = {
 
 
 def _operand_reads_within_roots(
-    argv: list[str], extract: Callable[[list[str]], list[str] | None],
-    policy: AgentPolicy, *, run_dir: Path | None, defender_dir: Path | None,
+    argv: list[str], policy: AgentPolicy, *, run_dir: Path | None, defender_dir: Path | None,
 ) -> bool:
-    """Whether every file an operand-gated stage opens resolves within `policy`'s read
-    roots. Calls the SAME `read_allowed_path` routine `decide_read` uses, so the bash
-    lane and the Read tool confine to one roots set through one mechanism — including
-    `read_roots` (which the textual anchors cannot see) and the secret/ground-truth
-    denylist. A stage with no file operands passes; an unparseable shape fails closed."""
+    """Whether every file this stage opens resolves within `policy`'s read roots. Calls
+    the SAME `read_allowed_path` routine `decide_read` uses, so the bash lane and the
+    Read tool confine to one roots set through one mechanism — including `read_roots`
+    (which the textual anchors cannot see) and the secret/ground-truth denylist.
+
+    A RELATIVE operand is rebased onto `defender_dir.parent` — the cwd `tools._tool_bash`
+    hands the executor — before it is resolved. Without that, the gate would `resolve()`
+    against the ambient process cwd while `cat` opens the file from the executor's, so the
+    two could name different files: the validator/executor differential this package
+    exists to eliminate. `tools._resolve_operand` already does exactly this for the file
+    tools; the bash lane now matches it.
+
+    A stage whose program is not operand-gated opens no file and passes untouched (the
+    registry lookup lives here, next to the registry, so the caller does not re-derive
+    it); so does a gated stage with no file operands. An unparseable shape fails closed."""
+    extract = _OPERAND_GATED_PROGRAMS.get(argv[0])
+    if extract is None:
+        return True
     files = extract(argv)
     if files is None:
         return False
+    if defender_dir is None:
+        return False  # no cwd to rebase against — fail closed (read_allowed_path would too)
+    cwd = defender_dir.parent
     return all(
-        read_allowed_path(f, run_dir=run_dir, defender_dir=defender_dir, policy=policy)
+        read_allowed_path(
+            f if Path(f).is_absolute() else cwd / f,
+            run_dir=run_dir, defender_dir=defender_dir, policy=policy,
+        )
         for f in files
     )
 
@@ -304,13 +343,11 @@ def _decide_readers(
         return None  # not a reader command → let the caller try adapter routing
     if any(_stage_unsafe(s) for s in stages):
         return BashDecision(False, policy.deny_reason)
-    if policy.operand_gated:
-        for s in stages:
-            extract = _OPERAND_GATED_PROGRAMS.get(s[0])
-            if extract is not None and not _operand_reads_within_roots(
-                s, extract, policy, run_dir=run_dir, defender_dir=defender_dir
-            ):
-                return BashDecision(False, policy.deny_reason)
+    if policy.operand_gated and not all(
+        _operand_reads_within_roots(s, policy, run_dir=run_dir, defender_dir=defender_dir)
+        for s in stages
+    ):
+        return BashDecision(False, policy.deny_reason)
     return _allow(pipelines)
 
 
@@ -346,7 +383,15 @@ def decide_bash(
     ):
         return BashDecision(False, RAW_DENY_REASON)
 
-    pipelines = _parse(cmd)
+    try:
+        pipelines = _parse(cmd)
+    except bash_exec.UntokenizableCommand:
+        # A lexing failure, not a policy one. Saying so is the difference between the
+        # model re-emitting its command on one line and the model concluding the
+        # program is forbidden and hunting for another (`policy.deny_reason` would say
+        # e.g. "gather may only run an adapter standalone" for a standalone adapter
+        # call whose only sin was a line break inside its quoted query).
+        return BashDecision(False, UNTOKENIZABLE_REASON)
     if pipelines is None:
         return BashDecision(False, policy.deny_reason)
 
@@ -354,7 +399,7 @@ def decide_bash(
     # every stage matches an approved shape — including the judge's pinned `python3
     # <ticket_cli>` read and the actor's pinned scripts, adapter-SHAPED commands that
     # must win over adapter classification (the job the old custom matchers did). A
-    # shape-approved command that fails the jq operand path-gate / carries an unsafe
+    # shape-approved command that fails the operand path-gate / carries an unsafe
     # construct denies HERE rather than falling through.
     reader = _decide_readers(pipelines, policy, run_dir=run_dir, defender_dir=defender_dir)
     if reader is not None:

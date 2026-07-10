@@ -32,6 +32,7 @@ from defender.runtime.agent_definition import (
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy
+from defender.runtime.permission.command_shape import SQL_SHIM
 from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
@@ -74,12 +75,17 @@ class JudgeDeps(AgentDeps):
 # The judge's bash lane is exactly two programs, split so that the one which OPENS files
 # has a trivially decidable argv and the one which COMPUTES cannot open a file at all:
 #
-#   `cat` — boolean short flags only (coreutils `cat` has no arg-taking flag), operands
-#     UNANCHORED here and instead path-gated at `resolve()` time by ``operand_gated``
-#     (``bash._OPERAND_GATED_PROGRAMS``). Unanchored is REQUIRED, not lax: `gather_raw`
-#     sits under the investigation run dir while the judge's ``run_dir`` is the learning
-#     run dir, so it arrives only via ``read_roots`` — which the anchored reader-lane
-#     grammars (``policies._common._file_operand``) cannot see. The gate calls the same
+#   `cat` — every token after the program is admitted HERE; which of them are flags and
+#     which are files is decided by ``bash._cat_input_files``, the single owner of cat's
+#     option grammar (coreutils `cat` has no arg-taking flag, so an unknown `-token` is a
+#     grammar/gate disagreement and fails CLOSED there). This pattern deliberately does
+#     NOT re-encode the flag set: a second copy that drifts from the extractor's is the
+#     fail-open this gate exists to prevent. Operands are UNANCHORED here and instead
+#     path-gated at `resolve()` time by ``operand_gated`` (``bash._OPERAND_GATED_PROGRAMS``).
+#     Unanchored is REQUIRED, not lax: `gather_raw` sits under the investigation run dir
+#     while the judge's ``run_dir`` is the learning run dir, so it arrives only via
+#     ``read_roots`` — which the anchored reader-lane grammars
+#     (``policies._common._file_operand``) cannot see. The gate calls the same
 #     ``read_allowed_path`` as ``decide_read``, so a `..` escape, an out-of-roots path,
 #     and the secret/ground-truth denylist are all rejected identically on both surfaces.
 #   `defender-sql` — argument-inert: it reads stdin only, takes exactly one argv (the
@@ -87,8 +93,8 @@ class JudgeDeps(AgentDeps):
 #     one-way) BEFORE the caller's SQL runs. The sandbox bounds it, not this pattern.
 #
 # grep/head/tail/ls fold into ``read_file`` (with its optional grep ``pattern``).
-_CAT_PATTERN = re.compile(r"^cat(?: -[AbeEnstTuv]+)*(?: [^ ]+)*$")
-_SQL_PATTERN = re.compile(r"^defender-sql(?: .*)?$")
+_CAT_PATTERN = re.compile(r"^cat(?: [^ ]+)*$")
+_SQL_PATTERN = re.compile(rf"^{re.escape(SQL_SHIM)}(?: .*)?$")
 
 
 def _ticket_pattern(py: str, ticket_cli: Path) -> re.Pattern[str]:

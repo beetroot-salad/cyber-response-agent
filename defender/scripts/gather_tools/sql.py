@@ -31,17 +31,25 @@ element. There is no wrapper envelope to reach through — an adapter's
 stdout is the payload verbatim. Output is a JSON array of row objects on
 stdout.
 
-Shapes an onboarded adapter actually emits today, and the idiom for each:
+`DESCRIBE data` runs against every shape and names the columns the payload
+actually has; projecting one it lacks is a Binder Error, not an empty
+result. Shapes an onboarded adapter emits today, and the idiom for each:
 
-    {index, total, returned, truncated, hits}  ->  unnest(hits)
-    {columns, row_count, values}   (ES|QL)     ->  unnest(values)
+    {index, total, returned, truncated, hits}  ->  unnest(hits) -> a STRUCT;
+                                                   filter on h.<field>
+    {columns, row_count, values}   (ES|QL)     ->  unnest(values) -> a
+                                                   POSITIONAL JSON[] , not a
+                                                   struct: `SELECT columns FROM
+                                                   data` for the field order,
+                                                   then 1-based `v[2]->>'$'`
     a flat object (cmdb/identity/...)          ->  SELECT * FROM data
     a bare array of docs                       ->  SELECT ... FROM data
 
-`truncated`/`total` are load-bearing for absence checks: `hits` holds only
-the first `returned` rows, so "not in `hits`" means "absent" only when
-`truncated` is false. An empty payload is an input error (exit 2), never
-an empty result set — absence must be read off a query, not off silence.
+`truncated`/`total` are load-bearing for absence checks on the search-hits
+shape (the only one carrying them): `hits` holds only the first `returned`
+rows, so "not in `hits`" means "absent" only when `truncated` is false. An
+empty payload is an input error (exit 2), never an empty result set —
+absence must be read off a query, not off silence.
 
 Sandbox: the payload is materialized into an in-memory table, then DuckDB
 is sealed — `enable_external_access=false` + `lock_configuration=true` —
@@ -67,7 +75,7 @@ EXIT_OK = 0           # success (an empty result set is still 0)
 EXIT_QUERY_ERROR = 1  # the SQL was rejected by DuckDB
 EXIT_INPUT_ERROR = 2  # no stdin, unparseable payload, or duckdb missing
 
-# read_json_auto's default per-object cap is small; a single `--raw` envelope
+# read_json_auto's default per-object cap is small; a single adapter payload
 # can be larger, so lift it. 1 GiB is a generous ceiling, not a target.
 _MAX_OBJECT_SIZE = 1 << 30
 
@@ -165,9 +173,10 @@ def main() -> int:
         description="Sandboxed SQL aggregation over a JSON/NDJSON payload on stdin, "
                     "exposed as the table `data`. Tier-2 fallback for a source with "
                     "no native aggregation (see skills/connect/cli-adapter.md).",
-        epilog="example: defender-<system> '<filter>' --raw | defender-sql "
+        epilog="the payload IS the table — there is no wrapper envelope to reach "
+               "through. example: defender-<system> query '<filter>' | defender-sql "
                "\"SELECT h.user, count(*) c "
-               "FROM (SELECT unnest(result.hits) h FROM data) GROUP BY 1 ORDER BY c DESC\"",
+               "FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\"",
     )
     parser.add_argument(
         "sql",

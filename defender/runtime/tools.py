@@ -52,21 +52,40 @@ _BASH_TIMEOUT_S = 120
 # record_query's own check.
 
 
-def _overflow_filter_hint(path: str, *, operand_gated: bool) -> str:
-    """The "this file is too big — here's how to reduce it" advice, keyed to the agent's
-    ACTUAL bash lane. The judge (`operand_gated`) has no `jq` and no write tool, so the
-    reader-lane advice ("jq it, write the result, read that") is doubly wrong for it: it
-    names a program it cannot run and a step it cannot take. Reducing in the pipe is the
-    whole shape of its surface."""
-    if operand_gated:
+def _lane_admits(policy: permission.AgentPolicy, probe: str) -> bool:
+    """Whether the agent's bash lane would accept `probe` — the one honest way to ask
+    "can this agent run that program?", since `bash_allow` is a regex tuple and carries
+    no program list."""
+    return any(p.fullmatch(probe) for p in policy.bash_allow)
+
+
+def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
+    """The "this file is too big — here's how to reduce it" advice, derived from the
+    agent's ACTUAL bash lane. A hint naming a program the agent cannot run, or a step it
+    cannot take, is worse than no hint — and every part of it here is load-bearing:
+
+      - the reducer is always PIPED (`cat <path> | …`), never handed the file. Every
+        reader's `jq`/`defender-sql` is stdin-compute-only — `jq '<filter>' <path>` is
+        DENIED for main and gather alike, so naming that form taught a dead command;
+      - `jq` when the lane has it (main/gather), `defender-sql` when it does not but the
+        SQL shim is there (the judge — its whole surface is `cat … | defender-sql`);
+      - the write-the-result-to-a-file step ONLY for an agent with a writer: gather has
+        `jq` but no write tool, so it reads the filtered text straight back;
+      - a lane with neither reducer (actor / oracle / verify / curators) gets pointed at
+        `read_file(pattern=)`, the only reduction it actually has.
+    """
+    sql_shim = permission.command_shape.SQL_SHIM
+    if _lane_admits(policy, "jq '.'"):
+        reducer = "jq '<filter>'"
+    elif _lane_admits(policy, f"{sql_shim} 'SELECT 1'"):
+        reducer = f'{sql_shim} "SELECT count(*) FROM data"'
+    else:
         return (
-            "Aggregate it in the pipe rather than reading it: "
-            f'\n  cat {path} | defender-sql "SELECT count(*) FROM data"'
+            "You have no bash reducer for this. Narrow it with the read tool's substring "
+            f"search instead:\n  read_file({path!r}, pattern='<substring>')"
         )
-    return (
-        "Filter it on disk (jq, defender-sql, grep, the Grep tool), write the result "
-        f"to a file, then read that:\n  jq '<filter>' {path}"
-    )
+    sink = ", write the result to a file, then read that" if policy.write_allow else ""
+    return f"Reduce it in a pipe{sink}:\n  cat {path} | {reducer}"
 
 
 def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
@@ -317,10 +336,7 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     # Bound the in-context view BEFORE wrapping: an oversized payload read
     # whole would overflow the model's window (#303). Cap first so the head is
     # what gets tag-wrapped (injected text in it stays inert), not the full dump.
-    text = _bounded_read(
-        text, path,
-        filter_hint=_overflow_filter_hint(path, operand_gated=deps.policy.operand_gated),
-    )
+    text = _bounded_read(text, path, filter_hint=_overflow_filter_hint(path, deps.policy))
     if permission.is_untrusted_read(p):
         # Attacker-influenced data — wrap so injected instructions inside it
         # are inert. Same delimiter as the rest of the system.

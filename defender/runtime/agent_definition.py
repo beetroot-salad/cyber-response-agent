@@ -79,11 +79,13 @@ class BashGrammar:
         of a file-opening stage is path-gated to the read roots at ``resolve()`` time
         (``bash._OPERAND_GATED_PROGRAMS``), which is what lets it reach ``gather_raw``
         — a tree the textual anchors cannot see, since it is not under its ``run_dir``.
-      - ``raw_reads`` — may read ``gather_raw/**``. DECLARED, not inferred: ``adapters``/
-        ``adapter_sql_pipe`` imply it (gather owns the payloads it captures), but the
-        judge has neither and still must read raw, and the ``defender-sql`` *shim* is
-        not the ``adapter_sql_pipe`` *route*. Inferring it from the bash lane is how
-        the judge silently loses ``gather_raw`` to the clamp in ``bash.decide_bash``.
+      - ``raw_reads`` — may read ``gather_raw/**``. DECLARED, never inferred from a
+        sibling bit: gather declares it (it owns the payloads it captures) and so does
+        the judge, which has neither ``adapters`` nor ``adapter_sql_pipe`` — the
+        ``defender-sql`` *shim* is not the ``adapter_sql_pipe`` *route*. Inferring it
+        from the bash lane is how the judge silently loses ``gather_raw`` to the clamp
+        in ``bash.decide_bash``; inferring it FOR an adapter agent would make a declared
+        ``raw_reads=False`` a lie. main/actor/oracle/verify leave it off.
       - ``skills_rm`` — the lead author's scoped ``rm``-of-drafts grant: ``compile_policy``
         anchors the single ``rm <defender_dir>/skills/<draft>`` matcher on the run's
         ``defender_dir`` (the worktree). A per-run bash pattern like the actor's pinned
@@ -308,10 +310,10 @@ def compile_policy(
     """Project a ``ToolSet`` + resolved ``roots`` into the gate's ``AgentPolicy`` — the
     derived runtime artifact ``decide_bash``/``decide_read`` key on.
 
-    A genuine projection: the capability bits come straight off the grammar (a bit is
-    set only when its source bit is), ``raw_reads`` is derived (an agent that runs
-    adapters or the judge's path-gated ``cat`` reads ``gather_raw``; main/actor/oracle/verify do not),
-    and the read roots/confine come from the scope. ``read_shapes`` (#545 — decision 3) is
+    A genuine projection: EVERY capability bit comes straight off the grammar (a bit is
+    set only when its source bit is) — ``raw_reads`` included, so the declared value is
+    never overridden by an inference (gather and the judge declare it; main/actor/oracle/
+    verify do not), and the read roots/confine come from the scope. ``read_shapes`` (#545 — decision 3) is
     CONSUMED here: each shape-builder the def carries is resolved against the run's roots into
     the read-tool filename filter (``decide_read`` then admits exactly the filename set the bash
     ``cat`` lane does). Empty ``read_shapes`` ⇒ no filter (the legacy root-only read gate).
@@ -328,20 +330,20 @@ def compile_policy(
     _require_write_co_constraint(tools, write_shapes)
     bash = tools.bash
     if bash is None:
-        adapters = adapter_sql_pipe = operand_gated = declared_raw = False
+        adapters = adapter_sql_pipe = operand_gated = raw_reads = False
         bash_allow: tuple[Any, ...] = ()
     else:
         adapters = bash.adapters
         adapter_sql_pipe = bash.adapter_sql_pipe
         operand_gated = bash.operand_gated
-        declared_raw = bash.raw_reads
+        raw_reads = bash.raw_reads
         bash_allow = _bash_allow(bash, roots)
     return AgentPolicy(
         bash_allow=bash_allow,
         operand_gated=operand_gated,
         adapters=adapters,
         adapter_sql_pipe=adapter_sql_pipe,
-        raw_reads=adapters or adapter_sql_pipe or declared_raw,
+        raw_reads=raw_reads,
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
         write_allow=tuple(

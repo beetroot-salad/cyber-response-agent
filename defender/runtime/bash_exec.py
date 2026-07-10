@@ -54,6 +54,21 @@ class BashExecError(Exception):
     the gate and the executor have diverged. Raised rather than silently mis-running."""
 
 
+class UntokenizableCommand(BashExecError):
+    """A physical line does not lex: an unbalanced quote or a dangling `\\` escape.
+
+    Split out from its parent because it is the ONE parse failure with a cause worth
+    explaining to the caller. `parse` lexes each physical line independently (an
+    unquoted newline is a command separator, so splitting first is what stops a second
+    command hiding behind one), which means it does not model bash's line-JOINING
+    rules: a `\\`-continuation and a newline inside a quoted string both leave line 1
+    unbalanced and land here. That is a deliberate capability cut — reimplementing
+    line-joining is the validator/executor differential this module exists to close —
+    so the gate turns this into a deny that says so, rather than the generic
+    "not an approved shape" reason, which would send the model hunting for a different
+    program when its command was fine and only its LINE BREAKS were not."""
+
+
 @dataclass(frozen=True)
 class Stage:
     """One command in a pipeline: its argv plus how its stderr is wired.
@@ -154,7 +169,7 @@ def parse(inner: str) -> list[Pipeline]:
     for line in inner.split("\n"):
         toks = tokenize(line)
         if toks is None:
-            raise BashExecError("untokenizable command reached the executor")
+            raise UntokenizableCommand("untokenizable command reached the executor")
         i, n = 0, len(toks)
         while i < n:
             i = builder.feed_token(toks, i)

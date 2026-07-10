@@ -130,7 +130,7 @@ The six agents, in this shape:
 |---|---|---|
 | main | `read=True`, `bash=BashGrammar(shims, viewers)`, `write=True` | `RunPaths` + corpus (per-run after #535) |
 | gather | `read=True`, `bash=BashGrammar(viewers, adapters=True, adapter_sql_pipe=True)` | `RunPaths` + corpus (per-run after #535) |
-| judge | `read=True`, `bash=BashGrammar(jq_operand_gated=True)` | + comparison dir (via `scope`) |
+| judge | `read=True`, `bash=BashGrammar(operand_gated=True, raw_reads=True)` | + comparison dir (via `scope`) |
 | actor | `read=True`, `bash=BashGrammar()` | + confine + pinned scripts (via `scope`) |
 | **oracle** | **`ToolSet()`** — nothing | — |
 | **verify** | **`ToolSet()`** — nothing | — |

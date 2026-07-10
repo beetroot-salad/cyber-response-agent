@@ -26,6 +26,7 @@ from __future__ import annotations
 from . import command_shape
 from .bash import (
     ADAPTER_STANDALONE_REASON,
+    UNTOKENIZABLE_REASON,
     BashDecision,
     decide_bash,
     require_anchor_root,
@@ -40,6 +41,7 @@ __all__ = [
     "ADAPTER_STANDALONE_REASON",
     "FALLTHROUGH_DENY_REASON",
     "GATHER_FALLTHROUGH_DENY_REASON",
+    "UNTOKENIZABLE_REASON",
     "AgentPolicy",
     "BashDecision",
     "Decision",

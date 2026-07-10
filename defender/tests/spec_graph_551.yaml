@@ -41,7 +41,7 @@ demands:
     kind: behavior
     form: test
     outcome: {nl: "the JUDGE production site builds deps via bind(JUDGE_DEF, run_dir, scope=RunScope(
-      add_dirs, ticket_cli)); the policy is jq_operand_gated with raw_reads, read_roots == add_dirs,
+      add_dirs, ticket_cli)); the policy is operand_gated with raw_reads, read_roots == add_dirs,
       and (benign) the pinned --require-closed ticket pattern."}
     binds: ["bind", "read_surface.access[bash-jq]"]
   - id: d1_actor_via_bind
@@ -257,7 +257,7 @@ demands:
   - id: d5_judge_actor_bash_lane_preserved
     kind: survival
     form: test
-    outcome: {nl: "the judge jq lane (jq_operand_gated, operands confined to scope.add_dirs, ticket
+    outcome: {nl: "the judge cat|defender-sql lane (operand_gated, operands confined to scope.add_dirs, ticket
       --require-closed) and the actor python3-<script> lane are unchanged by the factory retirement —
       _judge_policy/_actor_policy are KEPT as compile_policy._bash_allow's internal pattern helpers
       (decision Q1, keep-as-helpers); only their JudgeDeps.for_scope/ActorDeps.for_scope front-doors

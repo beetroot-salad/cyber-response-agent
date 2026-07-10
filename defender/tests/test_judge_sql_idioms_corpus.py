@@ -23,6 +23,7 @@ refute primitive would have read as "the projected entity is missing".
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -94,8 +95,32 @@ def test_the_dead_recipe_stays_dead():
     errors, because no adapter emits a `result` wrapper. Pinning the failure keeps anyone
     from reintroducing the recipe on the strength of the old docs."""
     proc = _sql(_ELASTIC, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
-    assert proc.returncode != 0
-    assert "result" in proc.stderr
+    assert proc.returncode == 1  # EXIT_QUERY_ERROR: DuckDB rejected the SQL
+    # the error must be ABOUT the missing `result` wrapper, not some unrelated failure
+    assert "Binder Error" in proc.stderr
+    assert 'Referenced table "result" not found' in proc.stderr
+
+
+# Every authored surface that could re-teach the dead recipe. `test_judge_prompts_*`
+# below covers only the two prompts; the recipe originally survived precisely because
+# it was copied across several docs, so guard all of them at once.
+_IDIOM_SURFACES = (
+    _DEFENDER / "scripts" / "gather_tools" / "sql.py",
+    _DEFENDER / "skills" / "connect" / "cli-adapter.md",
+    _JUDGE / "compare.py",
+    _JUDGE / "run.py",
+    _JUDGE / "malicious.md",
+    _JUDGE / "benign.md",
+)
+
+
+@pytest.mark.parametrize("surface", _IDIOM_SURFACES, ids=lambda p: p.name)
+def test_no_surface_resurrects_the_result_envelope(surface):
+    """`unnest(result.hits)` has no legitimate home anywhere: no adapter emits a `result`
+    wrapper. sql.py's argparse EPILOG kept teaching it long after the module docstring
+    stopped — and `defender-sql --help` is inside the judge's bash lane, so the fiction
+    was one `--help` away from being copied back into a query."""
+    assert "result.hits" not in surface.read_text(), f"{surface.name} re-teaches the dead recipe"
 
 
 def test_esql_shape_on_the_real_tracked_payload():
@@ -107,6 +132,60 @@ def test_esql_shape_on_the_real_tracked_payload():
     assert _rows(payload, "SELECT row_count FROM data") == [{"row_count": doc["row_count"]}]
     assert _rows(payload, "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data)") \
         == [{"n": len(doc["values"])}]
+
+
+def test_esql_values_are_positional_json_not_a_struct():
+    """The trap the prompts must not fall into: `unnest(values)` yields a POSITIONAL
+    `JSON[]`, NOT the named struct `unnest(hits)` yields. `v.<field>` — the idiom the
+    prompt teaches for search hits — is a Binder Error here, so the ES|QL row of the
+    shape table must teach positional indexing + a JSON unwrap instead."""
+    payload = _REAL_ESQL.read_text()
+    doc = json.loads(payload)
+    field = doc["columns"][1]["name"]                       # a real ES|QL column name
+
+    struct_idiom = _sql(payload, f"SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v.\"{field}\" = 'x'")
+    assert struct_idiom.returncode == 1
+    assert "not a struct" in struct_idiom.stderr
+
+    # what the prompt now teaches: 1-based positional index + `->>'$'` to unwrap the JSON
+    wanted = json.loads(json.dumps(doc["values"][0][1]))    # the real value at position 2
+    assert _rows(payload, f"SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE v[2]->>'$' = '{wanted}'") \
+        == [{"n": 1}]
+
+
+def _payload_without_truncated(shape: str) -> str:
+    """One payload per corpus shape that has no `truncated` column — ES|QL off the real
+    tracked fixture, the other two hand-written (they are shape, not content)."""
+    return {
+        "esql": lambda: _REAL_ESQL.read_text(),
+        "flat": lambda: json.dumps({"host": "web-1", "owner": "team.platform"}),
+        "bare_array": lambda: json.dumps([{"user": "alice"}]),
+    }[shape]()
+
+
+@pytest.mark.parametrize("shape", ["esql", "flat", "bare_array"])
+def test_truncation_probe_is_shape_specific_not_universal(shape):
+    """`SELECT total, returned, truncated FROM data` is a Binder Error on every shape but
+    search-hits — and ES|QL (31/640) plus flat objects (~230/640) are ~40% of the corpus.
+    So the prompts must NOT mandate it as the unconditional first step; they must send the
+    judge through `DESCRIBE data` (which runs on every shape) and gate the probe on
+    `truncated` actually being a column."""
+    payload = _payload_without_truncated(shape)
+    proc = _sql(payload, "SELECT total, returned, truncated FROM data")
+    assert proc.returncode == 1
+    assert "Binder Error" in proc.stderr
+    # DESCRIBE, by contrast, answers on every shape — which is why it goes first
+    assert _rows(payload, "DESCRIBE data")
+
+
+@pytest.mark.parametrize("prompt", ["malicious.md", "benign.md"])
+def test_prompts_do_not_mandate_the_truncation_probe_unconditionally(prompt):
+    """The regression guard for the above: `DESCRIBE data` must be taught, and the
+    `total, returned, truncated` probe must never be introduced as the unconditional
+    "run this first" step."""
+    text = (_JUDGE / prompt).read_text()
+    assert "DESCRIBE data" in text
+    assert "SELECT total, returned, truncated FROM data` first" not in text
 
 
 def test_flat_object_is_one_row():
@@ -158,3 +237,30 @@ def test_judge_prompts_teach_a_live_idiom(prompt):
     assert "unnest(result.hits)" not in text
     assert "jq" not in text
     assert "truncated" in text  # the absence-check guard
+
+
+# Every `cat … | defender-sql "…"` the prompts show, from fenced blocks and inline
+# backticks alike. Deliberately matches ANY operand, absolute or relative — a regex that
+# only found the absolute form would pass vacuously on exactly the bug it must catch.
+_PROMPT_CMD_RE = re.compile(r"cat \S+ \| defender-sql \"[^\"]*\"")
+
+
+@pytest.mark.parametrize("prompt", ["malicious.md", "benign.md"])
+def test_every_command_the_prompt_teaches_passes_the_judges_own_gate(prompt):
+    """The whole point of #569's "the documented recipe was dead" finding, turned into a
+    gate. A worked example the judge copies must be one `decide_bash` would ALLOW — so a
+    relative operand (resolves outside the read roots) or a `\\`-continuation (the parser
+    splits on newlines before tokenizing) can never ship in a prompt again."""
+    pytest.importorskip("pydantic_ai")
+    from defender.runtime import permission
+    from defender.learning.pipeline.judge.engine_pydantic import _judge_policy
+
+    root = Path("/abs/path")
+    policy = _judge_policy(read_roots=(root,), ticket_cli=None)
+    commands = _PROMPT_CMD_RE.findall((_JUDGE / prompt).read_text())
+    assert commands, "the prompt shows no defender-sql command — did the example shape change?"
+    for cmd in commands:
+        decision = permission.decide_bash(
+            cmd, policy=policy, run_dir=Path("/run"), defender_dir=_DEFENDER,
+        )
+        assert decision.allow, f"the prompt teaches a command its own gate denies: {cmd}"

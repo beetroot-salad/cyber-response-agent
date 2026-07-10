@@ -19,6 +19,13 @@ from defender.skills.invlang.validate import validate_companion
 from .decision import Decision
 from .policy import AgentPolicy
 
+# Everything `Path.resolve()` can throw on a hostile operand, so every gate that
+# resolves one fails CLOSED instead of propagating. `OSError`/`RuntimeError` are the
+# filesystem + symlink-cycle cases; `ValueError` is an embedded NUL (`cat a\0b`),
+# which `shlex` happily tokenizes into an operand — without it the exception escapes
+# `decide_read`/`decide_bash` and crashes the tool call rather than denying it.
+_RESOLVE_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError, ValueError)
+
 
 def _is_within(p: Path, root: Path) -> bool:
     """True iff resolved path `p` is `root` or below it."""
@@ -77,19 +84,19 @@ def read_allowed_path(
     """Whether a file operand resolves within `policy`'s read roots — the
     containment half of `decide_read`, reused by the judge's bash-lane `cat`
     path-gate (`permission.bash`). FAILS CLOSED: a `resolve()` error (a symlink
-    cycle) OR a missing root context (`run_dir`/`defender_dir` `None`) returns
-    `False`, never raises. The secret/ground-truth denylist IS applied (parity with
-    `decide_read`, so `cat` can't read a denied file the read tool refuses — the
-    held-out `ground_truth.yaml`, a captured `.env`); the gather_raw RAW clamp is
-    NOT — a `cat` reader that may read raw (the judge, `raw_reads=True`) legitimately
-    names a gather_raw path, and the bash gate owns the raw clamp for agents that
-    may not."""
+    cycle, an embedded NUL) OR a missing root context (`run_dir`/`defender_dir`
+    `None`) returns `False`, never raises. The secret/ground-truth denylist IS
+    applied (parity with `decide_read`, so `cat` can't read a denied file the read
+    tool refuses — the held-out `ground_truth.yaml`, a captured `.env`); the
+    gather_raw RAW clamp is NOT — a `cat` reader that may read raw (the judge,
+    `raw_reads=True`) legitimately names a gather_raw path, and the bash gate owns
+    the raw clamp for agents that may not."""
     if run_dir is None or defender_dir is None:
         return False  # no root context to gate against — fail closed
     try:
         rp = Path(path).resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
-    except (OSError, RuntimeError):
+    except _RESOLVE_ERRORS:
         return False
     if _denylisted(rp):
         return False  # a secret / ground-truth file is denied even inside a root
@@ -131,8 +138,8 @@ def decide_read(
     try:
         rp = p.resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
-    except (OSError, RuntimeError):
-        return Decision(False, f"Blocked: {p} could not be resolved (failing closed).")
+    except _RESOLVE_ERRORS:
+        return Decision(False, f"Blocked: {p!r} could not be resolved (failing closed).")
     if not any(_is_within(rp, root) for root in roots):
         return Decision(
             False,
@@ -206,8 +213,8 @@ def decide_write(
     path = Path(path)
     try:
         rp = path.resolve()
-    except (OSError, RuntimeError):
-        return Decision(False, f"Blocked: {path} could not be resolved (failing closed).")
+    except _RESOLVE_ERRORS:
+        return Decision(False, f"Blocked: {path!r} could not be resolved (failing closed).")
     if not any(pat.fullmatch(str(rp)) for pat in policy.write_allow):
         return Decision(
             False,
