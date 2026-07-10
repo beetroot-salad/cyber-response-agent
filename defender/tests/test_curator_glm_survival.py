@@ -375,17 +375,20 @@ def test_env_corpus_two_writers_distinct(tmp_path: Path):
 def test_runner_teardown_structural():
     """STRUCTURAL. No production module under ``defender/learning/author`` references the
     removed ``claude -p`` transport symbols — ``invoke_claude_print`` /
-    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted) — while
-    ``resolve_verifier_python`` SURVIVES with its four curator callers (each still builds a
-    ``python3 <verifier>`` bash grant). AST-walk of Name/Attribute references (not
-    docstrings/comments), so the check is about real callers — a conservation guard against
-    re-introducing the transport."""
+    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted). AST-walk of Name/Attribute
+    references (not docstrings/comments), so the check is about real callers — a conservation
+    guard against re-introducing the transport.
+
+    NB #558 INVERTS the old ``resolve_verifier_python`` SURVIVES assertion that used to live
+    here (the forward-check is now an in-process tool, not a ``python3 <verifier>`` subprocess).
+    That inversion is now owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
+    _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml), which asserts
+    ZERO callers — so it is dropped from this #556 teardown guard rather than kept green here."""
     import defender.learning.author.shared as _anchor  # any author module → the package dir
 
     author_dir = Path(_anchor.__file__).resolve().parent
     torn_down = ("invoke_claude_print", "curator_allowed_tools", "curator_agent_env")
     referencing = {sym: set() for sym in torn_down}
-    verifier_callers: set[str] = set()
 
     for py in sorted(author_dir.rglob("*.py")):
         if py.name.startswith("test_"):
@@ -400,22 +403,11 @@ def test_runner_teardown_structural():
         for sym in torn_down:
             if sym in names:
                 referencing[sym].add(rel)
-        if "resolve_verifier_python" in names:
-            verifier_callers.add(rel)
 
     # Teardown: zero production references to the retired transport symbols.
     assert referencing["invoke_claude_print"] == set()
     assert referencing["curator_allowed_tools"] == set()
     assert referencing["curator_agent_env"] == set()
-
-    # Survives: the four curators (A/B/C/D) each still resolve a verifier python.
-    four_curators = {
-        "lessons/run.py",             # A — findings → defender/lessons/
-        "malicious_actor/run.py",     # B — actor tradecraft → defender/lessons-actor/
-        "benign_actor/run.py",        # C — env benign → defender/lessons-environment/
-        "benign_actor/env.py",        # D — env adversarial → defender/lessons-environment/
-    }
-    assert four_curators <= verifier_callers
 
 
 # ===========================================================================

@@ -1,0 +1,916 @@
+schema_version: 1
+design: "https://github.com/beetroot-salad/cyber-response-agent/issues/558 (+ comment-4928624243, the authoritative revision)"
+base: 8197a36d
+
+# ---------------------------------------------------------------------------
+# DEMANDS — the spec proper. d* = design-extracted / enrichment-derived;
+# m* = minted by a gate rule (see gate.obligations); w* = recorded waivers.
+# ---------------------------------------------------------------------------
+demands:
+
+  # --- D0: the return-value contract. Everything else asserts against this. ---
+  - id: d0_returns_text_protocol
+    kind: behavior
+    form: test
+    outcome:
+      nl: "forward_check returns one GOOD/BAD/ERROR line per input pair in input order, followed by a BATCH: n_good=… n_bad=… n_error=… summary line, and never raises for a per-pair fault."
+    binds: ["forward_check_tool", "interacts(curator_agent->forward_check_tool).response"]
+    rejected:
+      - nl: "return a structured list of {lesson, id, verdict, detail} objects instead of the text protocol"
+
+  - id: d0b_results_in_input_order
+    kind: behavior
+    form: test
+    outcome:
+      nl: "When the checks complete out of order the result lines are still emitted in input-pair order."
+    binds: ["forward_check_tool"]
+
+  # --- Tool existence, binding, and the absent script operand ---
+  - id: d1_tool_registered_for_corpus_author
+    kind: seam
+    form: test
+    outcome:
+      nl: "The forward_check tool is registered on an agent built for the corpus-author role and is absent from every other role's toolset."
+    binds: ["corpus_author_toolset", "interacts(curator_agent->forward_check_tool)"]
+
+  - id: d2_check_bound_from_deps_not_operand
+    kind: seam
+    form: test
+    outcome:
+      nl: "Which forward-check runs is carried on the curator deps and bound at spawn; the tool exposes no script or program operand."
+    binds: ["curator_deps_check", "forward_check_tool"]
+    rejected:
+      - nl: "a script-path argument on the tool, the shape batch.py's argv[1] had"
+
+  - id: d3_no_program_operand_negative
+    kind: negative
+    form: test
+    outcome:
+      nl: "No argument accepted by the forward-check tool can cause a program of the model's choosing to execute; the tool's signature admits only lesson/id/direction pairs."
+    binds: ["forward_check_tool", "interacts(curator_agent->forward_check_tool).payload"]
+    # positive control: d0 — a legitimate pair set does execute the bound check.
+
+  - id: d4_single_pair_is_a_length_one_batch
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A one-off recheck is the tool called with a single pair; it produces one verdict line and a BATCH: summary counting one."
+    binds: ["forward_check_tool"]
+
+  - id: d4b_empty_pairs_is_an_empty_batch
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "An empty pair list returns only the BATCH: n_good=0 n_bad=0 n_error=0 summary and invokes no check."
+    binds: ["forward_check_tool"]
+
+  - id: d4c_duplicate_pairs_are_not_deduplicated
+    kind: behavior
+    form: test
+    outcome:
+      nl: "An identical pair supplied twice yields two result lines, one per occurrence, in input order."
+    binds: ["forward_check_tool"]
+    rejected:
+      - nl: "deduplicate identical pairs to a single result line"
+
+  - id: d5_all_four_curators_share_the_signature
+    kind: parity
+    form: test
+    outcome:
+      nl: "Each of the four curators invokes the same forward_check tool signature; the only per-curator variation is which check the deps bind."
+    binds: ["forward_check_tool", "curator_deps_check"]
+
+  # --- Fan-out, isolation, faults ---
+  - id: d6_concurrency_bounded_by_workers
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "The number of checks in flight at any instant never exceeds the configured worker bound."
+    binds: ["VERIFY_BATCH_WORKERS.domain.default", "forward_check_tool"]
+
+  - id: d7_one_check_fault_does_not_fail_the_batch
+    kind: behavior
+    form: test
+    outcome:
+      nl: "When one check raises a per-run fault, that pair reports ERROR with a cause-specific detail and every other pair still reports its real verdict."
+    binds: ["forward_check_tool", "interacts(curator_agent->verify_stage)"]
+    rejected:
+      - nl: "let the exception propagate and fail the whole tool call"
+
+  - id: m14_raising_check_does_not_cancel_siblings
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A check that raises does not cancel its sibling checks; the siblings run to completion and their verdicts appear."
+    binds: ["interacts(curator_agent->verify_stage)", "forward_check_tool"]
+    rejected:
+      - nl: "a bare asyncio.gather, whose default return_exceptions=False propagates the first exception, and pydantic-ai's own except-BaseException, which cancels sibling tool tasks"
+
+  - id: d8_per_check_timeout_is_one_pairs_error
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "A check exceeding the verifier timeout is reported as that pair's ERROR with a timeout-specific detail, and the batch completes."
+    binds: ["VERIFIER_TIMEOUT.domain.default", "forward_check_tool"]
+
+  - id: d9_error_details_are_cause_specific
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The ERROR detail distinguishes a timeout from a model or API fault from an unparseable verdict from a missing lesson file — the four causes batch.py separated."
+    binds: ["forward_check_tool"]
+
+  - id: d9b_unusable_verdict_is_that_pairs_error
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A check whose model output carries no verdict line, or a verdict that is neither GOOD nor BAD, is that pair's ERROR rather than a coerced verdict."
+    binds: ["forward_check_tool", "interacts(verify_stage->verify_model).response"]
+    rejected:
+      - nl: "treat an unrecognized verdict as BAD"
+      - nl: "use the first of several verdict lines"
+
+  - id: d10_systemic_faults_propagate
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A systemic FatalConfigError or StageAbort raised by a check propagates out of the tool rather than being flattened into an ERROR line, preserving the systemic-versus-per-run split the other in-process stages make."
+    binds: ["forward_check_tool", "interacts(curator_agent->verify_stage)"]
+    rejected:
+      - nl: "map every gathered exception to an ERROR line, which would retry a config fault forever"
+
+  - id: m12_a_raising_check_does_not_hang_the_batch
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A check that raises while holding the concurrency slot releases it, so the remaining pairs still run and the tool returns."
+    binds: ["forward_check_tool", "VERIFY_BATCH_WORKERS.domain.default"]
+
+  - id: m13_trace_handle_closed_when_a_check_raises
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A check that raises still closes its trace file handle, so a batch of raising checks leaks no file descriptors."
+    binds: ["interacts(verify_stage->verify_trace_root)"]
+
+  # --- The shared trace sink (R2) ---
+  - id: d11_trace_names_distinct_per_check
+    kind: uniqueness
+    form: test
+    outcome:
+      nl: "Two concurrent checks of the same lesson stem in one source bundle — the same lesson in both directions — write to distinct trace files, under a genuine interleaving, and both files hold that check's own real content."
+    binds: ["verify_trace_root.identity", "interacts(verify_stage->verify_trace_root)", "curator_agent"]
+
+  - id: d12_curator_trace_in_a_separate_root
+    kind: uniqueness
+    form: test
+    outcome:
+      nl: "The curator spawn's own trace and the nested checks' traces land in different directories, so no nested check can truncate the curator's trace."
+    binds: ["curator_trace_root.identity", "verify_trace_root.identity"]
+    # the positive control for d11: proves the observation channel distinguishes the two roots.
+
+  - id: m2_env_checks_write_no_trace
+    kind: negative
+    form: test
+    outcome:
+      nl: "The deterministic environment check runs no model and creates no trace file in the source bundle, so the trace-uniqueness fix targets the two model-backed checks only."
+    binds: ["env_check", "interacts(verify_stage->verify_trace_root)"]
+    # positive control: d11 — the model-backed checks DO write two distinct traces.
+
+  # --- The verify prompt payload (minted by R1: no derivation bound it) ---
+  - id: m1_verify_payload_shape
+    kind: shape
+    form: test
+    outcome:
+      nl: "The payload sent to the verify model carries the system prompt and the user turn from disjoint sources, and the user turn has every slot substituted — no unrendered brace token reaches the model."
+    binds: ["interacts(verify_stage->verify_model).payload", "verify_model.payload"]
+
+  # --- Key sourcing, environment, budget ---
+  - id: d13_key_sourced_once_per_spawn
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The metered provider key is sourced exactly once by the curator spawn for an N-pair batch; no per-check path sources it again."
+    binds: ["source_key_seam", "forward_check_tool"]
+    rejected:
+      - nl: "the tool wraps the existing CLI-facing engine.forward_check, which sources the key per check"
+
+  - id: d14_no_environ_mutation
+    kind: negative
+    form: test
+    outcome:
+      nl: "Running the forward-check tool mutates no process-global environment entry, in particular no learning-state-dir pin."
+    binds: ["os_environ", "forward_check_tool"]
+    # positive control: d16 — the source bundle still resolves, via deps.
+
+  - id: d15_verify_requests_do_not_consume_curator_request_cap
+    kind: behavior
+    form: test
+    outcome:
+      nl: "Model requests made by nested checks do not count against the curator spawn's own request cap; each nested run carries its own usage limit."
+    binds: ["AUTHOR_REQUEST_LIMIT.domain.default", "forward_check_tool"]
+
+  # --- Paths: deps, not module constants ---
+  - id: d16_bundle_resolves_from_deps
+    kind: behavior
+    form: test
+    outcome:
+      nl: "Driven in-process against a temp tree whose run bundle differs from the module-level default, the check reads the bundle named by the deps, proving it does not read the frozen module default."
+    binds: ["curator_deps_runs_dir", "forward_check_tool", "interacts(verify_stage->runs_bundle)"]
+
+  - id: d17_env_check_uses_the_worktree_corpus
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The environment check retrieves against the corpus named by the deps — the worktree the lesson was just written into — not the main checkout's corpus."
+    binds: ["curator_deps_corpus_dir", "env_check", "interacts(verify_stage->corpus_dir)"]
+
+  - id: d20_pending_queue_resolves_from_deps
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The finding or observation row is resolved from the pending queue named by the deps, not the frozen module default."
+    binds: ["curator_deps_pending", "forward_check_tool", "interacts(verify_stage->pending_queue)"]
+
+  # --- The lesson_path operand (R3 parity + confinement) ---
+  - id: d18_lesson_path_resolves_against_the_worktree
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A worktree-relative lesson path operand resolves against the agent's own tree, matching the cwd the bash lane used."
+    binds: ["lesson_path.access[tool-arg]", "forward_check_tool"]
+
+  - id: d19_lesson_path_confined_to_own_corpus
+    kind: negative
+    form: test
+    outcome:
+      nl: "A lesson path naming a sibling corpus, a parent traversal, or an absolute path outside the spawn's own corpus is refused, and its bytes reach neither the model payload nor the trace file nor the returned text."
+    binds:
+      - "lesson_path.access[tool-arg]"
+      - "forward_check_tool"
+      - "interacts(verify_stage->verify_model).payload"
+      - "interacts(verify_stage->verify_trace_root)"
+      - "interacts(curator_agent->forward_check_tool).response"
+    # binds every out-edge the content could reach. Positive control: d19b.
+
+  - id: d19b_in_corpus_lesson_path_accepted
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A lesson path inside the spawn's own corpus is accepted and its content is checked, whether spelled relative or absolute."
+    binds: ["lesson_path.access[tool-arg]", "forward_check_tool"]
+    # the paired positive control for d19: proves the mechanism fired and the channel can see the difference.
+
+  - id: m3_tool_arg_denylist_parity
+    kind: parity
+    form: test
+    outcome:
+      nl: "The secret and ground-truth denylist the write-tool lane enforces is enforced on the tool-argument lane too: a lesson path naming an env file, a credentials file, or the held-out ground truth is refused on both surfaces."
+    binds: ["lesson_path.access[tool-arg]", "lesson_path.access[write-tool]"]
+
+  - id: m3b_tool_arg_resolve_parity
+    kind: parity
+    form: test
+    outcome:
+      nl: "The tool-argument lane resolves its operand before the containment check, as the write-tool lane does, so a symlink or a parent traversal cannot escape a textual prefix test."
+    binds: ["lesson_path.access[tool-arg]", "lesson_path.access[write-tool]"]
+
+  # --- The id operand (found only by the strong author) ---
+  - id: m11_source_id_confined_to_queued_rows
+    kind: negative
+    form: test
+    outcome:
+      nl: "A pair naming a source id that is not among the curator batch's own queued rows reports that pair's ERROR and cannot cause the tool to load an unrelated case's transcript into the model payload or the trace."
+    binds:
+      - "source_id.access[tool-arg]"
+      - "interacts(verify_stage->runs_bundle)"
+      - "interacts(verify_stage->verify_model).payload"
+      - "interacts(verify_stage->verify_trace_root)"
+    # positive control: m11b.
+
+  - id: m11b_queued_source_id_accepted
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A pair naming a source id that IS among the batch's queued rows loads that case's transcript and produces a real verdict."
+    binds: ["source_id.access[tool-arg]", "interacts(verify_stage->runs_bundle)"]
+
+  # --- The async seam ---
+  - id: d21_no_nested_event_loop_crash
+    kind: behavior
+    form: test
+    outcome:
+      nl: "Invoked from inside a running event loop, as pydantic-ai invokes every tool, the forward-check tool completes without raising the nested-asyncio-run RuntimeError."
+    binds: ["forward_check_tool", "run_stage_seam"]
+    # NOTE: passes for BOTH the async-core-split and the sync-tool-on-a-worker-thread mechanisms.
+    # This demand deliberately pins the OBSERVABLE, not the mechanism. See handoff.forks F-ASYNC.
+
+  # --- The verify-transport injection seam (minted by R0: the fake's sole entry point) ---
+  - id: m15_verify_transport_is_a_deps_seam
+    kind: seam
+    form: test
+    outcome:
+      nl: "The verify transport enters the tool through the curator deps (deps.run_verify), the only injection seam a pydantic-ai tool — handed only (ctx, args) — admits without monkeypatch: a fake stamped on the deps is exactly what the tool calls per check."
+    binds: ["curator_deps_check", "forward_check_tool"]
+
+  # --- Config domain coverage (minted by R4) ---
+  - id: m4_workers_zero_fails_loud
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "A worker bound of zero fails loudly and immediately rather than hanging until the wall clock; the semaphore port must not turn today's immediate raise into a deadlock."
+    binds: ["VERIFY_BATCH_WORKERS.domain.distinguished[0]"]
+    rejected:
+      - nl: "silently coalesce a zero worker bound to one"
+
+  - id: m5_verifier_timeout_zero_is_honored
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "A verifier timeout of zero is honored as written and is not swallowed by an or-default coercion."
+    binds: ["VERIFIER_TIMEOUT.domain.distinguished[0]"]
+
+  - id: m6_verifier_model_alternative_crosses
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "The documented alternative verifier model runs the fan-out to completion under the shipped effort default."
+    binds: ["VERIFIER_MODEL.domain.alternatives[claude-haiku-4-5]"]
+
+  - id: m7_verifier_effort_none_is_provider_gated
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "The Fireworks-only effort value fails loudly and legibly when combined with an Anthropic verifier model rather than being silently accepted."
+    binds: ["VERIFIER_EFFORT.domain.alternatives[none]"]
+
+  # --- Subtraction (R5) ---
+  - id: d23_curator_verifies_n_lessons_in_one_call
+    kind: survival
+    form: test
+    outcome:
+      nl: "A curator that wrote N lessons still verifies the whole set in one tool call and reads one output — the workflow the batch driver served."
+    binds: ["batch_py", "forward_check_tool"]
+
+  - id: d24_eval_harness_scenario_still_runs
+    kind: survival
+    form: test
+    outcome:
+      nl: "An eval scenario still drives the findings curator end-to-end against a temp tree through an injected author config, copying no entry scripts and spawning no verifier subprocess."
+    binds: ["harness", "cli_mains", "batch_py"]
+
+  - id: d25_no_bash_grant_for_the_verifier
+    kind: negative
+    form: test
+    outcome:
+      nl: "The curator's bash allowlist admits no python-interpreter command at all; the surviving lane is the single-path rm plus the corpus viewers."
+    binds: ["curator_bash_lane.access[bash]", "verifier_pattern"]
+    # positive control: d25b.
+
+  - id: d25b_surviving_bash_lane_still_works
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The curator's single-path in-corpus rm and its ls, grep and cat viewers are still admitted."
+    binds: ["curator_bash_lane.access[bash]"]
+
+  - id: d26_no_curator_resolves_a_verifier_interpreter
+    kind: survival
+    form: test
+    outcome:
+      nl: "No curator module resolves a venv interpreter for a verifier subprocess, and the verifier-python environment override no longer affects a curator run."
+    binds: ["resolve_verifier_python", "LEARNING_VERIFIER_PYTHON.domain.default"]
+
+  - id: d27_user_prompt_carries_no_command_template
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The built curator user prompt contains no verify-batch, verify-forward or forward-check command line, and no orphan direction line."
+    binds: ["interacts(curator_orchestrator->curator_agent).payload"]
+
+  - id: m9_verify_forward_helpers_survive_as_a_library
+    kind: survival
+    form: test
+    outcome:
+      nl: "The pure helpers the deleted CLI entry points wrapped — run-context loading, expected-disposition selection, cited-policy loading, case-entity extraction, verdict parsing — remain importable and behave unchanged."
+    binds: ["cli_mains"]
+
+  - id: m10_curator_deps_cannot_be_built_without_a_corpus_confine
+    kind: seam
+    form: test
+    outcome:
+      nl: "The curator deps cannot be constructed without naming the corpus that confines both its writes and its forward-check lesson operand; a construction that omits it raises rather than defaulting to a wider tree."
+    binds: ["curator_deps_corpus_dir", "curator_deps_check"]
+    # R5's judgment extension: safe-by-construction, not merely correct-when-configured-right.
+
+  - id: m16_user_prompt_builder_is_a_seam
+    kind: seam
+    form: test
+    outcome:
+      nl: "The curator user-prompt builder is an importable pure function, so the payload the orchestrator sends the agent is observable without patching module globals."
+    binds: ["interacts(curator_orchestrator->curator_agent).payload"]
+
+  # --- Recorded waivers (examined noes; minted at step 7) ---
+  - id: w1_verdict_nondeterminism_not_a_contract
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "Re-running the same pair may yield a different verdict; the check is a model call and per-run verdict determinism is deliberately not a contract."
+    binds: ["forward_check_tool"]
+
+  - id: w2_lesson_body_prompt_injection_not_unit_testable
+    kind: negative
+    form: waiver
+    outcome:
+      nl: "Whether an adversarial lesson body can coerce the verifier into an unconditional GOOD verdict is a model-behavior property, not an observable code contract; the lesson-path confinement demands are the structural mitigation, and this residual is named rather than tested."
+    binds: ["verify_model.payload"]
+
+  - id: w3_verify_batch_timeout_removed_without_a_survival_test
+    kind: survival
+    form: waiver
+    outcome:
+      nl: "The batch-level timeout knob is deleted with the batch driver; a deployment that still sets it silently no-ops, and this is accepted rather than tested."
+    binds: ["VERIFY_BATCH_TIMEOUT"]
+
+# ---------------------------------------------------------------------------
+structure:
+  axes:
+    - lesson_stem
+    - direction
+    - error_prefix
+    - check_index        # NEW — the discriminator replacing the collapsed pid axis
+    - source_run_id
+    - batch_id
+    - curator_pid
+    - corpus_name
+
+  actors:
+    - {id: author_drain,        frame: composition, provenance: code}
+    - {id: curator_orchestrator, frame: composition, provenance: code}
+    - {id: curator_agent,       frame: composition, provenance: design}   # fans N verify_stage legs
+    - {id: verify_stage,        frame: leg,         provenance: design}
+    - {id: env_check,           frame: leg,         provenance: design}
+    - {id: harness,             frame: composition, provenance: code}     # literal `harness` — check_actors matches \bharness\b
+    - {id: conftest_inprocess,  frame: composition, provenance: code}
+    - {id: loop_cli,            frame: composition, provenance: code}
+
+  boundaries:
+    - id: forward_check_tool
+      provenance: design
+      facets: {}
+
+    - id: corpus_author_toolset
+      provenance: design
+      facets: {}
+
+    - id: curator_deps_check
+      provenance: design
+      facets: {}
+    - id: curator_deps_corpus_dir
+      provenance: design
+      facets: {}
+    - id: curator_deps_runs_dir
+      provenance: design
+      facets: {}
+    - id: curator_deps_pending
+      provenance: design
+      facets: {}
+
+    - id: run_stage_seam
+      provenance: design
+      facets: {}
+
+    - id: verify_model
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:FORWARD_MD"}
+            - {role: user,   source: "template:DATA_SECTIONS",
+               slots: {transcript: runs_bundle, lesson: lesson_path,
+                       disposition: runs_bundle, cited_policy: runs_bundle}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "the user turn inlines the case transcript, the candidate lesson's bytes, the ground-truth disposition and any cited covering policy; the system turn is the forward-check instruction prompt"
+
+    - id: verify_trace_root
+      provenance: code
+      facets:
+        identity:
+          key_axes: [source_run_id, error_prefix, lesson_stem, direction]
+          evidence:
+            nl: "read off engine.py:178's template {error_prefix}.{lesson_stem}.{os.getpid()}.trace.jsonl and its landing dir source_run_dir (engine.py:181, forward.py:222); direction is a CLI arg absent from the name (forward.py:181-190); observe.py:117 opens the file with mode w, so a shared name truncates"
+          derivations:
+            - {value: curator_pid, fn_of: check_index, injective: false}   # constant in-process: covers nothing
+          sharing: unique-key
+
+    - id: curator_trace_root
+      provenance: code
+      facets:
+        identity:
+          key_axes: [batch_id, curator_pid]
+          evidence:
+            nl: "read off curator_engine.py:370's template {batch_id}.{os.getpid()}.trace.jsonl, landing in cfg.pending_dir (lessons/run.py:268) — a different directory from verify_trace_root"
+          sharing: unique-key
+
+    - id: lesson_path
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            bash:       {trust: attacker-influenced, constraints: [confine]}
+            write-tool: {trust: derived,             constraints: [resolve, denylist, confine, suffix]}
+            tool-arg:   {trust: attacker-influenced, constraints: unknown}
+
+    - id: source_id
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            tool-arg: {trust: attacker-influenced, constraints: unknown}
+
+    - id: curator_bash_lane
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bash: {trust: attacker-influenced, constraints: [confine]}
+
+    - id: runs_bundle
+      provenance: code
+      facets: {}
+    - id: pending_queue
+      provenance: code
+      facets: {}
+    - id: corpus_dir
+      provenance: code
+      facets: {}
+    - id: source_key_seam
+      provenance: code
+      facets: {}
+    - id: os_environ
+      provenance: code
+      facets: {}
+
+    - id: VERIFY_BATCH_WORKERS
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "positive count of concurrently running checks"}
+          default: 8
+          distinguished: [0, 1]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: VERIFIER_TIMEOUT
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "per-check wall-clock seconds; zero means no limit and is honored, not coerced"}
+          default: 180
+          distinguished: [0]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: VERIFIER_MODEL
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the model the forward-check predicts with"}
+          default: "glm-5.2"
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives:
+            - {value: "claude-haiku-4-5", crosses_validation: true}
+
+    - id: VERIFIER_EFFORT
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "reasoning effort for the forward-check"}
+          default: "low"
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives:
+            - {value: "none", crosses_validation: false}
+
+    - id: AUTHOR_REQUEST_LIMIT
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "the curator spawn's tool-loop request cap"}
+          default: 250
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: LEARNING_VERIFIER_PYTHON
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "override for the verifier subprocess interpreter; no default literal"}
+          default: ""
+          distinguished: [""]
+          falsy_valid: true
+          documented_alternatives: []
+
+    # --- removed elements (delta: remove) ---
+    - id: batch_py
+      provenance: code
+      facets: {}
+    - id: cli_mains
+      provenance: code
+      facets: {}
+    - id: resolve_verifier_python
+      provenance: code
+      facets: {}
+    - id: verifier_pattern
+      provenance: code
+      facets: {}
+    - id: verifier_scripts
+      provenance: code
+      facets: {}
+    - id: agent_deps_state_root
+      provenance: code
+      facets: {}
+    - id: run_env_state_root
+      provenance: code
+      facets: {}
+    - id: VERIFY_BATCH_TIMEOUT
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "the removed batch-level per-child timeout"}
+          default: 240
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+  interacts:
+    - {from: curator_agent, to: forward_check_tool, mode: invoke, via: api, provenance: design, sends: payload}
+    - {from: curator_orchestrator, to: curator_agent, mode: invoke, via: api, provenance: code, sends: payload}
+
+    - {from: verify_stage, to: verify_model, mode: invoke, via: api, provenance: design, sends: payload, transport: llm}
+    - {from: verify_stage, to: verify_trace_root, mode: write, via: fs, provenance: design,
+       interpolates: [error_prefix, lesson_stem, check_index]}
+    - {from: curator_agent, to: curator_trace_root, mode: write, via: fs, provenance: code,
+       interpolates: [batch_id, curator_pid]}
+
+    - {from: verify_stage, to: runs_bundle,   mode: read, via: fs, provenance: design}
+    - {from: verify_stage, to: pending_queue, mode: read, via: fs, provenance: design}
+    - {from: verify_stage, to: corpus_dir,    mode: read, via: fs, provenance: design}
+    - {from: env_check,    to: corpus_dir,    mode: read, via: fs, provenance: design}
+    - {from: curator_agent, to: corpus_dir,   mode: write, via: write-tool, provenance: code, interpolates: [corpus_name, lesson_stem]}
+
+    - {from: curator_agent, to: lesson_path, mode: read, via: tool-arg,   provenance: design}
+    - {from: curator_agent, to: lesson_path, mode: write, via: write-tool, provenance: code}
+    - {from: curator_agent, to: lesson_path, mode: read, via: bash,        provenance: code}
+    - {from: curator_agent, to: source_id,   mode: read, via: tool-arg,   provenance: design}
+    - {from: curator_agent, to: curator_bash_lane, mode: invoke, via: bash, provenance: code}
+
+    - {from: curator_orchestrator, to: source_key_seam, mode: invoke, via: api, provenance: design}
+    - {from: forward_check_tool,   to: os_environ,      mode: read,   via: env, provenance: design}
+
+    - {from: curator_agent, to: VERIFY_BATCH_WORKERS, mode: read, via: env, provenance: design}
+    - {from: verify_stage,  to: VERIFIER_TIMEOUT,     mode: read, via: env, provenance: design}
+    - {from: verify_stage,  to: VERIFIER_MODEL,       mode: read, via: env, provenance: design}
+    - {from: verify_stage,  to: VERIFIER_EFFORT,      mode: read, via: env, provenance: design}
+    - {from: curator_agent, to: AUTHOR_REQUEST_LIMIT, mode: read, via: env, provenance: code}
+
+    - {from: harness,            to: curator_agent, mode: invoke, via: api, provenance: code}
+    - {from: conftest_inprocess, to: curator_agent, mode: invoke, via: api, provenance: code}
+    - {from: loop_cli,           to: author_drain,  mode: invoke, via: argv, provenance: code}
+
+    # removals
+    - {from: curator_agent, to: batch_py,                mode: remove, via: bash, provenance: design}
+    - {from: curator_agent, to: cli_mains,               mode: remove, via: bash, provenance: design}
+    - {from: curator_orchestrator, to: resolve_verifier_python, mode: remove, via: api, provenance: design}
+    - {from: curator_orchestrator, to: verifier_pattern, mode: remove, via: api, provenance: design}
+    - {from: curator_orchestrator, to: verifier_scripts, mode: remove, via: api, provenance: design}
+    - {from: curator_agent, to: agent_deps_state_root,   mode: remove, via: api, provenance: design}
+    - {from: curator_agent, to: run_env_state_root,      mode: remove, via: api, provenance: design}
+    - {from: curator_agent, to: VERIFY_BATCH_TIMEOUT,    mode: remove, via: env, provenance: design}
+    - {from: curator_orchestrator, to: LEARNING_VERIFIER_PYTHON, mode: remove, via: env, provenance: design}
+
+  drives:
+    - {from: author_drain,  to: curator_agent, provenance: code,   multiplicity: serial}
+    - {from: curator_agent, to: verify_stage,  provenance: design, multiplicity: concurrent}
+    - {from: curator_agent, to: env_check,     provenance: design, multiplicity: concurrent}
+    - {from: harness,       to: curator_agent, provenance: code,   multiplicity: serial}
+    - {from: conftest_inprocess, to: curator_agent, provenance: code, multiplicity: serial}
+
+# ---------------------------------------------------------------------------
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # incl. the bidirectional prose reconciliation (ran; see holes h3)
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}    # incl. the judgment extension (considered; minted m10)
+
+  obligations:
+    - rule: R0
+      element: "forward_check_tool"
+      witness: "the design gives the verify transport no injection seam; a fake cannot enter without monkeypatch, which CI ratchets. The only seam pydantic-ai leaves — a tool is handed only (ctx, args) — is a per-call deps field (curator_deps_check carries it as run_verify)."
+      discharged_by: m15_verify_transport_is_a_deps_seam
+
+    - rule: R1
+      element: "interacts(verify_stage->verify_model).payload"
+      witness: "The verify edge sends a payload-facet boundary and NOT ONE of the six derivations bound its composition; nothing asserts the system and user turns come from disjoint sources or that every slot is substituted."
+      discharged_by: m1_verify_payload_shape
+
+    - rule: R2
+      element: "verify_trace_root.identity"
+      witness: "One writer (verify_stage) driven over multiple invocations by a concurrent drives edge; interpolates [error_prefix, lesson_stem, check_index] must cover key_axes [source_run_id, error_prefix, lesson_stem, direction]. The pid derivation is injective:false (constant in-process), so it covers nothing; direction is absent from the name. Bound at the composition frame (curator_agent), asserted under a genuine interleaving because multiplicity is concurrent."
+      discharged_by: d11_trace_names_distinct_per_check
+
+    - rule: R2
+      element: "verify_trace_root.identity"
+      witness: "Positive control for the uniqueness demand: both writes must land as distinct REAL content, else `no collision` passes vacuously when nothing was written."
+      discharged_by: m2_env_checks_write_no_trace
+
+    - rule: R3
+      element: "lesson_path.access[tool-arg]"
+      witness: "A third via reaches a boundary two vias already reach, and the established write-tool via enforces a denylist the new via does not state. Per-cell parity: denylist."
+      discharged_by: m3_tool_arg_denylist_parity
+
+    - rule: R3
+      element: "lesson_path.access[tool-arg]"
+      witness: "Per-cell parity: resolve-before-containment. The bash via is textual with no resolve(); the write-tool via resolves. A textual test on the new via is a symlink escape."
+      discharged_by: m3b_tool_arg_resolve_parity
+
+    - rule: R4
+      element: "VERIFY_BATCH_WORKERS.domain.distinguished[0]"
+      witness: "falsy_valid is false and the port changes the failure mode: ThreadPoolExecutor(0) raised immediately; asyncio.Semaphore(0) blocks forever. The falsy member must be exercised."
+      discharged_by: m4_workers_zero_fails_loud
+
+    - rule: R4
+      element: "VERIFIER_TIMEOUT.domain.distinguished[0]"
+      witness: "falsy_valid is true; an `x or DEFAULT` coercion would silently swallow a deliberate 0."
+      discharged_by: m5_verifier_timeout_zero_is_honored
+
+    - rule: R4
+      element: "VERIFIER_MODEL.domain.alternatives[claude-haiku-4-5]"
+      witness: "A documented alternative with crosses_validation true; the spec would otherwise test only the shipped default column."
+      discharged_by: m6_verifier_model_alternative_crosses
+
+    - rule: R4
+      element: "VERIFIER_EFFORT.domain.alternatives[none]"
+      witness: "A documented alternative with crosses_validation false — Fireworks-only. Pin the crossing: it must fail loud and legibly, not be silently accepted."
+      discharged_by: m7_verifier_effort_none_is_provider_gated
+
+    - rule: R5
+      element: "cli_mains"
+      witness: "Removed element with live in-edges: the eval harness, conftest, the env curators' command, and the subprocess-import test cases all depend on it. Survival: the pure helpers remain importable and the harness completes via its substitute."
+      discharged_by: m9_verify_forward_helpers_survive_as_a_library
+
+    - rule: R5
+      element: "batch_py"
+      witness: "Removed element with live in-edges: two curator prompts and two run.py command templates. Survival: the N-lesson single-call verification workflow still completes."
+      discharged_by: d23_curator_verifies_n_lessons_in_one_call
+
+    - rule: R5
+      element: "resolve_verifier_python"
+      witness: "Removed element with four live in-edges, one of which is an existing test asserting it SURVIVES (test_curator_glm_survival.py:375-418). That assertion inverts."
+      discharged_by: d26_no_curator_resolves_a_verifier_interpreter
+
+    - rule: R5
+      element: "verifier_pattern"
+      witness: "Removed facet on curator_bash_lane, whose boundary has live in-edges. Survival: the surviving bash lane still admits rm and the viewers."
+      discharged_by: d25b_surviving_bash_lane_still_works
+
+    - rule: R5
+      element: "VERIFY_BATCH_TIMEOUT"
+      witness: "A config surface removed with no demand naming it; a deployment that still sets it silently no-ops."
+      discharged_by: w3_verify_batch_timeout_removed_without_a_survival_test
+
+    - rule: R5
+      element: "curator_deps_corpus_dir"
+      witness: "Judgment extension (considered, fired): the delta ADDS a confinement obligation to a new operand lane. Is the security-critical caller left constructible in the newly-unsafe state — a CuratorDeps with no corpus to confine the lesson operand against? Mint safe-by-construction: the constructor must raise, not merely behave when configured right."
+      discharged_by: m10_curator_deps_cannot_be_built_without_a_corpus_confine
+
+    - rule: R0
+      element: "interacts(curator_orchestrator->curator_agent).payload"
+      witness: "d27 demands the BUILT user payload carry no command template, but the design gives the prompt builder no injection seam: invoke_agent builds the prompt inline and calls run_curator_stage with production defaults, so a fake can only enter via monkeypatch.setattr, which CI ratchets. The seam is part of the contract."
+      discharged_by: m16_user_prompt_builder_is_a_seam
+
+  holes:
+    - rule: R0
+      element: "lesson_path.access[tool-arg].constraints"
+      resolution: "RESOLVED (F-VIA): the tool-arg lane takes write-tool parity — resolve() before containment, plus the secret/ground-truth denylist, plus the corpus confine. A lesson_path escaping the corpus is a policy deny (ModelRetry), not a per-pair ERROR."
+      resolved_to: m3_tool_arg_denylist_parity
+
+    - rule: R0
+      element: "source_id.access[tool-arg].constraints"
+      resolution: "RESOLVED (F-ID): the id is confined to the batch's own queued rows. An unqueued id is that pair's ERROR line, not a deny — a single bad id must not abort the batch. The bundle is never read either way."
+      resolved_to: m11_source_id_confined_to_queued_rows
+
+    - rule: R0
+      element: "run_stage_seam"
+      resolution: "RESOLVED (F-BYPASS): the tool bypasses engine.forward_check and calls the inner transport directly; the key is sourced once at the curator spawn and the trace is keyed on a per-check counter. The CLI-facing forward_check() is deleted with the four main()s. The design sentence is superseded."
+      resolved_to: d13_key_sourced_once_per_spawn
+
+    - rule: R0
+      element: "forward_check_tool"
+      resolution: "RESOLVED (F-ASYNC): d21 pins the OBSERVABLE only — no nested-loop RuntimeError, in-flight count bounded, env check does not serialize the fan-out. The async-core split is the recorded recommendation (it buys cancellability); write-code-from-spec chooses the mechanism."
+      resolved_to: d21_no_nested_event_loop_crash
+
+  pre_discharged:
+    - {rule: R2, element: "curator_trace_root.identity", by: d12_curator_trace_in_a_separate_root}
+    - {rule: R4, element: "AUTHOR_REQUEST_LIMIT.domain.default", by: d15_verify_requests_do_not_consume_curator_request_cap}
+    - {rule: R4, element: "LEARNING_VERIFIER_PYTHON.domain.distinguished[]", by: d26_no_curator_resolves_a_verifier_interpreter}
+
+actor_waivers:
+  replay_actor: >-
+    defender/learning/ops/replay_actor.py re-execs and relocates PATHS, but it drives the frozen-generation
+    actor replay over lead_repository; it has no edge to the curators or to verify_forward (grounding swept
+    ops/ for verify_forward references and found none). Out of scope for #558.
+  harness_lead: >-
+    defender/evals/harness_lead.py re-execs and relocates PATHS, but it drives the LEAD author
+    (learning/leads/lead_author.py), a different writer stage with its own corpus and no forward-check.
+    Out of scope for #558. The findings-curator harness (evals/harness.py) IS modelled, as actor `harness`.
+
+handoff:
+  forks:
+    - >-
+      F-BYPASS (silent branch; only the strong author raised it). The design asserted twice that
+      `engine.forward_check` was out of scope, but d13 (key sourced once per spawn) and d11 (distinct
+      per-check traces) both require changing it: it calls source_first_party_key per check (engine.py:170)
+      and keys its trace on os.getpid() (engine.py:178). RESOLVED: the tool BYPASSES it and calls the inner
+      transport directly; the CLI-facing forward_check() is deleted alongside the four main()s. The design
+      sentence "Out: the engine.forward_check contract itself" is superseded.
+    - >-
+      F-ID (gap; only the strong author bound it). The id/run_id operand is a second model-supplied argument
+      selecting which case bundle is read into the metered prompt and the trace; the bash lane's regex allowed
+      any trailing args, so it was never gated. RESOLVED: confine the id to the batch's own queued rows. An
+      unqueued id is that pair's ERROR line (a data fault), NOT a ModelRetry deny — chosen deliberately so a
+      single bad id does not abort the whole batch. Containment holds either way: the bundle is never read.
+    - >-
+      F-VIA (silent branch; the adversarial lens flagged it open, two other lenses stated it settled). The
+      lesson_path operand now reaches the corpus via three lanes with different constraints: bash (textual
+      anti-`..`, no resolve(), NO denylist), write-tool (resolve, denylist, .md suffix, write-subset-read), and
+      the new tool-arg lane, which the design never gated. RESOLVED: the tool-arg lane takes WRITE-TOOL PARITY
+      — resolve() before containment plus the secret/ground-truth denylist. A lesson_path escaping the corpus is
+      a policy DENY (ModelRetry, matching every other tool in tools.py), not a per-pair ERROR.
+    - >-
+      F-ASYNC (fork; the design mandated a mechanism the observable cannot distinguish). A SYNC pydantic-ai tool
+      body is offloaded to a worker thread (_function_schema.py:82-87), where asyncio.run does not raise — so
+      "no nested-loop crash" passes for both the async-core split and a sync-tool-plus-thread-pool. RESOLVED:
+      d21 pins the OBSERVABLE only (no RuntimeError, in-flight count bounded, the env check does not serialize
+      the fan-out). The async-core split is the RECOMMENDED mechanism (it buys cancellability: the outer
+      AUTHOR_TIMEOUT can interrupt an in-flight check; worker threads cannot be cancelled). write-code-from-spec
+      chooses.
+    - >-
+      F-TRACE-KEY (auto-resolved, not escalated). The d11 collision is fixed with a per-check COUNTER
+      (check_index), not by adding `direction` to the trace name: direction alone does not disambiguate two
+      different findings that yield the same lesson stem in the same direction. The counter is total.
+    - >-
+      F-STALEGRAPH (auto-resolved under the user's standing "delete/migrate the tests" decision).
+      defender/tests/spec_graph_curator-glm-port.yaml (the #556 graph) pins `resolve_verifier_python` survival
+      and the forward-check bash grant; #558 INVERTS both. Its two inverted demands and their realized tests are
+      migrated into this spec rather than left to contradict it.
+    - >-
+      FORK-A (adjudicated at step 4, not escalated). The dependency and concurrency lenses both predicted "one
+      raising check cancels its siblings" — which is what a bare asyncio.gather plus pydantic-ai's
+      except-BaseException actually does (_agent_graph.py:1950-1956). d7 states the required behavior; the lenses
+      described the failure mode of the naive implementation. Both survive as tests: d7 (behavior) and
+      m14 (the mechanism trap).
+
+  deviations:
+    - >-
+      FIVE lensed enumerators instead of four (dependency, input-surface, lifecycle, adversarial-input,
+      concurrency). Concurrency was promoted out of lifecycle rather than folded into it: the design admits
+      genuine parallel invocation into a truncate-mode shared sink, which is the R2 shape. Deviation is upward
+      (more coverage), recorded for honesty about the ensemble's shape.
+    - >-
+      COLLAPSED DIFF. No separate step-4 alignment agent was spawned; the alignment was done in-context after
+      ALL 91 stubs were collected (never incrementally). Forks, silent branches, gaps, consensus and lens errors
+      are recorded in scratchpad/step4-align.md and summarized in `forks` above.
+    - >-
+      MANUAL SLOT CHECK. The formal-slot validation against schema.md's closed vocabularies (kinds, forms, modes,
+      vias, invariant vocabularies) was hand-checked; the spec_graph linter for it is future work (#537). The two
+      mechanical checks that DO exist — check_binds.py and check_actors.py — both pass.
+    - >-
+      LENS ERRORS RECORDED, NOT ESCALATED. The concurrency lens claimed concurrent checks share one
+      VERIFY_REQUEST_LIMIT counter; the brief establishes UsageLimits is per-agent.run (usage.py:378-382), so
+      d15 stands and the stub was dropped. The dependency lens conflated the production drain (main checkout,
+      correct DEFAULT_PATHS) with the in-process test contexts; the strong author's decomposition (A2) was used.
+    - >-
+      STEP-9 REPAIR, not a loosening. test_d27 originally asserted on the three prompt.md files — the SYSTEM
+      prompt, a different artifact from the demand's address (the BUILT user payload). The payload surface was
+      unreachable: invoke_agent builds the prompt inline and calls run_curator_stage with production defaults,
+      so a fake could only enter via monkeypatch.setattr, which CI ratchets. Per the skill, the missing seam
+      became a demand (m16) and d27 was repaired to call the target, binding both surfaces plus a positive
+      control that the builder emits a non-empty payload.
+    - >-
+      The strong author ran on a frontier model (Opus), UNLENSED, as the skill requires. The unknown-unknown
+      region did NOT run degraded. It produced the three findings no lens reached: the engine.forward_check
+      scope contradiction (F-BYPASS), the unconfined id operand (F-ID), and the fact that the env check writes
+      no RequestLogger at all — which makes d11 an A/B-only demand and gives m2 its positive-control shape.

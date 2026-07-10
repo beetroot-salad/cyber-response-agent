@@ -139,17 +139,11 @@ demands:
     outcome: {nl: "A `..` traversal path and a symlink under the corpus pointing outside are both DENIED by decide_write's RESOLVED-path fullmatch, on both write_file and edit_file. Positive control: the direct in-corpus .md write succeeds."}
     binds: ["write_gate.write_file", "write_gate.edit_file"]
 
-  # --- Bash gate: forward-check + rm + corpus-anchored viewers (Q1 option 3) ---
-  - id: bash-forward-check-admitted
-    kind: behavior
-    form: test
-    outcome: {nl: "Positive control: the curator's OWN forward-check command is admitted on the bash lane — A: python3 <verifier> .../verify_forward/{batch,forward}.py …; B: .../verify_forward/{batch,actor}.py …; C/D: .../verify_forward/env.py …. Each curator's bash_allow carries only ITS verifier scripts."}
-    binds: ["bash_gate.forward_check"]
-  - id: bash-wrong-forward-check-denied
-    kind: negative
-    form: test
-    outcome: {nl: "A curator running a DIFFERENT curator's forward-check (curator A invoking verify_forward/actor.py) is DENIED — the verifier grant is per-curator. Positive control: A's own verify_forward/forward.py is admitted."}
-    binds: ["bash_gate.forward_check"]
+  # --- Bash gate: rm + corpus-anchored viewers (Q1 option 3) ---
+  # (#558) REMOVED: `bash-forward-check-admitted` + `bash-wrong-forward-check-denied` pinned the
+  # curator's `python3 <verify_forward/…>` bash grant. #558 makes the forward-check an in-process
+  # @agent.tool and DELETES that grant, so both invert. spec_graph_558-forward-check-tool.yaml
+  # supersedes them: d25 (no python-interpreter command is admitted) + d25b (rm/viewers survive).
   - id: bash-rm-scoped-admitted
     kind: behavior
     form: test
@@ -268,11 +262,13 @@ demands:
     binds: ["envelope", "bash_gate"]
 
   # --- Removal / conservation (R5) ---
-  - id: runner-teardown
-    kind: survival
-    form: test
-    outcome: {nl: "After the port, runner.invoke_claude_print / curator_allowed_tools / curator_agent_env have no production callers; resolve_verifier_python survives (the four curators still build python3 <verifier> bash grants); the transaction envelope (run_batch/_author_to_author/commit_corpus/rotate_queue) is unchanged."}
-    binds: ["runner_teardown", "envelope"]
+  # (#558) REMOVED: `runner-teardown` pinned `resolve_verifier_python SURVIVES (the four curators
+  # still build python3 <verifier> bash grants)`. #558 INVERTS that — the in-process forward-check
+  # tool needs no verifier subprocess, so resolve_verifier_python has ZERO callers.
+  # spec_graph_558-forward-check-tool.yaml supersedes it: d26 (no curator resolves a verifier
+  # interpreter). The #556 transport-teardown half (invoke_claude_print / curator_allowed_tools /
+  # curator_agent_env have no callers; the envelope is unchanged) is still pinned by
+  # test_curator_glm_survival.py::test_runner_teardown_structural.
 
   # --- Env-corpus shared sink (R2) ---
   - id: env-corpus-two-writers-distinct
