@@ -10,7 +10,19 @@ You work from:
 
 1. **The per-lead comparison files** — `<comparison_files>` lists them; read each `{lead_id}.md` at its turn. Each joins three columns: **[1]** the oracle's projection for that lead; **[2]** a real sample event from the lead's *actual* payload (orientation only); **[3]** the defender's own per-lead reasoning from the invlang (`:T resolutions` belief movement + `:R authz`) — *why* it read that lead the way it did. These files are your work surface.
 
-2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json` (the absolute path is named in `<comparison_files>`); you query them with `jq` (a single `jq` over the payload's absolute path — no pipes) and `read_file` (pass a `pattern=` to scan for a substring). **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the refutation the defender's narrative can hide: an event present in the raw it never wrote down.
+2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json`; the lead file names the **absolute** path of every payload — pass an absolute path (a relative one resolves outside your read roots and is denied). Pipe one into `defender-sql`, which exposes it as a table named `data` and runs read-only SQL over it. Run `DESCRIBE data` first: payload shapes differ, and `defender-sql` tells you the columns and the idiom that fits the one you hold — including on a failed query, so a wrong field name self-corrects. Use `read_file` (with `pattern=`) for a payload that isn't JSON.
+
+   ```bash
+   cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'alice'"
+   ```
+
+   **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the refutation the defender's narrative can hide: an event present in the raw it never wrote down.
+
+   An absence check is only as sound as the read behind it — three ways it lies, all of which you must rule out before refuting:
+
+   - **Truncated.** `defender-sql` warns when a payload is truncated; its `hits` are only the first rows of a larger match, so a 0 there is "not in the first rows", not "absent". Such a payload is *silent*, not refuting.
+   - **Empty or non-JSON.** `defender-sql` fails loudly rather than returning "0 rows"; an error means the lead recorded no observation at all — *silent*, not absent.
+   - **Partial.** A lead that ran several queries has several payloads, and the lead file names them all; an absence claim must cover every one, not just seq 0.
 
 3. **`report.md`** — the defender's disposition + one-paragraph rationale: the claim you are scoring.
 
@@ -111,7 +123,7 @@ The story is an **existential** claim ("if the attack happened, these events wou
 
 The discriminating question is always "could the actuals contain a subset compatible with the projection?", never "do the actuals equal the projection?". Over-specificity refutations — treating extra users / processes / hosts / events that the story didn't mention as contradictions — are the most common judge failure mode; avoid them.
 
-**You are now looking at the full, noisy window directly** (via the sample plus your own `jq` over the raw payload), not a clean projection. So the extras are right in front of you — that *raises* the over-specificity temptation, it does not lower it. Real payloads always carry unrelated benign traffic; the default reading of an unaccounted-for entity is "ambient", not "contradiction". Reach for *refutes* only when a **projected** signature is genuinely absent (confirmed by querying the full payload, not the sample) or a story-required **negative** is present.
+**You are now looking at the full, noisy window directly** (via the sample plus your own SQL over the raw payload), not a clean projection. So the extras are right in front of you — that *raises* the over-specificity temptation, it does not lower it. Real payloads always carry unrelated benign traffic; the default reading of an unaccounted-for entity is "ambient", not "contradiction". Reach for *refutes* only when a **projected** signature is genuinely absent (confirmed by querying the full payload, not the sample) or a story-required **negative** is present.
 
 ### Reasoning (internal — do not emit)
 
@@ -121,7 +133,7 @@ Walk through the encounter **lead by lead**, reading each `{lead_id}.md` compari
 
 - name the lead (lead_id + goal) and what it was measuring,
 - what column [1] projected the attack would have produced (specific fields/values),
-- what the lead **actually** returned — column [2] orients you; **query the full payload with `jq` whenever the comparison turns on presence/absence or a value the sample doesn't settle** (e.g. `jq '[.[] | select(.user=="alice")] | length' gather_raw/l-002/0.json`). Do not assert a refutation from the sample alone.
+- what the lead **actually** returned — column [2] orients you; **query the full payload with `defender-sql` whenever the comparison turns on presence/absence or a value the sample doesn't settle** (e.g. `cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'alice'"`). Do not assert a refutation from the sample alone; check `truncated` before reading a zero count as absence, and cover **every** payload the lead file names, not just seq 0.
 - how the defender read it (column [3] — its `:T resolutions` / `:R authz`), and
 - whether the actual result **refutes**, is **consistent with**, or is **silent on** the projection.
 
@@ -154,7 +166,7 @@ Pick the 2–3 most load-bearing things the encounter exposed about the defender
 For each finding:
 
 - `finding` — a few sentences in your own words: state what the encounter taught, ground it with a specific quote, and generalize in one line. For lead-set / lead-quality / analyze-discipline / observability: name the gap and tie it to the surviving claim. For detection-confirmed: name what worked and why the actor's bypass framing did not survive — a claim about which capability was load-bearing on this encounter, not a victory lap. Keep the quoting inline and minimal; do not restate the lead-by-lead walk here.
-- `citations` — at least one entry per finding. Each citation is a `{source, quote}` mapping where `source ∈ {comparison, synthesis, coverage_manifest, report, actor, alert}` and `quote` is **only the specific load-bearing span/fields** your finding depends on — not the whole event or object (always a block scalar — `quote: |` then the cited text on indented lines, no surrounding quotes — so internal quotes and punctuation need no escaping). Use `comparison` when the finding turns on a per-lead projection-vs-actual span (e.g. "[1] projected N events with field X, but querying the payload returned 0" — quote the projection line and/or the jq result); use `synthesis` for the defender's reasoning (the `:T resolutions` inference an `analyze-discipline` finding targets). The downstream author stage uses these to repair / re-anchor the finding; ungrounded findings are unusable.
+- `citations` — at least one entry per finding. Each citation is a `{source, quote}` mapping where `source ∈ {comparison, synthesis, coverage_manifest, report, actor, alert}` and `quote` is **only the specific load-bearing span/fields** your finding depends on — not the whole event or object (always a block scalar — `quote: |` then the cited text on indented lines, no surrounding quotes — so internal quotes and punctuation need no escaping). Use `comparison` when the finding turns on a per-lead projection-vs-actual span (e.g. "[1] projected N events with field X, but querying the payload returned 0" — quote the projection line and/or the SQL result); use `synthesis` for the defender's reasoning (the `:T resolutions` inference an `analyze-discipline` finding targets). The downstream author stage uses these to repair / re-anchor the finding; ungrounded findings are unusable.
 
 Subject rules. `subject_anchor` is a plain scalar identifying *what* the finding is anchored to — one token, no quotes, no parens. `subject_topic` is a short free-form phrase naming the issue (also a plain scalar; do not quote internal fragments).
 
@@ -205,7 +217,7 @@ When you **refuted** the story by citing the deployment's actual telemetry — t
 The discipline that makes these usable:
 
 - **Positive polarity (the crux).** The refutation is negatively framed ("the actor assumed 443 blends with this host's outbound; the actuals show none"). Author the env fact as the **standing positive fact** the actuals established — "jump-box-1's outbound baseline is ports 9200 and 22 only; there is no 443 in it" — not the negation of the actor's guess. A future actor reads this without your case and reasons *with* the fact; write what is TRUE about the deployment, grounded in the system of record that establishes it.
-- **Only emit what the actuals established.** The fact must be one a lead's actual result (or your `jq` over the raw payload) directly grounded — cite the load-bearing span (`comparison` for a projection-vs-actual span, `synthesis` for the defender's resolution, `report`/`alert`/`actor` as needed). A fact you inferred but did not observe is not an env observation.
+- **Only emit what the actuals established.** The fact must be one a lead's actual result (or your SQL over the raw payload) directly grounded — cite the load-bearing span (`comparison` for a projection-vs-actual span, `synthesis` for the defender's resolution, `report`/`alert`/`actor` as needed). A fact you inferred but did not observe is not an env observation.
 - **`alert_rule_ids`** — read the rule id(s) this standing fact explains from the alert; this is the retrieval anchor, always emit it.
 - **`entities` — selector discipline (load-bearing).** Key only on **prologue-observable** entity types — `process`, `socket`, `file`, `credential`, `compute` — drawn from the investigation's `:V prologue.vertices` block, using that block's `type/class` slot vocabulary verbatim (a selector with fewer slots matches more). **Never** emit an `identity` selector: the downstream forward-check re-derives the case's entities from the prologue and drops any lesson whose selector the prologue cannot satisfy, and an identity the defender grounded mid-investigation is not in the prologue. The identity grounding (e.g. "svc.monitoring is the authorized fleet monitor") is the *content* of the `fact`, not a selector. Omit `entities` entirely for a pure detector/threshold fact that is not bound to a prologue entity (it then matches every case on its rule anchor).
 

@@ -138,7 +138,7 @@ def unredacted_exemplar(text: str) -> str:
     """Like ``redact_exemplar`` but keeps the real leaf values.
 
     The judge is the *scorer*, not a gray-box actor, so it sees real values — the
-    sample orients it (field names + example values to shape a jq query); it still
+    sample orients it (field names + example values to shape a SQL query); it still
     queries the full payload for absence-checks. Reuses the same two block regexes as
     ``redact_exemplar`` so the extraction can't drift. Leading ``(`` on a return value
     signals ``real_sample_text`` to try a sibling payload, matching ``lead_sample_text``.

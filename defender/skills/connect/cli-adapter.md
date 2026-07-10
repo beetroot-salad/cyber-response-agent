@@ -62,14 +62,14 @@ its parts.
   `{SYSTEM}_`-prefixed env var — e.g. `ASSETDB_URL_BASE` — overrides a
   declared key, scoped per system so overrides can't collide across
   adapters). Use `die(EXIT_CONN_ERROR, hint)` for a missing key.
-- **JSON envelope is the only output.** Every command prints the stable
-  JSON envelope (`print_raw(system, endpoint, args, result)`) the gather
-  capture persists by-ref — unconditionally. There is no human pretty-print
-  mode: the gather agent consumes the envelope and `defender-sql` reduces it,
-  so prose output has no reader. Keep the envelope stable across adapters —
-  drift breaks replay. The `--raw` flag is still accepted (the gather SKILL,
-  query templates, and `defender-sql` recipes pass it) but no longer toggles
-  anything.
+- **JSON is the only output, and it is the payload itself.** Every command
+  prints its result as JSON on stdout — unconditionally, with no wrapper
+  envelope around it. There is no human pretty-print mode: the gather agent
+  consumes the payload and `defender-sql` reduces it (`FROM data` binds the
+  payload's own top-level keys), so prose output has no reader. Keep each
+  command's payload shape stable across releases — drift breaks replay. The
+  `--raw` flag is still accepted (the gather SKILL, query templates, and
+  `defender-sql` recipes pass it) but no longer toggles anything.
 - **Native query pass-through, native aggregation first.** A query source
   takes its native language unmodified; a lookup source keys on an
   identifier. No translation, no field renaming. When the source can
@@ -92,22 +92,32 @@ adapter's shape:
    — not a Lucene filter that returns documents.
 2. **Filter-only source** — expose the native filter passthrough and
    return the rows; the model aggregates them downstream with
-   `defender-sql` over the `--raw` output, which keeps it in SQL — a
-   language it knows. `defender-sql` exposes the piped payload as a table
-   named `data` (`read_json_auto` inference, so structs/lists work) and
-   runs the SQL in a sealed sandbox (no file/network access):
+   `defender-sql`, which keeps it in SQL — a language it knows.
+   `defender-sql` exposes the piped payload as a table named `data`
+   (`read_json_auto` inference, so structs/lists work) and runs the SQL in
+   a sealed sandbox (no file/network access):
 
    ```bash
-   defender-{system} query '<native filter>' --raw \
+   defender-{system} query '<native filter>' \
      | defender-sql "SELECT h.user AS user, count(*) c \
-         FROM (SELECT unnest(result.hits) h FROM data) \
+         FROM (SELECT unnest(hits) h FROM data) \
          GROUP BY user ORDER BY c DESC"
    ```
+
+   The adapter's stdout **is** the table — there is no wrapper envelope to
+   reach through. A top-level object yields one row whose columns are its
+   keys (so `unnest(hits)` for an `{index, total, returned, truncated,
+   hits}` payload); a top-level array yields one row per element.
+   `DESCRIBE data` names the columns a given payload actually has —
+   projecting one it lacks is a Binder Error, not an empty result. Note
+   `unnest` does not always give you a struct: an ES|QL `values` is a
+   positional `JSON[]`, so you index it 1-based and unwrap
+   (`v[2]->>'$'`) rather than naming a field.
 
    This downloads before it reduces, so it's the fallback, not the goal —
    reach for it only when the source genuinely can't aggregate. When a
    source lands here, record the concrete `defender-sql` recipe for *its*
-   row shape (the path into the `--raw` envelope, the columns) in that
+   row shape (the column that carries the rows, the fields on them) in that
    system's `execution.md`, where gather reads it at dispatch — not in the
    credential-free `SKILL.md`.
 3. **No query language** (pure REST / lookup) — key on an identifier and
@@ -144,7 +154,7 @@ headers and the configured timeout. Swap that one method for whatever your
 environment needs — direct HTTP, a shell-out (curl, an SSH command, an
 existing CLI you wrap and parse), or a vendor SDK call. The right transport
 is a property of *your* deployment, not of this skill; the rest of the
-adapter — parsing, config, exit codes, auth, the `--raw` envelope — does
+adapter — parsing, config, exit codes, auth, the JSON payload — does
 not change with it.
 
 One thing *does* need care when you leave urllib: **the exit-code

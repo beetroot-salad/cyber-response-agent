@@ -105,7 +105,7 @@ def build_judge_invocation(
 ) -> JudgeInvocation:
     """Assemble the grounded judge call: write the per-lead comparison files and build the
     context message. The comparison join + synthesis are the structural grounding (the
-    judge can't avoid seeing the actuals); jq over the add-dir'd ``gather_raw/`` is its
+    judge can't avoid seeing the actuals); SQL over the add-dir'd ``gather_raw/`` is its
     discretionary verification surface for absence-checks.
 
     ``comparison_dirname`` is per-direction so the adversarial and benign legs — which run
@@ -150,8 +150,10 @@ def build_judge_invocation(
         + _section(
             "comparison_files", render_manifest(comparisons),
             f"per-lead projection-vs-actual files under {comparison_dir} — read each at "
-            f"its turn; query the full payloads under {gather_raw} with jq to check "
-            "absence (the refute primitive), never inferring it from the sample",
+            f"its turn; query the full payloads under {gather_raw} by piping one into "
+            "defender-sql (`cat <payload> | defender-sql '<SQL>'`, table `data`) to check "
+            "absence (the refute primitive), never inferring it from the sample, and "
+            "never reading a truncated or empty payload as absence",
         )
     )
     if closed_ticket_read:
@@ -167,7 +169,7 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
                  projected_telemetry_path: Path, learning_run_dir: Path,
                  *, judge_fn: Callable[..., str]) -> str:
     """Grounded judge for either direction: write the per-lead comparison files, then score
-    against the actual evidence (per-lead comparison files + jq over ``gather_raw/``), not
+    against the actual evidence (per-lead comparison files + SQL over ``gather_raw/``), not
     the narrative. The direction rides in ``wiring`` (adversarial vs benign prompt/model/
     effort + disjoint comparison dirname + the benign-only closed-ticket read); for the
     benign leg, a routine story that SURVIVES is the FP signal. ``judge_fn`` is the engine

@@ -18,17 +18,18 @@ the main/gather patterns also ANCHOR their operands: a viewer's file/dir operand
 textually sit under `{run_dir}` or a tight corpus `.md`, and a `..` segment is rejected
 literally (built by `policies._common.reader_patterns_for` from the run's roots — the bash
 lane does no `resolve()`, so the symlink residual is closed by the no-symlink-writer
-invariant, not the regex). The judge keeps the complementary `resolve()`-based `jq`
-file-operand gate (`jq_operand_gated` → `_jq_reads_within_roots`) because its `jq`
-legitimately opens files; main/gather `jq` is stdin-compute-only.
+invariant, not the regex). The judge keeps the complementary `resolve()`-based
+file-operand gate (`operand_gated` → `_operand_reads_within_roots`) because its
+`cat` legitimately opens files OUTSIDE its own run dir: `gather_raw` reaches it only
+as a `read_root`, which the textual anchors are blind to.
 
   - main / gather — the read-only viewers + non-adapter `defender-*` shims
     (`policies/main.py`, `policies/gather.py`); gather additionally routes a
     data-source adapter run either standalone (captured transparently) or as the
     sanctioned `adapter --raw | defender-sql '<SQL>'` pipe.
   - judge / actor — build their own `bash_allow` in their pipeline modules (the
-    judge's path-gated `jq` + pinned closed-ticket read; the actor's pinned
-    lesson scripts).
+    judge's operand-gated `cat` piped into the sandboxed `defender-sql`, plus the
+    pinned closed-ticket read; the actor's pinned lesson scripts).
 
 **The command is parsed exactly once (#456).** `decide_bash` unwraps + parses, then
 returns a `BashDecision` carrying that parse: the verdict, the `Pipeline` list (for
@@ -40,6 +41,7 @@ the main-loop raw/adapter deny *reasons* in `hooks/block_main_loop_raw_access.py
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,38 +83,16 @@ _GATHER_PAYLOAD_TOKENS = (
 # matched against the first token of a stage only.
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# jq option grammar for the file-arg path-gate (the judge's `jq_operand_gated`
-# lane). jq OPENS a file for: its positional input operands (after the filter
-# program) and the argument-taking flags below. The gate validates EVERY such path
-# against the policy's read roots — closing the flag-injection escape where a
-# `--slurpfile <out-of-roots>` loads a file while the trailing operand looks clean.
-#
-# Each entry: flag -> (tokens consumed INCLUDING the flag, index of the FILE arg
-# within that span or None, supplies-the-filter). `-f`/`--from-file` load the filter
-# program FROM a file, so their arg is both a gated file AND fills the filter slot
-# (the next bare positional is then an input, not the filter).
-_JQ_ARG_FLAGS: dict[str, tuple[int, int | None, bool]] = {
-    "-f": (2, 1, True), "--from-file": (2, 1, True),
-    "--slurpfile": (3, 2, False), "--rawfile": (3, 2, False), "--argfile": (3, 2, False),
-    "--arg": (3, None, False), "--argjson": (3, None, False),       # <name> <value>
-    "--indent": (2, None, False),
-    # `-L`/`--library-path <dir>` is DELIBERATELY absent → it fails closed (below).
-    # It adds a jq MODULE search dir, and an `include`/`import` in the filter then
-    # opens `<dir>/<mod>.jq` — files the operand gate can't enumerate (they come from
-    # the filter body, not the argv), so gating the dir alone would miss them and a
-    # compile error echoes a module file's source line to stderr (an out-of-roots
-    # read oracle). The judge has no legitimate use for jq module paths, so any `-L`
-    # (standalone or bundled/attached) is denied rather than decoded ungated.
-}
-_JQ_ARGS_MODES = frozenset({"--args", "--jsonargs"})  # trailing positionals become strings, not files
-# The arg-taking SHORT flags (`-f`/`-L`). jq bundles short options AND lets a
-# bundle's trailing arg-taking flag consume the next token (`jq -nf FILE` opens
-# FILE as the `-f` filter program) or an attached value (`-L<dir>`). `-f` is decoded
-# as a STANDALONE token (in `_JQ_ARG_FLAGS`); `-L` is decoded NOWHERE (it opens files
-# the gate can't enumerate — see above). Either appearing in a bundle/attached form,
-# and `-L` in ANY form, desyncs the positional count or hides an ungated read, so the
-# gate FAILS CLOSED on it instead (see `_jq_flag_step`).
-_JQ_SHORT_ARG_FLAGS = frozenset("fL")
+# `cat`'s complete short-option set (coreutils). EVERY one is boolean — `cat` has no
+# arg-taking flag at all. That is the whole reason `cat` is the judge's file-opening
+# program: "which files does this argv open?" is answerable without reimplementing an
+# option parser (jq's `-f`/`-L`/`--slurpfile`/`--rawfile`/`--argfile` + short-bundle arg
+# consumption needed ~60 lines and three fail-closed branches to answer the same
+# question). This is the SOLE encoding of that option set: the judge's admitting pattern
+# (`engine_pydantic._CAT_PATTERN`) deliberately does not repeat it, so the grammar and
+# the extractor cannot drift apart. Anything else `-`-prefixed fails closed below, which
+# also covers a non-coreutils `cat` whose flags differ.
+_CAT_BOOL_BUNDLE = re.compile(r"-[AbeEnstTuv]+")
 
 
 @dataclass(frozen=True)
@@ -158,17 +138,35 @@ def _stage_unsafe(argv: list[str]) -> bool:
     return False
 
 
+# The deny for a command that does not LEX. Every other deny means "your command is not
+# a shape you may run"; this one means "your command may well be fine, but its line
+# breaks are not" — and the agent cannot tell those apart from the generic reason. It is
+# worth its own text because the failure is invisible in the command as written: the SQL
+# and ES|QL the agents are shown are rendered multi-line, and flattening is on them.
+UNTOKENIZABLE_REASON = (
+    "Blocked: the command could not be tokenized — an unbalanced quote or a trailing "
+    "`\\`. Each PHYSICAL LINE is lexed on its own (there is no shell to join them), so "
+    "a `\\` line-continuation and a newline inside a quoted argument both fail here, "
+    "even when the command is otherwise allowed. Rewrite it as a SINGLE line."
+)
+
+
 def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
     """Unwrap + parse `cmd` (already stripped) once into the `Pipeline` list, or
     None to fail closed — when `unwrap` rejects the wrapper, or the executor's
     decomposition raises on an operator/redirect it does not model (the shared
     `bash_exec.parse`, the whole point of #379: gate and executor decompose
-    identically). This is the single decomposition every branch below routes off."""
+    identically). This is the single decomposition every branch below routes off.
+
+    `UntokenizableCommand` PROPAGATES rather than flattening to None: it is the one
+    parse failure whose cause the caller can explain (`UNTOKENIZABLE_REASON`)."""
     inner = unwrap(cmd)
     if inner is None:
         return None
     try:
         return bash_exec.parse(inner)
+    except bash_exec.UntokenizableCommand:
+        raise
     except bash_exec.BashExecError:
         return None
 
@@ -229,69 +227,72 @@ def _decide_adapter(pipelines: list[bash_exec.Pipeline], policy: AgentPolicy) ->
     return BashDecision(False, ADAPTER_STANDALONE_REASON)
 
 
-def _jq_flag_step(argv: list[str], i: int) -> tuple[int, list[str], bool] | None:
-    """Handle one jq OPTION token at `argv[i]` (a token starting with `-`, never a
-    bare `-`). Returns `(next_i, files_loaded, supplies_filter)`, or `None` to FAIL
-    CLOSED (a malformed arg-taking flag, or an unrecognized long option that might
-    smuggle a file). A short boolean flag / bundle (`-s`, `-nr`, `-c`, …) opens no
-    file and consumes only itself."""
-    t = argv[i]
-    spec = _JQ_ARG_FLAGS.get(t)
-    if spec is not None:
-        consume, file_off, supplies_filter = spec
-        if i + consume > len(argv):
-            return None  # arg-taking flag with its argument(s) missing
-        loaded = [argv[i + file_off]] if file_off is not None else []
-        return i + consume, loaded, supplies_filter
-    if t.startswith("--"):
-        return None  # unrecognized long option — fail closed (may take a file)
-    if any(c in _JQ_SHORT_ARG_FLAGS for c in t[1:]):
-        return None  # short bundle carrying an arg-taking flag (`-nf FILE`, `-L<dir>`)
-    return i + 1, [], False  # boolean short flag / bundle
-
-
-def _jq_input_files(argv: list[str]) -> list[str] | None:
-    """Every file path a `jq` invocation (`argv[0] == 'jq'`) will OPEN — its
-    positional input operands plus the `--slurpfile`/`--rawfile`/`--argfile`/`-f`
-    file targets. Returns `[]` for an inert stdin-only `jq '.'` (nothing to gate), or
-    `None` when the argv uses a shape we won't reason about (FAIL CLOSED). `-`
-    operands (stdin) are skipped; after `--args`/`--jsonargs` the trailing positionals
-    are string args, not files."""
+def _cat_input_files(argv: list[str]) -> list[str] | None:
+    """Every file path a `cat` invocation (`argv[0] == 'cat'`) will OPEN. `cat` has no
+    arg-taking flag (`_CAT_BOOL_BUNDLE`), so every non-flag token is an input operand —
+    no option parser needed. Returns `[]` for an inert stdin-only `cat` in a downstream
+    pipe stage (nothing to gate), or `None` to FAIL CLOSED on any `-`-prefixed token
+    that is not a known boolean bundle: the operand-gated stage grammar admits only
+    those, so anything else means grammar and gate disagree, and a disagreement is the
+    bug class this whole gate exists to prevent. A bare `-` is stdin; `--` ends options
+    (every later token is an operand, even one starting with `-`)."""
     files: list[str] = []
-    filter_seen = False
-    i, n = 1, len(argv)
-    while i < n:
-        t = argv[i]
-        if t in _JQ_ARGS_MODES:
-            break  # `--args`/`--jsonargs`: every remaining positional is a string arg, never a file
-        if t.startswith("-") and t != "-":
-            step = _jq_flag_step(argv, i)
-            if step is None:
-                return None
-            i, loaded, supplies_filter = step
-            files.extend(loaded)
-            filter_seen = filter_seen or supplies_filter
-        elif not filter_seen:
-            filter_seen = True  # the first bare positional is the filter program
-            i += 1
-        else:
+    opts_done = False
+    for t in argv[1:]:
+        if opts_done or t == "-" or not t.startswith("-"):
             if t != "-":
-                files.append(t)  # a subsequent bare positional is an input file
-            i += 1
+                files.append(t)
+        elif t == "--":
+            opts_done = True
+        elif not _CAT_BOOL_BUNDLE.fullmatch(t):
+            return None
     return files
 
 
-def _jq_reads_within_roots(
-    argv: list[str], policy: AgentPolicy, *, run_dir: Path | None, defender_dir: Path | None
+# The operand-gated programs: program name -> the extractor naming every file that
+# program's argv OPENS. Keyed by PROGRAM (not applied to every stage) so a compute
+# stage is never mistaken for a reader: `defender-sql 'SELECT …'` opens no file, and
+# its SQL text is not a path — it is argument-inert because DuckDB is sealed
+# (`enable_external_access=false` + `lock_configuration=true`, one-way) BEFORE the
+# caller's SQL runs, so the sandbox bounds it rather than this gate. A stage whose
+# program is absent here is shape-checked by `bash_allow` and nothing more.
+_OPERAND_GATED_PROGRAMS: dict[str, Callable[[list[str]], list[str] | None]] = {
+    "cat": _cat_input_files,
+}
+
+
+def _operand_reads_within_roots(
+    argv: list[str], policy: AgentPolicy, *, run_dir: Path | None, defender_dir: Path | None,
 ) -> bool:
-    """Whether every file a `jq` stage opens resolves within `policy`'s read roots.
-    An inert stdin `jq '.'` (no file operands) passes; an unparseable jq shape fails
-    closed."""
-    files = _jq_input_files(argv)
+    """Whether every file this stage opens resolves within `policy`'s read roots. Calls
+    the SAME `read_allowed_path` routine `decide_read` uses, so the bash lane and the
+    Read tool confine to one roots set through one mechanism — including `read_roots`
+    (which the textual anchors cannot see) and the secret/ground-truth denylist.
+
+    A RELATIVE operand is rebased onto `defender_dir.parent` — the cwd `tools._tool_bash`
+    hands the executor — before it is resolved. Without that, the gate would `resolve()`
+    against the ambient process cwd while `cat` opens the file from the executor's, so the
+    two could name different files: the validator/executor differential this package
+    exists to eliminate. `tools._resolve_operand` already does exactly this for the file
+    tools; the bash lane now matches it.
+
+    A stage whose program is not operand-gated opens no file and passes untouched (the
+    registry lookup lives here, next to the registry, so the caller does not re-derive
+    it); so does a gated stage with no file operands. An unparseable shape fails closed."""
+    extract = _OPERAND_GATED_PROGRAMS.get(argv[0])
+    if extract is None:
+        return True
+    files = extract(argv)
     if files is None:
         return False
+    if defender_dir is None:
+        return False  # no cwd to rebase against — fail closed (read_allowed_path would too)
+    cwd = defender_dir.parent
     return all(
-        read_allowed_path(f, run_dir=run_dir, defender_dir=defender_dir, policy=policy)
+        read_allowed_path(
+            f if Path(f).is_absolute() else cwd / f,
+            run_dir=run_dir, defender_dir=defender_dir, policy=policy,
+        )
         for f in files
     )
 
@@ -330,24 +331,23 @@ def _decide_readers(
       - `None` when the command is NOT a reader command (some stage matches no
         `bash_allow` pattern) — the caller then tries adapter classification;
       - an ALLOW when every stage matches an approved shape (and, when
-        `jq_operand_gated`, every `jq` stage's file operands resolve in-roots);
+        `operand_gated`, every operand-gated stage's file operands resolve in-roots);
       - a DENY when a shape-approved command carries an unsafe construct
-        (`$(...)`/backtick/`export`/`VAR=`) or a `jq` operand escapes the read roots.
+        (`$(...)`/backtick/`export`/`VAR=`) or an operand escapes the read roots.
 
     Requiring EVERY stage to match the (narrow, per-agent) allowlist is what makes a
-    pipe safe without a single-stage restriction: the judge's `jq … | jq …` is fine,
-    but a downstream `cat`/`head` matches no judge pattern and is denied here."""
+    pipe safe without a single-stage restriction: the judge's `cat … | defender-sql …`
+    is fine, but a downstream `head` matches no judge pattern and is denied here."""
     stages = command_shape.flat_stages(pipelines)
     if not stages or not all(_stage_shape_ok(s, policy) for s in stages):
         return None  # not a reader command → let the caller try adapter routing
     if any(_stage_unsafe(s) for s in stages):
         return BashDecision(False, policy.deny_reason)
-    if policy.jq_operand_gated:
-        for s in stages:
-            if s[0] == "jq" and not _jq_reads_within_roots(
-                s, policy, run_dir=run_dir, defender_dir=defender_dir
-            ):
-                return BashDecision(False, policy.deny_reason)
+    if policy.operand_gated and not all(
+        _operand_reads_within_roots(s, policy, run_dir=run_dir, defender_dir=defender_dir)
+        for s in stages
+    ):
+        return BashDecision(False, policy.deny_reason)
     return _allow(pipelines)
 
 
@@ -359,9 +359,9 @@ def decide_bash(
     (no per-role method): the raw-read clamp, then the per-agent `bash_allow` regex
     reader lane, then structural adapter routing.
 
-    `run_dir`/`defender_dir` supply the read roots the judge's `jq` file-arg
+    `run_dir`/`defender_dir` supply the read roots the judge's `cat` file-operand
     path-gate validates against; they are irrelevant to a policy with
-    `jq_operand_gated=False` (main/gather/actor), so those callers may omit them.
+    `operand_gated=False` (main/gather/actor), so those callers may omit them.
 
     Returns a `BashDecision` carrying the single parse (see the class): callers read
     `.allow`/`.reason` as before, and route capture/execution off
@@ -383,7 +383,15 @@ def decide_bash(
     ):
         return BashDecision(False, RAW_DENY_REASON)
 
-    pipelines = _parse(cmd)
+    try:
+        pipelines = _parse(cmd)
+    except bash_exec.UntokenizableCommand:
+        # A lexing failure, not a policy one. Saying so is the difference between the
+        # model re-emitting its command on one line and the model concluding the
+        # program is forbidden and hunting for another (`policy.deny_reason` would say
+        # e.g. "gather may only run an adapter standalone" for a standalone adapter
+        # call whose only sin was a line break inside its quoted query).
+        return BashDecision(False, UNTOKENIZABLE_REASON)
     if pipelines is None:
         return BashDecision(False, policy.deny_reason)
 
@@ -391,7 +399,7 @@ def decide_bash(
     # every stage matches an approved shape — including the judge's pinned `python3
     # <ticket_cli>` read and the actor's pinned scripts, adapter-SHAPED commands that
     # must win over adapter classification (the job the old custom matchers did). A
-    # shape-approved command that fails the jq operand path-gate / carries an unsafe
+    # shape-approved command that fails the operand path-gate / carries an unsafe
     # construct denies HERE rather than falling through.
     reader = _decide_readers(pipelines, policy, run_dir=run_dir, defender_dir=defender_dir)
     if reader is not None:

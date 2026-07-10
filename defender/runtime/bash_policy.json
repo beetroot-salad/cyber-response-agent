@@ -16,7 +16,7 @@
     "adapters = whether the agent may invoke a data-source adapter (defender-<sys>",
     "           or scripts/adapters/<sys>_cli.py). main: no (dispatch gather);",
     "           gather: yes, captured transparently.",
-    "raw_reads = whether the agent may read / jq gather_raw/**. main: no (consumes",
+    "raw_reads = whether the agent may read gather_raw/**. main: no (consumes",
     "           the gather summary); gather: yes (verify its own query result). A",
     "           learning-loop agent (the judge) declares this in its own AgentPolicy.",
     "adapter_sql_pipe = whether `defender-<sys> ... --raw | defender-sql '<SQL>'` is",

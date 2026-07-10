@@ -41,8 +41,12 @@ hooks). The gates:
   `decide_read` does (#535 — `compile_policy_for(<DEF>, run_dir, defender_dir)` / `bind` bakes
   the anchors; `jq` is stdin-compute-only there); the shim names come from the `_cmd_segments.py`
   taxonomy (`NON_ADAPTER_SHIMS` + inert `echo`/`true`). Judge/actor build theirs in their
-  pipeline modules (the judge's path-gated `jq` + closed-ticket read, the actor's pinned
-  lesson scripts). `bash_policy.json` still carries the per-agent capability bits + the read
+  pipeline modules (the judge's operand-gated `cat` piped into the sandboxed `defender-sql`,
+  plus the closed-ticket read; the actor's pinned lesson scripts). The judge is the one agent
+  whose bash operands are gated at `resolve()` time rather than textually anchored
+  (`AgentPolicy.operand_gated`), because its `gather_raw` lives under the *investigation* run
+  dir while its own `run_dir` is the *learning* run dir — it arrives only via `read_roots`,
+  which the anchors cannot see. `bash_policy.json` still carries the per-agent capability bits + the read
   denylist that `_common` bakes into the anchors (its `viewers` list is no longer read — the
   program set moved into `_common`); the main-loop deny *reasons* come from their policy
   files / `block_main_loop_raw_access.py`.

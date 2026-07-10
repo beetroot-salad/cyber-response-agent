@@ -2,9 +2,10 @@
 
 Pins two contracts:
 
-1. **Aggregation.** A JSON `--raw` envelope or NDJSON piped on stdin is
-   exposed as the table `data` with `read_json_auto` inference, so the
-   caller's SQL (structs, `unnest`, GROUP BY) computes the answer — the
+1. **Aggregation.** A JSON payload or NDJSON piped on stdin is exposed as
+   the table `data` with `read_json_auto` inference — the payload's own
+   top-level keys are the columns, with no wrapper envelope — so the
+   caller's SQL (structs, `unnest`, GROUP BY) computes the answer. The
    tier-2 fallback for a source with no native aggregation.
 2. **Sandbox.** The caller's SQL runs after the connection is sealed, so it
    cannot read files (including the held-out ground-truth the read-deny
@@ -42,25 +43,28 @@ def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:
     return code, capsys.readouterr().out
 
 
-_ENVELOPE = json.dumps({
-    "system": "example", "endpoint": "/events", "args": {"q": "status:failed"},
-    "result": {"hits": [
+# The real modal payload shape (241/640 of the corpus). There is NO `{system, endpoint,
+# args, result}` wrapper — no adapter has ever emitted one, and `unnest(result.hits)` is
+# a Binder Error against every real payload (pinned in test_judge_sql_idioms_corpus.py).
+_PAYLOAD = json.dumps({
+    "index": "logs-*", "total": 4, "returned": 4, "truncated": False,
+    "hits": [
         {"user": "root", "src_ip": "203.0.113.4"},
         {"user": "root", "src_ip": "203.0.113.4"},
         {"user": "root", "src_ip": "203.0.113.9"},
         {"user": "sre.alice", "src_ip": "10.0.0.5"},
-    ]},
+    ],
 })
 
 
 # --- aggregation ----------------------------------------------------------
 
 
-def test_aggregates_over_raw_envelope(monkeypatch, capsys):
+def test_aggregates_over_the_payload(monkeypatch, capsys):
     code, out = _run(
-        monkeypatch, capsys, _ENVELOPE,
+        monkeypatch, capsys, _PAYLOAD,
         "SELECT h.user AS user, count(*) c, count(DISTINCT h.src_ip) ips "
-        "FROM (SELECT unnest(result.hits) h FROM data) GROUP BY user ORDER BY c DESC",
+        "FROM (SELECT unnest(hits) h FROM data) GROUP BY user ORDER BY c DESC",
     )
     assert code == defender_sql.EXIT_OK
     assert json.loads(out) == [
@@ -88,7 +92,7 @@ def test_empty_stdin_is_input_error(monkeypatch, capsys):
 
 
 def test_bad_sql_is_query_error(monkeypatch, capsys):
-    code, out = _run(monkeypatch, capsys, _ENVELOPE, "SELECT no_such_col FROM data")
+    code, out = _run(monkeypatch, capsys, _PAYLOAD, "SELECT no_such_col FROM data")
     assert code == defender_sql.EXIT_QUERY_ERROR
     assert out == ""
 
@@ -149,13 +153,13 @@ def test_tmpdir_with_quote_does_not_break_materialization(monkeypatch, capsys, t
     "SET enable_external_access=true",                              # undo the seal
 ])
 def test_sandbox_blocks_filesystem_and_unlock(monkeypatch, capsys, tmp_path, hostile):
-    code, out = _run(monkeypatch, capsys, _ENVELOPE, hostile)
+    code, out = _run(monkeypatch, capsys, _PAYLOAD, hostile)
     assert code == defender_sql.EXIT_QUERY_ERROR
     assert out == ""
 
 
 def test_sandbox_blocks_file_write(monkeypatch, capsys, tmp_path):
     target = tmp_path / "exfil.csv"
-    code, _ = _run(monkeypatch, capsys, _ENVELOPE, f"COPY (SELECT 1 x) TO '{target}'")
+    code, _ = _run(monkeypatch, capsys, _PAYLOAD, f"COPY (SELECT 1 x) TO '{target}'")
     assert code == defender_sql.EXIT_QUERY_ERROR
     assert not target.exists()
