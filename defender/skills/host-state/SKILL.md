@@ -112,9 +112,11 @@ defender-host-state package-list <host> [--limit N]
 SKILL plus `defender-host-state {subcommand} --help` is the
 authoritative surface.
 
-Each subcommand emits a JSON object with `host`, `captured_at`, and the
-verb-specific payload (e.g. `ps_output`, `entries`, `keys`,
-`sha256`, `packages`).
+Each subcommand emits a JSON object with `captured_at` and the
+verb-specific payload. The host-keyed verbs (`proc-tree`, `passwd`,
+`authorized-keys`, `fim-checksum`, `package-list`) also carry `host` plus
+their payload field (`ps_output`, `entries`, `keys`, `sha256`, `packages`);
+`container-inspect` keys on `container_id` and carries `name` + `image`.
 
 ### Connectivity
 
