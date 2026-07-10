@@ -115,6 +115,8 @@ value; do not poll.
   - For a **fold** rewrite: re-Edit it back to its pre-edit body (you read the original at the start of the batch). Do *not* attempt to rewrite around the BAD verdict; the finding routes to the held-back report and the next batch will revisit.
 - **ERROR** (the check could not run) → re-run that one pair once, by calling `forward_check` again with just that pair; if it errors again, revert the file like a BAD and note `forward_check_error` in its held-back reason.
 
+For folds where one finding produces GOOD and another BAD on the same target file, keep the GOOD edit. Each finding is gated independently against its own source case.
+
 ## Final output (last thing you emit)
 
 Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:

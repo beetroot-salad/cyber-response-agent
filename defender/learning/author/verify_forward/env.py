@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from defender._run_paths import RunPaths, resolve_run_bundle
-from defender.learning.core.config import LESSONS_ENV_RETRIEVE_SCRIPT
+from defender.learning.core.config import LESSONS_ENV_RETRIEVE_SCRIPT, VERIFIER_TIMEOUT
 from defender.learning.core.prologue import extract_case_entities
 
 # The env-retrieval script offset lives once in core.config, shared with the in-process
@@ -52,13 +52,28 @@ def rule_ids_arg(rule_ids: object) -> str:
 
 
 def run_retrieval(rule_ids: str, entities: str, corpus: Path) -> list[str]:
-    """Return the list of repo-relative lesson paths the retrieval emits."""
+    """Return the list of repo-relative lesson paths the retrieval emits.
+
+    Bounded by ``VERIFIER_TIMEOUT``, the same ceiling the two model-backed checks get from
+    ``run_stage``'s ``wait_for``. This is the ONLY check that spends its wall clock outside
+    that transport, and until #558 it was bounded by the bash tool's own subprocess timeout —
+    in-process there is nothing else left to stop a wedged retrieval from hanging the batch's
+    gather forever. A timeout is this pair's ERROR (``SystemExit`` is what ``_run_one``
+    flattens), never a systemic abort.
+    """
     cmd = [sys.executable, str(RETRIEVE), "--corpus", str(corpus)]
     if rule_ids:
         cmd += ["--alert-rule-ids", rule_ids]
     if entities:
         cmd += ["--entities", entities]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=VERIFIER_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise SystemExit(
+            f"verify_forward_env: retrieval timed out after {VERIFIER_TIMEOUT}s"
+        ) from e
     if proc.returncode != 0:
         raise SystemExit(
             f"verify_forward_env: retrieval failed (rc={proc.returncode}): "

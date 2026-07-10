@@ -9,7 +9,7 @@ transport they share with the five other in-process stages lives in
 ONE engine serves all FOUR curators — findings (A → ``defender/lessons/``), actor-tradecraft
 (B → ``defender/lessons-actor/``), env-benign (C) and env-adversarial (D → the shared
 ``defender/lessons-environment/``) — the way ``verify_forward``'s one engine serves both
-forward-checks: the per-curator variation (its prompt, corpus, verifier scripts, batch id,
+forward-checks: the per-curator variation (its prompt, corpus, bound forward-check, batch id,
 trace anchor, model/effort) is threaded through ``run_curator_stage``'s args, not a second
 engine module. Each curator's invoke seam (``lessons.run.invoke_agent`` for A,
 ``curator.invoke_curator_agent`` for B/C/D) delegates here.
@@ -133,8 +133,8 @@ def _corpus_spellings(corpus_dir: Path) -> str:
     """The `re.escape`-d alternation of the corpus's two bash-operand spellings: the fixed
     repo-relative ``defender/<name>`` (the agent runs with cwd=worktree and types repo-relative
     paths) and the worktree-absolute ``<wt>/defender/<name>``. Derived from ``defender/<name>``
-    rather than ``corpus_dir.relative_to(repo_root)`` for the same worktree reason as
-    ``_VERIFY_FORWARD_REL`` — a corpus always sits directly under ``<repo>/defender/``."""
+    rather than ``corpus_dir.relative_to(repo_root)`` because ``repo_root`` is the throwaway
+    worktree — a corpus always sits directly under ``<repo>/defender/``."""
     rel = f"defender/{corpus_dir.name}"
     return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
 
@@ -370,6 +370,18 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     # ONCE per spawn, for the whole batch: the nested forward-checks call the verify transport
     # directly and source no key of their own (the retired CLI wrapper re-read `.env` per check).
     source_key(model, label="curator")  # FatalConfigError PROPAGATES (systemic)
+    # The curator's key covers the nested checks only while they share a provider. It is one
+    # `.env` var per provider, and `LEARNING_VERIFIER_MODEL` is documented as routing anywhere
+    # `providers.provider_for` does (`claude-haiku-4-5`, to A/B the pre-migration gate) — so a
+    # cross-provider verifier needs its own key sourced, else every check dies unauthenticated
+    # and the gate silently degrades to all-ERROR. Still once per SPAWN, never per check; and
+    # only for a model-backed check, since ENV_CHECK runs no model and must not acquire a
+    # phantom key dependency.
+    if check.prompt_path is not None and (
+        providers.provider_for(config.VERIFIER_MODEL).api_key_var
+        != providers.provider_for(model).api_key_var
+    ):
+        source_key(config.VERIFIER_MODEL, label=f"verify:{check.error_prefix}")
     # Anchor the trace (batch_id + pid) BEFORE the spawn so a partial failure still leaves a
     # complete, per-spawn-distinct trace (RequestLogger opens truncate → two spawns into one drain
     # dir would clobber a shared name). The nested checks trace into the SOURCE bundle, a different

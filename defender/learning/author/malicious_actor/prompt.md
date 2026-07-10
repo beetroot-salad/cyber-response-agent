@@ -48,6 +48,8 @@ The checks run concurrently and the tool returns one line per pair — `GOOD <pa
 
 Stale-only flips don't need a forward check — there's no new body to evaluate; omit them from the batch.
 
+For folds where one observation produces GOOD and another BAD on the same target file, keep the GOOD edit and skip the BAD one. Each observation is gated independently.
+
 ## Discipline
 
 - One file per lesson. Flat layout under `defender/lessons-actor/`. No subdirectories.

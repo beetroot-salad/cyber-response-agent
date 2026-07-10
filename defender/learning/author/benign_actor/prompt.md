@@ -51,6 +51,7 @@ This is a **deterministic retrieval check**, not an LLM judgment: it re-runs the
 - **BAD** → the lesson cannot be retrieved for its own source case — almost always a mis-keyed anchor or selector (empty/wrong `alert_rule_ids`, a `class` slot narrower than the case entity, or an `identity` selector that the case prologue can't satisfy). One rewrite attempt allowed: re-read the observation, fix the frontmatter keys, re-check that pair.
   - Second run `GOOD` → keep.
   - Still `BAD` → revert: `rm` the file (for a `new`) or re-Edit it back to its pre-batch content (for a `fold` — you read the original at the start of the batch), and route the observation to `consumed_skip` with reason `forward_check_failed:{one-line summary}`.
+- **ERROR** (the check could not run) → re-check that one pair once, by calling `forward_check` again with just that pair; if it errors again, revert the file like a still-`BAD` and route the observation to `consumed_skip` with reason `forward_check_error:{one-line summary}`.
 
 Stale-only flips don't need a forward check — there's no new body to evaluate. For a fold where one observation passes and another fails on the same file, keep the passing edit and skip the failing one; each observation is gated independently.
 

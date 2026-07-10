@@ -510,8 +510,7 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     paths = LoopPaths(repo_root=orig, state_dir=state).with_repo_root(worktree)
     cfg = benign_run.build_benign_config(paths)
     assert cfg.repo_root == worktree
-    assert cfg.state_root == state
-    assert cfg.pending_dir == state / "_pending"
+    assert cfg.pending_dir == state / "_pending"  # the state dir survives `with_repo_root`
     with pytest.raises(ValueError, match="subpath"):
         cfg.pending_dir.relative_to(worktree)     # persistent anchor NOT under the worktree
 

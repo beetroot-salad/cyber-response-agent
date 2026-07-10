@@ -102,10 +102,6 @@ class AuthorConfig:
     lessons_dir: Path
     lessons_dir_rel: str
     runs_dir: Path
-    # Shared mutable-state root (``LoopPaths.state_root``) pinned as
-    # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
-    # (#425) — a first-class field, not ``runs_dir.parent``.
-    state_root: Path
     pending_dir: Path
     pending_file: Path
     consumed_file: Path
@@ -137,7 +133,6 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
-        state_root=paths.state_root,
         pending_dir=paths.pending_dir,
         pending_file=paths.pending_file,
         consumed_file=paths.pending_dir / "consumed.jsonl",

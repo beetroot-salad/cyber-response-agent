@@ -48,8 +48,6 @@ from defender import _git  # _harness_util put the repo root on sys.path
 
 
 HERE = Path(__file__).resolve().parent      # .../defender/evals
-REAL_LEARNING = HERE.parent / "learning"    # .../defender/learning
-REAL_REPO_ROOT = REAL_LEARNING.parents[1]  # workspace root (worktree)
 RESULTS_DIR = HERE / "results"
 
 

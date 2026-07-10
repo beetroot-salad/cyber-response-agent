@@ -90,12 +90,6 @@ class LoopPaths:
         return self.defender.learning_dir
 
     @property
-    def verify_forward_dir(self) -> Path:
-        """The author-time forward-check verifier scripts dir — follows ``repo_root`` (the batch
-        worktree), so the curators pin the scripts under the tree they actually edit."""
-        return self.defender.verify_forward_dir
-
-    @property
     def lessons_dir(self) -> Path:
         return self.defender.lessons_dir
 

@@ -74,10 +74,6 @@ class CuratorConfig:
     # root — so it stays correct even though ``repo_root`` moves to a batch worktree
     # (#425). Do NOT resolve the bundle off ``repo_root``.
     runs_dir: Path
-    # Shared mutable-state root (``LoopPaths.state_root``) — the value pinned as
-    # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocesses
-    # (#425). A first-class field, not ``runs_dir.parent``: see ``LoopPaths.state_root``.
-    state_root: Path
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
@@ -109,18 +105,6 @@ class CuratorConfig:
     # The one genuinely-divergent step: build the AUTHOR_RESULT dict from the
     # batch. Signature: (observations, batch_id, cfg) -> dict.
     invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
-
-    @property
-    def pending_file_rel(self) -> str:
-        """Repo-relative queue path for the forward-check ``--pending`` arg.
-
-        Derived from ``channel.file`` so a relocated ``DEFENDER_LEARNING_STATE_DIR``
-        queue and the forward-check stay in sync — an out-of-repo queue falls back
-        to its absolute path (which the verifier resolves directly)."""
-        try:
-            return str(self.channel.file.relative_to(self.repo_root))
-        except ValueError:
-            return str(self.channel.file)
 
     @property
     def run_log(self) -> Path:

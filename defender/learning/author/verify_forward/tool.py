@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -52,6 +53,11 @@ if TYPE_CHECKING:  # importing the curator deps eagerly would close a module cyc
 _CHECK_SEQ = itertools.count()
 
 _DETAIL_MAX = 200
+
+# Any whitespace run in a model-supplied operand. `lesson_path` and `source_id` are echoed back
+# into a whitespace-delimited, newline-separated protocol, so an operand carrying a space or a
+# newline would forge extra result lines (`_field`).
+_WHITESPACE = re.compile(r"\s+")
 
 
 # One lesson to check against one source row. Deliberately UNDOCUMENTED as far as the JSON
@@ -84,11 +90,28 @@ class _Result:
     detail: str
 
 
+def _one_line(text: str) -> str:
+    """One line, bounded — an ERROR detail is the result line's trailing free-text field, so a
+    newline in it would forge a result line and an unbounded one would flood the model's
+    context. Interior spaces are fine: nothing is parsed past this field."""
+    return " ".join(text.split())[:_DETAIL_MAX]
+
+
 def _detail(exc: BaseException) -> str:
-    """One line, bounded — an ERROR detail rides in a whitespace-delimited result line, so a
-    multi-line exception message would corrupt the protocol the prompts parse."""
-    text = " ".join(str(exc).split()) or repr(exc)
-    return text[:_DETAIL_MAX]
+    """This exception as one bounded ERROR detail."""
+    return _one_line(str(exc)) or _one_line(repr(exc))
+
+
+def _field(value: str) -> str:
+    """One model-supplied operand, rendered as exactly ONE field of the result protocol.
+
+    ``lesson_path`` and ``source_id`` are echoed back verbatim into ``<verdict> <path> <id>``
+    lines that the three curator prompts read positionally, whitespace-separated. Both operands
+    are model-controlled, and neither the corpus ``write_allow`` (``<corpus>/[^\\x00]*\\.md`` —
+    ``[^\\x00]`` matches a newline) nor the ``queued_ids`` membership test constrains whitespace,
+    so a raw echo lets the curator forge its own ``GOOD`` verdicts and ``BATCH:`` summary. A real
+    lesson path or queue id carries no whitespace, so any is escaped rather than emitted."""
+    return _WHITESPACE.sub(r"\\s", value)[:_DETAIL_MAX] or "<empty>"
 
 
 def _gate_lesson_path(deps: CuratorDeps, operand: str) -> Path:
@@ -118,12 +141,22 @@ def _prepare(deps: CuratorDeps, pair: Pair) -> _Prepared:
     fault becomes this pair's ERROR so its siblings still get real verdicts."""
     path = _gate_lesson_path(deps, pair.lesson_path)
     if pair.source_id not in deps.queued_ids:
-        return _Prepared(pair, detail=f"source id {pair.source_id!r} is not in this batch's queued rows")
-    if not path.is_file():
-        return _Prepared(pair, detail=f"lesson not found: {path}")
-    return _Prepared(
-        pair, lesson_path=path, lesson_text=path.read_text(), check_index=next(_CHECK_SEQ),
-    )
+        return _Prepared(pair, detail=_one_line(
+            f"source id {pair.source_id!r} is not in this batch's queued rows"
+        ))
+    try:
+        if not path.is_file():
+            return _Prepared(pair, detail=_one_line(f"lesson not found: {path}"))
+        text = path.read_text()
+    except (StageAbort, FatalConfigError):
+        raise  # systemic: never demoted to one pair's ERROR
+    except (OSError, ValueError) as e:
+        # Reading the lesson is per-pair data, not policy: a file that vanished between the
+        # stat and the read, an unreadable mode, a non-UTF-8 body (`UnicodeDecodeError` is a
+        # `ValueError`). `_run_one` isolates the check itself; this read runs before the
+        # worker thread, so without this it would abort the batch its siblings are in.
+        return _Prepared(pair, detail=_detail(e))
+    return _Prepared(pair, lesson_path=path, lesson_text=text, check_index=next(_CHECK_SEQ))
 
 
 def _run_one(deps: CuratorDeps, item: _Prepared) -> _Result:
@@ -159,12 +192,14 @@ def _run_one(deps: CuratorDeps, item: _Prepared) -> _Result:
 def _render_batch(results: list[_Result]) -> str:
     """The text protocol the three curator prompts parse: one line per pair in input order,
     then the summary. Spacing is load-bearing only in that the prompts read whitespace-
-    separated fields; it matches what ``batch.py`` printed."""
+    separated fields; it matches what ``batch.py`` printed. Every model-supplied field goes
+    through ``_field`` (and every detail through ``_one_line``), so a pair can render exactly
+    one line and cannot forge a sibling verdict or the summary."""
     lines: list[str] = []
     counts = {"GOOD": 0, "BAD": 0, "ERROR": 0}
     for r in results:
         counts[r.verdict] += 1
-        lp, idv = r.pair.lesson_path, r.pair.source_id
+        lp, idv = _field(r.pair.lesson_path), _field(r.pair.source_id)
         if r.verdict == "GOOD":
             lines.append(f"GOOD  {lp}  {idv}")
         elif r.verdict == "BAD":
@@ -196,10 +231,12 @@ async def run_forward_check(deps: CuratorDeps, pairs: list[Pair]) -> str:
             return await asyncio.to_thread(_run_one, deps, item)
 
     settled = await asyncio.gather(*(_one(i) for i in prepared), return_exceptions=True)
+    results: list[_Result] = []
     for outcome in settled:
         if isinstance(outcome, BaseException):
             raise outcome  # systemic — surfaced only after every sibling ran to completion
-    return _render_batch([r for r in settled if isinstance(r, _Result)])
+        results.append(outcome)  # every non-exception outcome is a verdict; none is dropped
+    return _render_batch(results)
 
 
 def register_forward_check_tool(agent) -> None:
