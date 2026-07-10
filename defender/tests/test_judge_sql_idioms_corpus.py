@@ -201,6 +201,67 @@ def test_bare_array_is_one_row_per_element():
 
 
 # ---------------------------------------------------------------------------
+# reactive, payload-grounded guidance: the tool holds the payload the caller does
+# not, so the shape/idiom/truncation advice is emitted on the actual failure rather
+# than pre-taught in the prompt for every shape at once.
+# ---------------------------------------------------------------------------
+
+def test_query_error_on_hits_shape_hint_points_at_the_struct():
+    """A wrong field on the search-hits shape: the error carries the idiom fix, naming the
+    real columns and how to read the struct's fields — the "learn the field names" step the
+    prompt used to spell out for every call."""
+    proc = _sql('{"total":9,"returned":2,"truncated":true,"hits":[{"user":"a"}]}',
+                "SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.usr = 'x'")
+    assert proc.returncode == 1
+    assert "hint:" in proc.stderr
+    assert "columns [total, returned, truncated, hits]" in proc.stderr
+    assert "unnest(hits) h FROM data LIMIT 1" in proc.stderr  # how to see the field names
+
+
+def test_query_error_on_esql_shape_hint_gives_the_positional_map():
+    """The killer case a prompt cannot pre-teach: struct-style access on ES|QL `values`
+    fails, and the hint names the EXACT position of each field FOR THIS payload — grounded
+    in the real fixture, not a generic table."""
+    payload = _REAL_ESQL.read_text()
+    doc = json.loads(payload)
+    proc = _sql(payload,
+                "SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v.\"source.ip\" = 'x'")
+    assert proc.returncode == 1
+    assert "POSITIONAL JSON array" in proc.stderr
+    # the real column order, 1-based, is in the hint
+    for i, col in enumerate(doc["columns"]):
+        assert f"{i + 1}={col['name']}" in proc.stderr
+
+
+def test_query_error_on_flat_shape_hint_names_the_columns():
+    proc = _sql('{"host":"web-1","owner":"team.platform"}', "SELECT nope FROM data")
+    assert proc.returncode == 1
+    assert "columns [host, owner]" in proc.stderr
+    assert "SELECT * FROM data" in proc.stderr
+
+
+def test_truncated_payload_warns_on_a_SUCCESSFUL_query():
+    """The truncation trap moved from the prompt to the tool: a successful query over a
+    truncated payload carries a stderr note (the tool sees `truncated`, the caller may
+    miss it), so a 0 is not silently read as absence."""
+    proc = _sql('{"total":9,"returned":1,"truncated":true,"hits":[{"user":"a"}]}',
+                "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'")
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout) == [{"n": 0}]     # the query still succeeds
+    assert "TRUNCATED" in proc.stderr
+    assert "cannot support an absence refutation" in proc.stderr
+
+
+def test_non_truncated_payload_emits_no_note():
+    """The note fires ONLY on `truncated=true`; every other payload is silent, so the
+    signal stays meaningful."""
+    proc = _sql('{"total":2,"returned":2,"truncated":false,"hits":[{"user":"a"}]}',
+                "SELECT count(*) AS n FROM data")
+    assert proc.returncode == 0
+    assert proc.stderr.strip() == ""
+
+
+# ---------------------------------------------------------------------------
 # the two NON-JSON shapes: loud failure, never a silent "absent"
 # ---------------------------------------------------------------------------
 

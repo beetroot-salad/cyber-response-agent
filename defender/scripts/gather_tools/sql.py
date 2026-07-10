@@ -94,6 +94,70 @@ def _json_safe(value):
     return value
 
 
+# --- reactive, payload-grounded guidance -----------------------------------
+# The tool holds what the caller does not: the materialized payload and the exact
+# DuckDB exception. So the shape-specific "which idiom / which columns / is this
+# truncated" advice lives HERE, keyed on the real payload and emitted only when it
+# is relevant — not front-loaded into every caller's prompt for every shape at once.
+# `DESCRIBE data` works after the seal (an in-memory read needs no external access).
+# Both helpers run in/after an error-or-success path and MUST never raise.
+
+
+def _top_level_columns(con) -> list[str]:
+    return [row[0] for row in con.execute("DESCRIBE data").fetchall()]
+
+
+def _shape_hint(con) -> str:
+    """A shape-aware nudge appended to a query error, grounded in the payload actually
+    loaded. Names the real top-level columns and the idiom that fits this shape — the
+    fix for the failure the caller most often hits (a field/column the shape lacks)."""
+    try:
+        cols = _top_level_columns(con)
+    except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
+        return ""
+    colset = set(cols)
+    if "hits" in colset:
+        idiom = (
+            "search-hits shape — `unnest(hits)` yields a STRUCT, filter on `h.<field>`; "
+            "the field names live inside it (`SELECT unnest(hits) h FROM data LIMIT 1`)"
+        )
+    elif "values" in colset and "columns" in colset:
+        try:
+            order = ", ".join(
+                f"{i + 1}={c['name']}"
+                for i, c in enumerate(con.execute("SELECT columns FROM data").fetchone()[0])
+            )
+        except Exception:  # noqa: BLE001
+            order = "see `SELECT columns FROM data`"
+        idiom = (
+            "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
+            f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unwrap the JSON: "
+            "`v[2]->>'$' = '<value>'`"
+        )
+    else:
+        idiom = "flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`"
+    return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}."
+
+
+def _truncation_note(con) -> str:
+    """A one-line warning emitted AFTER a successful query when the payload is truncated —
+    the single most dangerous shape for an absence check, visible to the tool and easy for
+    the caller to miss. Fires only on `truncated=true`, so it is silent for every other
+    payload."""
+    try:
+        if "truncated" not in _top_level_columns(con):
+            return ""
+        if con.execute("SELECT 1 FROM data WHERE truncated LIMIT 1").fetchone() is None:
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+    return (
+        "defender-sql: note — this payload is TRUNCATED: `hits` holds only the first "
+        "`returned` of `total` matching rows. A 0 or a miss here means 'not in the first "
+        "rows', NOT 'absent' — a truncated payload cannot support an absence refutation."
+    )
+
+
 def _run(sql: str) -> int:
     try:
         import duckdb
@@ -152,7 +216,9 @@ def _run(sql: str) -> int:
         try:
             cursor = con.execute(sql)
         except duckdb.Error as exc:
-            print(f"defender-sql: query error: {exc}", file=sys.stderr)
+            # Append the shape/idiom fix, grounded in the payload actually loaded — the
+            # advice a prompt would otherwise have to pre-teach for every shape at once.
+            print(f"defender-sql: query error: {exc}{_shape_hint(con)}", file=sys.stderr)
             return EXIT_QUERY_ERROR
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -162,6 +228,12 @@ def _run(sql: str) -> int:
         # any non-finite float to null, so this never actually rejects a row.
         json.dump(rows, sys.stdout, default=str, allow_nan=False)
         sys.stdout.write("\n")
+        # A successful query over a TRUNCATED payload is the classic unsound-absence
+        # trap; warn on stderr (the caller sees the payload's truncation, the caller
+        # may not). Silent for every non-truncated payload.
+        note = _truncation_note(con)
+        if note:
+            print(note, file=sys.stderr)
         return EXIT_OK
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

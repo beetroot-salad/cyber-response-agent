@@ -12,44 +12,19 @@ You work from:
 
 1. **The per-lead comparison files** — `<comparison_files>` lists them; read each `{lead_id}.md` at its turn. Each joins three columns: **[1]** the oracle's projection for that lead — what the *routine operation* would have surfaced; **[2]** a real sample event from the lead's *actual* payload (orientation only); **[3]** the defender's own per-lead reasoning from the invlang (`:T resolutions` belief movement + `:R authz`) — *why* it read that lead the way it did. These files are your work surface.
 
-2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json`; each lead file names its payloads' **absolute** paths, and you must pass an absolute path — a relative operand resolves outside your read roots and is denied. Query one by piping it into `defender-sql`, which loads the payload as a table named `data` and runs read-only SQL over it.
+2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json`; the lead file names the **absolute** path of every payload — pass an absolute path (a relative one resolves outside your read roots and is denied). Pipe one into `defender-sql`, which exposes it as a table named `data` and runs read-only SQL over it. Run `DESCRIBE data` first: payload shapes differ, and `defender-sql` tells you the columns and the idiom that fits the one you hold — including on a failed query, so a wrong field name self-corrects. Use `read_file` (with `pattern=`) for a payload that isn't JSON.
 
    ```bash
    cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'svc.monitoring'"
    ```
 
-   The payload **is** the table: a top-level object gives one row whose columns are its keys; a top-level array gives one row per element.
-
-   **`DESCRIBE data` first, every time.** It is the one query that runs against every payload, and its answer tells you which shape you are holding. Projecting a column the shape does not have is a `Binder Error`, not a `0` — `SELECT total …` against an ES\|QL or flat payload fails outright.
-
-   ```bash
-   cat /abs/path/gather_raw/l-002/0.json | defender-sql "DESCRIBE data"
-   ```
-
-   | top-level columns | shape | query it with |
-   |---|---|---|
-   | `index, total, returned, truncated, hits` | search hits | `unnest(hits)` yields a **struct** — filter on `h.<field>` |
-   | `columns, row_count, values` | ES\|QL | `unnest(values)` yields a **positional JSON array**, *not* a struct — `h.<field>` fails. `SELECT columns FROM data` gives the field order; index it 1-based and unwrap the JSON: `v[2]->>'$' = '10.0.0.5'`. Or just `SELECT row_count FROM data` |
-   | anything else, one row | flat object (cmdb / identity / …) | `SELECT * FROM data` |
-   | (a bare array) | list of documents | `SELECT count(*) FROM data WHERE …` |
-
-   **Learn the field names before you project columns.** `DESCRIBE data` names only the TOP-LEVEL columns; for the search-hits shape the fields you filter on live *inside* the row struct. Read them off the column-[2] sample, or ask for one row:
-
-   ```bash
-   cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT h FROM (SELECT unnest(hits) h FROM data) LIMIT 1"
-   ```
-
-   Guessing a field name (`h.host_name` when the field is `h.host`) costs you a `Binder Error` and a wasted turn.
-
-   Use `read_file` (with `pattern=`) for anything that isn't JSON — some payloads are the adapter's rendered text, and `defender-sql` will reject those as invalid input. You never need to list a directory: the lead file names the absolute path of **every** payload its lead produced.
-
    **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the routine-grounding evidence the defender's narrative can hide: an authorization, baseline, or read-only-scope signal present in the raw that the escalation reasoned past.
 
-   Three ways an absence check lies to you, all of which you must rule out before refuting:
+   An absence check is only as sound as the read behind it — three ways it lies, all of which you must rule out before refuting:
 
-   - **A truncated payload.** Only the search-hits shape carries `truncated`. When `DESCRIBE data` shows that column, read it before you read a zero count as absence: `SELECT total, returned, truncated FROM data`. `hits` holds only the first `returned` of `total` matching rows, so if `truncated` is true, "not in `hits`" means "not in the first `returned` rows" — **not** "absent". The payload cannot support a refutation on absence, so the lead is *silent*, not refuting.
-   - **An empty payload.** A query that returned nothing writes an empty file, and `defender-sql` exits with an input error rather than "0 rows". An error is not evidence of absence — it means the lead produced no observation at all. Treat it as *silent*.
-   - **A partial read of the lead.** A lead that ran several queries has several payloads, and the lead file names them all. An entity absent from one may sit in another, so an absence claim must cover every payload the lead file lists.
+   - **Truncated.** `defender-sql` warns when a payload is truncated; its `hits` are only the first rows of a larger match, so a 0 there is "not in the first rows", not "absent". Such a payload is *silent*, not refuting.
+   - **Empty or non-JSON.** `defender-sql` fails loudly rather than returning "0 rows"; an error means the lead recorded no observation at all — *silent*, not absent.
+   - **Partial.** A lead that ran several queries has several payloads, and the lead file names them all; an absence claim must cover every one, not just seq 0.
 
 3. **`report.md`** — the defender's disposition (`malicious` or `inconclusive`) + one-paragraph rationale: the escalation you are scoring.
 
