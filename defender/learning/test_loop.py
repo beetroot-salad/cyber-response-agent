@@ -1759,8 +1759,36 @@ def test_write_comparison_files_one_per_lead(tmp_path: Path):
     txt = paths[0].read_text()
     assert "[1] Oracle projection" in txt
     assert "[3] What the defender" in txt
-    assert "gather_raw/l-001/0.json" in txt  # jq hint with the absolute payload path
+    assert "gather_raw/l-001/0.json" in txt  # defender-sql hint with the absolute payload path
     assert "scripted automation" in txt  # the per-lead belief-movement reasoning
+    # Every `cat … | defender-sql …` the lead file teaches must be ONE line: `bash_exec.parse`
+    # splits on newlines before tokenizing, so a `\`-continuation is denied by the judge's gate.
+    for line in txt.splitlines():
+        assert not line.rstrip().endswith("\\"), f"line-continuation in a taught command: {line!r}"
+    # ...and the operand must be absolute (a relative one resolves outside the read roots).
+    for line in txt.splitlines():
+        if "cat " in line and "defender-sql" in line:
+            operand = line.split("cat ", 1)[1].split(" |", 1)[0]
+            assert operand.startswith("/"), f"relative operand in a taught command: {operand!r}"
+
+
+def test_comparison_file_names_every_payload_seq(tmp_path: Path):
+    """A lead that ran N queries has `0.json … {N-1}.json`. The judge cannot enumerate
+    them (`ls` is denied, and a `*.json` glob is inert under the shell=False executor),
+    so the lead file must NAME them all. Pointing it at seq 0 alone makes an absence
+    check unsound the same way a `truncated` payload does — the projected entity may sit
+    in a sibling seq."""
+    run = _make_run_dir(tmp_path)
+    rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
+    for seq in (1, 2):
+        (run / "gather_raw" / "l-001" / f"{seq}.json").write_text("[]")
+        rows.append({**rows[0], "seq": seq, "payload_path": f"gather_raw/l-001/{seq}.json"})
+    (run / "executed_queries.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    comps = comparison.build_comparison(run, _make_projection(tmp_path), companion=_COMPANION)
+    txt = comparison.write_comparison_files(comps, tmp_path / "cmp", run / "gather_raw")[0].read_text()
+    for seq in (0, 1, 2):
+        assert str(run / "gather_raw" / "l-001" / f"{seq}.json") in txt, f"seq {seq} unnamed"
 
 
 def test_render_synthesis_includes_reasoning_and_conclude():

@@ -3,7 +3,7 @@
 Pins the parts that need the pydantic runtime:
   - the actor/judge policy BUILDERS wire the confinement fields + the #522 regex allowlist
     (_actor_policy(scripts, read_confine) -> one pinned-script pattern per script;
-    _judge_policy -> bash_allow=(jq,), jq_operand_gated=True),
+    _judge_policy -> bash_allow=(cat, defender-sql), operand_gated=True),
   - the read tool _tool_read_file(deps, path, pattern=None) routes through the confined policy,
     folds search via `pattern`, and honours the return contract (deny -> ModelRetry, no existence
     oracle, no-match -> empty, in-confine-missing -> 'file not found').
@@ -43,7 +43,7 @@ def test_actor_policy_malicious_wires_confine_and_no_readers():
     pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
     assert set(pol.read_confine) == {_ACTOR_DIR, _ENV_DIR}
     assert len(pol.bash_allow) == 2
-    assert pol.jq_operand_gated is False
+    assert pol.operand_gated is False
     assert pol.raw_reads is False
     assert pol.adapters is False
 
@@ -82,14 +82,19 @@ def test_benign_actor_pins_env_script_only():
     assert not permission.decide_bash("jq . anything", policy=pol).allow
 
 
-def test_judge_policy_is_jq_only():
-    """_judge_policy -> `bash_allow` admits `jq` (any shape) and nothing else, with jq_operand_gated
-    on: cat/grep/head/tail/ls match no pattern and are dropped."""
+def test_judge_policy_is_cat_and_sql_only():
+    """_judge_policy -> `bash_allow` admits `cat` and `defender-sql` and nothing else, with
+    operand_gated on: grep/head/tail/ls/jq match no pattern and are dropped, and the inert
+    `echo`/`true` viewers are NOT inherited (the judge does not route through `_shim_names`).
+    `raw_reads` is declared True — it can no longer be inferred from a bash capability bit."""
     from defender.learning.pipeline.judge import engine_pydantic
     pol = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
-    assert pol.jq_operand_gated is True
-    assert any(p.fullmatch("jq '.'") for p in pol.bash_allow)
-    assert not any(p.fullmatch("cat x") for p in pol.bash_allow)
+    assert pol.operand_gated is True
+    assert pol.raw_reads is True
+    assert any(p.fullmatch("cat x") for p in pol.bash_allow)
+    assert any(p.fullmatch("defender-sql 'SELECT 1'") for p in pol.bash_allow)
+    for denied in ("jq '.'", "grep x y", "head x", "tail x", "ls .", "echo hi", "true"):
+        assert not any(p.fullmatch(denied) for p in pol.bash_allow), denied
 
 
 # ============================================================================

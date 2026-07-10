@@ -210,12 +210,28 @@ def test_ticket_pattern_shape():
     assert not p.fullmatch(f"{_PY} -c print(1) --require-closed")
 
 
-def test_judge_ticket_pipe_and_arbitrary_denied_through_gate():
-    # Through decide_bash: the ticket read is a single approved shape; a pipe (its `| cat`
-    # stage matches no judge pattern) and arbitrary python are denied.
+def test_judge_ticket_pipe_and_arbitrary_denied_through_gate(tmp_path):
+    """Through decide_bash: arbitrary python is denied, and no pipe composition widens the
+    judge's READ SET beyond {its roots} ∪ {closed tickets}.
+
+    The `| cat` / `| defender-sql` stages are now allowed (they are in the judge's lane) —
+    a deliberate relaxation, not a hole. A `cat` with no operand is the identity on stdin
+    and `defender-sql` opens no file, so piping a ticket the judge may ALREADY read through
+    either yields nothing new. What must stay denied is a pipe stage that opens a file
+    (`cat /etc/passwd`, caught by the operand gate) or is not in the lane at all (`head`).
+    Previously this was denied only incidentally, because `cat` matched no judge pattern."""
     benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
-    assert not permission.decide_bash(
-        f"{_PY} {_CLI} get-ticket CASE-9 --require-closed | cat", policy=benign).allow
+    ticket = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed"
+
+    def gate(cmd):
+        return permission.decide_bash(cmd, policy=benign, run_dir=tmp_path, defender_dir=tmp_path).allow
+
+    # inert composition over data the judge may already read
+    assert gate(f"{ticket} | cat")
+    assert gate(f"{ticket} | defender-sql 'SELECT 1'")
+    # ...but a pipe stage may not OPEN a new file, nor leave the lane
+    assert not gate(f"{ticket} | cat /etc/passwd")   # operand gate bites inside the pipe
+    assert not gate(f"{ticket} | head")              # `head` matches no judge pattern
     assert not permission.decide_bash(f"{_PY} -c 'print(1)'", policy=benign).allow
 
 
@@ -253,16 +269,23 @@ def test_judge_policy_ticket_read_through_the_gate(tmp_path):
     adversarial = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
     assert not permission.decide_bash(ok, policy=adversarial).allow
     # The judge (either direction) still refuses data-source adapters + arbitrary shell,
-    # but MAY jq an IN-ROOTS gather_raw payload (raw_reads + the path-gated jq-only lane, #512).
+    # but MAY aggregate an IN-ROOTS gather_raw payload (raw_reads + the operand-gated
+    # `cat | defender-sql` lane).
     assert not permission.decide_bash("defender-elastic query x --raw", policy=benign).allow
     assert not permission.decide_bash("rm -rf /tmp/x", policy=benign).allow
     raw = tmp_path / "gather_raw" / "l-001" / "0.json"
     assert permission.decide_bash(
-        f"jq '.' {raw}", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
+        f"cat {raw} | defender-sql 'SELECT count(*) FROM data'",
+        policy=benign, run_dir=tmp_path, defender_dir=tmp_path,
     ).allow
-    # …but jq of an OUT-OF-ROOTS file is now denied (the reader surface is path-gated).
+    # …but a cat of an OUT-OF-ROOTS file is denied (the reader surface is path-gated).
     assert not permission.decide_bash(
-        "jq '.' /etc/passwd", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
+        "cat /etc/passwd | defender-sql 'SELECT 1'",
+        policy=benign, run_dir=tmp_path, defender_dir=tmp_path,
+    ).allow
+    # …and jq is gone from the judge's lane entirely.
+    assert not permission.decide_bash(
+        f"jq '.' {raw}", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
     ).allow
 
 

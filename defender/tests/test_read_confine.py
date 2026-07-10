@@ -4,23 +4,23 @@ The permission surface under test (#512 slice 2 + the #522 regex-allowlist refac
 
   - AgentPolicy.read_confine: tuple[Path, ...] = ()        # REPLACES the defender_dir read base when non-empty
   - AgentPolicy.bash_allow: tuple[re.Pattern, ...] = ()    # per-agent anchored regexes over the tokenized argv
-  - AgentPolicy.jq_operand_gated: bool = False             # jq file operands must resolve within the read roots
+  - AgentPolicy.operand_gated: bool = False                # a file-opening stage's operands must resolve within the read roots
   - decide_read: honour read_confine; FAIL CLOSED on a resolve() error
   - decide_bash(command, *, policy, run_dir=None, defender_dir=None): a command is allowed iff EVERY stage
-    matches some `bash_allow` pattern; a `jq` stage is additionally path-gated when `jq_operand_gated`.
+    matches some `bash_allow` pattern; a `cat` stage is additionally path-gated when `operand_gated`.
 
 These are pure unit tests (no pydantic, no model, no API key) — they drive permission.decide_read /
 decide_bash directly, constructing the AgentPolicy under test. Builder wiring (_actor_policy / _judge_policy)
 and the read-tool return contract live in test_read_confine_engine.py.
 
 Locked design: malicious actor confined to {lessons-actor, lessons-environment} with NO bash readers
-(empty `bash_allow`); benign actor to {lessons-environment} likewise; judge keeps ONLY jq (path-gated to
-its roots via `jq_operand_gated`); main/gather keep the full viewer allowlist. See issues #512 / #522.
+(empty `bash_allow`); benign actor to {lessons-environment} likewise; judge keeps ONLY `cat` (operands
+path-gated to its roots via `operand_gated`) piped into the sandboxed `defender-sql`; main/gather keep the
+full viewer allowlist. See issues #512 / #522.
 """
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -43,19 +43,25 @@ _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 _BENIGN_CONFINE = (_ENV_DIR,)
 
-# The judge's jq shape (any jq invocation; operands path-gated separately). The
-# main/gather viewer allowlist is now PER-RUN + anchored (#535), so it is built via
-# `compile_policy_for(<DEF>, run_dir=…, defender_dir=…)` in the tests below rather than a module const.
-_JQ = re.compile(r"^jq(?: .*)?$")
+# The judge's two shapes, IMPORTED from their authoritative source rather than re-typed:
+# `cat` (operands UNANCHORED here and path-gated separately at resolve() time) and the
+# argument-inert `defender-sql`. A hand-copied regex would keep passing against the OLD
+# grammar after the real one is tightened. The main/gather viewer allowlist is PER-RUN +
+# anchored (#535), so it is built via `compile_policy_for(<DEF>, run_dir=…, defender_dir=…)`
+# in the tests below rather than a module const.
+from defender.learning.pipeline.judge.engine_pydantic import (  # noqa: E402
+    _CAT_PATTERN as _CAT,
+    _SQL_PATTERN as _SQL,
+)
 
 
-def _policy(*, read_confine=(), bash_allow=(), jq_operand_gated=False, raw_reads=False, read_roots=()):
+def _policy(*, read_confine=(), bash_allow=(), operand_gated=False, raw_reads=False, read_roots=()):
     """An AgentPolicy for gate tests. Defaults model a confined, reader-less actor leg
     (empty `bash_allow` -> no bash readers at all). Override per case."""
     return AgentPolicy(
         adapters=False, adapter_sql_pipe=False, raw_reads=raw_reads,
         read_roots=read_roots, read_confine=read_confine,
-        bash_allow=bash_allow, jq_operand_gated=jq_operand_gated,
+        bash_allow=bash_allow, operand_gated=operand_gated,
     )
 
 
@@ -215,108 +221,206 @@ def test_reduction_is_per_policy_not_global(tmp_path):
 
 
 # ============================================================================
-# C. decide_bash — judge jq gate (bash_allow=(jq,), jq_operand_gated -> path-gated)
+# C. decide_bash — judge operand gate
+#    (bash_allow=(cat, defender-sql), operand_gated -> cat's operands path-gated)
 #    NOTE: judge is UNCONFINED this slice (read_confine=()), so its roots are
-#    {run_dir, defender_dir}. The jq gate protects against reads OUTSIDE those
-#    (e.g. /etc/passwd), not against the rubric (which is in-roots until judge
-#    confinement lands in a later slice).
+#    {run_dir, defender_dir, *read_roots}. The operand gate protects against reads
+#    OUTSIDE those (e.g. /etc/passwd), not against the rubric (which is in-roots
+#    until judge confinement lands in a later slice).
+#
+#    `cat` OPENS files, so its operands are resolve()-gated. `defender-sql` opens
+#    none — stdin only, one argv (the SQL), DuckDB sealed before that SQL runs — so
+#    it is argument-inert and deliberately NOT operand-gated.
 # ============================================================================
 
 def _judge_gate(cmd, run_dir, *, read_roots=()):
-    pol = _policy(bash_allow=(_JQ,), jq_operand_gated=True, raw_reads=True, read_roots=read_roots)
+    pol = _policy(bash_allow=(_CAT, _SQL), operand_gated=True, raw_reads=True, read_roots=read_roots)
     return permission.decide_bash(cmd, policy=pol, run_dir=run_dir, defender_dir=_DEFENDER)
 
 
-def test_judge_jq_in_roots_operand_allowed(tmp_path):
-    """jq with a file operand under run_dir (gather_raw) -> allow. The refute primitive keeps working;
-    raw_reads=True skips the gather_raw clamp."""
+def test_judge_cat_sql_pipe_in_roots_allowed(tmp_path):
+    """the refute primitive: `cat <payload> | defender-sql '<SQL>'` with the operand under run_dir
+    -> allow. raw_reads=True skips the gather_raw clamp."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert _judge_gate(f"jq '[.[]|select(.user==\"x\")]|length' {raw}", tmp_path).allow
+    sql = "SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'x'"
+    assert _judge_gate(f'cat {raw} | defender-sql "{sql}"', tmp_path).allow
 
 
-def test_judge_jq_out_of_roots_operand_denied(tmp_path):
-    """jq with a file operand outside the judge's roots -> deny (jq retained but path-gated)."""
-    assert not _judge_gate("jq . /etc/passwd", tmp_path).allow
+def test_judge_gather_raw_outside_run_dir_via_read_roots_allowed(tmp_path):
+    """THE production topology, and the reason the judge is operand-gated rather than
+    textually anchored: `gather_raw` lives under the INVESTIGATION run dir while the judge's
+    run_dir is the LEARNING run dir, so it arrives only as a `read_root`. The anchored reader
+    grammars (`policies._common._file_operand`) cannot see read_roots; `read_allowed_path` can."""
+    investigation, learning = tmp_path / "inv", tmp_path / "learn"
+    raw = investigation / "gather_raw"
+    sql = "SELECT total, returned, truncated FROM data"
+    assert _judge_gate(
+        f'cat {raw / "l-002" / "0.json"} | defender-sql "{sql}"', learning, read_roots=(raw,),
+    ).allow
+    # ...and a sibling of that read_root is still out of bounds
+    assert not _judge_gate(
+        f'cat {investigation / "secrets" / "x.json"}', learning, read_roots=(raw,),
+    ).allow
 
 
-def test_judge_jq_slurpfile_out_of_roots_denied(tmp_path):
-    """the flag-injection escape: --slurpfile loads an out-of-roots file while the trailing operand looks
-    clean -> deny. EVERY file-loading arg is validated, not just the last token."""
+def test_judge_cat_out_of_roots_operand_denied(tmp_path):
+    """cat with a file operand outside the judge's roots -> deny (cat retained but path-gated)."""
+    assert not _judge_gate("cat /etc/passwd", tmp_path).allow
+    assert not _judge_gate("cat /etc/passwd | defender-sql 'SELECT 1'", tmp_path).allow
+
+
+def test_judge_bare_stdin_sql_allowed(tmp_path):
+    """`defender-sql` with no producer reads stdin -> allow: it opens no file, nothing to path-gate."""
+    assert _judge_gate("defender-sql 'SELECT 1'", tmp_path).allow
+
+
+def test_judge_sql_argv_is_not_operand_gated(tmp_path):
+    """`defender-sql`'s single argv is SQL, not a path — it must never be resolved against the read
+    roots. A query whose TEXT looks like an out-of-roots path is still allowed: the sealed DuckDB
+    (enable_external_access=false + lock_configuration=true) bounds it, not this gate."""
+    assert _judge_gate("defender-sql 'SELECT * FROM data /etc/passwd'", tmp_path).allow
+    assert _judge_gate("defender-sql '/etc/shadow'", tmp_path).allow
+
+
+def test_judge_stdin_cat_mid_pipe_allowed(tmp_path):
+    """a `cat` naming no file (a downstream pipe stage) is inert: no operand to gate, so it must not
+    be denied for lack of one."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert not _judge_gate(f"jq --slurpfile s /etc/passwd '.' {raw}", tmp_path).allow
+    assert _judge_gate(f"cat {raw} | cat | defender-sql 'SELECT 1'", tmp_path).allow
 
 
-def test_judge_jq_rawfile_out_of_roots_denied(tmp_path):
-    """--rawfile is a second file-loading flag — same gate -> deny on an out-of-roots target."""
+def test_judge_cat_operand_with_embedded_nul_fails_closed(tmp_path):
+    """`shlex` happily tokenizes a NUL into an operand, but `Path.resolve()` raises
+    `ValueError` on one — an exception class the fail-closed `except` used to miss, so
+    the gate RAISED out of `decide_bash` instead of denying. Every gate that resolves a
+    hostile operand must deny, never raise (`files._RESOLVE_ERRORS`)."""
+    assert not _judge_gate("cat /etc/pass\x00wd", tmp_path).allow
+    assert not _judge_gate("cat /etc/pass\x00wd | defender-sql 'SELECT 1'", tmp_path).allow
+
+
+def test_judge_relative_operand_denied(tmp_path):
+    """The judge's payloads reach it as ABSOLUTE `read_roots`, so a relative operand names
+    nothing inside them and is denied. The prompts must not teach one either — that side is
+    pinned by `test_every_command_the_prompt_teaches_passes_the_judges_own_gate`."""
+    assert not _judge_gate("cat gather_raw/l-002/0.json", tmp_path).allow
+
+
+def test_judge_relative_operand_gated_against_the_executors_cwd(monkeypatch, tmp_path):
+    """A relative operand must be judged against `defender_dir.parent` — the cwd
+    `tools._tool_bash` gives the executor — NOT the ambient process cwd. Otherwise the
+    gate validates one file while `cat` opens another: the validator/executor differential
+    `bash_exec` exists to close, and which `tools._resolve_operand` already closed for the
+    file tools.
+
+    `run_dir` is deliberately a directory the ambient cwd is NOT inside, so a relative
+    operand cannot land in-roots by accident — that is what makes the two resolutions
+    distinguishable."""
+    run = tmp_path / "run"
+    neutral = tmp_path / "neutral"
+    neutral.mkdir(parents=True)
+    # repo-relative, and really inside `defender_dir` when resolved from the executor's cwd
+    inside, escape = "defender/CLAUDE.md", "defender/../../../../../etc/passwd"
+
+    verdicts = []
+    for cwd in (neutral, tmp_path):
+        monkeypatch.chdir(cwd)
+        verdicts.append((
+            _judge_gate(f"cat {inside}", run).allow,
+            _judge_gate(f"cat {escape}", run).allow,
+        ))
+    # in-roots relative operand ALLOWED, `..` escape DENIED — from any ambient cwd
+    assert verdicts == [(True, False)] * 2, f"verdict moved with the ambient cwd: {verdicts}"
+
+
+@pytest.mark.parametrize("cmd", [
+    'cat {r} | defender-sql \\\n  "SELECT 1"',          # `\`-continuation: dangling escape
+    'cat {r} | defender-sql "SELECT 1\nFROM data"',      # newline inside a quoted argument
+])
+def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
+    """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a
+    command separator), so it does not model bash's line-JOINING: both shapes leave line 1
+    unbalanced and fail closed. That is deliberate — but the deny must SAY so. The generic
+    `policy.deny_reason` reads as "this program is forbidden", which sends the model
+    hunting for another one when its command was fine and only its line breaks were not."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert not _judge_gate(f"jq --rawfile r /etc/shadow '.' {raw}", tmp_path).allow
+    decision = _judge_gate(cmd.format(r=raw), tmp_path)
+    assert not decision.allow
+    assert decision.reason == permission.bash.UNTOKENIZABLE_REASON
+    assert "SINGLE line" in decision.reason
 
 
-def test_judge_bare_stdin_jq_allowed(tmp_path):
-    """jq with NO file operand (reads stdin) -> allow: inert, nothing to path-gate."""
-    assert _judge_gate("jq '.'", tmp_path).allow
-    # rejected: deny any jq lacking an in-roots file operand (would break stdin/pipe jq)
-
-
-def test_judge_pipe_with_non_jq_stage_denied(tmp_path):
-    """a pipe whose downstream/upstream stage is NOT jq -> deny: EVERY stage must match the judge's
-    (jq-only) `bash_allow`, so head/cat match no pattern and the whole command is denied. (This
-    replaces the old single-stage restriction: a jq|jq pipe is now allowed — see the next test.)"""
+def test_judge_pipe_with_unapproved_stage_denied(tmp_path):
+    """a pipe with a stage outside the judge's (cat, defender-sql) `bash_allow` -> deny: EVERY stage
+    must match, so `head`/`jq` match no pattern and the whole command is denied."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert not _judge_gate(f"jq '.' {raw} | head", tmp_path).allow
+    assert not _judge_gate(f"cat {raw} | head", tmp_path).allow
     assert not _judge_gate(f"cat {raw} | jq '.'", tmp_path).allow
 
 
-def test_judge_jq_pipe_all_stages_gated(tmp_path):
-    """a jq|jq pipe is allowed (both stages match `bash_allow`), but EVERY jq stage's operands are still
+def test_judge_pipe_all_cat_stages_gated(tmp_path):
+    """a cat|cat pipe matches `bash_allow` twice, but EVERY cat stage's operands are still
     path-gated: an out-of-roots operand on ANY stage denies the whole command."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert _judge_gate(f"jq '.' {raw} | jq '.a'", tmp_path).allow
-    assert not _judge_gate(f"jq '.' {raw} | jq '.' /etc/passwd", tmp_path).allow
+    assert _judge_gate(f"cat {raw} | cat {raw}", tmp_path).allow
+    assert not _judge_gate(f"cat {raw} | cat /etc/passwd", tmp_path).allow
 
 
-@pytest.mark.parametrize("tmpl", ["cat {r}", "grep x {r}", "head {r}", "tail {r}", "ls ."])
-def test_judge_non_jq_readers_denied(tmp_path, tmpl):
-    """for the judge, cat/grep/head/tail/ls are denied (subsumed by the read tool's read+search);
-    only jq survives as a bash reader."""
+@pytest.mark.parametrize("tmpl", ["grep x {r}", "head {r}", "tail {r}", "ls .", "jq . {r}", "echo hi"])
+def test_judge_other_readers_denied(tmp_path, tmpl):
+    """for the judge, grep/head/tail/ls/jq are denied (subsumed by the read tool's read+search), and
+    the inert `echo`/`true` viewers are NOT inherited — only cat + defender-sql survive as bash."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     assert not _judge_gate(tmpl.format(r=raw), tmp_path).allow
     # rejected: judge keeps grep for gather_raw text scans (folded into read_file(pattern=))
 
 
-def test_judge_jq_multiple_operands_one_out_of_roots_denied(tmp_path):
-    """multiple file operands, one outside roots -> deny (validate EVERY file-shaped arg, not just one)."""
+def test_judge_cat_multiple_operands_one_out_of_roots_denied(tmp_path):
+    """multiple file operands, one outside roots -> deny (validate EVERY operand, not just one)."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
-    assert not _judge_gate(f"jq -s '.' {raw} /etc/passwd", tmp_path).allow
+    assert not _judge_gate(f"cat {raw} /etc/passwd", tmp_path).allow
+
+
+def test_judge_cat_operand_after_double_dash_still_gated(tmp_path):
+    """`--` ends options, so a flag-shaped token after it is an OPERAND cat opens — and it is gated
+    like any other. The gate must not mistake it for a flag and wave it through."""
+    assert not _judge_gate("cat -- /etc/passwd", tmp_path).allow
+    assert _judge_gate(f"cat -n -- {tmp_path / 'payload.json'}", tmp_path).allow
 
 
 @pytest.mark.parametrize("cmd", [
-    "jq -nf /etc/passwd",      # -n + -f bundled: jq opens /etc/passwd as its `-f` filter program
-    "jq -Rf /etc/passwd",      # -R + -f
-    "jq -sf /etc/passwd",      # -s + -f
-    "jq -L/etc/ssh '.'",       # attached -L<dir>: an out-of-roots module search path
+    "cat -f /etc/passwd",       # `-f` is not a cat flag at all -> don't guess, fail closed
+    "cat -nf /etc/passwd",      # a bundle carrying an unknown letter
+    "cat --files0-from=/etc/passwd",  # a real coreutils flag, but `wc`'s — not `cat`'s
+    "cat -L/etc/ssh x",         # attached-value shape
 ])
-def test_judge_jq_bundled_arg_flag_denied(tmp_path, cmd):
-    """a SHORT bundle carrying an arg-taking flag (`-nf FILE`, `-L<dir>`) -> deny. jq bundles short options
-    and lets a trailing `-f`/`-L` consume the next token / an attached value, opening a file the per-token
-    parser would otherwise miss (and jq echoes a compile error's source line to stderr). The gate FAILS
-    CLOSED on such a bundle rather than leave its file un-gated."""
+def test_judge_cat_unknown_flag_denied(tmp_path, cmd):
+    """any `-`-prefixed token that is not a known boolean bundle -> deny. `cat` has no arg-taking
+    flag, so a token shaped like one means the stage grammar and the operand extractor disagree —
+    and a disagreement between them is exactly the fail-open class this gate exists to prevent."""
     assert not _judge_gate(cmd, tmp_path).allow, cmd
 
 
 @pytest.mark.parametrize("name", ["cases.json", "ground_truth.yaml", ".env", "credentials.txt"])
-def test_judge_jq_denylisted_file_in_roots_denied(tmp_path, name):
-    """a denylisted secret / ground-truth file that resolves INSIDE the judge's roots is denied in the bash
-    jq lane too — parity with decide_read, so the judge can't `jq` the held-out answer key / a captured .env
-    that read_file refuses. A non-denylisted sibling in the same dir stays allowed (it's the name, not the dir)."""
-    assert not _judge_gate(f"jq '.' {tmp_path / name}", tmp_path).allow, name
-    assert _judge_gate(f"jq '.' {tmp_path / 'payload.json'}", tmp_path).allow  # sibling, not denied
+def test_judge_cat_denylisted_file_in_roots_denied(tmp_path, name):
+    """a denylisted secret / ground-truth file that resolves INSIDE the judge's roots is denied in the
+    bash lane too — parity with decide_read, so the judge can't `cat` the held-out answer key / a
+    captured .env that read_file refuses. A non-denylisted sibling stays allowed (it's the name, not the dir)."""
+    assert not _judge_gate(f"cat {tmp_path / name}", tmp_path).allow, name
+    assert not _judge_gate(f"cat {tmp_path / name} | defender-sql 'SELECT 1'", tmp_path).allow, name
+    assert _judge_gate(f"cat {tmp_path / 'payload.json'}", tmp_path).allow  # sibling, not denied
 
 
-def test_judge_jq_comparison_dir_via_read_roots_allowed(tmp_path):
-    """jq of a file under the judge's read_roots (its comparison dir) -> allow (read_roots still widen)."""
+def test_judge_cat_traversal_denied(tmp_path):
+    """a `..` escape out of an in-roots prefix -> deny. The operand gate resolve()s before matching,
+    so the traversal collapses and lands outside the roots."""
+    raw = tmp_path / "gather_raw"
+    assert not _judge_gate(f"cat {raw}/../../../etc/passwd", tmp_path).allow
+
+
+def test_judge_cat_comparison_dir_via_read_roots_allowed(tmp_path):
+    """cat of a file under the judge's read_roots (its comparison dir) -> allow (read_roots widen)."""
     comp = tmp_path / "comparison"
-    assert _judge_gate(f"jq '.' {comp / 'x.json'}", tmp_path, read_roots=(comp,)).allow
+    assert _judge_gate(f"cat {comp / 'x.md'}", tmp_path, read_roots=(comp,)).allow
 
 
 # ============================================================================
@@ -325,6 +429,30 @@ def test_judge_jq_comparison_dir_via_read_roots_allowed(tmp_path):
 #    anchored allow/deny matrix is comprehensively owned by test_read_confine_bash.py;
 #    these pin the compile_policy_for wiring + that decide_read is unaffected.)
 # ============================================================================
+
+def test_gather_multiline_esql_denies_with_the_lexing_reason_not_the_adapter_one(tmp_path):
+    """The case that motivates a dedicated reason, and it is NOT the judge's.
+
+    ES|QL is line-oriented and the query templates render it as multi-line blocks, so
+    gather must flatten it into one shell argument on every call. When it doesn't, the
+    command is a perfectly legal standalone adapter invocation whose only defect is a
+    newline inside its quoted query. Before the split-out reason, the gate answered with
+    `GATHER_FALLTHROUGH_DENY_REASON` — "gather may only run a data-source adapter as a
+    standalone command" — i.e. it blamed adapter policy for a tokenizer failure, telling
+    the model the exact opposite of what it needed to know."""
+    run = tmp_path / "run"
+    dfn = _DEFENDER
+    pol = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
+    multi = 'defender-elastic esql \'FROM logs-*\n| WHERE host == "db-1"\n| STATS n = count(*)\''
+    flat = 'defender-elastic esql \'FROM logs-* | WHERE host == "db-1" | STATS n = count(*)\''
+
+    denied = permission.decide_bash(multi, policy=pol, run_dir=run, defender_dir=dfn)
+    assert not denied.allow
+    assert denied.reason == permission.UNTOKENIZABLE_REASON
+    assert denied.reason != pol.deny_reason  # not the misleading adapter-policy text
+    # the same query on one line is a normal, allowed standalone adapter call
+    assert permission.decide_bash(flat, policy=pol, run_dir=run, defender_dir=dfn).allow
+
 
 def test_main_viewers_now_anchored(tmp_path):
     """#535: MAIN keeps a viewer allowlist, but its operands are now ANCHORED to the run dir +
@@ -335,7 +463,7 @@ def test_main_viewers_now_anchored(tmp_path):
     dfn.mkdir()
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert main.bash_allow
-    assert not main.jq_operand_gated
+    assert not main.operand_gated
     assert permission.decide_bash(f"cat {run}/investigation.md", policy=main).allow
     assert not permission.decide_bash("cat /tmp/x", policy=main).allow
 

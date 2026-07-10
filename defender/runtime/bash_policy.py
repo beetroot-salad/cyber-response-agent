@@ -70,7 +70,7 @@ def adapter_sql_pipe_allowed(agent: str) -> bool:
 
 
 def raw_reads_allowed(agent: str) -> bool:
-    """May `agent` read / `jq` `gather_raw/**`? main: no (consumes the gather
+    """May `agent` read `gather_raw/**`? main: no (consumes the gather
     summary); gather + judge: yes (verify / refute against the raw payload)."""
     return bool(_policy()["bash"]["agents"].get(agent, {}).get("raw_reads", False))
 

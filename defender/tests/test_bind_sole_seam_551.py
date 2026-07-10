@@ -128,7 +128,7 @@ def _policy9(p) -> tuple:
     read_shapes (tested separately / folded into `_policy_full`)."""
     return (
         tuple(pat.pattern for pat in p.bash_allow),
-        p.jq_operand_gated, p.adapters, p.adapter_sql_pipe, p.raw_reads,
+        p.operand_gated, p.adapters, p.adapter_sql_pipe, p.raw_reads,
         tuple(str(r) for r in p.read_roots),
         tuple(str(r) for r in p.read_confine),
         tuple(pat.pattern for pat in p.write_allow),
@@ -180,8 +180,8 @@ def test_d0_bind_return_contract(tmp_path):
 # ============================================================================
 
 def test_d1_judge_via_bind(tmp_path):
-    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs, ticket_cli)) yields a
-    jq_operand_gated + raw_reads policy whose read_roots == add_dirs and whose bash lane
+    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs, ticket_cli)) yields an
+    operand_gated + raw_reads policy whose read_roots == add_dirs and whose bash lane
     carries the pinned --require-closed ticket read."""
     # GREEN@HEAD: judge binds off scope alone (no defender_dir); stays green post-#551.
     run = tmp_path / "run"
@@ -190,12 +190,16 @@ def test_d1_judge_via_bind(tmp_path):
     jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,), ticket_cli=("python3", tcli)))
     assert isinstance(jdeps, JudgeDeps)
     jpol = jdeps.policy
-    assert jpol.jq_operand_gated
-    assert jpol.raw_reads
+    assert jpol.operand_gated
+    assert jpol.raw_reads  # DECLARED on the grammar — the judge has no adapters bit to imply it
     assert jpol.read_roots == (cmp,)
-    # bash-jq lane: a jq operand inside the comparison root is admitted, outside denied.
-    assert permission.decide_bash(f"jq '.' {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash("jq '.' /etc/passwd", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    # bash lane: a cat operand inside the comparison root is admitted, outside denied.
+    assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    assert not permission.decide_bash("cat /etc/passwd", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    # ...and the sandboxed aggregator it feeds.
+    assert permission.decide_bash(
+        f"cat {cmp}/a.json | defender-sql 'SELECT 1'", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
+    ).allow
     # the benign --require-closed ticket read (required flag enforced).
     assert permission.decide_bash(f"python3 {tcli} list-tickets --require-closed", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash(f"python3 {tcli} list-tickets", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
@@ -653,16 +657,16 @@ def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
 
 
 def test_d5_judge_actor_bash_lane_preserved(tmp_path):
-    """d5_judge_actor_bash_lane_preserved (survival): the judge jq lane (jq_operand_gated, operands
+    """d5_judge_actor_bash_lane_preserved (survival): the judge lane (operand_gated, operands
     confined to the read roots) and the actor python3-<script> lane are UNCHANGED by the factory
     retirement — _judge_policy/_actor_policy stay as compile_policy._bash_allow's pattern helpers."""
     # GREEN@HEAD: decide_bash for judge/actor is identical after #551.
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
     jpol = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,))).policy
-    assert jpol.jq_operand_gated
-    assert permission.decide_bash(f"jq '.' {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash("jq '.' /etc/shadow", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    assert jpol.operand_gated
+    assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    assert not permission.decide_bash("cat /etc/shadow", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
 
     apol = bind(ACTOR_DEF, run, scope=_actor_scope()).policy
     assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --q x", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow

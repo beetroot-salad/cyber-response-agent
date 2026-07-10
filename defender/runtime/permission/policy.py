@@ -17,10 +17,11 @@ into their `bash_allow` regex (`policies._common.reader_patterns_for`), so a vie
 file operand must TEXTUALLY sit under `{run_dir}` or a tight corpus `.md` and a `..`
 segment is rejected literally (the bash lane does no `resolve()`, so a symlink target
 is closed by the write-side invariant that no allowed tool creates a symlink, not by
-the regex; see `_common`). The judge keeps the complementary `resolve()`-based `jq`
-file-operand path-gate (`bash._jq_reads_within_roots`, enabled by `jq_operand_gated`),
-since its `jq` legitimately opens files; main/gather `jq` is stdin-compute-only, so it
-has no file operand to gate. The shared security invariants — the secret/ground-truth
+the regex; see `_common`). The judge keeps the complementary `resolve()`-based
+file-operand path-gate (`bash._operand_reads_within_roots`, enabled by `operand_gated`),
+since its `cat` legitimately opens files the textual anchors cannot see: `gather_raw`
+lives under the INVESTIGATION run dir and reaches the judge only as a `read_root`, while
+its own `run_dir` is the learning run dir. The shared security invariants — the secret/ground-truth
 read denylist and the `gather_raw` raw-read clamp — stay global / capability-bit driven
 and are applied for every agent regardless of `bash_allow`.
 """
@@ -47,15 +48,16 @@ class AgentPolicy:
       EVERY stage matches some pattern here. Empty (the default) → no bash reader
       surface at all (the confined actor reads through `read_file`). Data-source
       adapters are NOT expressed here — they route structurally (see `adapters`).
-    - `jq_operand_gated` — when True, a `jq` stage's file operands must resolve
-      within the policy's read roots (the judge's path-gated `jq`; see
-      `bash._jq_reads_within_roots`). False for main/gather because their `jq` is
-      stdin-compute-only (no file operand to gate — #535); their reader lane instead
-      confines the file-OPENING viewers (`cat`/`grep`/…) via the anchored `bash_allow`.
+    - `operand_gated` — when True, an operand-gated stage's file operands must resolve
+      within the policy's read roots (the judge's path-gated `cat`; see
+      `bash._operand_reads_within_roots` and `bash._OPERAND_GATED_PROGRAMS`). False for
+      main/gather: their reader lane confines the file-OPENING viewers (`cat`/`grep`/…)
+      via the anchored `bash_allow` instead (#535), which suffices because everything
+      they read sits under `{run_dir}` or the corpus.
     - `adapters` — may invoke a data-source adapter (captured transparently).
     - `adapter_sql_pipe` — may run the `adapter --raw | defender-sql '<SQL>'` pipe.
-    - `raw_reads` — may read / `jq` `gather_raw/**` (the MAIN loop may not; the
-      gather subagent and the judge may).
+    - `raw_reads` — may read `gather_raw/**` (the MAIN loop may not; the gather
+      subagent and the judge may).
     - `read_roots` — extra allowed read roots beyond `{run_dir, defender_dir}`
       (the judge's comparison dir under `learning_run_dir`).
     - `read_confine` — when non-empty, REPLACES the `defender_dir` read base: the
@@ -85,7 +87,7 @@ class AgentPolicy:
     """
 
     bash_allow: tuple[re.Pattern[str], ...] = ()
-    jq_operand_gated: bool = False
+    operand_gated: bool = False
     adapters: bool = False
     adapter_sql_pipe: bool = False
     raw_reads: bool = False

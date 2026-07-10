@@ -266,7 +266,7 @@ GATHER_DEF = AgentDefinition(
         read=True,
         bash=BashGrammar(
             shims=tuple(NON_ADAPTER_SHIMS), viewers=READER_VIEWERS,
-            adapters=True, adapter_sql_pipe=True,
+            adapters=True, adapter_sql_pipe=True, raw_reads=True,
         ),
     ),
     corpus_dirs=_CORPUS_DIRS,

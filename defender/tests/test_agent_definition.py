@@ -243,14 +243,15 @@ def test_toolset_shape():
 
 def test_bashgrammar_shape():
     """BashGrammar is a frozen dataclass: shims/viewers default to (); adapters/
-    adapter_sql_pipe/jq_operand_gated default to False."""
+    adapter_sql_pipe/operand_gated/raw_reads default to False."""
     bg = BashGrammar()
     assert dataclasses.is_dataclass(bg)
     assert bg.shims == ()
     assert bg.viewers == ()
     assert bg.adapters is False
     assert bg.adapter_sql_pipe is False
-    assert bg.jq_operand_gated is False
+    assert bg.operand_gated is False
+    assert bg.raw_reads is False
     with pytest.raises(dataclasses.FrozenInstanceError):
         bg.adapters = True  # type: ignore[misc]
 
@@ -404,7 +405,7 @@ def test_verify_empty_toolset(logger):
             agent_id="verify", make_model=_fake_model(_text_fn()),
         )
         judge = driver.build_agent_core(
-            _defn(role=AgentRole.JUDGE, tools=ToolSet(read=True, bash=BashGrammar(jq_operand_gated=True))),
+            _defn(role=AgentRole.JUDGE, tools=ToolSet(read=True, bash=BashGrammar(operand_gated=True, raw_reads=True))),
             deps_type=JudgeDeps, instructions="x", logger=logger,
             agent_id="judge", make_model=_fake_model(_text_fn()),
         )
@@ -445,7 +446,7 @@ def test_compile_policy_projects_only_toolset_bits(tmp_path):
     assert no_bash.bash_allow == ()          # no grammar → no bash allowlist
     assert no_bash.adapters is False
     assert no_bash.adapter_sql_pipe is False
-    assert no_bash.jq_operand_gated is False
+    assert no_bash.operand_gated is False
     # positive control: the source bit set -> the projected bit set
     with_adapters = _compile(
         _defn(role=AgentRole.GATHER, tools=ToolSet(read=True, bash=BashGrammar(adapters=True))),

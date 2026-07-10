@@ -12,7 +12,19 @@ You work from:
 
 1. **The per-lead comparison files** — `<comparison_files>` lists them; read each `{lead_id}.md` at its turn. Each joins three columns: **[1]** the oracle's projection for that lead — what the *routine operation* would have surfaced; **[2]** a real sample event from the lead's *actual* payload (orientation only); **[3]** the defender's own per-lead reasoning from the invlang (`:T resolutions` belief movement + `:R authz`) — *why* it read that lead the way it did. These files are your work surface.
 
-2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json` (the absolute path is named in `<comparison_files>`); you query them with `jq` (a single `jq` over the payload's absolute path — no pipes) and `read_file` (pass a `pattern=` to scan for a substring). **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the routine-grounding evidence the defender's narrative can hide: an authorization, baseline, or read-only-scope signal present in the raw that the escalation reasoned past.
+2. **A read-only query surface over the actual payloads.** The column-[2] sample is one event for shape orientation. The full payloads live at `gather_raw/{lead_id}/{seq}.json`; the lead file names the **absolute** path of every payload — pass an absolute path (a relative one resolves outside your read roots and is denied). Pipe one into `defender-sql`, which exposes it as a table named `data` and runs read-only SQL over it. Run `DESCRIBE data` first: payload shapes differ, and `defender-sql` tells you the columns and the idiom that fits the one you hold — including on a failed query, so a wrong field name self-corrects. Use `read_file` (with `pattern=`) for a payload that isn't JSON.
+
+   ```bash
+   cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'svc.monitoring'"
+   ```
+
+   **You MUST query the full payload to assert any absence** — the refute primitive (§refute) is "the projected entity is *absent* from the actuals", and an absence read off a single sample is unfounded. This is exactly the routine-grounding evidence the defender's narrative can hide: an authorization, baseline, or read-only-scope signal present in the raw that the escalation reasoned past.
+
+   An absence check is only as sound as the read behind it — three ways it lies, all of which you must rule out before refuting:
+
+   - **Truncated.** `defender-sql` warns when a payload is truncated; its `hits` are only the first rows of a larger match, so a 0 there is "not in the first rows", not "absent". Such a payload is *silent*, not refuting.
+   - **Empty or non-JSON.** `defender-sql` fails loudly rather than returning "0 rows"; an error means the lead recorded no observation at all — *silent*, not absent.
+   - **Partial.** A lead that ran several queries has several payloads, and the lead file names them all; an absence claim must cover every one, not just seq 0.
 
 3. **`report.md`** — the defender's disposition (`malicious` or `inconclusive`) + one-paragraph rationale: the escalation you are scoring.
 
@@ -114,7 +126,7 @@ Walk through the encounter **lead by lead**, reading each `{lead_id}.md` compari
 
 - name the lead (lead_id + goal) and what it was measuring,
 - what column [1] projected the routine operation would have produced (specific fields/values),
-- what the lead **actually** returned — column [2] orients you; **query the full payload with `jq` whenever the comparison turns on presence/absence or a value the sample doesn't settle** (e.g. `jq '[.[] | select(.user=="svc.monitoring")] | length' gather_raw/l-002/0.json`). Do not assert a refutation — or a clean confirmation — from the sample alone.
+- what the lead **actually** returned — column [2] orients you; **query the full payload with `defender-sql` whenever the comparison turns on presence/absence or a value the sample doesn't settle** (e.g. `cat /abs/path/gather_raw/l-002/0.json | defender-sql "SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'svc.monitoring'"`). Do not assert a refutation — or a clean confirmation — from the sample alone; check `truncated` before reading a zero count as absence, and cover **every** payload the lead file names, not just seq 0.
 - how the defender read it (column [3] — its `:T resolutions` / `:R authz`), and
 - whether the actual result **refutes**, is **consistent with**, or is **silent on** the projection.
 
@@ -131,7 +143,7 @@ This is **distinct** from the missing-lead step above. There, the defender named
 Using the scoped, **closed-only** read in `cited_policy_read` (closed cases only; never the in-flight ticket — its key is named there), confirm two **factual** questions before letting a cited seed carry a `survived`:
 
 - **(a) exists** — an **attributed** policy covering this signature genuinely exists: a real *closed* case authored with a **named authority** (read the cited ticket's grounded resolution-method — the `[grounded: …]` segment — and its author/comments). A seed the store cannot return, or one with no attributed policy/authority, is unconfirmed: it does not establish a covering policy.
-- **(b) applies** — *this* case's actuals satisfy the cited policy's **conditions** — the grounded predicates carried in that resolution-method (e.g. `identity-confirmed`, `no-egress`, `approved-window`). Check each against the current case's evidence the way you check any projection: the comparison files + `jq` over the actuals. A condition the current actuals **contradict** (or that no lead here establishes) means the policy does not cover this case.
+- **(b) applies** — *this* case's actuals satisfy the cited policy's **conditions** — the grounded predicates carried in that resolution-method (e.g. `identity-confirmed`, `no-egress`, `approved-window`). Check each against the current case's evidence the way you check any projection: the comparison files + SQL over the actuals. A condition the current actuals **contradict** (or that no lead here establishes) means the policy does not cover this case.
 
 A cited seed that fails (a) or (b) **does not survive on the strength of that citation** — fall through to the ordinary grounding-coverage reasoning (the operation is consistent-but-unconfirmed → the missing-grounding `lead-set` finding stands). Stay **evidence-only**: you confirm the policy is a real, attributed, condition-matching closed case — you do **not** rule on whether the org *should* accept this risk (that normative call is governance's, not yours). Frequency is never a ground: a covering case being cited does not, by itself, make the disposition benign; it must exist and its conditions must hold against these actuals.
 
