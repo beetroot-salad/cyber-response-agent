@@ -20,7 +20,7 @@ ALERT = {"rule": {"id": "5710", "description": "sshd brute force"}}
 
 def _ticket(key, *, disposition="benign", outcome="caught",
             event_time=NOW - timedelta(days=10), reason="nightly vuln scan"):
-    """A store ticket as `list-tickets --raw` would return it. The window keys on the
+    """A store ticket as `list-tickets` would return it. The window keys on the
     `evt:` label (alert event time), not the server-set `created`."""
     comments = []
     if outcome is not None:

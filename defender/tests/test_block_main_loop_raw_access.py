@@ -158,7 +158,7 @@ def test_denies_main_running_adapter_cli(monkeypatch, capsys):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/adapters/elastic_cli.py query 'x' --raw"},
+        "tool_input": {"command": "python3 defender/scripts/adapters/elastic_cli.py query 'x'"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -180,7 +180,7 @@ def test_allows_subagent_running_adapter_cli(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 .../scripts/adapters/elastic_cli.py query 'x' --raw"},
+        "tool_input": {"command": "python3 .../scripts/adapters/elastic_cli.py query 'x'"},
         **SUBAGENT,
     })
     assert rc == 0
@@ -221,7 +221,7 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
         "tool_input": {"command": (
             "python3 defender/scripts/gather_tools/record_query.py --run-dir /r --lead l-001 "
             "--system elastic --query-id elastic.q -- "
-            "python3 defender/scripts/adapters/elastic_cli.py query 'x' --raw"
+            "python3 defender/scripts/adapters/elastic_cli.py query 'x'"
         )},
         "cwd": MAIN_CWD,
     })
@@ -236,7 +236,7 @@ def test_denies_main_running_adapter_shim(monkeypatch, capsys):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "defender-elastic query 'x' --raw"},
+        "tool_input": {"command": "defender-elastic query 'x'"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -256,7 +256,7 @@ def test_newly_onboarded_adapter_auto_gates_in_main_loop(monkeypatch, capsys):
     })
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "defender-foo lookup web-1 --raw"},
+        "tool_input": {"command": "defender-foo lookup web-1"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -269,7 +269,7 @@ def test_denies_main_adapter_shim_inside_bash_c(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "bash -c 'defender-host-state proc-tree web-1 --raw'"},
+        "tool_input": {"command": "bash -c 'defender-host-state proc-tree web-1'"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -294,7 +294,7 @@ def test_allows_main_record_query_shim_wrapping_adapter_shim(monkeypatch):
         "tool_name": "Bash",
         "tool_input": {"command": (
             "defender-record-query --run-dir /r --lead l-001 --system elastic "
-            "--query-id elastic.q -- defender-elastic query 'x' --raw"
+            "--query-id elastic.q -- defender-elastic query 'x'"
         )},
         "cwd": MAIN_CWD,
     })
@@ -305,7 +305,7 @@ def test_allows_subagent_running_adapter_shim(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "defender-elastic query 'x' --raw"},
+        "tool_input": {"command": "defender-elastic query 'x'"},
         **SUBAGENT,
     })
     assert rc == 0

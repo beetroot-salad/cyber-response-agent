@@ -8,7 +8,7 @@ playground-v2's compose (kept under the playground's `ticket-server`
 so v1 integrations stay working). v1's
 `soc-agent/scripts/tools/playground_ticket_cli.py` is a separate
 ActionContract-shaped adapter for that ecosystem; this adapter is
-v2-flavored (`_stub_transport.py` + docker-exec-curl + `--raw`) and
+v2-flavored (`_stub_transport.py` + docker-exec-curl) and
 read-only.
 
 This file is split by audience. **Visibility surface** is read by
@@ -91,15 +91,15 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ```bash
 defender-ticket health-check
-defender-ticket list-tickets [--status X] [--label X] [--q X] [--limit N] [--raw]
-defender-ticket get-ticket <key> [--raw]
+defender-ticket list-tickets [--status X] [--label X] [--q X] [--limit N]
+defender-ticket get-ticket <key>
 ```
 
 **Do not Read `ticket_cli.py` source to discover flags.** This SKILL
 plus `defender-ticket {subcommand} --help` is the authoritative
 surface.
 
-`--raw` emits the upstream JSON response unchanged.
+Each subcommand emits the upstream JSON response unchanged.
 
 ### Connectivity
 

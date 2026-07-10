@@ -100,21 +100,23 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ```bash
 defender-host-state health-check
-defender-host-state container-inspect <container_id> [--raw]
-defender-host-state proc-tree <host> [--raw]
-defender-host-state passwd <host> [--raw]
-defender-host-state authorized-keys <host> [--user U] [--raw]
-defender-host-state fim-checksum <host> <path> [--raw]
-defender-host-state package-list <host> [--limit N] [--raw]
+defender-host-state container-inspect <container_id>
+defender-host-state proc-tree <host>
+defender-host-state passwd <host>
+defender-host-state authorized-keys <host> [--user U]
+defender-host-state fim-checksum <host> <path>
+defender-host-state package-list <host> [--limit N]
 ```
 
 **Do not Read `host_state_cli.py` source to discover flags.** This
 SKILL plus `defender-host-state {subcommand} --help` is the
 authoritative surface.
 
-`--raw` emits a JSON envelope with `host`, `captured_at`, and the
-verb-specific payload (e.g. `ps_output`, `entries`, `keys`,
-`sha256`, `packages`).
+Each subcommand emits a JSON object with `captured_at` and the
+verb-specific payload. The host-keyed verbs (`proc-tree`, `passwd`,
+`authorized-keys`, `fim-checksum`, `package-list`) also carry `host` plus
+their payload field (`ps_output`, `entries`, `keys`, `sha256`, `packages`);
+`container-inspect` keys on `container_id` and carries `name` + `image`.
 
 ### Connectivity
 

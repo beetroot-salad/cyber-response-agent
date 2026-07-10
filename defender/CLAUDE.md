@@ -59,7 +59,7 @@ hooks). The gates:
     (queries table + by-ref payload) in-process, so the old
     `block_unwrapped_adapter_calls.py` wrapper-forcing hook is gone (no
     `defender-record-query` wrapper to require). The sanctioned
-    `defender-<sys> … --raw | defender-sql '<SQL>'` aggregation pipe is captured
+    `defender-<sys> … | defender-sql '<SQL>'` aggregation pipe is captured
     the same way (`tools._capture_adapter_sql`): the adapter stage is recorded,
     then its payload is aggregated through the sandboxed defender-sql. The
     queries table is still a

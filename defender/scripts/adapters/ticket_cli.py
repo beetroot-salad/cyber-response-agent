@@ -4,7 +4,7 @@
 Wraps the v2 ticket-server (the v1 FastAPI app reused under
 playground-v2's compose). v1's `playground_ticket_cli.py` is a separate
 ActionContract-shaped adapter; this one matches v2 conventions
-(_stub_transport + --raw envelopes + docker-exec-curl), and is read-only.
+(_stub_transport + docker-exec-curl), and is read-only.
 
 Usage:
     ticket_cli.py health-check
@@ -93,11 +93,9 @@ def build_parser():
         "--require-closed", action="store_true",
         help="Pin status=closed (scoped closed-only list); overrides any other --status.",
     )
-    lt.add_argument("--raw", action="store_true")
 
     gt = sub.add_parser("get-ticket", help="Full ticket record incl. comments.")
     gt.add_argument("key")
-    gt.add_argument("--raw", action="store_true")
     gt.add_argument(
         "--require-closed", action="store_true",
         help="Exit non-zero unless the ticket is closed (scoped closed-only read).",

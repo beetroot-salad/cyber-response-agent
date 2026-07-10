@@ -74,7 +74,7 @@ class BashGrammar:
       - ``shims`` / ``viewers`` — the reader-lane program set (the ``defender-*`` shims
         + the read-only viewers). Non-empty ⇒ this is a main/gather reader agent.
       - ``adapters`` — may invoke a data-source adapter (captured transparently).
-      - ``adapter_sql_pipe`` — may run ``adapter --raw | defender-sql '<SQL>'``.
+      - ``adapter_sql_pipe`` — may run ``adapter | defender-sql '<SQL>'``.
       - ``operand_gated`` — the judge's ``cat | defender-sql`` lane: every file operand
         of a file-opening stage is path-gated to the read roots at ``resolve()`` time
         (``bash._OPERAND_GATED_PROGRAMS``), which is what lets it reach ``gather_raw``

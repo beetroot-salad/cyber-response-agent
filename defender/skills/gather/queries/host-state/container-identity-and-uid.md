@@ -18,17 +18,17 @@ Determine container metadata (name, image) and resolve a user ID to its /etc/pas
 
 ```bash
 # Query 1: Container metadata (name, image) by container id
-defender-host-state container-inspect ${container_id} --raw
+defender-host-state container-inspect ${container_id}
 
 # Query 2: /etc/passwd entry for the target uid — TWO steps. Run the adapter STANDALONE
 # (it is captured to gather_raw automatically), then filter the captured payload with jq
 # reading STDIN. jq is stdin-compute-only here (it never opens a file), so pipe the
-# captured payload in with `cat` rather than `adapter --raw | jq`:
-defender-host-state passwd ${container_id} --raw
+# captured payload in with `cat` rather than `adapter | jq`:
+defender-host-state passwd ${container_id}
 cat ${passwd_payload} | jq -r --arg uid "${uid}" '.entries[] | select(split(":")[2] == $uid)'
 
 # Query 3: Process tree on the container
-defender-host-state proc-tree ${container_id} --raw
+defender-host-state proc-tree ${container_id}
 ```
 
 `${passwd_payload}` is the gather_raw path Query 2's standalone `passwd` call was

@@ -26,7 +26,7 @@ as a `read_root`, which the textual anchors are blind to.
   - main / gather — the read-only viewers + non-adapter `defender-*` shims
     (`policies/main.py`, `policies/gather.py`); gather additionally routes a
     data-source adapter run either standalone (captured transparently) or as the
-    sanctioned `adapter --raw | defender-sql '<SQL>'` pipe.
+    sanctioned `adapter | defender-sql '<SQL>'` pipe.
   - judge / actor — build their own `bash_allow` in their pipeline modules (the
     judge's operand-gated `cat` piped into the sandboxed `defender-sql`, plus the
     pinned closed-ticket read; the actor's pinned lesson scripts).
@@ -62,13 +62,13 @@ from .policy import AgentPolicy
 # (`policies/main.py`, `policies/gather.py`); the gate reads `policy.deny_reason`.
 
 # Gather may run a data-source adapter directly — it's captured transparently —
-# but only solo, or as the sanctioned `adapter --raw | defender-sql '<SQL>'`
+# but only solo, or as the sanctioned `adapter | defender-sql '<SQL>'`
 # aggregation pipe. Any other pipeline/compound makes "the payload" ambiguous.
 ADAPTER_STANDALONE_REASON = (
     "Blocked: run the data-source adapter as a standalone command (it is captured "
     "automatically — no wrapper needed), then filter the persisted payload file "
     "with jq/grep/Read. The only adapter pipe allowed is "
-    "`defender-<system> … --raw | defender-sql '<SQL>'`. Don't otherwise pipe or "
+    "`defender-<system> … | defender-sql '<SQL>'`. Don't otherwise pipe or "
     "chain the adapter call."
 )
 
@@ -104,7 +104,7 @@ class BashDecision(Decision):
         (None on a deny; empty tuple for an empty command).
       - `adapter_argv` — the standalone-adapter argv to capture (gather only).
       - `sql_pipe` — the `(adapter_argv, sql_argv)` split for the sanctioned
-        `adapter --raw | defender-sql` pipe (gather only).
+        `adapter | defender-sql` pipe (gather only).
 
     `adapter_argv`/`sql_pipe` are mutually exclusive and set only when the verdict
     is allow; both None means the command runs through the plain executor."""
@@ -212,7 +212,7 @@ def _allow(
 def _decide_adapter(pipelines: list[bash_exec.Pipeline], policy: AgentPolicy) -> BashDecision:
     """Classify a command that contains a data-source adapter. Denied unless the agent
     may run adapters; when allowed, a standalone call is captured transparently and the
-    only sanctioned multi-stage shape is `adapter --raw | defender-sql '<SQL>'` (gated on
+    only sanctioned multi-stage shape is `adapter | defender-sql '<SQL>'` (gated on
     `adapter_sql_pipe`). Any other adapter compound is ambiguous. The adapter/sql payloads
     are NOT run through the substitution guard (they go straight to subprocess shell=False)."""
     if not policy.adapters:

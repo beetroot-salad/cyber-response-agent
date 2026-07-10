@@ -147,7 +147,7 @@ def test_capture_rejects_undetectable_system(tmp_path):
 
 @pytest.mark.skipif(_DEFENDER_DIR is None, reason="needs a defender .venv with duckdb")
 def test_capture_adapter_sql_pipe_aggregates(tmp_path, stub):
-    # The sanctioned `adapter --raw | defender-sql '<SQL>'` pipe (#379): the bash
+    # The sanctioned `adapter | defender-sql '<SQL>'` pipe (#379): the bash
     # tool captures the adapter payload, then aggregates it through the real
     # defender-sql shim. The adapter query is audited (queries row + by-ref
     # payload); the SQL runs over the FULL payload, not the truncated passthrough.

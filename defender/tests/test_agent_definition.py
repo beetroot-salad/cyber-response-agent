@@ -468,7 +468,7 @@ def test_gate_bash_parity_read_convergent(tmp_path):
     # BASH: bind reproduces compile_policy_for's allowlist exactly (they are the same policy now).
     for cmd in (
         f"cat {tmp_path}/investigation.md",       # anchored viewer under run_dir
-        "defender-elastic query x --raw",         # a data-source adapter (main may not)
+        "defender-elastic query x",         # a data-source adapter (main may not)
         "rm -rf /tmp/x",                           # arbitrary shell
     ):
         assert (

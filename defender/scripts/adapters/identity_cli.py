@@ -80,15 +80,12 @@ def build_parser():
     ca = sub.add_parser("can-access", help="Is <user> authorized on <host>?")
     ca.add_argument("user")
     ca.add_argument("host")
-    ca.add_argument("--raw", action="store_true")
 
     gu = sub.add_parser("get-user", help="Full user record incl. authorized_hosts.")
     gu.add_argument("user")
-    gu.add_argument("--raw", action="store_true")
 
     lah = sub.add_parser("list-authorized-hosts", help="Hosts <user> can access.")
     lah.add_argument("user")
-    lah.add_argument("--raw", action="store_true")
 
     lu = sub.add_parser("list-users", help="All users (filterable).")
     lu.add_argument("--role")
@@ -97,10 +94,8 @@ def build_parser():
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
         help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
-    lu.add_argument("--raw", action="store_true")
 
-    lr = sub.add_parser("list-roles", help="Inventory roles ↔ realm roles mapping.")
-    lr.add_argument("--raw", action="store_true")
+    sub.add_parser("list-roles", help="Inventory roles ↔ realm roles mapping.")
 
     return p
 

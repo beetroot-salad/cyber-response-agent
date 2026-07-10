@@ -19,7 +19,7 @@
     "raw_reads = whether the agent may read gather_raw/**. main: no (consumes",
     "           the gather summary); gather: yes (verify its own query result). A",
     "           learning-loop agent (the judge) declares this in its own AgentPolicy.",
-    "adapter_sql_pipe = whether `defender-<sys> ... --raw | defender-sql '<SQL>'` is",
+    "adapter_sql_pipe = whether `defender-<sys> ... | defender-sql '<SQL>'` is",
     "           sanctioned (gather only): the adapter stage is captured, then the",
     "           payload is aggregated through the sandboxed defender-sql.",
     "read_deny = secrets / ground-truth the agent may never read. Kept as a",

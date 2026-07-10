@@ -260,7 +260,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
             if tripped is not None:
                 return tripped
             return _capture_adapter(deps, decision.adapter_argv)
-        # The sanctioned `adapter --raw | defender-sql '<SQL>'` aggregation pipe:
+        # The sanctioned `adapter | defender-sql '<SQL>'` aggregation pipe:
         # capture the adapter payload (queries table + by-ref file), then run the
         # captured bytes through the sandboxed defender-sql.
         if decision.sql_pipe is not None:

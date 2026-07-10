@@ -55,7 +55,7 @@ class AgentPolicy:
       via the anchored `bash_allow` instead (#535), which suffices because everything
       they read sits under `{run_dir}` or the corpus.
     - `adapters` — may invoke a data-source adapter (captured transparently).
-    - `adapter_sql_pipe` — may run the `adapter --raw | defender-sql '<SQL>'` pipe.
+    - `adapter_sql_pipe` — may run the `adapter | defender-sql '<SQL>'` pipe.
     - `raw_reads` — may read `gather_raw/**` (the MAIN loop may not; the gather
       subagent and the judge may).
     - `read_roots` — extra allowed read roots beyond `{run_dir, defender_dir}`

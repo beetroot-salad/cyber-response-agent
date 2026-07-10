@@ -75,8 +75,8 @@ def _cited_policy_read_section(
     body = (
         "Confirm a CITED past case against the case-history store with a scoped, "
         "CLOSED-ONLY read — closed cases only, never the in-flight ticket. Use exactly:\n"
-        f"  {py} {ticket_cli} list-tickets --status closed --require-closed --label {sig_label} --raw\n"
-        f"  {py} {ticket_cli} get-ticket <case-id> --require-closed --raw\n"
+        f"  {py} {ticket_cli} list-tickets --status closed --require-closed --label {sig_label}\n"
+        f"  {py} {ticket_cli} get-ticket <case-id> --require-closed\n"
         f"The in-flight ticket for the alert you are scoring is `{inflight_key}` — never "
         "read it (it is open; --require-closed refuses it on both commands). A cited seed "
         "the store can't "

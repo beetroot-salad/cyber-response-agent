@@ -479,7 +479,7 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     raw = f"{run}/gather_raw/l/0.json"
     assert permission.decide_bash(
         f"cat {raw} | defender-sql 'SELECT count(*) FROM data'", policy=gather).allow
-    assert permission.decide_bash("defender-elastic query 'x' --raw", policy=gather).allow
+    assert permission.decide_bash("defender-elastic query 'x'", policy=gather).allow
     assert permission.decide_bash(f"cat {raw} | jq '.hits|length'", policy=gather).allow
     assert not permission.decide_bash("jq '.hits|length' /tmp/p.json", policy=gather).allow
 

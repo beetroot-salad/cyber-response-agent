@@ -24,27 +24,27 @@ _spec.loader.exec_module(ge)
 # --- parse_params: generic, no per-system tables ---
 
 def test_parse_params_single_positional_and_boolean_flag():
-    p = ge.parse_params(["python3", "/x/cmdb_cli.py", "host-lookup", "web-1", "--raw"])
-    assert p == {"arg0": "web-1", "raw": True}
+    p = ge.parse_params(["python3", "/x/cmdb_cli.py", "host-lookup", "web-1", "--verbose"])
+    assert p == {"arg0": "web-1", "verbose": True}
 
 
 def test_parse_params_two_positionals():
-    p = ge.parse_params(["/x/host_query.py", "fim-checksum", "db-1", "/etc/passwd", "--raw"])
-    assert p == {"arg0": "db-1", "arg1": "/etc/passwd", "raw": True}
+    p = ge.parse_params(["/x/host_query.py", "fim-checksum", "db-1", "/etc/passwd", "--verbose"])
+    assert p == {"arg0": "db-1", "arg1": "/etc/passwd", "verbose": True}
 
 
 def test_parse_params_value_flags():
     p = ge.parse_params(
-        ["wazuh_cli.py", "query", "--query", "rule.id:5503", "--limit", "20", "--raw"]
+        ["wazuh_cli.py", "query", "--query", "rule.id:5503", "--limit", "20", "--verbose"]
     )
-    assert p == {"query": "rule.id:5503", "limit": "20", "raw": True}
+    assert p == {"query": "rule.id:5503", "limit": "20", "verbose": True}
 
 
 def test_parse_params_short_flag_with_value():
     # `-q` is a real wazuh_cli short form for --query; it must capture its value,
     # not get dropped as a bare positional.
-    p = ge.parse_params(["wazuh_cli.py", "query", "-q", "rule.id:5503", "--raw"])
-    assert p == {"q": "rule.id:5503", "raw": True}
+    p = ge.parse_params(["wazuh_cli.py", "query", "-q", "rule.id:5503", "--verbose"])
+    assert p == {"q": "rule.id:5503", "verbose": True}
 
 
 def test_parse_params_unknown_shape_does_not_raise():
@@ -79,7 +79,7 @@ def test_main_writes_payload_record_and_passes_through(tmp_path, capsys):
 
     rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-003",
                   "--system", "stub-cmdb", "--query-id", "stub-cmdb.host-lookup", "--",
-                  sys.executable, str(cli), "host-lookup", "web-1", "--raw"])
+                  sys.executable, str(cli), "host-lookup", "web-1", "--verbose"])
 
     assert rc == 0
     payload = run_dir / "gather_raw" / "l-003" / "0.json"
@@ -94,7 +94,7 @@ def test_main_writes_payload_record_and_passes_through(tmp_path, capsys):
     assert r["system"] == "stub-cmdb"
     assert r["query_id"] == "stub-cmdb.host-lookup"
     assert r["verb"] == "host-lookup"
-    assert r["params"] == {"arg0": "web-1", "raw": True}
+    assert r["params"] == {"arg0": "web-1", "verbose": True}
     assert r["payload_path"] == "gather_raw/l-003/0.json"
     assert r["payload_status"] == "ok"
     # passthrough: the CLI's stdout reaches the wrapper's stdout
@@ -139,10 +139,10 @@ def test_main_adhoc_query_id(tmp_path):
     cli = _fake_cli(tmp_path, "wazuh_cli.py", '{"hits":[]}')
     ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
              "--system", "wazuh", "--query-id", "ad-hoc", "--",
-             sys.executable, str(cli), "query", "--query", 'rule.id:5503', "--raw"])
+             sys.executable, str(cli), "query", "--query", 'rule.id:5503', "--verbose"])
     row = json.loads((run_dir / "executed_queries.jsonl").read_text().splitlines()[0])
     assert row["query_id"] == "ad-hoc"
-    assert row["params"] == {"query": "rule.id:5503", "raw": True}
+    assert row["params"] == {"query": "rule.id:5503", "verbose": True}
 
 
 def test_main_requires_query_id(tmp_path):
@@ -317,7 +317,7 @@ def test_build_truncated_view_non_json_falls_back_to_chars(tmp_path):
 
 
 def test_build_truncated_view_capped_envelope_points_counts_at_total(tmp_path):
-    # A capped --raw envelope (`total` >> returned): the on-disk payload is a
+    # A capped payload (`total` >> returned): the on-disk payload is a
     # SAMPLE, so the view reports the exact `total`, frames the file as a sample,
     # and must NOT tell the agent to jq-`length` it (that would report the cap as
     # the count — the meaning-flip the returned-doc cap introduces).
@@ -354,7 +354,7 @@ def test_main_samples_record_list_and_persists_full(tmp_path, capsys):
     cli = _fake_cli(tmp_path, "elastic_cli.py", big)
     rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
                   "--system", "elastic", "--query-id", "elastic.q", "--",
-                  sys.executable, str(cli), "query", "--raw"])
+                  sys.executable, str(cli), "query", "--verbose"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "FIELD-SHAPE sample" in out
@@ -375,7 +375,7 @@ def test_main_small_record_list_is_still_sampled(tmp_path, capsys, monkeypatch):
     cli = _fake_cli(tmp_path, "elastic_cli.py", '{"hits":[{"i":1}]}')
     rc = ge.main(["--run-dir", str(run_dir), "--lead", "l-001",
                   "--system", "elastic", "--query-id", "elastic.q", "--",
-                  sys.executable, str(cli), "query", "--raw"])
+                  sys.executable, str(cli), "query", "--verbose"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "FIELD-SHAPE sample" in out

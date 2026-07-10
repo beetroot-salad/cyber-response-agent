@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-stable invocation shim for sql.py. The agent calls
-# `defender-sql '<SQL>'` (piped after an adapter's --raw output) instead of a
+# `defender-sql '<SQL>'` (piped after an adapter's output) instead of a
 # path/module form so the allowlist matches one stable token regardless of cwd,
 # venv path, or compound wrapping. (The script is deliberately NOT named
 # `sql_cli.py`: `*_cli.py` is the structural marker for a data-source adapter

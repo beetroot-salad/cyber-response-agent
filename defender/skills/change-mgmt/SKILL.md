@@ -88,9 +88,9 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ```bash
 defender-change-mgmt health-check
-defender-change-mgmt active-changes --host <h> --at <iso> [--raw]
-defender-change-mgmt get-change <cr_id> [--raw]
-defender-change-mgmt list-changes [--status X] [--host h] [--active-at iso] [--limit N] [--raw]
+defender-change-mgmt active-changes --host <h> --at <iso>
+defender-change-mgmt get-change <cr_id>
+defender-change-mgmt list-changes [--status X] [--host h] [--active-at iso] [--limit N]
 ```
 
 **Do not Read `change_mgmt_cli.py` source to discover flags.** This
@@ -102,7 +102,7 @@ authoritative surface.
 local-time / date-only forms before dispatching — a silent timezone
 mismatch is harder to diagnose than a refusal.
 
-`--raw` emits the upstream JSON response unchanged.
+Each subcommand emits the upstream JSON response unchanged.
 
 ### Connectivity
 

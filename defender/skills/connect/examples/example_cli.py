@@ -18,8 +18,8 @@ Pick the query shape before the verbs. Three tiers, best first:
 
   2. The source only FILTERS and returns rows (what this example shows).
      Expose the native filter passthrough and return the rows; the model
-     aggregates them downstream with `defender-sql` over the `--raw`
-     output — still SQL, a language it knows. This downloads before it
+     aggregates them downstream with `defender-sql` over the adapter's
+     JSON payload — still SQL, a language it knows. This downloads before it
      reduces, so it is the fallback, not the goal. Document the concrete
      recipe for the source's row shape in that system's `execution.md`
      (see `cli-adapter.md` -> "Prefer native aggregation").
@@ -40,11 +40,12 @@ The contract every adapter implements (see `_adapter.py`):
 
     health-check                          — is the system reachable + authed?
     query '<native query>' [--limit N]    — run a query, return raw results
-        [--start ISO] [--end ISO] [--raw]
+        [--start ISO] [--end ISO]
 
-Subcommands are argparse verbs; `--raw` emits the stable JSON envelope the
-gather capture persists. Exit codes: 0 success (0 hits included), 1 query
-rejected, 2 unreachable/unauthed/misconfigured, 64 bad invocation.
+Subcommands are argparse verbs; each command prints its JSON payload on
+stdout — the payload IS the output, with no wrapper envelope — and the
+gather capture persists it by-ref. Exit codes: 0 success (0 hits included),
+1 query rejected, 2 unreachable/unauthed/misconfigured, 64 bad invocation.
 
 Transport here is HTTP via urllib. A `docker exec`, SSH, or
 existing-CLI-wrapping adapter keeps the same contract but swaps this
@@ -65,8 +66,8 @@ from _adapter import (
     EXIT_QUERY_ERROR,
     AdapterArgumentParser,
     die,
+    emit_payload,
     load_config,
-    print_raw,
     resolve_auth,
 )
 
@@ -120,7 +121,7 @@ def cmd_query(config: dict[str, str], args: Any) -> int:
     if args.end:
         params["end"] = args.end
     result = _request(config, "/events", params)
-    print_raw(SYSTEM, "/events", params, result)
+    emit_payload(result)
     return EXIT_OK
 
 
@@ -134,19 +135,18 @@ def build_parser() -> AdapterArgumentParser:
     sub.add_parser("health-check", help="Check reachability + auth; exit 0/2.")
 
     # Verb and flag names mirror what a fresh-context Haiku reaches for
-    # (positional query, --limit, --start/--end, --raw). The --help example
+    # (positional query, --limit, --start/--end). The --help example
     # is load-bearing: gather pattern-matches against it, so use a real
     # query shape, not a placeholder.
     q = sub.add_parser(
         "query",
         help="Run a native query and return matching events.",
-        epilog="example: query 'status:failed AND service:sshd' --limit 5 --raw",
+        epilog="example: query 'status:failed AND service:sshd' --limit 5",
     )
     q.add_argument("query", help="Native query string, passed through unmodified.")
     q.add_argument("--limit", type=int, default=100, help="Max results (default 100).")
     q.add_argument("--start", help="ISO-8601 UTC lower time bound.")
     q.add_argument("--end", help="ISO-8601 UTC upper time bound.")
-    q.add_argument("--raw", action="store_true", help="Emit the JSON capture envelope.")
     return parser
 
 

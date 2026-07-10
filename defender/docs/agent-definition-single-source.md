@@ -88,7 +88,7 @@ class BashGrammar:                         # STATIC: which programs; which opera
     shims:            tuple[str, ...] = ()  # defender-lessons, defender-invlang, cd
     viewers:          tuple[str, ...] = ()  # cat, grep, tail, wc, find, ls, sed
     adapters:         bool = False          # gather: structural adapter routing
-    adapter_sql_pipe: bool = False          # gather: adapter --raw | defender-sql
+    adapter_sql_pipe: bool = False          # gather: adapter | defender-sql
     operand_gated:    bool = False          # judge: cat's file operands path-gated at resolve()
     raw_reads:        bool = False          # judge: declared (no adapters bit to imply it)
 ```

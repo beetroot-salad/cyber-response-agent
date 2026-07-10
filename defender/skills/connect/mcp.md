@@ -33,7 +33,7 @@ system is reached so the gather subagent and the defender can use it.
 ## The cost to name out loud
 
 MCP output is tagged for injection safety by the runtime, but it does
-**not** flow through the `--raw` → `gather_raw/` capture path that the
+**not** flow through the `gather_raw/` capture path that the
 queries table and the offline learning loop depend on. So an MCP-backed
 system is thinner in the learning loop than a CLI-backed one: its queries
 aren't captured as a re-runnable, by-ref record. Tell the maintainer this

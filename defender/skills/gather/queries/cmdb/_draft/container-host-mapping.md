@@ -33,7 +33,7 @@ recent baseline activity or Falco/Docker event logs.
 container_id: ${container_id}
 
 # Step 2: Query CMDB for all hosts
-cmdb_cli.py list-hosts --raw
+cmdb_cli.py list-hosts
 
 # Step 3: Cross-reference: which host's container(s) have this ID?
 # Heuristic: container ID truncation, role-cluster names (web-*, db-*, etc.),

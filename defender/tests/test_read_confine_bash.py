@@ -542,21 +542,21 @@ def test_write_investigation_invalid_invlang_denied(env):
 # ===========================================================================  #
 
 def test_standalone_adapter_allowed_and_exposed(env):
-    """defender-elastic query 'x' --raw → ALLOW for gather, with .adapter_argv exposed for capture."""
-    d = _bash(env, "defender-elastic query 'x' --raw", "gather")
+    """defender-elastic query 'x' → ALLOW for gather, with .adapter_argv exposed for capture."""
+    d = _bash(env, "defender-elastic query 'x'", "gather")
     assert d.allow
-    assert d.adapter_argv == ["defender-elastic", "query", "x", "--raw"]
+    assert d.adapter_argv == ["defender-elastic", "query", "x"]
 
 
 def test_adapter_sql_pipe_allowed_and_split(env):
-    """defender-elastic … --raw | defender-sql 'SELECT …' → ALLOW for gather, with .sql_pipe split
+    """defender-elastic … | defender-sql 'SELECT …' → ALLOW for gather, with .sql_pipe split
     exposed; main never gets the adapter."""
-    cmd = "defender-elastic query 'x' --raw | defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'"
+    cmd = "defender-elastic query 'x' | defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'"
     d = _bash(env, cmd, "gather")
     assert d.allow
     assert d.sql_pipe is not None
     adapter_av, sql_av = d.sql_pipe
-    assert adapter_av == ["defender-elastic", "query", "x", "--raw"]
+    assert adapter_av == ["defender-elastic", "query", "x"]
     assert sql_av[0] == "defender-sql"
     assert not _bash(env, cmd, "main").allow
 
@@ -569,16 +569,16 @@ def test_cat_payload_into_defender_sql_allowed(env):
 
 
 def test_adapter_jq_pipe_denied(env):
-    """defender-elastic … --raw | jq '.x' → DENY: adapter|jq is NOT a sanctioned pipe (only
+    """defender-elastic … | jq '.x' → DENY: adapter|jq is NOT a sanctioned pipe (only
     adapter|defender-sql is); the host-state template is rewritten standalone→read instead."""
     # rejected: allow adapter | jq structurally (widens the sanctioned adapter-pipe grammar)
-    d = _bash(env, "defender-elastic query 'x' --raw | jq '.x'", "gather")
+    d = _bash(env, "defender-elastic query 'x' | jq '.x'", "gather")
     assert not d.allow
 
 
 def test_adapter_denied_for_main(env):
     """A data-source adapter is denied for the main loop (it dispatches gather) — unchanged."""
-    d = _bash(env, "defender-elastic query 'x' --raw", "main")
+    d = _bash(env, "defender-elastic query 'x'", "main")
     assert not d.allow
     assert "data-source CLIs directly" in (d.reason or "")
 

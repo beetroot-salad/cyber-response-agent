@@ -207,10 +207,10 @@ def die_for_http_status(system: str, status: int, body: str = "") -> None:
             + (f": {detail}" if detail else "."))
 
 
-def print_raw(system: str, endpoint: str, args: dict[str, Any], result: Any) -> None:
-    """Emit the stable `--raw` envelope the gather capture persists by-ref
-    to `gather_raw/`. Keep this shape stable across adapters — drift breaks
-    replay and the offline learning loop."""
-    print(json.dumps(
-        {"system": system, "endpoint": endpoint, "args": args, "result": result}
-    ))
+def emit_payload(payload: Any) -> None:
+    """Emit the command's JSON payload on stdout — the payload IS the output,
+    with no wrapper envelope. The gather capture persists it by-ref to
+    `gather_raw/`, and `defender-sql` reduces it (`FROM data` binds the
+    payload's own top-level keys). Keep each command's payload shape stable
+    across releases — drift breaks replay and the offline learning loop."""
+    print(json.dumps(payload))

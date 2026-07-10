@@ -67,7 +67,7 @@ def _list_closed(label: str) -> list:
     non-zero exit / unreachable store / unparseable body → empty list."""
     cmd = [
         sys.executable, str(_TICKET_CLI), "list-tickets",
-        "--status", "closed", "--label", label, "--raw",
+        "--status", "closed", "--label", label,
     ]
     try:
         proc = subprocess.run(
