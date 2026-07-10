@@ -150,7 +150,7 @@ def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
     # arbitrary python, an unpinned script, a data-source adapter, and arbitrary shell are denied
     assert not permission.decide_bash("python3 -c 'print(1)'", policy=pol).allow
     assert not permission.decide_bash("python3 defender/scripts/lessons/other.py", policy=pol).allow
-    assert not permission.decide_bash("defender-elastic query x --raw", policy=pol).allow
+    assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
 
 

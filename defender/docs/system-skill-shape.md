@@ -56,8 +56,9 @@ Each system's Visibility surface section uses the same four fields:
 - Pointers to template authoring resources
   (`defender/skills/gather/queries/{system}/`).
 - For a **filter-only** source (one with no server-side aggregation),
-  the concrete `defender-sql`-over-`--raw` aggregation recipe for the
-  adapter's row shape — the path into the `--raw` envelope and the columns
+  the concrete `defender-sql`-over-payload aggregation recipe for the
+  adapter's row shape — the path into the payload's rows (e.g. `hits` for
+  an elastic query, the top-level list for a `list-*` verb) and the columns
   to group on. This is a dispatch-time property of driving the adapter,
   not a fact about the system's answers, so it lives here rather than in
   `read_guidance`. A source with a native aggregating query language

@@ -115,7 +115,7 @@ def _fetch_closed_resolution(case_id: str) -> str | None:
     the policy load is best-effort and must never break the forward-check."""
     cmd = [
         sys.executable, str(_TICKET_CLI), "get-ticket", case_id,
-        "--require-closed", "--raw",
+        "--require-closed",
     ]
     try:
         proc = subprocess.run(

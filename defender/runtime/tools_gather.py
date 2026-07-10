@@ -169,7 +169,7 @@ def _payload_note(deps: GatherDeps, record: dict) -> str:
 def _capture_adapter_sql(
     deps: GatherDeps, adapter_argv: list[str], sql_argv: list[str]
 ) -> str:
-    """The `adapter --raw | defender-sql '<SQL>'` pipe (gather only). Capture the
+    """The `adapter | defender-sql '<SQL>'` pipe (gather only). Capture the
     adapter's raw payload (queries table + by-ref file), then aggregate that
     payload through the sandboxed defender-sql on stdin. The queries-table row
     records the adapter query (audited); defender-sql is a local, self-sandboxed

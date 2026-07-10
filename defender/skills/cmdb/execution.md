@@ -8,18 +8,18 @@ surface.
 
 ```bash
 defender-cmdb health-check
-defender-cmdb get-host <name> [--raw]
-defender-cmdb list-hosts [--role X] [--criticality X] [--owner X] [--limit N] [--raw]
-defender-cmdb list-roles [--raw]
+defender-cmdb get-host <name>
+defender-cmdb list-hosts [--role X] [--criticality X] [--owner X] [--limit N]
+defender-cmdb list-roles
 ```
 
 **Do not Read `cmdb_cli.py` source to discover flags.** This file plus
 `defender-cmdb {subcommand} --help` is the authoritative surface.
 
-`--raw` emits the upstream JSON response unchanged, suitable for
-`gather_raw/{position}.json`. Default output is short formatted text
-that includes the full JSON record for `get-host` and a per-row
-summary for `list-hosts`.
+Each subcommand emits the upstream JSON response unchanged — a flat
+object for `get-host`, a list/object for `list-hosts` / `list-roles`.
+That payload IS the output (there is no separate formatted-text mode);
+gather captures it under `gather_raw/{lead_id}/{seq}.json`.
 
 `get-host` is keyed by inventory host name (e.g. `scanner-1`, `web-1`).
 Feeding a runtime identifier — container id, docker container name —

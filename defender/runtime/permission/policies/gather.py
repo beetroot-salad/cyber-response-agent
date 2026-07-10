@@ -1,7 +1,7 @@
 """The GATHER subagent's Bash-policy deny reason.
 
 Gather IS the data-access layer: it may run a data-source adapter directly
-(captured transparently) or as the sanctioned `adapter --raw | defender-sql
+(captured transparently) or as the sanctioned `adapter | defender-sql
 '<SQL>'` aggregation pipe, and it may read / `jq` its own `gather_raw/**`. Its
 reader surface (`bash_allow`) is the same anchored viewers/shims as main (#535);
 the difference is capability bits (adapters + raw_reads), routed structurally

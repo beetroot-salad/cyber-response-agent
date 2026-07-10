@@ -23,8 +23,8 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   and reducing them adapter- or agent-side was the dominant cost, and
   aggregating server-side in a language the model already knows removed
   it. A filter-only source falls back to native-filter passthrough plus
-  `defender-sql` (sandboxed SQL the model drives) over the `--raw` output;
-  we don't write a bespoke reducer. The ladder is in `cli-adapter.md`
+  `defender-sql` (sandboxed SQL the model drives) over the adapter's JSON
+  payload; we don't write a bespoke reducer. The ladder is in `cli-adapter.md`
   ("Prefer native aggregation").
 
 - **The CLI conforms to the gather subagent, not the reverse.** The
@@ -57,7 +57,7 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
 - **MCP and CLI are peer paths, not a hierarchy.** Writing a CLI is
   heavier than pointing at a maintained MCP server, but neither is the
   "real" way to connect. The interview routes; the maintainer decides.
-  The one defender-specific tilt: only the CLI path's `--raw` output
+  The one defender-specific tilt: only the CLI path's output
   flows through the capture wrapper into the queries table, so an MCP
   system is thinner in the offline learning loop. That's a cost to weigh,
   not a disqualifier.

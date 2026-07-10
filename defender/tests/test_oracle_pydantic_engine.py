@@ -105,9 +105,9 @@ def test_oracle_policy_denies_everything():
     assert pol.bash_allow == ()
     # a data-source adapter, the adapter|defender-sql pipe, arbitrary python, and arbitrary shell
     # are all denied — the oracle's whole input is inlined in the prompt, so it needs none of them.
-    assert not permission.decide_bash("defender-elastic query x --raw", policy=pol).allow
+    assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash(
-        "defender-elastic query x --raw | defender-sql 'SELECT 1'", policy=pol
+        "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol
     ).allow
     assert not permission.decide_bash("python3 -c 'print(1)'", policy=pol).allow
     assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow

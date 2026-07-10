@@ -6,7 +6,7 @@ instead of redirecting a system-CLI's stdout itself. Only two flags carry
 information the wrapper can't recover on its own:
 
     defender-record-query --lead {L} --query-id cmdb.host-lookup -- \
-        defender-cmdb host-lookup web-1 --raw
+        defender-cmdb host-lookup web-1
 
 Both the wrapper and the inner command are invoked through their stable
 ``defender-*`` shims (``defender/bin/``), not a path/module form — see
@@ -249,12 +249,12 @@ def _is_event_payload(stdout: str) -> bool:
 
 
 def _envelope_total(stdout: str) -> int | None:
-    """Exact server-side match count from an adapter's --raw envelope
+    """Exact server-side match count from an adapter's JSON payload
     (`{total, returned, truncated, hits:[…]}`) — independent of how many docs were
     actually returned. None when the payload has no such field (a plain list, or an
     adapter that doesn't report a total): then the returned-record count is all
     there is. Keys on the field-name convention like `_RECORD_KEYS` — no per-system
-    table, so an adapter adopting the envelope is covered with no edit here."""
+    table, so an adapter adopting this shape is covered with no edit here."""
     try:
         obj = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):

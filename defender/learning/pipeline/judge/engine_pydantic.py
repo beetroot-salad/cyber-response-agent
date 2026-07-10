@@ -122,7 +122,7 @@ def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | N
     judge's read roots — closing the reader surface as an out-of-roots read oracle.
     Because ``bash._decide_readers`` requires EVERY stage to match, `cat X | head` is
     denied while `cat X | defender-sql '<SQL>'` is allowed. Note ``adapter_sql_pipe``
-    stays False: that bit is the STRUCTURAL ``adapter --raw | defender-sql`` route
+    stays False: that bit is the STRUCTURAL ``adapter | defender-sql`` route
     (``command_shape.adapter_sql_split``), not the presence of the shim — the judge
     pipes a payload at rest, never a live adapter. The judge is UNCONFINED this slice
     (no ``read_confine``), so its roots stay ``{run_dir, defender_dir, *read_roots}``."""

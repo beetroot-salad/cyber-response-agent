@@ -198,10 +198,10 @@ def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
 def test_ticket_pattern_shape():
     p = engine_pydantic._ticket_pattern(_PY, _CLI)
     # accepted: the pinned CLI, a ticket subcommand, and --require-closed present
-    assert p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed --raw")
+    assert p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed")
     assert p.fullmatch(f"{_PY} {_CLI} list-tickets --status closed --require-closed --label sig")
     # --require-closed REQUIRED (the security property: the open ticket stays unreachable)
-    assert not p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --raw")
+    assert not p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9")
     # …and it must be a WHOLE space-delimited token, not a substring
     assert not p.fullmatch(f"{_PY} {_CLI} get-ticket --require-closed-not")
     # wrong subcommand / wrong CLI / arbitrary python — denied even WITH the flag
@@ -261,17 +261,17 @@ def test_judge_ticket_require_closed_spoof_denied_through_gate():
 def test_judge_policy_ticket_read_through_the_gate(tmp_path):
     # The matcher, wired into the benign judge's AgentPolicy, is honored by decide_bash.
     benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
-    ok = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed --raw"
+    ok = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed"
     assert permission.decide_bash(ok, policy=benign).allow
     # Without --require-closed the matcher declines → generic gate denies (python not a viewer).
-    assert not permission.decide_bash(f"{_PY} {_CLI} get-ticket CASE-9 --raw", policy=benign).allow
+    assert not permission.decide_bash(f"{_PY} {_CLI} get-ticket CASE-9", policy=benign).allow
     # The adversarial judge has no matcher → even the pinned form is denied.
     adversarial = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
     assert not permission.decide_bash(ok, policy=adversarial).allow
     # The judge (either direction) still refuses data-source adapters + arbitrary shell,
     # but MAY aggregate an IN-ROOTS gather_raw payload (raw_reads + the operand-gated
     # `cat | defender-sql` lane).
-    assert not permission.decide_bash("defender-elastic query x --raw", policy=benign).allow
+    assert not permission.decide_bash("defender-elastic query x", policy=benign).allow
     assert not permission.decide_bash("rm -rf /tmp/x", policy=benign).allow
     raw = tmp_path / "gather_raw" / "l-001" / "0.json"
     assert permission.decide_bash(

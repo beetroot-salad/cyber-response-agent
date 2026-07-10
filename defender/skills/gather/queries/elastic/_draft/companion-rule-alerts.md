@@ -24,10 +24,10 @@ whether the primary alert is isolated or part of a broader campaign.
 *
 ```
 
-This catch-all query retrieves all alerts in the specified time window. The CLI's
-`--raw` flag returns the full alert objects, which are then analyzed offline to
-extract the requested metrics: distinct rule_ids, individual timestamps, and
-severity breakdown.
+This catch-all query retrieves all alerts in the specified time window. The CLI
+returns the full alert objects (in the `hits` array of its payload), which are then
+analyzed offline to extract the requested metrics: distinct rule_ids, individual
+timestamps, and severity breakdown.
 
 ## Common pitfalls
 

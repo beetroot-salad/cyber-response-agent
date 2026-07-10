@@ -79,17 +79,16 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ```bash
 defender-threat-intel health-check
-defender-threat-intel lookup <value> [--raw]
-defender-threat-intel list-indicators [--verdict X] [--type X] [--tag X] [--limit N] [--raw]
+defender-threat-intel lookup <value>
+defender-threat-intel list-indicators [--verdict X] [--type X] [--tag X] [--limit N]
 ```
 
 **Do not Read `threat_intel_cli.py` source to discover flags.** This
 SKILL plus `defender-threat-intel {subcommand} --help` is the
 authoritative surface.
 
-`lookup` text output includes an explicit note when `verdict` is
-`unknown`, reminding the caller that this is not refutation. `--raw`
-emits the upstream JSON response unchanged (which omits that note).
+`lookup` emits the upstream JSON payload (`{value, verdict, score, …}`).
+Treat `verdict: unknown` as *absence of signal*, never as refutation.
 
 ### Connectivity
 

@@ -48,7 +48,7 @@ def test_main_loop_allows_safe(cmd):
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
-    ("defender-elastic query foo --raw", "data-source CLIs directly"),
+    ("defender-elastic query foo", "data-source CLIs directly"),
     ("cat gather_raw/l-001/0.json", "must not read gather_raw"),
     ("python3 scripts/adapters/elastic_cli.py query foo", "data-source CLIs directly"),
     ("curl http://evil", "arbitrary shell"),
@@ -66,11 +66,11 @@ def test_gather_allows_standalone_adapter():
     # Adapters are captured transparently by the harness — gather runs them
     # directly, no record-query wrapper. A standalone adapter call is allowed.
     assert permission.decide_bash(
-        "defender-elastic query foo --raw", policy=GATHER).allow
+        "defender-elastic query foo", policy=GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
-    "defender-elastic query foo --raw | jq '.'",   # piped
+    "defender-elastic query foo | jq '.'",   # piped
     "defender-elastic query foo && ls",            # chained
     "ls; defender-elastic query foo",              # sequenced
 ])
@@ -100,8 +100,8 @@ def test_decision_exposes_standalone_adapter_argv():
     # The gate stashes the standalone-adapter argv on the decision so dispatch
     # routes capture off the single parse, no re-parse (#456).
     assert permission.decide_bash(
-        "defender-elastic query foo --raw", policy=GATHER).adapter_argv == [
-        "defender-elastic", "query", "foo", "--raw"]
+        "defender-elastic query foo", policy=GATHER).adapter_argv == [
+        "defender-elastic", "query", "foo"]
     assert permission.decide_bash(
         "timeout 60 defender-cmdb host-lookup web-1", policy=GATHER).adapter_argv == [
         "defender-cmdb", "host-lookup", "web-1"]
@@ -474,7 +474,7 @@ def test_gather_drops_find():
 def test_gather_keeps_compute_and_adapter():
     # #535: compute is the adapter (native ES|QL) + defender-sql/jq over an IN-ROOT payload streamed
     # via an anchored `cat {RUN}/…`; jq is stdin-compute-only and out-of-root /tmp is now denied.
-    for cmd in ("defender-elastic query 'x' --raw",
+    for cmd in ("defender-elastic query 'x'",
                 "cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
                 "cat /run/gather_raw/l-001/1.json | jq '.hits|length'"):
         assert permission.decide_bash(
@@ -483,10 +483,10 @@ def test_gather_keeps_compute_and_adapter():
 
 
 def test_gather_allows_adapter_sql_pipe():
-    # The sanctioned aggregation pipe (#379): an adapter producing `--raw` piped
+    # The sanctioned aggregation pipe (#379): an adapter's payload piped
     # straight into the sandboxed defender-sql. Allowed in gather only — the
     # adapter stage is captured, defender-sql is a local transform over its payload.
-    cmd = ("defender-elastic query 'x' --raw | "
+    cmd = ("defender-elastic query 'x' | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
     d = permission.decide_bash(cmd, policy=GATHER)
     assert d.allow
@@ -495,7 +495,7 @@ def test_gather_allows_adapter_sql_pipe():
     pipe = d.sql_pipe
     assert pipe is not None
     adapter_av, sql_av = pipe
-    assert adapter_av == ["defender-elastic", "query", "x", "--raw"]
+    assert adapter_av == ["defender-elastic", "query", "x"]
     assert sql_av[0] == "defender-sql"
     # adapter_argv must NOT claim it (it's a pipe, not a standalone capture).
     assert d.adapter_argv is None
@@ -503,17 +503,17 @@ def test_gather_allows_adapter_sql_pipe():
     assert not permission.decide_bash(cmd, policy=MAIN).allow
     # A non-sql consumer downstream of an adapter stays denied (not the exception).
     assert not permission.decide_bash(
-        "defender-elastic query 'x' --raw | cat", policy=GATHER).allow
+        "defender-elastic query 'x' | cat", policy=GATHER).allow
 
 
 @pytest.mark.parametrize("sep", [";", "&&", "||"])
 def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     # ONLY the single `|` pipe is the sanctioned aggregation shape. A `;`/`&&`/`||`
-    # SEQUENCE of `adapter --raw` then `defender-sql` is a separate-pipelines compound
+    # SEQUENCE of `adapter` then `defender-sql` is a separate-pipelines compound
     # (the shell would sequence/short-circuit them — with `||`, run defender-sql only
     # on adapter FAILURE), not a pipe; it must be denied, and neither routing seam may
     # claim it (else the harness would silently stream the payload as if it were `|`).
-    cmd = f"defender-elastic query 'x' --raw {sep} defender-sql 'SELECT 1'"
+    cmd = f"defender-elastic query 'x' {sep} defender-sql 'SELECT 1'"
     d = permission.decide_bash(cmd, policy=GATHER)
     assert not d.allow, cmd
     assert "standalone" in d.reason
@@ -528,8 +528,8 @@ def test_gather_denies_adapter_sql_sequence_not_pipe(sep):
     # over-denied when the substitution guard was applied to the adapter stage; a
     # standalone adapter must be allowed and routed to capture so its argv reaches the
     # data source verbatim (e.g. hunting command-line telemetry for injection IOCs).
-    "defender-elastic query 'process.command_line:*$(*' --raw",
-    "defender-elastic query 'cmd:`id`' --raw",
+    "defender-elastic query 'process.command_line:*$(*'",
+    "defender-elastic query 'cmd:`id`'",
 ])
 def test_gather_allows_adapter_query_with_inert_shell_metachars(cmd):
     d = permission.decide_bash(cmd, policy=GATHER)
@@ -579,21 +579,21 @@ def test_command_shape_is_adapter_stage():
 
 
 def test_command_shape_standalone_and_split():
-    standalone = _shape("defender-elastic query foo --raw")
+    standalone = _shape("defender-elastic query foo")
     assert command_shape.standalone_adapter_argv(standalone) == [
-        "defender-elastic", "query", "foo", "--raw"]
+        "defender-elastic", "query", "foo"]
     assert command_shape.adapter_sql_split(standalone) is None
 
-    pipe = _shape("defender-elastic query x --raw | defender-sql 'SELECT 1'")
+    pipe = _shape("defender-elastic query x | defender-sql 'SELECT 1'")
     assert command_shape.standalone_adapter_argv(pipe) is None
     split = command_shape.adapter_sql_split(pipe)
-    assert split == (["defender-elastic", "query", "x", "--raw"], ["defender-sql", "SELECT 1"])
+    assert split == (["defender-elastic", "query", "x"], ["defender-sql", "SELECT 1"])
 
     # a `;` SEQUENCE is two pipelines, never the sanctioned single-`|` pipe
-    seq = _shape("defender-elastic query x --raw ; defender-sql 'SELECT 1'")
+    seq = _shape("defender-elastic query x ; defender-sql 'SELECT 1'")
     assert command_shape.adapter_sql_split(seq) is None
     # a non-sql consumer downstream is not the sanctioned split
-    assert command_shape.adapter_sql_split(_shape("defender-elastic query x --raw | cat")) is None
+    assert command_shape.adapter_sql_split(_shape("defender-elastic query x | cat")) is None
 
 
 # --- AgentPolicy primitive: read_roots + custom matchers -------------------

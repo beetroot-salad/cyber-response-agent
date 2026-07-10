@@ -336,10 +336,6 @@ def build_parser():
             ),
         )
         parser.add_argument(
-            "--raw", action="store_true",
-            help="Emit raw JSON array of _source docs instead of formatted text.",
-        )
-        parser.add_argument(
             "--index", help="Override the default index pattern for this subcommand.",
         )
 

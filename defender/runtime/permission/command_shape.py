@@ -16,7 +16,7 @@ from __future__ import annotations
 from defender.hooks._cmd_segments import ADAPTER_CLI_RE, NON_ADAPTER_SHIMS
 from defender.runtime.bash_exec import Pipeline
 
-# The aggregation shim that consumes an adapter's `--raw` payload on stdin. Only
+# The aggregation shim that consumes an adapter's payload on stdin. Only
 # this program may sit downstream of an adapter in the sanctioned pipe.
 SQL_SHIM = "defender-sql"
 
@@ -60,14 +60,14 @@ def standalone_adapter_argv(pipelines: list[Pipeline]) -> list[str] | None:
 
 
 def adapter_sql_split(pipelines: list[Pipeline]) -> tuple[list[str], list[str]] | None:
-    """If the command is the sanctioned `defender-<system> … --raw | defender-sql
+    """If the command is the sanctioned `defender-<system> … | defender-sql
     '<SQL>'` shape, return `(adapter_argv, sql_argv)`; else None. The shape is ONE
     pipeline of exactly two stages — an adapter producing on the left, defender-sql
     consuming on the right. defender-sql is self-sandboxed (no file/network), so
     aggregating the captured payload through it is a local transform, not a second
     data-source query.
 
-    A `;`/`&&`/`||` compound (`adapter --raw ; defender-sql …`) is a SEQUENCE of
+    A `;`/`&&`/`||` compound (`adapter ; defender-sql …`) is a SEQUENCE of
     SEPARATE pipelines, not a pipe, so it can't match this single-`Pipeline` test —
     the shell would sequence/short-circuit them (with `||`, run defender-sql only on
     adapter *failure*), whereas the capture path unconditionally streams the captured

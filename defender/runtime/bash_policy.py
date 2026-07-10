@@ -65,7 +65,7 @@ def adapters_allowed(agent: str) -> bool:
 
 
 def adapter_sql_pipe_allowed(agent: str) -> bool:
-    """May `agent` run the sanctioned `adapter --raw | defender-sql` pipe?"""
+    """May `agent` run the sanctioned `adapter | defender-sql` pipe?"""
     return bool(_policy()["bash"]["agents"].get(agent, {}).get("adapter_sql_pipe", False))
 
 

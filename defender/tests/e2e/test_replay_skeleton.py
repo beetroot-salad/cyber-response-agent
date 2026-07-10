@@ -155,7 +155,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # D1 — the breach: the main loop must NOT run a data-source adapter directly
     # (that's the exfil lane; the gather subagent is the only data-access role).
     ("adapter-from-main", "bash",
-     lambda rd: {"command": "defender-elastic query foo --raw"},
+     lambda rd: {"command": "defender-elastic query foo"},
      "data-source CLIs directly", None),
     # D6 — a write escaping the run dir must be refused. Main's write_allow is its
     # run-dir subtree only (the flat deny-by-default write allowlist), so a path outside
@@ -208,7 +208,7 @@ def test_role_flip_adapter_is_role_dependent():
     DENIED from the main loop (wired-and-bounced by test_main_loop_deny_bounces
     above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
     nested-gather replay; this pins the role-dependence the driver must thread."""
-    cmd = "defender-elastic query foo --raw"
+    cmd = "defender-elastic query foo"
     # compile_policy_for is per-run since #535; the adapter deny/allow is role-driven, not root-driven,
     # so synthetic absolute roots suffice for this contrast.
     run, dfn = Path("/run"), Path("/dfn")

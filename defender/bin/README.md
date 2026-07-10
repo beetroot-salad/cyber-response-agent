@@ -2,7 +2,7 @@
 
 Thin, stable wrappers the defender agent (orchestrator + gather subagents)
 invokes by a single token — `defender-invlang enum types`,
-`defender-<system> <verb> '<query>' --raw`, `defender-record-query … -- defender-<system> …`.
+`defender-<system> <verb> '<query>'`, `defender-record-query … -- defender-<system> …`.
 
 ## Why
 

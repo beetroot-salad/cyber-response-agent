@@ -67,9 +67,7 @@ its parts.
   envelope around it. There is no human pretty-print mode: the gather agent
   consumes the payload and `defender-sql` reduces it (`FROM data` binds the
   payload's own top-level keys), so prose output has no reader. Keep each
-  command's payload shape stable across releases — drift breaks replay. The
-  `--raw` flag is still accepted (the gather SKILL, query templates, and
-  `defender-sql` recipes pass it) but no longer toggles anything.
+  command's payload shape stable across releases — drift breaks replay.
 - **Native query pass-through, native aggregation first.** A query source
   takes its native language unmodified; a lookup source keys on an
   identifier. No translation, no field renaming. When the source can

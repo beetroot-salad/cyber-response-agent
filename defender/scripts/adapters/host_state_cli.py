@@ -262,25 +262,20 @@ def build_parser():
         help="Container name + image by container id (docker inspect).",
     )
     ci.add_argument("container_id")
-    ci.add_argument("--raw", action="store_true")
 
     pt = sub.add_parser("proc-tree", help="Process forest (ps -eo ... --forest).")
     pt.add_argument("host")
-    pt.add_argument("--raw", action="store_true")
 
     pw = sub.add_parser("passwd", help="/etc/passwd contents.")
     pw.add_argument("host")
-    pw.add_argument("--raw", action="store_true")
 
     ak = sub.add_parser("authorized-keys", help="<user>'s ~/.ssh/authorized_keys.")
     ak.add_argument("host")
     ak.add_argument("--user", help="Default: root.")
-    ak.add_argument("--raw", action="store_true")
 
     fim = sub.add_parser("fim-checksum", help="SHA-256 of a single file.")
     fim.add_argument("host")
     fim.add_argument("path", help="Absolute path on <host>.")
-    fim.add_argument("--raw", action="store_true")
 
     pl = sub.add_parser("package-list", help="Installed dpkg packages.")
     pl.add_argument("host")
@@ -288,7 +283,6 @@ def build_parser():
         "--limit", type=int, default=200,
         help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
-    pl.add_argument("--raw", action="store_true")
 
     return p
 

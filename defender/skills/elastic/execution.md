@@ -8,8 +8,8 @@ surface. It carries the CLI surface, query syntax, and index scoping.
 
 ```bash
 defender-elastic health-check
-defender-elastic query  '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
-defender-elastic alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N] [--raw]
+defender-elastic query  '<query_string>' [--index P] [--start T] [--end T] [--limit N]
+defender-elastic alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N]
 defender-elastic esql   '<ES|QL pipe>'
 ```
 
@@ -33,10 +33,11 @@ single largest source of wasted Read calls across runs. If a flag
 you need isn't here or in `--help`, treat it as unsupported and
 escalate — don't infer one from the source.
 
-Output is formatted markdown (summary + 5 sample lines + first 3 raw
-_source docs) by default; `--raw` emits a JSON envelope
+`query` / `alerts` emit a JSON payload
 `{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`
-suitable for `gather_raw/{position}.json`.
+where `hits` is the array of `_source` docs. That payload IS the output
+(there is no separate formatted-text mode); gather captures it under
+`gather_raw/{lead_id}/{seq}.json`.
 
 ## Connectivity & credentials
 

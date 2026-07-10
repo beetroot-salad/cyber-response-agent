@@ -8,11 +8,11 @@ surface.
 
 ```bash
 defender-identity health-check
-defender-identity can-access <user> <host> [--raw]
-defender-identity get-user <user> [--raw]
-defender-identity list-authorized-hosts <user> [--raw]
-defender-identity list-users [--role X] [--enabled true|false] [--limit N] [--raw]
-defender-identity list-roles [--raw]
+defender-identity can-access <user> <host>
+defender-identity get-user <user>
+defender-identity list-authorized-hosts <user>
+defender-identity list-users [--role X] [--enabled true|false] [--limit N]
+defender-identity list-roles
 ```
 
 **Do not Read `identity_cli.py` source to discover flags.** This file
@@ -20,9 +20,10 @@ plus `defender-identity {subcommand} --help` is the authoritative
 surface. If a flag you need isn't here or in `--help`, treat it as
 unsupported and escalate.
 
-`--raw` emits the upstream JSON response unchanged (the FastAPI
-response body), suitable for `gather_raw/{position}.json`. Default
-output is short formatted text.
+Each subcommand emits the upstream JSON response unchanged (the FastAPI
+response body). That payload IS the output (there is no separate
+formatted-text mode); gather captures it under
+`gather_raw/{lead_id}/{seq}.json`.
 
 ## Connectivity
 

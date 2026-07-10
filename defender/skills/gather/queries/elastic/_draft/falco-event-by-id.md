@@ -34,8 +34,7 @@ _id: "${event_id}"
 ```bash
 python3 {defender_dir}/scripts/adapters/elastic_cli.py query \
   '_id: "${event_id}"' \
-  --index 'logs-falco.alerts-*' \
-  --raw
+  --index 'logs-falco.alerts-*'
 ```
 
 ## Common pitfalls

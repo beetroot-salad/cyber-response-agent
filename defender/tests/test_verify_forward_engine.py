@@ -101,8 +101,8 @@ def test_verify_policy_denies_adapters_and_shell():
     assert pol.raw_reads is False
     assert pol.read_roots == ()
     # a data-source adapter, an aggregation pipe, and arbitrary shell are all denied
-    assert not permission.decide_bash("defender-elastic query x --raw", policy=pol).allow
-    assert not permission.decide_bash("defender-elastic query x --raw | defender-sql 'SELECT 1'", policy=pol).allow
+    assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
+    assert not permission.decide_bash("defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
     assert not permission.decide_bash("cat /etc/passwd", policy=pol).allow
 
 

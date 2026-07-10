@@ -70,13 +70,17 @@ Each adapter is `defender/scripts/adapters/{system}_cli.py`. Conventions
 that need to match `elastic_cli.py`:
 
 - `argparse` with one subcommand per query verb plus `health-check`.
-- `--raw` flag emits a stable JSON envelope per call:
-  `{"system": ..., "endpoint": ..., "args": {...}, "result": ...}`.
-  Gather persists this under `gather_raw/{position}.json`.
+- Each command prints its result as JSON on stdout, unconditionally —
+  the payload IS the output, with no wrapper envelope around it. The
+  shape is the payload's own: `{index, total, returned, truncated,
+  hits}` for an elastic `query`/`alerts`, a flat object for a cmdb
+  `get-host`, a list/object for a `list-*` verb. `defender-sql` reduces
+  it with `FROM data` binding the payload's own top-level keys. There is
+  no human pretty-print mode. Keep each command's payload shape stable
+  across releases — drift breaks replay. Gather persists it by-ref under
+  `gather_raw/{lead_id}/{seq}.json`.
 - Exit codes: `0` success, `1` query error (404, schema mismatch,
   bad arg), `2` connectivity/auth failure.
-- Default output is short formatted text (one-line summary +
-  key-value extracts). Agents prefer `--raw` for downstream parsing.
 - **Don't** Read the CLI source to discover flags — the SKILL.md +
   `--help` must be authoritative (per the memory-recorded discipline
   in the elastic SKILL).
@@ -136,10 +140,10 @@ SKILL handoff context). The audit surface is:
 
 - `investigation.md` — `:L` rows record `system: {system-name}`, the
   query/target, and the gather subagent's observations.
-- `gather_raw/{position}.json` — the adapter's `--raw` envelope,
+- `gather_raw/{lead_id}/{seq}.json` — the adapter's JSON payload,
   persisted per-lead by the gather subagent. **This is the only
   literal-tool-IO capture today.** Adapters MUST emit a stable
-  `--raw` shape for this to be useful — drift breaks replay.
+  payload shape for this to be useful — drift breaks replay.
 
 If we ever add per-call audit, the natural shape is a PreToolUse hook
 on `Bash` matching `*/defender/scripts/adapters/*` that appends to a

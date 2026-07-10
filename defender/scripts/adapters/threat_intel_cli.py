@@ -70,7 +70,6 @@ def build_parser():
 
     lk = sub.add_parser("lookup", help="Reputation for one IP/domain/hash.")
     lk.add_argument("value")
-    lk.add_argument("--raw", action="store_true")
 
     li = sub.add_parser("list-indicators", help="All seed indicators (filterable).")
     li.add_argument("--verdict", choices=["benign", "suspicious", "malicious", "unknown"])
@@ -80,7 +79,6 @@ def build_parser():
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
         help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
-    li.add_argument("--raw", action="store_true")
 
     return p
 

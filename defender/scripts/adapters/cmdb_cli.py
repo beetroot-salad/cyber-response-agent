@@ -68,7 +68,6 @@ def build_parser():
 
     gh = sub.add_parser("get-host", help="Effective record for one host.")
     gh.add_argument("name")
-    gh.add_argument("--raw", action="store_true")
 
     lh = sub.add_parser("list-hosts", help="All hosts (filterable).")
     lh.add_argument("--role")
@@ -78,10 +77,8 @@ def build_parser():
         "--limit", type=int, default=DEFAULT_LIST_LIMIT,
         help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
     )
-    lh.add_argument("--raw", action="store_true")
 
-    lr = sub.add_parser("list-roles", help="Inventory role catalog.")
-    lr.add_argument("--raw", action="store_true")
+    sub.add_parser("list-roles", help="Inventory role catalog.")
 
     return p
 
