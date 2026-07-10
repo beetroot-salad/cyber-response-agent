@@ -101,9 +101,6 @@ class AuthorConfig:
     repo_root: Path
     lessons_dir: Path
     lessons_dir_rel: str
-    # Forward-check verifier scripts dir (absolute, under repo_root) — resolved from the injected
-    # LoopPaths so it follows the batch worktree rather than being hand-built off repo_root.
-    verifier_dir: Path
     runs_dir: Path
     # Shared mutable-state root (``LoopPaths.state_root``) pinned as
     # DEFENDER_LEARNING_STATE_DIR for the curator agent's forward-check subprocess
@@ -139,7 +136,6 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         repo_root=paths.repo_root,
         lessons_dir=paths.lessons_dir,
         lessons_dir_rel=paths.lessons_dir_rel,
-        verifier_dir=paths.verify_forward_dir,
         runs_dir=paths.runs_dir,
         state_root=paths.state_root,
         pending_dir=paths.pending_dir,

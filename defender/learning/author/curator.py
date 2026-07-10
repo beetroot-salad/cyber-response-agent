@@ -81,9 +81,6 @@ class CuratorConfig:
     # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
-    # The forward-check verifier scripts dir (absolute, under repo_root) — resolved from the
-    # injected LoopPaths so it follows the batch worktree, not hand-built off repo_root.
-    verifier_dir: Path
     # Queue channel — file/consumed/lock for the stream this curator drains
     # (honors DEFENDER_LEARNING_STATE_DIR via DEFAULT_PATHS).
     channel: QueueChannel

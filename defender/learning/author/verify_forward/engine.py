@@ -104,7 +104,7 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     to the shared ``run_stage`` (agent build + one-shot drive + error mapping + trace logging). The
     caller (``forward.py`` / ``actor.py``)
     parses the returned text with ``shared.parse_verdict``. A timeout / usage-limit / model error →
-    ``RunUnprocessable`` (which the CLI ``main`` surfaces as a non-zero exit, reported by ``batch.py``
+    ``RunUnprocessable`` (which the tool flattens into that pair's ERROR line
     as ERROR — the same disposition the old ``claude -p`` non-zero exit gave). ``source_run_dir`` is
     where the RequestLogger trace lands; distinct ``trace_name``s per lesson keep concurrent batch
     children from racing on one file."""

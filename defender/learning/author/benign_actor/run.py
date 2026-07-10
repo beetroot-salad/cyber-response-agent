@@ -99,7 +99,6 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         state_root=paths.state_root,
         corpus_dir=paths.lessons_environment_dir,
         corpus_dir_rel=paths.lessons_environment_dir_rel,
-        verifier_dir=paths.verify_forward_dir,
         channel=channel,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,

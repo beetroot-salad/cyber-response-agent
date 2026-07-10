@@ -410,7 +410,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     """d2_deps_class_all_roles (migrated from test_bind_wiring_545): bind maps every BINDABLE role
     to its AgentDeps subtype — none silently mismapped. The one role bind does NOT build is
     CORPUS_AUTHOR (the #556 curator port): like the lead author it is a per-spawn writer, but its
-    policy needs the worktree `corpus_dir` + `verifier_scripts` that bind's RunScope cannot carry
+    policy needs the worktree `corpus_dir` that bind's RunScope cannot carry
     (compiling it here would root its write_allow at run_dir), so it is constructed only via
     `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy."""
     cases = [

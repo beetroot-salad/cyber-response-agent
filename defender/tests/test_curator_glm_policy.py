@@ -9,8 +9,8 @@ Design (mirror of the lead-author port #543): one ``AgentRole.CORPUS_AUTHOR`` + 
 ``CORPUS_AUTHOR_DEF`` (``ToolSet(read=True, bash=BashGrammar(), write=True)``) serves all four
 curators; the write_allow / bash_allow are built PER-SPAWN from the worktree ``corpus_dir``
 (``CuratorDeps.for_run`` → ``_corpus_author_policy``), NOT via ``compile_policy``/``bind`` (whose
-write_allow roots at ``run_dir``). Per curator: A→lessons/ (verifiers batch.py+forward.py),
-B→lessons-actor/ (batch.py+actor.py), C&D→lessons-environment/ (env.py).
+write_allow roots at ``run_dir``). Per curator: A→lessons/, B→lessons-actor/,
+C&D→lessons-environment/. Since #558 the forward-check is a bound tool, not a bash grant.
 
 What is driven, and how:
   * every test builds a REAL policy via ``_corpus_author_policy`` / ``CuratorDeps.for_run`` and
@@ -66,29 +66,19 @@ from defender.runtime.agents import AGENTS  # noqa: E402
 # Per-curator wiring (the seam contract's A/B/C/D partition) + worktree harness
 # ---------------------------------------------------------------------------
 
-# corpus subdir + the verifier scripts each curator's bash_allow may run. batch.py is
-# SHARED by A and B, so the per-curator discriminator is forward.py (A) vs actor.py (B)
-# vs env.py (C/D) — the wrong-forward-check negatives lean on that.
+# The corpus subdir each curator writes into (its ONLY per-spawn isolation surface).
 _CURATORS: dict[str, dict[str, object]] = {
-    "A": {"corpus": "lessons", "verifiers": ("batch.py", "forward.py")},
-    "B": {"corpus": "lessons-actor", "verifiers": ("batch.py", "actor.py")},
-    "C": {"corpus": "lessons-environment", "verifiers": ("env.py",)},
-    "D": {"corpus": "lessons-environment", "verifiers": ("env.py",)},
+    "A": {"corpus": "lessons"},
+    "B": {"corpus": "lessons-actor"},
+    "C": {"corpus": "lessons-environment"},
+    "D": {"corpus": "lessons-environment"},
 }
 
-_VERIFY_REL = "defender/learning/author/verify_forward"
-
-
 def _make_worktree(tmp_path: Path) -> Path:
-    """A tmp batch 'worktree': the three lesson corpora + the verify_forward scripts exist
-    so real writes land and (belt-and-suspenders) any ``.is_file()`` verifier check passes."""
+    """A tmp batch 'worktree': the three lesson corpora exist so real writes land."""
     root = tmp_path / "wt"
     for name in ("lessons", "lessons-actor", "lessons-environment"):
         (root / "defender" / name).mkdir(parents=True, exist_ok=True)
-    vf = root / "defender" / "learning" / "author" / "verify_forward"
-    vf.mkdir(parents=True, exist_ok=True)
-    for script in ("batch.py", "forward.py", "actor.py", "env.py"):
-        (vf / script).write_text("# verifier\n")
     return root
 
 
@@ -118,11 +108,6 @@ def _policy(wt: Path, curator: str):
 def _rel(curator: str) -> str:
     """The repo-relative corpus prefix the agent (cwd=worktree) types, e.g. defender/lessons-actor."""
     return f"defender/{_CURATORS[curator]['corpus']}"
-
-
-def _verify_cmd(script: str, args: str = "--pending q.jsonl --run-dir rd") -> str:
-    """A forward-check command in the shape the agent issues (bare python3 + repo-relative script)."""
-    return f"python3 {_VERIFY_REL}/{script} {args}"
 
 
 # --- write-surface drivers: bind write_file AND edit_file (both are decide_write) ---

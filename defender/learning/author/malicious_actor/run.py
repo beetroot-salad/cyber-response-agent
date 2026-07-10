@@ -6,7 +6,7 @@ Drains ``_pending/actor_observations.jsonl`` into the checked-in
 lock → clean-scope → partition → curator agent → git cross-check → rotate) lives in
 ``_author_curator``; this module supplies the actor direction's config and the one
 divergent step — ``invoke_agent``, which hands the curator agent the actor-side
-forward-check commands (``verify_forward_actor.py`` / ``verify_batch.py``).
+forward check (``ACTOR_CHECK``, bound onto the curator's deps).
 
 Outcome policy (see judge.md): ``caught``/``incoherent`` author pattern/tradecraft
 lessons; ``survived``/``undecidable`` skip. Standing deployment facts flow to the
@@ -78,7 +78,6 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
         state_root=paths.state_root,
         corpus_dir=paths.lessons_actor_dir,
         corpus_dir_rel=paths.lessons_actor_dir_rel,
-        verifier_dir=paths.verify_forward_dir,
         channel=paths.actor_observations,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,

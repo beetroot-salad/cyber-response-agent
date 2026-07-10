@@ -155,9 +155,13 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
     contents = [t.read_text() for t in traces]
     assert all(c.strip() for c in contents)  # both hold REAL content (no vacuous 'no collision')
     # each trace holds ITS OWN check's content: the direction-aware disposition differs, so a
-    # shared-name truncation (one file / same bytes) is ruled out.
-    assert sum("malicious" in c for c in contents) == 1  # the adversarial check's disposition
-    assert sum("benign" in c for c in contents) == 1     # the benign check's corrected target
+    # shared-name truncation (one file / same bytes) is ruled out. Anchor on the rendered
+    # DISPOSITION SECTION, not a bare word — a bare "benign" appears in EVERY trace in BOTH
+    # directions, from two sources this demand does not own: the `instructions` (forward.md,
+    # which the design puts out of scope) and the CITED COVERING POLICY section label, which
+    # reads "benign/FP lessons only — adversarial lessons cite none".
+    assert sum(r"DISPOSITION:\n\nmalicious" in c for c in contents) == 1  # the adversarial target
+    assert sum(r"DISPOSITION:\n\nbenign" in c for c in contents) == 1     # the benign corrected one
     assert peak[0] >= 2, "the two same-stem checks did not genuinely interleave"
 
 
