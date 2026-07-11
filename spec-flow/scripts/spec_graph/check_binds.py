@@ -67,8 +67,13 @@ def check(path: Path, cfg: dict) -> list[str]:
     # flaggable when it is `modelled` — i.e. some demand binds it — and the graph never binds
     # the code's spelling (`anchor_dir`). So without the alias, prose threading `anchor_dir=`
     # maps to an unmodelled concept and is skipped: a false NEGATIVE, exactly the escape this
-    # check exists to catch. Project-configured; an unaliased spelling mismatch is a silent
-    # hole, so add the entry when the graph and the code disagree on a name.
+    # check exists to catch.
+    #
+    # Which is why this map should normally be EMPTY. The fix for a spelling mismatch is to
+    # rename the graph to the code's name (schema.md, "Coin ids from the code's name"), not to
+    # alias around it — an alias silently disables the check for any concept whose entry someone
+    # forgets. Legitimate entries: a concept the code genuinely spells differently per call site,
+    # or a third-party name you cannot rename.
     alias: dict[str, str] = cfg["conceptAliases"]
 
     # The graph's own vocabulary: every concept some demand binds is "modelled". A threaded

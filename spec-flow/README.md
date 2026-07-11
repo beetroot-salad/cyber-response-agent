@@ -77,8 +77,9 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
   and the traps that make a green local run a lie.
 - `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
   to enter the code (what the project's CI forbids).
-- `specGraph` — read as data by the two checkers: the project's source roots, entrypoint stems, and
-  actor/concept aliases.
+- `specGraph` — read as data by the two checkers: the project's source roots and entrypoint stems.
+  (The alias maps are an escape hatch, normally empty — a spec graph is supposed to name things what
+  the code names them, and a private synonym silently disables the check for that concept.)
 - `conventions` — the default branch, and the **danger lens**: what kind of hostile reality this
   system faces, which `write-tests` spends one of four enumeration lenses on.
 

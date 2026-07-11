@@ -35,9 +35,7 @@
       "tools_gather": "gather_dispatch",
       "tools": "tool_write_file"
     },
-    "conceptAliases": {
-      "defender_dir": "defender_tree"
-    }
+    "conceptAliases": {}
   },
   "conventions": {
     "defaultBranch": "main",
