@@ -6,8 +6,12 @@ off-box is a **host-side broker** that owns every credential and every egress
 destination. Filesystem scope is the isolate's mount list; network scope is the
 broker's egress allowlist; credentials are attached *at the broker boundary* and
 never cross into the isolate. The broker's proxy half is **adopted, not built**
-(Infisical Agent Vault — see §Build/buy); the capability-RPC half stays ours.
-The in-process `runtime/permission/` gate demotes to defense-in-depth / UX.
+(a credential-injecting proxy + vault — Infisical Agent Vault is the leading
+candidate; see §Build/buy); the capability-RPC half stays ours. The in-process
+`runtime/permission/` gate demotes to defense-in-depth / UX. **The driver/brain
+runs host-side and trusted; the isolate is a thin tool-executor (hands)** — see
+§Prior art & the brain/hands/session decision for that split and the
+origination-not-MITM stance it implies.
 
 **Forcing issue:** **#540** (OS-sandbox the run as the real read/write boundary).
 Builds on **#535** (the interim anchored read-confinement guard, which this
@@ -16,6 +20,74 @@ replaces as the *boundary* and leaves as belt-and-suspenders). Related:
 ("The real read/write boundary is OS sandboxing (#540); this gate is
 defense-in-depth"), and `tests/test_read_confine_bash.py:494-499` defers the
 pre-existing-symlink residual to it.
+
+## Prior art & the brain/hands/session decision
+
+Anthropic shipped this exact problem three times in 2025–26. The design tracks
+their conclusions rather than re-deriving them.
+
+- **[Making Claude Code more secure with sandboxing](https://www.anthropic.com/engineering/claude-code-sandboxing)**
+  — an OS-level isolate (bubblewrap/seatbelt) with the network removed and forced
+  through a **unix-socket → host proxy that allowlists by hostname and does *not*
+  terminate TLS by default**. Sensitive creds are "never inside the sandbox." The
+  git→GitHub path is a credential-injecting proxy: the sandbox git client
+  authenticates with a **scoped placeholder credential**, and the proxy *verifies
+  the request* (only push to the configured branch) *before* attaching the real
+  token — the agent never handles it. This is the socat loopback↔UDS bridge we
+  copy, plus the inject-**with-verification** pattern (mitigates honest-limit-1).
+- **[Managed Agents](https://www.anthropic.com/engineering/managed-agents)** — the
+  architecture we adopt. It **decouples "the brain (Claude and its harness) from
+  the hands (sandboxes and tools) and the session,"** the harness calling
+  sandboxes over a generic `execute(name, input) → string`. The threat is ours
+  verbatim: "a prompt injection only had to convince Claude to read its own
+  environment… the structural fix ensures tokens never reach the sandbox where
+  Claude's code executes." MCP creds are brokered exactly as we intend: "Claude
+  calls MCP tools via a dedicated proxy; this proxy takes in a token associated
+  with the session… fetch[es] the corresponding credentials from the vault before
+  invoking external services. The harness remains unaware of all credentials."
+- **[Claude Code Auto Mode](https://www.anthropic.com/engineering/claude-code-auto-mode)**
+  — the *other* layer. Confidentiality/egress isolation does nothing for
+  **capability misuse** (a hijacked agent invoking a legitimate-but-dangerous
+  tool), which MCP write-tools make urgent. Their answer is behavioural, not more
+  sandbox: an input-side prompt-injection probe on tool outputs, a
+  **reasoning-blind transcript classifier** that gates each action as a substitute
+  approver, tiered permissions, and explicit credential-exploration blocks. Note
+  their honest caveat — "sandboxing is safe but high-maintenance: each new
+  capability needs configuring, and anything requiring network or host access
+  breaks isolation."
+
+**Decisions taken from this:**
+
+1. **Adopt the brain/hands/session split (was "option B / invert").** The
+   PydanticAI driver + LLM client run **host-side and trusted**; the isolate is a
+   thin **tool-executor (hands)** the host-side loop drives over the
+   capability-RPC. Tractable for us because our tool set is small and fixed — the
+   general Claude Code harness kept the agent *inside* the sandbox precisely
+   because its tool surface is open-ended; ours isn't, so the invert cost we pay
+   is one they couldn't. Consequence: the **LLM key never enters the isolate and
+   needs no injection** — it lives with the trusted host-side brain. This retires
+   the design's single highest-risk mechanism (streaming TLS terminate+inject)
+   for the LLM path outright.
+2. **Injection is origination-shaped, not MITM.** Because we configure every
+   endpoint we care about — the LLM SDK `base_url` (verified: pydantic-ai
+   `AnthropicProvider`/`OpenAIProvider` both take `base_url`, and the Anthropic SDK
+   honours `ANTHROPIC_BASE_URL`), MCP server URLs, and our own adapters — a
+   credentialed tool points at the broker and the broker **originates** the real
+   upstream TLS with the credential attached. No per-SNI CA minting, no CA baked
+   into the rootfs, for anything we can repoint. Transparent terminate+inject (a
+   minted CA) is the **fallback for an un-repointable third-party HTTP client**
+   only, not the primary path.
+3. **Two boundaries, not one.** The isolate + broker (this doc) is the
+   **confidentiality/egress** boundary. **Capability misuse** (honest limit 1) is
+   a *separate* layer — scoped/read-only creds now, and an auto-mode-style
+   authorization/approval gate when write-capable MCP servers arrive (tracked as
+   its own issue; this doc's boundary stays confidentiality/egress).
+
+The body below still describes the isolate/broker/fs/net mechanics, which the
+split does not change. Where it says "the driver runs in the isolate" or frames
+the LLM as a terminate+inject destination, read it through decisions 1–2 (a fuller
+mechanics pass — §The shape diagram, §Credential injection modes, §The run.py
+lifecycle seam — is a follow-up, flagged inline).
 
 ## Why the in-process gate isn't the boundary
 
@@ -46,16 +118,20 @@ run.py (venv re-exec, run.py:29-30)
   └─ startup, UNCONFINED: read creds/.env → broker, materialize run_dir,
      render per-run OCI spec + broker config from the tool manifests
        ├─ BROKER (host-side, trusted): holds ALL secrets; the only thing on the network
-       │     • egress proxy (ADOPTED: Agent Vault)  allowlist + TLS-terminating credential injection
+       │     • egress proxy (ADOPT: credential-injecting proxy + vault)  session-token→vault→inject,
+       │                                             origination-primary (MITM only as fallback), default-deny allowlist
        │     • capability-RPC (ours)                brokered subprocesses: docker-exec adapters, local CLIs
-       │     • brokered services                    credentialed MCP / DB servers
+       │     • brokered services                    credentialed MCP / DB servers (the enterprise tool surface)
        │     • per-run egress allowlist (default-deny)
-       └─ ISOLATE (gVisor runsc, untrusted): the PydanticAI driver + tools
-             • fs: rootfs ro (incl. the broker CA cert), defender_dir ro,
-               run_dir rw, /tmp tmpfs, else absent
+       │  (the host-side driver/brain + LLM client also live here, trusted — decision 1)
+       └─ ISOLATE (gVisor runsc, untrusted): the tool-executor (hands) — runs the
+             model-directed TOOL calls; the driver/brain is HOST-SIDE (§Prior art)
+             • fs: rootfs ro (incl. the broker CA cert, only if MITM fallback used),
+               defender_dir ro, run_dir rw, /tmp tmpfs, else absent
              • net: --network=none → netstack loopback only; a loopback↔UDS
                bridge to the broker socket is the sole off-box path
-             • env: secret-free (extends run_common.py:90-92 to all secrets)
+             • env: secret-free (extends run_common.py:99-101 key-strip to all
+               secrets; the LLM key stays with the host-side brain, not here)
 ```
 
 Chosen runtime is **gVisor** — a userspace guest kernel (Sentry) services the
@@ -171,10 +247,15 @@ per-destination behaviors, selected by the manifest:
   and **re-originates** a verified TLS connection to the real destination. This
   is the standard MITM-with-CA pattern, and it is what Agent Vault implements.
 
-The **LLM API is a terminate+inject destination** — the one credential *every*
-run needs (playground included), on a streaming API — so the injection path is
-exercised from day one, not "built but unused." This is the main reason the
-proxy is adopted rather than built (§Build/buy).
+**Superseded for the LLM (see §Prior art, decisions 1–2).** Under the
+brain/hands/session split the LLM client runs host-side, so the LLM is **not** a
+terminate+inject destination and needs no injection at all. Injection now serves
+**tools** — MCP servers and credentialed adapters running in the isolate — and is
+**origination-shaped** wherever the endpoint is ours to set (MCP URLs, our own
+adapters, any SDK exposing `base_url`), which is the common case; terminate+inject
+with a minted CA remains only for an un-repointable third-party client. The proxy
+is still adopted (§Build/buy) — its first real consumer is a credentialed tool,
+not the LLM.
 
 | Mode | For | How the secret is attached |
 |---|---|---|
@@ -183,8 +264,9 @@ proxy is adopted rather than built (§Build/buy).
 | **Brokered service** | credentialed MCP / DB servers | broker launches it host-side with its secret; isolate speaks its protocol through the socket |
 
 This generalizes the one pattern that already exists: adapters run host-side via
-`_capture_adapter` (`tools.py:205`) with keys stripped from the isolate env
-(`run_common.py:90-92`). The broker is where that logic moves.
+`_capture_adapter` (`tools_gather.py:204`, re-exported through `tools.py`) with
+keys stripped from the subprocess env (`run_common.py:99-101` — `run_env` pops
+`providers.api_key_vars()`). The broker is where that logic moves.
 
 Worked examples:
 - **A CLI wanting `FOO_API_KEY`** → HTTP: run in isolate, point at the proxy,
@@ -235,39 +317,61 @@ launched with creds.
 Everything on this socket is default-deny: an unlisted cap or an unlisted egress
 host is refused and logged. The socket is the isolate's entire off-box surface.
 
-## Build/buy — adopt the proxy, write the RPC
+## Build/buy — adopt a credential-injecting proxy + vault, write the RPC
 
-"Sandbox the agent, broker its credentials at the egress boundary" became a
-product category in 2025–26 — Cloudflare Sandboxes ships credential injection +
-TLS interception + per-instance egress policies; Azure's SRE agent keeps all
-tokens in an identity sidecar so "credentials never enter the reasoning context."
-The architecture here is the emerging standard, not an invention — so buy the
-generic parts:
+"Sandbox the agent, broker its credentials at the egress boundary" is now a
+product category — Cloudflare Sandboxes, Azure's SRE identity sidecar, and
+Anthropic's own **Managed Agents** (§Prior art) all ship it. We buy the generic
+proxy+vault and keep the small domain-specific parts.
 
-- **Adopt: [Infisical Agent Vault](https://github.com/Infisical/agent-vault)**
-  (MIT + `ee/` exception) as the forward proxy: `HTTPS_PROXY`-shaped, destination
-  allowlisting via declared services, strips agent-attached creds, TLS-terminates
-  with a local CA and injects, short-lived vault-scoped tokens authenticate the
-  isolate to the proxy. This deletes the hardest would-be-custom component — a
-  streaming-capable TLS-terminating injecting proxy. Caveats we carry: it's 0.x
-  (API churn); it listens on TCP, so it sits host-side behind the UDS↔loopback
-  bridge; its CA cert bakes into the rootfs; per-run dynamic allowlists need
-  scripting against its config surface (spike below).
-- **Still ours (small, domain-specific):** the per-run OCI spec generation; the
-  capability-RPC + its argv validation + queries-table capture; the manifest
-  compiler (now compiling to Agent Vault service config + OCI mounts + RPC caps);
-  the reap-time scrub.
+**What we need from the proxy** (per the brain/hands/session decision): the
+*hands* hold a **session-scoped token**, never a real secret; the proxy exchanges
+it at a vault for the destination's credential and attaches it — **by
+origination** (the tool points its endpoint at the broker; the broker makes the
+real upstream connection), falling back to terminate+inject with a minted CA only
+for an un-repointable client. Per-run destination allowlist, default-deny. This is
+exactly the Managed-Agents MCP proxy shape (`session token → vault → inject`).
+
+- **Leading candidate — [Infisical Agent Vault](https://github.com/Infisical/agent-vault)**
+  (MIT + `ee/`): a credential-injecting proxy + vault with session-scoped tokens
+  and per-destination inject rules — the `session-token→vault→inject` pattern out
+  of the box, and it already streams (HTTP/1.1 `flushingWriter`, HTTP/2 pinned
+  off) and mints per-SNI CAs if we ever need MITM. Carry honestly: it's a research
+  preview on a ~2-day release cadence (v0.39 as of 2026-06); **fail-open by
+  default** (`unmatched_host_policy=deny` is the load-bearing line to set); scoping
+  is per-**vault**, not per-run (per-run allowlists mean vault lifecycle, not just
+  a session); **no mTLS-to-upstream** in-tree; and it listens on TCP, so it sits
+  host-side behind the UDS↔loopback bridge. We depend on it *operationally* (a
+  process + config), not as a linked library, so pin a digest and the churn
+  blast-radius is its config schema + management API, not our code.
+- **Origination-native alternative — Envoy `credential_injector` filter + TLS
+  origination.** A shipping, versioned, CNCF-graduated filter that injects a
+  Bearer/Basic credential from a `generic_secret` and **fails closed by default**
+  (`allow_request_without_credential=false → 401`). Injection-via-origination is
+  Envoy's *well-trodden* path (unlike Envoy-as-forward-MITM), so its maturity
+  transfers to our config. Cost: an xDS/protobuf config surface + a control plane
+  to push per-run allowlists is heavier than scripting Agent Vault's management API
+  for a single-host v1. Reasonable to start on Agent Vault and hold Envoy as the
+  harden-for-production swap; the architecture doesn't move, only the binary.
+- **Secret store:** the vault behind the proxy can be Agent Vault's own store,
+  Infisical core, or (v1) the existing `.env` path — a *store*, not the egress
+  proxy; don't conflate them. HashiCorp Vault is the mature option if enterprise
+  demands it.
+- **mitmproxy shim** only if a real destination pins both its endpoint *and* its
+  cert, forcing true MITM. Not expected — origination covers the LLM, MCP, and our
+  own adapters.
 - **Evaluate at the many-alerts phase:
-  [OpenSandbox](https://github.com/alibaba/OpenSandbox)** (Apache-2.0): a
-  self-hostable sandbox *platform* — gVisor/Kata/Firecracker runtimes,
-  per-sandbox egress controls, a credential vault, Python SDK. It would collapse
-  the scheduler question too, but restructures the run lifecycle around its
-  server + exec API and likely costs the run_dir-bind-mount-is-the-exit
-  property. Wrong trade for single-host v1; the natural candidate when "many
-  isolates" becomes real.
-- **Fallbacks if the Agent Vault spike fails:** Envoy (its credential-injector
-  filter + TLS origination) or a minimal mitmproxy-based shim. The architecture
-  doesn't move; only the proxy binary does.
+  [OpenSandbox](https://github.com/alibaba/OpenSandbox)** (Apache-2.0) — a
+  self-hostable sandbox *platform* (gVisor/Kata/Firecracker, per-sandbox egress
+  controls, a credential vault, Python SDK). Collapses the scheduler question but
+  restructures the run lifecycle around its server + exec API and likely costs the
+  run_dir-bind-is-the-exit property. Wrong trade for single-host v1; the candidate
+  when "many isolates" becomes real.
+
+**Still ours (small, domain-specific):** the per-run OCI spec generation; the
+capability-RPC + its argv validation + queries-table capture; the manifest
+compiler (now → proxy service config + OCI mounts + RPC caps + MCP registrations);
+the reap-time scrub.
 
 ## Plugging in tools — the capability manifest
 
@@ -389,21 +493,42 @@ stateless.
 - **Fail-closed on capability.** The startup check must *attempt* a runsc probe
   (not just detect the binary) and refuse to process untrusted input unsandboxed
   on failure — only `DEFENDER_ALLOW_UNSANDBOXED=1` opts out, loudly.
-- **Agent Vault fitness spike (timeboxed).** Verify: per-run dynamic
-  service/allowlist configuration; running host-side behind the UDS↔loopback
-  bridge; streaming LLM responses through terminate+inject; mTLS injection.
-  Fallbacks in §Build/buy; the architecture doesn't move.
-- **Playground tool creds start empty — the LLM key doesn't.** v1 wires isolate +
-  bridge + proxy + RPC; tool credential slots stay empty in playground, but the
-  LLM key rides the terminate+inject path from day one, so the injection
-  machinery is exercised long before production needs it.
-- **LLM egress: proxy vs. invert.** (A) terminate+inject via the proxy — day-one
-  viable now that the proxy is adopted; `driver.py` intact. (B) invert: run the
-  loop host-side and make the isolate a thin tool-executor (cleanest split,
-  bigger refactor). Start (A), keep (B) as the target. If (A) hits SDK/CA
-  friction, the only fallback is the LLM key *inside* the isolate env — a loud,
-  temporary, documented exception that forfeits the invariant for exactly that
-  key.
-- **gVisor syscall tax on gather.** Gather shells out heavily (`docker exec …
-  curl`); those syscalls pay the Sentry tax. Moving adapter egress to the broker
-  (mode 2) pulls them *out* of the isolate and largely sidesteps it — measure.
+- **LLM egress: proxy vs. invert — RESOLVED (invert / brain host-side).** Per the
+  brain/hands/session decision (§Prior art), the driver + LLM client run host-side
+  and trusted; the LLM key never enters the isolate, so there is **no LLM
+  injection path** to build or de-risk. This retires the old "start (A)
+  terminate+inject, keep (B) as target" plan and its fallback (LLM key inside the
+  isolate). Phase intent shifts: #550 ("LLM API through the broker proxy") is
+  reframed from *inject the LLM key at the proxy* to *stand up the host-side driver
+  so the key leaves the isolate by never entering it* — the proxy's first real
+  consumer is a credentialed **tool/MCP**, not the LLM.
+- **Proxy fitness spike (#549) — rescoped.** The old spike centred on streaming
+  TLS terminate+inject, which the invert decision removes from the LLM path and
+  origination removes from repointable tools. What actually needs verifying against
+  the candidate proxy (Agent Vault): (a) **fail-closed** — a non-allowlisted host
+  is refused (`unmatched_host_policy=deny`); (b) **scoping granularity** — is the
+  allowlist per-vault or per-run, and does per-run mean a vault lifecycle per run;
+  (c) **`session-token→vault→inject` by origination** for one credentialed
+  tool/MCP, driven from `run.py` via the management API (the SDK is TypeScript; we
+  script the API). Streaming and CA-minting are *confirm-upstream-claim*, not
+  discover-if-possible; mTLS-to-upstream is **absent in-tree** — decide whether any
+  destination needs it before it can block adoption. Fallbacks in §Build/buy.
+- **First injection consumer is a tool, not the LLM.** In playground the tool
+  credential slots start empty, so the injection machinery is first exercised by
+  the earliest credentialed tool or MCP server we wire — not, as previously
+  planned, by the LLM on day one. Wire one read-only MCP/tool early to keep the
+  `session-token→vault→inject` path live before production needs it.
+- **Capability misuse is a second boundary (new issue, to file).** The
+  isolate/broker gives *confidentiality + egress*; it does nothing for a hijacked
+  agent invoking a legitimate-but-dangerous **MCP write-tool** (honest limit 1),
+  which enterprise MCP makes urgent. The mitigation is behavioural, per Auto Mode
+  (§Prior art): least-privilege / read-only creds + a tight allowlist now, and an
+  injection-probe-on-tool-output + reasoning-blind transcript approver (or
+  human-in-loop on sensitive actions) when write-capable servers land. Tracked
+  separately — this doc's boundary stays confidentiality/egress.
+- **gVisor syscall tax.** Gather shells out heavily (`docker exec … curl`); those
+  syscalls pay the Sentry tax. Two relaxations under this design: brokered-
+  subprocess adapters (mode 2) run host-side and pull their syscalls *out* of the
+  isolate, and under the invert decision the LLM streaming runs host-side too — so
+  the isolate's hot path is the tool-executor's file/bash ops. Measure the
+  residual.
