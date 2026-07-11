@@ -1,0 +1,34 @@
+# Keep docker build contexts lean. Applies to any build whose context is the repo
+# root — both the dev image (.devcontainer/Dockerfile.dev) and the runtime image
+# (.devcontainer/Dockerfile.runtime) build with `context: ../`. Exclude-list, not
+# an allowlist, so adding a COPY later doesn't silently lose files.
+
+# VCS + worktrees
+.git
+.worktrees
+
+# Python build/venv/caches (the runtime image builds its own .venv fresh)
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# JS deps (dev-orchestrator)
+**/node_modules
+
+# Transient / large local state — never needed to build the agent
+defender/learning/runs
+defender/run-transcripts
+/tmp
+
+# Playground stack data + local infra state
+playground-v2/**/data
+**/*.tfstate
+**/*.tfstate.*
+
+# Secrets / local env — supplied at RUN time (--env-file), never at build
+.env
+*.env.bak
+.ssh

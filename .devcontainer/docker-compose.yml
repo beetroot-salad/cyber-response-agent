@@ -16,6 +16,15 @@ services:
       - ../.env
     volumes:
       - ../:/workspace # Mount full workspace directory
+      # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can
+      # build and run the runtime image (Dockerfile.runtime) as a *sibling*
+      # container — keeping the actual investigation runtime separate from this
+      # dev/tooling container. NOTE: this makes the dev container effectively
+      # root-equivalent on the host daemon; acceptable because the dev container
+      # is the trusted "coding machine", and it is the seam by which the SEPARATE,
+      # minimal runtime container gets spawned (and, later, given the privilege
+      # runsc needs — which this dev container deliberately does not have).
+      - /var/run/docker.sock:/var/run/docker.sock
     # PID 1 must reap orphaned children. Without an init, `sleep infinity`
     # becomes PID 1 and never reaps — every detached process (run.py
     # launchers, backgrounded ssh/git/gh) leaks as a permanent zombie, and

@@ -1,0 +1,54 @@
+# Lightweight defender RUNTIME image — the "application container", deliberately
+# distinct from the dev container (.devcontainer/Dockerfile.dev).
+#
+# WHY SEPARATE. The dev container carries the toolchain (terraform, hcloud, codex,
+# docker CLI, ssh) plus the interactive session; the runtime is where an
+# investigation actually executes (defender/run.py) and — per the sandbox design
+# (defender/docs/runtime-sandbox-design.md) — the eventual untrusted "hands" whose
+# rootfs should be minimal. So this image carries ONLY python + the defender
+# runtime deps + the defender code. No dev tooling, no egress tooling.
+#
+# HOW IT'S BUILT/RUN. From the dev container (via the mounted docker socket) or
+# straight from the host, context = repo root:
+#   docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
+# Hermetic replay smoke test (no key, no egress):
+#   docker run --rm defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
+# Live investigation (needs the LLM key; egress is NOT baked in — see below):
+#   docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json>
+#
+# EGRESS CAVEAT. Live gather currently shells out to `docker --context
+# soc-playground exec … curl` (mode-2 in the design). That egress is deliberately
+# NOT in this image — credentialed egress belongs behind the broker, not baked into
+# the untrusted runtime surface. Until the broker exists, mount what a live gather
+# needs at run time rather than baking it in, e.g.
+#   -v /var/run/docker.sock:/var/run/docker.sock -v "$HOME/.ssh":/root/.ssh:ro
+#
+# LIVE ITERATION. Code is baked so the image is self-contained; to iterate without
+# rebuilding, mount the workspace over it — run.py finds defender/.venv at the same
+# path either way:
+#   docker run --rm -v "<HOST_REPO_PATH>":/workspace defender-runtime …
+# (from the dev container use the HOST repo path, not the container's /workspace —
+# the daemon resolves bind sources host-side.)
+
+FROM python:3.11-slim
+
+# curl + ca-certificates: uv bootstrap and TLS to the model API. Nothing else —
+# the runtime imports no libmagic, and dev/egress tooling stays out by design.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /workspace
+
+# Deps layer first, cached across code changes: resolve the `.[runtime]` extra
+# from the committed lock into defender/.venv — the exact venv path run.py
+# re-execs into (defender/run.py:28).
+COPY defender/pyproject.toml defender/uv.lock defender/
+RUN cd defender && uv sync --frozen --extra runtime
+
+# Code layer (busts only when defender/ changes, not on a dep change).
+COPY defender/ defender/
+
+CMD ["bash"]
