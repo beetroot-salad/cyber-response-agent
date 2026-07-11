@@ -13,7 +13,7 @@ base: e0993ae   # SHA the spec branch forked from — write-code-from-spec diffs
 # their durable behavior and pins the NEW behavior (write⊆read active, non-PATHS defender_dir threaded
 # into BOTH policy and deps, requires_confine as data). handoff.deviations records the reduced modes.
 
-# scripts/spec_graph/check_binds.py waivers — a demand whose prose threads a modelled concept
+# `spec-graph binds` waivers — a demand whose prose threads a modelled concept
 # it deliberately does NOT bind (the concept is covered by a sibling demand's node). Each entry
 # is a conscious triage, not a silent gap. (The gather salt orphan was NOT waived — it was a real
 # under-binding and is now bound on d3_gather_threads_not_restamps.)
