@@ -23,7 +23,9 @@ demand binds it. We only flag threading of a concept the graph already treats as
 an incidental mention of an unmodelled local never trips it.
 
 Usage:
-    python "$CLAUDE_PLUGIN_ROOT"/scripts/spec_graph/check_binds.py [graph.yaml ...] [--config <path>]
+    spec-graph binds [graph.yaml ...] [--config <path>]
+(the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself;
+`$CLAUDE_PLUGIN_ROOT` does NOT expand in SKILL.md prose, so never spell a path with it).
 Exit 1 if any orphan is found. Waive a deliberate incidental mention by binding the
 concept (preferred — then the test is forced to assert it) or by listing the demand id +
 concept under a top-level `binds_waivers:` map in the graph.

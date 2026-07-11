@@ -47,7 +47,11 @@ if [ -n "${SPEC_GRAPH_PYTHON:-}" ]; then
 elif has_yaml python3; then
   exec python3 "$script" "$@"
 elif command -v uv >/dev/null 2>&1; then
-  exec uv run --quiet --with pyyaml python "$script" "$@"
+  # --no-project: never adopt the project whose directory we happen to be standing in. Without it
+  # `uv run` picks up the nearest pyproject.toml and resolves ITS dependencies first — so
+  # `cd defender && spec-graph binds` dies on an unrelated dependency conflict, offline registry,
+  # or stale lock. The gate must not be hostage to the tree it is checking.
+  exec uv run --quiet --no-project --with pyyaml python "$script" "$@"
 else
   echo "spec-graph: no interpreter with PyYAML found." >&2
   echo "  install uv, or run: SPEC_GRAPH_PYTHON=/path/to/python spec-graph ..." >&2

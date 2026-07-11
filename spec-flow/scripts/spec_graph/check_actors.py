@@ -24,7 +24,9 @@ actor are all read from `.claude/spec-flow.json` (see `_config.py`) — the meth
 the census targets are not.
 
 Usage:
-    python "$CLAUDE_PLUGIN_ROOT"/scripts/spec_graph/check_actors.py [graph.yaml] [--base <ref>] [--config <path>]
+    spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
+(the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself;
+`$CLAUDE_PLUGIN_ROOT` does NOT expand in SKILL.md prose, so never spell a path with it).
 Exit 1 if an unmodelled driver reaches the change. Waive an out-of-scope context by listing
 its stem under a top-level `actor_waivers:` in the graph.
 """
@@ -41,10 +43,17 @@ import _config
 
 
 def _sh(cmd: list[str]) -> str:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
+    return subprocess.run(
+        cmd, cwd=_config.repo_root(), capture_output=True, text=True, check=False
+    ).stdout
 
 
 def _changed_stems(base: str) -> set[str]:
+    # Anchored at the repo root, both times. git resolves a pathspec against the process CWD, so
+    # running `spec-graph` from a subdirectory (`cd defender && …`, exactly what this project's
+    # gate command does) would scope `*.py` to that subtree — and a diff that touched nothing
+    # under it would come back EMPTY. The census would then find no changed module to match, go
+    # quiet, and exit 0: a gate that passes green on a diff it never looked at.
     out = _sh(["git", "diff", "--name-only", f"{base}...HEAD", "--", "*.py"])
     return {
         Path(f).stem
@@ -120,15 +129,21 @@ def check(graph_path: Path, base: str, cfg: dict) -> list[str]:
         )
         if modelled:
             continue
-        how = (
-            f"subprocess re-exec of {sorted(subprocs)} (relocates the tree anchor)" if subprocs
-            else f"in-process import of changed {sorted(imports_changed)}"
-        )
+        # Say which arm fired, and don't overclaim. The subprocess arm is deliberately NOT gated
+        # on `changed` — a re-exec context is a standing hazard, and a guard introduced anywhere
+        # can make a long-unchanged harness newly load-bearing — so it fires on drivers that need
+        # not touch this diff at all. Reporting those as "reaches the changed subsystem" is a
+        # claim the check has not made.
         rel = f.relative_to(_config.repo_root())
+        reach = (
+            f"reaches the changed subsystem [in-process import of changed {sorted(imports_changed)}]"
+            if imports_changed
+            else f"re-executes {sorted(subprocs)} as a subprocess (relocating the tree anchor onto "
+            f"whatever tree it runs in — a standing hazard this graph does not cover)"
+        )
         findings.append(
-            f"{graph_path.name}: driver `{rel}` reaches the changed subsystem "
-            f"[{how}] but is not modelled (no actor, no demand names `{stem}`). Model it "
-            f"as an actor — or waive under actor_waivers if out of scope."
+            f"{graph_path.name}: driver `{rel}` {reach} but is not modelled (no actor, no demand "
+            f"names `{stem}`). Model it as an actor — or waive under actor_waivers if out of scope."
         )
     return findings
 

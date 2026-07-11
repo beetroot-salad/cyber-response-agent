@@ -32,7 +32,7 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** â
     "notes": "<the traps: worktree/venv gotchas, required env, services>"
   },
   "tests": {
-    "language": "python",
+    "language": "<the language the tests are written in>",
     "dir": "<where tests live>",
     "harness": "<path to the existing fake/replay harness + how a scenario is added>",
     "idioms": "<how fakes enter; what CI forbids>"
@@ -51,4 +51,4 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** â
 }
 ```
 
-`specGraph` is consumed by the checkers as data (`scripts/spec_graph/_config.py`); every other field is read by a skill as prose, so write it to be *read* â€” a sentence that tells the next agent what to do beats a value it has to interpret.
+`specGraph` is consumed by the checkers as data (the plugin's own `scripts/spec_graph/_config.py`); every other field is read by a skill as prose, so write it to be *read* â€” a sentence that tells the next agent what to do beats a value it has to interpret.

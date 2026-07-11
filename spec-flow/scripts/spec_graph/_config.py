@@ -13,22 +13,48 @@ and every field can be overridden. `/spec-flow:init` writes the file.
 """
 from __future__ import annotations
 
+import functools
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 CONFIG_REL = ".claude/spec-flow.json"
 
-# Directories that are never a project's own source, and are expensive to walk.
-_PRUNE = {".git", ".venv", "venv", "node_modules", "__pycache__", ".worktrees", ".mypy_cache", ".ruff_cache"}
+# Directory names that are never a project's own source, and are expensive to walk. `worktrees`
+# is bare on purpose: it has to catch both `.worktrees/` and Claude Code's `.claude/worktrees/`,
+# and a sibling checkout under either is a whole second copy of the repo — its files would enter
+# the census as phantom drivers and its graphs as phantom artifacts.
+_PRUNE = {
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    "worktrees",
+    ".worktrees",
+    ".mypy_cache",
+    ".ruff_cache",
+}
 
 
+@functools.cache
 def repo_root() -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
     ).stdout.strip()
     return Path(out) if out else Path.cwd()
+
+
+def _walk(top: Path) -> list[Path]:
+    """Every file under `top`, pruning `_PRUNE` dirs from the walk itself (not after the fact —
+    descending into a `.venv` or a sibling worktree is the expensive part)."""
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE]
+        found.extend(Path(dirpath) / f for f in filenames)
+    return found
 
 
 def load(explicit: str | None = None) -> dict[str, Any]:
@@ -53,18 +79,31 @@ def load(explicit: str | None = None) -> dict[str, Any]:
     }
 
 
-def artifacts(cfg: dict[str, Any]) -> list[Path]:
-    root = repo_root()
-    return sorted(root.glob(cfg["artifacts"]))
+def _kept(path: Path, root: Path) -> bool:
+    """Whether `path` survives pruning.
 
-
-def source_files(cfg: dict[str, Any], suffix: str = "*.py") -> list[Path]:
-    """Every source file under the configured roots, minus tests and prune-listed dirs.
-
-    Pruning is keyed on the path RELATIVE to the repo root: an absolute-path check would
-    prune the entire repo whenever the checkout itself sits under a prune-listed name
-    (a git worktree under `.worktrees/`, a clone under `node_modules/`).
+    Every check here is keyed on the path RELATIVE to the repo root. An absolute-path check
+    would misfire whenever the checkout itself sits under a matching name — prune the entire
+    repo for a worktree under `.worktrees/`, or (the `tests` rule) drop every source file for
+    a checkout under `/srv/tests/myrepo`. Both fail *silently*, to zero findings.
     """
+    parts = path.relative_to(root).parts
+    return not (_PRUNE & set(parts)) and "tests" not in parts[:-1]
+
+
+def artifacts(cfg: dict[str, Any]) -> list[Path]:
+    """The committed spec_graph_*.yaml artifacts — the configured glob, minus prune-listed dirs.
+
+    The pruning is not cosmetic: the default glob is `**/spec_graph_*.yaml`, and
+    write-code-from-spec *mandates* working in a worktree — so an unpruned glob run from the
+    main checkout picks up every sibling branch's graphs alongside this branch's.
+    """
+    root = repo_root()
+    return sorted(p for p in root.glob(cfg["artifacts"]) if not _PRUNE & set(p.relative_to(root).parts))
+
+
+def source_files(cfg: dict[str, Any], suffix: str = ".py") -> list[Path]:
+    """Every source file under the configured roots, minus tests and prune-listed dirs."""
     root = repo_root()
     roots = [root / r for r in cfg["codeRoots"]] or [root]
     files: list[Path] = []
@@ -72,5 +111,5 @@ def source_files(cfg: dict[str, Any], suffix: str = "*.py") -> list[Path]:
         if p.is_file():
             files.append(p)
         elif p.is_dir():
-            files.extend(f for f in p.rglob(suffix) if not _PRUNE & set(f.relative_to(root).parts))
-    return [f for f in files if "/tests/" not in str(f)]
+            files.extend(f for f in _walk(p) if f.suffix == suffix)
+    return [f for f in files if _kept(f, root)]
