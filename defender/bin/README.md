@@ -21,8 +21,8 @@ shims resolve from any cwd.
 ## Conventions
 
 - Each shim `exec`s the venv python (`$DEFENDER_DIR/.venv/bin/python3`),
-  falling back to `python3` on PATH when no venv is present (e.g. the
-  `tests/gather_invocation` sandbox, which runs stub CLIs under system python).
+  falling back to `python3` on PATH when no venv is present (a sandbox that
+  points `DEFENDER_DIR` at a tree with no `.venv` still runs).
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
   root, so the agent never passes a path.

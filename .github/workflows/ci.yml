@@ -22,8 +22,8 @@ jobs:
       # defender/pyproject.toml is package = false — `uv sync` installs the
       # dependencies into defender/.venv without trying to build defender itself
       # as an installable package. The runtime extra (pydantic-ai) is synced so
-      # the runtime/ package import-checks during collection and slice-2's
-      # hermetic gather tests can run; the llm-marked smoke still skips here.
+      # the runtime/ package import-checks during collection and the hermetic
+      # e2e replay suite can run.
       - name: Sync defender venv
         working-directory: defender
         run: uv sync --extra dev --extra runtime
@@ -34,7 +34,7 @@ jobs:
         # orchestrator/loop tests co-located under learning/. The latter were
         # previously dark to CI — only tests/ was collected — so a green run
         # could hide failures in learning/test_loop.py et al.
-        run: uv run pytest tests/ learning/ -v -m "not llm and not live"
+        run: uv run pytest tests/ learning/ -v -m "not live"
 
   lint:
     runs-on: ubuntu-latest

@@ -42,7 +42,6 @@ dev = [
 # learning/ — in isolation or in a full run — without per-file sys.path hacks.
 pythonpath = [".."]
 markers = [
-    "llm: makes a real (metered) in-process model request (skip in CI with -m 'not llm')",
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
 ]
