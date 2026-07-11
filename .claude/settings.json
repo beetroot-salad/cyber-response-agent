@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
     "spec-flow@spec-flow-local": true
+  },
+  "extraKnownMarketplaces": {
+    "spec-flow-local": {
+      "source": {
+        "source": "directory",
+        "path": "./"
+      }
+    }
   }
 }
