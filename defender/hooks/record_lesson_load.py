@@ -12,8 +12,10 @@ an influence Read, and agents often Read whole files — so this records lessons
 **into context**, not lessons that demonstrably *influenced* the disposition. The
 trace surface is post-merge visibility, not a strict causal claim.
 
-Scoped to ``defender/lessons/`` only — ``lessons-actor/`` and ``lessons-environment/``
-are author corpora the runtime agent never loads. Always exits 0 (best-effort).
+Scoped to the three lesson corpora — ``defender/lessons/`` plus the author corpora
+``lessons-actor/`` and ``lessons-environment/`` (#559 F3 widened the matcher from
+``lessons/`` only, so a curator's ``lesson_read`` records an actor/env lesson load
+symmetrically with a findings one). Always exits 0 (best-effort).
 """
 from __future__ import annotations
 
@@ -30,13 +32,25 @@ from defender._io import append_jsonl
 from defender.hooks._run_dir import resolve_run_dir
 
 
+_LESSON_CORPORA = frozenset({"lessons", "lessons-actor", "lessons-environment"})
+
+
 def lesson_name(file_path: str) -> str | None:
-    """The lesson slug if ``file_path`` is a ``defender/lessons/<name>.md`` file,
-    else None. Matches the runtime corpus exactly — a sibling ``lessons-actor/`` /
-    ``lessons-environment/`` (parent name differs) or a nested subdir (parent isn't
-    ``lessons``) does not match."""
+    """The lesson slug if ``file_path`` is a ``defender/<corpus>/<name>.md`` file for one of the
+    three lesson corpora (``lessons``, ``lessons-actor``, ``lessons-environment``), else None.
+    Widened from ``lessons/`` only (#559 F3) so a curator's ``lesson_read`` of an actor/env
+    lesson records a load symmetrically with a findings one. A nested subdir (parent isn't a
+    corpus) or a non-``.md`` file does not match.
+
+    Cross-role blast radius: the in-process runtime ``_record_lesson_load`` reuses this matcher,
+    so a MAIN/GATHER ``read_file`` of an actor/env lesson now records a load too — the accepted
+    #559 F3 consequence (the trace is post-merge visibility, not a causal claim)."""
     p = Path(file_path)
-    if p.suffix == ".md" and p.parent.name == "lessons" and p.parent.parent.name == "defender":
+    if (
+        p.suffix == ".md"
+        and p.parent.name in _LESSON_CORPORA
+        and p.parent.parent.name == "defender"
+    ):
         return p.stem
     return None
 

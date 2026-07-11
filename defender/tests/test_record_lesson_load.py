@@ -1,8 +1,9 @@
 """Tests for defender/hooks/record_lesson_load.py.
 
 PostToolUse-on-Read hook: appends a {lesson_name, ts} row to
-{DEFENDER_RUN_DIR}/lessons_loaded.jsonl for each Read of a defender/lessons/*.md
-file. Scoped to the runtime corpus only; always exits 0.
+{DEFENDER_RUN_DIR}/lessons_loaded.jsonl for each Read of a lesson .md under one of the
+three corpora (defender/{lessons,lessons-actor,lessons-environment}/ — widened by #559
+F3 from lessons/ only); always exits 0.
 """
 from __future__ import annotations
 
@@ -42,15 +43,21 @@ def test_records_runtime_lesson_read(monkeypatch, tmp_path):
     assert "ts" in rows[0]
 
 
-def test_ignores_author_corpora(monkeypatch, tmp_path):
-    """lessons-actor/ and lessons-environment/ are author corpora the runtime never
-    loads — a Read of them must not be recorded."""
+def test_records_all_three_lesson_corpora(monkeypatch, tmp_path):
+    """#559 F3 widened the matcher from lessons/ only to all three lesson corpora: a Read of a
+    findings, actor, OR env lesson is recorded (the curators' lesson_read reuses this matcher;
+    the runtime read_file does too — the accepted cross-role blast radius)."""
     mod = _load()
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
-    for fp in ("/repo/defender/lessons-actor/x.md",
+    for fp in ("/repo/defender/lessons/a.md",
+               "/repo/defender/lessons-actor/x.md",
                "/repo/defender/lessons-environment/y.md"):
-        _run(mod, _read_event(fp))
-    assert not (tmp_path / "lessons_loaded.jsonl").exists()
+        assert _run(mod, _read_event(fp)) == 0
+    loaded = {
+        json.loads(line)["lesson_name"]
+        for line in (tmp_path / "lessons_loaded.jsonl").read_text().splitlines()
+    }
+    assert loaded == {"a", "x", "y"}
 
 
 def test_ignores_nested_and_non_md(monkeypatch, tmp_path):

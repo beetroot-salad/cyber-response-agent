@@ -307,13 +307,12 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.defender_dir.parent / p
 
 
-def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
-    """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
-    untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
-    read raises the policy denial for an existing and an absent path alike — no
-    existence oracle. An optional `pattern` folds grep into the read (return only
-    the matching lines): search never widens the read surface — the confine gates
-    the PATH before any scan — so a `pattern` over a denied path still raises."""
+def _gated_read(deps: AgentDeps, path: str) -> tuple[Path, str]:
+    """The shared front half of every read tool (`read_file`, the curator's `lesson_read`):
+    resolve → gate → existence → read → lesson-load trace. The gate runs FIRST, before any
+    existence check, so a denied read raises the policy denial for an existing and an absent
+    path alike — no existence oracle. `_record_lesson_load` fires once, here, for whichever
+    tool did the read. Returns the resolved path (for the trust check) and the raw text."""
     p = _resolve_operand(deps, path)
     decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
@@ -325,19 +324,36 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
     _record_lesson_load(deps, p)  # lesson→outcome traceability (best-effort)
-    if pattern is not None:
-        # grep fold: only the matching lines reach the model (the read-only bash
-        # grep viewer a confined agent no longer has). No-match → '' (not an error).
-        text = _grep_lines(text, pattern)
-    # Bound the in-context view BEFORE wrapping: an oversized payload read
-    # whole would overflow the model's window (#303). Cap first so the head is
-    # what gets tag-wrapped (injected text in it stays inert), not the full dump.
+    return p, text
+
+
+def _bound_and_wrap(deps: AgentDeps, p: Path, path: str, text: str) -> str:
+    """The shared back half of every read tool: bound the in-context view to the char cap,
+    then salt-wrap it iff the source is attacker-influenced. Bound BEFORE wrapping — an
+    oversized payload read whole would overflow the model's window (#303), and capping first
+    means the head is what gets tag-wrapped (injected text in it stays inert), not the full
+    dump. A trusted read (`is_untrusted_read` False — every lesson, a SKILL, a doc) skips the
+    wrap and returns the (bounded) text raw."""
     text = _bounded_read(text, path, filter_hint=_overflow_filter_hint(path, deps.policy))
     if permission.is_untrusted_read(p):
         # Attacker-influenced data — wrap so injected instructions inside it
         # are inert. Same delimiter as the rest of the system.
         return _wrap(text, "untrusted", deps.salt)
     return text
+
+
+def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
+    """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
+    untrusted-wrap, over the shared `_gated_read`/`_bound_and_wrap` core. An optional
+    `pattern` folds grep into the read (return only the matching lines): search never widens
+    the read surface — `_gated_read` gates the PATH before any scan — so a `pattern` over a
+    denied path still raises."""
+    p, text = _gated_read(deps, path)
+    if pattern is not None:
+        # grep fold: only the matching lines reach the model (the read-only bash
+        # grep viewer a confined agent no longer has). No-match → '' (not an error).
+        text = _grep_lines(text, pattern)
+    return _bound_and_wrap(deps, p, path, text)
 
 
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
@@ -419,8 +435,8 @@ def register_tools(agent, tools: ToolSet) -> None:
     pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
-    edit_file, forward_check` — independent of the `ToolSet` field order, so the pinned tool
-    ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
+    edit_file, forward_check, lesson_read` — independent of the `ToolSet` field order, so the
+    pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
     (a `BashGrammar()` with no programs still REGISTERS the tool — the gate then denies
     every command); the file writers are the `tools.write` opt-in (MAIN only)."""
 
@@ -466,6 +482,15 @@ def register_tools(agent, tools: ToolSet) -> None:
         from defender.learning.author.verify_forward.tool import register_forward_check_tool
 
         register_forward_check_tool(agent)
+
+    if tools.lesson_read:
+        # Same deferred-import shape as `forward_check`: the curator's read tool lives in the
+        # author package (it pulls `_frontmatter` for the body/full split) and reuses THIS
+        # module's read core, so importing it at module top would close a cycle. Registration
+        # runs at agent-build time, long after both modules load, so the cycle never closes.
+        from defender.learning.author.lesson_read import register_lesson_read_tool
+
+        register_lesson_read_tool(agent)
 
 
 # --- gather dispatch & in-process adapter capture ----------------------------

@@ -141,11 +141,12 @@ def _admitted_on_both_write_surfaces(wt: Path, deps: CuratorDeps, corpus_name: s
 
 def test_one_corpus_author_role_serves_all_four(tmp_path):
     """one-corpus-author-role: a single AgentRole.CORPUS_AUTHOR + CORPUS_AUTHOR_DEF
-    (ToolSet read+bash+write+forward_check) registered ONCE in AGENTS serves all four curators;
-    A's held_forward_bad divergence lives in the envelope, not a second engine/role."""
+    (ToolSet lesson_read+bash+write+forward_check — read=True swapped for the scoped lesson_read
+    in #559) registered ONCE in AGENTS serves all four curators; A's held_forward_bad divergence
+    lives in the envelope, not a second engine/role."""
     assert CORPUS_AUTHOR_DEF.role is AgentRole.CORPUS_AUTHOR
     assert CORPUS_AUTHOR_DEF.tools == ToolSet(
-        read=True, bash=BashGrammar(), write=True, forward_check=True
+        bash=BashGrammar(), write=True, forward_check=True, lesson_read=True
     )
     assert AGENTS[AgentRole.CORPUS_AUTHOR] is CORPUS_AUTHOR_DEF  # registered once, no duplicate role
     wt, rd = _make_worktree(tmp_path), _run_dir(tmp_path)

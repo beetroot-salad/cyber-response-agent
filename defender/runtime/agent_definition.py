@@ -114,6 +114,11 @@ class ToolSet:
     # grant because a bash allowlist pins a program token and cannot constrain the
     # operands that program then acts on.
     forward_check: bool = False
+    # The lesson curators' scoped read tool (#559): read_file with an added ``part`` mode
+    # (body-default strips the YAML frontmatter; full = whole file). Replaces the generic
+    # ``read`` for the curator — its read surface is IDENTICAL (root-only ``decide_read``),
+    # it only adds the part seam + degrades to whole text on a non-fenced file.
+    lesson_read: bool = False
 
 
 @dataclass(frozen=True)
