@@ -112,7 +112,17 @@ def _dir_operand(run: str, dfn: str) -> str:
 # admitted anywhere, so `--files0-from=…`/`--rawfile` fail too.
 _GREP_FLAG = r"-[nicovwxHhsEFabz]+"    # safe grep short flags (NO f/e/r/R/L/l/d)
 _JQ_FLAG = r"-[rjcnesRaSCM]+"          # safe jq boolean short flags (NO f/L file-openers)
-_VIEW_FLAG = r"-[A-Za-z]+"             # cat/wc/ls: any short flag (none open a 2nd file)
+_VIEW_FLAG = r"-[A-Za-z]+"             # cat/wc ONLY: neither has an arg-taking short option, so
+                                       # every short flag is boolean (none opens a 2nd file). NOT
+                                       # for ls — GNU ls DOES have arg-consuming short flags; see
+                                       # `_LS_FLAG` (#579).
+# ls IS flag-aware, unlike cat/wc: `-I PATTERN`/`-w COLS`/`-T COLS` consume the NEXT token, so a
+# catch-all `-[A-Za-z]+` lets `ls -I {run_dir}` swallow the anchored dir operand and fall back to
+# listing the CWD (the repo root) — a fail-open (#579). An EXPLICIT boolean-flag allowlist (like
+# `_GREP_FLAG`/`_JQ_FLAG`, not a catch-all minus the known-bad) closes it and fails CLOSED if a
+# future coreutils adds another arg-consuming short flag. Letters = the GNU-coreutils-9.7 boolean
+# ls short-flag set MINUS the three arg-takers `I`/`w`/`T`.
+_LS_FLAG = r"-[aAbBcCdDfFgGhHiklLmnNopqQrRsStuUvxXZ1]+"
 _NUM_FLAG = r"-[A-Za-z0-9]+"           # tail/head: `-5`/`-1`/`-n`/`-c`
 
 # jq's file-FREE key/value flags: `--arg NAME VALUE` / `--argjson NAME VALUE` bind a
@@ -151,7 +161,13 @@ def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
     grammar can compile just the subset a `BashGrammar` declares."""
     f = _file_operand(run, dfn)
     d = _dir_operand(run, dfn)
-    pat = r"[^ ]+"  # a free-text grep search pattern / a jq filter program (one token)
+    # a free-text grep search PATTERN / a jq filter program (one token). A leading `-` is
+    # FORBIDDEN (`(?!-)`): without it a rejected file-opening flag (grep's `-r`/`-R`/`-f`/`-e`,
+    # excluded from `_GREP_FLAG`) is silently re-absorbed HERE as the pattern, so `grep -r
+    # {run_dir}/x.md` matches and then runs `grep -r <path>` = recursive walk of the CWD with no
+    # FILE operand (#579). A real grep pattern / jq filter never starts with `-` (a literal
+    # leading-dash search needs `-e`/`--`, neither admitted), so this loses no legitimate shape.
+    pat = r"(?!-)[^ ]+"
     return {
         # single file-reader + the read/format viewers: PROG (flag)* FILE* — the file
         # operands are OPTIONAL (`*`, not `+`): a viewer reading STDIN in a downstream
@@ -167,7 +183,7 @@ def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
         "grep": rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
         # ls/cd: anchored DIR operand (recon confined to the read roots). ls REQUIRES a
         # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon).
-        "ls": rf"ls(?: {_VIEW_FLAG})*(?: {d})+",
+        "ls": rf"ls(?: {_LS_FLAG})*(?: {d})+",
         "cd": rf"cd(?: {d})?",
         # jq: stdin-compute-only — safe boolean flags + file-free `--arg`/`--argjson`
         # key/value flags + exactly one filter, NO file slot.

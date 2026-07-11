@@ -235,6 +235,38 @@ def test_grep_recursive_denied(env):
     assert _bash(env, f"grep secret {env.run}/investigation.md", "gather").allow  # positive control (no -r)
 
 
+def test_grep_recursive_single_operand_denied(env):
+    """grep -r {RUN}/x.md → DENY. The SINGLE-operand form the two-operand
+    `test_grep_recursive_denied` misses: `-r` is (correctly) excluded from `_GREP_FLAG`, but without
+    the `(?!-)` guard the free-text PATTERN slot RE-ABSORBS it — the argv matches and runs as
+    `grep -r <path>` = `-r` flag + pattern + NO FILE operand, which walks the CWD (the repo root),
+    reading every file under it including denylisted ones (#579). With two positional tokens the
+    extra token has nowhere to land so it already denied; with ONE it slipped through. Positive
+    control: `grep -n secret {RUN}/inv.md` (a real leading-dash-free pattern + anchored file)."""
+    # rejected: `pat = r"[^ ]+"` (a leading-dash pattern slot re-absorbs the rejected -r)
+    for which in ("main", "gather"):
+        assert not _bash(env, f"grep -r {env.run}/investigation.md", which).allow, which
+        assert not _bash(env, f"grep -R {env.run}/investigation.md", which).allow, which
+        assert not _bash(env, f"grep -rn {env.run}/investigation.md", which).allow, which
+        assert _bash(env, f"grep -n secret {env.run}/investigation.md", which).allow, which  # control
+
+
+def test_tail_head_arg_consuming_flag_stays_anchored(env):
+    """tail -n /etc/passwd → DENY. tail/head's `-n`/`-c` DO consume the next token (unlike cat/wc),
+    but — unlike `ls -I` (#579) — that is NOT a leak: the consumed token must still match the
+    anchored `{f}` operand slot to pass the grammar, so an out-of-root path denies outright, and an
+    in-root path used as a line/byte COUNT merely errors at runtime (no out-of-root read is
+    reachable). So tail/head need no `_LS_FLAG`-style tightening; this pins that the ANCHORING is
+    what protects them, so a future operand-grammar change can't silently reintroduce a leak.
+    Positive controls: the real fused-count forms `tail -5` / `head -5` over an in-root file."""
+    # rejected: treat tail/head like ls and assume -n/-c can smuggle an out-of-root read
+    for which in ("main", "gather"):
+        assert not _bash(env, "tail -n /etc/passwd", which).allow, which
+        assert not _bash(env, "head -c /etc/shadow", which).allow, which
+        assert _bash(env, f"tail -5 {env.run}/investigation.md", which).allow, which  # control
+        assert _bash(env, f"head -5 {env.run}/investigation.md", which).allow, which  # control
+
+
 def test_grep_free_text_pattern_not_anchored(env):
     """grep "/home/x/.ssh/authorized_keys" {RUN}/investigation.md → ALLOW: the path-LOOKING token is
     the search PATTERN, not a file; only the trailing operand is anchored (real trace shape)."""
@@ -594,6 +626,25 @@ def test_ls_out_of_root_dir_denied(env):
     # rejected: leave ls operands unanchored (a low-grade out-of-root recon primitive)
     assert not _bash(env, "ls /etc", "gather").allow
     assert _bash(env, f"ls {env.run}/gather_raw", "gather").allow
+
+
+def test_ls_arg_consuming_flag_denied(env):
+    """ls -I {RUN} → DENY: GNU ls's `-I PATTERN`/`-w COLS`/`-T COLS` CONSUME the next token, so a
+    catch-all `-[A-Za-z]+` flag class lets `-I` swallow the anchored dir operand — leaving `ls` with
+    NO operand, which falls back to listing the CWD (the repo root): a fail-open (#579). The explicit
+    `_LS_FLAG` boolean allowlist (I/w/T excluded) closes it. Both agents share the reader lane.
+    Positive controls: a bare `ls {RUN}` and a boolean-flag bundle `ls -la {RUN}` still list an
+    in-root dir."""
+    # rejected: `_VIEW_FLAG = -[A-Za-z]+` for ls (admits -I/-w/-T, which then consume the operand)
+    for which in ("main", "gather"):
+        assert not _bash(env, f"ls -I {env.run}", which).allow, which
+        assert not _bash(env, f"ls -w {env.run}", which).allow, which
+        assert not _bash(env, f"ls -T {env.run}", which).allow, which
+        # -I in a boolean bundle still consumes the operand → still denied
+        assert not _bash(env, f"ls -laI {env.run}", which).allow, which
+        # positive controls: no flag, and a real boolean bundle
+        assert _bash(env, f"ls {env.run}", which).allow, which
+        assert _bash(env, f"ls -la {env.run}", which).allow, which
 
 
 # ===========================================================================  #
