@@ -89,9 +89,9 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     read_file, write_file AND gather dispatch — through the real driver loop.
 
     Scope: this is a MAIN-LOOP e2e test, so `gather` is faked at its return
-    boundary (it's a separately-tested unit — test_runtime_gather /
-    test_gather_capture own its internals; re-driving it would couple this test to
-    them). Everything else is real: the bash/read/write tools and the permission
+    boundary (it's a separately-tested unit — test_gather_capture owns its
+    internals; re-driving it would couple this test to it). Everything else is
+    real: the bash/read/write tools and the permission
     gate's decide_bash / decide_read / decide_write / invlang paths all fire. We
     assert the authored artifact (investigation.md) reconstructs byte-for-byte and
     re-validates clean through the live gate. The two-table / gather_raw capture
