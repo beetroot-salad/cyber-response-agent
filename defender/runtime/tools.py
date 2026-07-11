@@ -37,7 +37,10 @@ from defender.scripts.gather_tools.record_query import (
     derive_system as _derive_system,
     _passthrough_max_bytes as _read_char_cap,
 )
-from defender.hooks.record_lesson_load import lesson_name as _lesson_name
+from defender.hooks.record_lesson_load import (
+    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
+    lesson_name as _lesson_name,
+)
 
 _BASH_TIMEOUT_S = 120
 
@@ -212,13 +215,21 @@ class GatherDeps(AgentDeps):
     query_id: str | None = None
 
 
-def _record_lesson_load(deps: AgentDeps, path: Path) -> None:
-    """Append a `lessons_loaded.jsonl` row when a runtime lesson is read into
-    context — the in-process equivalent of the `record_lesson_load` PostToolUse
-    hook (reusing its `lesson_name` matcher), feeding learning/trace_lesson.py's
-    lesson→outcome surface. Records loads into context, not demonstrable influence
-    (same caveat as the hook). Best-effort — never breaks a read."""
-    name = _lesson_name(str(path))
+def _record_lesson_load(
+    deps: AgentDeps, path: Path, corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
+) -> None:
+    """Append a `lessons_loaded.jsonl` row when a lesson from one of `corpora` is read into
+    context — the in-process equivalent of the `record_lesson_load` PostToolUse hook (reusing
+    its `lesson_name` matcher), feeding learning/trace_lesson.py's lesson→outcome surface.
+    Records loads into context, not demonstrable influence (same caveat as the hook).
+    Best-effort — never breaks a read.
+
+    `corpora` defaults to the RUNTIME corpus (`defender/lessons/`) alone. Only the curator's
+    `lesson_read` widens it to all three (#559 F3): every other reader's `run_dir` IS its
+    durable per-case bundle, so an author-corpus row written there would masquerade as a
+    defender lesson load in `trace_lesson` — the gray-box actor reads `lessons-actor/`
+    tradecraft on every run."""
+    name = _lesson_name(str(path), corpora)
     if name is None:
         return
     try:
@@ -307,12 +318,16 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.defender_dir.parent / p
 
 
-def _gated_read(deps: AgentDeps, path: str) -> tuple[Path, str]:
+def _gated_read(
+    deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
+) -> tuple[Path, str]:
     """The shared front half of every read tool (`read_file`, the curator's `lesson_read`):
     resolve → gate → existence → read → lesson-load trace. The gate runs FIRST, before any
     existence check, so a denied read raises the policy denial for an existing and an absent
     path alike — no existence oracle. `_record_lesson_load` fires once, here, for whichever
-    tool did the read. Returns the resolved path (for the trust check) and the raw text."""
+    tool did the read — over `lesson_corpora`, the runtime corpus by default and all three only
+    for the curator's `lesson_read`. Returns the resolved path (for the trust check) and the
+    raw text."""
     p = _resolve_operand(deps, path)
     decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
@@ -323,7 +338,7 @@ def _gated_read(deps: AgentDeps, path: str) -> tuple[Path, str]:
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
-    _record_lesson_load(deps, p)  # lesson→outcome traceability (best-effort)
+    _record_lesson_load(deps, p, lesson_corpora)  # lesson→outcome traceability (best-effort)
     return p, text
 
 

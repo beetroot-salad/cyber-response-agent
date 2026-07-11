@@ -60,6 +60,29 @@ def test_records_all_three_lesson_corpora(monkeypatch, tmp_path):
     assert loaded == {"a", "x", "y"}
 
 
+def test_ignores_template_schema(monkeypatch, tmp_path):
+    """``_TEMPLATE.md`` is the corpus SCHEMA (the shape a curator reads before authoring), not a
+    lesson — recording it would put a `_TEMPLATE` slug in the trace that no corpus can resolve."""
+    mod = _load()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    for corpus in ("lessons", "lessons-actor", "lessons-environment"):
+        assert mod.lesson_name(f"/repo/defender/{corpus}/_TEMPLATE.md") is None
+        assert _run(mod, _read_event(f"/repo/defender/{corpus}/_TEMPLATE.md")) == 0
+    assert not (tmp_path / "lessons_loaded.jsonl").exists()
+
+
+def test_runtime_corpora_narrows_to_the_defender_lessons(monkeypatch, tmp_path):
+    """The in-process runtime readers pass ``RUNTIME_LESSON_CORPORA``, keeping the AUTHOR corpora
+    out of their case trace — the actor reads lessons-actor/ tradecraft via read_file every run and
+    its run_dir IS the durable bundle trace_lesson scans. Only the curators' ``lesson_read`` opts
+    into the full ``LESSON_CORPORA``."""
+    mod = _load()
+    runtime = mod.RUNTIME_LESSON_CORPORA
+    assert mod.lesson_name("/repo/defender/lessons/a.md", runtime) == "a"
+    assert mod.lesson_name("/repo/defender/lessons-actor/x.md", runtime) is None
+    assert mod.lesson_name("/repo/defender/lessons-environment/y.md", runtime) is None
+
+
 def test_ignores_nested_and_non_md(monkeypatch, tmp_path):
     mod = _load()
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))

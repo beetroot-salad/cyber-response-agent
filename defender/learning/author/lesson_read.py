@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic_ai import RunContext
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender.hooks.record_lesson_load import LESSON_CORPORA
 from defender.runtime.tools import AgentDeps, _bound_and_wrap, _gated_read, _grep_lines
 
 
@@ -49,8 +50,13 @@ def _tool_lesson_read(
 ) -> str:
     """Logic for ``lesson_read``: the shared gate+read core, then select ``part``, then the
     optional grep fold over the SELECTED text (part-then-grep), then the shared bound+wrap tail.
-    One core with ``read_file`` — ``part`` is the only added seam."""
-    p, text = _gated_read(deps, path)
+    One core with ``read_file`` — ``part`` is the only added seam.
+
+    This tool is the ONE caller that widens the lesson-load trace to all three corpora (#559 F3):
+    a curator folding an actor/env lesson records it symmetrically with a findings one. Every
+    other reader keeps ``_gated_read``'s ``RUNTIME_LESSON_CORPORA`` default, because their
+    ``run_dir`` is a durable per-case bundle ``trace_lesson`` reads as the DEFENDER's loads."""
+    p, text = _gated_read(deps, path, lesson_corpora=LESSON_CORPORA)
     text = _select_part(text, part)
     if pattern is not None:
         text = _grep_lines(text, pattern)

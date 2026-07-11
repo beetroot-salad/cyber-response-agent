@@ -344,6 +344,45 @@ def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):
     assert "find-lesson" in loaded  # positive control — findings always logged
 
 
+def test_l12b_read_file_keeps_the_author_corpora_out_of_the_case_trace(tmp_path):
+    """demand: L12, scope half — the F3 widening belongs to ``lesson_read``, NOT to every reader.
+    The generic ``read_file`` core still records the RUNTIME corpus only: the gray-box actor reads
+    ``lessons-actor/`` tradecraft through ``read_file`` on every run (its ``read_confine`` names it
+    and it carries no ``read_shapes``) and its ``run_dir`` IS the durable per-case learning bundle
+    ``trace_lesson`` scans — so recording there would write attacker-corpus rows straight into the
+    defender's lesson→outcome trace."""
+    scene = _scene(tmp_path)
+    find = _lesson(scene.corpus, "rf-find")
+    actor = _lesson(scene.repo / "defender" / "lessons-actor", "rf-actor", name_key=False)
+    deps = _deps(scene)
+    assert "lesson body" in _rt_tools._tool_read_file(deps, actor)  # the read itself succeeds …
+    _rt_tools._tool_read_file(deps, find)  # … and a runtime-corpus read (positive control)
+    rows = read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")
+    loaded = {r.get("lesson_name") for r in rows}
+    assert "rf-actor" not in loaded  # read_file keeps the author corpora out of the case trace
+    assert "rf-find" in loaded  # …while still recording the runtime corpus
+
+
+def test_l12c_template_schema_read_is_not_a_lesson_load(tmp_path):
+    """demand: L9/L12 corner — ``_TEMPLATE.md`` is the corpus SCHEMA a curator reads (part='full'),
+    not a lesson, so it records NO load. The ``_`` skip matches the convention
+    ``build_corpus_manifest`` / ``existing_observation_ids`` already follow."""
+    scene = _scene(tmp_path)
+    tmpl = scene.repo / "defender" / "lessons-actor" / "_TEMPLATE.md"
+    tmpl.write_text("---\ntechniques: []\n---\nTEMPLATE-BODY\n")
+    real = _lesson(scene.repo / "defender" / "lessons-actor", "tmpl-ctl", name_key=False)
+    agent, logger = _build_curator_agent(scene.tmp)
+    try:
+        deps = _deps(scene)
+        _read(agent, deps, path="defender/lessons-actor/_TEMPLATE.md", part="full")
+        _read(agent, deps, path=real, part="full")  # positive control
+    finally:
+        logger.close()
+    loaded = {r.get("lesson_name") for r in read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")}
+    assert "_TEMPLATE" not in loaded  # the schema read is not a lesson load
+    assert "tmpl-ctl" in loaded  # …but a real sibling lesson still is
+
+
 # ===========================================================================
 # ToolSet / registration
 # ===========================================================================

@@ -542,9 +542,15 @@ def build_corpus_manifest(corpus_dir: Path) -> str:
     provenance drop-set, re-emitted from the PARSED dict via ``yaml.safe_dump``. Re-emitting from
     the dict (not a raw-line filter) is what makes the drop total — a multi-line block field
     (``source_finding_ids:`` + its ``- id`` continuations) leaves no orphan line — AND what makes
-    the render injection-safe: ``safe_dump`` indents/quotes every value, so a crafted frontmatter
+    the VALUES injection-safe: ``safe_dump`` indents/quotes every one, so a crafted frontmatter
     scalar (``\\n## other`` / ``\\n---`` / YAML metachars) cannot forge a sibling ``## `` header or
-    a ``---`` break. Sections are stem-SORTED, so the manifest is byte-stable across reruns.
+    a ``---`` break. Sections are sorted by stem, so the manifest is byte-stable across reruns.
+
+    The STEM is untrusted too, and ``safe_dump`` never sees it. A lesson filename is model-chosen
+    (the curator authors the corpus with ``write_file``) and ``build_write_allow``'s ``[^\\x00]*``
+    tail is a char class that matches a NEWLINE — so ``lessons/x\\n## other\\n….md`` is a
+    gate-approved path whose stem would forge exactly the sibling section the value-quoting above
+    closes. Collapse the stem's whitespace so a slug can never leave its own ``## `` line.
 
     Reads the PASSED ``corpus_dir`` (the author-drain threads its throwaway worktree's corpus —
     #562), never a module global, so the manifest reflects the tree the curator actually edits.
@@ -552,24 +558,28 @@ def build_corpus_manifest(corpus_dir: Path) -> str:
     ``safe_dump`` ever sees it.
 
     Tolerant: a missing / empty / non-directory ``corpus_dir`` yields ``''`` (a first-ever run in a
-    fresh worktree), and a single malformed (non-fenced / non-mapping) ``.md`` is warned to stderr
-    and skipped — one bad file never aborts the manifest and loses its well-formed siblings."""
+    fresh worktree), and a single malformed ``.md`` is warned to stderr and skipped — one bad file
+    never aborts the manifest and loses its well-formed siblings. "Malformed" covers non-fenced /
+    non-mapping frontmatter (``FrontmatterError``), an unreadable file (``OSError``), AND
+    undecodable bytes: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and
+    NOT an ``OSError``, so it must be named or a single corrupt byte aborts the whole drain."""
     if not corpus_dir.is_dir():
         return ""
     sections: list[str] = []
-    for path in sorted(corpus_dir.glob("*.md")):
+    for path in sorted(corpus_dir.glob("*.md"), key=lambda p: p.stem):
         if path.name.startswith("_"):
             continue
         try:
             fm, _body = parse_frontmatter(path.read_text())
-        except (FrontmatterError, OSError) as e:
-            print(f"build_corpus_manifest: skipping {path.name}: {e}", file=sys.stderr)
+        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
+            print(f"build_corpus_manifest: skipping {path.name!r}: {e}", file=sys.stderr)
             continue
         kept = {k: v for k, v in fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
         rendered = yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )
-        sections.append(f"## {path.stem}\n{rendered}")
+        slug = " ".join(path.stem.split())  # a model-chosen stem is not a safe protocol field
+        sections.append(f"## {slug}\n{rendered}")
     return "\n".join(sections)
 
 
@@ -590,7 +600,9 @@ def build_curator_user_prompt(
     curator's deps at spawn (#558), so there is nothing here for the agent to substitute an
     interpreter path or a script operand into; each row's own id and direction ride in the
     rows below, where they already were."""
-    manifest = build_corpus_manifest(corpus_dir)
+    # An empty corpus (the first-ever drain) renders as a blank section, which reads as a
+    # truncated prompt rather than a fact. Say the fact.
+    manifest = build_corpus_manifest(corpus_dir) or "(none — the corpus is empty)"
     return (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {corpus_dir_rel}\n"
