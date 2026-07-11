@@ -231,17 +231,26 @@ def test_m8b_adversarial_stem_cannot_forge_a_section(tmp_path):
     assert len(_headers(manifest)) == 2  # exactly the two real files — no smuggled third
 
 
-def test_m9_deterministic_and_stem_sorted(tmp_path):
-    """demand: M9 — the manifest is byte-identical across two builds over the same corpus, with
-    sections in stem-sorted order."""
+def test_m9_deterministic_and_sorted(tmp_path):
+    """demand: M9 (AMENDED by #577, fork F1) — with no seed the manifest is byte-identical across two
+    builds over the same corpus, with sections in deterministic sorted order.
+
+    M9 originally said *stem*-sorted. #577 folds this walk onto ``iter_lessons``, which sorts by full
+    ``Path``, and the human resolved the fork in favour of the iterator's order — so the "stem" half of
+    this demand is overturned; only byte-stability survives here. The fixture below (a-/b-/c-lesson)
+    orders identically under BOTH keys, which is exactly why the divergence went unnoticed: this test
+    never discriminated them. ``test_s0_manifest_takes_the_iterators_path_order`` in
+    ``test_corpus_fold_seed.py`` pins the order on a real prefix pair, where the keys actually differ.
+
+    Note this no-seed path is now test-only: production always seeds from ``batch_id``."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     for stem in ("c-lesson", "a-lesson", "b-lesson"):
         _findings_lesson(corpus, stem)
     first = _shared.build_corpus_manifest(corpus)
     second = _shared.build_corpus_manifest(corpus)
-    assert first == second  # byte-identical
-    assert _headers(first) == ["a-lesson", "b-lesson", "c-lesson"]  # stem-sorted
+    assert first == second  # byte-identical across reruns
+    assert _headers(first) == ["a-lesson", "b-lesson", "c-lesson"]  # deterministic sorted order
 
 
 def test_m10_dropping_provenance_avoids_a_datetime_dump(tmp_path):
