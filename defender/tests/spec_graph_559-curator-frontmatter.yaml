@@ -1,0 +1,331 @@
+schema_version: 1
+design: "#559 — curators read frontmatter via an injected manifest + a curator-scoped lesson_read tool"
+base: 9c835308e2550636fe96b8339644b89bb9bdf4d0
+
+# demand ids are the short codes the suite's docstrings carry (`demand: <id>`); one test per
+# demand EXCEPT the four negative/positive-control pairs {M3,M3c} {M8,M8c} {L7,L7c} {T3,T3c},
+# where the control is asserted inside its negative's single test (test_m3 / test_m8 / test_l7 /
+# test_t3). 34 test-form demands over 30 tests; W1 is a clause (prose, not unit-testable).
+
+# ---------------------------------------------------------------------------
+# DEMANDS — the spec proper (design-extracted + enrichment-derived + obligation-minted)
+# ---------------------------------------------------------------------------
+demands:
+  # --- manifest builder: build_corpus_manifest(corpus_dir: Path) -> str ---
+  - id: M1                                   # #0-A return contract
+    kind: behavior
+    form: test
+    outcome: {nl: "build_corpus_manifest returns a str with one `## <path.stem>` section per non-underscore lesson, carrying that lesson's frontmatter as YAML"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M2
+    kind: behavior
+    form: test
+    outcome: {nl: "the section slug is path.stem — an actor/env lesson with no `name` frontmatter key still gets a `## <stem>` header"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+    rejected: [{nl: "slug = fm['name'] — KeyErrors on the first actor/env lesson"}]
+  - id: M3                                   # negative (paired with M3c)
+    kind: negative
+    form: test
+    outcome: {nl: "the four provenance fields {source_finding_ids, source_observation_ids, created_at, recorded_at} are ABSENT from every section, across BOTH corpus shapes (no KeyError on a drop-field a given corpus lacks)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+    rejected: [{nl: "fm.pop(k) without a default — no corpus carries all four, so it KeyErrors"}]
+  - id: M3c                                  # positive control for M3 (in test_m3)
+    kind: behavior
+    form: test
+    outcome: {nl: "the kept relevance fields survive in the section (findings: description/telemetry_source/attack_phase/source_signature; actor/env: techniques|subject/relevance_criteria/alert_rule_ids)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M4
+    kind: behavior
+    form: test
+    outcome: {nl: "the findings `source_finding_ids` multi-line BLOCK list is dropped with no orphan `- <id>` continuation line, and no dropped id token survives anywhere in the manifest (re-emit from the parsed dict)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+    rejected: [{nl: "raw-line filter that deletes `source_finding_ids:` but not its `-` continuation lines"}]
+  - id: M5                                    # #562 execution-context hazard
+    kind: behavior
+    form: test
+    outcome: {nl: "the manifest is built from the PASSED corpus_dir — a sentinel worktree corpus yields the sentinel slug and NONE of the real checked-in slugs; two different dirs yield two different manifests"}
+    binds: ["interacts(build_corpus_manifest->corpus_dir)"]
+    rejected: [{nl: "resolves corpus via a module global (config.LESSONS_*_DIR / DEFAULT_PATHS) — reads the un-re-rooted main checkout"}]
+  - id: M6
+    kind: behavior
+    form: test
+    outcome: {nl: "`_`-prefixed files are absent; a non-fenced/non-mapping `.md` is warn-skipped (stderr, not raised) and dropped while a well-formed sibling still renders — one bad file cannot abort the batch"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+    rejected: [{nl: "a FrontmatterError/KeyError on the malformed file aborts the whole manifest (loses good lessons)"}]
+  - id: M7
+    kind: behavior
+    form: test
+    outcome: {nl: "an empty, missing, or non-directory corpus_dir yields an empty manifest with no raise (first-ever run in a fresh worktree)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M8                                    # negative (paired with M8c)
+    kind: negative
+    form: test
+    outcome: {nl: "a frontmatter value containing `\\n## other` / `\\n---` / YAML metachars (`|`, `!tag`, `&anchor`) is re-emitted as a QUOTED scalar under its own slug — it cannot forge a sibling `## ` section or a `---` break in the manifest"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M8c                                   # positive control for M8 (in test_m8)
+    kind: behavior
+    form: test
+    outcome: {nl: "a genuine lesson stem IS a real top-level `## <stem>` section header (the channel can distinguish a real section from an injected-scalar one)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M9
+    kind: behavior
+    form: test
+    outcome: {nl: "the manifest built twice over the same corpus is byte-identical, sections in stem-sorted order (diff-stable across reruns)"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+  - id: M10
+    kind: behavior
+    form: test
+    outcome: {nl: "dropping provenance removes created_at/recorded_at so no YAML-parsed datetime reaches safe_dump — the build succeeds where a naive keep-then-dump would TypeError"}
+    binds: ["interacts(build_corpus_manifest->manifest_out)"]
+
+  # --- build_curator_user_prompt splice ---
+  - id: P1                                    # #0-B
+    kind: seam
+    form: test
+    outcome: {nl: "build_curator_user_prompt gains a kw `corpus_dir: Path` and returns a prompt containing the manifest section AND the surviving batch_id / lessons_dir / `{label} (N):` / json.dumps(rows)"}
+    binds: ["interacts(build_curator_user_prompt->curator_llm).payload"]
+  - id: P2                                    # R1 obligation
+    kind: shape
+    form: test
+    outcome: {nl: "the manifest reflects the CORPUS and rows reflect the QUEUE — a queued finding id in rows is NOT emitted as a manifest slug, and an existing lesson slug is not among the rows (disjoint sources)"}
+    binds: ["interacts(build_curator_user_prompt->curator_llm).payload"]
+  - id: P3
+    kind: behavior
+    form: test
+    outcome: {nl: "the manifest is drawn from the abs corpus_dir; corpus_dir_rel appears ONLY on the `lessons_dir:` display line, never as the glob root"}
+    binds: ["interacts(build_curator_user_prompt->curator_llm).payload"]
+    rejected: [{nl: "Path(corpus_dir_rel).glob(...) / REPO_ROOT / corpus_dir_rel — reads the main checkout via cwd"}]
+  - id: P4
+    kind: seam
+    form: test
+    outcome: {nl: "both callers forward the abs Path they hold — lessons/run.build_user_prompt passes cfg.lessons_dir (behavioral); curator.invoke_curator_agent passes cfg.corpus_dir into build_curator_user_prompt (AST-bound, no observable seam)"}
+    binds: ["drives(build_user_prompt->build_curator_user_prompt)", "drives(invoke_curator_agent->build_curator_user_prompt)"]
+
+  # --- lesson_read tool ---
+  - id: L1                                    # #0-C
+    kind: behavior
+    form: test
+    outcome: {nl: "lesson_read(path) with the default part='body' returns the frontmatter-stripped body"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+  - id: L2
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "lesson_read(path, part='full') returns the whole file including frontmatter, observably different from body on a fenced lesson"}
+    binds: ["lesson_part.domain.distinguished[full]"]
+  - id: L3                                    # R4 default member
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "the DEFAULT part='body' is exercised — a call with no part arg returns body only, not the whole file; the tool schema records default='body'"}
+    binds: ["lesson_part.domain.default[body]"]
+  - id: L4                                    # R4 closed vocab
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "the part domain is the closed set {body, full} (Literal) — the tool's parameters_json_schema exposes exactly those members; an out-of-set value cannot pass the schema"}
+    binds: ["lesson_part.domain"]
+  - id: L5
+    kind: behavior
+    form: test
+    outcome: {nl: "a non-fenced file (parse_frontmatter raises FrontmatterError) degrades to whole text under part='body' (returns the whole file, does not raise); part='full' returns whole text unconditionally (never parses)"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+  - id: L6                                    # F2 grep-fold survival
+    kind: behavior
+    form: test
+    outcome: {nl: "pattern grep-folds the SELECTED text — part='body', pattern=P returns the body lines matching P (part-then-grep); pattern=None returns the unfolded selection"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+  - id: L7                                    # R3/gate negative (paired with L7c)
+    kind: negative
+    form: test
+    outcome: {nl: "a path the curator's decide_read denies (traversal `../..`, outside {run_dir, defender_dir}) raises ModelRetry with no existence oracle and no leaked bytes"}
+    binds: ["lesson_files.access[read-tool]"]
+  - id: L7c                                   # positive control for L7 (in test_l7)
+    kind: behavior
+    form: test
+    outcome: {nl: "an in-corpus path returns content through the same gate (the mechanism fired and the channel can see the difference)"}
+    binds: ["lesson_files.access[read-tool]"]
+  - id: L8                                    # R3 corrected framing + R5 survival
+    kind: parity
+    form: test
+    outcome: {nl: "lesson_read's read surface equals the removed read_file's (root-only decide_read) — it admits a SIBLING corpus file (lessons-actor/x.md) reachable where the corpus-anchored bash `cat` is not, neither narrowed to cat's anchor nor broadened past read_file"}
+    binds: ["lesson_files.access[read-tool]", "lesson_files.access[bash]"]
+    rejected: [{nl: "narrowing lesson_read to the corpus-subdir anchor — breaks the _TEMPLATE/docs/sibling reads the curator legitimately needs"}]
+  - id: L9                                    # R5 survival (schema read)
+    kind: survival
+    form: test
+    outcome: {nl: "the actor/env `_TEMPLATE.md` schema read completes via part='full' (schema lives in the template frontmatter, which default body strips)"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+  - id: L10                                   # reuse core, not reimplement
+    kind: behavior
+    form: test
+    outcome: {nl: "an oversized lesson is truncated to the shared _read_char_cap with the overflow notice, identical to _tool_read_file — one core, part its only added seam"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+    rejected: [{nl: "a bespoke read that re-checks containment (drifts from decide_read + the bounded cap)"}]
+  - id: L11
+    kind: shape
+    form: test
+    outcome: {nl: "a lesson is not is_untrusted_read (only alert.json/gather_raw are) — lesson_read returns raw body/full text with no salted untrusted tag; the reused wrap-tail is inert for the trusted corpus"}
+    binds: ["interacts(lesson_read->lesson_files)"]
+  - id: L12                                   # F3
+    kind: behavior
+    form: test
+    outcome: {nl: "a lesson_read of a findings OR actor OR env lesson appends a lessons_loaded.jsonl row into run_dir — the _record_lesson_load matcher is widened to all three corpora"}
+    binds: ["interacts(lesson_read->lessons_loaded)"]
+
+  # --- ToolSet / registration (R5 subtraction) ---
+  - id: T1
+    kind: seam
+    form: test
+    outcome: {nl: "ToolSet has a `lesson_read: bool = False` field"}
+    binds: ["ToolSet"]
+  - id: T2
+    kind: seam
+    form: test
+    outcome: {nl: "CORPUS_AUTHOR_DEF.tools has lesson_read=True and NOT read=True"}
+    binds: ["CORPUS_AUTHOR_DEF"]
+  - id: T3                                    # R5 negative (paired with T3c)
+    kind: negative
+    form: test
+    outcome: {nl: "a CORPUS_AUTHOR agent registers `lesson_read` and NOT `read_file`; lesson_read is absent from every other role"}
+    binds: ["interacts(register_tools->lesson_read)", "interacts(register_tools->read_file)"]
+  - id: T3c                                   # positive control for T3 (in test_t3)
+    kind: behavior
+    form: test
+    outcome: {nl: "a role with read=True (MAIN) still registers `read_file` WITH its `pattern` grep-fold and NOT lesson_read — the shared registration path is byte-identical for non-curator roles"}
+    binds: ["interacts(register_tools->read_file)"]
+  - id: T4                                    # R5 survival at role level
+    kind: survival
+    form: test
+    outcome: {nl: "the curator can still read a lesson body after read=True is dropped — lesson_read discharges the read capability the removed read_file served (driven through a CORPUS_AUTHOR agent's registered tool)"}
+    binds: ["interacts(register_tools->read_file)"]
+
+  # --- prose (part 2) ---
+  - id: W1
+    kind: behavior
+    form: clause
+    outcome: {nl: "the three curator prompt.md files are rewritten to consume the manifest instead of cat-per-lesson — deferred to prose/PR review; LLM consumption is not unit-testable"}
+    binds: ["interacts(build_curator_user_prompt->curator_llm).payload"]
+
+# ---------------------------------------------------------------------------
+# STRUCTURE — the address space (reduced neighborhood; see handoff.deviations)
+# ---------------------------------------------------------------------------
+structure:
+  axes: [lesson_stem, corpus_root]
+  actors:
+    - {id: build_corpus_manifest,      frame: leg,         provenance: design}
+    - {id: build_curator_user_prompt,  frame: composition, provenance: code}    # modify: gains corpus_dir + manifest splice
+    - {id: build_user_prompt,          frame: composition, provenance: code}    # findings caller
+    - {id: invoke_curator_agent,       frame: composition, provenance: code}    # actor/env caller
+    - {id: lesson_read,                frame: leg,         provenance: design}
+    - {id: cat_viewer,                 frame: leg,         provenance: code}     # the bash cat lane (R3 sibling via)
+    - {id: register_tools,             frame: composition, provenance: code}    # modify: new lesson_read bit; read_file removed for curator
+    - {id: curator_agent,              frame: composition, provenance: code}     # the CORPUS_AUTHOR agent — R5/R3 consumer
+    - {id: author_drain,               frame: composition, provenance: code}     # loop.py --author-drain → worktree re-root (#562 execution context)
+  boundaries:
+    - {id: corpus_dir,   provenance: code,   facets: {}}                          # plain read input; M5 binds the read edge
+    - {id: manifest_out, provenance: design, facets: {}}                          # the returned manifest string; M* bind the write/return edge
+    - id: curator_llm
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:curator prompt.md"}
+            - {role: user,   source: "template:build_curator_user_prompt", slots: {manifest: "interacts(build_corpus_manifest->manifest_out)", rows: rows_queue}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "the curator user turn = the corpus frontmatter manifest (existing lessons) spliced above the queued rows (findings/observations to author)"
+    - id: lesson_files
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            read-tool: {trust: derived, constraints: [confine-to-run_dir+defender_dir, secret-denylist, raw-clamp]}   # lesson_read via decide_read (root-only)
+            bash:      {trust: derived, constraints: [confine-to-corpus-subdir]}                                       # cat/grep/ls viewers (tighter, pre-existing, unchanged)
+    - id: lesson_part
+      provenance: design
+      facets:
+        domain: {type: enum, refinement: {nl: "body strips frontmatter, full is the whole file"}, default: body, distinguished: [body, full], falsy_valid: false, documented_alternatives: []}
+    - id: lessons_loaded
+      provenance: code                                                            # modify: matcher widened to all 3 corpora (F3)
+      facets:
+        identity:
+          key_axes: [lesson_stem, corpus_root]
+          evidence: {nl: "lessons_loaded.jsonl is a per-run_dir append keyed by the lesson name; matcher widened from lessons/ to lessons-actor/ + lessons-environment/ too"}
+          sharing: serialized-append
+    - {id: ToolSet,            provenance: design, facets: {}}                     # new lesson_read field
+    - {id: CORPUS_AUTHOR_DEF,  provenance: design, facets: {}}                     # modify: read=True → lesson_read=True
+  interacts:
+    - {from: build_corpus_manifest, to: corpus_dir,   mode: read,  via: fs,        provenance: design}
+    - {from: build_corpus_manifest, to: manifest_out, mode: write, via: api,       provenance: design}
+    - {from: build_curator_user_prompt, to: curator_llm, mode: write, via: api,    provenance: code, sends: payload}   # modify: manifest slot added
+    - {from: lesson_read, to: lesson_files,   mode: read,  via: read-tool, provenance: design}
+    - {from: cat_viewer,  to: lesson_files,   mode: read,  via: bash,      provenance: code}     # existing sibling via → R3 trigger
+    - {from: lesson_read, to: lesson_part,    mode: read,  via: argv,      provenance: design}
+    - {from: lesson_read, to: lessons_loaded, mode: write, via: fs,        provenance: code}      # modify: widened matcher
+    - {from: register_tools, to: lesson_read, mode: invoke, via: api,      provenance: design}    # registers the tool
+    - {from: register_tools, to: read_file,   mode: remove, via: api,      provenance: code}      # read=True dropped for curator → R5
+    - {from: curator_agent,  to: lesson_read, mode: invoke, via: read-tool, provenance: design}
+  drives:
+    - {from: build_user_prompt,       to: build_curator_user_prompt, provenance: code,   multiplicity: serial}
+    - {from: invoke_curator_agent,    to: build_curator_user_prompt, provenance: code,   multiplicity: serial}
+    - {from: build_curator_user_prompt, to: build_corpus_manifest,   provenance: design, multiplicity: serial}
+    - {from: author_drain,            to: build_curator_user_prompt, provenance: code,   multiplicity: serial}    # #562: re-roots corpus_dir to the worktree
+
+# ---------------------------------------------------------------------------
+# GATE
+# ---------------------------------------------------------------------------
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # holes: F1 seam (resolved standalone), F2 grep-fold/hint (resolved keep-pattern), F3 record-load (resolved extend); reconciliation ran — prompt-rewrite sentence → clause (no dangling); invalid-part unknown → resolved (Literal)
+    - {rule: R1, fired: true}    # curator_llm payload gains the manifest part → shape demand
+    - {rule: R2, fired: false}   # no new write-sink collision: manifest+lesson_read are reads; lessons_loaded is a per-run_dir append (no cross-run/writer collision)
+    - {rule: R3, fired: true}    # lesson_read (read-tool via) added to lesson_files that cat (bash via) already reaches
+    - {rule: R4, fired: true}    # lesson_part domain {body, full}, default body
+    - {rule: R5, fired: true}    # read=True dropped → read_file removed for curator; judgment-extension considered (change TIGHTENS; the unsafe over-fix is narrowing lesson_read, captured by L8)
+  obligations:
+    - {rule: R1, element: "interacts(build_curator_user_prompt->curator_llm).payload", witness: "the manifest is a new user-turn part with no shape demand asserting it is present and disjoint from the queued rows", discharged_by: P2}
+    - {rule: R3, element: "lesson_files.access[read-tool]", witness: "lesson_read is a new read via to a boundary the bash cat via already reaches — parity: it must enforce the removed read_file's containment, not narrow to cat's anchor", discharged_by: L8}
+    - {rule: R4, element: "lesson_part.domain.default[body]", witness: "the default part member (body) must be exercised or an x-or-DEFAULT swallow goes unseen", discharged_by: L3}
+    - {rule: R4, element: "lesson_part.domain.distinguished[full]", witness: "the full member must be exercised", discharged_by: L2}
+    - {rule: R5, element: "interacts(register_tools->read_file)", witness: "read_file removed for the curator — the workflows that read a lesson body / the _TEMPLATE schema / a non-fenced doc through it must survive via lesson_read", discharged_by: T4}
+    - {rule: R5, element: "interacts(lesson_read->lesson_files)", witness: "the _TEMPLATE.md schema read (frontmatter) survives only via part='full'", discharged_by: L9}
+  holes:
+    - {rule: R0, element: build_corpus_manifest, resolution: "F1 — standalone importable build_corpus_manifest(corpus_dir)->str (testable in isolation, m16 precedent)", resolved_to: M1}
+    - {rule: R5, element: "curator grep-fold + _overflow_filter_hint", resolution: "F2 — keep pattern= on lesson_read (grep-fold survives as a first-class param); the overflow-hint tool-name mismatch (still literally names read_file) is a cosmetic out-of-scope follow-up, not tested here", resolved_to: L6}
+    - {rule: R0, element: "interacts(lesson_read->lessons_loaded)", resolution: "F3 — extend the _record_lesson_load matcher to all three corpora (symmetric); FLAG: cross-role blast radius — main/gather reads of actor/env lessons now log too", resolved_to: L12}
+  pre_discharged: []
+
+# check_actors flags these two relocates-PATHS re-exec drivers because they reach the shared
+# runtime (tools.py) #559 touches. Both drive the LEAD subsystem, not the curator — grounding
+# confirmed neither reaches build_corpus_manifest / lesson_read / build_curator_user_prompt.
+# #559's PATHS-sensitive code (the curator manifest reading the threaded corpus_dir, M5) is
+# curator-only and driven by the modelled `author_drain`; these drivers' PATHS relocation is
+# the lead's, which #559 does not touch. The shared-runtime intersection is held invariant for
+# non-curator roles — ToolSet.lesson_read defaults False, the register_tools branch is
+# bit-guarded, and read_file+pattern parity is pinned by test_t3 (T3c). The one genuine
+# cross-role effect (F3's _record_lesson_load widening → a lead/main read of an actor/env lesson
+# now logs) is recorded as a hole + handoff flag and belongs to the F3 implementation's review.
+actor_waivers:
+  replay_actor: >-
+    defender/learning/ops/replay_actor.py re-execs and relocates PATHS, but it drives the
+    frozen-generation actor replay over lead_repository — no edge to the curator manifest or the
+    lesson_read tool (grep of ops/ found no build_corpus_manifest / lesson_read / *curator* ref).
+    Reaches #559 only via shared tools.py runtime, held invariant for the lead's read=True path
+    (T3c parity). Out of scope for the curator spec.
+  harness_lead: >-
+    defender/evals/harness_lead.py re-execs and relocates PATHS, but it drives the LEAD author
+    (learning/leads/lead_author.py) — a different writer stage with its own corpus, no curator
+    manifest, no lesson_read. The curator drain driver (author_drain) IS modelled. The F3
+    _record_lesson_load widening's cross-role reach onto the lead read path is flagged (holes +
+    handoff), not silenced. Out of scope for the curator spec.
+
+handoff:
+  forks:
+    - "F1 manifest builder seam → standalone importable build_corpus_manifest(corpus_dir)->str (vs inlined into build_curator_user_prompt, vs fm inlined per-row). Human chose standalone."
+    - "F2 curator loses read_file(pattern=) grep-fold + stale _overflow_filter_hint → keep pattern= on lesson_read (grep-fold survives). Human declined the in-scope hint fix; hint tool-name mismatch left as a cosmetic follow-up."
+    - "F3 _record_lesson_load matcher scoped to lessons/ only → extend to all three corpora (symmetric load-tracking). Human chose extend; cross-role blast radius flagged (holes + L12 + this handoff)."
+    - "R3 mis-statement corrected (strong author): lesson_read is NOT a broadening regression vs the removed read_file (both root-only) — the real hazard is the OPPOSITE over-fix of narrowing to cat's anchor. Demand pinned as surface==read_file (L8)."
+  deviations:
+    - "collapsed diff — step-4 alignment done by the orchestrator (not a separate diff agent), after all 5 derivations were collected"
+    - "reduced neighborhood — graph scoped to the touched surfaces (manifest seam, lesson_files vias, ToolSet/registration, lessons_loaded); not a full repo census"
+    - "manual slot-check — formal-slot vocabularies hand-checked against schema.md (the #537 spec_graph linter is not yet landed)"
+    - "strong author ran on Opus (frontier) — the unknown-unknown region is NOT degraded"
+    - "check_actors: 2 relocates-PATHS lead-subsystem drivers (replay_actor, harness_lead) waived as out-of-scope for the curator spec (actor_waivers); they don't reach #559's curator-only PATHS-sensitive manifest, and the F3 cross-role touch is flagged separately"
+    - "P4 actor-caller half bound by AST (invoke_curator_agent passes corpus_dir=) — it spawns the pydantic-ai graph with no observable prompt seam without a metered key/monkeypatch; the findings-caller half is behavioral"

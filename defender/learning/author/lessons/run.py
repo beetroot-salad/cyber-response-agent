@@ -223,7 +223,8 @@ def build_user_prompt(findings: list[dict], batch_id: str, cfg: AuthorConfig) ->
     """The findings curator's user payload — the shared curator builder, with this curator's
     corpus and row label."""
     return _shared.build_curator_user_prompt(
-        findings, batch_id, corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
+        findings, batch_id, corpus_dir=cfg.lessons_dir,
+        corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
     )
 
 

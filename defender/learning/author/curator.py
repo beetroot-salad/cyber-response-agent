@@ -230,7 +230,8 @@ def invoke_curator_agent(
         system_prompt_file=cfg.author_prompt,
         batch_id=batch_id,
         user_prompt=_shared.build_curator_user_prompt(
-            observations, batch_id, corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
+            observations, batch_id, corpus_dir=cfg.corpus_dir,
+            corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
         ),
         corpus_dir=cfg.corpus_dir,
         check=check,

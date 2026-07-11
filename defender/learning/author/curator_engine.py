@@ -264,7 +264,8 @@ class CuratorDeps(AgentDeps):
 
 
 # The curator's AgentDefinition (#538). Like the lead author it is a WRITER, so its ToolSet grants
-# the file writers (write=True → write_file/edit_file) on top of read + the corpus-anchored bash
+# the file writers (write=True → write_file/edit_file) on top of the scoped ``lesson_read`` (#559 —
+# replaces the generic ``read``: read_file with a body/full part mode) + the corpus-anchored bash
 # lane. ``model``/``effort`` are the declarative stage defaults; each spawn re-binds its own
 # per-curator model/effort in ``build_stage_agent``. The real per-spawn policy (the corpus-scoped
 # ``write_allow`` + bash matchers) is built by ``CuratorDeps.for_run`` / ``_corpus_author_policy`` —
@@ -274,7 +275,7 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.CORPUS_AUTHOR,
     model=lambda: config.AUTHOR_MODEL,
     effort=config.AUTHOR_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar(), write=True, forward_check=True),
+    tools=ToolSet(bash=BashGrammar(), write=True, forward_check=True, lesson_read=True),
     bindable=False,
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )

@@ -34,13 +34,19 @@ def iter_lessons(
     warn_label: Callable[[Path], str] | None = None,
 ) -> Iterator[tuple]:
     """Yield well-formed lessons under ``corpus_dir``: ``*.md`` sorted, skipping
-    ``_``-prefixed files, warning-and-skipping on malformed frontmatter.
+    ``_``-prefixed files, warning-and-skipping on a malformed one.
 
     Yields ``(path, frontmatter)`` by default, or ``(path, raw_frontmatter, fm)``
     when ``with_raw`` (the raw YAML between the fences, for frontmatter grep).
     ``warn_label`` formats the skipped path in the warning (default ``path.name``;
     the actor index passes a repo-relative label). The yaml-backed parser is
     imported lazily so this module stays importable before the venv re-exec.
+
+    "Malformed" covers the READ as well as the PARSE, so ``read_text()`` is inside the
+    ``try``: it raises ``UnicodeDecodeError`` on undecodable bytes, which is a ``ValueError``
+    and NOT an ``OSError`` — outside the guard it would escape and take the whole caller down
+    (the actor's ``lessons_actor_index`` / ``lessons_env_retrieve`` run this on their bash lane
+    mid-run), defeating the skip-one-bad-file contract this function exists to provide.
     """
     from defender._frontmatter import FrontmatterError, parse_frontmatter
 
@@ -50,11 +56,11 @@ def iter_lessons(
     for path in sorted(corpus_dir.glob("*.md")):
         if path.name.startswith("_"):
             continue
-        text = path.read_text()
         try:
+            text = path.read_text()
             fm, _body = parse_frontmatter(text)
-        except FrontmatterError:
-            print(f"warn: skipping {label(path)} (malformed frontmatter)", file=sys.stderr)
+        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
+            print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
             continue
         if with_raw:
             norm = text.replace("\r\n", "\n").replace("\r", "\n")

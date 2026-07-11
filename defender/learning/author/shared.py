@@ -35,12 +35,16 @@ import contextlib
 import fcntl
 import json
 import re
+import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from defender import _git
+from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
 # REPO_LOCK_WAIT_SECONDS (the env-derived ceiling each curator config sources as its
@@ -523,20 +527,86 @@ def run_batch_envelope(
         release_flock(queue_lock)
 
 
+# The provenance frontmatter the corpus manifest DROPS: bookkeeping the curator does not need to
+# fold against (source ids + timestamps), and the drop is PARTIAL per corpus (findings carry
+# ``source_finding_ids``+``created_at``; actor/env carry ``source_observation_ids``+``recorded_at``),
+# so the filter is set membership, never ``fm.pop(k)`` — which KeyErrors on a field a corpus lacks.
+_MANIFEST_PROVENANCE_DROP = frozenset(
+    {"source_finding_ids", "source_observation_ids", "created_at", "recorded_at"}
+)
+
+
+def build_corpus_manifest(corpus_dir: Path) -> str:
+    """Render the existing-corpus manifest a lesson curator folds against: one ``## <stem>``
+    section per non-``_`` lesson in ``corpus_dir``, carrying that lesson's frontmatter MINUS the
+    provenance drop-set, re-emitted from the PARSED dict via ``yaml.safe_dump``. Re-emitting from
+    the dict (not a raw-line filter) is what makes the drop total — a multi-line block field
+    (``source_finding_ids:`` + its ``- id`` continuations) leaves no orphan line — AND what makes
+    the VALUES injection-safe: ``safe_dump`` indents/quotes every one, so a crafted frontmatter
+    scalar (``\\n## other`` / ``\\n---`` / YAML metachars) cannot forge a sibling ``## `` header or
+    a ``---`` break. Sections are sorted by stem, so the manifest is byte-stable across reruns.
+
+    The STEM is untrusted too, and ``safe_dump`` never sees it. A lesson filename is model-chosen
+    (the curator authors the corpus with ``write_file``) and ``build_write_allow``'s ``[^\\x00]*``
+    tail is a char class that matches a NEWLINE — so ``lessons/x\\n## other\\n….md`` is a
+    gate-approved path whose stem would forge exactly the sibling section the value-quoting above
+    closes. Collapse the stem's whitespace so a slug can never leave its own ``## `` line.
+
+    Reads the PASSED ``corpus_dir`` (the author-drain threads its throwaway worktree's corpus —
+    #562), never a module global, so the manifest reflects the tree the curator actually edits.
+    Dropping ``created_at``/``recorded_at`` also removes the YAML-parsed ``datetime`` before
+    ``safe_dump`` ever sees it.
+
+    Tolerant: a missing / empty / non-directory ``corpus_dir`` yields ``''`` (a first-ever run in a
+    fresh worktree), and a single malformed ``.md`` is warned to stderr and skipped — one bad file
+    never aborts the manifest and loses its well-formed siblings. "Malformed" covers non-fenced /
+    non-mapping frontmatter (``FrontmatterError``), an unreadable file (``OSError``), AND
+    undecodable bytes: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and
+    NOT an ``OSError``, so it must be named or a single corrupt byte aborts the whole drain."""
+    if not corpus_dir.is_dir():
+        return ""
+    sections: list[str] = []
+    for path in sorted(corpus_dir.glob("*.md"), key=lambda p: p.stem):
+        if path.name.startswith("_"):
+            continue
+        try:
+            fm, _body = parse_frontmatter(path.read_text())
+        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
+            print(f"build_corpus_manifest: skipping {path.name!r}: {e}", file=sys.stderr)
+            continue
+        kept = {k: v for k, v in fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
+        rendered = yaml.safe_dump(
+            kept, sort_keys=True, default_flow_style=False, allow_unicode=True
+        )
+        slug = " ".join(path.stem.split())  # a model-chosen stem is not a safe protocol field
+        sections.append(f"## {slug}\n{rendered}")
+    return "\n".join(sections)
+
+
 def build_curator_user_prompt(
-    rows: list[dict], batch_id: str, *, corpus_dir_rel: str, label: str
+    rows: list[dict], batch_id: str, *, corpus_dir: Path, corpus_dir_rel: str, label: str
 ) -> str:
-    """The user payload every curator sends its agent: the batch, its corpus, and the queued
-    rows verbatim. ``label`` names the row kind (``findings`` / ``observations``) — the only
-    thing that varied between the four curators' hand-rolled copies.
+    """The user payload every curator sends its agent: the existing-corpus frontmatter manifest,
+    the batch, its corpus display path, and the queued rows verbatim. ``label`` names the row kind
+    (``findings`` / ``observations``) — the only thing that varied between the four curators'
+    hand-rolled copies.
+
+    The manifest is built from the ABSOLUTE ``corpus_dir`` (the worktree corpus each caller
+    already holds — #562), so the curator folds against what it already has without cat-ing each
+    lesson; ``corpus_dir_rel`` is the human-readable display path ONLY, never the glob root. The
+    manifest (existing lessons) is disjoint from the queued rows (findings/observations to author).
 
     It carries NO forward-check command line. The check is an in-process tool bound to the
     curator's deps at spawn (#558), so there is nothing here for the agent to substitute an
     interpreter path or a script operand into; each row's own id and direction ride in the
     rows below, where they already were."""
+    # An empty corpus (the first-ever drain) renders as a blank section, which reads as a
+    # truncated prompt rather than a fact. Say the fact.
+    manifest = build_corpus_manifest(corpus_dir) or "(none — the corpus is empty)"
     return (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {corpus_dir_rel}\n"
+        f"\nexisting lessons (frontmatter manifest):\n{manifest}\n\n"
         f"{label} ({len(rows)}):\n"
         f"{json.dumps(rows, indent=2)}\n"
     )

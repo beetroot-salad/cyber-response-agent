@@ -1,8 +1,9 @@
 """Tests for defender/hooks/record_lesson_load.py.
 
 PostToolUse-on-Read hook: appends a {lesson_name, ts} row to
-{DEFENDER_RUN_DIR}/lessons_loaded.jsonl for each Read of a defender/lessons/*.md
-file. Scoped to the runtime corpus only; always exits 0.
+{DEFENDER_RUN_DIR}/lessons_loaded.jsonl for each Read of a lesson .md under one of the
+three corpora (defender/{lessons,lessons-actor,lessons-environment}/ — widened by #559
+F3 from lessons/ only); always exits 0.
 """
 from __future__ import annotations
 
@@ -42,15 +43,44 @@ def test_records_runtime_lesson_read(monkeypatch, tmp_path):
     assert "ts" in rows[0]
 
 
-def test_ignores_author_corpora(monkeypatch, tmp_path):
-    """lessons-actor/ and lessons-environment/ are author corpora the runtime never
-    loads — a Read of them must not be recorded."""
+def test_records_all_three_lesson_corpora(monkeypatch, tmp_path):
+    """#559 F3 widened the matcher from lessons/ only to all three lesson corpora: a Read of a
+    findings, actor, OR env lesson is recorded (the curators' lesson_read reuses this matcher;
+    the runtime read_file does too — the accepted cross-role blast radius)."""
     mod = _load()
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
-    for fp in ("/repo/defender/lessons-actor/x.md",
+    for fp in ("/repo/defender/lessons/a.md",
+               "/repo/defender/lessons-actor/x.md",
                "/repo/defender/lessons-environment/y.md"):
-        _run(mod, _read_event(fp))
+        assert _run(mod, _read_event(fp)) == 0
+    loaded = {
+        json.loads(line)["lesson_name"]
+        for line in (tmp_path / "lessons_loaded.jsonl").read_text().splitlines()
+    }
+    assert loaded == {"a", "x", "y"}
+
+
+def test_ignores_template_schema(monkeypatch, tmp_path):
+    """``_TEMPLATE.md`` is the corpus SCHEMA (the shape a curator reads before authoring), not a
+    lesson — recording it would put a `_TEMPLATE` slug in the trace that no corpus can resolve."""
+    mod = _load()
+    monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
+    for corpus in ("lessons", "lessons-actor", "lessons-environment"):
+        assert mod.lesson_name(f"/repo/defender/{corpus}/_TEMPLATE.md") is None
+        assert _run(mod, _read_event(f"/repo/defender/{corpus}/_TEMPLATE.md")) == 0
     assert not (tmp_path / "lessons_loaded.jsonl").exists()
+
+
+def test_runtime_corpora_narrows_to_the_defender_lessons(monkeypatch, tmp_path):
+    """The in-process runtime readers pass ``RUNTIME_LESSON_CORPORA``, keeping the AUTHOR corpora
+    out of their case trace — the actor reads lessons-actor/ tradecraft via read_file every run and
+    its run_dir IS the durable bundle trace_lesson scans. Only the curators' ``lesson_read`` opts
+    into the full ``LESSON_CORPORA``."""
+    mod = _load()
+    runtime = mod.RUNTIME_LESSON_CORPORA
+    assert mod.lesson_name("/repo/defender/lessons/a.md", runtime) == "a"
+    assert mod.lesson_name("/repo/defender/lessons-actor/x.md", runtime) is None
+    assert mod.lesson_name("/repo/defender/lessons-environment/y.md", runtime) is None
 
 
 def test_ignores_nested_and_non_md(monkeypatch, tmp_path):

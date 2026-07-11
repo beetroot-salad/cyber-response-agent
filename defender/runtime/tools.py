@@ -37,7 +37,10 @@ from defender.scripts.gather_tools.record_query import (
     derive_system as _derive_system,
     _passthrough_max_bytes as _read_char_cap,
 )
-from defender.hooks.record_lesson_load import lesson_name as _lesson_name
+from defender.hooks.record_lesson_load import (
+    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
+    lesson_name as _lesson_name,
+)
 
 _BASH_TIMEOUT_S = 120
 
@@ -59,7 +62,9 @@ def _lane_admits(policy: permission.AgentPolicy, probe: str) -> bool:
     return any(p.fullmatch(probe) for p in policy.bash_allow)
 
 
-def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
+def _overflow_filter_hint(
+    path: str, policy: permission.AgentPolicy, read_tool: str = "read_file"
+) -> str:
     """The "this file is too big — here's how to reduce it" advice, derived from the
     agent's ACTUAL bash lane. A hint naming a program the agent cannot run, or a step it
     cannot take, is worse than no hint — and every part of it here is load-bearing:
@@ -72,7 +77,11 @@ def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
       - the write-the-result-to-a-file step ONLY for an agent with a writer: gather has
         `jq` but no write tool, so it reads the filtered text straight back;
       - a lane with neither reducer (actor / oracle / verify / curators) gets pointed at
-        `read_file(pattern=)`, the only reduction it actually has.
+        its read tool's `pattern=` substring fold, the only reduction it actually has —
+        and named by `read_tool`, NOT a hardcoded `read_file`. The same rule that bans a
+        dead PROGRAM bans a dead TOOL: the curators traded `read_file` for the scoped
+        `lesson_read` (#559), so a constant here would hand the one agent that reaches
+        this branch with a writer an instruction it cannot execute.
     """
     sql_shim = permission.command_shape.SQL_SHIM
     if _lane_admits(policy, "jq '.'"):
@@ -82,13 +91,15 @@ def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
     else:
         return (
             "You have no bash reducer for this. Narrow it with the read tool's substring "
-            f"search instead:\n  read_file({path!r}, pattern='<substring>')"
+            f"search instead:\n  {read_tool}({path!r}, pattern='<substring>')"
         )
     sink = ", write the result to a file, then read that" if policy.write_allow else ""
     return f"Reduce it in a pipe{sink}:\n  cat {path} | {reducer}"
 
 
-def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
+def _bounded_read(
+    text: str, path: str, *, filter_hint: str, read_tool: str = "read_file"
+) -> str:
     """Bound a file read to the shared char cap (read at call time via
     `_read_char_cap()`). Under the cap → verbatim (the common case: every
     SKILL/lesson/doc fits with room to spare). Over it → the head, plus a notice
@@ -97,13 +108,17 @@ def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
     big, spelled in the caller's own bash lane (`_overflow_filter_hint`). No paging —
     the files that overflow are single-document JSON dumps (one giant line), so an
     offset/limit window is a no-op. Slices by char, not byte, so a multibyte
-    sequence is never split."""
+    sequence is never split.
+
+    The notice is tagged with `read_tool` — the tool that actually produced this view — so
+    it agrees with the tool named in `filter_hint` (`lesson_read` for a curator, `read_file`
+    for every other reader) instead of both claiming a `read_file` the caller may not have."""
     cap = _read_char_cap()
     if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
     note = (
-        f"\n\n[read_file] {len(text)} chars / {total_lines} line(s); showing the "
+        f"\n\n[{read_tool}] {len(text)} chars / {total_lines} line(s); showing the "
         f"first {cap}. This file is too large to read whole — do not "
         f"treat this head as complete. {filter_hint}"
     )
@@ -212,13 +227,21 @@ class GatherDeps(AgentDeps):
     query_id: str | None = None
 
 
-def _record_lesson_load(deps: AgentDeps, path: Path) -> None:
-    """Append a `lessons_loaded.jsonl` row when a runtime lesson is read into
-    context — the in-process equivalent of the `record_lesson_load` PostToolUse
-    hook (reusing its `lesson_name` matcher), feeding learning/trace_lesson.py's
-    lesson→outcome surface. Records loads into context, not demonstrable influence
-    (same caveat as the hook). Best-effort — never breaks a read."""
-    name = _lesson_name(str(path))
+def _record_lesson_load(
+    deps: AgentDeps, path: Path, corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
+) -> None:
+    """Append a `lessons_loaded.jsonl` row when a lesson from one of `corpora` is read into
+    context — the in-process equivalent of the `record_lesson_load` PostToolUse hook (reusing
+    its `lesson_name` matcher), feeding learning/trace_lesson.py's lesson→outcome surface.
+    Records loads into context, not demonstrable influence (same caveat as the hook).
+    Best-effort — never breaks a read.
+
+    `corpora` defaults to the RUNTIME corpus (`defender/lessons/`) alone. Only the curator's
+    `lesson_read` widens it to all three (#559 F3): every other reader's `run_dir` IS its
+    durable per-case bundle, so an author-corpus row written there would masquerade as a
+    defender lesson load in `trace_lesson` — the gray-box actor reads `lessons-actor/`
+    tradecraft on every run."""
+    name = _lesson_name(str(path), corpora)
     if name is None:
         return
     try:
@@ -307,13 +330,16 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.defender_dir.parent / p
 
 
-def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
-    """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
-    untrusted-wrap. The gate runs FIRST, before any existence check, so a denied
-    read raises the policy denial for an existing and an absent path alike — no
-    existence oracle. An optional `pattern` folds grep into the read (return only
-    the matching lines): search never widens the read surface — the confine gates
-    the PATH before any scan — so a `pattern` over a denied path still raises."""
+def _gated_read(
+    deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
+) -> tuple[Path, str]:
+    """The shared front half of every read tool (`read_file`, the curator's `lesson_read`):
+    resolve → gate → existence → read → lesson-load trace. The gate runs FIRST, before any
+    existence check, so a denied read raises the policy denial for an existing and an absent
+    path alike — no existence oracle. `_record_lesson_load` fires once, here, for whichever
+    tool did the read — over `lesson_corpora`, the runtime corpus by default and all three only
+    for the curator's `lesson_read`. Returns the resolved path (for the trust check) and the
+    raw text."""
     p = _resolve_operand(deps, path)
     decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
@@ -324,20 +350,47 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
     text = p.read_text()
-    _record_lesson_load(deps, p)  # lesson→outcome traceability (best-effort)
-    if pattern is not None:
-        # grep fold: only the matching lines reach the model (the read-only bash
-        # grep viewer a confined agent no longer has). No-match → '' (not an error).
-        text = _grep_lines(text, pattern)
-    # Bound the in-context view BEFORE wrapping: an oversized payload read
-    # whole would overflow the model's window (#303). Cap first so the head is
-    # what gets tag-wrapped (injected text in it stays inert), not the full dump.
-    text = _bounded_read(text, path, filter_hint=_overflow_filter_hint(path, deps.policy))
+    _record_lesson_load(deps, p, lesson_corpora)  # lesson→outcome traceability (best-effort)
+    return p, text
+
+
+def _bound_and_wrap(
+    deps: AgentDeps, p: Path, path: str, text: str, *, read_tool: str
+) -> str:
+    """The shared back half of every read tool: bound the in-context view to the char cap,
+    then salt-wrap it iff the source is attacker-influenced. Bound BEFORE wrapping — an
+    oversized payload read whole would overflow the model's window (#303), and capping first
+    means the head is what gets tag-wrapped (injected text in it stays inert), not the full
+    dump. A trusted read (`is_untrusted_read` False — every lesson, a SKILL, a doc) skips the
+    wrap and returns the (bounded) text raw.
+
+    `read_tool` is REQUIRED (no default): it is the name the overflow notice + hint tell the
+    model to call, so an agent whose read tool is not `read_file` (the curators' `lesson_read`,
+    #559) must state it rather than inherit a constant that would teach it a dead tool."""
+    text = _bounded_read(
+        text, path,
+        filter_hint=_overflow_filter_hint(path, deps.policy, read_tool),
+        read_tool=read_tool,
+    )
     if permission.is_untrusted_read(p):
         # Attacker-influenced data — wrap so injected instructions inside it
         # are inert. Same delimiter as the rest of the system.
         return _wrap(text, "untrusted", deps.salt)
     return text
+
+
+def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
+    """Logic for the `read_file` tool: permission → (optional grep fold) → bound →
+    untrusted-wrap, over the shared `_gated_read`/`_bound_and_wrap` core. An optional
+    `pattern` folds grep into the read (return only the matching lines): search never widens
+    the read surface — `_gated_read` gates the PATH before any scan — so a `pattern` over a
+    denied path still raises."""
+    p, text = _gated_read(deps, path)
+    if pattern is not None:
+        # grep fold: only the matching lines reach the model (the read-only bash
+        # grep viewer a confined agent no longer has). No-match → '' (not an error).
+        text = _grep_lines(text, pattern)
+    return _bound_and_wrap(deps, p, path, text, read_tool="read_file")
 
 
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
@@ -419,8 +472,8 @@ def register_tools(agent, tools: ToolSet) -> None:
     pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
-    edit_file, forward_check` — independent of the `ToolSet` field order, so the pinned tool
-    ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
+    edit_file, forward_check, lesson_read` — independent of the `ToolSet` field order, so the
+    pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
     (a `BashGrammar()` with no programs still REGISTERS the tool — the gate then denies
     every command); the file writers are the `tools.write` opt-in (MAIN only)."""
 
@@ -466,6 +519,15 @@ def register_tools(agent, tools: ToolSet) -> None:
         from defender.learning.author.verify_forward.tool import register_forward_check_tool
 
         register_forward_check_tool(agent)
+
+    if tools.lesson_read:
+        # Same deferred-import shape as `forward_check`: the curator's read tool lives in the
+        # author package (it pulls `_frontmatter` for the body/full split) and reuses THIS
+        # module's read core, so importing it at module top would close a cycle. Registration
+        # runs at agent-build time, long after both modules load, so the cycle never closes.
+        from defender.learning.author.lesson_read import register_lesson_read_tool
+
+        register_lesson_read_tool(agent)
 
 
 # --- gather dispatch & in-process adapter capture ----------------------------

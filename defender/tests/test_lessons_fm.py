@@ -122,3 +122,28 @@ def test_bad_regex_exits_2(corpus, capsys):
 def test_unknown_dimension_exits_2(corpus, capsys):
     mod = _load(corpus)
     assert mod.main(["prog", "--tags", "nonsense"]) == 2
+
+
+# --- iter_lessons: the shared corpus iterator behind all three lesson CLIs ---
+
+
+def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
+    """``iter_lessons`` promises to warn-and-skip a malformed lesson so one bad file never takes
+    the caller down. That has to cover the READ, not just the PARSE: ``read_text()`` raises
+    ``UnicodeDecodeError`` on undecodable bytes, and it is a ``ValueError`` — NOT an ``OSError`` —
+    so a guard around the parse alone lets it escape. Live blast radius: the gray-box actor runs
+    ``lessons_actor_index`` / ``lessons_env_retrieve`` on its bash lane mid-run."""
+    from defender.scripts.lessons._lessons_common import iter_lessons
+
+    corpus = tmp_path / "lessons"
+    corpus.mkdir()
+    (corpus / "good.md").write_text("---\nname: good\n---\nbody\n")
+    (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe not utf-8\n")
+    (corpus / "unfenced.md").write_text("no fence at all\n")  # the parse-side control
+
+    yielded = [p.stem for p, _fm in iter_lessons(corpus)]  # must not raise
+
+    assert yielded == ["good"]  # the well-formed sibling survives both bad files
+    err = capsys.readouterr().err
+    assert "corrupt" in err  # the undecodable one was warn-skipped …
+    assert "unfenced" in err  # … alongside the unparseable one
