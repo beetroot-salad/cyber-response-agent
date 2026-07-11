@@ -19,7 +19,13 @@ export function headlessPrompt(run: Pick<RunRow, "stage">, card: Pick<CardState,
     case "write_code":
       return `Run the write-code-from-spec skill for ${at}: implement the code against the committed test spec, ship a PR, and watch CI until it is green.`;
     case "review":
-      return `Run /code-review --fix for ${at}: apply the safe fixes inline, file the rest as follow-up issues, and re-green the PR if you pushed any commit.`;
+      return [
+        `Run /code-review --fix for ${at}.`,
+        `Apply every fix you're confident in directly — don't hold back to only the trivial ones — then re-green the PR (push commits, get CI green before finishing).`,
+        `Look past the diff: a smell or bug in the code this change touches or depends on counts even when it isn't in the changed lines.`,
+        `Read the prior review trail for this work — the follow-up issues already filed and earlier review comments on the PR — and reconcile what was skipped before: do the cheap cleanups that were deferred, fix-or-file bugs in related (out-of-diff) code, and leave only genuine design choices for a human.`,
+        `File a follow-up issue for anything you surface but don't fix inline — name the finding and where it lives.`,
+      ].join(" ");
     default:
       return `Run the ${run.stage} skill for ${at}.`;
   }

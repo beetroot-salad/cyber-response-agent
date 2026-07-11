@@ -11,7 +11,7 @@
 >   sweep — still bound against the fake (§9.4).
 > - **Slice #2b** *(this firm-up)* — the **runnable surface**: the real `Effects` as subprocesses
 >   (`git worktree` / `claude -p` / `gh` / the session host), the on-disk `bun:sqlite` migration,
->   the `Bun.serve` + Hono `/rpc` server + read model, the board wired to live data, and the
+>   the `Bun.serve` + hand-rolled `{fetch}` `/rpc` server + read model, the board wired to live data, and the
 >   `main` boot sequence. Spec'd in **§9.7.1 (effects), §9.8 (boot + layout), §9.9 (config),
 >   §10 (test surface)**.
 >
@@ -69,7 +69,7 @@ loop can pid-track, kill, and reap (§6.4).
 | Concern | Choice | Notes |
 |---|---|---|
 | Runtime | **Bun** | one runtime for server + build + tests; no Node, no native addons |
-| App / serving | **`Bun.serve` + Hono**, board bundled by **`bun build`** | one process serves `/rpc` + the static board (§9.1); no Next / Vite |
+| App / serving | **`Bun.serve` + a hand-rolled `{fetch}` app** (zero-dep, drop-in swappable for Hono); board served as a single static file | one process serves `/rpc` + the static board (§9.1); no Next / Vite, no `bun build` step in V1 |
 | Engine — headless stages | **`claude -p` subprocess** (write_tests / write_code / review) | injected spawn → real OS pid; `--session-id <uuid>` assigned up front; **not** the Agent SDK (no dep) |
 | Engine — interactive discuss | **configurable session host** (default VS Code; **`Bun.Terminal`** backs the built-in `embedded-pty`) | injected launcher `exec`s a per-host command; the board owns the pty only for `embedded-pty` |
 | Data | **`bun:sqlite`** (built-in, synchronous), WAL, on-disk in the run dir | open `{ strict: true }` for bare-key named binding; raw SQL, no Drizzle |
@@ -663,8 +663,10 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
    that can carry `--session-id` get the id we generate up front (§2 capture); a bare terminal
    that can't falls back to the newest `~/.claude` file. *(Verify `--session-id` on the
    installed CLI when wiring the real effect.)*
-4. **Resolved — app shell = Bun.** `Bun.serve` + Hono serve `/rpc` + the `bun build` board
-   bundle in one process (§2, §9.1); Next.js / Vite dropped. *(was: Next.js vs. Hono+Vite.)*
+4. **Resolved — app shell = Bun, server hand-rolled.** `Bun.serve` + a hand-rolled `{fetch}`
+   app serve `/rpc` + the board as a single static file in one process (§2, §9.1); Next.js /
+   Vite dropped, and Hono itself dropped for a zero-dep `{fetch}` handler (drop-in swappable
+   for Hono if the surface grows). *(was: Next.js vs. Hono+Vite.)*
 5. **Resolved — the `discuss → write_tests` boundary.** Two independent choices, both
    settled: (1) **discussion-done is a manual "Done — proceed" click** (§2, §6.3), never
    inferred from session exit, an LLM judgement, or a design-doc mtime — inferring it would
@@ -679,19 +681,34 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
    dropped. *(was "resolved — auto-advance on clean exit"; retracted, then re-resolved.)*
 6. **Resolved — `review` + `follow_ups`:** one run — `review` applies fixes *and* files
    follow-up issues; the separate `follow_ups` stage is removed. *(was: two chained runs vs. one)*
-7. **`review` fix policy:** apply the safe fixes inline (default, §3.3) or findings-only?
-   And when review pushes fixes: **re-green the PR inside the run** (default — keeps the
-   merge gate honest) or let the merge/CI catch red later?
-8. **Merge-gate approve (`review / awaiting_human`):** auto-merge the PR, or mark done and
-   leave the merge to you?
-9. **Intake filter:** which issues become cards — all, or only those with a tracking
-   label (e.g. `flow`)?
+7. **Resolved — `review` = `--fix`, applied inline + re-green in-run.** The run applies every
+   fix it's confident in directly — not just the trivial ones (the conservative "safe fixes
+   only" framing was too timid) — and re-greens the PR inside the run (keeps the merge gate
+   honest, §3.3). Anything it surfaces but doesn't fix inline — including smells in related code
+   *outside the diff* — is filed as a follow-up issue. The run also reconciles against the
+   **prior review trail** (already-filed follow-ups + earlier PR review comments, read via `gh`
+   — cold-start-safe, §7.5): it does the cheap cleanups it previously deferred, fixes-or-files
+   bugs in related (out-of-diff) code, and leaves only genuine design choices for a human.
+   *(was: inline vs findings-only; re-green vs let-CI-catch.)*
+8. **Resolved — merge-gate approve marks `done`; the human merges.** No auto-merge (the
+   conservative default); auto-merge stays a deferred follow-up (§9.9). *(was: auto-merge vs
+   mark-done.)*
+9. **Resolved — only tracking-labelled issues.** Intake takes only issues carrying the `flow`
+   label (`cfg.label`); the same label is stamped on issues created from the board. *(was: all
+   issues vs labelled-only.)*
 10. **Poll vs. webhooks** for intake/drift. Default: **poll** (`gh` on a timer) → a
     fully local service with no inbound endpoint. Webhooks are an optional latency
     optimization if the poll interval ever feels sluggish.
-11. **`write-code` repair-loop bound:** cap by max attempts, or a time/cost budget?
-12. **Interactive `discuss` lane:** bypass the concurrency-capped worker queue (default,
-    so the terminal opens immediately) or share it?
+11. **Resolved — uncapped; human-cancel is the bound.** This is a developer's tool, not a
+    software factory, so the orchestrator imposes no max-attempts / time / cost ceiling on the
+    repair loop — the run ends when the `claude -p` subprocess exits, and the developer cancels
+    from the board (which fires `kill`, §6.4) if a long session thrashes. *(was: max-attempts
+    vs time/cost budget.)*
+12. **Resolved — `discuss` bypasses the pool; the lanes stay separate.** Interactive `discuss`
+    and the headless worker pool are distinct resource classes (human-paced + long-lived vs.
+    autonomous + bursty), so they get separate accounting: `discuss` opens immediately, never
+    consumes a `pool` slot, and never starves headless throughput. The human initiating each
+    session is the throttle on the interactive side. *(was: bypass vs share the pool.)*
 
 ---
 
@@ -709,8 +726,8 @@ One branch + one worktree per card (`card.worktree_path`; branch e.g. `flow/issu
 
 ## 9. Service API & data flows
 
-The service is **one Bun process**: it serves the board's static bundle (`bun build`),
-exposes a single command endpoint for the browser (`Bun.serve` + Hono), and runs the worker
+The service is **one Bun process**: it serves the board as a single static file,
+exposes a single command endpoint for the browser (`Bun.serve` + a hand-rolled `{fetch}` app), and runs the worker
 + poll loops in-process. Everything except the browser hop is a plain function call — the
 core (transition fn, SQLite via `bun:sqlite`, effect layer, worker, poller) never talks to
 itself over a wire.
@@ -732,9 +749,10 @@ Endpoint *count* is cosmetic — `/rpc` multiplexes every operation, exactly as 
 server actions do under the hood. Whether it's hand-rolled JSON, tRPC, or server actions is
 **decision #4** (the app-shell choice); the *shape* is fixed either way.
 
-**2b resolves the shape: Hono + hand-rolled JSON `/rpc`, board served as a single static file.**
-`Bun.serve({ fetch: app.fetch })` mounts one Hono app; `POST /rpc` reads `{op, args}`, dispatches
-to an in-process handler, and returns JSON; `GET /*` serves the board. The board is **one
+**2b resolves the shape: a hand-rolled JSON `/rpc`, board served as a single static file.**
+`Bun.serve({ fetch: app.fetch })` mounts one hand-rolled `{fetch}` app — Hono was dropped for a
+zero-dep handler, but the `{fetch}` shape is drop-in swappable for it; `POST /rpc` reads `{op,
+args}`, dispatches to an in-process handler, and returns JSON; `GET /*` serves the board. The board is **one
 hand-authored file** (`src/board/index.html` — the wired-up `mockups/board.html`), returned as a
 static asset — no `bun build` step in V1 (the board is vanilla JS with no imports, so there is
 nothing to bundle; `bun build` stays available for when the board grows modules). SSE `/events`
@@ -1036,7 +1054,7 @@ new engine logic.
 |---|---|
 | `db.ts` | `openDb(runRoot)` — open + `PRAGMA` + migrate `SCHEMA_SQL` if `user_version` is 0 (promotes test-support `schema.ts` to a real migration) |
 | `effects/git.ts` · `claude.ts` · `gh.ts` · `session_host.ts` · `reap.ts` | the §9.7.1 builders + shells; `effects/index.ts` composes them into one `Effects` |
-| `server.ts` | `makeApp(db, fx, cfg)` — the Hono app: `POST /rpc` router (§9.2 table) + `GET /*` static board; `readBoard`/`readCard` (§9.3) live here |
+| `server.ts` | `makeApp(db, fx, cfg, health)` — the hand-rolled `{fetch}` app: `POST /rpc` router (§9.2 table) + `GET /*` static board; `readBoard`/`readCard` (§9.3) live here |
 | `config.ts` | `Config` type + `loadConfig()` (TOML/env → object); config is injected everywhere, never re-read in the hot path |
 | `board/index.html` | the wired-up `mockups/board.html` (fetches `/rpc`, §10-UI) |
 | `main.ts` | `boot(loadConfig())` — the entrypoint |
