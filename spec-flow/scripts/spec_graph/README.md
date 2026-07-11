@@ -13,8 +13,12 @@ graph alone and wants property-based / differential-oracle testing at impl time 
 
 Both read the project profile (`.claude/spec-flow.json`, key `specGraph`) for the things that are
 not portable — where the project's source lives, which stems are entrypoints, what the graph calls
-each actor. See `_config.py`. Run them with an interpreter that has PyYAML (`specGraph.python`;
-`uv run --with pyyaml python` works anywhere `uv` does).
+each actor. See `_config.py`.
+
+**Invoke them through `spec-graph`**, the wrapper in the plugin's `bin/` (which Claude Code puts on
+the Bash PATH). It resolves the scripts from its own location and discovers an interpreter with
+PyYAML, so nothing has to know where the plugin is installed — `$CLAUDE_PLUGIN_ROOT` does *not*
+expand inside SKILL.md prose, and a repo-relative venv path breaks inside a git worktree.
 
 ## check_binds.py — prose ⊄ binds (assertion-weakness / dropped-invariant class)
 
@@ -23,7 +27,7 @@ demand's prose but not wired into its `binds` is invisible to the rules, so the 
 silently drop the assertion.
 
 ```
-python "$CLAUDE_PLUGIN_ROOT"/scripts/spec_graph/check_binds.py [graph.yaml ...] [--config <path>]
+spec-graph binds [graph.yaml ...] [--config <path>]
 ```
 
 Flags each `<concept>=<threaded-value>` in a demand's prose where the concept is modelled elsewhere
@@ -40,7 +44,7 @@ execution contexts nobody wrote down — especially **subprocess re-execs**, whe
 "constant" (the anchor path a guard trusts) silently relocates onto a different tree.
 
 ```
-python "$CLAUDE_PLUGIN_ROOT"/scripts/spec_graph/check_actors.py [graph.yaml] [--base <ref>] [--config <path>]
+spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
 ```
 
 Derives — from the CODE, not the design — every CLI/harness/eval entrypoint that drives a changed

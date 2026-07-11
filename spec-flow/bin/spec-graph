@@ -1,0 +1,55 @@
+#!/bin/sh
+# spec-graph — the mechanical half of the write-tests gate, as one bare command.
+#
+# Two things this wrapper exists to hide, both learned the hard way:
+#
+#   * `$CLAUDE_PLUGIN_ROOT` does NOT expand inside SKILL.md prose and is NOT exported into
+#     the Bash tool's environment — a skill that spells the checks as
+#     `"$CLAUDE_PLUGIN_ROOT"/scripts/...` sends the agent hunting for a path it cannot
+#     resolve. A plugin's bin/ *is* on the Bash PATH, so the skill just says `spec-graph`,
+#     and the wrapper finds its own plugin root from $0.
+#
+#   * The interpreter needs PyYAML, and a repo-relative venv path (`x/.venv/bin/python`) does
+#     not exist inside a git worktree — which is exactly where write-tests mandates the work
+#     happen. So the interpreter is discovered, not configured.
+#
+# Usage:  spec-graph binds  [graph.yaml ...]            [--config <path>]
+#         spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
+#
+# Override the interpreter with SPEC_GRAPH_PYTHON=<path> if discovery picks wrong.
+
+set -eu
+
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+scripts=$(cd "$(dirname "$self")/../scripts/spec_graph" && pwd)
+
+case "${1:-}" in
+  binds) script=$scripts/check_binds.py ;;
+  actors) script=$scripts/check_actors.py ;;
+  *)
+    echo "usage: spec-graph {binds|actors} [graph.yaml ...] [--base <ref>] [--config <path>]" >&2
+    exit 2
+    ;;
+esac
+shift
+
+has_yaml() { command -v "$1" >/dev/null 2>&1 && "$1" -c "import yaml" >/dev/null 2>&1; }
+
+if [ -n "${SPEC_GRAPH_PYTHON:-}" ]; then
+  exec "$SPEC_GRAPH_PYTHON" "$script" "$@"
+elif has_yaml python3; then
+  exec python3 "$script" "$@"
+elif command -v uv >/dev/null 2>&1; then
+  exec uv run --quiet --with pyyaml python "$script" "$@"
+else
+  echo "spec-graph: no interpreter with PyYAML found." >&2
+  echo "  install uv, or run: SPEC_GRAPH_PYTHON=/path/to/python spec-graph ..." >&2
+  exit 1
+fi

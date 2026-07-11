@@ -77,8 +77,8 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
   and the traps that make a green local run a lie.
 - `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
   to enter the code (what the project's CI forbids).
-- `specGraph` — read as data by the two checkers: the project's source roots, entrypoint stems,
-  actor/concept aliases, and an interpreter with PyYAML.
+- `specGraph` — read as data by the two checkers: the project's source roots, entrypoint stems, and
+  actor/concept aliases.
 - `conventions` — the default branch, and the **danger lens**: what kind of hostile reality this
   system faces, which `write-tests` spends one of four enumeration lenses on.
 
@@ -103,4 +103,6 @@ thing driving it can stay dumb.
 
 ## Requirements
 
-`git`, the `gh` CLI (authenticated), and — for the spec_graph checks — a Python with PyYAML.
+`git` and the `gh` CLI (authenticated). The spec_graph checks need a Python with PyYAML; the
+bundled `spec-graph` command finds one (or falls back to `uv run --with pyyaml python`), so there is
+nothing to configure.
