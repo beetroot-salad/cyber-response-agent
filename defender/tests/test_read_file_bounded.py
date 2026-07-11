@@ -108,14 +108,32 @@ def test_overflow_hint_judge_pipes_into_defender_sql(tmp_path) -> None:
     assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_reader_less_agent_points_at_read_file() -> None:
-    """The actor / oracle / verify / curators have an EMPTY bash lane: both `jq` and
-    `defender-sql` name programs they cannot run, so the only reducer left is the read
-    tool's own substring search."""
+def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:
+    """The actor / oracle / verify / curators have no bash reducer: both `jq` and
+    `defender-sql` name programs they cannot run, so the only reduction left is their read
+    tool's own `pattern=` substring fold. The hint names the DEFAULT read tool here."""
     hint = tools._overflow_filter_hint(_PATH, AgentPolicy())
     assert "jq" not in hint
     assert "defender-sql" not in hint
     assert "pattern=" in hint
+    assert "read_file(" in hint  # the default reader's tool
+
+
+def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
+    """The rule that bans a hint naming a dead PROGRAM bans one naming a dead TOOL. The
+    curators traded `read_file` for the scoped `lesson_read` (#559) AND have no bash reducer,
+    so they are exactly the agent that lands on this branch — a hardcoded `read_file` would
+    hand them an instruction they cannot execute. The tool name comes from the caller, and the
+    overflow notice tag agrees with it."""
+    hint = tools._overflow_filter_hint(_PATH, AgentPolicy(), "lesson_read")
+    assert "lesson_read(" in hint  # the curator's ACTUAL read tool …
+    assert "read_file(" not in hint  # … not the one it no longer has
+    assert "pattern=" in hint  # …with the substring fold it does have
+    over = tools._bounded_read(
+        "x" * (tools._read_char_cap() + 10), _PATH, filter_hint=hint, read_tool="lesson_read",
+    )
+    assert "[lesson_read]" in over  # the notice tag agrees with the hint
+    assert "[read_file]" not in over
 
 
 def test_overflow_hint_never_advertises_jq_over_a_file_operand(tmp_path) -> None:

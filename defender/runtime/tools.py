@@ -62,7 +62,9 @@ def _lane_admits(policy: permission.AgentPolicy, probe: str) -> bool:
     return any(p.fullmatch(probe) for p in policy.bash_allow)
 
 
-def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
+def _overflow_filter_hint(
+    path: str, policy: permission.AgentPolicy, read_tool: str = "read_file"
+) -> str:
     """The "this file is too big — here's how to reduce it" advice, derived from the
     agent's ACTUAL bash lane. A hint naming a program the agent cannot run, or a step it
     cannot take, is worse than no hint — and every part of it here is load-bearing:
@@ -75,7 +77,11 @@ def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
       - the write-the-result-to-a-file step ONLY for an agent with a writer: gather has
         `jq` but no write tool, so it reads the filtered text straight back;
       - a lane with neither reducer (actor / oracle / verify / curators) gets pointed at
-        `read_file(pattern=)`, the only reduction it actually has.
+        its read tool's `pattern=` substring fold, the only reduction it actually has —
+        and named by `read_tool`, NOT a hardcoded `read_file`. The same rule that bans a
+        dead PROGRAM bans a dead TOOL: the curators traded `read_file` for the scoped
+        `lesson_read` (#559), so a constant here would hand the one agent that reaches
+        this branch with a writer an instruction it cannot execute.
     """
     sql_shim = permission.command_shape.SQL_SHIM
     if _lane_admits(policy, "jq '.'"):
@@ -85,13 +91,15 @@ def _overflow_filter_hint(path: str, policy: permission.AgentPolicy) -> str:
     else:
         return (
             "You have no bash reducer for this. Narrow it with the read tool's substring "
-            f"search instead:\n  read_file({path!r}, pattern='<substring>')"
+            f"search instead:\n  {read_tool}({path!r}, pattern='<substring>')"
         )
     sink = ", write the result to a file, then read that" if policy.write_allow else ""
     return f"Reduce it in a pipe{sink}:\n  cat {path} | {reducer}"
 
 
-def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
+def _bounded_read(
+    text: str, path: str, *, filter_hint: str, read_tool: str = "read_file"
+) -> str:
     """Bound a file read to the shared char cap (read at call time via
     `_read_char_cap()`). Under the cap → verbatim (the common case: every
     SKILL/lesson/doc fits with room to spare). Over it → the head, plus a notice
@@ -100,13 +108,17 @@ def _bounded_read(text: str, path: str, *, filter_hint: str) -> str:
     big, spelled in the caller's own bash lane (`_overflow_filter_hint`). No paging —
     the files that overflow are single-document JSON dumps (one giant line), so an
     offset/limit window is a no-op. Slices by char, not byte, so a multibyte
-    sequence is never split."""
+    sequence is never split.
+
+    The notice is tagged with `read_tool` — the tool that actually produced this view — so
+    it agrees with the tool named in `filter_hint` (`lesson_read` for a curator, `read_file`
+    for every other reader) instead of both claiming a `read_file` the caller may not have."""
     cap = _read_char_cap()
     if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
     note = (
-        f"\n\n[read_file] {len(text)} chars / {total_lines} line(s); showing the "
+        f"\n\n[{read_tool}] {len(text)} chars / {total_lines} line(s); showing the "
         f"first {cap}. This file is too large to read whole — do not "
         f"treat this head as complete. {filter_hint}"
     )
@@ -342,14 +354,24 @@ def _gated_read(
     return p, text
 
 
-def _bound_and_wrap(deps: AgentDeps, p: Path, path: str, text: str) -> str:
+def _bound_and_wrap(
+    deps: AgentDeps, p: Path, path: str, text: str, *, read_tool: str
+) -> str:
     """The shared back half of every read tool: bound the in-context view to the char cap,
     then salt-wrap it iff the source is attacker-influenced. Bound BEFORE wrapping — an
     oversized payload read whole would overflow the model's window (#303), and capping first
     means the head is what gets tag-wrapped (injected text in it stays inert), not the full
     dump. A trusted read (`is_untrusted_read` False — every lesson, a SKILL, a doc) skips the
-    wrap and returns the (bounded) text raw."""
-    text = _bounded_read(text, path, filter_hint=_overflow_filter_hint(path, deps.policy))
+    wrap and returns the (bounded) text raw.
+
+    `read_tool` is REQUIRED (no default): it is the name the overflow notice + hint tell the
+    model to call, so an agent whose read tool is not `read_file` (the curators' `lesson_read`,
+    #559) must state it rather than inherit a constant that would teach it a dead tool."""
+    text = _bounded_read(
+        text, path,
+        filter_hint=_overflow_filter_hint(path, deps.policy, read_tool),
+        read_tool=read_tool,
+    )
     if permission.is_untrusted_read(p):
         # Attacker-influenced data — wrap so injected instructions inside it
         # are inert. Same delimiter as the rest of the system.
@@ -368,7 +390,7 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
         # grep fold: only the matching lines reach the model (the read-only bash
         # grep viewer a confined agent no longer has). No-match → '' (not an error).
         text = _grep_lines(text, pattern)
-    return _bound_and_wrap(deps, p, path, text)
+    return _bound_and_wrap(deps, p, path, text, read_tool="read_file")
 
 
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:

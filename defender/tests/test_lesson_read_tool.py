@@ -293,7 +293,12 @@ def test_l9_template_schema_read_via_full(tmp_path):
 
 def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
     """demand: L10 — an oversized lesson is truncated to the shared ``_read_char_cap`` with the same
-    overflow notice as ``_tool_read_file`` (one core; ``part`` is its only added seam)."""
+    overflow notice as ``_tool_read_file`` (one core; ``part`` is its only added seam).
+
+    The notice and its filter hint name ``lesson_read``, not ``read_file``: the curator has no bash
+    reducer (no ``jq``, no ``defender-sql``), so it is precisely the agent that lands on the hint's
+    read-tool branch — and ``read=True`` was dropped, so a hardcoded ``read_file`` would tell the
+    one agent that reads this hint to call a tool it does not have."""
     scene = _scene(tmp_path)
     cap = _rt_tools._read_char_cap()
     (scene.corpus / "big.md").write_text("---\nname: big\n---\n" + "X" * (cap + 5000) + "\n")
@@ -303,8 +308,11 @@ def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
     finally:
         logger.close()
     assert len(out) < cap + 5000  # truncated
-    assert "[read_file]" in out  # the shared bounded-read notice
+    assert "[lesson_read]" in out  # the shared bounded-read notice, tagged with THIS tool
     assert "too large" in out
+    assert "lesson_read(" in out  # the hint names the tool the curator HAS …
+    assert "pattern=" in out  # … with the substring fold it does have …
+    assert "read_file(" not in out  # … and not the one #559 took away
 
 
 def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):

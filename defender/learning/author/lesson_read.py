@@ -60,7 +60,10 @@ def _tool_lesson_read(
     text = _select_part(text, part)
     if pattern is not None:
         text = _grep_lines(text, pattern)
-    return _bound_and_wrap(deps, p, path, text)
+    # `read_tool="lesson_read"`: the curator dropped `read_file`, and its bash lane admits
+    # neither `jq` nor `defender-sql`, so it is precisely the agent that lands on the
+    # overflow hint's read-tool branch. The hint has to name the tool it actually has.
+    return _bound_and_wrap(deps, p, path, text, read_tool="lesson_read")
 
 
 def register_lesson_read_tool(agent) -> None:
