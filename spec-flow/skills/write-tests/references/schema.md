@@ -58,6 +58,20 @@ drives(<actor>-><actor>)                  # a drive edge
 
 An address that resolves to nothing in structure ∪ delta is an R0 finding, not an error to silently fix.
 
+### Coin ids from the code's name
+
+An id is a *stable slug*, but it is not a free one: **name the element what the code names it.** The address forms above are already code addresses — `compile_policy`, `resolve_roots`, `read_surface.access[bash-cat]` are literal symbols — and the mechanical checks join the graph to the code **by name**.
+
+A private synonym does not cost you a config entry; it costs you the check, silently. `check_binds` treats a concept as *modelled* iff some demand binds it, so if the graph calls the anchor tree `anchor_tree` while the code threads it as `anchor_dir=`, then every `anchor_dir=` in a demand's prose maps to a concept nothing binds — and the check **skips it**. The under-binding it exists to catch becomes invisible. (Learned the hard way: one graph coined `defender_tree` while four others and ~54 call sites said `defender_dir`, and the gap was papered over with an alias that quietly disabled the check for that concept.)
+
+Alias (`specGraph.conceptAliases` / `contextAliases` in the project profile) **only** where alignment is genuinely impossible:
+
+- **many-to-one** — one concept the code legitimately spells differently per call site (`anchor_dir=` here, `root=` there);
+- **a name you don't own** — a third-party parameter you cannot rename into your vocabulary;
+- **actor id vs file stem** — the graph names actors semantically (`run_investigation`) where the file is `run.py`; that is `contextAliases`, and it only ever *suppresses* a false alarm, so it is the safe direction.
+
+Everything else: rename the graph, not the config. This is the `axes:` registry's rule (below) applied to concept ids, for the same reason — two artifacts coining different names for one thing is the join-breaker.
+
 ## Structure layer
 
 ```

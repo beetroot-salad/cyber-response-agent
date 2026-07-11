@@ -1,0 +1,13 @@
+{
+  "name": "spec-flow-local",
+  "owner": {
+    "name": "beetroot-salad"
+  },
+  "plugins": [
+    {
+      "name": "spec-flow",
+      "source": "./spec-flow",
+      "description": "A spec-first issue-to-PR pipeline: discuss, write-tests, write-code-from-spec, review, ship."
+    }
+  ]
+}

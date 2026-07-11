@@ -1,0 +1,8 @@
+{
+  "name": "spec-flow",
+  "displayName": "spec-flow",
+  "version": "0.1.0",
+  "description": "A spec-first issue-to-PR pipeline: discuss an issue, turn the design into an executable spec (tests + a spec-coverage graph), write code until the spec is green, then review and ship. The tests are the spec, so 'green' means 'the code follows intent'.",
+  "keywords": ["tdd", "spec", "code-review", "github", "pipeline"],
+  "license": "MIT"
+}

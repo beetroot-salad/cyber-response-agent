@@ -13,14 +13,14 @@ base: e0993ae   # SHA the spec branch forked from — write-code-from-spec diffs
 # their durable behavior and pins the NEW behavior (write⊆read active, non-PATHS defender_dir threaded
 # into BOTH policy and deps, requires_confine as data). handoff.deviations records the reduced modes.
 
-# scripts/spec_graph/check_binds.py waivers — a demand whose prose threads a modelled concept
+# `spec-graph binds` waivers — a demand whose prose threads a modelled concept
 # it deliberately does NOT bind (the concept is covered by a sibling demand's node). Each entry
 # is a conscious triage, not a silent gap. (The gather salt orphan was NOT waived — it was a real
 # under-binding and is now bound on d3_gather_threads_not_restamps.)
 binds_waivers:
-  d1_lead_author_via_bind: [defender_tree]        # tree coverage via d3_bind_threads_defender_dir_into_deps_field
-  d6_writers_pass_roots: [defender_tree]          # tree coverage via d3_* ; this demand pins the write⊆read wiring
-  d7_lead_author_main_tree_unbuildable: [defender_tree]  # the PATHS-equal case is bound via requires_explicit_tree
+  d1_lead_author_via_bind: [defender_dir]        # tree coverage via d3_bind_threads_defender_dir_into_deps_field
+  d6_writers_pass_roots: [defender_dir]          # tree coverage via d3_* ; this demand pins the write⊆read wiring
+  d7_lead_author_main_tree_unbuildable: [defender_dir]  # the PATHS-equal case is bound via requires_explicit_tree
 
 demands:
   # ── Demand #0 — the return-value contract (resolve FIRST) ──────────────────
@@ -148,14 +148,14 @@ demands:
     form: test
     outcome: {nl: "resolve_roots takes defender_dir: Path = PATHS.defender_dir (no longer hardcodes it);
       ResolvedRoots.defender_dir is the passed value."}
-    binds: ["resolve_roots", "defender_tree"]
+    binds: ["resolve_roots", "defender_dir"]
   - id: d3_bind_threads_defender_dir_into_deps_field
     kind: parity
     form: test
     outcome: {nl: "bind(MAIN_DEF, run_dir, defender_dir=wt).defender_dir == wt (NOT PATHS) — bind
       threads defender_dir into BOTH resolve_roots (policy anchor) AND _for_run (deps field), so
       deps.defender_dir and the policy's read/bash/write anchors are ONE tree."}
-    binds: ["bind", "defender_tree", "read_surface.access[read-tool]"]
+    binds: ["bind", "defender_dir", "read_surface.access[read-tool]"]
   - id: d3_partial_thread_bricks_worktree_reads
     kind: negative
     form: test
@@ -163,26 +163,26 @@ demands:
       defender_dir=tree B (A!=B, the split) DENIES every corpus read on BOTH surfaces — the total
       functional brick the canonical-PATHS parity suite cannot exhibit; positive control: one tree
       admits the corpus read."}
-    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]", "defender_tree"]
+    binds: ["read_surface.access[read-tool]", "read_surface.access[bash-cat]", "defender_dir"]
   - id: d3_lead_author_worktree_anchor
     kind: behavior
     form: test
     outcome: {nl: "bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt/defender) yields deps.defender_dir ==
       wt/defender AND the policy's write_allow + read surface anchor on wt/defender, not
       PATHS.defender_dir."}
-    binds: ["bind", "defender_tree", "write_scope.domain.distinguished[lead_author]"]
+    binds: ["bind", "defender_dir", "write_scope.domain.distinguished[lead_author]"]
   - id: d3_main_gather_non_paths_defender_dir
     kind: domain-outcome
     form: test
     outcome: {nl: "bind(MAIN_DEF/GATHER_DEF, run_dir, defender_dir=<non-PATHS worktree>) anchors the
       policy's read/bash surface on the passed defender_dir, not PATHS."}
-    binds: ["defender_tree.domain.distinguished[non_paths]", "bind"]
+    binds: ["defender_dir.domain.distinguished[non_paths]", "bind"]
   - id: d3_paths_equal_behavior_preserving
     kind: domain-outcome
     form: test
     outcome: {nl: "positive control: with defender_dir == PATHS.defender_dir the compiled policy is
       identical to today's — the threading is behavior-preserving for every current caller."}
-    binds: ["defender_tree.domain.default", "bind"]
+    binds: ["defender_dir.domain.default", "bind"]
   - id: d3_main_driver_threads_param_into_bind
     kind: behavior
     form: test
@@ -195,7 +195,7 @@ demands:
     outcome: {nl: "the GATHER dispatch builds deps as bind(GATHER_DEF, deps.run_dir, salt=deps.salt,
       defender_dir=deps.defender_dir) and DROPS the replace(defender_dir=…) restamp — the policy
       anchors and the deps field are one tree (no restamp-only split)."}
-    binds: ["gather_dispatch", "read_surface.access[bash-cat]", "defender_tree", "salt.domain.distinguished[carried]"]
+    binds: ["gather_dispatch", "read_surface.access[bash-cat]", "defender_dir", "salt.domain.distinguished[carried]"]
   - id: d3_corpus_traversal_guard_survives
     kind: survival
     form: test
@@ -313,7 +313,7 @@ demands:
     outcome: {nl: "(D6 × the deps/policy split) the write⊆read guard admits <wt>/skills/x.md ONLY when
       deps.defender_dir is the worktree tree the write_allow anchors on; if deps=PATHS (the split) the
       legit lead-author write DENIES — the split is observable on WRITES, not only reads."}
-    binds: ["read_surface.access[write]", "defender_tree"]
+    binds: ["read_surface.access[write]", "defender_dir"]
 
   # ── R3 read↔bash filename + symlink parity ─────────────────────────────────
   - id: r3_read_bash_filename_parity
@@ -344,7 +344,7 @@ demands:
     outcome: {nl: "two different (run_dir, defender_dir) pairs bound through bind get DISTINCT resolved
       read_confine/anchors — one run's confine never appears in another's policy, and no corpus-only
       cache-key bleed across defender_dir values (the #497/#534 hazard)."}
-    binds: ["resolve_roots", "defender_tree"]
+    binds: ["resolve_roots", "defender_dir"]
 
   # ── R5 safe-by-construction judgment extension (FORK-bearing) ──────────────
   - id: r5_tools_write_write_shapes_agree
@@ -389,7 +389,7 @@ demands:
     binds: ["requires_confine.domain.default"]
 
 structure:
-  axes: [run_dir, defender_tree]
+  axes: [run_dir, defender_dir]
   actors:
     - {id: bind,             frame: composition, provenance: code}   # modified: +defender_dir thread, -role branches
     - {id: compile_policy,   frame: leg,         provenance: code}   # modified: +write_shapes
@@ -420,10 +420,10 @@ structure:
           falsy_valid: true          # empty write_shapes ⇒ empty write_allow (read-only stages)
           documented_alternatives: []
         identity:
-          key_axes: [run_dir, defender_tree]
+          key_axes: [run_dir, defender_dir]
           evidence: {nl: "MAIN write shape anchors roots.run_dir (no suffix); LEAD anchors roots.defender_dir/skills suffix .md — read off compile_policy + the def write_shapes"}
           sharing: unique-key
-    - id: defender_tree
+    - id: defender_dir
       provenance: design
       facets:
         domain:
@@ -435,7 +435,7 @@ structure:
           documented_alternatives:
             - {value: non_paths, crosses_validation: true}   # a worktree tree must stay valid through the gate
         identity:
-          key_axes: [defender_tree]
+          key_axes: [defender_dir]
           evidence: {nl: "two anchors — resolve_roots.defender_dir (policy) and _for_run defender_dir (deps) — must be the SAME tree; bind threads both"}
           sharing: unique-key
     - id: requires_confine
@@ -465,9 +465,9 @@ structure:
     - {id: _deps_class,        provenance: code, facets: {}}   # modify: LEAD_AUTHOR arm now live
   interacts:
     - {from: bind, to: read_surface, mode: invoke, via: api, provenance: design}
-    - {from: compile_policy, to: write_scope, mode: write, via: api, provenance: design, interpolates: [run_dir, defender_tree]}
-    - {from: resolve_roots, to: defender_tree, mode: read, via: api, provenance: design}
-    - {from: bind, to: defender_tree, mode: write, via: api, provenance: design, interpolates: [defender_tree]}  # both anchors
+    - {from: compile_policy, to: write_scope, mode: write, via: api, provenance: design, interpolates: [run_dir, defender_dir]}
+    - {from: resolve_roots, to: defender_dir, mode: read, via: api, provenance: design}
+    - {from: bind, to: defender_dir, mode: write, via: api, provenance: design, interpolates: [defender_dir]}  # both anchors
     - {from: tool_write_file, to: read_surface, mode: write, via: fs, provenance: design}
     - {from: tool_edit_file, to: read_surface, mode: write, via: fs, provenance: design}
     - {from: run_investigation, to: bind, mode: invoke, via: api, provenance: code}
@@ -484,16 +484,16 @@ gate:
   evaluated:
     - {rule: R0, fired: true}    # holes: requires_repo_root default unknown (H2); write co-constraint (H3); repo_root=main policy (H6); + reconciliation ran
     - {rule: R1, fired: false}   # no LLM/payload edge in this pure-function delta; policy is not a parts-payload
-    - {rule: R2, fired: true}    # write_scope + defender_tree identity: two anchors must agree; per-pair isolation
+    - {rule: R2, fired: true}    # write_scope + defender_dir identity: two anchors must agree; per-pair isolation
     - {rule: R3, fired: true}    # read_surface reached by 4 vias — the crown: write⊆read, read↔cat filename, symlink, tree-anchor parity
-    - {rule: R4, fired: true}    # defender_tree / requires_confine / write_scope / salt / requires_repo_root distinguished members
+    - {rule: R4, fired: true}    # defender_dir / requires_confine / write_scope / salt / requires_repo_root distinguished members
     - {rule: R5, fired: true}    # 3 factories + 2 constants removed; base _for_run conserved; 4 safe-by-construction extensions
   obligations:
     - {rule: R3, element: "read_surface.access[write]", witness: "write⊆read guard dormant today (writers pass no roots); wire + pin escape-denied/noop", discharged_by: d6_guard_denies_escape}
     - {rule: R3, element: "read_surface.access[read-tool] vs [bash-cat]", witness: "symlinked-base parity fixture the #545 suite lacked (all canonical)", discharged_by: r3_symlinked_base_admits}
-    - {rule: R3, element: "defender_tree", witness: "deps.defender_dir (via _for_run) and policy anchor (via resolve_roots) must be one tree — bind threads only resolve_roots per the design note", discharged_by: d3_bind_threads_defender_dir_into_deps_field}
-    - {rule: R2, element: "defender_tree.identity", witness: "the two tree anchors are a shared sink that must land on one value; a split bricks every worktree read/write", discharged_by: d3_partial_thread_bricks_worktree_reads}
-    - {rule: R4, element: "defender_tree.domain.distinguished[non_paths]", witness: "every #545 fixture is canonical PATHS; a non-PATHS tree is an untested column", discharged_by: d3_main_gather_non_paths_defender_dir}
+    - {rule: R3, element: "defender_dir", witness: "deps.defender_dir (via _for_run) and policy anchor (via resolve_roots) must be one tree — bind threads only resolve_roots per the design note", discharged_by: d3_bind_threads_defender_dir_into_deps_field}
+    - {rule: R2, element: "defender_dir.identity", witness: "the two tree anchors are a shared sink that must land on one value; a split bricks every worktree read/write", discharged_by: d3_partial_thread_bricks_worktree_reads}
+    - {rule: R4, element: "defender_dir.domain.distinguished[non_paths]", witness: "every #545 fixture is canonical PATHS; a non-PATHS tree is an untested column", discharged_by: d3_main_gather_non_paths_defender_dir}
     - {rule: R4, element: "requires_confine.domain.distinguished[true]", witness: "the fail-loud must survive the altitude change to a data bit", discharged_by: d4_actor_empty_confine_raises}
     - {rule: R4, element: "write_scope.domain.distinguished[lead_author]", witness: "the .md-suffixed skills shape vs MAIN's run-dir shape", discharged_by: d2_lead_author_write_shape_anchors_skills}
     - {rule: R5, element: "_lead_author_policy (removed)", witness: "the worktree write scope + rm grant must be reproduced by compile_policy via write_shapes", discharged_by: d1_lead_author_via_bind}

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """spec-graph check #1 — prose-token ⊄ binds (the F7 class).
 
-A write-tests spec graph (`defender/tests/spec_graph_*.yaml`) is a list of *demands*,
-each with a natural-language `outcome` and a `binds` list naming the graph elements it
-covers. The gate rules R0–R5 reason over `binds` (the edges), NOT the prose — so a value
-named in a demand's prose but not wired into its `binds` is INVISIBLE to the rules, and
-the realized test silently drops the assertion.
+A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a list of
+*demands*, each with a natural-language `outcome` and a `binds` list naming the graph
+elements it covers. The gate rules R0–R5 reason over `binds` (the edges), NOT the prose — so
+a value named in a demand's prose but not wired into its `binds` is INVISIBLE to the rules,
+and the realized test silently drops the assertion.
 
-This is exactly how the #551 gather salt-not-split invariant escaped: the demand
-`d3_gather_threads_not_restamps` names `salt=deps.salt` in its outcome yet binds only
-`defender_tree` — so nothing forced the test to assert the salt, and a refactor dropping
-it would fail the injection defence open with every test green.
+The canonical escape (the project this check was forged in): a demand whose outcome read
+"…threads `salt=deps.salt`…" bound only the anchor tree — so nothing forced the test to
+assert the salt, and a refactor that dropped it would have failed a prompt-injection defence
+OPEN with every test still green.
 
 THE CHECK (deterministic, no LLM): for each demand, find every `<concept>=<value>` kwarg
 in the prose where the value is a threaded name/attribute (not `None`/a literal). Map the
@@ -23,7 +23,9 @@ demand binds it. We only flag threading of a concept the graph already treats as
 an incidental mention of an unmodelled local never trips it.
 
 Usage:
-    python scripts/spec_graph/check_binds.py [spec_graph.yaml ...]
+    spec-graph binds [graph.yaml ...] [--config <path>]
+(the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself;
+`$CLAUDE_PLUGIN_ROOT` does NOT expand in SKILL.md prose, so never spell a path with it).
 Exit 1 if any orphan is found. Waive a deliberate incidental mention by binding the
 concept (preferred — then the test is forced to assert it) or by listing the demand id +
 concept under a top-level `binds_waivers:` map in the graph.
@@ -36,13 +38,10 @@ from pathlib import Path
 
 import yaml
 
-# Code kwarg name → graph concept name. The graph models the anchor tree as `defender_tree`
-# but the code threads it as the `defender_dir=` kwarg; without this the alias the check
-# would false-flag every `defender_dir=` as unbound.
-_ALIAS = {"defender_dir": "defender_tree"}
+import _config
 
 # A `<name>=<value>` kwarg whose RHS is a threaded name/attribute (deps.salt, wt,
-# <worktree>/defender) — NOT `None`, a bare literal, or a quoted string. Those are
+# <worktree>/anchor) — NOT `None`, a bare literal, or a quoted string. Those are
 # signature-default declarations, not value threading, so they carry no coverage duty.
 _KWARG = re.compile(r"\b([a-z_][a-z0-9_]*)\s*=\s*([A-Za-z_<][\w.<>/]*)")
 _NON_THREAD_RHS = {"None", "True", "False"}
@@ -50,8 +49,8 @@ _NON_THREAD_RHS = {"None", "True", "False"}
 
 def _concept_root(bind: str) -> str:
     """The head concept of a `binds` entry: `salt.domain.distinguished[carried]` → `salt`,
-    `read_surface.access[bash-cat]` → `read_surface`, `defender_tree` → `defender_tree`."""
-    return re.split(r"[.\[]", bind, 1)[0].strip()
+    `read_surface.access[bash-cat]` → `read_surface`, `anchor_tree` → `anchor_tree`."""
+    return re.split(r"[.\[]", bind, maxsplit=1)[0].strip()
 
 
 def _load(path: Path) -> dict:
@@ -59,10 +58,25 @@ def _load(path: Path) -> dict:
         return yaml.safe_load(fh)
 
 
-def check(path: Path) -> list[str]:
+def check(path: Path, cfg: dict) -> list[str]:
     graph = _load(path)
     demands = graph.get("demands", []) or []
     waivers = graph.get("binds_waivers", {}) or {}
+    # Code kwarg name → graph concept name, when the two disagree: the graph may model the
+    # anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=` kwarg.
+    #
+    # The alias makes the check SEE such a demand, it does not silence one. A concept is only
+    # flaggable when it is `modelled` — i.e. some demand binds it — and the graph never binds
+    # the code's spelling (`anchor_dir`). So without the alias, prose threading `anchor_dir=`
+    # maps to an unmodelled concept and is skipped: a false NEGATIVE, exactly the escape this
+    # check exists to catch.
+    #
+    # Which is why this map should normally be EMPTY. The fix for a spelling mismatch is to
+    # rename the graph to the code's name (schema.md, "Coin ids from the code's name"), not to
+    # alias around it — an alias silently disables the check for any concept whose entry someone
+    # forgets. Legitimate entries: a concept the code genuinely spells differently per call site,
+    # or a third-party name you cannot rename.
+    alias: dict[str, str] = cfg["conceptAliases"]
 
     # The graph's own vocabulary: every concept some demand binds is "modelled". A threaded
     # value we flag must be one the graph already treats as first-class somewhere.
@@ -81,7 +95,7 @@ def check(path: Path) -> list[str]:
         for kw, rhs in _KWARG.findall(prose):
             if rhs in _NON_THREAD_RHS:
                 continue  # signature default, not a threaded value
-            concept = _ALIAS.get(kw, kw)
+            concept = alias.get(kw, kw)
             if concept in seen:
                 continue
             seen.add(concept)
@@ -95,15 +109,22 @@ def check(path: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    paths = [Path(a) for a in argv] or sorted(
-        Path("defender/tests").glob("spec_graph_*.yaml")
-    )
+    config: str | None = None
+    args = []
+    it = iter(argv)
+    for a in it:
+        if a == "--config":
+            config = next(it, None)
+        else:
+            args.append(a)
+    cfg = _config.load(config)
+    paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         print("check_binds: no spec_graph_*.yaml found", file=sys.stderr)
         return 0
     all_findings: list[str] = []
     for p in paths:
-        all_findings.extend(check(p))
+        all_findings.extend(check(p, cfg))
     for f in all_findings:
         print(f"  ORPHAN {f}")
     n = len(all_findings)
