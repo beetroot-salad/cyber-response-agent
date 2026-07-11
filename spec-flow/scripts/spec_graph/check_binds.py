@@ -60,9 +60,15 @@ def check(path: Path, cfg: dict) -> list[str]:
     graph = _load(path)
     demands = graph.get("demands", []) or []
     waivers = graph.get("binds_waivers", {}) or {}
-    # Code kwarg name → graph concept name, when the two disagree (a graph may model the
-    # anchor tree as `anchor_tree` while the code threads it as `anchor_dir=`). Without the
-    # alias the check false-flags every such kwarg as unbound. Project-configured.
+    # Code kwarg name → graph concept name, when the two disagree: the graph may model the
+    # anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=` kwarg.
+    #
+    # The alias makes the check SEE such a demand, it does not silence one. A concept is only
+    # flaggable when it is `modelled` — i.e. some demand binds it — and the graph never binds
+    # the code's spelling (`anchor_dir`). So without the alias, prose threading `anchor_dir=`
+    # maps to an unmodelled concept and is skipped: a false NEGATIVE, exactly the escape this
+    # check exists to catch. Project-configured; an unaliased spelling mismatch is a silent
+    # hole, so add the entry when the graph and the code disagree on a name.
     alias: dict[str, str] = cfg["conceptAliases"]
 
     # The graph's own vocabulary: every concept some demand binds is "modelled". A threaded
