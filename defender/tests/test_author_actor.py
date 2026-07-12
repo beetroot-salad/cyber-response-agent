@@ -622,10 +622,15 @@ def test_rotate_queue_preserves_held_and_appends_consumed(tmp_path: Path):
 
 
 def _defender_import_closure(script: Path, repo_src: Path) -> set[str]:
-    """Every `defender.*` module reachable from `script` through module-level imports."""
+    """Every `defender.*` module reachable from `script`, through imports at ANY depth.
+
+    `ast.walk`, not `tree.body`: `_corpus.iter_lessons` imports `defender._frontmatter` INSIDE
+    the function (deliberately — the module must stay yaml-free at import time for the actor's
+    system-interpreter bootstrap). A module-level-only closure misses it, and the subprocess dies
+    with ModuleNotFoundError the moment nothing else puts the real tree on sys.path."""
     def direct(src: Path) -> set[str]:
         found: set[str] = set()
-        for node in ast.parse(src.read_text()).body:
+        for node in ast.walk(ast.parse(src.read_text())):
             if isinstance(node, ast.Import):
                 found |= {a.name for a in node.names if a.name.startswith("defender.")}
             elif (
