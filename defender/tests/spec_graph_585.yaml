@@ -1,11 +1,11 @@
 # spec-coverage graph — issue #585
 # "restore gather's query-template discovery: the injected index + a gated template_search"
 #
-# base: 64a3df4e   branch: 585-write-tests   (rebased onto main after #586/#587 landed)
+# base: 995f58e3   branch: 585-write-tests   (rebased onto main after #586/#587/#593 landed)
 #
 # Demand ids are stable slugs. Structure ids are the code's names.
 
-base: 64a3df4e
+base: 995f58e3
 
 axes: [system, template_id, status, defender_tree]
 
@@ -442,8 +442,19 @@ structure:
 # and never reads the query-template catalog (grep: no `catalog` / `queries/` reference in the module).
 # The folded walk is not on any path it drives. harness_lead, the other flagged driver, is NOT waived —
 # it is modelled as an actor above and pinned by d18b.
+#
+# trace_lesson + frontend/serialize: both import `defender._corpus` — for `iter_lessons` ONLY (the
+# LESSONS walk, which this change does not touch). They are flagged because the fold ADDS
+# `iter_query_templates` to that module, so `_corpus` lands in the changed set and every importer of
+# it reaches "the changed subsystem". Neither module references the query catalog at all (grep: no
+# `catalog` / `queries` / `iter_query_templates`), so the folded walk is on no path they drive. The
+# one property of `_corpus` they DO depend on — that importing it pulls no yaml at module scope,
+# because the actor's pinned lesson scripts import it under the system python — is preserved and
+# pinned by d12 (its parser import is lazy, exactly as `iter_lessons`' is).
 actor_waivers:
   - replay_actor
+  - trace_lesson
+  - serialize
 
 # ---------------------------------------------------------------------------
 # GATE
