@@ -7,67 +7,25 @@ the same handful of frontmatter-coercion helpers. They are collected here once.
 Deliberately **pure stdlib at import time** — the module top imports nothing the
 defender venv provides (no ``yaml`` / ``defender._frontmatter``). That is what
 lets a caller import it *before* :func:`reexec_into_venv` has swapped the
-interpreter, on a bare system ``python3`` that has no PyYAML yet. :func:`iter_lessons`
-therefore imports the yaml-backed frontmatter parser *lazily*, inside the function.
+interpreter, on a bare system ``python3`` that has no PyYAML yet. Both re-exported
+implementations below (``defender._corpus`` / ``defender.scripts._venv``) hold to that
+same contract, so importing them from here stays pre-venv-safe.
 """
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable, Iterator
 from pathlib import Path
 
-# Re-exported so the lessons CLIs keep importing it from here unchanged; the
-# single implementation now lives in the neutral `defender.scripts._venv`, shared
-# with the lessons frontend. Pure stdlib, so importing it stays pre-venv-safe.
+# Both re-exported so the lessons CLIs keep importing them from here unchanged, while the
+# single implementation lives in the neutral module a non-lessons consumer can reach without
+# importing out of ``scripts/``: the corpus walk is shared with the curators' corpus manifest
+# (``learning/author/shared.py``), the venv re-exec with the lessons frontend.
+from defender._corpus import iter_lessons
 from defender.scripts._venv import reexec_into_venv
 
 __all__ = [
     "reexec_into_venv", "iter_lessons",
     "as_list", "as_str_set", "csv_set", "rel_to_repo",
 ]
-
-
-def iter_lessons(
-    corpus_dir: Path,
-    *,
-    with_raw: bool = False,
-    warn_label: Callable[[Path], str] | None = None,
-) -> Iterator[tuple]:
-    """Yield well-formed lessons under ``corpus_dir``: ``*.md`` sorted, skipping
-    ``_``-prefixed files, warning-and-skipping on a malformed one.
-
-    Yields ``(path, frontmatter)`` by default, or ``(path, raw_frontmatter, fm)``
-    when ``with_raw`` (the raw YAML between the fences, for frontmatter grep).
-    ``warn_label`` formats the skipped path in the warning (default ``path.name``;
-    the actor index passes a repo-relative label). The yaml-backed parser is
-    imported lazily so this module stays importable before the venv re-exec.
-
-    "Malformed" covers the READ as well as the PARSE, so ``read_text()`` is inside the
-    ``try``: it raises ``UnicodeDecodeError`` on undecodable bytes, which is a ``ValueError``
-    and NOT an ``OSError`` — outside the guard it would escape and take the whole caller down
-    (the actor's ``lessons_actor_index`` / ``lessons_env_retrieve`` run this on their bash lane
-    mid-run), defeating the skip-one-bad-file contract this function exists to provide.
-    """
-    from defender._frontmatter import FrontmatterError, parse_frontmatter
-
-    label = warn_label or (lambda p: p.name)
-    if not corpus_dir.is_dir():
-        return
-    for path in sorted(corpus_dir.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
-        try:
-            text = path.read_text()
-            fm, _body = parse_frontmatter(text)
-        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
-            print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
-            continue
-        if with_raw:
-            norm = text.replace("\r\n", "\n").replace("\r", "\n")
-            raw = norm[4:norm.find("\n---", 4)]  # YAML between the fences
-            yield path, raw, fm
-        else:
-            yield path, fm
 
 
 def as_list(v) -> list:

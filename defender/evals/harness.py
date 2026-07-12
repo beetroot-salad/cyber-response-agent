@@ -50,6 +50,11 @@ from defender import _git  # _harness_util put the repo root on sys.path
 HERE = Path(__file__).resolve().parent      # .../defender/evals
 RESULTS_DIR = HERE / "results"
 
+# The eval's fixed corpus-manifest shuffle seed (see run_author). Any constant string works —
+# what matters is that it does not move between runs, so two evals differ by what they are
+# measuring and not by the order the curator's menu happened to draw.
+MANIFEST_SEED = "eval-harness"
+
 
 @dataclass(frozen=True)
 class AuthorRun:
@@ -98,7 +103,11 @@ def run_author(tmp: Path) -> tuple[AuthorRun, float]:
     from defender.learning.core.config import LoopPaths
 
     paths = LoopPaths(repo_root=tmp)
-    cfg = author.build_author_config(paths)
+    # Pin the manifest's shuffle seed. Production seeds it from batch_id — a fresh uuid4 per
+    # drain — so an unpinned eval would hand the curator a differently-ordered menu on every run,
+    # and this harness is the instrument that would measure the very position bias the shuffle
+    # exists to remove. A fixed seed still exercises the shuffle path production takes.
+    cfg = author.build_author_config(paths, manifest_seed=MANIFEST_SEED)
     out, err = io.StringIO(), io.StringIO()
     t0 = time.monotonic()
     try:

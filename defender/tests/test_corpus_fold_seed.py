@@ -72,7 +72,10 @@ def _sections(manifest: str) -> list[str]:
             out.append(line)
         elif out:
             out[-1] += line
-    return out
+    # The join's separator lands on the PRECEDING section, so only the last one lacks a trailing
+    # blank — position-dependent, and the multiset oracle below must not see that. The byte shape
+    # this strips is pinned exactly by d0.
+    return [s.rstrip("\n") for s in out]
 
 
 def _prompt_manifest(prompt: str) -> str:
@@ -238,7 +241,7 @@ def test_c2c_corpus_module_top_level_imports_are_import_safe():
 
 
 @pytest.mark.parametrize(
-    "script,argv",
+    ("script", "argv"),
     [
         ("lessons_fm.py", ["--tags"]),
         ("lessons_actor_index.py", ["--techniques", "T1078"]),
@@ -290,9 +293,13 @@ def test_c4_mirrored_fake_tree_carries_every_defender_import_of_the_copied_scrip
         for node in ast.parse(src.read_text()).body:
             if isinstance(node, ast.Import):
                 found |= {a.name for a in node.names if a.name.startswith("defender.")}
-            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-                if node.module.startswith("defender."):
-                    found.add(node.module)
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.level == 0
+                and node.module.startswith("defender.")
+            ):
+                found.add(node.module)
         return found
 
     seen: set[str] = set()
@@ -337,10 +344,12 @@ def test_c5_iter_lessons_observable_contract_is_unchanged(tmp_path, capsys):
     three = list(mod.iter_lessons(corpus, with_raw=True))
     assert len(three[0]) == 3  # (path, raw, fm)
     path, raw, fm = three[0]
-    assert "name: good" in raw and fm["name"] == "good"  # raw is the YAML between the fences
+    assert "name: good" in raw  # raw is the YAML between the fences
+    assert fm["name"] == "good"
 
     err = capsys.readouterr().err
-    assert "unfenced.md" in err and "undecodable.md" in err  # default warn_label is p.name
+    assert "unfenced.md" in err  # default warn_label is p.name
+    assert "undecodable.md" in err
     assert "corpus manifest" not in err  # the manifest's label did NOT become the shared default
 
 
@@ -381,7 +390,8 @@ def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, capsys):
     manifest = _shared.build_corpus_manifest(corpus)  # must not raise
     assert _headers(manifest) == ["good"]  # the well-formed sibling survives both bad files
     err = capsys.readouterr().err
-    assert "bad.md" in err and "corrupt.md" in err
+    assert "bad.md" in err
+    assert "corrupt.md" in err
 
 
 def test_e0_empty_frontmatter_mapping_still_renders(tmp_path):
@@ -520,7 +530,8 @@ def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path)
     assert _prompt_manifest(p1) == _shared.build_corpus_manifest(corpus, seed="batch-one")
     assert _prompt_manifest(p1) != _prompt_manifest(p2)  # a new batch_id reorders the menu
     assert sorted(_headers(_prompt_manifest(p1))) == sorted(_headers(_prompt_manifest(p2)))
-    assert "batch-one" in p1 and "a finding" in p1  # P1 survives: batch_id + rows still spliced
+    assert "batch-one" in p1  # P1 survives: batch_id + rows still spliced
+    assert "a finding" in p1
 
 
 def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):

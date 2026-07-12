@@ -121,9 +121,16 @@ class AuthorConfig:
     author_model: str = AUTHOR_MODEL
     author_timeout: int = AUTHOR_TIMEOUT
     author_effort: str | None = AUTHOR_EFFORT
+    # Pins the corpus manifest's shuffle seed. Production leaves it None and the manifest is
+    # seeded from the batch_id; only the author eval sets it, because batch_id is a fresh uuid4
+    # per drain and an eval that redraws the curator's menu order every run cannot measure the
+    # position bias the shuffle exists to remove.
+    manifest_seed: str | None = None
 
 
-def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
+def build_author_config(
+    paths: LoopPaths = DEFAULT_PATHS, *, manifest_seed: str | None = None
+) -> AuthorConfig:
     """Resolve the findings author's paths + agent wiring from an injected ``LoopPaths``.
 
     Constructed at call time (not import) so a test rooted at a tmp tree threads one
@@ -144,6 +151,7 @@ def build_author_config(paths: LoopPaths = DEFAULT_PATHS) -> AuthorConfig:
         author_run_log=paths.pending_dir / "author_run.jsonl",
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
+        manifest_seed=manifest_seed,
     )
 
 
@@ -225,6 +233,7 @@ def build_user_prompt(findings: list[dict], batch_id: str, cfg: AuthorConfig) ->
     return _shared.build_curator_user_prompt(
         findings, batch_id, corpus_dir=cfg.lessons_dir,
         corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
+        manifest_seed=cfg.manifest_seed,
     )
 
 
