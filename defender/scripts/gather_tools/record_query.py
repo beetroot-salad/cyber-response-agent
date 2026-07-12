@@ -419,8 +419,16 @@ def capture(
         query_id = f"{system}.{verb}" if verb else f"{system}.ad-hoc"
 
     try:
+        # Pinned utf-8 and LOSSY. This pipe is the ingestion boundary: the adapter's stdout is
+        # vendor telemetry — indexed log lines, process cmdlines, filenames — i.e. the likeliest
+        # source of a non-UTF-8 byte in the whole system. A strict decode raises
+        # UnicodeDecodeError inside `run()`, which is a ValueError, so it sails past the
+        # TimeoutExpired guard below, out of `capture()`, out of the gather tool (`capture` runs
+        # IN-PROCESS via tools_gather._capture_query) and kills the stage. One mangled byte must
+        # cost one character, not the lead and not the run.
         proc = subprocess.run(
-            inner, capture_output=True, text=True, env=env, timeout=timeout, encoding="utf-8"
+            inner, capture_output=True, text=True, env=env, timeout=timeout,
+            encoding="utf-8", errors="replace",
         )
         rc, out, err = proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:

@@ -72,9 +72,10 @@ def _run(
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         errors="surrogateescape",
         timeout=timeout,
-        input=input, encoding="utf-8"
+        input=input,
     )
     if check and proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr)

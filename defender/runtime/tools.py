@@ -360,6 +360,13 @@ def _gated_read(
         text = read_text_utf8(p)
     except UnicodeDecodeError:
         raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
+    except OSError as e:
+        # The OTHER half of TEXT_READ_ERRORS, and it escapes for the same reason the decode
+        # error did. `is_file()` above is not a read-permission check — the gate is a policy
+        # gate, not a filesystem one — and it races the read: an unreadable mode, a symlink
+        # loop, a file deleted between the two syscalls all land here. Same rule: the agent can
+        # act on "couldn't read it"; the run cannot act on a traceback.
+        raise ModelRetry(f"could not read {path}: {e}") from None
     _record_lesson_load(deps, p, lesson_corpora)  # lesson→outcome traceability (best-effort)
     return p, text
 

@@ -158,7 +158,11 @@ def docker_exec_curl(
     else:
         cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "curl", *flags, *args]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10, encoding="utf-8")
+        # utf-8 and LOSSY: the far side is vendor data (indexed log lines), so a stray
+        # non-UTF-8 byte must cost one character, not raise a UnicodeDecodeError that sails
+        # past the guards below (it is a ValueError) and out of the adapter.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10,
+                              encoding="utf-8", errors="replace")
     except FileNotFoundError as e:
         raise TransportError("docker CLI not found on PATH") from e
     except subprocess.TimeoutExpired as e:
@@ -310,8 +314,13 @@ def docker_exec_raw(
     """
     cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", bastion, *argv]
     try:
+        # utf-8 and LOSSY: this runs arbitrary host verbs (`ps`, `ls`, file reads) inside the
+        # bastion, so its stdout carries filenames and process cmdlines — a strict decode would
+        # turn one odd byte in one filename into a UnicodeDecodeError that escapes both guards
+        # below (a ValueError is neither) and takes the host_state adapter down.
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5, encoding="utf-8"
+            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
+            encoding="utf-8", errors="replace",
         )
     except FileNotFoundError:
         print("error: docker CLI not found on PATH", file=sys.stderr)
@@ -345,7 +354,8 @@ def docker_inspect_raw(
     cmd.append(target)
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5, encoding="utf-8"
+            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
+            encoding="utf-8", errors="replace",  # container labels/env are foreign bytes too
         )
     except FileNotFoundError:
         print("error: docker CLI not found on PATH", file=sys.stderr)

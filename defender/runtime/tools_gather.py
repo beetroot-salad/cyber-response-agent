@@ -194,7 +194,12 @@ def _capture_adapter_sql(
     try:
         proc = subprocess.run(
             sql_argv, input=raw, capture_output=True, text=True,
-            env=env, timeout=_BASH_TIMEOUT_S, encoding="utf-8"
+            env=env, timeout=_BASH_TIMEOUT_S,
+            # Lossy, like the adapter pipe upstream: defender-sql echoes the captured payload's
+            # own cells back out, so a byte the adapter mangled must not become a strict-decode
+            # UnicodeDecodeError here — a ValueError no gate converts, escaping this in-process
+            # tool and killing the stage.
+            encoding="utf-8", errors="replace",
         )
     except subprocess.TimeoutExpired as e:
         raise ModelRetry(f"defender-sql timed out after {_BASH_TIMEOUT_S}s") from e

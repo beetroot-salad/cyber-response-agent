@@ -25,6 +25,7 @@ committed, and then warn-skipped as "malformed" by every walk that reads it back
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -263,3 +264,83 @@ def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
 
     with pytest.raises(ModelRetry, match="not valid UTF-8"):
         tools._tool_read_file(deps, "defender/lessons/corrupt.md")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the mode bits this drives")
+def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
+    """`read_text_utf8` is documented to raise TEXT_READ_ERRORS — BOTH halves. The decode half is
+    converted to a ModelRetry; the `OSError` half escaped, on the same argument that condemned the
+    decode half. `is_file()` is not a read-permission check (the gate is a policy gate, not a
+    filesystem one) and it races the read besides."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime import tools
+
+    deps, corpus = _curator_deps(tmp_path)
+    unreadable = corpus / "locked.md"
+    unreadable.write_text("---\nname: x\n---\nbody\n", encoding="utf-8")
+    unreadable.chmod(0o000)
+
+    with pytest.raises(ModelRetry, match="could not read"):
+        tools._tool_read_file(deps, "defender/lessons/locked.md")
+
+
+def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
+    """`reconfigure(encoding=…)` with no `errors=` silently RESETS the handler to `strict`, and the
+    defaults it clobbers are load-bearing: stderr is `backslashreplace` so an error path can never
+    itself raise, stdout is `surrogateescape` so a non-UTF-8 filename — what `Path.glob` hands back
+    as lone surrogates — prints instead of exploding.
+
+    The failure it buys is exquisite: `iter_lessons` warn-skips a bad lesson, then dies with a
+    `UnicodeEncodeError` printing the path it just skipped. A pin that hardens the read by breaking
+    the skip message is not hardening. Driven in a subprocess because stdio is process-wide."""
+    proc = _c_locale_python(
+        f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
+        "from defender._io import use_utf8_stdio\n"
+        "use_utf8_stdio()\n"
+        "print('handlers=' + sys.stdout.errors + ',' + sys.stderr.errors)\n"
+        "print('encodings=' + sys.stdout.encoding + ',' + sys.stderr.encoding)\n"
+        # the em-dash the pin exists for...
+        "print('emdash=\\u2014')\n"
+        # ...and the surrogate-bearing path name a strict handler would explode on
+        "print('warn: skipping ' + 'caf\\udce9.md', file=sys.stderr)\n"
+        "print('survived=True')\n"
+    )
+
+    assert proc.returncode == 0, f"use_utf8_stdio broke its own callers:\n{proc.stderr}"
+    assert "encodings=utf-8,utf-8" in proc.stdout, f"the pin did not take: {proc.stdout!r}"
+    assert "handlers=surrogateescape,backslashreplace" in proc.stdout, (
+        f"use_utf8_stdio reset the error handlers to strict: {proc.stdout!r}"
+    )
+    assert "emdash=—" in proc.stdout
+    assert "survived=True" in proc.stdout
+
+
+def test_a_vendor_byte_on_the_adapter_pipe_is_replaced_not_raised(tmp_path):
+    """The gather ingestion boundary. `record_query.capture` runs the adapter IN-PROCESS (via
+    `tools_gather._capture_query`), and the adapter's stdout is vendor telemetry — indexed log
+    lines, process cmdlines, filenames — i.e. the likeliest non-UTF-8 byte in the whole system.
+
+    A `subprocess.run(..., text=True, encoding="utf-8")` decodes STRICTLY, so one such byte raises
+    `UnicodeDecodeError` inside `run()`. It is a `ValueError`: it sails past the `TimeoutExpired`
+    guard, out of `capture()`, out of the gather tool, and kills the stage — the same escape as
+    #589, one pipe over. One bad byte must cost one character, not the lead and not the run."""
+    from defender.scripts.gather_tools import record_query
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    emit_bad_bytes = [
+        sys.executable, "-c",
+        r'import sys; sys.stdout.buffer.write(b"{\"host\": \"caf\xe9-01\"}")',
+    ]
+
+    passthrough, _stderr, record = record_query.capture(  # must not raise
+        run_dir, "l-001", emit_bad_bytes, system="elastic",
+    )
+
+    assert record["exit_code"] == 0, "the adapter itself failed — wrong thing under test"
+    assert "�" in passthrough, "the undecodable byte was not replaced"
+    assert "caf" in passthrough, "the payload before the bad byte was lost"
+    assert "-01" in passthrough, "the payload after the bad byte was lost"
+    payload = (run_dir / record["payload_path"]).read_text(encoding="utf-8")
+    assert "�" in payload, "the by-ref payload defender-sql reads back was not written"

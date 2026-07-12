@@ -99,13 +99,21 @@ def use_utf8_stdio() -> None:
     having emitted a silently truncated corpus. Same locale dependence as the read bug, one
     direction over.
 
+    Only the ENCODING moves. ``reconfigure(encoding=…)`` with no ``errors=`` silently resets the
+    error handler to ``strict``, and the defaults it would clobber are load-bearing: stderr is
+    ``backslashreplace`` precisely so an error path can never itself raise, and stdout is
+    ``surrogateescape`` so a filename carrying non-UTF-8 bytes — what ``Path.glob`` hands back as
+    lone surrogates — prints instead of exploding. Reset to strict, :func:`iter_lessons`'s own
+    ``warn: skipping <path>`` line dies on the very path it is skipping. So the current handler is
+    passed back in.
+
     Idempotent. A stream that cannot be reconfigured (a replaced ``sys.stdout`` under pytest's
     capture) is left alone rather than raising — this is hardening, never a new failure mode.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
-            reconfigure(encoding="utf-8")
+            reconfigure(encoding="utf-8", errors=getattr(stream, "errors", None) or "strict")
 
 
 def read_jsonl_rows(path: Path) -> list[dict]:
