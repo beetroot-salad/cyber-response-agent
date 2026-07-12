@@ -48,7 +48,6 @@ corpus and pass no provenance trailers (issue #330).
 """
 from __future__ import annotations
 
-import re
 import sys
 import uuid
 from collections.abc import Callable
@@ -66,6 +65,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import curator as _curator
 from defender.learning.author import shared as _shared
+from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     AUTHOR_EFFORT,
@@ -195,30 +195,23 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     return val if isinstance(val, str) else None
 
 
-_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
-
-
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
-    """Union of source_finding_ids across all lesson frontmatter."""
+    """Union of source_finding_ids across all lesson frontmatter.
+
+    Walks the corpus through the shared ``iter_lessons``, like the manifest this pre-flight runs
+    beside, so the two cannot disagree about what a lesson *is*. The hand-rolled walk this replaces
+    disagreed on three counts, each a live bug: it read the file OUTSIDE any guard, so one
+    undecodable byte raised ``UnicodeDecodeError`` (a ``ValueError``, not an ``OSError``) and took
+    the whole author drain down instead of skipping one lesson; it matched ``\\A---\\n`` literally,
+    so a CRLF lesson silently contributed no ids at all; and it did not skip ``_``-prefixed files,
+    the one corpus convention every other reader honours."""
     ids: set[str] = set()
-    if not cfg.lessons_dir.is_dir():
-        return ids
-    for path in sorted(cfg.lessons_dir.glob("*.md")):
-        text = path.read_text()
-        m = _FRONTMATTER_RE.match(text)
-        if not m:
-            continue
-        try:
-            doc = yaml.safe_load(m.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        sids = doc.get("source_finding_ids") or []
+    for _path, fm in iter_lessons(
+        cfg.lessons_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
+    ):
+        sids = fm.get("source_finding_ids") or []
         if isinstance(sids, list):
-            for sid in sids:
-                if isinstance(sid, str):
-                    ids.add(sid)
+            ids.update(sid for sid in sids if isinstance(sid, str))
     return ids
 
 
