@@ -1,0 +1,593 @@
+schema_version: 1
+design: "#577 (issue body + the settled-design comment: issues/577#issuecomment-4947100220)"
+base: 6581fe282fbaa9fe6b54fc662eb2d0bfed6100dd
+
+# The change, in three parts:
+#  (a) RELOCATE iter_lessons  scripts/lessons/_lessons_common.py -> defender/_corpus.py (re-exported)
+#  (b) FOLD    build_corpus_manifest's duplicate corpus walk onto iter_lessons
+#  (c) ADD     build_corpus_manifest(corpus_dir, *, seed: str | None = None) — a seeded shuffle of the
+#              rendered sections; build_curator_user_prompt seeds it from batch_id.
+#
+# M1-M8b, M10, P1-P4 are the #559 demands (spec_graph_559-curator-frontmatter.yaml). The fold is
+# behavior-preserving against them, so they are CHARACTERIZATION here: they stay green, unchanged.
+# M9 SPLITS (see s1/s2/s4) and its "stem-sorted" half is OVERTURNED by fork F1.
+
+demands:
+  # ---- demand #0: the return-value contract, at BYTE level ------------------------------------
+  - id: d0_byte_shape
+    kind: behavior
+    form: test
+    outcome:
+      nl: "build_corpus_manifest returns '\\n'.join of one f'## {slug}\\n{safe_dump(...)}' section per
+           lesson — safe_dump always ends in a newline, so two sections are separated by a blank line
+           and the string ends in exactly one newline; one lesson has no separator; an empty, missing,
+           or non-dir corpus returns the empty string exactly."
+    binds: [build_corpus_manifest, "interacts(build_corpus_manifest->manifest_string)"]
+    rejected:
+      - nl: "assert only on the '## ' headers (what _headers() reads) — a fold that changes the
+             separator or drops safe_dump's trailing newline is invisible to every existing test while
+             changing every curator prompt."
+
+  # ---- (a) the relocation ---------------------------------------------------------------------
+  - id: c1_reexport_identity
+    kind: seam
+    form: test
+    outcome:
+      nl: "defender._corpus defines iter_lessons, and _lessons_common.iter_lessons is the SAME object
+           (identity, not a wrapper) and stays in _lessons_common.__all__ — so the three lesson CLIs'
+           import lines are unchanged and the two names cannot drift."
+    binds: [corpus_module, lessons_common_module, "interacts(lessons_common_module->corpus_module)"]
+
+  - id: c2_bare_python_import
+    kind: negative
+    form: test
+    outcome:
+      nl: "defender._corpus imports cleanly on an interpreter with NO PyYAML — importing it with yaml
+           blocked at the meta_path must NOT raise. This is the pre-venv contract: the actor runs the
+           pinned lesson scripts as `python3 <script>` on its bash lane under SYSTEM python, and they
+           import _lessons_common at module scope BEFORE reexec_into_venv swaps the interpreter."
+    binds: ["corpus_module.access[bare-python3]"]
+    rejected:
+      - nl: "trust the docstring (the contract is prose-only today — NO existing test pins it)."
+      - nl: "grep the source for `import yaml` — the real fault is a TRANSITIVE module-top import of a
+             yaml-backed module, which a grep misses."
+
+  - id: c2b_import_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "positive control for c2: on the venv interpreter (PyYAML present) iter_lessons imported from
+           defender._corpus parses a real lesson's frontmatter — proving the lazy import fires and the
+           masked-import test above is not passing because the module does nothing."
+    binds: ["corpus_module.access[in-process]"]
+
+  - id: c3_cli_survival
+    kind: survival
+    form: test
+    outcome:
+      nl: "each of the three lesson CLIs still runs as a REAL subprocess against a temp corpus and exits
+           0 with its expected rows — the only shape that exercises the script's own sys.path bootstrap,
+           reexec_into_venv, and the new defender._corpus resolution together."
+    binds: [lessons_fm_cli, lessons_actor_index_cli, lessons_env_retrieve_cli]
+    rejected:
+      - nl: "rely on test_lessons_fm.py's importlib exec_module loader — it runs IN-PROCESS under the
+             venv (__name__ != '__main__', so reexec never fires and PyYAML is already present); it is
+             structurally blind to the contract the whole relocation hinges on."
+
+  - id: c4_mirrored_copy_list
+    kind: survival
+    form: test
+    outcome:
+      nl: "test_author_actor.py::_index_cli_runner mirrors source files into a fake repo tree and runs
+           the copy as a subprocess; every module-level `defender.*` import transitively reachable from
+           the copied lessons_actor_index.py must exist in that fake tree — so the relocation cannot
+           ModuleNotFoundError inside the subprocess."
+    binds: [index_cli_runner_fake_tree]
+    rejected:
+      - nl: "just append _corpus.py to the hardcoded 4-name copy list — that re-arms the identical trap
+             for the next module the CLIs pick up."
+
+  - id: c5_iter_lessons_contract_unchanged
+    kind: parity
+    form: test
+    outcome:
+      nl: "iter_lessons' observable contract is unchanged by the relocation and the fold: the 2-tuple
+           default and the 3-tuple (path, raw, fm) under with_raw, the `_`-prefix skip, warn-and-skip on
+           a malformed OR undecodable file, the default warn_label of p.name, and its yielded order
+           (full-Path sorted). The fold must not repurpose the shared iterator's defaults to serve the
+           manifest — the three CLIs stream its order straight to the actor."
+    binds: [iter_lessons, "iter_lessons.access[in-process]", "iter_lessons.access[bare-python3]"]
+
+  # ---- (b) the fold ----------------------------------------------------------------------------
+  - id: s0_path_order   # F1: OVERTURNS M9's "stem-sorted" half
+    kind: behavior
+    form: test
+    outcome:
+      nl: "with no seed the manifest's sections follow iter_lessons' full-Path order, which DIVERGES from
+           the old stem order on a prefix pair (cover-prereqs.md sorts before cover.md by path, after it
+           by stem) — exercised with a real prefix pair, since #559's a-/b-/c-lesson fixture orders
+           identically under both keys and therefore pinned nothing."
+    binds: [build_corpus_manifest, iter_lessons]
+    rejected:
+      - nl: "re-sort by stem at the render site to preserve M9 (costs a redundant sort; the sorted order
+             is test-only once production always seeds)."
+      - nl: "make iter_lessons stem-sorted — that flips the ACTOR's lessons_actor_index /
+             lessons_env_retrieve stdout order, an LLM-visible retrieval change shipped as a refactor
+             side effect."
+
+  - id: w1_warn_text
+    kind: behavior
+    form: test
+    outcome:
+      nl: "a malformed and an undecodable lesson are still warn-skipped to stderr with the offending
+           file NAMED, under iter_lessons' warn format — one bad file never aborts the manifest and its
+           well-formed siblings still render."
+    binds: ["interacts(build_corpus_manifest->stderr)"]
+
+  - id: e0_empty_mapping_renders
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "a lesson whose frontmatter is an empty mapping (---\\n{}\\n---) parses to fm={} — a VALID
+           parse, not a FrontmatterError — and renders as a section '## slug\\n{}\\n'; it is not dropped.
+           A fold that skips falsy frontmatter would hide the lesson and the curator would author a
+           duplicate of something it cannot see."
+    binds: ["lesson_file.domain.distinguished[empty-mapping]"]
+
+  # ---- (c) the seeded shuffle -------------------------------------------------------------------
+  - id: s1_seed_none_sorted
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "seed=None (and the seed omitted entirely) yields the deterministic sorted manifest, byte-
+           identical across two calls and to each other — the pre-#577 default every existing M1-M10
+           test calls. seed is keyword-only, so a positional third argument is a TypeError."
+    binds: ["seed.domain.distinguished[None]", "seed.domain.default"]
+
+  - id: s2_same_seed_cross_process
+    kind: behavior
+    form: test
+    outcome:
+      nl: "the same seed yields a byte-identical manifest, and it holds ACROSS PROCESSES: a fresh
+           subprocess under a different PYTHONHASHSEED produces the same bytes. random.Random(str) seeds
+           via sha512, so this is a real property — and an implementation reaching for
+           random.Random(hash(seed)) would pass an in-process check and fail this one."
+    binds: [seed, "interacts(build_corpus_manifest->rng)"]
+    rejected:
+      - nl: "in-process determinism only — it cannot see the hash() variant."
+      - nl: "a golden expected order for a literal seed — that pins CPython's RNG stream, not the contract."
+
+  - id: s3_shuffle_is_a_permutation
+    kind: behavior
+    form: test
+    outcome:
+      nl: "a seeded manifest is a true PERMUTATION of the unseeded one: the multiset of section bodies
+           and the set of headers are equal, nothing dropped, duplicated, or content-drifted — only the
+           order moved. A shuffle applied to the wrong list, or one that loses a section, still passes a
+           naive 'the order differed' assertion."
+    binds: [build_corpus_manifest, seed]
+
+  - id: s4_different_seeds_reorder
+    kind: behavior
+    form: test
+    outcome:
+      nl: "the shuffle actually fires: over a corpus large enough to make coincidence negligible, not all
+           seeds drawn from a fixed list reproduce the sorted order — asserted as a property of
+           random.Random, never as a golden permutation. A seed accepted and ignored is otherwise
+           indistinguishable from seed=None."
+    binds: [seed]
+
+  - id: s5_empty_string_seed_is_a_seed
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "seed='' is FALSY but not None: it must shuffle (matching a reference random.Random('')
+           permutation), not fall back to sorted order. An `if seed:` guard would silently swallow it —
+           the exact shape defender/CLAUDE.md's anchor-a-default convention and lint_unanchored_default
+           exist to forbid."
+    binds: ["seed.domain.distinguished[empty-string]", "seed.domain.falsy_valid"]
+
+  - id: s6_batch_id_is_the_seed
+    kind: seam
+    form: test
+    outcome:
+      nl: "build_curator_user_prompt seeds the manifest from batch_id: the manifest it splices equals
+           build_corpus_manifest(corpus_dir, seed=batch_id), and a different batch_id over the same
+           corpus reorders the spliced manifest — pinned through the public prompt string, since
+           shared.py calls build_corpus_manifest as a bare module-level name (not an attribute lookup)."
+    binds: ["interacts(build_curator_user_prompt->build_corpus_manifest).payload", batch_id, seed]
+    rejected:
+      - nl: "an AST check that the call site passes seed= — it proves the token, not the effect."
+
+  - id: s7_injection_survives_the_shuffle
+    kind: negative
+    form: test
+    outcome:
+      nl: "under a seed, the M8/M8b forged-section defenses still hold: with an adversarial frontmatter
+           VALUE ('\\n## forged') and an adversarial newline-bearing STEM in the corpus, the header count
+           is exactly the number of real lessons and no line is a bare '---'. The shuffle moves WHERE the
+           section boundary logic runs, which is precisely what M8 depends on."
+    binds: ["interacts(build_corpus_manifest->manifest_string)", seed]
+    rejected:
+      - nl: "assume the fold's safe_dump + stem-collapse carry over untested."
+
+  - id: s7b_injection_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "positive control for s7 and m8c: a GENUINE lesson slug IS rendered as a real '## ' header and
+           a genuine list-valued field IS rendered as a YAML list, under the same seed — proving the
+           header-count assertion is not passing vacuously on an empty manifest."
+    binds: ["interacts(build_corpus_manifest->manifest_string)"]
+
+  - id: m8c_list_valued_injection
+    kind: negative
+    form: test
+    outcome:
+      nl: "an injection payload carried inside a LIST-valued frontmatter field (techniques:
+           ['T1098', 'T9999\\n## forged']) cannot forge a section — safe_dump quotes and INDENTS the
+           element, so the payload never reaches column 0. #559's M8 pins only a SCALAR value, and the
+           actor-lesson shape's fields (techniques, applies_to, alert_rule_ids) are lists — the realistic
+           carrier is the untested one."
+    binds: ["interacts(build_corpus_manifest->manifest_string)"]
+
+  # ---- (c) the eval instrument (fork F2) --------------------------------------------------------
+  - id: e1_eval_seed_override
+    kind: seam
+    form: test
+    outcome:
+      nl: "the author config carries an explicit manifest-seed override; when it is set, the manifest's
+           order is a function of the override and NOT of batch_id — two prompts built with different
+           batch_ids carry a byte-identical manifest. With the override unset, production keeps the
+           batch_id seed and the two prompts' manifests differ."
+    binds: [manifest_seed_override, batch_id]
+    rejected:
+      - nl: "let evals/harness.py inherit the uuid4 seed — the author eval is the very instrument that
+             would measure the position bias this change claims to fix; a fresh order per run removes its
+             fixed baseline and every before/after comparison carries an unmodeled order term."
+      - nl: "have the harness pass seed=None — deterministic, but the eval then never exercises the
+             shuffle path production always takes."
+
+  # ---- waivers -----------------------------------------------------------------------------------
+  - id: waiver_all_malformed_corpus_reads_as_empty
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "a corpus in which EVERY lesson is malformed renders to '' and therefore splices as
+           '(none — the corpus is empty)' — which is a lie (the corpus is not empty, it is unreadable).
+           Pre-existing behavior, unchanged by this fold; recorded rather than fixed here."
+    binds: ["interacts(build_curator_user_prompt->curator_llm).payload"]
+
+  - id: waiver_serialize_iter_corpus_not_folded
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "learning/frontend/serialize.py::_iter_corpus is a FIFTH copy of the corpus walk and
+           defender/_corpus.py is its correct eventual home, but folding it here is out of scope: it
+           yields a different tuple shape (path, fm, body), folding would silently FIX a real crash
+           (it catches only FrontmatterError, so an OSError/UnicodeDecodeError takes the frontend build
+           down today) with no test and no issue, and its `if not fm` skip drops empty-mapping lessons
+           that iter_lessons renders. Follow-up issue, not this PR."
+    binds: [serialize_iter_corpus]
+
+structure:
+  axes: [lesson_stem, seed_value, corpus_dir]
+
+  actors:
+    - {id: build_corpus_manifest,    frame: leg,         provenance: code}
+    - {id: build_curator_user_prompt, frame: composition, provenance: code}
+    - {id: author_drain,             frame: composition, provenance: code}
+    - {id: eval_harness_run_author,  frame: composition, provenance: code}
+    - {id: lessons_fm_cli,           frame: leg,         provenance: code}
+    - {id: lessons_actor_index_cli,  frame: leg,         provenance: code}
+    - {id: lessons_env_retrieve_cli, frame: leg,         provenance: code}
+    - {id: index_cli_runner_fake_tree, frame: composition, provenance: code}
+    - {id: serialize_iter_corpus,    frame: leg,         provenance: code}
+
+  boundaries:
+    - id: corpus_module          # defender/_corpus.py — NEW
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            in-process:
+              trust: operator
+              constraints: []            # the venv is active; PyYAML present
+            bare-python3:
+              trust: operator
+              constraints: [no-module-top-yaml-import]
+              # the actor's bash lane runs `python3 <script>` under SYSTEM python; the CLIs import
+              # _lessons_common (-> _corpus) BEFORE reexec_into_venv. A module-top yaml import here
+              # breaks the actor's lesson retrieval live, in the learning loop.
+
+    - id: iter_lessons
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            in-process:  {trust: operator, constraints: []}
+            bare-python3: {trust: operator, constraints: [no-module-top-yaml-import]}
+
+    - id: lessons_common_module  # scripts/lessons/_lessons_common.py — now a re-export shim
+      provenance: design
+      facets: {}
+
+    - id: seed                   # the NEW keyword-only parameter
+      provenance: design
+      facets:
+        domain:
+          type: str | None
+          refinement: {nl: "an opaque string; production passes the curator's 12-hex-char batch_id"}
+          default: null
+          distinguished: [None, empty-string]
+          falsy_valid: true
+          documented_alternatives:
+            - {value: empty-string, crosses_validation: true}
+              # "" is falsy but a VALID seed: random.Random("") is a well-defined generator.
+
+    - id: batch_id
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "uuid.uuid4().hex[:12] — minted FRESH per drain invocation, NOT a content
+                            hash and NOT stable across a re-run of the same queued batch. It IS echoed
+                            into the prompt and the trace, so a past drain's order is replayable by
+                            reading the batch_id back out."}
+          default: unknown          # minted, not defaulted
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: manifest_seed_override   # the eval harness's fixed seed — NEW (fork F2)
+      provenance: design
+      facets:
+        domain:
+          type: str | None
+          refinement: {nl: "set by evals/harness.py so the author eval's manifest order is fixed AND
+                            still exercises the shuffle path; unset in production, where batch_id seeds."}
+          default: null
+          distinguished: [None]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: lesson_file
+      provenance: code
+      facets:
+        domain:
+          type: file
+          refinement: {nl: "a .md file in the corpus; frontmatter between --- fences"}
+          default: unknown
+          distinguished: [empty-mapping, underscore-prefixed, unfenced, undecodable-bytes,
+                          adversarial-stem, adversarial-scalar-value, adversarial-list-value]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: manifest_string
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: section, source: template:SECTION, slots: {slug: lesson_stem, body: lesson_file}}
+          invariants: [all-slots-bound]
+          nl: "the rendered manifest — spliced VERBATIM into the curator LLM's user turn and never
+               re-parsed by code. The slug is model-chosen (the curator authors the corpus with
+               write_file, and build_write_allow's [^\\x00]* tail matches a NEWLINE), so both the slug
+               and the frontmatter values are attacker-influenced protocol fields."
+
+    - id: curator_llm
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: user, source: template:CURATOR_USER, slots: {manifest: manifest_string,
+                                                                  batch_id: batch_id}}
+          invariants: [all-slots-bound]
+          nl: "the curator's user turn: the manifest, the batch id, the corpus display path, the rows."
+
+    - id: rng
+      provenance: design
+      facets: {}
+      # No injection seam, deliberately: random.Random(str) is a pure function of the seed, so the
+      # properties are testable directly. A fake rng would let an impl that never shuffles pass green,
+      # and lint_monkeypatch (ci:160) fails a new monkeypatch.setattr under defender/ anyway.
+
+    - id: stderr
+      provenance: code
+      facets: {}
+
+  interacts:
+    - {from: build_corpus_manifest, to: iter_lessons,    mode: invoke, via: api, provenance: design}
+    - {from: build_corpus_manifest, to: seed,            mode: read,   via: argv, provenance: design}
+    - {from: build_corpus_manifest, to: rng,             mode: invoke, via: api, provenance: design}
+    - {from: build_corpus_manifest, to: lesson_file,     mode: read,   via: fs,  provenance: code}
+    - {from: build_corpus_manifest, to: manifest_string, mode: write,  via: api, provenance: design,
+       sends: payload, interpolates: [lesson_stem]}
+    - {from: build_corpus_manifest, to: stderr,          mode: write,  via: fs,  provenance: code}
+    - {from: build_curator_user_prompt, to: build_corpus_manifest, mode: invoke, via: api,
+       provenance: design, sends: payload}
+    - {from: build_curator_user_prompt, to: batch_id,    mode: read,   via: api, provenance: code}
+    - {from: build_curator_user_prompt, to: manifest_seed_override, mode: read, via: api,
+       provenance: design}
+    - {from: build_curator_user_prompt, to: curator_llm, mode: write,  via: api, provenance: code,
+       sends: payload}
+    - {from: lessons_common_module, to: corpus_module,   mode: read,   via: api, provenance: design}
+    - {from: iter_lessons,          to: corpus_module,   mode: read,   via: api, provenance: design}
+    - {from: lessons_fm_cli,           to: iter_lessons, mode: invoke, via: bash, provenance: code}
+    - {from: lessons_actor_index_cli,  to: iter_lessons, mode: invoke, via: bash, provenance: code}
+    - {from: lessons_env_retrieve_cli, to: iter_lessons, mode: invoke, via: bash, provenance: code}
+    - {from: index_cli_runner_fake_tree, to: lessons_actor_index_cli, mode: invoke, via: bash,
+       provenance: code}
+    - {from: eval_harness_run_author, to: manifest_seed_override, mode: read, via: api,
+       provenance: design}
+
+  drives:
+    - {from: author_drain,            to: build_curator_user_prompt, provenance: code, multiplicity: serial}
+    - {from: eval_harness_run_author, to: build_curator_user_prompt, provenance: code, multiplicity: serial}
+
+# Both are LEAD-side subprocess drivers (a standing tree-anchor hazard) that reach NEITHER
+# iter_lessons NOR build_corpus_manifest / build_curator_user_prompt — verified by grep over both
+# modules. The lead-author drain curates defender/skills/ (the gather catalog), not the lessons
+# corpora. The AUTHOR-side eval harness (evals/harness.py::run_author) DOES reach the manifest and is
+# modelled as the actor `eval_harness_run_author`, carrying demand e1.
+actor_waivers:
+  - replay_actor
+  - harness_lead
+
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: false}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}
+
+  obligations:
+    - rule: R3
+      element: "corpus_module.access[bare-python3]"
+      witness: "corpus_module is reached by TWO vias — an in-process import (venv active, PyYAML
+                present) and a bare system python3 (the actor's bash lane runs the pinned lesson
+                scripts, which import _lessons_common BEFORE reexec_into_venv). The
+                no-module-top-yaml-import constraint holds on only one of them, and NO test pins it:
+                the contract is prose-only in a docstring. This is the fail-open the rule exists for —
+                the in-process via looks correct in isolation while the bare-python3 via breaks live."
+      discharged_by: c2_bare_python_import
+    - rule: R3
+      element: "iter_lessons.access[bare-python3]"
+      witness: "same two vias on the relocated iterator: the fold must not repurpose its defaults
+                (warn_label, sort key, tuple shape) to serve the manifest, because the three CLIs stream
+                its output straight to the actor."
+      discharged_by: c5_iter_lessons_contract_unchanged
+    - rule: R4
+      element: "seed.domain.distinguished[empty-string]"
+      witness: "seed's falsy member. `if seed:` silently coerces '' to the sorted path — the exact
+                x-or-DEFAULT shape lint_unanchored_default and the repo's anchor-a-default convention
+                forbid. Nothing in the design mentions ''."
+      discharged_by: s5_empty_string_seed_is_a_seed
+    - rule: R4
+      element: "seed.domain.distinguished[None]"
+      witness: "the shipped default column — every existing M1-M10 caller passes no seed."
+      discharged_by: s1_seed_none_sorted
+    - rule: R4
+      element: "lesson_file.domain.distinguished[empty-mapping]"
+      witness: "---\\n{}\\n--- is a VALID parse (fm={}), not a FrontmatterError. The fifth copy of the
+                walk (serialize.py::_iter_corpus) skips it via `if not fm`; iter_lessons renders it.
+                A fold that imports the wrong semantics silently hides a lesson from the curator."
+      discharged_by: e0_empty_mapping_renders
+    - rule: R4
+      element: "lesson_file.domain.distinguished[adversarial-list-value]"
+      witness: "#559's M8 pins injection through a SCALAR frontmatter value only. The actor-lesson shape
+                carries LIST fields (techniques, applies_to, alert_rule_ids) — the realistic carrier is
+                the untested one."
+      discharged_by: m8c_list_valued_injection
+    - rule: R1
+      element: "interacts(build_corpus_manifest->manifest_string).payload"
+      witness: "the manifest is an outbound payload spliced verbatim into an LLM turn and never
+                re-parsed by code; its slug slot is a model-chosen, newline-capable filename. The
+                shuffle relocates WHERE the section boundary is computed, so M8/M8b's defenses need
+                re-pinning UNDER a seed, with a positive control (a bare header-count assertion passes
+                vacuously on an empty manifest)."
+      discharged_by: s7_injection_survives_the_shuffle
+    - rule: R1
+      element: "interacts(build_curator_user_prompt->build_corpus_manifest).payload"
+      witness: "the seed is a new outbound slot on this edge; nothing asserted that batch_id actually
+                REACHES the manifest (an AST check would prove the token, not the effect)."
+      discharged_by: s6_batch_id_is_the_seed
+    - rule: R5
+      element: iter_lessons
+      witness: "iter_lessons is REMOVED from _lessons_common (as a def) and re-exported. Live in-edges:
+                three lesson CLIs, test_lessons_fm's function-local import, and — the one that actually
+                breaks — test_author_actor::_index_cli_runner, which does not import but MIRRORS four
+                source files into a fake tree and runs the copy as a subprocess. defender/_corpus.py is
+                not in that copy list, so the copied _lessons_common ModuleNotFoundErrors."
+      discharged_by: c4_mirrored_copy_list
+    - rule: R5
+      element: lessons_common_module
+      witness: "the three CLIs' import lines survive by fiat (the re-export). Pin the re-export is an
+                IDENTITY, not a wrapper, or the two copies drift back apart — which is the whole reason
+                this issue exists."
+      discharged_by: c1_reexport_identity
+    - rule: R5
+      element: "build_corpus_manifest.hand_rolled_walk"
+      witness: "the duplicate walk is removed; its dependents are the #559 demands M1-M8b/M10, which must
+                stay green through the fold (characterization) — except M9, whose stem-sorted half F1
+                overturns."
+      discharged_by: s0_path_order
+
+  holes:
+    - rule: R0
+      element: "build_corpus_manifest.sort_key"
+      resolution: "FORK F1 — HUMAN RESOLVED: accept iter_lessons' full-Path order and reword M9 from
+                   'stem-sorted' to 'deterministic sorted order'. Rejected: re-sorting by stem at the
+                   render site (a redundant sort for a test-only property — production ALWAYS seeds, so
+                   the sorted order never reaches a curator); rejected: making iter_lessons stem-sorted
+                   (flips the actor's retrieval output order as a refactor side effect). #559's M9 asserts
+                   stem-sorted but its a-/b-/c-lesson fixture orders identically under BOTH keys, so the
+                   one test guarding this was vacuous."
+      resolved_to: s0_path_order
+    - rule: R0
+      element: manifest_seed_override
+      resolution: "FORK F2 — HUMAN RESOLVED: the eval harness pins a fixed seed. batch_id is a fresh
+                   uuid4 per drain, so evals/harness.py::run_author — which drives the REAL curator
+                   in-process — would otherwise get a different manifest order every run. That is the
+                   instrument used to measure the very position bias this change exists to fix. A fixed
+                   override keeps the eval deterministic AND still exercises the shuffle path production
+                   takes. Rejected: seed=None in the eval (deterministic, but then the instrument stops
+                   matching the thing it measures); rejected: accepting the variance."
+      resolved_to: e1_eval_seed_override
+    - rule: R0
+      element: "batch_id.domain.refinement"
+      resolution: "GROUNDED, not a decision: batch_id is uuid.uuid4().hex[:12], minted fresh per drain —
+                   NOT stable across a re-run of the same queued batch. The settled-design comment's
+                   'same batch re-run → same order' claim is therefore FALSE and must not be written as
+                   a demand. The honest contract is 'same SEED → same order', with replay via the
+                   batch_id recorded in the prompt and the trace."
+      resolved_to: s2_same_seed_cross_process
+
+  pre_discharged:
+    - {rule: R1, element: "interacts(build_curator_user_prompt->curator_llm).payload", by: "P1 (#559)"}
+    - {rule: R4, element: "lesson_file.domain.distinguished[underscore-prefixed]", by: "M6 (#559)"}
+    - {rule: R4, element: "lesson_file.domain.distinguished[unfenced]", by: "M6 (#559)"}
+    - {rule: R4, element: "lesson_file.domain.distinguished[undecodable-bytes]", by: "M6b (#559)"}
+    - {rule: R4, element: "lesson_file.domain.distinguished[adversarial-stem]", by: "M8b (#559)"}
+    - {rule: R4, element: "lesson_file.domain.distinguished[adversarial-scalar-value]", by: "M8 (#559)"}
+
+  # R2 clean: build_corpus_manifest writes no shared sink — it returns a string and the manifest is
+  # never persisted. stderr is append-only diagnostics with no identity contract.
+  #
+  # R5 judgment extension — CONSIDERED: does the delta leave a security-critical caller constructible
+  # in a newly-unsafe state? Yes, one: the shuffle relocates where the section boundary is computed,
+  # so an implementation that re-splits the JOINED manifest on '## ' to shuffle would treat a FORGED
+  # header as a real boundary and let a crafted frontmatter value hijack a section. s7 pins the
+  # property (header count == real file count under a seed + adversarial corpus) rather than the
+  # mechanism, so it catches that implementation without naming it.
+
+handoff:
+  forks:
+    - "F1 sort key — RESOLVED: accept iter_lessons' full-Path order; M9's 'stem-sorted' half is
+       overturned and reworded to 'deterministic sorted order'. The sorted path is test-only once
+       build_curator_user_prompt always seeds from batch_id."
+    - "F2 eval seed — RESOLVED: the author config carries an explicit manifest-seed override that
+       evals/harness.py sets, so the author eval stays deterministic while still exercising the shuffle.
+       Production leaves it unset and seeds from batch_id."
+    - "The settled-design comment on #577 claims 'same batch re-run → same order'. Grounding falsified
+       it: batch_id is a fresh uuid4 per drain. The demand is 'same SEED → same order' (s2), replayable
+       via the batch_id recorded in the prompt/trace. The issue comment should be corrected."
+    - "The `random` seam — DECIDED, no injection seam: random.Random(str) is a pure function of the seed
+       (sha512-derived, PYTHONHASHSEED-independent — verified empirically), so the properties are
+       directly testable. A fake rng would let an impl that never shuffles pass green, and
+       lint_monkeypatch fails a new monkeypatch.setattr under defender/ anyway."
+  deviations:
+    - "Reduced small-delta mode: 3 cheap lenses (input-surface, adversarial-input, lifecycle/state) +
+       the frontier strong author. The DEPENDENCY lens was not run — this change has no dependency other
+       than the filesystem and PyYAML, both covered by the input-surface and lifecycle lenses."
+    - "Collapsed step-4 diff: alignment done by the lead, not a separate diff agent."
+    - "The adversarial lens proposed six exotic-separator stubs (U+2028, U+2029, U+0085, U+200B). Five
+       were GROUNDED-FALSE and dropped: str.split() already treats U+2028/2029/0085/00A0 as whitespace
+       (verified empirically), and U+200B cannot break a line. They collapse into one parametrized
+       regression guard on the collapse (in s7)."
+    - "The input-surface lens INVERTED the settled sort-key and warn-text decisions (it asserted stem-sort
+       and the old warn text survive). Corrected at alignment, not carried."
+    - "Formal-slot validation against schema.md's closed vocabularies was a MANUAL check (the #537 linter
+       does not exist yet)."

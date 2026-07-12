@@ -182,6 +182,22 @@ def test_outcome_policy_filter_drops_survived_and_undecidable(
     assert by_id["c/0"]["skip_reason"] == "outcome_policy:undecidable"
 
 
+def test_existing_observation_ids_skips_an_undecodable_lesson(tmp_path: Path, capsys):
+    """One corrupt byte must not abort the curator drain. ``read_text()`` raises
+    ``UnicodeDecodeError`` — a ``ValueError``, not an ``OSError`` — so the un-guarded read this
+    pre-flight used to do took the whole drain down, where the corpus manifest beside it warned and
+    skipped the one file. The well-formed sibling's ids must still come back, because an id this
+    scan fails to see is an observation the curator re-authors as a duplicate lesson."""
+    corpus = tmp_path / "lessons-actor"
+    corpus.mkdir()
+    (corpus / "good.md").write_text(
+        "---\nname: good\nsource_observation_ids:\n  - a/0\n---\nbody\n"
+    )
+    (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
+    assert curator.existing_observation_ids(corpus) == {"a/0"}  # must not raise
+    assert "corrupt.md" in capsys.readouterr().err
+
+
 def test_idempotency_consumes_already_cited_observations(tmp_path: Path):
     ctx = _isolate(tmp_path)
     _write_lesson(
@@ -614,9 +630,16 @@ def _index_cli_runner(ctx: dict):
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
     # The script imports defender._frontmatter and the shared scripts.lessons._lessons_common
-    # helper (both via its sys.path bootstrap), which re-exports scripts._venv — mirror all three.
+    # helper (both via its sys.path bootstrap), which re-exports defender._corpus (the shared
+    # lesson walk) and defender.scripts._venv — mirror all four. The copy list is the script's
+    # transitive module-level defender.* import closure; test_corpus_fold_seed::test_c4 pins that
+    # structurally, so a module the CLIs pick up later fails there rather than as a
+    # ModuleNotFoundError inside this subprocess.
     (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
         (defender_src / "_frontmatter.py").read_text()
+    )
+    (ctx["repo"] / "defender" / "_corpus.py").write_text(
+        (defender_src / "_corpus.py").read_text()
     )
     (fake_scripts / "_lessons_common.py").write_text(
         (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()

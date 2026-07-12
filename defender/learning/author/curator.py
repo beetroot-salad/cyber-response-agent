@@ -31,7 +31,6 @@ trailers; the ``commit_corpus`` / ``changes_outside_corpus`` / ``corpus_dir_clea
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +41,7 @@ import yaml
 
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
+from defender._corpus import iter_lessons
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
 from defender.learning.core import config
@@ -123,8 +123,6 @@ def read_batch(cfg: CuratorConfig) -> list[dict]:
     return read_jsonl_rows(cfg.channel.file)
 
 
-_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
-
 # Cache of the corpus-wide id set, keyed on a (name, mtime_ns) signature of the
 # corpus files. The repo lock means the corpus only changes when a commit lands,
 # which bumps the signature and invalidates the cache — so two drains on an
@@ -139,7 +137,15 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
 
     Corpus-wide, so an id already authored into this corpus (by any direction that
     shares it) is treated as consumed. Lessons missing the field or with a non-list
-    value are skipped silently."""
+    value are skipped silently.
+
+    Parses through the shared ``iter_lessons``, like the corpus manifest this pre-flight runs
+    beside. The hand-rolled walk it replaces read each file OUTSIDE any guard, so a single
+    undecodable byte raised ``UnicodeDecodeError`` (a ``ValueError``, NOT an ``OSError``) and took
+    the whole curator drain down where the manifest would have warned and skipped the one file; and
+    its ``\\A---\\n`` literal silently contributed no ids for a CRLF lesson. The glob below stays —
+    it is the mtime *signature*, computed before any parse, and it applies the same discovery rules
+    the iterator does."""
     if not corpus_dir.is_dir():
         return set()
     paths = [
@@ -150,21 +156,12 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     if cached is not None:
         return set(cached)
     ids: set[str] = set()
-    for path in paths:
-        m = _FRONTMATTER_RE.match(path.read_text())
-        if not m:
-            continue
-        try:
-            doc = yaml.safe_load(m.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        sids = doc.get("source_observation_ids") or []
+    for _path, fm in iter_lessons(
+        corpus_dir, warn_label=lambda p: f"observation-id pre-flight: {p.name}"
+    ):
+        sids = fm.get("source_observation_ids") or []
         if isinstance(sids, list):
-            for sid in sids:
-                if isinstance(sid, str):
-                    ids.add(sid)
+            ids.update(sid for sid in sids if isinstance(sid, str))
     _EXISTING_IDS_CACHE.clear()  # keep only the latest signature
     _EXISTING_IDS_CACHE[sig] = set(ids)
     return ids

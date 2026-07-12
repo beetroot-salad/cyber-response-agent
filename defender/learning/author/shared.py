@@ -34,8 +34,8 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import random
 import re
-import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -44,7 +44,7 @@ from typing import Any
 import yaml
 
 from defender import _git
-from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._corpus import iter_lessons
 from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
 # REPO_LOCK_WAIT_SECONDS (the env-derived ceiling each curator config sources as its
@@ -536,7 +536,7 @@ _MANIFEST_PROVENANCE_DROP = frozenset(
 )
 
 
-def build_corpus_manifest(corpus_dir: Path) -> str:
+def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
     """Render the existing-corpus manifest a lesson curator folds against: one ``## <stem>``
     section per non-``_`` lesson in ``corpus_dir``, carrying that lesson's frontmatter MINUS the
     provenance drop-set, re-emitted from the PARSED dict via ``yaml.safe_dump``. Re-emitting from
@@ -544,13 +544,32 @@ def build_corpus_manifest(corpus_dir: Path) -> str:
     (``source_finding_ids:`` + its ``- id`` continuations) leaves no orphan line — AND what makes
     the VALUES injection-safe: ``safe_dump`` indents/quotes every one, so a crafted frontmatter
     scalar (``\\n## other`` / ``\\n---`` / YAML metachars) cannot forge a sibling ``## `` header or
-    a ``---`` break. Sections are sorted by stem, so the manifest is byte-stable across reruns.
+    a ``---`` break. That holds for a LIST-valued field too (the actor corpus's ``techniques`` /
+    ``applies_to``, whose values trace back to alert data): safe_dump quotes and indents each
+    element, so no element reaches column 0.
 
     The STEM is untrusted too, and ``safe_dump`` never sees it. A lesson filename is model-chosen
     (the curator authors the corpus with ``write_file``) and ``build_write_allow``'s ``[^\\x00]*``
     tail is a char class that matches a NEWLINE — so ``lessons/x\\n## other\\n….md`` is a
     gate-approved path whose stem would forge exactly the sibling section the value-quoting above
     closes. Collapse the stem's whitespace so a slug can never leave its own ``## `` line.
+
+    The walk itself is ``defender._corpus.iter_lessons`` — the same reader the three lesson CLIs
+    stream to the actor — so the manifest cannot drift from it the way the hand-rolled copy did
+    (the ``UnicodeDecodeError`` hole had to be closed twice). Section ORDER is therefore the
+    iterator's full-path order, not a stem sort: taking the shared order is the point, and the
+    shuffle below is what the curator actually sees in production anyway.
+
+    ``seed`` shuffles the sections with a local ``random.Random`` (never the module-level
+    ``random``, whose global stream ``ticket_seeds``/``malicious_actor`` draw from). The curator's
+    job is fold-into-an-existing-lesson vs author-a-new-one, and this manifest is the menu it picks
+    from: under a fixed order the same lessons sit at the top on every batch forever, so any
+    position bias in the model compounds into a systematic tilt instead of averaging out. Seeded
+    (from ``batch_id``) rather than free-running, so a drain stays replayable and the prompt prefix
+    stays cacheable. ``random.Random(<str>)`` seeds via sha512 — NOT ``hash()``, which is
+    PYTHONHASHSEED-salted and would reorder in every new process. ``seed=None`` (the default) keeps
+    the deterministic sorted path for every other caller; ``seed=""`` is a seed, not an absence —
+    hence ``is not None``, never ``if seed:``.
 
     Reads the PASSED ``corpus_dir`` (the author-drain threads its throwaway worktree's corpus —
     #562), never a module global, so the manifest reflects the tree the curator actually edits.
@@ -559,32 +578,25 @@ def build_corpus_manifest(corpus_dir: Path) -> str:
 
     Tolerant: a missing / empty / non-directory ``corpus_dir`` yields ``''`` (a first-ever run in a
     fresh worktree), and a single malformed ``.md`` is warned to stderr and skipped — one bad file
-    never aborts the manifest and loses its well-formed siblings. "Malformed" covers non-fenced /
-    non-mapping frontmatter (``FrontmatterError``), an unreadable file (``OSError``), AND
-    undecodable bytes: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and
-    NOT an ``OSError``, so it must be named or a single corrupt byte aborts the whole drain."""
-    if not corpus_dir.is_dir():
-        return ""
+    never aborts the manifest and loses its well-formed siblings."""
     sections: list[str] = []
-    for path in sorted(corpus_dir.glob("*.md"), key=lambda p: p.stem):
-        if path.name.startswith("_"):
-            continue
-        try:
-            fm, _body = parse_frontmatter(path.read_text())
-        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
-            print(f"build_corpus_manifest: skipping {path.name!r}: {e}", file=sys.stderr)
-            continue
+    for path, fm in iter_lessons(
+        corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}"
+    ):
         kept = {k: v for k, v in fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
         rendered = yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )
         slug = " ".join(path.stem.split())  # a model-chosen stem is not a safe protocol field
         sections.append(f"## {slug}\n{rendered}")
+    if seed is not None:
+        random.Random(seed).shuffle(sections)
     return "\n".join(sections)
 
 
 def build_curator_user_prompt(
-    rows: list[dict], batch_id: str, *, corpus_dir: Path, corpus_dir_rel: str, label: str
+    rows: list[dict], batch_id: str, *, corpus_dir: Path, corpus_dir_rel: str, label: str,
+    manifest_seed: str | None = None,
 ) -> str:
     """The user payload every curator sends its agent: the existing-corpus frontmatter manifest,
     the batch, its corpus display path, and the queued rows verbatim. ``label`` names the row kind
@@ -599,10 +611,20 @@ def build_curator_user_prompt(
     It carries NO forward-check command line. The check is an in-process tool bound to the
     curator's deps at spawn (#558), so there is nothing here for the agent to substitute an
     interpreter path or a script operand into; each row's own id and direction ride in the
-    rows below, where they already were."""
+    rows below, where they already were.
+
+    The manifest's section order is seeded from ``batch_id`` (see ``build_corpus_manifest``) — the
+    default every production curator takes, and the reason ``batch_id`` is echoed into the prompt:
+    it is what replays the order. ``manifest_seed`` overrides that with a fixed seed, and this is
+    the ONE place the override-else-batch_id choice is made, so the four curators cannot drift on
+    it. Its only caller is the author eval (``evals/harness.py``), which drives the real curator
+    against a temp tree: ``batch_id`` is a fresh uuid4 per drain, so without a pin the eval would
+    draw a different menu order every run — and that eval is the instrument you would measure the
+    position bias with."""
     # An empty corpus (the first-ever drain) renders as a blank section, which reads as a
     # truncated prompt rather than a fact. Say the fact.
-    manifest = build_corpus_manifest(corpus_dir) or "(none — the corpus is empty)"
+    seed = manifest_seed if manifest_seed is not None else batch_id
+    manifest = build_corpus_manifest(corpus_dir, seed=seed) or "(none — the corpus is empty)"
     return (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {corpus_dir_rel}\n"
