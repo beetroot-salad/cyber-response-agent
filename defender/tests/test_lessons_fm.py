@@ -132,7 +132,10 @@ def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
     the caller down. That has to cover the READ, not just the PARSE: ``read_text()`` raises
     ``UnicodeDecodeError`` on undecodable bytes, and it is a ``ValueError`` — NOT an ``OSError`` —
     so a guard around the parse alone lets it escape. Live blast radius: the gray-box actor runs
-    ``lessons_actor_index`` / ``lessons_env_retrieve`` on its bash lane mid-run."""
+    ``lessons_actor_index`` / ``lessons_env_retrieve`` on its bash lane mid-run.
+
+    #584 SUPERSEDES the 2-tuple destructure below: ``iter_lessons`` now yields a frozen ``Lesson``
+    dataclass. The warn-and-skip property this test pins is unchanged."""
     from defender.scripts.lessons._lessons_common import iter_lessons
 
     corpus = tmp_path / "lessons"
@@ -141,7 +144,7 @@ def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe not utf-8\n")
     (corpus / "unfenced.md").write_text("no fence at all\n")  # the parse-side control
 
-    yielded = [p.stem for p, _fm in iter_lessons(corpus)]  # must not raise
+    yielded = [lesson.path.stem for lesson in iter_lessons(corpus)]  # must not raise
 
     assert yielded == ["good"]  # the well-formed sibling survives both bad files
     err = capsys.readouterr().err

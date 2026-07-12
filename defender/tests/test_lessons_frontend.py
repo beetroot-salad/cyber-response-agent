@@ -11,6 +11,7 @@ from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
+from defender._corpus import iter_lessons  # noqa: E402
 from defender.learning.frontend import serialize  # noqa: E402
 
 
@@ -22,20 +23,18 @@ CORPUS_DIR = {
 
 
 def _on_disk(corpus: Path) -> set[str]:
-    """Stems the serializer would enumerate: non-underscore ``*.md`` whose
-    frontmatter parses. The serializer warns+skips malformed files, so
-    counting raw ``*.md`` would diverge the moment a lesson lands with a
-    YAML typo — mirror the skip via the same ``_read_lesson`` primitive."""
-    if not corpus.is_dir():
-        return set()
-    out: set[str] = set()
-    for p in corpus.glob("*.md"):
-        if p.name.startswith("_"):
-            continue
-        fm, _ = serialize._read_lesson(p)
-        if fm:
-            out.add(p.stem)
-    return out
+    """Stems the serializer enumerates: non-underscore ``*.md`` whose frontmatter parses.
+
+    The serializer warns+skips malformed files, so counting raw ``*.md`` would diverge the moment a
+    lesson lands with a YAML typo — mirror the skip through the SAME primitive the serializer now
+    walks (#584: the serializer's private reader/walk are deleted and ``build_view`` goes through
+    ``iter_lessons``; this oracle used to reach into that private reader). Deliberately NOT rebuilt
+    on ``build_view``'s own output: an oracle derived from the thing it checks is a tautology.
+
+    Note the semantics shift with the fold, and it is the fix, not a regression: a lesson whose
+    frontmatter is a valid EMPTY MAPPING (``fm == {}``) is now COUNTED — the old ``if fm`` filter
+    mirrored the serializer's falsy skip, which is the very bug #584 closes."""
+    return {lesson.path.stem for lesson in iter_lessons(corpus)}
 
 
 def test_build_view_is_pure():

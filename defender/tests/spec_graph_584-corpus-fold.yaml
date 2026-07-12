@@ -1,0 +1,784 @@
+schema_version: 1
+design: "#584 (+ the resolved design in the issue thread; discharges the standing waiver
+  `waiver_serialize_iter_corpus_not_folded` in spec_graph_577-corpus-fold-seed.yaml:261-271)"
+base: 09e0a93cd6e43939d89182e97e5a9c567e654f7c
+
+# ===========================================================================
+# DEMANDS — the spec proper
+# ===========================================================================
+demands:
+
+  # --- the return contract (demand #0) ---------------------------------
+  - id: d0_lesson_return_contract
+    kind: seam
+    form: test
+    outcome: {nl: "iter_lessons yields, for every well-formed lesson under corpus_dir, a single
+      frozen Lesson dataclass carrying path, fm, raw and body; the with_raw flag is gone and both
+      former tuple shapes with it. Lesson is defined in defender/_corpus.py itself."}
+    binds: ["iter_lessons", "Lesson", "interacts(iter_lessons->Lesson)"]
+    rejected:
+      - {nl: "a third anonymous tuple arity (with_body) — a second, differently-ordered 3-tuple"}
+      - {nl: "a NamedTuple — see d1: it converts the shape change into a silent field swap"}
+
+  - id: d1_lesson_not_unpackable
+    kind: negative
+    form: test
+    outcome: {nl: "Lesson is NOT iterable: `a, b, c = lesson` raises TypeError (cannot unpack
+      non-iterable Lesson object). raw was the MIDDLE element of the old 3-tuple and fm is the
+      middle field of the new dataclass, so an iterable Lesson would let every un-migrated
+      `for path, raw, fm in ...` keep running while silently binding raw<-fm and fm<-raw. This is
+      the safe-by-construction demand: a missed call site must fail LOUD."}
+    binds: ["Lesson"]
+    rejected: [{nl: "a NamedTuple for backward compatibility with the existing destructures"}]
+
+  - id: d1b_lesson_field_access_positive_control
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control for d1 — the complementary condition on the same address: named
+      field access works. lesson.path / lesson.fm / lesson.raw / lesson.body each return their
+      value, so d1's TypeError proves non-iterability rather than a broken object."}
+    binds: ["Lesson"]
+
+  - id: d2_field_values_are_discriminable
+    kind: shape
+    form: test
+    outcome: {nl: "The positional-swap fault stated on the VALUES, not the shape: over a lesson
+      with `telemetry_source: [sshd, auditd]`, lesson.fm is a dict whose ['telemetry_source'] ==
+      ['sshd','auditd'], and lesson.raw is a str CONTAINING the literal YAML source substring
+      'telemetry_source: [sshd, auditd]' (str(fm) would render a Python dict repr and never contain
+      it). A swapped construction inside iter_lessons fails both halves."}
+    binds: ["Lesson", "interacts(iter_lessons->Lesson)"]
+    rejected: [{nl: "asserting only isinstance(raw, str) / isinstance(fm, dict) — a swap that also
+      str()-ifies would slip through a pure type check"}]
+
+  - id: d3_raw_is_the_slice_the_parser_consumed
+    kind: shape
+    form: test
+    outcome: {nl: "Lesson.raw is exactly the text between the fences that parse_frontmatter handed
+      yaml.safe_load: CRLF-normalized, no leading '---\\n', no trailing '\\n---', body NEVER
+      included. Over a CRLF lesson whose BODY contains 'telemetry_source: sshd', raw contains no
+      '\\r' and does not contain the body line. Lesson.body is the stripped body text."}
+    binds: ["Lesson", "interacts(iter_lessons->corpus_dir)"]
+    rejected: [{nl: "defining raw as the un-normalized on-disk slice — cmd_grep's patterns are
+      authored against LF text and a trailing \\r silently defeats a $-anchored pattern"}]
+
+  - id: d4_import_purity_survives_the_dataclass
+    kind: behavior
+    form: test
+    outcome: {nl: "With yaml masked at sys.meta_path, `import defender._corpus` succeeds, 'yaml' is
+      not in sys.modules, and defender._corpus.Lesson exists and is constructible. Lesson must live
+      IN _corpus.py: a new defender.* module reds test_c4 (test_author_actor::_index_cli_runner
+      mirrors a hardcoded four files into its fake tree), and any yaml-backed module-scope import
+      breaks the actor's bash lane live under the system interpreter."}
+    binds: ["iter_lessons", "Lesson", "pre_venv_import_lane"]
+
+  # --- the corpus domain (R4) -------------------------------------------
+  - id: d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "iter_lessons reads with an explicit encoding='utf-8'. Driven in a subprocess
+      under a C locale (PYTHONCOERCECLOCALE=0 PYTHONUTF8=0 LC_ALL=C, i.e.
+      locale.getencoding()=='ANSI_X3.4-1968'), a VALID UTF-8 lesson whose description contains
+      'café' is still YIELDED. This is not hygiene: today's bare read_text() decodes under the
+      ambient locale, so on a C-locale box that lesson raises an ascii UnicodeDecodeError, is
+      warn-SKIPPED, and vanishes from the actor's retrieval — silent data loss."}
+    binds: ["READ_ENCODING.domain.distinguished[C-locale]", "interacts(iter_lessons->corpus_dir)"]
+
+  - id: d6_empty_mapping_is_yielded
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A lesson whose frontmatter is a valid EMPTY MAPPING ('---\\n{}\\n---') parses to
+      fm == {} — a SUCCESSFUL parse, not a FrontmatterError — and is YIELDED, not dropped. This is
+      the falsy member of the frontmatter domain (falsy_valid: true) and the one place the
+      hand-rolled serialize walk disagreed with the shared iterator."}
+    binds: ["corpus_dir.domain.distinguished[empty-mapping]"]
+
+  - id: d7_frontmatter_error_members_warn_skip
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "Each FrontmatterError member of the corpus domain is warn-skipped, NAMED once on
+      stderr, and its well-formed siblings still yield: no leading fence; no closing fence; invalid
+      YAML; a non-mapping document ('---\\n\\n---' parses to None -> not a dict); and a UTF-8 BOM
+      before the fence (the BOM defeats the startswith('---\\n') check, so it lands here rather
+      than being silently stripped)."}
+    binds: ["corpus_dir.domain.distinguished[unfenced]",
+            "corpus_dir.domain.distinguished[no-closing-fence]",
+            "corpus_dir.domain.distinguished[invalid-yaml]",
+            "corpus_dir.domain.distinguished[non-mapping-null]",
+            "corpus_dir.domain.distinguished[utf8-bom]"]
+
+  - id: d8_undecodable_bytes_warn_skip
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A lesson with undecodable bytes (b'\\xff\\xfe') is warn-skipped and NAMED on
+      stderr; siblings survive. The read sits INSIDE the guard because UnicodeDecodeError is a
+      ValueError and NOT an OSError."}
+    binds: ["corpus_dir.domain.distinguished[undecodable]"]
+
+  - id: d9_oserror_members_warn_skip
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "The OSError arm of the guard is exercised by the two members that reach it
+      without root privileges: a DIRECTORY named 'foo.md' (read_text raises IsADirectoryError) and
+      a DANGLING SYMLINK 'dead.md' (FileNotFoundError). Both are warn-skipped and named; siblings
+      survive."}
+    binds: ["corpus_dir.domain.distinguished[dir-named-md]",
+            "corpus_dir.domain.distinguished[dangling-symlink]"]
+    rejected: [{nl: "a chmod-000 file for the OSError arm — the suite runs as root (euid 0), so the
+      read SUCCEEDS and the test is vacuous"}]
+
+  - id: d10_discovery_rules_unchanged
+    kind: behavior
+    form: test
+    outcome: {nl: "The discovery rules survive the refactor: '_'-prefixed files are skipped
+      silently (no warn), and lessons are yielded in FULL-PATH sorted order — exercised on the
+      prefix pair, the one case where the two sort keys diverge ('cover-prereqs.md' < 'cover.md' by
+      path; the reverse by stem)."}
+    binds: ["interacts(iter_lessons->corpus_dir)"]
+
+  - id: d11_warn_label_contract
+    kind: behavior
+    form: test
+    outcome: {nl: "The default warn_label stays p.name, and a custom warn_label still reaches the
+      warn line: lessons_actor_index is the ONE consumer passing one (a repo-relative label) and
+      its stderr goes to the adversarial actor mid-run, so over a corpus with a malformed lesson its
+      warn carries 'defender/lessons-actor/bad.md', not the bare 'bad.md'."}
+    binds: ["warn_stderr", "interacts(iter_lessons->warn_stderr)"]
+    rejected: [{nl: "asserting the substring 'bad.md' — present under BOTH labels, so the assertion
+      is vacuous exactly where it must discriminate"}]
+
+  # --- the frontend fold -------------------------------------------------
+  - id: d12_build_view_seam
+    kind: seam
+    form: test
+    outcome: {nl: "build_view gains a DEFAULTED corpus-root parameter — build_view(defender_dir:
+      Path = DEFENDER) — resolving each group's corpus as defender_dir / spec['dir']. Called with
+      no args it still returns the three real groups (test_build_view_is_pure /
+      test_three_groups_present / test_counts_match_on_disk keep passing verbatim); called against
+      a fixture tree it returns records naming the fixture files."}
+    binds: ["build_view", "interacts(build_view->corpus_dir)"]
+    rejected:
+      - {nl: "an env var or a module-level rebind — ambient state, not injection; the project idiom
+          is that fakes enter through injection seams (and CI ratchets monkeypatch.setattr)"}
+
+  - id: d13_source_path_keys_off_the_injected_root
+    kind: behavior
+    form: test
+    outcome: {nl: "_normalize computes source_path relative to defender_dir.parent, not the module
+      REPO_ROOT constant. Against a fixture root the record's source_path names the fixture file;
+      against the real corpora the rendered value is byte-identical to today's (DEFENDER.parent IS
+      REPO_ROOT). Without this the seam is unusable: path.relative_to(REPO_ROOT) raises ValueError
+      on the first fixture record."}
+    binds: ["build_view", "lessons_json.payload"]
+    rejected: [{nl: "a second repo_root=REPO_ROOT parameter — two knobs every caller must keep
+      consistent is a wider seam than the one fact (the corpus root) demands"}]
+
+  - id: d14_frontend_truth_table_no_silent_subtraction
+    kind: behavior
+    form: test
+    outcome: {nl: "The FULL classification truth table over one fixture corpus — today `if not fm`
+      drops BOTH the FrontmatterError files AND the valid-{} file; after the fold the guard drops
+      only the former. Over {good, empty-fm, unfenced, no-close, bad-yaml, null-doc, undecodable,
+      _TEMPLATE}, the rendered title set is EXACTLY {'good', 'empty-fm'}: exactly one file changes
+      class (empty-fm: dropped -> rendered), the FrontmatterError files stay dropped, _TEMPLATE
+      stays skipped, and NOTHING that renders today disappears."}
+    binds: ["build_view", "lessons_json.payload", "corpus_dir.domain.distinguished[empty-mapping]"]
+    rejected: [{nl: "pinning only `'empty-fm' in titles` — the risk this spec exists to cover is a
+      file SILENTLY LEAVING the view, and a membership check cannot see a subtraction"}]
+
+  - id: d15_empty_mapping_record_shape
+    kind: shape
+    form: test
+    outcome: {nl: "The {}-lesson's rendered record is title == path.stem (no title_keys hit),
+      description == '', status == 'live' (the fm.get('status') or 'live' fallback), metadata == {},
+      body == the text after the fence. The record is legal under test_lesson_record_shape (the stem
+      keeps title truthy) and the view badges it live rather than hiding it."}
+    binds: ["lessons_json.payload"]
+    rejected: [{nl: "rendering it with status 'stale' or a '(no frontmatter)' placeholder title —
+      the manifest's test_e0 already treats {} as a first-class valid parse, and the frontend
+      disagreeing with the manifest is the divergence this arc closes"}]
+
+  - id: d16_build_completes_despite_a_bad_lesson
+    kind: behavior
+    form: test
+    outcome: {nl: "With an undecodable lesson AND an OSError lesson (a directory named foo.md) in
+      the corpus, build_view RETURNS — its well-formed siblings render — and each bad file is NAMED
+      once on stderr. Today _read_lesson reads OUTSIDE its try and catches only FrontmatterError,
+      so either one takes the whole lessons.html / lessons.json build down."}
+    binds: ["build_view", "warn_stderr"]
+    rejected: [{nl: "pinning the exact warn text — #577's w1 settled that the FORMAT is free and the
+      NAME is the contract; pinning the message would freeze an exception's str() into the spec"}]
+
+  - id: d17_stdout_stays_a_json_protocol
+    kind: negative
+    form: test
+    outcome: {nl: "serialize.py --stdout is an api preview: over a corpus containing a malformed
+      lesson, build_view leaves stdout EMPTY while stderr names the file. A warn that lost its
+      file=sys.stderr would corrupt the emitted bytes into unparseable JSON while the exit code
+      stayed 0."}
+    binds: ["build_view", "stdout_contract[serialize]", "warn_stderr"]
+    rejected: [{nl: "asserting the warn text is absent from stdout — a substring check passes on any
+      OTHER stray print; stdout must be EMPTY, because that is what makes --stdout a protocol"}]
+
+  - id: d17b_stdout_positive_control
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control for d17 on the same address: the sanctioned path still carries
+      the bytes — json.loads(dump_contract(stamped_view())) round-trips to the view contract. Proves
+      the empty-stdout assertion is not green merely because nothing was emitted at all."}
+    binds: ["stdout_contract[serialize]", "lessons_json.payload"]
+
+  - id: d18_serialize_walk_is_gone
+    kind: survival
+    form: test
+    outcome: {nl: "On serialize.py's AST: no module-level def named _read_lesson or _iter_corpus
+      survives, and there is NO module-level import of defender._frontmatter (deleting _read_lesson
+      orphans it -> ruff F401, a HARD repo-wide CI gate). The tempting local fix — keep the import
+      and hand-roll one more tolerant parse — re-creates the duplicate this issue exists to delete."}
+    binds: ["serialize_iter_corpus", "serialize_read_lesson"]
+    rejected: [{nl: "keeping the import behind a `# noqa: F401` — an import kept alive by a
+      suppression is exactly the 'the fifth copy is still reachable' state the waiver was filed
+      against"}]
+
+  - id: d19_on_disk_oracle_rebuilt
+    kind: survival
+    form: test
+    outcome: {nl: "test_lessons_frontend's _on_disk() oracle — which reaches into the deleted
+      serialize._read_lesson today — is rebuilt on _corpus.iter_lessons (the same primitive the
+      serializer now uses), and test_counts_match_on_disk still passes over the live corpora."}
+    binds: ["serialize_read_lesson"]
+    rejected: [{nl: "hardcoding today's counts (16/12/15) — the corpora grow as the loop authors,
+      and a count that must be hand-bumped is a test that gets deleted"}]
+
+  # --- the trace_lesson fold ---------------------------------------------
+  - id: d20_trace_lessons_dir_seam
+    kind: seam
+    form: test
+    outcome: {nl: "trace_lesson.main gains --lessons-dir (type=Path, default=LESSONS_DIR set in the
+      add_argument call, mirroring the existing --runs-dir and lessons_env_retrieve's --corpus), so
+      --all can be driven against a fixture corpus. The default is anchored at the boundary, NOT
+      re-defaulted in the body (`ns.lessons_dir or LESSONS_DIR` is exactly what
+      lint_unanchored_default blocks)."}
+    binds: ["trace_all", "trace_one", "interacts(trace_all->corpus_dir)"]
+    rejected: [{nl: "rebinding mod.LESSONS_DIR after spec_from_file_location — monkeypatch wearing a
+      different hat: it mutates module state a fixture never owns, and nothing forces production to
+      re-read the constant, so the test can go green against code that closed over the old value"}]
+
+  - id: d21_trace_all_walks_the_shared_iterator
+    kind: parity
+    form: test
+    outcome: {nl: "trace_lesson --all walks through iter_lessons, so it inherits the discovery rules
+      it hand-rolled without: a '_'-prefixed file (_TEMPLATE.md) is NO LONGER listed, and a
+      malformed or undecodable lesson is warn-skipped to stderr rather than crashing the run. The
+      well-formed siblings are still listed, one TSV line each, and the exit code stays 0."}
+    binds: ["corpus_dir.access[trace_all]", "trace_all"]
+
+  - id: d22_missing_lessons_dir_follows_the_seam
+    kind: behavior
+    form: test
+    outcome: {nl: "The `if not lessons_dir.is_dir(): return 1` guard keys on the RESOLVED dir:
+      main(['--all', '--lessons-dir', <nonexistent>]) returns 1 with 'no lessons dir: <that path>'
+      on stderr — naming the injected path, not the repo's real defender/lessons (which exists, and
+      would make the guard silently pass). A seam that is accepted and then ignored is
+      indistinguishable from no seam on every other assertion."}
+    binds: ["trace_all"]
+    rejected: [{nl: "exit 2 for a bad --lessons-dir — the CLI's established code for 'no corpus' is
+      1; there is no 2 anywhere in trace_lesson"}]
+
+  - id: d23_lesson_identity_is_the_stem_cross_module
+    kind: uniqueness
+    form: test
+    outcome: {nl: "Lesson identity is the file STEM — the same string record_lesson_load.lesson_name
+      writes into lessons_loaded.jsonl, which is the key in_context_cases joins on. Pinned
+      CROSS-MODULE: for a lesson at <dir>/foo-bar.md, trace_lesson's meta name ==
+      record_lesson_load.lesson_name(str(path)) == 'foo-bar'. A Lesson(path, fm, raw, body) carries
+      no .name, so the fold's obvious reach is lesson.fm['name'] (KeyError on the 12+ real lessons
+      with no name key) or .fm.get('name') (empty string -> every join misses, silently)."}
+    binds: ["lessons_loaded_jsonl.identity", "trace_all", "record_lesson_load"]
+    rejected: [{nl: "pinning == path.stem alone — that restates the implementation; the invariant
+      that matters is AGREEMENT with the co-writer of the key, and only a cross-module oracle checks
+      it"}]
+
+  - id: d23b_stem_wins_when_frontmatter_name_disagrees
+    kind: behavior
+    form: test
+    outcome: {nl: "The paired positive control for d23, end to end through main(): a lesson
+      foo-bar.md whose frontmatter says `name: foo_bar` (stem != fm name), plus a run whose
+      lessons_loaded.jsonl cites lesson_name 'foo-bar'. --all prints the line 'foo-bar\\t<desc>\\t1'
+      — the STEM in column 1 and the case COUNTED in column 3. Under an fm['name'] fold the line
+      reads 'foo_bar\\t<desc>\\t0': both columns wrong, and the count silently zero."}
+    binds: ["trace_all", "lessons_loaded_jsonl.identity"]
+    rejected: [{nl: "asserting only column 1 — the name can be right while the join key threaded into
+      in_context_cases is the frontmatter one; the NONZERO COUNT is what proves it"}]
+
+  - id: d24_single_lesson_path_keeps_its_own_guarded_read
+    kind: behavior
+    form: test
+    outcome: {nl: "iter_lessons is a DIRECTORY walk and structurally cannot serve `trace_lesson
+      <name>`, so the single-lesson path keeps its own read — but guarded. An unknown name returns 1
+      with 'no such lesson: <dir>/nope.md'. A NAMED lesson with undecodable bytes returns 1 with one
+      clean stderr line naming the file and NO traceback text reaching stderr (today's unguarded
+      read_text raises UnicodeDecodeError straight out of main()). A well-formed name returns 0 and
+      prints its case lines."}
+    binds: ["trace_one"]
+    rejected:
+      - {nl: "warn-and-continue with an empty meta (the --all posture) — for an explicitly NAMED
+          lesson, printing '# corrupt — 0 case(s)' and exiting 0 reports 'no cases' for a file that
+          was never read, which is worse than an error"}
+      - {nl: "rerouting the single path through iter_lessons — it turns an O(1) read into a
+          whole-corpus parse and converts 'no such lesson' from an explicit exit-1 into a
+          StopIteration traceback"}
+
+  # --- consumer survival + cross-via parity ------------------------------
+  - id: d25_env_retrieve_stdout_shape
+    kind: shape
+    form: test
+    outcome: {nl: "lessons_env_retrieve's stdout is PARSED as '<repo-rel path>\\t<relevance_criteria>'
+      by the curators' forward-check (author/verify_forward/env.py:64) and streamed to the actor on
+      its bash lane. Driven over a fixture corpus through its existing --corpus seam: rc 0, and every
+      stdout line is exactly TWO tab-separated fields whose first is the repo-relative path — no
+      extra column, no reordering, warns on stderr only."}
+    binds: ["interacts(lessons_env_retrieve->stdout_contract[env_retrieve]).payload"]
+    rejected: [{nl: "skipping this because 'the migration cannot change stdout' — the migration
+      rewrites the destructure at its loop header, and a swapped field would print the frontmatter
+      DICT into the criteria column, which the forward-check would happily ingest as a string"}]
+
+  - id: d26_cmd_grep_still_greps_the_yaml_source
+    kind: survival
+    form: test
+    outcome: {nl: "cmd_grep is the ONE behavioral consumer of raw (it regex-matches it), and the
+      frontmatter-only contract is what it exists for. Driven through the real CLI:
+      main(['prog', 'telemetry_source:.*sshd']) returns 0, stdout carries the sshd lesson, and does
+      NOT carry a lesson whose BODY merely mentions sshd. A migration that passes lesson.fm into
+      rx.search raises TypeError: expected string or bytes-like object."}
+    binds: ["corpus_dir.access[cmd_grep]", "cmd_grep"]
+    rejected: [{nl: "asserting only the exit code — cmd_grep exits 0 on 'no match', so an rc-only
+      assertion is green against a grep that matches nothing at all"}]
+
+  - id: d27_cmd_tags_counts_unchanged
+    kind: survival
+    form: test
+    outcome: {nl: "cmd_tags asks for with_raw=True today and DISCARDS raw — so it is precisely where
+      a raw/fm swap is INVISIBLE. Pin its output independently: main(['prog','--tags',
+      'telemetry_source']) returns 0 and stdout still carries each distinct value with its count,
+      _TEMPLATE.md excluded."}
+    binds: ["corpus_dir.access[cmd_tags]", "cmd_tags"]
+    rejected: [{nl: "dropping cmd_tags because 'the fold cannot change it' — the fold rewrites the
+      loop header at that exact line; unwatched lines are where the swap lands"}]
+
+  - id: d28_curator_consumers_survive
+    kind: survival
+    form: test
+    outcome: {nl: "The three in-process consumers still work through the dataclass:
+      build_corpus_manifest renders its sections (and still warn-skips a malformed lesson by name),
+      existing_finding_ids and existing_observation_ids still collect their id sets and still skip an
+      undecodable lesson rather than crashing the curator drain."}
+    binds: ["corpus_dir.access[build_corpus_manifest]",
+            "corpus_dir.access[existing_finding_ids]",
+            "corpus_dir.access[existing_observation_ids]"]
+
+  - id: d29_test_corpus_split_folds_too
+    kind: survival
+    form: test
+    outcome: {nl: "tests/test_corpus_split.py::_corpus() — a SIXTH hand-rolled walk (its own regex
+      fence-split + yaml.safe_load over the REAL checked-in corpora, CI-blocking) — is folded onto
+      iter_lessons. Its guarantees survive verbatim, and a CRLF lesson (which its un-normalized
+      regex reds on today, while iter_lessons parses it fine) no longer fails it. Resolved by the
+      human as IN scope for this PR."}
+    binds: ["corpus_dir.access[test_corpus_split]"]
+
+  - id: d30_relocated_tree_survival
+    kind: survival
+    form: test
+    outcome: {nl: "The pinned lesson CLIs are driven from FOREIGN trees — replay_actor materializes
+      a frozen-generation worktree with an older lessons-actor/ and re-execs the actor, whose bash
+      lane runs lessons_actor_index there; the eval harness copies lessons into a temp tree outside
+      the repo and runs the curator over it. Both resolve their corpus from the tree the script was
+      copied INTO (REPO_ROOT off __file__). Demand: iter_lessons takes its corpus_dir as an explicit
+      argument and the fold introduces NO module-level anchor that resolves back to the ORIGINAL
+      tree — the actor-index CLI, run from a mirrored tree, indexes THAT tree's corpus and its
+      repo-relative warn_label names THAT tree's paths."}
+    binds: ["replay_actor", "eval_harness", "lessons_actor_index", "drives(replay_actor->lessons_actor_index)"]
+
+  # --- recorded decisions ------------------------------------------------
+  - id: w1_empty_env_lesson_reds_ci
+    kind: behavior
+    form: waiver
+    outcome: {nl: "ACCEPTED as a canary, not fixed: test_environment_seed_field_mapping asserts every
+      env record has a truthy description, so once d6/d14 land, an empty-mapping lesson in
+      lessons-environment/ would newly RENDER with description == '' and RED that test. No such file
+      exists today (latent). The human's decision: a content-free env lesson SHOULD red CI — the env
+      corpus feeds actor retrieval and a seed with no relevance_criteria is useless to it. The test
+      is left as written."}
+    binds: ["lessons_json.payload"]
+
+  - id: w2_trace_lesson_venv_reexec_deferred
+    kind: survival
+    form: waiver
+    outcome: {nl: "DEFERRED to a follow-up by the human: trace_lesson.py has no reexec_into_venv and
+      no bin/ shim, so `python3 defender/learning/ops/trace_lesson.py --all` under the SYSTEM
+      interpreter dies at `import yaml` today, before reaching any #584 defect. Out of scope: the CLI
+      is run from the venv in practice and the #584 crashes bite there too. Nothing in this spec
+      makes --all reachable from a bare python3."}
+    binds: ["trace_all"]
+
+  - id: w3_split_frontmatter_deferred
+    kind: survival
+    form: waiver
+    outcome: {nl: "DEFERRED to a follow-up: lessons_fm._split_frontmatter (reached only by
+      `defender-lessons --show`) is a SECOND frontmatter parser with its own fence logic and NO CRLF
+      normalization, so --show fails on a CRLF lesson that iter_lessons reads fine. It parses one
+      named file, not a corpus, so iter_lessons cannot serve it; folding it onto parse_frontmatter is
+      a separate change."}
+    binds: ["cmd_show"]
+
+  - id: w4_curator_mtime_glob_is_deliberate
+    kind: survival
+    form: waiver
+    outcome: {nl: "NOT folded, by design: author/curator.py:151-154 re-globs *.md and '_'-skips to
+      build the mtime cache SIGNATURE for existing_observation_ids. It is computed BEFORE any parse,
+      so iter_lessons structurally cannot serve it. It does mean 'the one walk' is a claim about
+      PARSING, not about DISCOVERY — if the discovery rules ever change, this glob silently
+      disagrees."}
+    binds: ["corpus_dir.access[existing_observation_ids]"]
+
+# ===========================================================================
+# STRUCTURE
+# ===========================================================================
+structure:
+  axes: [corpus_stem, corpus_group, lesson_kind, read_encoding]
+
+  actors:
+    - {id: iter_lessons,             frame: leg,         provenance: code}   # modify
+    - {id: build_view,               frame: composition, provenance: code}   # fans 3 corpora
+    - {id: trace_all,                frame: leg,         provenance: code}
+    - {id: trace_one,                frame: leg,         provenance: code}
+    - {id: cmd_grep,                 frame: leg,         provenance: code}
+    - {id: cmd_tags,                 frame: leg,         provenance: code}
+    - {id: cmd_show,                 frame: leg,         provenance: code}   # NOT folded (w3)
+    - {id: lessons_actor_index,      frame: leg,         provenance: code}
+    - {id: lessons_env_retrieve,     frame: leg,         provenance: code}
+    - {id: build_corpus_manifest,    frame: leg,         provenance: code}
+    - {id: existing_finding_ids,     frame: leg,         provenance: code}
+    - {id: existing_observation_ids, frame: leg,         provenance: code}
+    - {id: test_corpus_split,        frame: leg,         provenance: code}   # the 6th walk
+    - {id: record_lesson_load,       frame: leg,         provenance: code}   # co-writer of the join key
+    - {id: serialize_iter_corpus,    frame: leg,         provenance: code}   # REMOVED
+    - {id: serialize_read_lesson,    frame: leg,         provenance: code}   # REMOVED
+    - {id: pre_venv_import_lane,     frame: composition, provenance: code}   # the actor's bash lane
+    - {id: replay_actor,             frame: composition, provenance: code}   # frozen-gen worktree re-exec
+    - {id: eval_harness,             frame: composition, provenance: code}   # temp tree outside the repo
+
+  boundaries:
+    - id: Lesson                                    # the return contract (ADD)
+      provenance: design
+      facets: {}
+
+    - id: corpus_dir
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the kinds of *.md file a lesson corpus dir can contain"}
+          default: well-formed
+          distinguished: [well-formed, underscore-prefixed, empty-mapping, unfenced,
+                          no-closing-fence, invalid-yaml, non-mapping-null, utf8-bom,
+                          undecodable, dir-named-md, dangling-symlink, crlf, prefix-pair]
+          falsy_valid: true          # fm == {} is a VALID parse — the falsy member (d6)
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            iter_lessons:            {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            cmd_grep:                {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            cmd_tags:                {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            lessons_actor_index:     {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            lessons_env_retrieve:    {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            build_corpus_manifest:   {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            existing_finding_ids:    {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            existing_observation_ids: {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}
+            build_view:              {trust: operator, constraints: [underscore-skip, warn-skip-malformed, utf8-decode, empty-mapping-yields]}   # NEW via (was: falsy-skip, crash-on-decode). Order NOT a constraint: build_view re-sorts by title.
+            trace_all:               {trust: operator, constraints: [underscore-skip, full-path-sort, warn-skip-malformed, utf8-decode, empty-mapping-yields]}  # NEW via (was: no `_`-skip, no guard)
+            test_corpus_split:       {trust: operator, constraints: [underscore-skip, warn-skip-malformed, utf8-decode]}   # NEW via (the 6th walk, folded per the human)
+
+    - id: READ_ENCODING
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the codec Path.read_text decodes a lesson with"}
+          default: utf-8                       # after the change; today it is locale.getencoding()
+          distinguished: [C-locale]            # ANSI_X3.4-1968 — where the bare read_text() loses data
+          falsy_valid: false
+          documented_alternatives:
+            - {value: C-locale, crosses_validation: true}   # VERIFIED: a valid `café` lesson is warn-skipped today
+
+    - id: lessons_loaded_jsonl
+      provenance: code
+      facets:
+        identity:
+          key_axes: [corpus_stem]
+          evidence: {nl: "record_lesson_load.lesson_name() writes p.stem into lessons_loaded.jsonl;
+            trace_lesson's in_context_cases joins rows on row['lesson_name'] == meta.name — read off
+            both call sites. The frontmatter `name` key is NOT the key, and 12+ real lessons have no
+            `name` at all."}
+          derivations: [{value: stem, fn_of: corpus_stem, injective: true}]
+          sharing: serialized-append
+
+    - id: lessons_json                       # the frontend view contract
+      provenance: code
+      facets:
+        identity:
+          key_axes: [corpus_group, corpus_stem]
+          evidence: {nl: "build_view keys records by group (the GROUPS dict) and carries source_path
+            per record — read off serialize.py's GROUPS + _normalize. Three corpora fan into one
+            contract, so the same stem in two corpora must remain two distinct records."}
+          derivations: []
+          sharing: unique-key
+        payload:
+          parts:
+            - {role: record, source: template:_normalize, slots: {title: corpus_stem, group: corpus_group, body: lesson_kind}}
+          invariants: [all-slots-bound]
+          nl: "the per-lesson view record the template and lessons.json both render"
+
+    - id: warn_stderr
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the warn line's label for a skipped lesson"}
+          default: p.name
+          distinguished: [repo-relative]     # lessons_actor_index's custom warn_label
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: "stdout_contract[env_retrieve]"
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: line, source: template:tsv, slots: {path: corpus_stem, criteria: lesson_kind}}
+          invariants: [all-slots-bound]
+          nl: "'<repo-rel path>\\t<relevance_criteria>' — parsed by author/verify_forward/env.py:64
+            and streamed to the actor on its bash lane"
+
+    - id: "stdout_contract[serialize]"
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: document, source: template:dump_contract, slots: {view: corpus_group}}
+          invariants: [all-slots-bound]
+          nl: "serialize.py --stdout emits the view contract as JSON and NOTHING else"
+
+    - id: pre_venv_import_lane
+      provenance: code
+      facets: {}
+
+  interacts:
+    # the shared iterator
+    - {from: iter_lessons, to: corpus_dir,    mode: read,  via: fs,  provenance: code}
+    - {from: iter_lessons, to: READ_ENCODING, mode: read,  via: api, provenance: design}
+    - {from: iter_lessons, to: Lesson,        mode: write, via: api, provenance: design, sends: payload}
+    - {from: iter_lessons, to: warn_stderr,   mode: write, via: fs,  provenance: code}
+    # the folded consumers (NEW vias onto corpus_dir)
+    - {from: build_view,        to: corpus_dir,  mode: read,  via: fs, provenance: design, interpolates: [corpus_group, corpus_stem]}
+    - {from: build_view,        to: lessons_json, mode: write, via: fs, provenance: code, sends: payload, interpolates: [corpus_group, corpus_stem]}
+    - {from: build_view,        to: "stdout_contract[serialize]", mode: write, via: fs, provenance: code, sends: payload}
+    - {from: trace_all,         to: corpus_dir,  mode: read,  via: fs, provenance: design}
+    - {from: trace_all,         to: lessons_loaded_jsonl, mode: read, via: fs, provenance: code}
+    - {from: trace_one,         to: corpus_dir,  mode: read,  via: fs, provenance: code}
+    - {from: test_corpus_split, to: corpus_dir,  mode: read,  via: fs, provenance: design}
+    # the existing consumers
+    - {from: cmd_grep,                 to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: cmd_tags,                 to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: cmd_show,                 to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: lessons_actor_index,      to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: lessons_actor_index,      to: warn_stderr, mode: write, via: fs, provenance: code}
+    - {from: lessons_env_retrieve,     to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: lessons_env_retrieve,     to: "stdout_contract[env_retrieve]", mode: write, via: fs, provenance: code, sends: payload}
+    - {from: build_corpus_manifest,    to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: existing_finding_ids,     to: corpus_dir, mode: read, via: fs, provenance: code}
+    - {from: existing_observation_ids, to: corpus_dir, mode: read, via: fs, provenance: code}
+    # the co-writer of the join key
+    - {from: record_lesson_load, to: lessons_loaded_jsonl, mode: write, via: fs, provenance: code, interpolates: [corpus_stem]}
+    # REMOVED
+    - {from: serialize_iter_corpus, to: corpus_dir, mode: remove, via: fs, provenance: design}
+    - {from: serialize_read_lesson, to: corpus_dir, mode: remove, via: fs, provenance: design}
+  drives:
+    - {from: build_view,           to: iter_lessons,        provenance: design, multiplicity: serial}   # 3 corpora
+    - {from: pre_venv_import_lane, to: iter_lessons,        provenance: code,   multiplicity: serial}
+    - {from: replay_actor,         to: lessons_actor_index, provenance: code,   multiplicity: serial}   # relocated tree
+    - {from: eval_harness,         to: existing_finding_ids, provenance: code,  multiplicity: serial}   # temp tree
+
+# `harness_lead.py` re-execs `lead_author` (the skills/catalog curator), which drives no corpus walk
+# and imports nothing this change touches — out of scope for #584.
+# harness_lead: drives the lead-author (skills catalog) path only — no corpus walk, and it imports
+# nothing this change touches (_corpus / serialize / trace_lesson).
+actor_waivers:
+  - harness_lead
+
+# ===========================================================================
+# GATE
+# ===========================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true}   # incl. the prose-reading reconciliation half — ran
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}   # incl. the judgment extension (safe-by-construction) — ran
+
+  obligations:
+    - rule: R1
+      element: "interacts(lessons_env_retrieve->stdout_contract[env_retrieve]).payload"
+      witness: "lessons_env_retrieve's stdout is PARSED by the curators' forward-check as
+        '<path>\\t<criteria>', and the fold rewrites the destructure at its loop header — a swapped
+        field prints the frontmatter dict into the criteria column and the forward-check ingests it
+        as a string. No demand asserted the CAPTURED payload; rc-0 is blind to it."
+      discharged_by: d25_env_retrieve_stdout_shape
+    - rule: R1
+      element: "interacts(build_view->stdout_contract[serialize]).payload"
+      witness: "serialize --stdout is a JSON protocol; a warn that lost its file=sys.stderr corrupts
+        it while the exit code stays 0."
+      discharged_by: d17_stdout_stays_a_json_protocol
+    - rule: R2
+      element: lessons_loaded_jsonl.identity
+      witness: "The identity boundary is also READ (trace_lesson joins on it), so an under-covering
+        key is a read-path bug: reaching for fm['name'] instead of the stem makes every join miss
+        SILENTLY and report 0 cases for every lesson. Bound at the composition frame with a
+        cross-module oracle against the co-writer, record_lesson_load."
+      discharged_by: d23_lesson_identity_is_the_stem_cross_module
+    - rule: R2
+      element: lessons_json.identity
+      witness: "build_view fans three corpora into ONE contract list; a fold that keyed records by
+        stem alone would collide same-stem lessons across corpora."
+      discharged_by: d14_frontend_truth_table_no_silent_subtraction
+    - rule: R3
+      element: "corpus_dir.access[build_view]"
+      witness: "A NEW via onto corpus_dir. The constraints the established via (iter_lessons)
+        enforces — underscore-skip, warn-skip-malformed, utf8-decode, empty-mapping-yields — must
+        hold here too; today this via enforces a FALSY skip and CRASHES on an undecodable byte."
+      discharged_by: d14_frontend_truth_table_no_silent_subtraction
+    - rule: R3
+      element: "corpus_dir.access[trace_all]"
+      witness: "A NEW via onto corpus_dir with NO underscore-skip and NO read guard at all."
+      discharged_by: d21_trace_all_walks_the_shared_iterator
+    - rule: R3
+      element: "corpus_dir.access[test_corpus_split]"
+      witness: "The sixth via — its own regex fence-split, no CRLF normalization, and it ASSERTS
+        rather than warn-skips. Folded per the human's step-7 decision."
+      discharged_by: d29_test_corpus_split_folds_too
+    - rule: R4
+      element: "READ_ENCODING.domain.alternatives[C-locale]"
+      witness: "crosses_validation: TRUE, verified empirically — under LC_ALL=C the bare read_text()
+        decodes as ASCII, so a VALID UTF-8 lesson containing 'café' raises UnicodeDecodeError and is
+        warn-SKIPPED. The shipped default column (a UTF-8 locale) hides it entirely."
+      discharged_by: d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale
+    - rule: R4
+      element: "corpus_dir.domain.distinguished[empty-mapping]"
+      witness: "The FALSY member of a falsy_valid domain — `if not fm` swallows it. R4's canonical
+        shape, and the exact divergence #582's test_e0 named."
+      discharged_by: d6_empty_mapping_is_yielded
+    - rule: R4
+      element: "corpus_dir.domain.distinguished[{unfenced,no-closing-fence,invalid-yaml,non-mapping-null,utf8-bom,undecodable,dir-named-md,dangling-symlink,crlf,prefix-pair}]"
+      witness: "Each member must be individually exercised; the pre-fold suite covered only
+        unfenced + undecodable."
+      discharged_by: "d7_frontmatter_error_members_warn_skip, d8_undecodable_bytes_warn_skip,
+        d9_oserror_members_warn_skip, d3_raw_is_the_slice_the_parser_consumed, d10_discovery_rules_unchanged"
+    - rule: R5
+      element: serialize_read_lesson
+      witness: "Removed, with a LIVE in-edge from test_lessons_frontend._on_disk() (the oracle for
+        test_counts_match_on_disk) — and lint_stale_refs BLOCKS on the surviving textual refs."
+      discharged_by: d19_on_disk_oracle_rebuilt
+    - rule: R5
+      element: serialize_iter_corpus
+      witness: "Removed; orphans serialize.py:57's _frontmatter import → ruff F401, a hard repo-wide
+        gate. Textual survivors in learning/frontend/README.md:37 and the #577 spec-graph waiver
+        node must land in the same PR or lint_stale_refs blocks."
+      discharged_by: d18_serialize_walk_is_gone
+    - rule: R5
+      element: "iter_lessons.with_raw"
+      witness: "A removed keyword parameter with three live call sites (lessons_fm:100, :113,
+        test_corpus_fold_seed:344). lint_stale_refs does NOT catch a removed PARAMETER (it collects
+        only removed def/class/CONST/import idents), so nothing mechanical guards this."
+      discharged_by: "d26_cmd_grep_still_greps_the_yaml_source, d27_cmd_tags_counts_unchanged"
+    - rule: R5
+      element: "Lesson"
+      witness: "JUDGMENT EXTENSION (safe-by-construction). The delta replaces two tuple shapes with
+        one dataclass. If Lesson were iterable (a NamedTuple), every un-migrated
+        `for path, raw, fm in ...` would KEEP RUNNING and silently bind raw<-fm / fm<-raw — the
+        critical caller stays CONSTRUCTIBLE in the unsafe state. Demand: the construction itself is
+        impossible — a missed site raises TypeError at the unpack."
+      discharged_by: d1_lesson_not_unpackable
+
+  holes:
+    - rule: R0
+      element: "build_view (no injection seam)"
+      resolution: "HUMAN: add a defaulted corpus-root parameter to both fold targets
+        (build_view(defender_dir=DEFENDER); trace_lesson --lessons-dir). Rejected: module-constant
+        rebind (ambient state, and it can go green against code that closed over the old value).
+        Forced a second fix — _normalize's path.relative_to(REPO_ROOT) raises ValueError against any
+        fixture tree, so source_path must key off the injected root."
+      resolved_to: d12_build_view_seam
+    - rule: R0
+      element: "trace_all (no --lessons-dir seam)"
+      resolution: "HUMAN: add --lessons-dir, default anchored in the add_argument call (an in-body
+        `or LESSONS_DIR` is what lint_unanchored_default blocks)."
+      resolved_to: d20_trace_lessons_dir_seam
+    - rule: R0
+      element: "corpus_dir.access[test_corpus_split]"
+      resolution: "HUMAN: the sixth walk is IN scope for this PR (overriding the author's
+        follow-up recommendation)."
+      resolved_to: d29_test_corpus_split_folds_too
+    - rule: R0
+      element: "lessons_json.payload (empty env lesson reds CI)"
+      resolution: "HUMAN: ACCEPT as a canary — a content-free env lesson SHOULD red CI. The test is
+        left as written."
+      resolved_to: w1_empty_env_lesson_reds_ci
+    - rule: R0
+      element: "trace_all (no venv re-exec)"
+      resolution: "HUMAN: DEFER to a follow-up — out of #584's scope."
+      resolved_to: w2_trace_lesson_venv_reexec_deferred
+    - rule: R0
+      element: "cmd_show (_split_frontmatter, the second parser)"
+      resolution: "DEFER to a follow-up — it parses one named file, not a corpus, so iter_lessons
+        cannot serve it."
+      resolved_to: w3_split_frontmatter_deferred
+
+  pre_discharged:
+    - {rule: R4, element: "corpus_dir.domain.distinguished[underscore-prefixed]", by: d10_discovery_rules_unchanged}
+    - {rule: R3, element: "corpus_dir.access[iter_lessons]", by: d10_discovery_rules_unchanged}
+
+handoff:
+  forks:
+    - "SEAM (the load-bearing one). Neither fold target could be driven against a fixture: build_view()
+       takes no args and trace_lesson has no --lessons-dir, while CI ratchets monkeypatch.setattr.
+       RESOLVED: add a defaulted parameter to each. This drags in a non-obvious second change —
+       _normalize computes source_path via path.relative_to(REPO_ROOT), which raises ValueError
+       against a fixture tree, so it must key off the injected root (d13)."
+    - "RETURN SHAPE. Lesson is a frozen dataclass and deliberately NOT iterable (d1). A NamedTuple
+       would keep every un-migrated `for path, raw, fm in ...` RUNNING while silently swapping
+       raw<->fm (raw was the middle element of the old 3-tuple; fm is the middle field of the new
+       dataclass). This OVERTURNS test_c5/test_c5b/test_c2b in test_corpus_fold_seed.py, which
+       deliberately pin the tuple shapes — updated to the new intent, flagged in the PR."
+    - "SIXTH WALK. tests/test_corpus_split.py::_corpus() is folded in THIS PR (human's call,
+       overriding the author's follow-up recommendation)."
+    - "ENCODING. The utf-8 pin is NOT hygiene. Verified empirically: under a C locale the bare
+       read_text() decodes as ASCII, so a VALID UTF-8 lesson containing 'café' is warn-SKIPPED and
+       vanishes from the actor's retrieval. Live data loss, invisible on a UTF-8 dev box."
+    - "LATENCY OF THE REPORTED BUGS. Corrected against the code: defender/lessons/ contains no
+       _-prefixed file and no empty-mapping lesson, so BOTH defects the issue calls live
+       (_TEMPLATE.md listed by --all; the falsy-fm drop) are LATENT. The case for the fold is
+       consolidation and the divergence duplication already caused — not a bug biting today."
+  deviations:
+    - "Danger lens SWAPPED: the profile's standing default is 'adversarial input' (alert data), but
+       this change's inputs are corpus files on disk, so the fourth lens ran as ENVIRONMENT/RESOURCE
+       (encoding, locale, filesystem, CI gates). That lens is what surfaced the utf-8 data-loss bug."
+    - "Step-4 diff ran COLLAPSED: the author aligned the five derivations' stubs by address himself
+       rather than spawning a separate diff agent. All stubs were collected before alignment began."
+    - "Formal-slot validation against schema.md's closed vocabularies was HAND-CHECKED (the #537
+       linter does not exist yet)."
+    - "chmod-000 was DROPPED as an OSError fixture: the suite runs as root (euid 0), so the read
+       succeeds and the test would be vacuous. The OSError arm is exercised by IsADirectoryError (a
+       directory named foo.md) and a dangling symlink instead — both verified to raise."

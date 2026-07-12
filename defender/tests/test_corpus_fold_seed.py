@@ -192,12 +192,16 @@ def test_c2b_positive_control_iter_lessons_parses_under_the_venv(tmp_path):
     """demand: c2b — the positive control for the masked-import test above. With PyYAML present (the
     venv lane), ``defender._corpus.iter_lessons`` actually parses a lesson's frontmatter: the lazy
     import fires and yields real data. Without this, ``test_c2`` would stay green against a module
-    that imports cleanly because it does nothing at all."""
+    that imports cleanly because it does nothing at all.
+
+    #584 SUPERSEDES the 2-tuple destructure this test used to do: ``iter_lessons`` now yields a
+    frozen ``Lesson`` dataclass. The property pinned here — the lazy parser import really fires —
+    is unchanged; only the access shape moved (see ``test_corpus_fold_584.py::test_d0``)."""
     corpus = _corpus_of(tmp_path, "real-lesson")
     mod = importlib.import_module("defender._corpus")
-    yielded = [(p.stem, fm) for p, fm in mod.iter_lessons(corpus)]
-    assert [stem for stem, _ in yielded] == ["real-lesson"]
-    assert yielded[0][1]["name"] == "real-lesson"  # the frontmatter really parsed
+    yielded = list(mod.iter_lessons(corpus))
+    assert [lesson.path.stem for lesson in yielded] == ["real-lesson"]
+    assert yielded[0].fm["name"] == "real-lesson"  # the frontmatter really parsed
 
 
 def test_c1_lessons_common_reexports_the_same_object():
@@ -325,27 +329,30 @@ def test_c4_mirrored_fake_tree_carries_every_defender_import_of_the_copied_scrip
 def test_c5_iter_lessons_observable_contract_is_unchanged(tmp_path, capsys):
     """demand: c5 (parity) — the fold must not repurpose the shared iterator's defaults to serve the
     manifest, because the three CLIs stream its output straight to the actor. Pinned over one corpus:
-    the 2-tuple default shape, the 3-tuple ``(path, raw, fm)`` under ``with_raw``, the ``_``-prefix
-    skip, warn-and-skip on BOTH a malformed and an undecodable file, and — the one a fold is tempted
-    to change — the default ``warn_label`` of ``p.name``.
+    the return shape, the ``_``-prefix skip, warn-and-skip on BOTH a malformed and an undecodable
+    file, and — the one a fold is tempted to change — the default ``warn_label`` of ``p.name``.
 
     ``lessons_actor_index`` passes its own repo-relative ``warn_label`` and ``lessons_env_retrieve``
     relies on the default, so a default changed to say "corpus manifest" silently rewrites the actor's
-    stderr."""
+    stderr.
+
+    #584 SUPERSEDES the SHAPE half of this demand — deliberately, and flagged in that PR. This test
+    used to pin the 2-tuple default AND the 3-tuple ``(path, raw, fm)`` under ``with_raw=True``;
+    ``iter_lessons`` now yields one frozen ``Lesson(path, fm, raw, body)`` and the ``with_raw`` flag
+    is gone. Every OTHER property c5 pins is re-asserted below, unchanged, on the dataclass — the
+    shape moved, the contract did not. The new shape itself is pinned by
+    ``test_corpus_fold_584.py`` (d0/d1/d2)."""
     mod = importlib.import_module("defender._corpus")
     corpus = _corpus_of(tmp_path, "good")
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
     (corpus / "unfenced.md").write_text("no frontmatter fence\n")
     (corpus / "undecodable.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
 
-    two = list(mod.iter_lessons(corpus))
-    assert [p.stem for p, _fm in two] == ["good"]  # 2-tuple; `_`-prefixed and both bad files skipped
-
-    three = list(mod.iter_lessons(corpus, with_raw=True))
-    assert len(three[0]) == 3  # (path, raw, fm)
-    path, raw, fm = three[0]
-    assert "name: good" in raw  # raw is the YAML between the fences
-    assert fm["name"] == "good"
+    lessons = list(mod.iter_lessons(corpus))
+    # `_`-prefixed and BOTH bad files skipped — the well-formed sibling survives
+    assert [lesson.path.stem for lesson in lessons] == ["good"]
+    assert "name: good" in lessons[0].raw  # raw is still the YAML between the fences
+    assert lessons[0].fm["name"] == "good"
 
     err = capsys.readouterr().err
     assert "unfenced.md" in err  # default warn_label is p.name
@@ -357,12 +364,15 @@ def test_c5b_iter_lessons_yields_in_full_path_order(tmp_path):
     """demand: c5 — the shared iterator's ORDER is full-Path sorted and stays that way. The three CLIs
     re-sort nothing, so their LLM-visible output order is this order; a stem-sort "fix" pushed into the
     shared module to satisfy the manifest would flip the actor's retrieval order as a silent side
-    effect of a refactor. Exercised on a PREFIX PAIR, the only place the two keys disagree."""
+    effect of a refactor. Exercised on a PREFIX PAIR, the only place the two keys disagree.
+
+    #584 SUPERSEDES the tuple destructure only: the ORDER this pins is unchanged and re-asserted on
+    ``Lesson.path`` (see ``test_corpus_fold_584.py::test_d10``)."""
     mod = importlib.import_module("defender._corpus")
     corpus = _corpus_of(tmp_path, "cover", "cover-prereqs")
     # by full path: "cover-prereqs.md" < "cover.md"  ('-' 0x2d < '.' 0x2e)
     # by stem:      "cover"            < "cover-prereqs"
-    assert [p.stem for p, _fm in mod.iter_lessons(corpus)] == ["cover-prereqs", "cover"]
+    assert [lesson.path.stem for lesson in mod.iter_lessons(corpus)] == ["cover-prereqs", "cover"]
 
 
 def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
@@ -399,9 +409,12 @@ def test_e0_empty_frontmatter_mapping_still_renders(tmp_path):
     ``fm == {}``: a valid parse, not a ``FrontmatterError``. It must still render as a section
     (``## slug`` with a ``{}`` body), not be dropped.
 
-    This is where the fifth copy of the walk disagrees: ``frontend/serialize.py::_iter_corpus`` skips
-    on ``if not fm``. A fold that imports that falsy-skip semantics would hide the lesson from the
-    manifest — and the curator, unable to see it, would author a duplicate of it."""
+    This is where the fifth copy of the walk disagrees: the corpus walk inside
+    ``learning/frontend/serialize.py`` skips on ``if not fm``. A fold that imports that falsy-skip
+    semantics would hide the lesson from the manifest — and the curator, unable to see it, would
+    author a duplicate of it. (#584 folds that fifth copy onto ``iter_lessons`` and closes the
+    divergence; the ident it used to name here is scrubbed so ``lint_stale_refs`` does not block on
+    this file once the helper is deleted.)"""
     corpus = _corpus_of(tmp_path, "normal")
     (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
     heads = _headers(_shared.build_corpus_manifest(corpus))
