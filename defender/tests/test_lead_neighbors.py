@@ -193,8 +193,19 @@ def test_load_catalog_walks_draft_subdir(tmp_path):
     assert by_id["wazuh.novel-thing"].system == "wazuh"
 
 
-def test_load_catalog_defaults_missing_status_to_established(tmp_path):
-    """Templates with no `status:` field default to established."""
+def test_load_catalog_does_not_promote_a_missing_status_to_established(tmp_path):
+    """A template with no `status:` field is NOT established — its status is unknown.
+
+    This test pinned the opposite until #585: `load_catalog` resolved the field with
+    `fm.get("status") or "established"`, an `or` mis-fire on a valid-falsy value (the shape
+    `defender/CLAUDE.md`'s anchor-a-default rule bans). That default was survivable while the walk
+    only ran in an offline drain. The fold puts it on the gather dispatch's hot path and feeds it
+    to the injected template index, where it becomes a promotion: a `draft_synthesis` skeleton that
+    lost its frontmatter key — a body auto-drafted from attacker-influenced alert data — would be
+    served to gather as a curated, established template. The template is still WALKED (the row is
+    not dropped); it is the established/draft split that fails closed, so the index's positive
+    `status == "established"` filter simply does not admit it.
+    """
     catalog_dir = tmp_path / "queries"
     (catalog_dir / "wazuh").mkdir(parents=True)
     (catalog_dir / "wazuh" / "x.md").write_text(
@@ -202,7 +213,7 @@ def test_load_catalog_defaults_missing_status_to_established(tmp_path):
     )
     cat = ln.load_catalog(catalog_dir)
     assert len(cat) == 1
-    assert cat[0].status == "established"
+    assert cat[0].status != "established"
 
 
 # ---------------------------------------------------------------------------

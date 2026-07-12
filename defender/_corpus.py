@@ -1,4 +1,4 @@
-"""The one walk over a lesson corpus.
+"""The one walk over a lesson corpus — and the one walk over the query-template corpus.
 
 ``iter_lessons`` is the single reader every consumer of a lesson corpus goes through: the three
 ``scripts/lessons/`` CLIs (which re-export it from ``_lessons_common``), the curators' corpus
@@ -18,9 +18,16 @@ function body — and :class:`Lesson` is a plain stdlib dataclass for the same r
 (``defender._io``, imported at module scope below, is pure stdlib for exactly this reason and
 must stay that way; the text-IO contract it owns — the utf-8 pin and the guard that holds it —
 is not lesson-specific and lives there, not here.)
+
+:func:`iter_query_templates` is the same contract one corpus over: the single walk over
+``skills/gather/queries/``. It lives here rather than in ``learning/`` because ``runtime/`` reads
+this corpus too (the gather dispatch index) and may not import ``defender.learning.*`` (#575), and
+because there were three partial walks of it at HEAD. It inherits both rules above verbatim — the
+parser import is lazy, and the read goes through ``read_text_utf8`` under ``TEXT_READ_ERRORS``.
 """
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -131,3 +138,101 @@ def iter_lessons(
             print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
             continue
         yield Lesson(path=path, fm=fm, raw=raw, body=body)
+
+
+# ---------------------------------------------------------------------------
+# The query-template corpus
+# ---------------------------------------------------------------------------
+
+_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class QueryTemplate:
+    """One well-formed query template: its file, its identity, and the two section bodies every
+    consumer reads.
+
+    ``status`` is the frontmatter value verbatim when it is a non-empty string, and ``""`` when the
+    key is absent or empty — NOT ``"established"``. The pre-fold walk defaulted it with
+    ``fm.get("status") or "established"``, an ``or`` mis-fire on a valid-falsy value (the very shape
+    ``defender/CLAUDE.md``'s anchor-a-default rule bans), which silently PROMOTED a draft skeleton
+    that had lost its frontmatter key. Absent status is unknown status; a consumer that admits only
+    established templates must say so positively (see ``tools_gather._template_index``, which
+    additionally requires the file to sit outside ``_draft/`` — the field and the location must
+    agree, and they fail closed when they don't).
+    """
+
+    path: Path
+    id: str
+    system: str
+    status: str
+    goal: str
+    query: str
+
+
+def _sections(body: str) -> dict[str, str]:
+    """The ``## Heading`` → body map of a template's markdown, headings stripped."""
+    out: dict[str, str] = {}
+    matches = list(_SECTION_RE.finditer(body))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        out[m.group(1).strip()] = body[m.end():end].strip()
+    return out
+
+
+def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
+    """Yield a :class:`QueryTemplate` per well-formed template under ``catalog_dir`` —
+    established ones at ``{system}/*.md`` and drafts at ``{system}/_draft/*.md`` — sorted by full
+    path, warning-and-skipping on a malformed one.
+
+    ``catalog_dir`` is READ AS GIVEN: there is no ``None`` overload and no ``PATHS`` fallback
+    resolved behind the caller's back. ``evals/harness_lead.py`` materializes a tmp tree, copies
+    the real catalog into it, overlays the scenario's ``catalog_overlay/`` on top and re-execs the
+    lead author against THAT tree — a walk that reached for a module-level root would silently
+    score the eval against the real repo's corpus and ignore the overlay entirely. The runtime's
+    index has the same requirement one tree over (``deps.defender_dir``, so a worktree run indexes
+    its own catalog).
+
+    Skip-one-bad-file, exactly as :func:`iter_lessons`: the read is INSIDE the ``try`` (an
+    undecodable byte raises ``UnicodeDecodeError``, a ``ValueError`` and not an ``OSError``), and a
+    file with no ``id:`` is a skip with a warning rather than a silent drop. The pre-fold walk read
+    outside its ``try`` and dropped an id-less file silently, which was survivable while it only ran
+    in an offline drain. This one runs on EVERY gather dispatch, so one bad byte among the 63
+    templates would otherwise take down every dispatch in the run.
+    """
+    from defender._frontmatter import FrontmatterError, parse_frontmatter
+
+    # The read goes through `read_text_utf8` under `TEXT_READ_ERRORS` — the one text-IO contract
+    # (#589), named rather than restated: an undecodable template raises `UnicodeDecodeError`,
+    # which is a `ValueError` and NOT an `OSError`, so an `except OSError` would let it escape and
+    # take the whole dispatch down instead of skipping the one bad file.
+    malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
+
+    if not catalog_dir.is_dir():
+        return
+    paths = sorted(
+        list(catalog_dir.glob("*/*.md")) + list(catalog_dir.glob("*/_draft/*.md"))
+    )
+    for path in paths:
+        try:
+            fm, body = parse_frontmatter(read_text_utf8(path))
+        except malformed as e:
+            print(f"warn: skipping {path.name} (malformed template: {e})", file=sys.stderr)
+            continue
+        tid = fm.get("id")
+        if not tid or not isinstance(tid, str):
+            print(f"warn: skipping {path.name} (malformed template: no `id:`)", file=sys.stderr)
+            continue
+        status = fm.get("status")
+        sections = _sections(body)
+        # A draft's system dir is the GRANDparent — it sits under `{system}/_draft/`.
+        parent = path.parent
+        system = parent.parent.name if parent.name == "_draft" else parent.name
+        yield QueryTemplate(
+            path=path,
+            id=tid,
+            system=system,
+            status=status if isinstance(status, str) else "",
+            goal=sections.get("Goal", ""),
+            query=sections.get("Query", ""),
+        )

@@ -1,11 +1,11 @@
 # spec-coverage graph — issue #585
 # "restore gather's query-template discovery: the injected index + a gated template_search"
 #
-# base: 09e0a93c   branch: 585-write-tests
+# base: 64a3df4e   branch: 585-write-tests   (rebased onto main after #586/#587 landed)
 #
 # Demand ids are stable slugs. Structure ids are the code's names.
 
-base: 09e0a93c
+base: 64a3df4e
 
 axes: [system, template_id, status, defender_tree]
 

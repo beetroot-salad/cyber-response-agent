@@ -93,7 +93,8 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path, mon
     assert not leaked, f"draft ids leaked into the dispatch prompt: {leaked[:5]}"
 
     # all systems, not just the dispatched one (d3)
-    assert "cmdb." in dispatch and "host-state." in dispatch
+    assert "cmdb." in dispatch
+    assert "host-state." in dispatch
 
     # the index gives gather the PATH, so it can read the body before it binds the id (d16)
     assert "skills/gather/queries/elastic/sshd-auth-history.md" in dispatch

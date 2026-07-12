@@ -270,12 +270,16 @@ MAIN_DEF = AgentDefinition(
 )
 
 # GATHER — the data-access subagent: the reader lane + its own gather_raw + the adapter routes,
-# read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off.
+# read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off. `template_search`
+# is its query-catalog discovery route (#585): every bash route it had into that corpus is dead
+# (`find` was never granted, `grep -r` denies since #581, a glob reaches grep as a literal filename
+# under `shell=False`, and #575 took the last one, `ls`), so the grep comes back as a gated tool
+# with a harness-owned root. MAIN does not get it — `defender/SKILL.md` forbids main the corpus.
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
-    tools=ToolSet(read=True, bash=True),
+    tools=ToolSet(read=True, bash=True, template_search=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_gather_bash_shapes,),
     deps_cls=GatherDeps,

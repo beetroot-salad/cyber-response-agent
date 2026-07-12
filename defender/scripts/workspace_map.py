@@ -21,6 +21,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Put the workspace root on sys.path so the `defender.*` import below resolves whether this file
+# is imported (orient.py builds message 0 in-process) or run directly as the CLI in the usage
+# above — where sys.path[0] is this script's own dir and the package would not resolve.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._corpus import iter_query_templates  # noqa: E402
+
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
 
@@ -101,20 +109,26 @@ def workspace_map(run_dir: Path) -> str:
         lines.append("- (none yet — v2 adapters TBD)")
     lines.append("")
 
-    # Gather query templates — one line per system, files comma-joined.
+    # Gather query templates — one line per system, COUNTS only.
+    #
+    # This section names no template filename, and above all no `_draft/` filename. A draft's
+    # name is a verb the gather LLM coined in response to alert data and `draft_synthesis` wrote
+    # to disk, so it is attacker-influenced text — and this map is injected verbatim into MAIN's
+    # message 0, where `defender/SKILL.md` forbids main the query corpus in the first place. The
+    # filenames were never actionable there either: main dispatches leads by SYSTEM, and it is
+    # GATHER that binds a template (from the index `tools_gather._template_index` injects into
+    # its dispatch prompt, #585). Counts keep the one fact main can use — which systems have a
+    # curated catalog behind them, and how deep it is.
     queries_dir = DEFENDER_DIR / "skills" / "gather" / "queries"
     lines.append(f"## Gather query templates — `{_rel(queries_dir)}/`")
-    if queries_dir.is_dir():
-        for system in sorted(p for p in queries_dir.iterdir() if p.is_dir()):
-            files = [f.name for f in sorted(system.iterdir())
-                     if f.is_file() and f.suffix == ".md"]
-            drafts_dir = system / "_draft"
-            drafts = [f.name for f in sorted(drafts_dir.iterdir())
-                      if f.is_file() and f.suffix == ".md"] if drafts_dir.is_dir() else []
-            tail = (f"  [{', '.join(files)}]" if files else "  [no published templates]")
-            if drafts:
-                tail += f"  _draft/[{', '.join(drafts)}]"
-            lines.append(f"- {system.name}/{tail}")
+    rows = list(iter_query_templates(queries_dir))
+    if rows:
+        for system in sorted({r.system for r in rows}):
+            established = sum(
+                1 for r in rows if r.system == system and r.status == "established"
+            )
+            drafts = sum(1 for r in rows if r.system == system and r.status == "draft")
+            lines.append(f"- {system}/ — {established} established, {drafts} draft")
     else:
         lines.append("- (no queries dir)")
     lines.append("")

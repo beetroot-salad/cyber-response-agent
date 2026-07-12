@@ -176,17 +176,38 @@ def _names_raw(p: Path) -> bool:
     return RAW_MARKER in p.parts
 
 
+# The two path components that together name a draft query template:
+# `{defender_dir}/skills/gather/queries/{system}/_draft/{verb}.md`.
+QUERIES_MARKER = "queries"
+DRAFT_MARKER = "_draft"
+
+
+def _names_query_draft(p: Path) -> bool:
+    """Whether a resolved path is a DRAFT query template — inside `_draft/` under the gather query
+    catalog. Two path COMPONENTS, for the reason `_names_raw` gives: `_draft` alone would tag any
+    file under any dir of that name anywhere in the tree."""
+    return QUERIES_MARKER in p.parts and DRAFT_MARKER in p.parts
+
+
 def is_untrusted_read(path: Path) -> bool:
     """True for reads of attacker-influenced data the caller must SALT-TAG WRAP: the alert
-    payload and the raw gather payloads.
+    payload, the raw gather payloads, and a DRAFT query template.
 
     Keyed on the gather_raw SHAPE, and deliberately kept when the raw *clamp* was deleted
     (#575): the clamp was containment (now positive enumeration), while this is the TRUST
     boundary. gather_raw is the primary attacker-influenced channel — untagging it would leave
     the model unable to tell data from instructions, failing the prompt-injection defense OPEN.
-    A deletion of the clamp is not a deletion of the boundary."""
+    A deletion of the clamp is not a deletion of the boundary.
+
+    `queries/{system}/_draft/` joins it (#585). A draft is not curated prose: `draft_synthesis`
+    mints it from an EXECUTED gather query, and the skeleton it writes embeds the lead's goal text
+    and the query body the gather LLM coined *in response to alert data* — attacker-influenced by
+    definition, on the same channel as the payload that produced it. `template_search` now returns
+    hits from those files, so without this the text would reach the model bare. An ESTABLISHED
+    template stays trusted (False): it is the curated corpus gather exists to reuse, and wrapping
+    it would teach gather to distrust its own catalog."""
     p = Path(path)
-    return p.name == "alert.json" or _names_raw(p)
+    return p.name == "alert.json" or _names_raw(p) or _names_query_draft(p)
 
 
 def decide_write(

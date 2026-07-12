@@ -356,7 +356,8 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
     assert "identity.only-one" in prompt_b                   # B is not serving A's cached index
     assert "elastic.sshd-auth-history" not in prompt_b
     # and neither is serving the REAL repo's corpus
-    assert "elastic.falco-alerts" not in prompt_a and "elastic.falco-alerts" not in prompt_b
+    assert "elastic.falco-alerts" not in prompt_a
+    assert "elastic.falco-alerts" not in prompt_b
 
 
 # ==========================================================================
@@ -647,8 +648,8 @@ def test_d15_the_prose_no_longer_instructs_an_impossible_discovery_move():
     for name, text in (("SKILL.md", skill), ("SCHEMA.md", schema)):
         low = text.lower()
         assert "ls-time filter" not in low, f"{name} still describes an ls-time filter"
-        assert "greps `## goal`" not in low and "grep the `## goal`" not in low, \
-            f"{name} still tells gather to grep the catalog"
+        assert "greps `## goal`" not in low, f"{name} still tells gather to grep the catalog"
+        assert "grep the `## goal`" not in low, f"{name} still tells gather to grep the catalog"
         assert not re.search(r"read the catalog dir", low), f"{name} still says to Read the catalog dir"
         assert not re.search(r"\b(ls|find)\b[^\n]*\b(catalog|queries)\b", low), \
             f"{name} still names ls/find over the catalog"

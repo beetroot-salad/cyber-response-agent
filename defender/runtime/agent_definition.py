@@ -83,6 +83,11 @@ class ToolSet:
     # ``read`` for the curator — its read surface is IDENTICAL (root-only ``decide_read``),
     # it only adds the part seam + degrades to whole text on a non-fenced file.
     lesson_read: bool = False
+    # Gather's query-template grep (#585). A tool rather than a bash grant for the same reason
+    # forward_check is one: the corpus root must be HARNESS-owned, and a bash allowlist pins the
+    # program token, not the operand it then opens. Gather's discovery of the catalog was dead on
+    # every bash route it had left, and this is the replacement.
+    template_search: bool = False
 
 
 @dataclass(frozen=True)
