@@ -138,14 +138,21 @@ def decide_read(
             "this agent's read confine), and its declared roots; "
             f"{p} is outside them.",
         )
-    if policy.read_allow and not any(shape.fullmatch(str(rp)) for shape in policy.read_allow):
-        # The path is in-roots but is not one of this agent's shapes. `gather_raw` is the case
-        # the model most needs explained — the main loop reaches for a payload constantly — and
-        # its dedicated reason (which the e2e deny-tail asserts as a substring) tells it what to
-        # do INSTEAD: re-dispatch gather. The reason is prompt surface; the CHECK above is the
-        # enumeration, so this is a message, not a second gate.
-        if _names_raw(rp):
-            return Decision(False, RAW_DENY_REASON)
+    admitted = any(shape.fullmatch(str(rp)) for shape in policy.read_allow)
+    # The attacker-influenced channel is OPT-IN, for EVERY agent — including one that declares no
+    # shapes at all. An empty `read_allow` means "no shape filter", which is a WIDENING default,
+    # and `gather_raw` is the one path class where a widening default is a security failure: the
+    # learning loop STAGES the investigation's whole `gather_raw/` tree into the learning run dir
+    # (`lead_repository.stage_tables`), and that dir IS the actor's own root — so a root-only read
+    # would hand the gray-box actor the very payloads it must write its story WITHOUT seeing.
+    # Reading a payload therefore requires a shape that NAMES it (gather's own raw shape; the
+    # judge's scope over its comparison roots), never merely a root that happens to contain it.
+    # This is the same enumeration everywhere else obeys, applied to the default that would
+    # otherwise widen; the reason is the one the model needs (re-dispatch gather), and the e2e
+    # deny-tail asserts it as a substring.
+    if _names_raw(rp) and not admitted:
+        return Decision(False, RAW_DENY_REASON)
+    if policy.read_allow and not admitted:
         return Decision(
             False,
             f"Blocked: {rp.name} is not a readable path for this agent — its reads are the "

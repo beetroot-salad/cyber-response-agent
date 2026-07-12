@@ -602,7 +602,7 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
     assert run_dir.name in inv.user_text          # the in-flight key it must never read
     assert "case-OLD" in inv.user_text            # candidate closed case from the menu
     # The scoped closed-ticket pins ride on the invocation → the in-process judge builds
-    # its closed-only bash_allow pattern from them (see engine_pydantic._ticket_pattern).
+    # its closed-only bash grant from them (see engine_pydantic._ticket_grant).
     assert inv.ticket_cli is not None
 
 

@@ -164,7 +164,7 @@ def test_c2_corpus_module_imports_with_no_pyyaml():
 
     It is not theoretical. The adversarial actor runs the pinned lesson scripts as
     ``python3 defender/scripts/lessons/lessons_actor_index.py …`` on its bash lane
-    (``learning/pipeline/actor_engine.py``'s ``_script_pattern``) under the SYSTEM interpreter, which
+    (``learning/pipeline/actor_engine.py``'s ``_script_grant``) under the SYSTEM interpreter, which
     has no PyYAML; each script imports ``_lessons_common`` at module scope and only THEN calls
     ``reexec_into_venv`` under its ``__main__`` guard. A module-top ``import yaml`` — or a module-top
     import of anything yaml-backed, like ``defender._frontmatter`` — in the new file breaks the

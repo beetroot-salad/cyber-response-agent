@@ -226,8 +226,8 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash(
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
-    # (the gather_raw half of the old `raw_reads is False` bit does NOT hold any more —
-    #  see ::test_actor_cannot_read_a_staged_gather_raw_payload below. KNOWN BUG, xfail.)
+    # the gather_raw half of the old `raw_reads is False` bit still holds — as enumeration now,
+    # not as a bit (see ::test_actor_cannot_read_a_staged_gather_raw_payload below).
     lrd = _lrd(tmp_path)
     # in-confine lesson: allowed
     assert permission.decide_read(
@@ -247,40 +247,38 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     ).allow
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#575 REGRESSION (gray-box leak): deleting the `raw_reads` clamp let the actor read a "
-           "staged gather_raw payload out of its own run_dir. Not fixed here — the fix belongs in "
-           "source (give the actor a read_allow shape set, or keep a raw clamp for read_allow=() "
-           "agents). strict=True so this flips to a FAILURE the moment source closes it.",
-)
 def test_actor_cannot_read_a_staged_gather_raw_payload(tmp_path):
-    """THE GRAY-BOX PROPERTY, at the seam that now decides it. Currently BROKEN — read the reason.
+    """THE GRAY-BOX PROPERTY, at the seam that now decides it.
 
     This is what `assert pol.raw_reads is False` used to buy, re-expressed as the observable
-    decision (#575 deleted the BIT; the property it stood for is supposed to survive). It does not.
+    decision (#575 deleted the BIT; the property it stood for survives — as enumeration).
 
     The actor is gray-box BY DESIGN: `lead_repository.actor_view` projects queries only and hides
     `payload_path` precisely so the actor invents its attack story WITHOUT seeing the raw evidence.
     If it can read the payloads, the whole adversarial signal is contaminated — it is no longer
     writing a candidate story, it is reading the answer.
 
-    HOW IT BROKE. At HEAD, `files.decide_read` applied a RAW clamp to EVERY agent with
-    `raw_reads=False`, so a `gather_raw/` path was denied wherever it sat. #575 replaced the clamp
-    with positive enumeration over `policy.read_allow` — but the actor has NO `cat` grant, so
-    `read_allow_of` returns `()`, and an empty `read_allow` applies NO shape filter at all
-    (`files.py:143`): `decide_read` falls back to ROOT-ONLY. The actor's `run_dir` is a root.
+    THE TRAP THIS PINS. At HEAD a RAW clamp denied a `gather_raw/` path for every agent with
+    `raw_reads=False`, wherever it sat. Replacing that with positive enumeration over
+    `policy.read_allow` ALMOST reopened it: the actor has no `cat` grant, so its `read_allow` is
+    `()` — and an empty `read_allow` means "no shape filter", which falls back to ROOT-ONLY. The
+    actor's `run_dir` is a root.
 
-    WHY THAT IS REACHABLE (not merely theoretical — the actor's run_dir really does hold payloads):
-    the actor's `run_dir` IS the *learning* run dir, and `persist._copy_shared_inputs` →
+    And its run_dir really does hold payloads — this is reachable, not theoretical. The actor's
+    `run_dir` IS the *learning* run dir, and `persist._copy_shared_inputs` →
     `lead_repository.stage_tables` COPIES the investigation's whole `gather_raw/` tree into it. The
     two direction legs SHARE one `learning_run_dir` (`orchestrate.py:433`) and run CONCURRENTLY
     (`ThreadPoolExecutor(max_workers=2)`, `orchestrate.py:450`) as actor → oracle → judge → persist,
     so on an `inconclusive` case leg A's persist stages the payloads while leg B's actor is still
     running. `ops/replay_actor.py` replays the actor over an already-staged bundle outright.
 
+    So `decide_read` makes the attacker-influenced channel OPT-IN for every agent: a `gather_raw`
+    read needs a shape that NAMES it (gather's raw shape; the judge's scope over its comparison
+    roots), never merely a root that contains it. An empty shape list is a widening default, and
+    this is the one path class where a widening default is a security failure.
+
     Driven through the REAL production tool (`tools._tool_read_file` on real `bind`-built deps),
-    not a synthetic policy — today it RETURNS THE PAYLOAD CONTENT."""
+    not a synthetic policy."""
     lrd = _lrd(tmp_path)
     raw = lrd / "gather_raw" / "l-001" / "0.json"
     raw.parent.mkdir(parents=True)
