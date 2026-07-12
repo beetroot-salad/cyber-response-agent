@@ -438,15 +438,22 @@ def test_d7_positive_control_a_real_system_returns_its_hits(tmp_path):
 
 def test_d8_system_none_searches_every_system_and_a_name_restricts(tmp_path):
     """system=None is the default AND the falsy member: it searches every system. A named system
-    restricts to that dir."""
+    restricts to that dir.
+
+    The pattern is `LIMIT` (every template's `## Query` body carries `... | LIMIT 1`). As written,
+    this test searched for `measures` — the default goal `_tpl` renders when `goal` is falsy — but
+    `_catalog` passes an EXPLICIT goal to every template it writes, so that word appears in no file
+    in the fixture and no correct substring search could ever have found it. The demand (all-systems
+    vs. scoped) is unchanged; only the literal was repaired. Human-approved during
+    write-code-from-spec."""
     deps = _deps(tmp_path, _catalog(tmp_path))
 
-    everywhere = tools_gather._tool_template_search(deps, "measures", system=None)
+    everywhere = tools_gather._tool_template_search(deps, "LIMIT", system=None)
     assert "elastic.sudo-commands" in everywhere
     assert "cmdb.hostname-by-ip" in everywhere
     assert "change-mgmt.active-changes" in everywhere
 
-    scoped = tools_gather._tool_template_search(deps, "measures", system="cmdb")
+    scoped = tools_gather._tool_template_search(deps, "LIMIT", system="cmdb")
     assert "cmdb.hostname-by-ip" in scoped
     assert "elastic.sudo-commands" not in scoped
 
