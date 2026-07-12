@@ -16,12 +16,11 @@ The three corpora (authored by distinct learning-loop curators):
     environment  defender/lessons-environment/ author_actor_benign.py (FP)
                                                + author_actor_env.py (adversarial, #298)
 
-Each corpus is enumerated locally with one read per file
-(``_iter_corpus`` → ``_read_lesson``), matching the indexer discovery
-rules (sorted ``*.md``, underscore-skip, warn+skip on malformed
-frontmatter). Stale lessons are *surfaced* (with a badge), not hidden:
-this is an author-facing posture view, not the runtime retrieval path
-the actors use.
+Each corpus is enumerated through the shared walk (``defender._corpus.iter_lessons`` — the same
+reader the lesson CLIs and the curators go through), so the view cannot drift from the rest of the
+codebase about what a lesson *is*: sorted ``*.md``, underscore-skip, warn+skip on a malformed
+*or unreadable* file. Stale lessons are *surfaced* (with a badge), not hidden: this is an
+author-facing posture view, not the runtime retrieval path the actors use.
 
 Usage:
     serialize.py            # write defender/learning/frontend/lessons.json
@@ -54,7 +53,7 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._corpus import iter_lessons, use_utf8_stdio
 
 
 def _json_safe(obj):
@@ -78,40 +77,23 @@ def _json_safe(obj):
     return str(obj)
 
 
-def _read_lesson(path: Path) -> tuple[dict, str]:
-    """Return (frontmatter dict, markdown body) for a lesson file — one read.
+def _normalize(
+    path: Path, fm: dict, body: str, *, group: str, title_keys: list[str], desc_key: str,
+    root: Path = REPO_ROOT,
+) -> dict:
+    """One lesson → one view record.
 
-    A tolerant wrapper over the shared ``parse_frontmatter``: a file with no
-    parseable frontmatter yields ``({}, whole-body)`` rather than raising, so a
-    malformed lesson is surfaced/skipped upstream instead of crashing the build.
+    ``source_path`` is rendered relative to ``root`` — the parent of the corpus root
+    ``build_view`` was pointed at, which for the real tree IS ``REPO_ROOT`` (so the value is
+    unchanged). Keying it off the module constant instead would make the injection seam unusable
+    rather than merely imprecise: ``relative_to(REPO_ROOT)`` raises ``ValueError`` on the first
+    record from any tree outside the repo.
+
+    A lesson whose frontmatter is a valid EMPTY MAPPING renders like any other: no ``title_keys``
+    hit, so the title falls back to the stem (which is what keeps the record's title truthy), an
+    empty description, and the default ``live`` status. It is *shown*, not silently dropped — the
+    shared walk treats ``{}`` as the successful parse it is.
     """
-    text = path.read_text(encoding="utf-8")
-    try:
-        return parse_frontmatter(text)
-    except FrontmatterError:
-        return {}, text.strip()
-
-
-def _iter_corpus(corpus: Path):
-    """Yield (path, frontmatter, body) for each lesson in a corpus dir.
-
-    One read per file. Skips ``_``-prefixed files and warns+skips any
-    file whose frontmatter is missing or malformed (the indexer
-    discovery rules). Stale lessons are yielded — the view badges them.
-    """
-    if not corpus.is_dir():
-        return
-    for path in sorted(corpus.glob("*.md")):
-        if path.name.startswith("_"):
-            continue
-        fm, body = _read_lesson(path)
-        if not fm:
-            print(f"warn: skipping {path.name} (malformed frontmatter)", file=sys.stderr)
-            continue
-        yield path, fm, body
-
-
-def _normalize(path: Path, fm: dict, body: str, *, group: str, title_keys: list[str], desc_key: str) -> dict:
     title = next((str(fm[k]).strip() for k in title_keys if fm.get(k)), path.stem)
     status = str(fm.get("status") or "live").strip()
     return {
@@ -119,7 +101,7 @@ def _normalize(path: Path, fm: dict, body: str, *, group: str, title_keys: list[
         "title": title,
         "description": str(fm.get(desc_key) or "").strip(),
         "status": status,
-        "source_path": str(path.relative_to(REPO_ROOT)),
+        "source_path": str(path.relative_to(root)),
         "metadata": _json_safe(fm),
         "body": body,
     }
@@ -178,13 +160,20 @@ GROUPS: dict[str, GroupSpec] = {
 }
 
 
-def build_view() -> dict:
-    """Pure: read the corpora → the view contract (no timestamp inside)."""
+def build_view(defender_dir: Path = DEFENDER) -> dict:
+    """Pure: read the corpora under ``defender_dir`` → the view contract (no timestamp inside).
+
+    ``defender_dir`` defaults to the real ``defender/``, so every existing caller is unchanged;
+    it exists so the view can be built against a fixture corpus at all (the group dirs are
+    resolved beneath it, and ``source_path`` is rendered relative to its parent).
+    """
     groups: dict[str, dict] = {}
     for name, spec in GROUPS.items():
         lessons = [
-            _normalize(path, fm, body, group=name, title_keys=spec["title_keys"], desc_key=spec["desc_key"])
-            for path, fm, body in _iter_corpus(DEFENDER / spec["dir"])
+            _normalize(lesson.path, lesson.fm, lesson.body, group=name,
+                       title_keys=spec["title_keys"], desc_key=spec["desc_key"],
+                       root=defender_dir.parent)
+            for lesson in iter_lessons(defender_dir / spec["dir"])
         ]
         lessons.sort(key=lambda rec: rec["title"].lower())
         groups[name] = {
@@ -216,6 +205,9 @@ def dump_contract(view: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # The file writes below pin utf-8; --stdout dumps the same ensure_ascii=False payload, so it
+    # needs the stream pinned too or an accented lesson kills the api preview under a C locale.
+    use_utf8_stdio()
     view = stamped_view()
     if "--stdout" in argv[1:]:
         sys.stdout.write(dump_contract(view))

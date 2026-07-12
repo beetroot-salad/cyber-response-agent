@@ -132,7 +132,10 @@ def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
     the caller down. That has to cover the READ, not just the PARSE: ``read_text()`` raises
     ``UnicodeDecodeError`` on undecodable bytes, and it is a ``ValueError`` — NOT an ``OSError`` —
     so a guard around the parse alone lets it escape. Live blast radius: the gray-box actor runs
-    ``lessons_actor_index`` / ``lessons_env_retrieve`` on its bash lane mid-run."""
+    ``lessons_actor_index`` / ``lessons_env_retrieve`` on its bash lane mid-run.
+
+    #584 SUPERSEDES the 2-tuple destructure below: ``iter_lessons`` now yields a frozen ``Lesson``
+    dataclass. The warn-and-skip property this test pins is unchanged."""
     from defender.scripts.lessons._lessons_common import iter_lessons
 
     corpus = tmp_path / "lessons"
@@ -141,9 +144,85 @@ def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe not utf-8\n")
     (corpus / "unfenced.md").write_text("no fence at all\n")  # the parse-side control
 
-    yielded = [p.stem for p, _fm in iter_lessons(corpus)]  # must not raise
+    yielded = [lesson.path.stem for lesson in iter_lessons(corpus)]  # must not raise
 
     assert yielded == ["good"]  # the well-formed sibling survives both bad files
     err = capsys.readouterr().err
     assert "corrupt" in err  # the undecodable one was warn-skipped …
     assert "unfenced" in err  # … alongside the unparseable one
+
+
+# ===========================================================================
+# Review hardening (PR #586). Three defects the corpus fold left standing in
+# the file it was editing — each pinned here against the fix.
+# ===========================================================================
+
+
+def test_show_is_confined_to_the_corpus(corpus, tmp_path, capsys):
+    """``--show`` is the ONE lesson read that takes a model-supplied path, and nothing upstream
+    confines it: ``defender-lessons`` is an allowed main-loop shim and the bash allowlist pins the
+    program token, not its operands (the reader lane compiles shims as ``defender-lessons(?: .*)?``),
+    so the read never reaches ``decide_read``'s {run_dir, defender_dir} allowlist.
+
+    Unconfined it was a frontmatter-DISCLOSURE primitive for any fenced file the process could
+    read. Pinned here on a file outside the corpus carrying a secret: it must not be printed."""
+    mod = _load(corpus)
+    outside = tmp_path / "not-a-lesson.md"
+    outside.write_text("---\napi_key: sk-live-DEADBEEF\n---\nbody\n")
+
+    rc = mod.cmd_show([str(outside)])
+
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "sk-live-DEADBEEF" not in out  # the whole point
+    assert "api_key" not in out
+
+
+def test_show_does_not_leak_an_existence_oracle(corpus, tmp_path, capsys):
+    """The off-corpus and the absent path must fail IDENTICALLY. They used to be distinguishable
+    ("malformed frontmatter" vs "no such lesson"), which is a file-existence oracle over the whole
+    filesystem on the main agent's bash lane — exactly what ``_tool_edit_file`` gates itself
+    against. A confinement check that still reports WHY is not a confinement check."""
+    mod = _load(corpus)
+    exists_outside = tmp_path / "exists.md"
+    exists_outside.write_text("no frontmatter fence here\n")
+    absent = tmp_path / "definitely-absent.md"
+
+    rc_exists = mod.cmd_show([str(exists_outside)])
+    err_exists = capsys.readouterr().err
+    rc_absent = mod.cmd_show([str(absent)])
+    err_absent = capsys.readouterr().err
+
+    assert rc_exists == rc_absent == 2
+    # identical modulo the echoed path — nothing distinguishes "is there" from "isn't"
+    assert err_exists.replace(str(exists_outside), "P") == err_absent.replace(str(absent), "P")
+
+
+def test_show_does_not_follow_a_symlink_out_of_the_corpus(corpus, tmp_path, capsys):
+    """The confinement resolves BEFORE it compares, so a symlink planted in the corpus cannot
+    smuggle an out-of-tree target back in. (The curator writes into this corpus; a lexical-only
+    prefix check would be one authored symlink away from the disclosure above.)"""
+    mod = _load(corpus)
+    secret = tmp_path / "secret.md"
+    secret.write_text("---\napi_key: sk-live-DEADBEEF\n---\nbody\n")
+    (corpus / "innocent.md").symlink_to(secret)
+
+    rc = mod.cmd_show([str(corpus / "innocent.md")])
+
+    assert rc == 2
+    assert "sk-live-DEADBEEF" not in capsys.readouterr().out
+
+
+def test_show_reads_a_real_lesson_and_pins_the_encoding(corpus, capsys):
+    """The confinement must not break the documented use — and the read is pinned ``utf-8`` like
+    the shared walk's, so an accented lesson does not traceback out of ``main()`` where the walk
+    would have warn-skipped it. ``--show`` prints the frontmatter only, never the body."""
+    _write(corpus, "cafe.md", "name: cafe\ndescription: exfil via café proxy", body="BODYMARKER")
+    mod = _load(corpus)
+
+    rc = mod.cmd_show([str(corpus / "cafe.md")])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "café" in out  # the non-ASCII survived the round trip
+    assert "BODYMARKER" not in out  # frontmatter only, as ever

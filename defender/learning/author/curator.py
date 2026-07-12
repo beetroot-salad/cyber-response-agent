@@ -41,7 +41,7 @@ import yaml
 
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
-from defender._corpus import iter_lessons
+from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
 from defender.learning.core import config
@@ -132,6 +132,24 @@ def read_batch(cfg: CuratorConfig) -> list[dict]:
 _EXISTING_IDS_CACHE: dict[tuple[str, tuple[tuple[str, int], ...]], set[str]] = {}
 
 
+def _mtime_ns(path: Path) -> int:
+    """``path``'s mtime in ns, or ``-1`` when it cannot be stat'd.
+
+    The cache signature has to tolerate exactly what the walk tolerates. ``iter_lessons``
+    warn-SKIPS an unreadable lesson — a dangling symlink is a member of the corpus domain, not an
+    error — so an unguarded ``stat()`` here would crash the whole curator drain, before the agent
+    ever runs, on a file the walk itself shrugs off. (It is also the TOCTOU window: a lesson
+    removed between the glob and the stat raises the same ``FileNotFoundError``.)
+
+    ``-1`` is a sound stand-in rather than a silent hole: the file contributes no ids either way,
+    and if it later becomes readable its real mtime differs from ``-1``, which busts the cache.
+    """
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return -1
+
+
 def existing_observation_ids(corpus_dir: Path) -> set[str]:
     """Union of source_observation_ids across all lessons in ``corpus_dir``.
 
@@ -142,24 +160,27 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     Parses through the shared ``iter_lessons``, like the corpus manifest this pre-flight runs
     beside. The hand-rolled walk it replaces read each file OUTSIDE any guard, so a single
     undecodable byte raised ``UnicodeDecodeError`` (a ``ValueError``, NOT an ``OSError``) and took
-    the whole curator drain down where the manifest would have warned and skipped the one file; and
-    its ``\\A---\\n`` literal silently contributed no ids for a CRLF lesson. The glob below stays —
-    it is the mtime *signature*, computed before any parse, and it applies the same discovery rules
-    the iterator does."""
+    the whole curator drain down where the manifest would have warned and skipped the one file.
+    (It did NOT, contrary to an earlier draft of this docstring, miss a CRLF lesson: ``read_text()``
+    universal-newline-translates, so ``\\r\\n`` is already ``\\n`` before the ``\\A---\\n`` regex
+    runs.)
+
+    A *signature* pass survives, because the cache needs the file set before paying for the parse
+    and the iterator exposes no mtimes — but it takes the discovery rule from ``iter_lesson_paths``
+    rather than restating it, and it stats through :func:`_mtime_ns` so it tolerates exactly what
+    the walk tolerates."""
     if not corpus_dir.is_dir():
         return set()
-    paths = [
-        p for p in sorted(corpus_dir.glob("*.md")) if not p.name.startswith("_")
-    ]
-    sig = (str(corpus_dir), tuple((p.name, p.stat().st_mtime_ns) for p in paths))
+    paths = iter_lesson_paths(corpus_dir)
+    sig = (str(corpus_dir), tuple((p.name, _mtime_ns(p)) for p in paths))
     cached = _EXISTING_IDS_CACHE.get(sig)
     if cached is not None:
         return set(cached)
     ids: set[str] = set()
-    for _path, fm in iter_lessons(
+    for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"observation-id pre-flight: {p.name}"
     ):
-        sids = fm.get("source_observation_ids") or []
+        sids = lesson.fm.get("source_observation_ids") or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     _EXISTING_IDS_CACHE.clear()  # keep only the latest signature

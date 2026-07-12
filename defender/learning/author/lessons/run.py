@@ -200,16 +200,21 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
 
     Walks the corpus through the shared ``iter_lessons``, like the manifest this pre-flight runs
     beside, so the two cannot disagree about what a lesson *is*. The hand-rolled walk this replaces
-    disagreed on three counts, each a live bug: it read the file OUTSIDE any guard, so one
+    disagreed on two counts, each a live bug: it read the file OUTSIDE any guard, so one
     undecodable byte raised ``UnicodeDecodeError`` (a ``ValueError``, not an ``OSError``) and took
-    the whole author drain down instead of skipping one lesson; it matched ``\\A---\\n`` literally,
-    so a CRLF lesson silently contributed no ids at all; and it did not skip ``_``-prefixed files,
-    the one corpus convention every other reader honours."""
+    the whole author drain down instead of skipping one lesson; and it did not skip ``_``-prefixed
+    files, the one corpus convention every other reader honours.
+
+    NOT a third count, though an earlier draft of this docstring claimed one: its ``\\A---\\n``
+    regex did *not* miss a CRLF lesson. ``Path.read_text()`` opens with ``newline=None``, so
+    universal-newline translation has already turned ``\\r\\n`` into ``\\n`` before any pattern
+    runs. Left recorded because the false version is the sort of claim that gets cited while
+    triaging a real encoding bug."""
     ids: set[str] = set()
-    for _path, fm in iter_lessons(
+    for lesson in iter_lessons(
         cfg.lessons_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
     ):
-        sids = fm.get("source_finding_ids") or []
+        sids = lesson.fm.get("source_finding_ids") or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     return ids

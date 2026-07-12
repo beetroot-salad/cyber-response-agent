@@ -25,6 +25,7 @@ from defender.scripts.lessons._lessons_common import (
     iter_lessons,
     reexec_into_venv,
     rel_to_repo,
+    use_utf8_stdio,
 )
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
@@ -143,6 +144,7 @@ examples:
 
 
 def main(argv: list[str]) -> int:
+    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
     ap = argparse.ArgumentParser(
         prog="lessons_env_retrieve.py",
         description=_HELP_DESCRIPTION,
@@ -162,7 +164,8 @@ def main(argv: list[str]) -> int:
     want_rule_ids = csv_set(ns.alert_rule_ids)
     want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons(corpus):
+    for lesson in iter_lessons(corpus):
+        path, fm = lesson.path, lesson.fm
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":
             continue
         if want_subject is not None and str(fm.get("subject") or "").strip() != want_subject:

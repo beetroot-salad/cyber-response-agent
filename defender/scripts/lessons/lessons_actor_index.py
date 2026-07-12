@@ -39,6 +39,7 @@ from defender.scripts.lessons._lessons_common import (
     iter_lessons,
     reexec_into_venv,
     rel_to_repo,
+    use_utf8_stdio,
 )
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
@@ -54,6 +55,7 @@ LESSONS_ROOT = REPO_ROOT / "defender" / "lessons-actor"
 
 
 def main(argv: list[str]) -> int:
+    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--techniques", help="Comma-separated MITRE T-IDs; OR within the list")
     ap.add_argument("--alert-rule-ids", help="Comma-separated SIEM rule IDs; OR within the list")
@@ -69,7 +71,8 @@ def main(argv: list[str]) -> int:
     want_applies_to = csv_set(ns.applies_to)
     want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
+    for lesson in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
+        path, fm = lesson.path, lesson.fm
         # Stale filter (default hide; mutable=false lessons never have
         # status=stale, so they pass through unconditionally).
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":

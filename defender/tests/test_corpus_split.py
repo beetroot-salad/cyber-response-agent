@@ -8,29 +8,37 @@ unretrievable / keyed on an identity selector — fails CI.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-import yaml
+from defender._corpus import iter_lessons
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_ENV = REPO_ROOT / "defender" / "lessons-environment"
 LESSONS_ACTOR = REPO_ROOT / "defender" / "lessons-actor"
 
-_FM = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
-
 
 def _corpus(d: Path) -> list[tuple[Path, dict]]:
-    out: list[tuple[Path, dict]] = []
-    for p in sorted(d.glob("*.md")):
-        if p.name.startswith("_"):
-            continue
-        m = _FM.match(p.read_text())
-        assert m, f"{p.name}: missing frontmatter"
-        doc = yaml.safe_load(m.group(1))
-        assert isinstance(doc, dict), f"{p.name}: frontmatter is not a mapping"
-        out.append((p, doc))
-    return out
+    """Every non-``_`` lesson in ``d`` as ``(path, frontmatter)``, parsed by the shared walk.
+
+    Folded onto ``iter_lessons`` (#584). This helper used to be a SIXTH hand-rolled copy of the
+    corpus walk — its own ``\\A---\\n`` regex fence-split plus ``yaml.safe_load`` — so the CI gate
+    below had its own private definition of what a lesson IS. The fold is behavior-PRESERVING on
+    accept/red for every case (the CRLF divergence an earlier draft of this docstring claimed does
+    not exist — ``read_text()`` universal-newline-translates, so the old regex matched a CRLF lesson
+    fine); what it buys is that four malformed shapes — invalid YAML, undecodable bytes, a dangling
+    symlink, a directory named ``*.md`` — used to escape as a raw exception and now red as a NAMED
+    assertion listing the offending files.
+
+    Its guarantee is kept VERBATIM and that is the load-bearing part of the fold: ``iter_lessons``
+    warn-SKIPS a malformed lesson where this walk ASSERTED, so the assertion moves here, to the call
+    site. Every non-``_`` ``*.md`` must come back from the iterator — otherwise a malformed lesson
+    would newly slip through this real-corpus CI gate in silence, which is the opposite of what it
+    is for."""
+    lessons = list(iter_lessons(d))
+    expected = {p for p in d.glob("*.md") if not p.name.startswith("_")}
+    skipped = sorted(p.name for p in expected - {lesson.path for lesson in lessons})
+    assert not skipped, f"unparseable frontmatter (warn-skipped by iter_lessons): {skipped}"
+    return [(lesson.path, lesson.fm) for lesson in lessons]
 
 
 def test_env_corpus_has_anchor_and_wellformed_entities() -> None:

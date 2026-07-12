@@ -49,6 +49,7 @@ from defender.scripts.lessons._lessons_common import (
     iter_lessons,
     reexec_into_venv,
     rel_to_repo,
+    use_utf8_stdio,
 )
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
@@ -61,29 +62,16 @@ if __name__ == "__main__":
 import argparse
 import re
 
-import yaml
-
+# Below the re-exec gate (like the yaml import it replaces): `defender._frontmatter` is
+# yaml-backed, and this script is launched by the actor under the SYSTEM interpreter, which
+# has no PyYAML. Anything yaml-backed must be imported only after `reexec_into_venv`.
+from defender._frontmatter import FrontmatterError, split_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 # The list-valued retrieval dimensions, in display order.
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
-
-
-def _split_frontmatter(text: str) -> tuple[str, dict] | None:
-    """Return (raw_frontmatter_text, parsed_dict) or None if malformed."""
-    if not text.startswith("---\n"):
-        return None
-    end = text.find("\n---", 4)
-    if end == -1:
-        return None
-    raw = text[4:end]
-    try:
-        data = yaml.safe_load(raw)
-    except yaml.YAMLError:
-        return None
-    return (raw, data) if isinstance(data, dict) else None
 
 
 def _emit_match(path: Path, fm: dict) -> None:
@@ -97,9 +85,9 @@ def cmd_grep(patterns: list[str]) -> int:
     except re.error as e:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
-    for path, raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
-        if all(rx.search(raw) for rx in regexes):
-            _emit_match(path, fm)
+    for lesson in iter_lessons(LESSONS_DIR):
+        if all(rx.search(lesson.raw) for rx in regexes):
+            _emit_match(lesson.path, lesson.fm)
     return 0
 
 
@@ -108,10 +96,11 @@ def cmd_tags(field: str | None) -> int:
     if field and field not in DIMENSIONS:
         print(f"error: unknown dimension {field!r}; choose from {', '.join(DIMENSIONS)}", file=sys.stderr)
         return 2
+    lessons = list(iter_lessons(LESSONS_DIR))  # one walk, not one per dimension
     for f in fields:
         counts: dict[str, int] = {}
-        for _path, _raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
-            for val in as_list(fm.get(f)):
+        for lesson in lessons:
+            for val in as_list(lesson.fm.get(f)):
                 counts[str(val)] = counts.get(str(val), 0) + 1
         print(f"{f}:")
         for val in sorted(counts):
@@ -121,25 +110,51 @@ def cmd_tags(field: str | None) -> int:
 
 def cmd_show(paths: list[str]) -> int:
     rc = 0
+    corpus = LESSONS_DIR.resolve()
     for raw_path in paths:
         p = Path(raw_path)
         if not p.is_absolute():
             p = REPO_ROOT / raw_path
-        if not p.is_file():
+        # --show is the one lesson read that takes a MODEL-SUPPLIED path, and nothing upstream
+        # confines it: `defender-lessons` is an allowed main-loop shim (hooks/_cmd_segments.py)
+        # and the bash allowlist pins the PROGRAM token, not its operands — the reader lane
+        # compiles shims as `defender-lessons(?: .*)?`, so every argument passes. This read
+        # therefore never reaches `decide_read`'s {run_dir, defender_dir} allowlist. Unconfined it
+        # is a frontmatter-DISCLOSURE primitive for any fenced file the process can read
+        # (`--show /tmp/anything.md` prints its YAML verbatim) plus a file-EXISTENCE oracle over
+        # the whole filesystem. Confine it to the corpus this CLI is about — membership in the
+        # walk is the confinement — and fail the off-corpus, absent and not-a-file cases with an
+        # IDENTICAL message, so nothing can be probed through the difference between them.
+        # `resolve()` first, so a symlink out of the corpus cannot smuggle a target back in.
+        lesson = p.resolve()
+        try:
+            lesson.relative_to(corpus)
+            inside = True
+        except ValueError:
+            inside = False
+        if not inside or not lesson.is_file():
             print(f"error: no such lesson: {raw_path}", file=sys.stderr)
             rc = 2
             continue
-        parsed = _split_frontmatter(p.read_text())
-        if parsed is None:
-            print(f"error: {raw_path}: malformed frontmatter", file=sys.stderr)
+        # Read exactly as the shared corpus walk does. The encoding is PINNED for the same reason
+        # iter_lessons pins it: a bare read_text() decodes under the ambient locale, so where the
+        # walk warn-skips an accented lesson this raised an ascii UnicodeDecodeError straight out
+        # of main() — a traceback, on a shim the agent runs at PLAN. The fence split delegates to
+        # the canonical parser so --show cannot disagree with --tags/the grep about where a
+        # lesson's frontmatter ends.
+        try:
+            fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]
+        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
+            print(f"error: {raw_path}: malformed lesson: {e}", file=sys.stderr)
             rc = 2
             continue
-        print(f"--- {rel_to_repo(p, REPO_ROOT)}")
-        print(parsed[0])
+        print(f"--- {rel_to_repo(lesson, REPO_ROOT)}")
+        print(fm_raw)
     return rc
 
 
 def main(argv: list[str]) -> int:
+    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
     ap = argparse.ArgumentParser(
         prog="defender-lessons",
         description=__doc__.splitlines()[0],

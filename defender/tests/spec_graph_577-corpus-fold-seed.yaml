@@ -262,12 +262,12 @@ demands:
     kind: behavior
     form: waiver
     outcome:
-      nl: "learning/frontend/serialize.py::_iter_corpus is a FIFTH copy of the corpus walk and
-           defender/_corpus.py is its correct eventual home, but folding it here is out of scope: it
-           yields a different tuple shape (path, fm, body), folding would silently FIX a real crash
-           (it catches only FrontmatterError, so an OSError/UnicodeDecodeError takes the frontend build
-           down today) with no test and no issue, and its `if not fm` skip drops empty-mapping lessons
-           that iter_lessons renders. Follow-up issue, not this PR."
+      nl: "DISCHARGED by #584 (spec_graph_584-corpus-fold.yaml, d12-d19). The private corpus walk
+           inside learning/frontend/serialize.py was a FIFTH copy, deferred here because folding it
+           would have silently FIXED a real crash (it caught only FrontmatterError, so an
+           OSError/UnicodeDecodeError took the frontend build down) with no test and no issue, and
+           because its `if not fm` skip dropped the empty-mapping lessons iter_lessons renders. #584
+           folds it onto iter_lessons and pins both behaviors as demands; the private walk is gone."
     binds: [serialize_iter_corpus]
 
 structure:
