@@ -19,11 +19,11 @@ from pathlib import Path
 # single implementation lives in the neutral module a non-lessons consumer can reach without
 # importing out of ``scripts/``: the corpus walk is shared with the curators' corpus manifest
 # (``learning/author/shared.py``), the venv re-exec with the lessons frontend.
-from defender._corpus import iter_lessons
+from defender._corpus import iter_lessons, use_utf8_stdio
 from defender.scripts._venv import reexec_into_venv
 
 __all__ = [
-    "reexec_into_venv", "iter_lessons",
+    "reexec_into_venv", "iter_lessons", "use_utf8_stdio",
     "as_list", "as_str_set", "csv_set", "rel_to_repo",
 ]
 

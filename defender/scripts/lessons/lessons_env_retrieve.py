@@ -25,6 +25,7 @@ from defender.scripts.lessons._lessons_common import (
     iter_lessons,
     reexec_into_venv,
     rel_to_repo,
+    use_utf8_stdio,
 )
 
 # Re-exec into defender/.venv so PyYAML resolves regardless of which python the
@@ -143,6 +144,7 @@ examples:
 
 
 def main(argv: list[str]) -> int:
+    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
     ap = argparse.ArgumentParser(
         prog="lessons_env_retrieve.py",
         description=_HELP_DESCRIPTION,

@@ -53,7 +53,7 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender._corpus import iter_lessons
+from defender._corpus import iter_lessons, use_utf8_stdio
 
 
 def _json_safe(obj):
@@ -205,6 +205,9 @@ def dump_contract(view: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # The file writes below pin utf-8; --stdout dumps the same ensure_ascii=False payload, so it
+    # needs the stream pinned too or an accented lesson kills the api preview under a C locale.
+    use_utf8_stdio()
     view = stamped_view()
     if "--stdout" in argv[1:]:
         sys.stdout.write(dump_contract(view))

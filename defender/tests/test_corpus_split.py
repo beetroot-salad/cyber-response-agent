@@ -21,9 +21,13 @@ def _corpus(d: Path) -> list[tuple[Path, dict]]:
     """Every non-``_`` lesson in ``d`` as ``(path, frontmatter)``, parsed by the shared walk.
 
     Folded onto ``iter_lessons`` (#584). This helper used to be a SIXTH hand-rolled copy of the
-    corpus walk — its own ``\\A---\\n`` regex fence-split plus ``yaml.safe_load`` — which meant the
-    CI gate below disagreed with every other reader about what a lesson IS: the un-normalized regex
-    reds on a CRLF lesson that ``iter_lessons`` parses fine.
+    corpus walk — its own ``\\A---\\n`` regex fence-split plus ``yaml.safe_load`` — so the CI gate
+    below had its own private definition of what a lesson IS. The fold is behavior-PRESERVING on
+    accept/red for every case (the CRLF divergence an earlier draft of this docstring claimed does
+    not exist — ``read_text()`` universal-newline-translates, so the old regex matched a CRLF lesson
+    fine); what it buys is that four malformed shapes — invalid YAML, undecodable bytes, a dangling
+    symlink, a directory named ``*.md`` — used to escape as a raw exception and now red as a NAMED
+    assertion listing the offending files.
 
     Its guarantee is kept VERBATIM and that is the load-bearing part of the fold: ``iter_lessons``
     warn-SKIPS a malformed lesson where this walk ASSERTED, so the assertion moves here, to the call
