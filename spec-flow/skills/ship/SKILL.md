@@ -1,6 +1,7 @@
 ---
 name: ship
 description: "Branch, commit, push, and open a PR for the current changes."
+effort: low
 ---
 
 # Ship Changes
