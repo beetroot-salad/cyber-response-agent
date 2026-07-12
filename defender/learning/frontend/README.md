@@ -33,10 +33,11 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
 - **`serialize.py`** is the api layer: it reads the three corpora (whose
   frontmatter schemas differ) and normalizes them into one
   schema-agnostic contract. `build_view()` is pure; the CLI stamps
-  `generated_at`. Each corpus is enumerated with one read per file
-  (`_iter_corpus`), matching the indexer discovery rules (sorted `*.md`,
-  underscore-skip, warn+skip on malformed frontmatter). Stale lessons
-  are surfaced with a badge, not hidden — this is an author-facing view.
+  `generated_at`. Each corpus is enumerated through the shared corpus walk
+  (`defender._corpus.iter_lessons`, the same reader the lesson CLIs and the
+  curators go through): sorted `*.md`, underscore-skip, warn+skip on a
+  malformed or unreadable lesson. Stale lessons are surfaced with a badge,
+  not hidden — this is an author-facing view.
 - **`lessons.json`** is the only coupling point between backend and view.
   Each group declares its `fields[]`, so the view renders metadata
   generically without knowing any corpus's schema. A real HTTP api could

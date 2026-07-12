@@ -97,9 +97,9 @@ def cmd_grep(patterns: list[str]) -> int:
     except re.error as e:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
-    for path, raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
-        if all(rx.search(raw) for rx in regexes):
-            _emit_match(path, fm)
+    for lesson in iter_lessons(LESSONS_DIR):
+        if all(rx.search(lesson.raw) for rx in regexes):
+            _emit_match(lesson.path, lesson.fm)
     return 0
 
 
@@ -110,8 +110,8 @@ def cmd_tags(field: str | None) -> int:
         return 2
     for f in fields:
         counts: dict[str, int] = {}
-        for _path, _raw, fm in iter_lessons(LESSONS_DIR, with_raw=True):
-            for val in as_list(fm.get(f)):
+        for lesson in iter_lessons(LESSONS_DIR):
+            for val in as_list(lesson.fm.get(f)):
                 counts[str(val)] = counts.get(str(val), 0) + 1
         print(f"{f}:")
         for val in sorted(counts):

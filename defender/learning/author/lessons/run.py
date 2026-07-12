@@ -206,10 +206,10 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     so a CRLF lesson silently contributed no ids at all; and it did not skip ``_``-prefixed files,
     the one corpus convention every other reader honours."""
     ids: set[str] = set()
-    for _path, fm in iter_lessons(
+    for lesson in iter_lessons(
         cfg.lessons_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
     ):
-        sids = fm.get("source_finding_ids") or []
+        sids = lesson.fm.get("source_finding_ids") or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     return ids

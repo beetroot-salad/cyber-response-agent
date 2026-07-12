@@ -69,7 +69,8 @@ def main(argv: list[str]) -> int:
     want_applies_to = csv_set(ns.applies_to)
     want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
+    for lesson in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
+        path, fm = lesson.path, lesson.fm
         # Stale filter (default hide; mutable=false lessons never have
         # status=stale, so they pass through unconditionally).
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":

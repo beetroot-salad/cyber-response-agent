@@ -16,7 +16,9 @@ Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
 ``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
 where the learn worker persists each case's ``report.md`` + ``lessons_loaded.jsonl``.
 Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
-``--no-learn`` dev runs that are never persisted). Lessons: defender/lessons/.
+``--no-learn`` dev runs that are never persisted). Lessons: ``defender/lessons/``, overridable with
+``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``, so it inherits the
+corpus discovery rules (underscore-skip, warn-and-skip on a malformed or unreadable lesson).
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._corpus import iter_lessons
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
@@ -68,26 +71,6 @@ def _parse_dt(raw) -> datetime | None:
     except ValueError:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
-
-
-@dataclass
-class LessonMeta:
-    name: str
-    description: str
-    created_at: datetime | None
-
-
-def lesson_meta(path: Path) -> LessonMeta:
-    """Lesson identity is the **file stem** — that is what ``record_lesson_load``
-    writes into ``lessons_loaded.jsonl`` and what ``trace_lesson <name>`` /
-    ``revert_lesson <name>`` take. Matching on the frontmatter ``name`` (which
-    nothing forces to equal the stem) would silently miss every recorded load."""
-    fm = parse_frontmatter_or_none(path.read_text()) or {}
-    return LessonMeta(
-        name=path.stem,
-        description=str(fm.get("description") or ""),
-        created_at=_parse_dt(fm.get("created_at")),
-    )
 
 
 @dataclass
@@ -148,30 +131,49 @@ def main(argv: list[str]) -> int:
     p.add_argument("--all", action="store_true",
                    help="list every lesson with its in-context case count (cheap scan)")
     p.add_argument("--runs-dir", type=Path, default=None)
+    p.add_argument("--lessons-dir", type=Path, default=LESSONS_DIR,
+                   help="Corpus directory (default: defender/lessons)")
     ns = p.parse_args(argv)
     runs_dir = ns.runs_dir or _default_runs_dir()
+    lessons_dir = ns.lessons_dir
 
-    if not LESSONS_DIR.is_dir():
-        print(f"no lessons dir: {LESSONS_DIR}", file=sys.stderr)
+    if not lessons_dir.is_dir():
+        print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
         return 1
 
+    # Lesson identity is the **file stem** — that is what ``record_lesson_load`` writes into
+    # ``lessons_loaded.jsonl`` and what ``trace_lesson <name>`` / ``revert_lesson <name>`` take.
+    # A ``Lesson`` carries no ``.name``, and joining on the frontmatter ``name`` (which nothing
+    # forces to equal the stem) would silently miss every recorded load and report zero cases.
     if ns.all:
-        for path in sorted(LESSONS_DIR.glob("*.md")):
-            m = lesson_meta(path)
-            n = len(in_context_cases(m.name, m.created_at, runs_dir))
-            print(f"{m.name}\t{m.description}\t{n}")
+        for lesson in iter_lessons(lessons_dir):
+            name = lesson.path.stem
+            created_at = _parse_dt(lesson.fm.get("created_at"))
+            n = len(in_context_cases(name, created_at, runs_dir))
+            print(f"{name}\t{str(lesson.fm.get('description') or '')}\t{n}")
         return 0
 
     if not ns.lesson_name:
         print("give a <lesson_name> or --all", file=sys.stderr)
         return 1
-    path = LESSONS_DIR / f"{ns.lesson_name}.md"
+    path = lessons_dir / f"{ns.lesson_name}.md"
     if not path.is_file():
         print(f"no such lesson: {path}", file=sys.stderr)
         return 1
-    m = lesson_meta(path)
-    hits = in_context_cases(m.name, m.created_at, runs_dir)
-    print(f"# {m.name} — {len(hits)} case(s) in context since {m.created_at}")
+    # ``iter_lessons`` is a directory walk and cannot serve a single named lesson without turning
+    # an O(1) read into a whole-corpus parse, so this path keeps its own read — but guarded, so an
+    # undecodable byte is one error line rather than a traceback out of main(). Unlike ``--all``,
+    # an explicitly named lesson is an ERROR, not a warn-and-continue: printing "0 case(s)" for a
+    # file that was never read is worse than failing.
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"error: cannot read {path.name}: {e}", file=sys.stderr)
+        return 1
+    fm = parse_frontmatter_or_none(text) or {}
+    created_at = _parse_dt(fm.get("created_at"))
+    hits = in_context_cases(path.stem, created_at, runs_dir)
+    print(f"# {path.stem} — {len(hits)} case(s) in context since {created_at}")
     for h in hits:
         print(f"{h.case_id}\t{h.disposition}\t{h.loaded_at}")
     return 0

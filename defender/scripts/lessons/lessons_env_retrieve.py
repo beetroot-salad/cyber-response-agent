@@ -162,7 +162,8 @@ def main(argv: list[str]) -> int:
     want_rule_ids = csv_set(ns.alert_rule_ids)
     want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons(corpus):
+    for lesson in iter_lessons(corpus):
+        path, fm = lesson.path, lesson.fm
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":
             continue
         if want_subject is not None and str(fm.get("subject") or "").strip() != want_subject:

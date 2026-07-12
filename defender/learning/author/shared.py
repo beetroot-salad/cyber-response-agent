@@ -580,14 +580,15 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
     fresh worktree), and a single malformed ``.md`` is warned to stderr and skipped — one bad file
     never aborts the manifest and loses its well-formed siblings."""
     sections: list[str] = []
-    for path, fm in iter_lessons(
+    for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}"
     ):
-        kept = {k: v for k, v in fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
+        kept = {k: v for k, v in lesson.fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
         rendered = yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )
-        slug = " ".join(path.stem.split())  # a model-chosen stem is not a safe protocol field
+        # a model-chosen stem is not a safe protocol field
+        slug = " ".join(lesson.path.stem.split())
         sections.append(f"## {slug}\n{rendered}")
     if seed is not None:
         random.Random(seed).shuffle(sections)

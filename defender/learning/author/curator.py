@@ -156,10 +156,10 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     if cached is not None:
         return set(cached)
     ids: set[str] = set()
-    for _path, fm in iter_lessons(
+    for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"observation-id pre-flight: {p.name}"
     ):
-        sids = fm.get("source_observation_ids") or []
+        sids = lesson.fm.get("source_observation_ids") or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     _EXISTING_IDS_CACHE.clear()  # keep only the latest signature
