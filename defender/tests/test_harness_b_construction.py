@@ -279,8 +279,15 @@ def test_build_agent_core_extra_capabilities_default_is_immutable_empty():
 
 def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, logger):
     """build_gather_agent (re-pointed at build_agent_core via the GATHER spec) yields the
-    read-only pair ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent
-    must not dispatch itself)."""
+    read-only surface ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent
+    must not dispatch itself).
+
+    #585 adds `template_search` to that surface: gather's query-template discovery is dead on the
+    bash lane (`find` was never there, `grep -r` denies since #581, a glob reaches grep as a
+    literal filename, and #575 removes `ls`), so the grep comes back as a gated tool with a
+    harness-owned root. This is the ONE test that pins gather's REAL registered surface — the
+    `["bash", "read_file"]` assertions in test_gather_engine_seam.py and at :224 above feed a
+    SYNTHETIC ToolSet and would stay green while GATHER_DEF drifted."""
     # The GATHER spec routes through the real env path (gather_model() → provider_for,
     # effort_for_role → env_str); clear the gather env so an ambient DEFENDER_GATHER_MODEL
     # (the A/B benchmark exports it) or DEFENDER_GATHER_REASONING_EFFORT can't error the build.
@@ -289,7 +296,9 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
         agent = driver.build_gather_agent(_DEFENDER, logger, "gather:l-001", make_model=fake)
-    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
+    assert list(agent._function_toolset.tools) == ["bash", "read_file", "template_search"]
+    assert "gather" not in agent._function_toolset.tools    # no self-dispatch
+    assert "write_file" not in agent._function_toolset.tools
 
 
 def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
