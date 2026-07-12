@@ -52,11 +52,18 @@ from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline._pydantic_stage import run_stage
-from defender.runtime import gnu_flags, providers
-from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
+from defender.runtime import providers
+from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import AgentPolicy, build_write_allow
+from defender.runtime.permission.grant import (
+    TREE,
+    Grant,
+    PathShapes,
+    program_shape,
+    under,
+)
 from defender.runtime.tools import AgentDeps
 
 AuthorError = _shared.AuthorError
@@ -109,35 +116,19 @@ def _find_balanced_json_object(text: str, start: int) -> str | None:
     return None
 
 # One path segment that is NOT a `..` traversal: `..` as a WHOLE segment (followed by `/`, a
-# token-boundary space, or end-of-token) is rejected TEXTUALLY, since the bash lane never
-# resolve()s (copied from the lead author's `_rm_skills_pattern` / policies._common._SEG). A real
-# path operand carries no embedded space, so `[^/ ]+` matches exactly one dir/file name and a
-# real space keeps a multi-path `rm a b` from matching as one long "segment".
+# token-boundary space, or end-of-token) is rejected TEXTUALLY. The `rm` grant needs this because
+# `rm` unlinks the LINK, not the target — `resolve()` is the wrong operand model for it, so its
+# path stays in the PATTERN (`pins_path`) and the traversal must be rejected literally there.
 _SEG = r"(?!\.\.(?:/| |$))[^/ ]+"
 
-# Per-program BOOLEAN short-flag allowlists for the corpus viewers, built from the shared GNU
-# arity facts in `runtime/gnu_flags.py` — the same source the main/gather reader lane
-# (`runtime/permission/policies/_common.py`) compiles its classes from. Read that module's header
-# for WHY a catch-all minus the known-bad fails open: an arg-CONSUMING short flag eats the
-# corpus-anchored operand behind it, leaving the program with none, and `ls`/`grep` then fall back
-# to the CWD — which for a curator is its git worktree, i.e. the whole repo (#579). This lane
-# carries NO auto secret-denylist, so the anchored operand is its sole containment (bash lane: no
-# resolve()) and a flag that dislodges the operand is the whole ballgame.
-_CAT_FLAG = gnu_flags.bundle(gnu_flags.CAT_BOOL)
-# `-R` is KEPT here, unlike the runtime lane: the corpus holds no subtree this agent is barred
-# from enumerating, so recursion reaches nothing the anchor doesn't already admit.
-_LS_FLAG = gnu_flags.bundle(gnu_flags.LS_BOOL)
-# grep's booleans + list-only + recursion. Recursion is admissible HERE (and not on the runtime
-# lane) for one structural reason: this grammar REQUIRES a file operand (`+`), so a recursive grep
-# always has a corpus-anchored root to descend from and can never fall back to the CWD.
-_GREP_FLAG = gnu_flags.bundle(
-    gnu_flags.GREP_BOOL + gnu_flags.GREP_LIST + gnu_flags.GREP_RECURSE
-)
-
+# PROMPT SURFACE: names only programs this lane grants (`cat`, `grep`, `rm`). The corpus listing
+# (`ls`) is gone — the #574 corpus manifest replaces it — and so is grep's file operand, so the
+# reason must not teach either.
 _CORPUS_AUTHOR_DENY_REASON = (
-    "Blocked: the lesson curator writes/edits .md lessons under its OWN corpus only. It reads the "
-    "corpus (ls/grep/cat) and rm's a single draft it promotes or discards — no writes outside the "
-    "corpus, no other corpus, no arbitrary shell. Forward-check with the forward_check tool."
+    "Blocked: the lesson curator writes and edits .md lessons under its OWN corpus only. It reads the "
+    "corpus (cat, or `cat <file> | grep <pattern>`), takes its inventory from the corpus manifest, "
+    "and rm's a single draft it promotes or discards — no writes outside the corpus, no other "
+    "corpus, no arbitrary shell. Forward-check with the forward_check tool."
 )
 
 
@@ -151,71 +142,63 @@ def _corpus_spellings(corpus_dir: Path) -> str:
     return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
 
 
-def _corpus_file_operand(corpus_dir: Path) -> str:
-    """A file UNDER the corpus (>=1 non-`..` segment): ``<corpus>/<seg>+``."""
-    return rf"(?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})+"
-
-
-def _corpus_dir_operand(corpus_dir: Path) -> str:
-    """The corpus itself OR a dir under it (for the `ls` operand), with an OPTIONAL trailing slash
-    — the agent idiomatically types ``ls defender/lessons-actor/`` (a real GLM smoke did exactly
-    that), so a dir operand admits the trailing ``/`` a file operand never carries."""
-    return rf"(?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})*/?"
-
-
-def _viewer_patterns(corpus_dir: Path) -> tuple[re.Pattern[str], ...]:
-    """The corpus-anchored ls/grep/cat reader lane — the in-process replacement for the absent
-    Glob/Grep tools (the agent enumerates existing lessons to fold duplicates via bash). Every
-    file/dir operand must TEXTUALLY sit under the spawn's OWN corpus (anti-`..`); there is no auto
-    secret-denylist here, so the anchored operand is the sole containment."""
-    f = _corpus_file_operand(corpus_dir)
-    d = _corpus_dir_operand(corpus_dir)
-    # A free-text grep search pattern (one token; may look like a path). The leading `(?!-)`
-    # is load-bearing: without it this slot swallows any `-`-prefixed token, so a file-opening
-    # option `_GREP_FLAG` is meant to block (`grep --file=<out-of-corpus>`, `grep
-    # --exclude-from=…`, `grep -r -f <corpus-probe>`) would fall through here and grep would OPEN
-    # an out-of-corpus file — the anchored operand is the sole containment on this denylist-free
-    # lane, so the search token must not be a flag. `(?!-)` alone is NOT sufficient: it only stops
-    # a REJECTED flag from re-entering as the pattern, and says nothing about an ADMITTED flag that
-    # consumes this token (`grep -m 1 <corpus>/x.md`). That half is `_GREP_FLAG`'s job — it admits
-    # boolean flags only, so the slot grep binds a token to is the slot this grammar sees.
-    pat = r"(?!-)[^ ]+"
-    return (
-        re.compile(rf"^cat(?: {_CAT_FLAG})*(?: {f})+$"),
-        re.compile(rf"^grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})+$"),
-        re.compile(rf"^ls(?: {_LS_FLAG})*(?: {d})+$"),  # `+`: bare `ls` (=cwd recon) denied
+def _rm_grant(corpus_dir: Path) -> Grant:
+    """The curator's ONE mutating bash grant: ``rm`` of a SINGLE path under its own corpus (promote
+    = write the lesson + rm the draft; discard = rm the draft). ``pins_path=True``, the same R1
+    exemption the lead author's ``rm`` carries and for the same reason: ``rm`` acts on the LINK, so
+    resolving the operand would FALSELY DENY a legitimate symlinked draft and would check the wrong
+    inode besides. The traversal guard is therefore textual, in the pattern."""
+    return Grant(
+        program="rm",
+        pattern=re.compile(rf"^rm (?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})+$"),
+        pins_path=True,
     )
 
 
-def _rm_pattern(corpus_dir: Path) -> re.Pattern[str]:
-    """The curator's ONE mutating bash grant: ``rm`` of a SINGLE path under its own corpus
-    (promote = write the lesson + rm the draft; discard = rm the draft). Anti-`..` textual (the
-    bash lane does no resolve()), single path, no flags — the shape of the lead author's
-    ``_rm_skills_pattern`` at the corpus root."""
-    return re.compile(rf"^rm (?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})+$")
+def _corpus_author_grants(corpus_dir: Path) -> tuple[Grant, ...]:
+    """The curator's bash lane, folded onto the SAME model as every other agent (#575): `cat` is
+    the sole opener, scoped to its own corpus at ``resolve()`` time, and `grep` is a stdin-only
+    pipe stage (`cat <file> | grep <pattern>`).
+
+    This lane is the one with NO secret denylist and NO ``compile_policy`` (it is built per-spawn
+    from the worktree ``corpus_dir``), which is exactly why it must not keep a private copy of the
+    viewer grammar: its `_LS_FLAG` had already drifted from the runtime lane's (it still admitted
+    `-R` after #579 dropped it there), and a private grammar is a second place for the next
+    fail-open to hide. It now compiles the shared ``program_shape``s and its policy passes the same
+    program-table check as every other agent's.
+
+    ``ls`` is gone: the corpus manifest (#574) is the inventory, and it needs no gate at all."""
+    corpus = corpus_dir.resolve()
+    scope = PathShapes([under(corpus, TREE)])
+    return (
+        _rm_grant(corpus_dir),
+        Grant(program="cat", pattern=program_shape("cat"), scope=scope),
+        Grant(program="grep", pattern=program_shape("grep")),
+    )
 
 
 def _corpus_author_policy(corpus_dir: Path) -> AgentPolicy:
     """The curator's declarative gate policy, built PER-SPAWN from the worktree ``corpus_dir``.
+
     ``write_allow`` is a single flat pattern admitting ``<corpus>/**.md`` ONLY (the corpus is
-    ``.md``): the file writers may author a lesson ``.md`` under their own corpus and NOTHING else —
-    not a sibling corpus, not the run dir (a flat allowlist, NOT a run-dir root, so ``run_dir`` /
-    ``_pending`` stay unwritable). ``bash_allow`` is the flat corpus-anchored lane: a single-draft ``rm``
-    and the ls/grep/cat viewers (no Glob/Grep tool in-process). It admits NO python interpreter —
-    the forward-check is the in-process ``forward_check`` tool (#558), because an allowlist that
-    pins a program token cannot constrain the operands that program then acts on (#565). ``read_confine`` is empty — reads under ``defender_dir`` stay allowed by
-    ``decide_read``'s defaults (it reads sibling lessons + the schema docs). Every other capability
-    bit off. Built DIRECTLY (not ``compile_policy``/``bind``, whose ``write_allow`` roots at run_dir)
-    because it needs the worktree's ``corpus_dir``."""
+    ``.md``): the file writers may author a lesson ``.md`` under their own corpus and NOTHING else
+    — not a sibling corpus, not the run dir (a flat allowlist, NOT a run-dir root, so ``run_dir`` /
+    ``_pending`` stay unwritable). ``bash_allow`` is the corpus-scoped ``cat``/``grep``/``rm`` lane
+    above; it admits NO python interpreter — the forward-check is the in-process ``forward_check``
+    tool (#558), because an allowlist that pins a program token cannot constrain the operands that
+    program then acts on (#565).
+
+    ``read_allow`` is deliberately EMPTY while the ``cat`` grant carries a scope: the curator reads
+    sibling corpora and the schema docs through ``lesson_read`` (root-only under ``defender_dir``),
+    but may only ``cat`` its OWN corpus. Read ⊋ bash here — the two surfaces are different sets on
+    purpose, which is why the def-compiled identity (``read_allow_of``) is not used for this lane.
+
+    Built DIRECTLY (not ``compile_policy``/``bind``, whose ``write_allow`` roots at run_dir) because
+    it needs the worktree's ``corpus_dir`` — and ``AgentPolicy.__post_init__`` still runs the
+    program-table check on it, so the one lane that skips ``compile_policy`` cannot skip the check
+    that makes an untabled (=ungated) program impossible."""
     return AgentPolicy(
-        bash_allow=(
-            _rm_pattern(corpus_dir),
-            *_viewer_patterns(corpus_dir),
-        ),
-        operand_gated=False,
-        adapters=False,
-        adapter_sql_pipe=False,
-        raw_reads=False,
+        bash_allow=_corpus_author_grants(corpus_dir),
         read_roots=(),
         read_confine=(),
         write_allow=(build_write_allow(corpus_dir, suffix=".md"),),
@@ -290,7 +273,7 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.CORPUS_AUTHOR,
     model=lambda: config.AUTHOR_MODEL,
     effort=config.AUTHOR_EFFORT,
-    tools=ToolSet(bash=BashGrammar(), write=True, forward_check=True, lesson_read=True),
+    tools=ToolSet(bash=True, write=True, forward_check=True, lesson_read=True),
     bindable=False,
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )

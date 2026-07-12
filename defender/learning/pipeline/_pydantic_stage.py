@@ -61,7 +61,7 @@ def build_stage_agent(
     ``AGENTS`` is imported LAZILY here (not at module top) to keep the shared-harness ↔
     registry edge off the import graph — ``agents`` pulls the stage engine modules, which
     import this harness."""
-    from defender.runtime.agents import AGENTS
+    from defender.agents import AGENTS
 
     defn = replace(AGENTS[deps_type.role], model=lambda: model, effort=effort)
     return build_agent_core(

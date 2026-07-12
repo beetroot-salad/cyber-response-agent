@@ -31,25 +31,35 @@ hooks). The gates:
   exactly what executes, with no validator/executor parser differential to
   bypass. The gate parses the command once and returns a `BashDecision` carrying
   that parse, so dispatch + execution never re-decompose it (#456). The decision
-  is then a **deny-by-default, per-agent regex allowlist** over the tokenized argv
-  (#522): each agent's `AgentPolicy.bash_allow` is a tuple of anchored `re.Pattern`s
-  matched per stage, and a non-adapter command is allowed iff every stage matches
-  one. Main/gather build theirs PER-RUN in `permission/policies/_common.py`
-  (`reader_patterns_for`): the viewer program set (`cat`/`grep`/`jq`/`tail`/`head`/`wc`/`ls`/`cd`)
-  is spelled there as anchored per-program grammars, with the viewer file operands
-  **anchored** to the run dir + corpus so the bash lane confines reads the same way
-  `decide_read` does (#535 — `compile_policy_for(<DEF>, run_dir, defender_dir)` / `bind` bakes
-  the anchors; `jq` is stdin-compute-only there); the shim names come from the `_cmd_segments.py`
-  taxonomy (`NON_ADAPTER_SHIMS` + inert `echo`/`true`). Judge/actor build theirs in their
-  pipeline modules (the judge's operand-gated `cat` piped into the sandboxed `defender-sql`,
-  plus the closed-ticket read; the actor's pinned lesson scripts). The judge is the one agent
-  whose bash operands are gated at `resolve()` time rather than textually anchored
-  (`AgentPolicy.operand_gated`), because its `gather_raw` lives under the *investigation* run
-  dir while its own `run_dir` is the *learning* run dir — it arrives only via `read_roots`,
-  which the anchors cannot see. `bash_policy.json` still carries the per-agent capability bits + the read
-  denylist that `_common` bakes into the anchors (its `viewers` list is no longer read — the
-  program set moved into `_common`); the main-loop deny *reasons* come from their policy
-  files / `block_main_loop_raw_access.py`.
+  is then a **deny-by-default, per-agent list of `Grant`s** (#575): each grant is a
+  **shape** (program + flags + arity — no paths) plus a **scope** (anchored regexes
+  over the **RESOLVED** path). A stage is allowed iff a grant's shape claims it AND
+  everything `PROGRAMS[grant.program]` says it opens resolves into that grant's scope;
+  a non-adapter command is allowed iff every stage is. `PROGRAMS`
+  (`permission/grant.py`) is the ONE table of what each program opens — **`cat` is the
+  sole opener**, and every other granted program is `OPENS_NOTHING`, a claim its shape
+  must earn by admitting no file-opening flag (`grep -f`, `wc --files0-from=`,
+  `grep -r`; the flag classes are positive boolean allowlists built from `gnu_flags.py`,
+  #579). `grep`/`jq`/`head`/`tail`/`wc` are stdin-only pipe stages — `cat X | grep -n s`,
+  never `grep -n s X` — and there is no `ls`/`cd` on any lane, which leaves the whole
+  bash surface with no recursive-descent primitive and no path-opening program but `cat`.
+  Each agent hangs its own grant builder on its own `AgentDefinition.bash_shapes`
+  (`compile_policy` composes what the defs bring; `runtime/` enumerates no agents and
+  imports no `learning/` private — the registry lives at `defender/agents.py`). Three
+  grants are `pins_path` exemptions, where the operand IS the program and the pattern is
+  the containment: the actor's pinned `python3 <script>`, the lead author's / curator's
+  `rm <path>`, and the judge's ticket CLI — whose **mandatory** `--require-closed`
+  lookahead is its entire security property (a boolean-flag allowlist would make it
+  optional and drop it silently). Containment is **positive enumeration**: main cannot
+  read `gather_raw` because that shape is not in its list — there is no `RAW_MARKER`
+  substring clamp over the command text any more — and the read tool enforces the SAME
+  tuple OBJECT the `cat` grant carries as its scope (`AgentPolicy.read_allow`), so
+  read↔bash parity is identity, not maintenance. `bash_policy.json` still carries the
+  secret/ground-truth read denylist, applied at `resolve()` time on both surfaces; the
+  deny *reasons* live with the policies (and are checked against the live grant list — a
+  reason naming a program the agent cannot run teaches a dead command). `defender-policy
+  show|explain` (`scripts/policy_cli.py`) is the audit CLI: a second CONSUMER of the
+  gate, never a second implementation — and an OPERATOR tool no agent may run.
   - **Main-loop raw-access + shim gating** — only the `defender-*` shims and
     read-only viewers run from the main loop; data-source adapters and
     `gather_raw/` reads are denied there (the gather subagent is the
@@ -108,16 +118,18 @@ defender/
   SKILL.md              # the runtime agent's entry point — ORIENT/PLAN/GATHER/ANALYZE/REPORT loop
   CLAUDE.md             # this file
   run.py                # canonical entrypoint: investigate one alert end-to-end via the in-process PydanticAI driver + post-steps (enqueues learning)
+  agents.py             # the agent REGISTRY (role → AgentDefinition). Lives at the package root, not under runtime/: a registry enumerates agents, and runtime/ is the library they are built on (#575)
   run_common.py         # shared run-dir + post-step helpers (materialize_run_dir, run_env, cross_check_tables, enqueue_learning, visualize)
   runtime/              # the in-process PydanticAI engine
     driver.py           # the main-agent loop (agent.iter); installs in-process budget + observability Hooks
     tools.py            # the four generic tools + gather dispatch; in-process adapter capture; imports claim_lead/descriptor_catalog/tag/lesson-load
-    permission/         # the single in-process gate (package): bash.py (gate→BashDecision) / command_shape.py (adapter classifiers, shared w/ dispatch) / files.py (read+write) — raises ModelRetry on deny
+    permission/         # the single in-process gate (package): grant.py (the containment model — Grant = shape + scope, the PROGRAMS table, `under`) / bash.py (gate→BashDecision) / command_shape.py (adapter classifiers, shared w/ dispatch) / files.py (read+write) — raises ModelRetry on deny
+    agent_definition.py # AgentDefinition/ToolSet/RunScope + bind/compile_policy: the SOLE deps+policy seam. Each agent brings its own bash_shapes (grants) + deps_cls, so runtime/ enumerates no agents and imports no learning/ private
     providers/          # LLM serving-infra abstraction (package): one provider per infra (anthropic native / fireworks OpenAI-compatible → GLM, Kimi). Owns build_model + per-role ModelSettings + api_key_var; provider_for(name) routes by name. Driver/run stay provider-neutral.
     bash_exec.py        # shell=False executor for the read-only Bash lane; parse() is the shared decomposition the gate validates against (#379), run_parsed() runs the gate's parse (#456)
-    bash_policy.json    # declarative deny-by-default allowlist: read-only viewers + per-agent adapter capability + the read denylist
+    bash_policy.json    # declarative secret/ground-truth READ DENYLIST (the per-agent capability bits + viewer list died with #575's grants)
     bash_policy.py      # loader for bash_policy.json (fails closed to built-in defaults if unreadable)
-    gnu_flags.py        # the GNU short-flag ARITY facts every bash reader lane compiles its flag classes from (#579) — a flag class must be a POSITIVE boolean allowlist, because an arg-consuming flag (`ls -I`, `grep -m`) eats the anchored operand behind it and the program falls back to the CWD. One home, because two lanes consume it (permission/policies/_common.py + learning/author/curator_engine.py) and the sets are a property of the runtime image's binaries, not of any agent's policy
+    gnu_flags.py        # the GNU short-flag ARITY facts the program shapes compile their flag classes from (#579) — a flag class must be a POSITIVE boolean allowlist, because an arg-consuming flag eats the operand behind it and the program falls back to the CWD. Since #575 there is ONE shape per program (`grant.program_shape`), so the lanes can no longer drift; the sets are a property of the runtime image's binaries, not of any agent's policy
     orient.py  observe.py  compaction.py  circuit_breaker.py
   hooks/                # gate LOGIC, imported as plain libraries by runtime/ (no longer wired as Claude Code hooks)
     record_lead.py                      # claim_lead: writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse raises)
@@ -140,6 +152,7 @@ defender/
     visualize/            # post-run transcript renderers (visualize_run.py + data/judge/primitives/runtime); imported in-process by the learning loop
     lessons/              # lessons toolchain: lessons_fm.py (defender-lessons grep), lessons_actor_index.py, lessons_env_retrieve.py
     case_history/         # case-ticket write path (case_ticket.py, ticket_writer.py)
+    policy_cli.py         # `defender-policy show|explain` — the gate's audit CLI (a second CONSUMER of decide_bash, never a second implementation). An OPERATOR tool: hooks/_cmd_segments.OPERATOR_TOOLS keeps it off every agent's lane
     pricing.py            # model cost table — read live by runtime/observe.py for cost attribution (runtime dep, not analytics)
     workspace_map.py      # on-disk orientation injected by runtime/orient.py (message 0)
   learning/             # offline learning loop — flow-oriented package tree; see §Learning loop below

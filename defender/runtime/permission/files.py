@@ -24,7 +24,7 @@ from .policy import AgentPolicy
 # filesystem + symlink-cycle cases; `ValueError` is an embedded NUL (`cat a\0b`),
 # which `shlex` happily tokenizes into an operand — without it the exception escapes
 # `decide_read`/`decide_bash` and crashes the tool call rather than denying it.
-_RESOLVE_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError, ValueError)
+RESOLVE_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError, ValueError)
 
 
 def _is_within(p: Path, root: Path) -> bool:
@@ -36,7 +36,7 @@ def _is_within(p: Path, root: Path) -> bool:
         return False
 
 
-def _denylisted(rp: Path) -> bool:
+def denylisted(rp: Path) -> bool:
     """True iff a resolved path hits the secret/ground-truth denylist — a denied
     filename substring (`.env` / `cases.json` / `ground_truth` / `credentials`) or a
     denied path component (`.ssh`). Belt-and-suspenders that applies INSIDE every
@@ -83,23 +83,21 @@ def read_allowed_path(
     policy: AgentPolicy,
 ) -> bool:
     """Whether a file operand resolves within `policy`'s read roots — the
-    containment half of `decide_read`, reused by the judge's bash-lane `cat`
-    path-gate (`permission.bash`). FAILS CLOSED: a `resolve()` error (a symlink
-    cycle, an embedded NUL) OR a missing root context (`run_dir`/`defender_dir`
-    `None`) returns `False`, never raises. The secret/ground-truth denylist IS
-    applied (parity with `decide_read`, so `cat` can't read a denied file the read
-    tool refuses — the held-out `ground_truth.yaml`, a captured `.env`); the
-    gather_raw RAW clamp is NOT — a `cat` reader that may read raw (the judge,
-    `raw_reads=True`) legitimately names a gather_raw path, and the bash gate owns
-    the raw clamp for agents that may not."""
+    ROOTS half of `decide_read` (the shape half is `policy.read_allow`), reused by `decide_write`
+    for its `write_allow ⊆ read roots` check. FAILS CLOSED: a `resolve()` error (a symlink cycle,
+    an embedded NUL) OR a missing root context (`run_dir`/`defender_dir` `None`) returns `False`,
+    never raises. The secret/ground-truth denylist IS applied (parity with `decide_read`, so a
+    write can't land on a denied file the read tool refuses — the held-out `ground_truth.yaml`, a
+    captured `.env`). It applies NO path shapes: containment by shape is the caller's job (the
+    read tool checks `read_allow`; the bash lane checks the claiming grant's scope)."""
     if run_dir is None or defender_dir is None:
         return False  # no root context to gate against — fail closed
     try:
         rp = Path(path).resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
-    except _RESOLVE_ERRORS:
+    except RESOLVE_ERRORS:
         return False
-    if _denylisted(rp):
+    if denylisted(rp):
         return False  # a secret / ground-truth file is denied even inside a root
     return any(_is_within(rp, root) for root in roots)
 
@@ -107,39 +105,31 @@ def read_allowed_path(
 def decide_read(
     path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy
 ) -> Decision:
-    """Allow/deny a file read — a **deny-by-default allowlist**, matching the shape
-    `decide_write` already uses for writes. A read must resolve INSIDE one of the
-    allowed roots: the run dir (the agent's own case artifacts + gather payloads),
-    the defender corpus (`defender_dir` — skills / lessons / scripts / SKILL.md) OR,
-    when the policy declares a `read_confine`, that confine set IN PLACE of the
-    corpus (the gray-box actor sees only its lesson dirs), plus any of the agent's
-    declared `policy.read_roots` (e.g. the judge's comparison dir under
-    `learning_run_dir`). Everything outside them fails closed. `resolve()` collapses
-    `..` and symlinks, so an allowed-root prefix can't be escaped (the structural
-    close for the `cat …/.env` / basename-only / case-sensitivity gaps a denylist
-    alone left); a `resolve()` error (a symlink cycle) FAILS CLOSED rather than
-    propagating out of a blocking gate.
+    """Allow/deny a file read — a **deny-by-default allowlist** over the RESOLVED path, the
+    shape `decide_write` already uses for writes. Two gates, both necessary:
 
-    On top of the allowlist, the declarative secret/ground-truth denylist
-    (`bash_policy.json`) still denies a sensitive file that lands INSIDE a root — a
-    captured `.env` in the run dir, the eval `cases.json`/`ground_truth.yaml` — cheap
-    belt-and-suspenders that applies to every agent regardless of policy.
+    1. **the roots** — a read must resolve inside the run dir, the defender corpus
+       (`defender_dir`) or, when the policy declares a `read_confine`, that confine set IN
+       PLACE of the corpus (the gray-box actor sees only its lesson dirs), plus the agent's
+       declared `read_roots` (the judge's comparison dir under the investigation run dir).
+       `resolve()` collapses `..` and symlinks, so an allowed-root prefix can't be escaped;
+    2. **`policy.read_allow`** — the agent's path SHAPES (#575). This is the same tuple object
+       the agent's bash `cat` grant carries as its scope, so the read tool admits exactly the
+       paths `cat` does: read↔bash parity by construction, with nothing to keep in sync. This
+       is also what makes "main cannot read gather_raw" positive enumeration rather than a
+       clamp — the gather_raw shape is simply not in main's list. Empty `read_allow` (every
+       non-reader agent) applies no shape filter, leaving the gate root-only.
 
-    The gather_raw clamp is now a policy bit: the main loop (raw_reads=False)
-    consumes the gather summary, never the raw payload; the gather subagent and the
-    judge (raw_reads=True) read their own gather_raw to verify / refute.
-
-    On top of the roots, a reader agent (main/gather) carries a `read_shapes` filename
-    filter (#545): the resolved path must additionally `fullmatch` one of those anchored
-    grammars — the read-tool twin of the bash `cat` lane's file-operand grammar, so a
-    non-`.md` corpus file readable by neither surface. The run-dir branch of that grammar
-    keeps run-dir scratch unfiltered; empty `read_shapes` (every non-reader agent) leaves
-    the gate root-only."""
+    On top of both, the declarative secret/ground-truth denylist (`bash_policy.json`) denies a
+    sensitive file that lands INSIDE an allowed shape — a captured `.env` in the run dir, the
+    eval `cases.json`/`ground_truth.yaml` — cheap belt-and-suspenders applied to every agent.
+    A `resolve()` error (a symlink cycle, an embedded NUL) FAILS CLOSED rather than propagating
+    out of a blocking gate."""
     p = Path(path)
     try:
         rp = p.resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
-    except _RESOLVE_ERRORS:
+    except RESOLVE_ERRORS:
         return Decision(False, f"Blocked: {p!r} could not be resolved (failing closed).")
     if not any(_is_within(rp, root) for root in roots):
         return Decision(
@@ -148,38 +138,48 @@ def decide_read(
             "this agent's read confine), and its declared roots; "
             f"{p} is outside them.",
         )
-    # Read-tool↔bash-lane filename parity (#545): a reader agent's `read_shapes` admits
-    # exactly the filename set its bash `cat` lane does, so a corpus file the bash lane
-    # rejects (a non-`.md` under defender/) is not readable via the read tool either. Run-dir
-    # paths match the grammar's own run-dir branch, so scratch stays unfiltered; an empty
-    # `read_shapes` (non-reader agents / the legacy API) applies no filter.
-    if policy.read_shapes and not any(pat.fullmatch(str(rp)) for pat in policy.read_shapes):
+    if policy.read_allow and not any(shape.fullmatch(str(rp)) for shape in policy.read_allow):
+        # The path is in-roots but is not one of this agent's shapes. `gather_raw` is the case
+        # the model most needs explained — the main loop reaches for a payload constantly — and
+        # its dedicated reason (which the e2e deny-tail asserts as a substring) tells it what to
+        # do INSTEAD: re-dispatch gather. The reason is prompt surface; the CHECK above is the
+        # enumeration, so this is a message, not a second gate.
+        if _names_raw(rp):
+            return Decision(False, RAW_DENY_REASON)
         return Decision(
             False,
-            f"Blocked: {rp.name} is not a readable file for this agent — corpus reads are "
-            "limited to the tight filename grammar the bash cat lane enforces (a .md file "
-            "under lessons/skills/examples); read your run dir for anything else.",
+            f"Blocked: {rp.name} is not a readable path for this agent — its reads are the "
+            "paths it declares (its own run dir + the corpus `.md` under "
+            "lessons/skills/examples), and this is not one of them.",
         )
-    # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed root is
-    # still denied (substrings match the filename, dirs match any path component).
-    # Shared with the bash operand lane (`read_allowed_path`) so both surfaces agree.
-    if _denylisted(rp):
+    # Belt-and-suspenders: a secret / ground-truth file INSIDE an allowed shape is still denied
+    # (substrings match the filename, dirs match any path component). Shared with the bash
+    # operand lane (`bash._in_scope`) so both surfaces agree.
+    if denylisted(rp):
         return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
-    # No gather-payload-tool exemption here: that exemption is about a Bash
-    # *command* invoking record-query (which legitimately names a gather_raw
-    # path). block_main_loop_raw_access never applies it to a Read
-    # (its `cmd` is "" for non-Bash), so a read of any gather_raw path by an agent
-    # that may not read raw (raw_reads=False, e.g. the main loop) is clamped.
-    if RAW_MARKER in str(rp) and not policy.raw_reads:
-        return Decision(False, RAW_DENY_REASON)
     return Decision(True)
 
 
+def _names_raw(p: Path) -> bool:
+    """Whether a resolved path is INSIDE `gather_raw/` — a path COMPONENT test, never a substring
+    scan of the whole string. A substring scan is decided by text the path's owner does not
+    control: an ancestor dir that merely carries the word (a pytest tmp dir named
+    `test_gather_raw_…`, a checkout under `~/gather_raw-notes/`) would tag every file in the tree
+    as an attacker-influenced payload. The component is the fact; the substring was a proxy."""
+    return RAW_MARKER in p.parts
+
+
 def is_untrusted_read(path: Path) -> bool:
-    """True for reads of attacker-influenced data that must be tag-wrapped:
-    the alert payload and (slice 2) raw gather payloads."""
+    """True for reads of attacker-influenced data the caller must SALT-TAG WRAP: the alert
+    payload and the raw gather payloads.
+
+    Keyed on the gather_raw SHAPE, and deliberately kept when the raw *clamp* was deleted
+    (#575): the clamp was containment (now positive enumeration), while this is the TRUST
+    boundary. gather_raw is the primary attacker-influenced channel — untagging it would leave
+    the model unable to tell data from instructions, failing the prompt-injection defense OPEN.
+    A deletion of the clamp is not a deletion of the boundary."""
     p = Path(path)
-    return p.name == "alert.json" or RAW_MARKER in str(p)
+    return p.name == "alert.json" or _names_raw(p)
 
 
 def decide_write(
@@ -201,9 +201,9 @@ def decide_write(
     — its read roots (`read_confine`/`read_roots`/run dir/`defender_dir`) minus the secret/ground-
     truth denylist (`read_allowed_path`), the `write_allow ⊆ read roots` invariant `edit_file`
     relies on. NOTE this is containment + denylist, NOT the full `decide_read` gate: it does not
-    apply the gather_raw RAW clamp (shared with the judge's `cat` lane, which legitimately reads
-    raw), so a `raw_reads=False` writer whose `write_allow` admits a `gather_raw/` path is not
-    additionally blocked here — no real writer's `write_allow` reaches there. Skipped when omitted
+    apply the read-side path SHAPES (`read_allow`), so a writer whose `write_allow` admits a path
+    its read shapes exclude is not additionally blocked here — a writer's declared paths are its
+    own, and MAIN legitimately writes run-dir artifacts. Skipped when omitted
     (the run-dir tool callers, already confined by `write_allow`); mirrors `decide_bash`'s
     optional-roots shape.
 
@@ -215,7 +215,7 @@ def decide_write(
     path = Path(path)
     try:
         rp = path.resolve()
-    except _RESOLVE_ERRORS:
+    except RESOLVE_ERRORS:
         return Decision(False, f"Blocked: {path!r} could not be resolved (failing closed).")
     if not any(pat.fullmatch(str(rp)) for pat in policy.write_allow):
         return Decision(
@@ -226,8 +226,8 @@ def decide_write(
     # Defense-in-depth (write ⊆ read roots): when the run roots are supplied, the write target
     # must also sit inside the agent's read CONTAINMENT — its read roots minus the secret/ground-
     # truth denylist (`read_allowed_path`), fails closed on a resolve error. This is containment +
-    # denylist, NOT the full `decide_read` (no gather_raw RAW clamp — that lane is shared with the
-    # judge's cat, which may read raw). A no-op for every real writer (its write_allow already sits
+    # denylist, NOT the full `decide_read` (the read-side path SHAPES are not applied: a writer's
+    # declared paths are its own). A no-op for every real writer (its write_allow already sits
     # within its read roots); it only closes a hypothetical write_allow that escapes them.
     if run_dir is not None and defender_dir is not None and not read_allowed_path(
         rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy

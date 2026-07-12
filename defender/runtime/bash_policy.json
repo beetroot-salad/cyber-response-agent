@@ -1,41 +1,33 @@
 {
   "_README": [
-    "Deny-by-default policy for the defender runtime gate (runtime/permission.py).",
-    "Issue #379: the read-only Bash lane runs shell=False (runtime/bash_exec.py), so",
-    "the gate no longer parses a shell string and predicts bash — it validates the",
-    "SAME argv-stage decomposition the executor runs. With the shell gone there are",
-    "no per-argument constraints to express here: the allowlist is just program",
-    "names. `find` was dropped (template discovery is Read/Grep now), which removed",
-    "the one tool that needed arg-level deny rules.",
+    "The secret / ground-truth READ DENYLIST for the defender runtime gate.",
     "",
-    "The reader-lane program set + its anchored operand grammar live in",
-    "permission/policies/_common.py (reader_patterns_for) since #535 — NOT a JSON list.",
-    "The non-adapter defender-* shims come from the taxonomy",
-    "(hooks/_cmd_segments.NON_ADAPTER_SHIMS), the single source of truth for the",
-    "adapter/non-adapter split.",
-    "adapters = whether the agent may invoke a data-source adapter (defender-<sys>",
-    "           or scripts/adapters/<sys>_cli.py). main: no (dispatch gather);",
-    "           gather: yes, captured transparently.",
-    "raw_reads = whether the agent may read gather_raw/**. main: no (consumes",
-    "           the gather summary); gather: yes (verify its own query result). A",
-    "           learning-loop agent (the judge) declares this in its own AgentPolicy.",
-    "adapter_sql_pipe = whether `defender-<sys> ... | defender-sql '<SQL>'` is",
-    "           sanctioned (gather only): the adapter stage is captured, then the",
-    "           payload is aggregated through the sandboxed defender-sql.",
-    "read_deny = secrets / ground-truth the agent may never read. Kept as a",
-    "           declarative last line (defense-in-depth) even though OS isolation is",
-    "           the eventual boundary. substrings match the filename; dirs match any",
-    "           path component."
+    "read_deny = paths the agent may never read, applied INSIDE every allowed path on BOTH",
+    "           read surfaces (runtime/permission/files.denylisted) at resolve() time.",
+    "           `substrings` match the FILENAME; `dirs` match any path COMPONENT. Kept as a",
+    "           declarative last line (defense-in-depth) even though OS isolation is the",
+    "           eventual boundary.",
+    "",
+    "What used to live here and no longer does (#575): the per-agent capability bits",
+    "(adapters / adapter_sql_pipe / raw_reads). They were a second, declarative model of a",
+    "permission the gate enforced somewhere else \u2014 and a bit no code reads is worse than dead",
+    "code, because it still reads like policy. Each is now the presence or absence of a Grant",
+    "in the agent's own AgentDefinition: the adapter capability is a routed grant, and",
+    "raw_reads is simply whether the gather_raw path shape is in that agent's grant list.",
+    "The reader-lane program set is likewise not a JSON list: there is ONE shape per program",
+    "(runtime/permission/grant.program_shape), compiled from the GNU flag-arity facts."
   ],
   "version": 1,
-  "bash": {
-    "agents": {
-      "main": {"adapters": false, "adapter_sql_pipe": false, "raw_reads": false},
-      "gather": {"adapters": true, "adapter_sql_pipe": true, "raw_reads": true}
-    }
-  },
   "read_deny": {
-    "substrings": [".env", "credentials", "ground_truth", "ground-truth", "cases.json"],
-    "dirs": [".ssh"]
+    "substrings": [
+      ".env",
+      "credentials",
+      "ground_truth",
+      "ground-truth",
+      "cases.json"
+    ],
+    "dirs": [
+      ".ssh"
+    ]
   }
 }

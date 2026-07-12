@@ -10,16 +10,15 @@ permission gate read, and — the forcing function — lets the pure-prediction 
 
 This module is the primitive layer:
 
-  - ``AgentDefinition`` / ``ToolSet`` / ``BashGrammar`` — the declarative shape.
+  - ``AgentDefinition`` / ``ToolSet`` — the declarative shape.
   - ``RunScope`` — the per-invocation carriage (judge comparison roots, actor
     confine + pinned scripts, benign-judge ticket cli).
   - ``resolve_roots`` → ``ResolvedRoots`` — folds a run + corpus names + scope into
     the resolved read roots.
-  - ``compile_policy`` — projects a ``ToolSet`` + roots into the gate's ``AgentPolicy``:
-    the reader ``bash_allow`` is compiled from the grammar's declared viewer/shim contents,
-    the read-tool ``read_shapes`` filename filter and the ``write_allow`` write scope from the
-    def's shape-builders (#545/#551 — read↔bash parity + the write twin, one grammar source),
-    so ``bind``'s policy is the production end-state for every role, not a characterization.
+  - ``compile_policy`` — projects a definition + roots into the gate's ``AgentPolicy``: each
+    def's own ``bash_shapes`` builders emit its ``Grant``s, the ``cat`` grant's scope IS the
+    read surface (``read_allow`` — parity by identity, #575), and ``write_shapes`` emits the
+    write scope, so ``bind``'s policy is the production end-state for every role.
   - ``bind`` — the SINGLE deps + policy resolution seam for all seven roles (#551 finishes the
     #545 wiring): ``resolve_roots`` → ``compile_policy`` → the role's ``AgentDeps`` subtype,
     carrying the run's salt (MAIN/GATHER keep the persisted trust token; the stages mint a fresh
@@ -29,12 +28,13 @@ This module is the primitive layer:
     ``requires_explicit_tree``), so no ``if role is X`` branch remains.
   - ``build_registry`` — the guarded collector behind ``agents.AGENTS``.
 
-Kept LIGHT on purpose: it imports only the permission gate types + the repo-layout
-primitive, never ``pydantic_ai`` — so ``driver`` can define MAIN/GATHER defs off it
-without pulling the learning graph. The one cross-layer reach (``bind`` returning the
-learning stages' ``AgentDeps`` subtypes, ``compile_policy`` reusing the judge/actor bash-pattern
-builders + the lead author's ``rm`` matcher) is done with LAZY, function-body imports: no
-module-load cycle, and it only fires for those shapes.
+Kept LIGHT on purpose: it imports only the permission gate types + the repo-layout primitive,
+never ``pydantic_ai`` — so ``driver`` can define MAIN/GATHER defs off it without pulling the
+learning graph. Since #575 it also imports NOTHING from ``learning``: the cross-layer reach it
+used to make (lazy function-body imports of ``_judge_policy`` / ``_actor_policy`` /
+``_rm_skills_pattern``, and a role→deps-class ladder) is INVERTED — each agent hangs its own
+``bash_shapes`` builder and its own ``deps_cls`` on its OWN definition, so this module composes
+what the defs bring instead of reaching up to ask each agent what it wants.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ from defender._paths import PATHS
 
 from .agent_role import AgentRole
 from .permission import AgentPolicy, require_anchor_root
-from .permission.policies._common import reader_patterns_for
+from .permission.grant import Grant, PathShapes
 
 if TYPE_CHECKING:
     from .tools import AgentDeps
@@ -65,50 +65,14 @@ _DEFAULT_DENY_REASON = (
 # ── Declarative shape ────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class BashGrammar:
-    """STATIC declaration of an agent's bash program grammar — which programs it may
-    run and which structural routes are open. ``bind`` compiles it against the run's
-    roots into the gate's anchored ``bash_allow`` (main/gather via ``reader_patterns_for``,
-    the judge/actor/lead-author to their pinned pattern builders).
-
-      - ``shims`` / ``viewers`` — the reader-lane program set (the ``defender-*`` shims
-        + the read-only viewers). Non-empty ⇒ this is a main/gather reader agent.
-      - ``adapters`` — may invoke a data-source adapter (captured transparently).
-      - ``adapter_sql_pipe`` — may run ``adapter | defender-sql '<SQL>'``.
-      - ``operand_gated`` — the judge's ``cat | defender-sql`` lane: every file operand
-        of a file-opening stage is path-gated to the read roots at ``resolve()`` time
-        (``bash._OPERAND_GATED_PROGRAMS``), which is what lets it reach ``gather_raw``
-        — a tree the textual anchors cannot see, since it is not under its ``run_dir``.
-      - ``raw_reads`` — may read ``gather_raw/**``. DECLARED, never inferred from a
-        sibling bit: gather declares it (it owns the payloads it captures) and so does
-        the judge, which has neither ``adapters`` nor ``adapter_sql_pipe`` — the
-        ``defender-sql`` *shim* is not the ``adapter_sql_pipe`` *route*. Inferring it
-        from the bash lane is how the judge silently loses ``gather_raw`` to the clamp
-        in ``bash.decide_bash``; inferring it FOR an adapter agent would make a declared
-        ``raw_reads=False`` a lie. main/actor/oracle/verify leave it off.
-      - ``skills_rm`` — the lead author's scoped ``rm``-of-drafts grant: ``compile_policy``
-        anchors the single ``rm <defender_dir>/skills/<draft>`` matcher on the run's
-        ``defender_dir`` (the worktree). A per-run bash pattern like the actor's pinned
-        scripts, but declared on the def (the lead author carries no ``RunScope``)."""
-
-    shims: tuple[str, ...] = ()
-    viewers: tuple[str, ...] = ()
-    adapters: bool = False
-    adapter_sql_pipe: bool = False
-    operand_gated: bool = False
-    raw_reads: bool = False
-    skills_rm: bool = False
-
-
-@dataclass(frozen=True)
 class ToolSet:
-    """An agent's tool PRESENCE (+ static bash capability). The read-only / no-tool
-    safe default is every field off. ``bash=None`` UNREGISTERS the bash tool;
-    ``bash=BashGrammar()`` (present but empty) registers it — absence vs present-but-
-    empty are observably distinct."""
+    """An agent's tool PRESENCE. The read-only / no-tool safe default is every field off.
+    ``bash=False`` UNREGISTERS the bash tool; ``bash=True`` registers it — and WHAT the agent
+    may then run is its ``bash_shapes`` grants. Presence and permission are two different
+    facts (#575), so they are two fields: an agent can hold the tool and be granted nothing."""
 
     read: bool = False
-    bash: BashGrammar | None = None
+    bash: bool = False
     write: bool = False
     # The lesson curators' author-time forward check (#558). A tool rather than a bash
     # grant because a bash allowlist pins a program token and cannot constrain the
@@ -123,23 +87,33 @@ class ToolSet:
 
 @dataclass(frozen=True)
 class AgentDefinition:
-    """The single per-agent source of truth. ``model`` is a zero-arg THUNK (late env
-    resolution, so a ``--model`` / ``$DEFENDER_MODEL`` override is honored at build,
-    not frozen at import); ``effort`` is the static reasoning knob (``None`` omits it).
-    ``tools`` drives registration; ``corpus_dirs`` + ``read_shapes`` + ``deny_reason``
-    drive the gate via ``compile_policy``. Frozen, so ``bind``/``build`` can't corrupt a
-    shared definition.
+    """The single per-agent source of truth. ``model`` is a zero-arg THUNK (late env resolution,
+    so a ``--model`` / ``$DEFENDER_MODEL`` override is honored at build, not frozen at import);
+    ``effort`` is the static reasoning knob (``None`` omits it). ``tools`` drives registration;
+    ``bash_shapes`` + ``write_shapes`` + ``corpus_dirs`` + ``deny_reason`` drive the gate via
+    ``compile_policy``. Frozen, so ``bind``/``build`` can't corrupt a shared definition.
 
-    ``read_shapes`` is a tuple of per-run shape-builders ``(run_dir, defender_dir) ->
-    tuple[re.Pattern]`` (#545 — decision 3): ``compile_policy`` resolves each against the run's
-    roots into the read-tool filename filter ``decide_read`` enforces. The reader defs carry
-    ``reader_read_shapes`` so the read tool admits exactly the filename set the bash ``cat`` lane
-    does (one grammar source); empty (every non-reader stage) leaves the read gate root-only.
+    ``bash_shapes`` is a tuple of per-run builders ``(ResolvedRoots) -> tuple[Grant, ...]``
+    (#575): each agent hangs its OWN builder on its OWN def, so ``compile_policy`` composes what
+    the defs bring instead of reaching up into ``learning`` to ask each agent what it wants (the
+    lazy ``_judge_policy`` / ``_actor_policy`` / ``_rm_skills_pattern`` imports existed only to
+    break the cycle that inversion created — invert it and they disappear). A ``Grant`` naming a
+    program absent from ``permission.grant.PROGRAMS`` fails loud at compile
+    (``AgentPolicy.__post_init__``), so an untabled — therefore ungated — program cannot ship.
 
-    ``write_shapes`` is the WRITE twin of ``read_shapes`` (#551 — decision 2): per-run builders
-    ``compile_policy`` resolves into ``write_allow`` (MAIN → the run-dir subtree; LEAD_AUTHOR →
-    ``<defender_dir>/skills/**.md``). ``compile_policy`` ASSERTS the co-constraint — a writer
-    (``tools.write``) must declare non-empty ``write_shapes`` and a non-writer must declare none.
+    ``read_allow`` is NOT a field: the read surface IS the ``cat`` grant's scope (the same tuple
+    OBJECT), so read↔bash parity holds by construction rather than by a second grammar kept in
+    sync (#545's two grammars drifted; there is now nothing to sync).
+
+    ``write_shapes`` is the write twin — per-run builders ``compile_policy`` resolves into
+    ``write_allow`` (MAIN → the run-dir subtree; LEAD_AUTHOR → ``<defender_dir>/skills/**.md``).
+    ``compile_policy`` ASSERTS the co-constraint: a writer (``tools.write``) must declare
+    non-empty ``write_shapes`` and a non-writer must declare none.
+
+    ``deps_cls`` is the role's ``AgentDeps`` subtype, carried BY the def (#575) — the last
+    ``runtime`` → ``learning`` reach: a role→class ladder in this module had to lazily import
+    five learning classes, while a def built in its own engine module simply names the class
+    that lives beside it. Required for a ``bindable`` def.
 
     ``requires_confine`` / ``requires_explicit_tree`` are per-role safe-by-construction DATA bits
     (#551 — decision Q2), checked GENERICALLY in ``bind`` (no role branch): the actor's empty-
@@ -158,8 +132,9 @@ class AgentDefinition:
     effort: str | None
     tools: ToolSet = ToolSet()
     corpus_dirs: tuple[str, ...] = ()
-    read_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...] = ()
-    write_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...] = ()
+    bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()
+    write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...] = ()
+    deps_cls: type[AgentDeps] | None = None
     requires_confine: bool = False
     requires_explicit_tree: bool = False
     bindable: bool = True
@@ -248,55 +223,18 @@ def resolve_roots(
     )
 
 
-# ── ToolSet → AgentPolicy ────────────────────────────────────────────────────
-
-def _bash_allow(bash: BashGrammar, roots: ResolvedRoots) -> tuple[Any, ...]:
-    """Compile a ``BashGrammar`` + roots into the gate's anchored ``bash_allow`` tuple:
-
-      - a reader agent (``viewers``/``shims`` present, main/gather) → the anchored per-run
-        reader lane built from the grammar's DECLARED viewers/shims CONTENTS (#545 — a
-        tighter ``BashGrammar.viewers`` compiles a tighter lane, so the contents are
-        load-bearing, not merely their non-emptiness); the reader defs declare the full
-        set, so their lane equals the ``reader_patterns_for`` builder;
-      - the judge (``operand_gated``) → its pinned ``cat``/``defender-sql`` (+ benign
-        ticket) patterns;
-      - the actor (``scope.scripts``) → one anchored ``python3 <script>`` pattern each.
-
-    The judge/actor/lead-author patterns are REUSED from their authoritative pattern builders
-    (via a lazy import — the same cross-layer reach ``bind`` already makes for the deps
-    subtypes) so parity is guaranteed with zero regex duplication/drift."""
-    patterns: list[Any] = []
-    if bash.viewers or bash.shims:
-        patterns.extend(reader_patterns_for(
-            roots.run_dir, roots.defender_dir,
-            frozenset(bash.viewers), frozenset(bash.shims),
-        ))
-    if bash.operand_gated:
-        from defender.learning.pipeline.judge.engine_pydantic import _judge_policy
-        patterns.extend(_judge_policy(roots.read_roots, roots.ticket_cli).bash_allow)
-    if roots.scripts:
-        from defender.learning.pipeline.actor_engine import _actor_policy
-        patterns.extend(_actor_policy(roots.scripts, read_confine=()).bash_allow)
-    if bash.skills_rm:
-        # The lead author's ONE bash grant: a scoped `rm` of a draft under the run's
-        # `<defender_dir>/skills` (the worktree). Anchored on `roots.defender_dir` so it
-        # rides the same tree the write scope + read surface anchor on — a per-run pattern
-        # like the actor's scripts, declared on the def (the lead author carries no scope).
-        from defender.learning.leads.lead_author_engine import _rm_skills_pattern
-        patterns.append(_rm_skills_pattern(roots.defender_dir / "skills"))
-    return tuple(patterns)
-
+# ── AgentDefinition → AgentPolicy ────────────────────────────────────────────
 
 def _require_write_co_constraint(
-    tools: ToolSet, write_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
+    tools: ToolSet, write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...],
 ) -> None:
-    """The writer⟺``write_shapes`` co-constraint (Q3 — safe-by-construction): a writer ToolSet
+    """The writer⟺``write_shapes`` co-constraint (safe-by-construction): a writer ToolSet
     (``write=True``) MUST declare non-empty ``write_shapes`` (else it would deny every write — a
     dead writer) and a non-writer MUST declare NONE (a dead scope). ONE implementation, enforced
     at TWO seams: ``build_registry`` runs it per registered def, so a production def typo (a new
     writer that forgets ``write_shapes``, or a read-only def carrying a dead scope) fails loud at
-    AGENTS IMPORT — not at first ``bind`` — and ``compile_policy`` re-runs it defensively for
-    callers passing a raw ``tools``/``write_shapes`` pair (the direct-compile tests)."""
+    AGENTS IMPORT — not at first ``bind`` — and ``compile_policy`` re-runs it defensively for a
+    caller compiling a hand-built definition."""
     if tools.write and not write_shapes:
         raise ValueError(
             "a writer ToolSet (write=True) must declare non-empty write_shapes — an empty "
@@ -309,93 +247,42 @@ def _require_write_co_constraint(
         )
 
 
-def compile_policy(
-    tools: ToolSet,
-    read_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
-    write_shapes: tuple[Callable[[Path, Path], tuple[Any, ...]], ...],
-    roots: ResolvedRoots,
-    deny_reason: str,
-) -> AgentPolicy:
-    """Project a ``ToolSet`` + resolved ``roots`` into the gate's ``AgentPolicy`` — the
-    derived runtime artifact ``decide_bash``/``decide_read`` key on.
+def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
+    """The agent's READ surface: the scope of its ``cat`` grant — the same tuple OBJECT, not a
+    copy (#575). `cat` is the one program that opens a path on the bash lane, so the set of paths
+    an agent may `cat` IS the set it may read; handing the read tool that very object is what
+    makes read↔bash parity structural. Two grammars built from one source still drifted (#545,
+    whose two builders needed OPPOSITE resolution semantics from the shared operand); one object
+    cannot.
 
-    A genuine projection: EVERY capability bit comes straight off the grammar (a bit is
-    set only when its source bit is) — ``raw_reads`` included, so the declared value is
-    never overridden by an inference (gather and the judge declare it; main/actor/oracle/
-    verify do not), and the read roots/confine come from the scope. ``read_shapes`` (#545 — decision 3) is
-    CONSUMED here: each shape-builder the def carries is resolved against the run's roots into
-    the read-tool filename filter (``decide_read`` then admits exactly the filename set the bash
-    ``cat`` lane does). Empty ``read_shapes`` ⇒ no filter (the legacy root-only read gate).
+    An agent with no ``cat`` grant (the actor, the pure-prediction stages) gets ``()`` — no shape
+    filter, so ``decide_read`` stays root-only for it, bounded by its confine/roots."""
+    return next((g.scope for g in bash_allow if g.program == "cat"), PathShapes())
 
-    ``write_shapes`` (#551 — decision 2) is the WRITE twin: each builder resolves into
-    ``write_allow`` (MAIN → the run-dir subtree; LEAD_AUTHOR → ``<defender_dir>/skills/**.md``),
-    so the per-writer write scope is DATA on the def, resolved against the caller's tree exactly
-    as ``read_shapes`` is. The co-constraint is ASSERTED (Q3 — safe-by-construction) via the
-    shared ``_require_write_co_constraint``: a writer ToolSet (``tools.write``) must declare
-    non-empty ``write_shapes`` (else it would deny every write — a dead writer) and a non-writer
-    must declare NONE (a dead scope). ``build_registry`` runs the SAME check on every registered
-    def at AGENTS import, so a production def typo fails loud there; this call is the defensive
-    twin for direct callers passing a raw ``tools``/``write_shapes`` pair."""
-    _require_write_co_constraint(tools, write_shapes)
-    bash = tools.bash
-    if bash is None:
-        adapters = adapter_sql_pipe = operand_gated = raw_reads = False
-        bash_allow: tuple[Any, ...] = ()
-    else:
-        adapters = bash.adapters
-        adapter_sql_pipe = bash.adapter_sql_pipe
-        operand_gated = bash.operand_gated
-        raw_reads = bash.raw_reads
-        bash_allow = _bash_allow(bash, roots)
+
+def compile_policy(defn: AgentDefinition, roots: ResolvedRoots) -> AgentPolicy:
+    """Project a definition + resolved ``roots`` into the gate's ``AgentPolicy`` — the derived
+    runtime artifact ``decide_bash``/``decide_read``/``decide_write`` key on.
+
+    A genuine projection with nothing to infer: the grants come from the def's OWN
+    ``bash_shapes`` builders, the read surface IS the ``cat`` grant's scope (``read_allow_of``),
+    the write scope from ``write_shapes``, and the roots/confine from the scope. The old
+    capability BITS (``adapters``/``adapter_sql_pipe``/``raw_reads``/``operand_gated``) are gone:
+    each was a fact the grant list now carries directly, and each was a place a declared value
+    could disagree with the lane that enforced it."""
+    _require_write_co_constraint(defn.tools, defn.write_shapes)
+    bash_allow = tuple(g for build in defn.bash_shapes for g in build(roots))
     return AgentPolicy(
         bash_allow=bash_allow,
-        operand_gated=operand_gated,
-        adapters=adapters,
-        adapter_sql_pipe=adapter_sql_pipe,
-        raw_reads=raw_reads,
+        read_allow=read_allow_of(bash_allow),
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
-        write_allow=tuple(
-            pat for build in write_shapes for pat in build(roots.run_dir, roots.defender_dir)
-        ),
-        read_shapes=tuple(
-            pat for build in read_shapes for pat in build(roots.run_dir, roots.defender_dir)
-        ),
-        deny_reason=deny_reason,
+        write_allow=tuple(pat for build in defn.write_shapes for pat in build(roots)),
+        deny_reason=defn.deny_reason,
     )
 
 
 # ── bind: the single resolution seam ─────────────────────────────────────────
-
-def _deps_class(role: AgentRole) -> type[AgentDeps]:
-    """Map a role to its ``AgentDeps`` subtype. Lazy imports keep this module light
-    and free of a load-time cycle: the runtime deps live in ``runtime.tools``, the
-    learning stages' in their engine modules (the cross-layer reach the F1 fork
-    resolves — ``bind`` returns the real subtype so gather's ``isinstance`` capture,
-    the actor confine, and role identity all survive)."""
-    from defender.runtime.tools import AgentDeps, GatherDeps
-
-    if role is AgentRole.MAIN:
-        return AgentDeps
-    if role is AgentRole.GATHER:
-        return GatherDeps
-    if role is AgentRole.JUDGE:
-        from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps
-        return JudgeDeps
-    if role is AgentRole.ACTOR:
-        from defender.learning.pipeline.actor_engine import ActorDeps
-        return ActorDeps
-    if role is AgentRole.ORACLE:
-        from defender.learning.pipeline.oracle_engine import OracleDeps
-        return OracleDeps
-    if role is AgentRole.VERIFIER:
-        from defender.learning.author.verify_forward.engine import VerifierDeps
-        return VerifierDeps
-    if role is AgentRole.LEAD_AUTHOR:
-        from defender.learning.leads.lead_author_engine import LeadAuthorDeps
-        return LeadAuthorDeps
-    raise ValueError(f"no AgentDeps subtype for role {role!r}")
-
 
 def _require_absolute_root(label: str, p: Path) -> None:
     """``bind``'s per-run root guard (run_dir / defender_dir / each scope read root): delegates
@@ -460,7 +347,7 @@ def compile_policy_for(
     roots = resolve_roots(
         run_dir, defn.corpus_dirs, scope, defender_dir=_resolved_tree(defender_dir),
     )
-    return compile_policy(defn.tools, defn.read_shapes, defn.write_shapes, roots, defn.deny_reason)
+    return compile_policy(defn, roots)
 
 
 def bind(
@@ -488,7 +375,13 @@ def bind(
     Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
     stamps it post-bind."""
     policy = compile_policy_for(defn, run_dir, scope=scope, defender_dir=defender_dir)
-    return _deps_class(defn.role)._for_run(
+    if defn.deps_cls is None:
+        raise ValueError(
+            f"{defn.role.name}_DEF declares no deps_cls — a bindable def must name the "
+            "AgentDeps subtype that lives beside it (that is what keeps runtime/ from "
+            "importing the learning stages to look it up)."
+        )
+    return defn.deps_cls._for_run(
         run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt,
     )
 
@@ -514,7 +407,6 @@ def build_registry(defs: tuple[AgentDefinition, ...]) -> dict[AgentRole, AgentDe
 
 __all__ = [
     "AgentDefinition",
-    "BashGrammar",
     "ResolvedRoots",
     "RunScope",
     "ToolSet",
@@ -522,5 +414,6 @@ __all__ = [
     "build_registry",
     "compile_policy",
     "compile_policy_for",
+    "read_allow_of",
     "resolve_roots",
 ]

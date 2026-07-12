@@ -16,7 +16,7 @@ Do **not** author a standing deployment fact as its own lesson (e.g. "a SIEM thr
 
 For each observation, in order:
 
-1. **Enumerate the corpus.** List it with `ls defender/lessons-actor/`, then read each lesson's frontmatter (`name`, `subject` if present, `techniques`, `relevance_criteria`) with `cat defender/lessons-actor/<name>.md` (or `grep` a field across a named file). For any candidate that looks plausibly related, read the body before deciding.
+1. **Enumerate the corpus.** The frontmatter manifest above IS the inventory — every existing lesson with its `name`, `subject`, `techniques` and `relevance_criteria`. For any candidate that looks plausibly related, read the body before deciding (`cat defender/lessons-actor/<name>.md`; to filter one file, pipe it: `cat <file> | grep <pattern>` — the viewers read STDIN and do not open files).
 
 2. **Extract the tradecraft.** An observation typically rests on a deployment fact (a property the failure depends on) and an attacker-shape teaching (the cover/bypass that exploits or is bounded by it). The deployment fact is not yours to author here; your job is the attacker-shape half — what the actor should do differently given that fact. If the observation is *only* a deployment fact with no transferable tradecraft, `skip` it.
 

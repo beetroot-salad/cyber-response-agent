@@ -23,14 +23,14 @@ from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import (
     AgentDefinition,
-    BashGrammar,
+    ResolvedRoots,
     RunScope,
     ToolSet,
     bind,
 )
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy
+from defender.runtime.permission.grant import Grant
 from defender.runtime.tools import AgentDeps
 
 # Bounds a runaway tool loop (the twin of JUDGE_REQUEST_LIMIT). Sized for GLM's tool-hunger:
@@ -43,8 +43,8 @@ ACTOR_REQUEST_LIMIT = 30
 _ACTOR_DENY_REASON = (
     "Blocked: the actor is read-only over the lessons corpora — it may run only the pinned "
     "read-only lesson scripts (lessons_env_retrieve.py; the adversarial actor also "
-    "lessons_actor_index.py) plus read_file/grep under defender/. No data-source adapters, "
-    "no writes, no arbitrary shell."
+    "lessons_actor_index.py) plus read_file (with an optional substring pattern) under "
+    "defender/. No data-source adapters, no writes, no arbitrary shell."
 )
 
 
@@ -78,46 +78,45 @@ class ActorDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.ACTOR
 
 
-def _script_pattern(script: Path) -> re.Pattern[str]:
-    """Allow the actor's read-only lessons retrieval: a single-stage ``python[3] <script>
-    <args…>`` whose script token is the pinned ``script`` — matched by its repo-relative form
-    (what the prompts type, bash running with cwd=repo root) OR its absolute form, both
-    ``re.escape``-d so a `.`/`-` in the path can't widen the match. Any other spelling fails
-    CLOSED. Because the pattern can't constrain the script's internals, the pinned scripts MUST
+def _script_grant(script: Path) -> Grant:
+    """The actor's read-only lessons retrieval: a single-stage ``python[3] <script> <args…>``
+    whose script token is the pinned ``script`` — matched by its repo-relative form (what the
+    prompts type, bash running with cwd=repo root) OR its absolute form, both ``re.escape``-d so
+    a `.`/`-` in the path can't widen the match. Any other spelling fails CLOSED.
+
+    ``pins_path=True`` — the R1 exemption: the operand IS the program. Resolving it and checking
+    it against a scope buys nothing the pinned pattern didn't already have (and per #565 the
+    pinned script's own argv is ungated regardless), so the path legitimately lives in the
+    PATTERN. Because the pattern cannot constrain the script's internals, the pinned scripts MUST
     stay read-only — both ``lessons_env_retrieve.py`` and ``lessons_actor_index.py`` are pure
     argparse corpus scanners (no writes, no network)."""
     script_abs = script.resolve()
     rel = script_abs.relative_to(REPO_ROOT.resolve())
     spellings = "|".join(re.escape(s) for s in (str(rel), str(script_abs)))
-    return re.compile(rf"^(?:[^ ]*/)?python3? (?:{spellings})(?: .*)?$")
-
-
-def _actor_policy(scripts: tuple[Path, ...], read_confine: tuple[Path, ...]) -> AgentPolicy:
-    """The actor's declarative gate policy: read-only, NO adapters, NO raw reads (its inputs are
-    all inlined in the user prompt — it never touches gather_raw), NO ``read_roots``, and a
-    ``read_confine`` that REPLACES the ``defender_dir`` read base — the actor sees only its own
-    lesson corpora (its confine), never the judge's grading rubric under ``defender/`` (#512).
-    ``bash_allow`` is JUST one pinned-script pattern per lesson script (no viewer surface): every
-    non-script read goes through ``read_file`` (which honours the confine). The pinned scripts now
-    run through the reader lane like any other approved shape, so the substitution guard
-    (``bash._stage_unsafe``) applies to them too — closing the #500 matcher-skips-guard gap."""
-    return AgentPolicy(
-        bash_allow=tuple(_script_pattern(s) for s in scripts),
-        operand_gated=False,
-        adapters=False,
-        adapter_sql_pipe=False,
-        raw_reads=False,
-        read_roots=(),
-        read_confine=read_confine,
-        deny_reason=_ACTOR_DENY_REASON,
+    return Grant(
+        program="python3",
+        pattern=re.compile(rf"^(?:[^ ]*/)?python3? (?:{spellings})(?: .*)?$"),
+        pins_path=True,
     )
+
+
+def _actor_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
+    """The actor's bash lane: JUST one pinned-script grant per lesson script — no viewer surface
+    at all. Every non-script read goes through ``read_file``, which honours the ``read_confine``
+    that REPLACES the ``defender_dir`` read base, so the actor sees only its own lesson corpora
+    and never the judge's grading rubric (#512). With no ``cat`` grant it carries no read shapes
+    either, leaving ``decide_read`` root-only inside that confine — which is the whole surface.
+
+    The pinned scripts run through the reader lane like any other approved shape, so the
+    substitution guard (``bash._stage_unsafe``) applies to them too (#500)."""
+    return tuple(_script_grant(s) for s in roots.scripts)
 
 
 # The actor's AgentDefinition (#538). Unlike the pure-prediction stages, the actor genuinely USES
 # its tools — it runs the pinned read-only lesson scripts on the bash lane and reads its lesson
-# corpora via ``read_file`` — so ``tools`` keeps the read + bash pair (``BashGrammar()`` registers the
-# bash tool; the per-leg pinned-script allowlist is compiled from the ``RunScope`` at bind, not
-# declared here). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each leg
+# corpora via ``read_file`` — so ``tools`` keeps the read + bash pair (``bash=True`` registers the
+# tool; its per-leg pinned-script GRANTS are built by its own ``bash_shapes`` builder from the
+# ``RunScope``'s scripts at bind). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each leg
 # re-binds its own per-call model/effort in ``build_stage_agent``. ``requires_confine=True`` makes
 # the empty-``read_confine`` fail-loud a DATA bit checked generically in ``bind`` (#551 — no role
 # branch): an empty confine widens the actor to the whole ``defender_dir``, reopening the #512
@@ -126,7 +125,9 @@ ACTOR_DEF = AgentDefinition(
     role=AgentRole.ACTOR,
     model=lambda: ACTOR_MODEL,
     effort=ACTOR_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar()),
+    tools=ToolSet(read=True, bash=True),
+    bash_shapes=(_actor_bash_shapes,),
+    deps_cls=ActorDeps,
     requires_confine=True,
     deny_reason=_ACTOR_DENY_REASON,
 )

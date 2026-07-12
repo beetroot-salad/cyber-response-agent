@@ -24,15 +24,21 @@ from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_st
 from defender.runtime import observe, providers
 from defender.runtime.agent_definition import (
     AgentDefinition,
-    BashGrammar,
+    ResolvedRoots,
     RunScope,
     ToolSet,
     bind,
 )
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy
 from defender.runtime.permission.command_shape import SQL_SHIM
+from defender.runtime.permission.grant import (
+    TREE,
+    Grant,
+    PathShapes,
+    program_shape,
+    under,
+)
 from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
@@ -48,14 +54,17 @@ if TYPE_CHECKING:
 # not a budget). Reducing GLM's tool-call count at the source is tracked in #514.
 JUDGE_REQUEST_LIMIT = 45
 
+# PROMPT SURFACE: this names only programs the judge's own lane grants (`cat`, `defender-sql`,
+# and — benign only — the pinned ticket CLI). A reason naming a program the agent cannot run
+# teaches a dead command and burns turns; the suite checks it against the live grant list.
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — `cat <payload> | "
-    "defender-sql '<SQL>'` to aggregate a gather_raw payload (cat's operands are "
-    "path-gated to the read roots; the SQL runs in a sealed sandbox), and read_file "
-    "(with an optional grep pattern) for everything else, plus — benign only — the "
-    "pinned closed-ticket read. No grep/ls/head/echo in bash, no data-source adapters, "
-    "no writes, no arbitrary shell. You never need to list a directory: every payload's "
-    "absolute path is named in the comparison files."
+    "defender-sql '<SQL>'` to aggregate a gather_raw payload (cat's operands must resolve "
+    "inside the read roots; the SQL runs in a sealed sandbox), and read_file (with an "
+    "optional substring pattern) for everything else, plus — benign only — the pinned "
+    "closed-ticket read. Nothing else in bash: no data-source adapters, no writes, no "
+    "arbitrary shell. You never need to list a directory: every payload's absolute path is "
+    "named in the comparison files."
 )
 
 
@@ -72,71 +81,64 @@ class JudgeDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.JUDGE
 
 
-# The judge's bash lane is exactly two programs, split so that the one which OPENS files
-# has a trivially decidable argv and the one which COMPUTES cannot open a file at all:
-#
-#   `cat` — every token after the program is admitted HERE; which of them are flags and
-#     which are files is decided by ``bash._cat_input_files``, the single owner of cat's
-#     option grammar (coreutils `cat` has no arg-taking flag, so an unknown `-token` is a
-#     grammar/gate disagreement and fails CLOSED there). This pattern deliberately does
-#     NOT re-encode the flag set: a second copy that drifts from the extractor's is the
-#     fail-open this gate exists to prevent. Operands are UNANCHORED here and instead
-#     path-gated at `resolve()` time by ``operand_gated`` (``bash._OPERAND_GATED_PROGRAMS``).
-#     Unanchored is REQUIRED, not lax: `gather_raw` sits under the investigation run dir
-#     while the judge's ``run_dir`` is the learning run dir, so it arrives only via
-#     ``read_roots`` — which the anchored reader-lane grammars
-#     (``policies._common._file_operand``) cannot see. The gate calls the same
-#     ``read_allowed_path`` as ``decide_read``, so a `..` escape, an out-of-roots path,
-#     and the secret/ground-truth denylist are all rejected identically on both surfaces.
-#   `defender-sql` — argument-inert: it reads stdin only, takes exactly one argv (the
-#     SQL), and seals DuckDB (`enable_external_access=false` + `lock_configuration=true`,
-#     one-way) BEFORE the caller's SQL runs. The sandbox bounds it, not this pattern.
-#
-# grep/head/tail/ls fold into ``read_file`` (with its optional grep ``pattern``).
-_CAT_PATTERN = re.compile(r"^cat(?: [^ ]+)*$")
-_SQL_PATTERN = re.compile(rf"^{re.escape(SQL_SHIM)}(?: .*)?$")
+def _judge_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
+    """The judge's bash lane — exactly two programs, split so the one that OPENS files has a
+    trivially decidable argv and the one that COMPUTES cannot open a file at all:
 
+      `cat` — the sole opener. Its SCOPE is every root the judge may read: its own (learning)
+        run dir, the corpus, and its ``read_roots`` — which is how it reaches ``gather_raw``,
+        whose payloads live under the INVESTIGATION run dir, a tree the judge's own ``run_dir``
+        never contains. The old textual anchors could not express that (they only knew the
+        agent's own run dir), which is why the judge needed a bespoke resolve()-time operand
+        gate; one scope over the resolved path expresses both, so the special case is gone.
+      `defender-sql` — argument-inert: it reads stdin only, takes exactly one argv (the SQL), and
+        seals DuckDB (`enable_external_access=false` + `lock_configuration=true`, one-way) BEFORE
+        the caller's SQL runs. The sandbox bounds it, not this shape.
 
-def _ticket_pattern(py: str, ticket_cli: Path) -> re.Pattern[str]:
-    """The benign judge's scoped, CLOSED-ONLY case-history read (#338): a single-stage
-    ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``. `py`/`ticket_cli`
-    are pinned (exact strings from ``build_judge_invocation``, interpolated ``re.escape``-d
-    so a `.`/`-` in the path can't widen the match); ``--require-closed`` is REQUIRED — the
-    security property that the open in-flight ticket stays unreachable rides on that flag,
-    enforced by the leading lookahead (the flag must appear as a whole space-delimited
-    token). The adversarial judge is built without this pattern, so it can never reach the
-    store."""
-    head = rf"{re.escape(py)} {re.escape(str(ticket_cli))}"
-    return re.compile(
-        rf"^(?=(?:.* )?--require-closed(?: |$)){head} (?:list-tickets|get-ticket)(?: .*)?$"
+    Because ``bash._decide_readers`` requires EVERY stage to be claimed, `cat X | head` is denied
+    while `cat X | defender-sql '<SQL>'` is allowed. grep/head/tail fold into ``read_file`` (with
+    its optional ``pattern``).
+
+    The benign leg additionally carries the pinned closed-ticket read (``_ticket_grant``)."""
+    scope = PathShapes(
+        under(r.resolve(), TREE)
+        for r in (roots.run_dir, roots.defender_dir, *roots.read_roots)
     )
+    grants = [
+        Grant(program="cat", pattern=program_shape("cat"), scope=scope),
+        Grant(program=SQL_SHIM, pattern=program_shape(SQL_SHIM)),
+    ]
+    if roots.ticket_cli is not None:
+        grants.append(_ticket_grant(*roots.ticket_cli))
+    return tuple(grants)
 
 
-def _judge_policy(read_roots: tuple[Path, ...], ticket_cli: tuple[str, Path] | None) -> AgentPolicy:
-    """The judge's declarative gate policy: read-only, may read/aggregate gather_raw
-    (raw_reads) + its comparison dir (read_roots), never runs a data-source adapter,
-    and — benign only — carries the pinned closed-ticket read in ``bash_allow``.
+def _ticket_grant(py: str, ticket_cli: Path) -> Grant:
+    """The benign judge's scoped, CLOSED-ONLY case-history read (#338): a single-stage
+    ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``.
 
-    ``bash_allow=(cat, defender-sql, [ticket])`` with ``operand_gated=True``: in the
-    bash lane only those survive, and every file `cat` opens must resolve within the
-    judge's read roots — closing the reader surface as an out-of-roots read oracle.
-    Because ``bash._decide_readers`` requires EVERY stage to match, `cat X | head` is
-    denied while `cat X | defender-sql '<SQL>'` is allowed. Note ``adapter_sql_pipe``
-    stays False: that bit is the STRUCTURAL ``adapter | defender-sql`` route
-    (``command_shape.adapter_sql_split``), not the presence of the shim — the judge
-    pipes a payload at rest, never a live adapter. The judge is UNCONFINED this slice
-    (no ``read_confine``), so its roots stay ``{run_dir, defender_dir, *read_roots}``."""
-    patterns = [_CAT_PATTERN, _SQL_PATTERN]
-    if ticket_cli is not None:
-        patterns.append(_ticket_pattern(*ticket_cli))
-    return AgentPolicy(
-        bash_allow=tuple(patterns),
-        operand_gated=True,
-        adapters=False,
-        adapter_sql_pipe=False,
-        raw_reads=True,
-        read_roots=read_roots,
-        deny_reason=_JUDGE_DENY_REASON,
+    ``pins_path=True`` — the R1 exemption, and NOT a formality. Two things make "migrate it into
+    a flag allowlist like every other program" wrong here:
+
+      - the operand IS the program (`py`/`ticket_cli` are pinned exact strings from
+        ``build_judge_invocation``, ``re.escape``-d so a `.`/`-` in the path can't widen the
+        match). There is no file operand to resolve, so a scope buys nothing the pattern didn't
+        already have;
+      - **``--require-closed`` is MANDATORY, and it is the entire security property** — it is
+        what stops the benign judge grading against the live, in-flight ticket (the answer key).
+        A boolean-flag allowlist makes every flag OPTIONAL, so a mechanical migration would drop
+        the requirement SILENTLY. The leading lookahead (the flag must appear as a whole
+        space-delimited token — see ``bash._TOKEN_SPACE``, which is what stops it being smuggled
+        inside a neighbouring quoted argument) is kept VERBATIM.
+
+    The adversarial judge is built without this grant, so it can never reach the store."""
+    head = rf"{re.escape(py)} {re.escape(str(ticket_cli))}"
+    return Grant(
+        program="python3",
+        pattern=re.compile(
+            rf"^(?=(?:.* )?--require-closed(?: |$)){head} (?:list-tickets|get-ticket)(?: .*)?$"
+        ),
+        pins_path=True,
     )
 
 
@@ -152,7 +154,9 @@ JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
     model=lambda: JUDGE_MODEL,
     effort=JUDGE_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar(operand_gated=True, raw_reads=True)),
+    tools=ToolSet(read=True, bash=True),
+    bash_shapes=(_judge_bash_shapes,),
+    deps_cls=JudgeDeps,
     deny_reason=_JUDGE_DENY_REASON,
 )
 

@@ -1,5 +1,8 @@
 """The agent registry — the single lookup surface over every agent's ``AgentDefinition``
-(#538).
+(#538). It lives HERE, at the package root, and not under ``runtime/`` (#575): a registry
+ENUMERATES agents, and ``runtime/`` is the library they are built ON. With this out, nothing
+under ``runtime/`` names an agent or imports a ``learning`` private — each agent hangs its own
+grants + deps class on its own def, and the gate composes what the defs bring.
 
 Authorship stays PER-AGENT (the ``[[agent-role-primitive]]`` convention): each agent's
 definition is co-located with its deps subtype + policy + prompt — the two runtime

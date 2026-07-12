@@ -52,8 +52,9 @@ from defender.runtime.tools import AgentDeps
 VERIFY_REQUEST_LIMIT = 1
 
 _VERIFY_DENY_REASON = (
-    "Blocked: the forward-check is a pure prediction — its entire input (transcript/story, lesson, "
-    "disposition) is inlined in the user prompt and its entire output is two short paragraphs plus a "
+    "Blocked: the forward-check is a pure prediction — its entire input (the transcript or story, "
+    "the lesson, the disposition) is inlined in the user prompt and its entire output is two short "
+    "paragraphs plus a "
     "single `VERDICT: GOOD|BAD` line. It runs no tools: no data-source adapters, no gather_raw reads, "
     "no writes, no shell. Emit the reasoning + verdict directly."
 )
@@ -73,7 +74,7 @@ class VerifierDeps(AgentDeps):
 # registers nothing, so there is no ``read_file`` to peek at the SOURCE run's ``source_refs.yaml``
 # answer key). ``model``/``effort`` are the declarative stage defaults (glm-5.2 @ low); each check
 # re-binds its own per-call model/effort in ``build_stage_agent``. Collected into
-# ``runtime.agents.AGENTS``; ``bind(VERIFY_DEF)`` compiles the deny-all policy over this empty
+# ``defender.agents.AGENTS``; ``bind(VERIFY_DEF)`` compiles the deny-all policy over this empty
 # ``ToolSet`` (#551 — the standalone ``_VERIFY_POLICY`` constant + ``VerifierDeps.for_run`` front
 # door retired, so there is no second policy source to keep honest by a parity test).
 VERIFY_DEF = AgentDefinition(
@@ -81,6 +82,7 @@ VERIFY_DEF = AgentDefinition(
     model=lambda: VERIFIER_MODEL,
     effort=VERIFIER_EFFORT,
     tools=ToolSet(),
+    deps_cls=VerifierDeps,
     deny_reason=_VERIFY_DENY_REASON,
 )
 

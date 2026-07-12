@@ -6,8 +6,9 @@ is written and the four curator prompts are rewritten off Glob/Grep. The module-
 ``curator_engine`` is the expected collection-time red.
 
 Design (mirror of the lead-author port #543): one ``AgentRole.CORPUS_AUTHOR`` + one
-``CORPUS_AUTHOR_DEF`` (``ToolSet(read=True, bash=BashGrammar(), write=True)``) serves all four
-curators; the write_allow / bash_allow are built PER-SPAWN from the worktree ``corpus_dir``
+``CORPUS_AUTHOR_DEF`` (``ToolSet(lesson_read=True, bash=True, write=True, forward_check=True)`` —
+``bash`` is a plain bool since #575: tool PRESENCE, with the grants built per-spawn below) serves
+all four curators; the write_allow / bash_allow are built PER-SPAWN from the worktree ``corpus_dir``
 (``CuratorDeps.for_run`` → ``_corpus_author_policy``), NOT via ``compile_policy``/``bind`` (whose
 write_allow roots at ``run_dir``). Per curator: A→lessons/, B→lessons-actor/,
 C&D→lessons-environment/. Since #558 the forward-check is a bound tool, not a bash grant.
@@ -29,12 +30,29 @@ Gate signatures confirmed from ``permission/files.py`` + ``permission/bash.py``:
   ``decide_bash(command, *, policy, run_dir=None, defender_dir=None)`` → ``BashDecision``.
 
 Bash operand spelling ASSUMED repo-relative (``defender/<corpus>/...``): the agent's bash runs at
-cwd=worktree (``tools._tool_bash`` cwd=``deps.defender_dir.parent``), the demand examples are
-repo-relative (``ls defender/lessons-actor/``), and the current in-process bash grants + forward-check
-commands are repo-relative (``Bash(rm defender/lessons/*.md)``; ``… defender/learning/author/
-verify_forward/forward.py``). A correct port must admit that form (else every in-worktree
-enumeration is silently denied). Writes are spelling-agnostic — a repo-relative operand is
-resolved against the worktree by ``_resolve_operand`` and matched against the absolute write_allow.
+cwd=worktree (``tools._tool_bash`` cwd=``deps.defender_dir.parent``), and the current in-process
+bash grants are repo-relative (``Bash(rm defender/lessons/*.md)``). A correct port must admit that
+form (else every in-worktree read is silently denied). Writes are spelling-agnostic — a
+repo-relative operand is resolved against the worktree by ``_resolve_operand`` and matched against
+the absolute write_allow.
+
+#575 — "one containment model" — folded this lane onto the SAME ``Grant`` model as every other
+agent, and three of the bash demands below moved with it (the WRITE demands are untouched — the
+write lane never had a private grammar):
+
+  * the curator's private viewer copies (``_CAT_FLAG``/``_LS_FLAG``/``_GREP_FLAG``) are DELETED; it
+    compiles the shared ``grant.program_shape``s, so the two lanes can no longer drift — which they
+    HAD (its ``_LS_FLAG`` still admitted ``-R`` after #579 dropped it on the runtime lane);
+  * ``ls`` is GONE from every lane. The corpus inventory is the #574 manifest, so the demand
+    "enumerate the corpus to fold duplicates" is served without a gated program at all;
+  * ``grep`` lost its FILE operand everywhere — it is a stdin-only pipe stage now
+    (``cat <file> | grep <pattern>``), which is what makes ``cat`` the sole opener. So the
+    corpus-anchored *operand* is no longer grep's containment: ``cat``'s ``scope`` is, checked
+    against the RESOLVED path.
+
+The properties those demands existed to protect all SURVIVE, re-expressed against the new lane and
+asserted below: every corpus read still resolves inside the spawn's OWN corpus, no flag that opens a
+file or eats an operand is admitted, and this remains the one denylist-free lane.
 """
 from __future__ import annotations
 
@@ -49,7 +67,7 @@ import defender  # noqa: E402
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import BashGrammar, ToolSet  # noqa: E402
+from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.tools import _tool_edit_file, _tool_write_file  # noqa: E402
 
@@ -59,7 +77,7 @@ from defender.learning.author.curator_engine import (  # noqa: E402  # type: ign
     CuratorDeps,
     _corpus_author_policy,
 )
-from defender.runtime.agents import AGENTS  # noqa: E402
+from defender.agents import AGENTS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +128,20 @@ def _rel(curator: str) -> str:
     return f"defender/{_CURATORS[curator]['corpus']}"
 
 
+def _gate(wt: Path, pol, cmd: str):
+    """Drive the REAL bash gate the way production does (``tools._tool_bash`` passes
+    ``deps.run_dir`` + ``deps.defender_dir``).
+
+    Threading ``defender_dir`` is now LOAD-BEARING, not ceremony: since #575 a ``cat`` operand is
+    RESOLVED before it is scope-checked, and a repo-relative operand (the spelling the curator
+    types, cwd=worktree) is rebased on ``defender_dir.parent`` to resolve it. Omit it and the gate
+    would have no cwd to rebase against — it FAILS CLOSED (``bash._in_scope``), so a test that
+    omitted it would be asserting denies for the wrong reason."""
+    return permission.decide_bash(
+        cmd, policy=pol, run_dir=wt / "runs", defender_dir=wt / "defender",
+    )
+
+
 # --- write-surface drivers: bind write_file AND edit_file (both are decide_write) ---
 
 def _denied_on_both_write_surfaces(deps: CuratorDeps, path: str) -> None:
@@ -143,10 +175,13 @@ def test_one_corpus_author_role_serves_all_four(tmp_path):
     """one-corpus-author-role: a single AgentRole.CORPUS_AUTHOR + CORPUS_AUTHOR_DEF
     (ToolSet lesson_read+bash+write+forward_check — read=True swapped for the scoped lesson_read
     in #559) registered ONCE in AGENTS serves all four curators; A's held_forward_bad divergence
-    lives in the envelope, not a second engine/role."""
+    lives in the envelope, not a second engine/role.
+
+    (#575: ``ToolSet.bash`` is a plain bool — tool PRESENCE. What the curator may then RUN is its
+    per-spawn grant list, built by ``_corpus_author_policy``, and asserted through the gate below.)"""
     assert CORPUS_AUTHOR_DEF.role is AgentRole.CORPUS_AUTHOR
     assert CORPUS_AUTHOR_DEF.tools == ToolSet(
-        bash=BashGrammar(), write=True, forward_check=True, lesson_read=True
+        bash=True, write=True, forward_check=True, lesson_read=True
     )
     assert AGENTS[AgentRole.CORPUS_AUTHOR] is CORPUS_AUTHOR_DEF  # registered once, no duplicate role
     wt, rd = _make_worktree(tmp_path), _run_dir(tmp_path)
@@ -245,7 +280,7 @@ def test_write_traversal_symlink_denied(tmp_path):
 
 
 # ===========================================================================
-# Bash gate — forward-check + rm + corpus-anchored viewers (Q1 option 3)
+# Bash gate — rm + the corpus-scoped `cat` opener + the stdin-only grep stage
 # ===========================================================================
 
 # (#558) The two per-curator verifier-grant cases that lived here — bash-forward-check-admitted
@@ -259,17 +294,24 @@ def test_write_traversal_symlink_denied(tmp_path):
 
 def test_bash_rm_scoped_admitted(tmp_path):
     """bash-rm-scoped-admitted: a single-path `rm <corpus>/<name>.md` of the spawn's OWN corpus is
-    admitted (promote/discard a draft), for each curator's own corpus."""
+    admitted (promote/discard a draft), for each curator's own corpus.
+
+    Unchanged by #575: `rm` is one of the three `pins_path` grants — `rm` unlinks the LINK, not the
+    target, so `resolve()` is the wrong operand model for it and its path stays in the PATTERN."""
     wt = _make_worktree(tmp_path)
     for curator in ("A", "B", "C"):
         pol = _policy(wt, curator)
-        assert permission.decide_bash(f"rm {_rel(curator)}/draft.md", policy=pol).allow
+        assert _gate(wt, pol, f"rm {_rel(curator)}/draft.md").allow
 
 
 def test_bash_rm_abuse_denied(tmp_path):
     """bash-rm-abuse-denied: rm with flags (-rf, -v), multi-path rm, cross-corpus rm, a literal `..`
     operand, and an absolute path outside the corpus are ALL DENIED (single path, no flags, anti-`..`
-    textual, corpus-anchored). The single-draft in-corpus rm succeeds (positive control)."""
+    textual, corpus-anchored). The single-draft in-corpus rm succeeds (positive control).
+
+    The `..` case stays a TEXTUAL rejection even after #575 made containment resolve: `rm`'s grant
+    is `pins_path`, so nothing resolves its operand and the traversal must be denied literally, in
+    the pattern (`curator_engine._SEG`)."""
     wt = _make_worktree(tmp_path)
     pol = _policy(wt, "A")  # corpus lessons/
     rel = _rel("A")
@@ -278,73 +320,130 @@ def test_bash_rm_abuse_denied(tmp_path):
         f"rm -v {rel}/x.md",                  # a flag
         f"rm {rel}/a.md {rel}/b.md",          # multi-path
         "rm defender/lessons-actor/x.md",      # cross-corpus
-        f"rm {rel}/../lessons-actor/x.md",     # a literal `..` operand (bash lane no resolve)
+        f"rm {rel}/../lessons-actor/x.md",     # a literal `..` operand (pins_path → no resolve)
         "rm /etc/passwd",                      # absolute path outside the corpus
     ):
-        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
-    assert permission.decide_bash(f"rm {rel}/single.md", policy=pol).allow  # positive control
+        assert not _gate(wt, pol, cmd).allow, cmd
+    assert _gate(wt, pol, f"rm {rel}/single.md").allow  # positive control
 
 
-def test_bash_nav_viewers_corpus_anchored(tmp_path):
-    """bash-nav-viewers-corpus-anchored: ls/grep/cat of the spawn's OWN corpus are admitted — the
-    agent enumerates existing lessons to fold duplicates via the bash reader lane, since there is
-    no Glob/Grep tool in-process."""
+def test_bash_corpus_read_admitted(tmp_path):
+    """bash-nav-viewers-corpus-anchored, RE-EXPRESSED for the one containment model (#575). The
+    demand — "the curator can read its own corpus from bash, since there is no Glob/Grep tool
+    in-process" — survives; the three programs that served it do not:
+
+      * `ls` is DELETED from every lane. The corpus INVENTORY is the #574 manifest now, so the
+        enumeration demand is met with no gated program at all — a strict subtraction of attack
+        surface (`ls`'s dir operand was the lane's other path-opening slot, and its arg-eating
+        `-I`/`-w`/`-T` flags were the #579 bug class);
+      * `grep` lost its FILE operand — it is a stdin-only pipe stage: `cat <file> | grep <pat>`.
+        Identical capability, one extra `cat |`;
+      * `cat` is the sole opener, and its scope is checked against the RESOLVED path.
+
+    So: the pipe form of every read the curator actually needs is ADMITTED, for each curator's own
+    corpus."""
     wt = _make_worktree(tmp_path)
     for curator in ("A", "B", "C"):
         pol = _policy(wt, curator)
         rel = _rel(curator)
-        assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow
-        assert permission.decide_bash(f"cat {rel}/x.md", policy=pol).allow
-        assert permission.decide_bash(f"ls {rel}", policy=pol).allow
+        assert _gate(wt, pol, f"cat {rel}/x.md").allow
+        assert _gate(wt, pol, f"cat {rel}/x.md | grep needle").allow
+        assert _gate(wt, pol, f"cat {rel}/x.md | grep -l 'source_signature:.*rule-id'").allow
+        # the two programs the fold deleted are gone from THIS lane too — no private survivor
+        assert not _gate(wt, pol, f"ls {rel}").allow
+        assert not _gate(wt, pol, f"grep needle {rel}/x.md").allow   # the file-operand form
 
 
 def test_bash_nav_outside_corpus_denied(tmp_path):
-    """bash-nav-outside-corpus-denied: cat/grep/ls of anything OUTSIDE the spawn's corpus — another
-    corpus, a `..` traversal, or an absolute path like /etc/passwd — is DENIED: the hand-built viewer
-    pattern carries NO auto secret-denylist, so its corpus-anchored operand (anti-`..`) is the sole
-    containment. The in-corpus grep/ls/cat succeeds (positive control on the same lane)."""
+    """bash-nav-outside-corpus-denied: a `cat` of anything OUTSIDE the spawn's corpus — a sibling
+    corpus, a `..` traversal, an absolute /etc/passwd, or a symlink pointing out — is DENIED.
+
+    WHAT CHANGED (#575): the containment is no longer the textual corpus-anchored OPERAND (which
+    could not see through a symlink, and had to reject `..` by spelling). It is the `cat` grant's
+    SCOPE, fullmatched against the path `resolve()` returns. That STRENGTHENS this lane, which is
+    the one with no compile_policy and — historically — no secret denylist: `..` collapses and an
+    escaping symlink resolves to where it POINTS, so both land outside the scope by the same check.
+    The escaping-symlink case could not be written against the old lane at all.
+
+    Positive control on the same lane (own corpus, both the direct read and the pipe form)."""
     wt = _make_worktree(tmp_path)
     pol = _policy(wt, "B")  # corpus lessons-actor/
     rel = _rel("B")
-    assert not permission.decide_bash("grep needle defender/lessons/x.md", policy=pol).allow          # other corpus
-    assert not permission.decide_bash("ls defender/lessons-environment", policy=pol).allow             # other corpus
-    assert not permission.decide_bash(f"cat {rel}/../lessons/x.md", policy=pol).allow                   # `..` traversal
-    assert not permission.decide_bash("cat /etc/passwd", policy=pol).allow                             # absolute, no denylist
+    # a symlink INSIDE the corpus pointing out of it — resolve() collapses it to /etc
+    (wt / "defender" / "lessons-actor" / "esc").symlink_to("/etc")
+    for cmd in (
+        "cat defender/lessons/x.md",           # a sibling corpus
+        f"cat {rel}/../lessons/x.md",           # `..` traversal — collapses out of scope
+        "cat /etc/passwd",                      # absolute, outside every scope
+        f"cat {rel}/esc/passwd",                # an ESCAPING SYMLINK (new: only resolve() sees it)
+        f"cat {rel}/x.md | cat /etc/passwd",     # every pipe STAGE is scope-checked, not just the first
+    ):
+        assert not _gate(wt, pol, cmd).allow, cmd
     # positive controls on the same lane (own corpus)
-    assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow
-    assert permission.decide_bash(f"ls {rel}", policy=pol).allow
-    assert permission.decide_bash(f"cat {rel}/x.md", policy=pol).allow
+    assert _gate(wt, pol, f"cat {rel}/x.md").allow
+    assert _gate(wt, pol, f"cat {rel}/x.md | grep needle").allow
+
+
+def test_bash_corpus_symlink_inside_the_corpus_still_reads(tmp_path):
+    """The paired positive control for the symlink deny above: containment is WHERE THE PATH
+    RESOLVES, not "symlinks are banned". A link inside the corpus pointing at another IN-CORPUS
+    file still ALLOWs — otherwise the deny above would be passing for the wrong reason (a blanket
+    symlink ban), and a legitimately symlinked corpus would be unreadable."""
+    wt = _make_worktree(tmp_path)
+    pol = _policy(wt, "B")
+    corpus = wt / "defender" / "lessons-actor"
+    (corpus / "real.md").write_text("x\n")
+    (corpus / "alias.md").symlink_to(corpus / "real.md")
+    assert _gate(wt, pol, f"cat {_rel('B')}/alias.md").allow
 
 
 def test_bash_grep_file_option_exfil_denied(tmp_path):
-    """A grep FILE-opening option must not smuggle an out-of-corpus read through the free-text
-    search slot. `_GREP_FLAG` excludes short `-f`, but the search token slot would otherwise admit
-    any `-`-prefixed token, so `grep --file=<out-of-corpus>` / `--exclude-from=<...>` (grep OPENS
-    that file) and `grep -r -f <in-corpus-probe>` (no file operand → `-r` recurses the worktree cwd)
-    would exfiltrate arbitrary files this denylist-free lane's operand anchor is the sole guard
-    against. All must be DENIED; a plain in-corpus grep is the positive control."""
+    """A grep FILE-opening option must not smuggle an out-of-corpus read. `grep --file=<path>` /
+    `--exclude-from=<path>` make grep OPEN that path, and `grep -r` walks the worktree cwd with no
+    operand at all — on a lane whose `grep` is declared `OPENS_NOTHING`, any of these landing means
+    the file grep opens is NEVER scope-checked. The claim is only as good as the SHAPE that earns
+    it, so these must deny at the shape.
+
+    #575 makes the claim structural rather than asserted: grep has no file slot left, so the
+    surviving grammar admits no `--long` option and no `-`-prefixed positional at all (the shared
+    `grant.program_shape("grep")`, pinned globally by test_grant_gate_575::b7/b8). What this test
+    still adds is that THIS lane — the denylist-free, `compile_policy`-free one — really did fold
+    onto that shared shape and kept no private copy of the old grammar.
+
+    Positive control: the stdin form the curator now uses."""
     wt = _make_worktree(tmp_path)
     pol = _policy(wt, "B")  # corpus lessons-actor/
     rel = _rel("B")
     for cmd in (
-        f"grep --file=/etc/passwd {rel}/probe.md",          # grep reads patterns FROM /etc/passwd
-        f"grep --exclude-from=/etc/passwd {rel}/probe.md",   # same file-open, different option
-        f"grep -r -f {rel}/probe.md",                        # -f eats the operand → -r recurses cwd
-        f"grep -rf {rel}/probe.md",                          # bundled form of the same
+        f"grep --file=/etc/passwd {rel}/probe.md",           # grep reads patterns FROM /etc/passwd
+        f"grep --exclude-from=/etc/passwd {rel}/probe.md",    # same file-open, different option
+        f"cat {rel}/x.md | grep --file=/etc/passwd",           # …and on the stdin form too
+        f"cat {rel}/x.md | grep --exclude-from=/etc/passwd",
+        f"grep -r -f {rel}/probe.md",                          # -f eats the operand → -r recurses cwd
+        f"grep -rf {rel}/probe.md",                            # bundled form of the same
+        f"cat {rel}/x.md | grep -r needle",                    # -r recurses the cwd from a pipe stage
     ):
-        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
-    assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow  # positive control
+        assert not _gate(wt, pol, cmd).allow, cmd
+    assert _gate(wt, pol, f"cat {rel}/x.md | grep needle").allow  # positive control
 
 
 def test_bash_arg_consuming_flag_denied(tmp_path):
-    """An ADMITTED flag that CONSUMES the next token must not eat the corpus-anchored operand.
-    This is the #579 bug class on the curator's lane — the `(?!-)` guard on the search slot does
-    NOT cover it, because the token these flags swallow carries no leading dash. A catch-all flag
-    class (`-[a-eg-zA-Z]+`, "any letter but `-f`") admitted all three shapes below; per-program
-    BOOLEAN allowlists (`_CAT_FLAG`/`_GREP_FLAG`/`_LS_FLAG`) are what close them, and they fail
-    CLOSED if a future coreutils/grep grows another arg-taker. Verified against the runtime
+    """An ADMITTED flag that CONSUMES the next token must not eat the operand. This is the #579 bug
+    class, and it is the reason a flag class must be a POSITIVE boolean allowlist rather than a
+    catch-all minus the known-bad: `-[a-eg-zA-Z]+` ("any letter but `-f`") admitted every shape
+    below, and a catch-all fails OPEN the day coreutils grows another arg-taker.
+
+    #575 re-expresses it rather than retiring it. The curator's PRIVATE flag classes
+    (`_CAT_FLAG`/`_LS_FLAG`/`_GREP_FLAG`) are DELETED — it compiles the shared `program_shape`s
+    now. That deletion is exactly what this test guards: the private copy had ALREADY DRIFTED (its
+    `_LS_FLAG` still admitted `-R` after #579 dropped it on the runtime lane), which is the second
+    place the next fail-open would have hidden.
+
+    `ls` is gone entirely, so its arg-eaters are moot — but they are kept in the deny list as a
+    ratchet: re-granting `ls` to this lane must not silently re-admit `-I`/`-w`/`-T`. Every deny is
+    paired with the boolean-flag positive control it must not cost us. (Verified against the runtime
     container's GNU coreutils 9.7 / grep 3.11 — the dev box's `ls`/`ugrep` are not the gate's
-    target. Every deny is paired with the boolean-flag positive control it must not cost us."""
+    target.)"""
     wt = _make_worktree(tmp_path)
     pol = _policy(wt, "B")  # corpus lessons-actor/
     rel = _rel("B")
@@ -353,37 +452,42 @@ def test_bash_arg_consuming_flag_denied(tmp_path):
         # an arbitrary out-of-corpus read on a lane with no secret denylist.
         f"grep -eNEEDLE /etc/passwd {rel}/x.md",
         f"grep -e NEEDLE /etc/passwd {rel}/x.md",
-        # each of these eats the search token, shifting the corpus path into the PATTERN slot and
-        # leaving grep with NO file operand → GNU grep then walks the worktree cwd.
+        f"cat {rel}/x.md | grep -e NEEDLE /etc/passwd",
+        # each of these eats the search token, leaving grep with NO pattern — and, on a lane that
+        # still had a file slot, shifting the corpus path into the PATTERN slot so grep walked the cwd.
         f"grep -d recurse {rel}/x.md",
         f"grep -D skip {rel}/x.md",
         f"grep -m 1 {rel}/x.md",
         f"grep -A 2 {rel}/x.md",
         f"grep -B 2 {rel}/x.md",
         f"grep -C 2 {rel}/x.md",
+        f"cat {rel}/x.md | grep -m 1 needle",
+        f"cat {rel}/x.md | grep -A 2 needle",
+        # `cat` has no arg-taking flag at all (that is WHY it can be the sole opener), so an
+        # unknown dash token must fail closed rather than be absorbed as free text.
+        f"cat -z {rel}/x.md",
+        f"cat --show-all {rel}/x.md",
         # ls: `-I PATTERN` / `-w COLS` / `-T COLS` swallow the dir operand, so `ls` falls back to
-        # listing the cwd — the worktree root. Defeats the `+` that makes bare `ls` cwd-recon deny.
+        # listing the cwd — the worktree root. `ls` is now denied outright; kept as the ratchet.
         f"ls -I {rel}",
         f"ls -w {rel}",
         f"ls -T {rel}",
         f"ls -laI {rel}",   # bundled: still contains an arg-taker
+        f"ls -R {rel}",     # the flag the curator's PRIVATE `_LS_FLAG` had drifted into admitting
     ):
-        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
+        assert not _gate(wt, pol, cmd).allow, cmd
     # positive controls — the boolean-flag shapes the curator prompts actually tell it to run
-    # (`ls defender/<corpus>/`, `grep -l '<key>:.*<val>' <file>`, `cat` a lesson) must survive.
+    # (`cat <lesson>`, `cat <file> | grep -l '<key>:.*<val>'`) must survive.
     for cmd in (
-        f"grep -l 'source_signature:.*rule-id' {rel}/x.md",
-        f"grep -rn needle {rel}/sub",   # `-r` stays: the FILE operand is required, so it has an
-                                        # anchored root to descend from and cannot reach the cwd
+        f"cat {rel}/x.md | grep -l 'source_signature:.*rule-id'",
+        f"cat {rel}/x.md | grep -n needle",
         f"cat -n {rel}/x.md",
-        f"ls -la {rel}",
-        f"ls {rel}",
     ):
-        assert permission.decide_bash(cmd, policy=pol).allow, cmd
+        assert _gate(wt, pol, cmd).allow, cmd
 
 
 def test_bash_arbitrary_program_denied(tmp_path):
-    """bash-arbitrary-program-denied: any command that is not a whitelisted viewer or the scoped rm
+    """bash-arbitrary-program-denied: any command that is not a granted viewer or the scoped rm
     — git commit, any python, curl, cat of a secret — is DENIED (deny-by-default). The in-corpus
     viewer succeeds (positive control). Also pins survival-agent-no-git: the toolset has no git
     grant. Since #558 there is no interpreter grant either: `python3 <anything>` is denied, so the
@@ -397,9 +501,26 @@ def test_bash_arbitrary_program_denied(tmp_path):
         "curl http://evil.test",           # arbitrary network
         "cat /etc/passwd",                 # a secret, absolute
     ):
-        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
-    assert permission.decide_bash("cat defender/lessons/x.md", policy=pol).allow    # positive control
-    assert permission.decide_bash("rm defender/lessons/x.md", policy=pol).allow     # positive control
+        assert not _gate(wt, pol, cmd).allow, cmd
+    assert _gate(wt, pol, "cat defender/lessons/x.md").allow    # positive control
+    assert _gate(wt, pol, "rm defender/lessons/x.md").allow     # positive control
+
+
+def test_bash_lane_names_only_programs_it_grants(tmp_path):
+    """The curator's `deny_reason` is PROMPT SURFACE, and #575 deleted two programs it used to
+    name. A reason that still advertised `ls` (or grep's file operand) would teach a dead command
+    and the curator would burn turns on it. So: every program the deny reason names must be one
+    this lane actually grants — derived from the LIVE grant list, never a hardcoded dead-name list,
+    so it keeps working after the next deletion. (The global sweep is
+    test_grant_gate_575::test_g1; this is its curator-lane instance, because the curator's policy
+    never passes through `compile_policy` and so is not reachable from a def-driven sweep.)"""
+    wt = _make_worktree(tmp_path)
+    pol = _policy(wt, "A")
+    granted = {g.program for g in pol.bash_allow}
+    assert granted == {"cat", "grep", "rm"}       # ls is gone; no interpreter; no adapter
+    named = set(re.findall(r"`?\b(ls|cat|grep|rm|jq|head|tail|wc|python3)\b`?", pol.deny_reason))
+    assert named, "the deny reason names no program at all — this check would be vacuous"
+    assert named <= granted, f"deny reason names programs this lane denies: {named - granted}"
 
 
 # ===========================================================================
@@ -408,21 +529,26 @@ def test_bash_arbitrary_program_denied(tmp_path):
 
 def test_cross_curator_isolation(tmp_path):
     """One CORPUS_AUTHOR role serves all four, so the ONLY isolation is the per-spawn corpus
-    scoping: curator A must DENY a write / rm / grep of B's corpus (lessons-actor/) on every
+    scoping: curator A must DENY a write / rm / READ of B's corpus (lessons-actor/) on every
     surface, while ADMITTING its OWN lessons/. (Since #558 the forward-check is no longer a bash
     grant, so it is not an isolation surface here; the tool's lesson operand is confined to the
-    spawn's own corpus — test_forward_check_tool.py::test_d19_lesson_path_confined_to_own_corpus.)"""
+    spawn's own corpus — test_forward_check_tool.py::test_d19_lesson_path_confined_to_own_corpus.)
+
+    The READ surface is spelled `cat` now, not `grep <file>` (#575: grep is a stdin-only stage, so
+    `cat` is the sole opener and the ONLY program whose operand carries the corpus scope). The
+    isolation property is unchanged — only which program can express a cross-corpus read is."""
     wt, rd = _make_worktree(tmp_path), _run_dir(tmp_path)
     a_deps = _deps(wt, rd, "A")
     a_pol = a_deps.policy
     # ADMIT own corpus (positive controls)
     _admitted_on_both_write_surfaces(wt, a_deps, "lessons", stem="own")
-    assert permission.decide_bash("rm defender/lessons/own.md", policy=a_pol).allow
-    assert permission.decide_bash("grep needle defender/lessons/own.md", policy=a_pol).allow
-    # DENY B's corpus (write + rm + grep)
+    assert _gate(wt, a_pol, "rm defender/lessons/own.md").allow
+    assert _gate(wt, a_pol, "cat defender/lessons/own.md | grep needle").allow
+    # DENY B's corpus (write + rm + read)
     _denied_on_both_write_surfaces(a_deps, "defender/lessons-actor/x.md")
-    assert not permission.decide_bash("rm defender/lessons-actor/x.md", policy=a_pol).allow
-    assert not permission.decide_bash("grep needle defender/lessons-actor/x.md", policy=a_pol).allow
+    assert not _gate(wt, a_pol, "rm defender/lessons-actor/x.md").allow
+    assert not _gate(wt, a_pol, "cat defender/lessons-actor/x.md").allow
+    assert not _gate(wt, a_pol, "cat defender/lessons-actor/x.md | grep needle").allow
 
 
 # ===========================================================================

@@ -31,10 +31,10 @@ from . import observe
 from . import orient
 from . import permission
 from . import providers
-from .agent_definition import AgentDefinition, BashGrammar, ToolSet, bind
+from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
-from .permission.policies._common import READER_VIEWERS, reader_read_shapes
+from .permission.policies import _common
 from .providers import BuiltModel
 from .tools import (
     AgentDeps,
@@ -45,7 +45,6 @@ from .tools import (
 
 from defender._env import env_bool
 from defender._run_paths import RunPaths
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     check_budgets,
@@ -217,60 +216,69 @@ def resolve_main_model(explicit: str | None = None) -> str:
     return explicit or os.environ.get("DEFENDER_MODEL") or DEFAULT_MODEL
 
 
-# The two runtime agents' definitions (#538). The declared viewer/shim CONTENTS are now
-# load-bearing (#545): `compile_policy` compiles `bash_allow` from exactly the declared
-# `READER_VIEWERS` + non-adapter shims (via `permission.policies._common.reader_patterns_for`,
-# the #535 anchoring), and the `read_shapes` builder gives the read tool the matching filename
-# filter (`reader_read_shapes`, read↔bash parity). Both defs declare the FULL reader set. The
-# corpus dirs are the tight `.md` roots under `defender_dir` a reader may open.
+# The two runtime agents' definitions (#538). Each hangs its OWN grant builder on its OWN def
+# (#575): `compile_policy` composes what the defs bring — it never reaches up to ask an agent
+# what it wants. The reader lane is the shared `_common.reader_grants` (one `cat` opener + the
+# stdin-only viewers + the non-adapter shims), and the `cat` grant's SCOPE is also this agent's
+# read surface (`read_allow`), so the two surfaces are one object. The corpus dirs are the `.md`
+# roots under `defender_dir` a reader may open.
 _CORPUS_DIRS = ("lessons", "skills", "examples")
 
 
-def _main_write_shape(run_dir: Path, defender_dir: Path) -> tuple[Any, ...]:
-    """MAIN's write scope (#551 — the write twin of `reader_read_shapes`): the run-dir subtree
-    (`investigation.md` / `report.md` + any case artifact it authors), resolved by `compile_policy`
-    into `write_allow`. Anchored on `run_dir` — NOT `defender_dir` — so MAIN can never author the
-    corpus (a `defender_dir`-anchored shape would let the main loop write skills/lessons)."""
-    return (permission.build_write_allow(run_dir),)
+def _main_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
+    """MAIN's bash lane: the reader grants WITHOUT the gather_raw shape and WITHOUT the adapter
+    routes. Main's denial of the raw payload channel is the ABSENCE of that address from its
+    grant list — not a clamp on a wider grant, which is what the deleted `RAW_MARKER in cmd`
+    substring scan was (it also denied `… | grep gather_raw`, where the marker is a search
+    pattern and no such file is ever opened)."""
+    return _common.reader_grants(
+        roots.run_dir, roots.defender_dir, raw=False, adapters=False,
+    )
+
+
+def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
+    """GATHER's bash lane: the reader grants PLUS the machine-tight `gather_raw/{lead}/{seq}.json`
+    shape (it owns the payloads it captures) and the two structurally-routed adapter grants (a
+    standalone call, captured transparently; and the sanctioned `adapter | defender-sql` pipe)."""
+    return _common.reader_grants(
+        roots.run_dir, roots.defender_dir, raw=True, adapters=True,
+    )
+
+
+def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
+    """MAIN's write scope: the run-dir subtree (`investigation.md` / `report.md` + any case
+    artifact it authors), resolved by `compile_policy` into `write_allow`. Anchored on `run_dir`
+    — NOT `defender_dir` — so MAIN can never author the corpus."""
+    return (permission.build_write_allow(roots.run_dir),)
 
 
 # MAIN — the orchestrator: reader lane + the file writers (it authors investigation.md /
-# report.md), no data-source adapters (it dispatches gather). `model` is the live thunk
-# so a `--model` / `$DEFENDER_MODEL` override resolves at build; `effort` is the Fireworks
-# GLM default (production re-binds both per invocation in `build_agent`, preserving the
-# model-dependent effort for the claude escape hatch). Its `write_shapes` (the run-dir subtree)
-# is DATA `compile_policy` resolves into `write_allow` — the write twin of `read_shapes`.
+# report.md), no data-source adapters (it dispatches gather). `model` is the live thunk so a
+# `--model` / `$DEFENDER_MODEL` override resolves at build; `effort` is the Fireworks GLM default
+# (production re-binds both per invocation in `build_agent`, preserving the model-dependent effort
+# for the claude escape hatch).
 MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
     effort="low",
-    tools=ToolSet(
-        read=True,
-        bash=BashGrammar(shims=tuple(NON_ADAPTER_SHIMS), viewers=READER_VIEWERS),
-        write=True,
-    ),
+    tools=ToolSet(read=True, bash=True, write=True),
     corpus_dirs=_CORPUS_DIRS,
-    read_shapes=(reader_read_shapes,),
+    bash_shapes=(_main_bash_shapes,),
     write_shapes=(_main_write_shape,),
+    deps_cls=AgentDeps,
     deny_reason=permission.FALLTHROUGH_DENY_REASON,
 )
 
-# GATHER — the data-access subagent: reader lane + adapters + the `adapter | defender-sql`
-# pipe, read-only (no writers). Declares the same viewers + non-adapter shims as main, plus its
-# read↔bash filename filter. Runs its own cheaper `gather_model()`, reasoning off.
+# GATHER — the data-access subagent: the reader lane + its own gather_raw + the adapter routes,
+# read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off.
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
-    tools=ToolSet(
-        read=True,
-        bash=BashGrammar(
-            shims=tuple(NON_ADAPTER_SHIMS), viewers=READER_VIEWERS,
-            adapters=True, adapter_sql_pipe=True, raw_reads=True,
-        ),
-    ),
+    tools=ToolSet(read=True, bash=True),
     corpus_dirs=_CORPUS_DIRS,
-    read_shapes=(reader_read_shapes,),
+    bash_shapes=(_gather_bash_shapes,),
+    deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
 )
 

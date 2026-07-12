@@ -43,8 +43,8 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 # is compiled PER-RUN via `compile_policy_for(<DEF>, run_dir, defender_dir=…)` (the reader lane is
 # anchored to the run's roots — the policy-only half of `bind`). These synthetic absolute
 # roots only anchor the bash lane, which these CONSTRUCTION tests don't exercise (enforcement
-# is pinned in test_read_confine_bash.py); their capability SHAPE (read_confine/raw_reads) is
-# what the guarded negatives below assert.
+# is pinned in test_read_confine_bash.py); their capability SHAPE (read_confine + the grant list
+# — #575 dissolved the raw_reads/adapters BITS into grants) is what the guarded negatives assert.
 _MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
 _GATHER_POLICY = compile_policy_for(GATHER_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
@@ -78,7 +78,9 @@ def test_agent_deps_accepts_explicit_policy(tmp_path):
 def test_judge_deps_requires_policy(tmp_path):
     """JudgeDeps inherits the base requiredness: JudgeDeps(4 identity fields) with no policy=
     -> TypeError (a mis-built judge cannot silently get MAIN and lose its grounding roots)."""
-    # rejected: inherits _MAIN_POLICY (raw_reads=False, read_roots=()) -> evidence-starved judge
+    # rejected: inherits _MAIN_POLICY (no gather_raw shape in its grants, read_roots=()) ->
+    # evidence-starved judge — the judge's payloads live under the INVESTIGATION run dir, which
+    # only its own read_roots + cat scope reach (#575: positive enumeration, not a raw_reads bit)
     with pytest.raises(TypeError):
         JudgeDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s")
 

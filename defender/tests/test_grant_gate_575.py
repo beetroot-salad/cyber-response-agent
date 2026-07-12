@@ -769,11 +769,16 @@ def test_f1_bash_decision_still_carries_the_dispatch_payload(env):
     `Grant.route` is what TAGS the reader-lane grants; it replaces the per-agent capability bits,
     it does not replace the decision payload."""
     d = _bash(env, f"cat {env.run}/investigation.md", "main")
-    assert d.allow and d.pipelines and d.adapter_argv is None and d.sql_pipe is None
+    assert d.allow
+    assert d.pipelines
+    assert d.adapter_argv is None
+    assert d.sql_pipe is None
     a = _bash(env, "defender-elastic query 'x'", "gather")
-    assert a.allow and a.adapter_argv == ["defender-elastic", "query", "x"]
+    assert a.allow
+    assert a.adapter_argv == ["defender-elastic", "query", "x"]
     routes = {g.route for g in env.gather.bash_allow}
-    assert Route.CAPTURE_ADAPTER in routes and Route.CAPTURE_ADAPTER_SQL in routes
+    assert Route.CAPTURE_ADAPTER in routes
+    assert Route.CAPTURE_ADAPTER_SQL in routes
     assert _cat_grant(env.gather).route is Route.PLAIN
 
 
@@ -787,7 +792,9 @@ def test_f2_reader_lane_claims_before_adapter_classification(env):
     pol = _judge(env, ticket_cli=(py, cli))
     d = _bash(env, f"{py} {cli} list-tickets --require-closed", pol)
     assert d.allow
-    assert d.adapter_argv is None and d.sql_pipe is None   # claimed by the grant, not routed
+    # claimed by the grant, not routed
+    assert d.adapter_argv is None
+    assert d.sql_pipe is None
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -811,9 +818,11 @@ def test_f4_sanctioned_adapter_sql_pipe_splits_and_nothing_else(env):
     sandboxed aggregator, never into an arbitrary reader stage."""
     cmd = "defender-elastic query 'x' | defender-sql 'SELECT count(*) FROM data'"
     d = _bash(env, cmd, "gather")
-    assert d.allow and d.sql_pipe is not None
+    assert d.allow
+    assert d.sql_pipe is not None
     adapter_av, sql_av = d.sql_pipe
-    assert adapter_av == ["defender-elastic", "query", "x"] and sql_av[0] == "defender-sql"
+    assert adapter_av == ["defender-elastic", "query", "x"]
+    assert sql_av[0] == "defender-sql"
     assert not _bash(env, "defender-elastic query 'x' | head -5", "gather").allow
     assert not _bash(env, cmd, "main").allow
 
@@ -917,9 +926,11 @@ def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
         hint = tools._overflow_filter_hint(path, getattr(env, which))
         assert f"cat {path} | jq" in hint, which
     jhint = tools._overflow_filter_hint(path, _judge(env, ticket_cli=_ticket_cli(env)))
-    assert "defender-sql" in jhint and "jq" not in jhint
+    assert "defender-sql" in jhint
+    assert "jq" not in jhint
     ahint = tools._overflow_filter_hint(path, _actor(env), read_tool="read_file")
-    assert "read_file" in ahint and "pattern=" in ahint
+    assert "read_file" in ahint
+    assert "pattern=" in ahint
 
 
 # ===========================================================================  #
@@ -965,7 +976,9 @@ def test_h2_no_cross_run_bleed(env):
                                   run_dir=run_b, defender_dir=env.dfn)
     cross = permission.decide_bash(f"cat {a_inv}", policy=pol_b,
                                    run_dir=run_b, defender_dir=env.dfn)
-    assert ok_a.allow and ok_b.allow and not cross.allow
+    assert ok_a.allow
+    assert ok_b.allow
+    assert not cross.allow
 
 
 def test_h3_denylist_contributes_no_regex_lookahead(env):
@@ -1003,7 +1016,8 @@ def test_i1_policy_show_prints_grants_and_never_a_misleading_empty_scope(env):
     p = _cli("show", "main", "--run-dir", str(env.run))
     assert p.returncode == 0, p.stderr
     out = p.stdout
-    assert "cat" in out and "read" in out and "write" in out and "bash" in out
+    for word in ("cat", "read", "write", "bash"):
+        assert word in out
     assert str(env.run) in out                      # the scopes are the RESOLVED roots
     assert "ls" not in _named_programs(out)         # a deleted program is not advertised
     j = _cli("show", "judge", "--run-dir", str(env.run))

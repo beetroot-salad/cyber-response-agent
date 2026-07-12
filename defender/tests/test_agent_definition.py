@@ -1,51 +1,33 @@
-"""Executable spec (written BEFORE the code) for design #538 — the AgentDefinition
-consolidation + tool-free predictors.
+"""The AgentDefinition suite — the consolidation (#538) as re-based on the one containment
+model (#575).
 
-#538 collapses the two capability carriers (the build-time spec + the runtime
-`AgentPolicy`) plus the scattered model/effort constants into one per-agent
-`AgentDefinition` that BOTH the build site and the permission gate read, and it makes
-the pure-prediction stages (oracle + verify-forward) genuinely tool-free (register
-NOTHING). These tests pin the observable behavior at the REAL entry points:
+#538 collapsed the two capability carriers (the build-time spec + the runtime `AgentPolicy`)
+plus the scattered model/effort constants into one per-agent `AgentDefinition` that BOTH the
+build site and the permission gate read, and made the pure-prediction stages (oracle +
+verify-forward) genuinely tool-free (register NOTHING). #575 then replaced the *containment*
+half of that definition: `BashGrammar` (a bag of capability BITS — `adapters` /
+`adapter_sql_pipe` / `operand_gated` / `raw_reads` — that a regex machine expanded into an
+allowlist with the run's paths BAKED INTO the argv patterns) is gone, and each agent now hangs
+its OWN `bash_shapes` grant builder on its OWN def. So these tests pin what SURVIVES that
+change, at the REAL entry points:
 
   - `build_agent_core(defn, …)`  — registers exactly the ToolSet's present tools
-  - `bind(defn, run_dir, scope)` — the deps + policy resolution seam (replaces the six
-                                   `_xxx_policy` factories + `for_scope`/`for_run`)
-  - `compile_policy(tools, read_shapes, roots, deny_reason)` — the AgentPolicy projection
+  - `bind(defn, run_dir, scope)` — the deps + policy resolution seam
+  - `compile_policy(defn, roots)` — the AgentPolicy projection (it now COMPOSES what the def
+                                    brings: the grants come from `defn.bash_shapes`, and the
+                                    read surface IS the `cat` grant's scope object)
   - `resolve_roots(run_dir, corpus_dirs, scope)` — run-anchored read roots
-  - `AGENTS` — the role-keyed registry
+  - `AGENTS` — the role-keyed registry, now at `defender.agents` (nothing under `runtime/`
+                may enumerate agents)
 
-The targets do NOT exist yet: importing `defender.runtime.agent_definition` /
-`defender.runtime.agents` is the EXPECTED red at collection. Every OTHER import
-resolves against real source, so the sole collection error is the two missing #538
-modules.
+The *grant* semantics themselves (shape ∧ scope, the PROGRAMS table, the resolved-path
+matching, the per-agent lanes) are owned by `test_grant_gate_575.py` — the #575 executable
+spec. This file stays at the DEFINITION layer: what a def carries, what a build registers,
+what a compile projects.
 
 Hermetic: no network, no key — a `FunctionModel` is injected through the `make_model`
 DI seam under `override_allow_model_requests(False)`; faults enter through that seam and
 `monkeypatch.setenv`, never `monkeypatch.setattr`.
-
-Deferred (spec waivers, NOT exercised here — #535 end-state):
-  - r3_parity_535: the read_file/bash "one roots set, two surfaces" parity is the #535
-    end state; at step one main/gather intentionally diverge (bash lane tight-to-corpus,
-    decide_read broad because read_roots==()). Preserved implicitly by the per-agent
-    compile_policy characterization + gate_decisions_unchanged.
-  - read_shapes_semantics: the ReadShape filename-grammar FILTERING is #535-dependent;
-    only the read_shapes FIELD's existence/type is pinned (read_shapes_field).
-
-spec-assumption (seams the design leaves ambiguous — write-code-from-spec reconciles):
-  - `RunScope` is the unified per-invocation carriage (superset of the judge's
-    `_ToolScope` and the actor's `_ActorScope`): fields `add_dirs` (judge comparison
-    roots → read_roots), `read_confine` (actor gray-box confine), `scripts` (actor
-    pinned lesson scripts → one bash_allow pattern each), `ticket_cli` (benign judge).
-    All default empty. `resolve_roots` folds it against the run.
-  - `resolve_roots(run_dir, corpus_dirs, scope)` returns a rich `roots` value carrying
-    the run anchor + defender_dir + resolved corpus absolutes (`.corpus_roots`) + the
-    scope-derived extras, which `compile_policy` projects into an `AgentPolicy`.
-  - `build_registry(defs)` is the guarded collector that fans the six definitions into
-    `AGENTS`, raising on a duplicate role (vs the dict-comp's silent last-wins).
-  - `build_agent_core` keeps its current keyword args (deps_type / instructions /
-    logger / agent_id / make_model) but takes an `AgentDefinition` positionally in place
-    of the old spec, deriving the writers bit from `tools.write` and the model/effort
-    from `defn.model()` / `defn.effort`.
 """
 from __future__ import annotations
 
@@ -82,22 +64,22 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps  # noqa: E402
 
-# ── THE NOT-YET-WRITTEN #538 TARGETS — this is the expected collection-time red ──────
-# spec-assumption: `build_registry` (the guarded collector) lives in the definition
-# primitive layer alongside AgentDefinition; the mandated symbols are otherwise verbatim
-# from the spec's assumed layout.
+# `build_registry` (the guarded collector) lives in the definition primitive layer alongside
+# AgentDefinition; the registry it feeds lives at `defender.agents` — OUT of `runtime/` (#575:
+# a registry enumerates agents, and `runtime/` is the library they are built on).
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
-    BashGrammar,
     RunScope,
     ToolSet,
     bind,
     build_registry,
     compile_policy,
     compile_policy_for,
+    read_allow_of,
     resolve_roots,
 )
-from defender.runtime.agents import (  # noqa: E402
+from defender.runtime.permission import Grant, Route  # noqa: E402
+from defender.agents import (  # noqa: E402
     ACTOR_DEF,
     AGENTS,
     GATHER_DEF,
@@ -106,7 +88,7 @@ from defender.runtime.agents import (  # noqa: E402
     VERIFY_DEF,
 )
 
-# Real repo-relative script/confine paths — `_actor_policy`'s `_script_pattern` does
+# Real repo-relative script/confine paths — the actor's `_script_grant` does
 # `script.resolve().relative_to(REPO_ROOT)`, so synthetic paths outside the repo raise.
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
@@ -176,16 +158,25 @@ def _glm_thunk() -> str:
 _EMPTY_TOOLSET = ToolSet()
 
 
-def _defn(*, role=AgentRole.MAIN, model=_glm_thunk, effort=None, tools=_EMPTY_TOOLSET, corpus_dirs=()):
-    """Build an AgentDefinition for a shape test (model defaults to a glm thunk)."""
+def _defn(
+    *, role=AgentRole.MAIN, model=_glm_thunk, effort=None, tools=_EMPTY_TOOLSET,
+    corpus_dirs=(), bash_shapes=(), write_shapes=(), deps_cls=None,
+):
+    """Build an AgentDefinition for a shape test (model defaults to a glm thunk). `bash_shapes`
+    is the #575 per-agent grant builder tuple — an agent may hold the bash TOOL and be granted
+    nothing (presence and permission are two facts), so it defaults empty. `deps_cls` is only
+    needed by a def a test actually `bind`s."""
     return AgentDefinition(
         role=role, model=model, effort=effort, tools=tools, corpus_dirs=corpus_dirs,
+        bash_shapes=bash_shapes, write_shapes=write_shapes, deps_cls=deps_cls,
     )
 
 
-def _patterns(policy) -> list[str]:
-    """re.Pattern compares by identity — project the SOURCE strings for comparison."""
-    return [p.pattern for p in policy.bash_allow]
+def _scope_patterns(policy) -> list[str]:
+    """The SOURCE strings of the policy's path scope — the paths half of the containment model
+    (#575: the run's roots live in the grants' SCOPE, never interpolated into an argv shape; the
+    shapes carry no path at all). re.Pattern compares by identity, so project the strings."""
+    return [p.pattern for p in policy.read_allow]
 
 
 # RunScope() is frozen, so one shared module-level singleton is a safe default anchored
@@ -194,19 +185,20 @@ _DEFAULT_SCOPE = RunScope()
 
 
 def _compile(defn, run_dir, scope=_DEFAULT_SCOPE):
-    """Drive the real resolve_roots → compile_policy composition (#551 — compile_policy grew a
-    `write_shapes` positional between `read_shapes` and `roots`, the write twin of read_shapes)."""
-    roots = resolve_roots(run_dir, defn.corpus_dirs, scope)
-    return compile_policy(defn.tools, defn.read_shapes, defn.write_shapes, roots, defn.deny_reason)
+    """Drive the real resolve_roots → compile_policy composition. Since #575 `compile_policy`
+    takes the DEFINITION itself (not a projection of its fields): the grants come from the def's
+    own `bash_shapes` builders, so there is nothing left for the caller to unpack."""
+    return compile_policy(defn, resolve_roots(run_dir, defn.corpus_dirs, scope))
 
 
 # ============================================================================
-# Type / seam shapes — AgentDefinition, ToolSet, BashGrammar
+# Type / seam shapes — AgentDefinition, ToolSet
 # ============================================================================
 
 def test_agentdefinition_shape():
     """AgentDefinition is a frozen dataclass carrying role/model(thunk)/effort/tools/
-    corpus_dirs/read_shapes/deny_reason; the tail fields default (ToolSet() / () / str)."""
+    corpus_dirs/bash_shapes/write_shapes/deps_cls/deny_reason; the tail fields default
+    (ToolSet() / () / None / str)."""
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
     assert dataclasses.is_dataclass(defn)
     assert defn.role is AgentRole.MAIN
@@ -215,7 +207,9 @@ def test_agentdefinition_shape():
     assert defn.effort == "low"
     assert isinstance(defn.tools, ToolSet)     # defaults to ToolSet()
     assert defn.corpus_dirs == ()
-    assert defn.read_shapes == ()
+    assert defn.bash_shapes == ()              # the per-agent grant builders (#575)
+    assert defn.write_shapes == ()
+    assert defn.deps_cls is None
     assert isinstance(defn.deny_reason, str)
 
 
@@ -230,38 +224,35 @@ def test_agentdefinition_frozen():
 
 
 def test_toolset_shape():
-    """ToolSet is a frozen dataclass: read=False, bash=None, write=False (read-only/no-tool
-    safe default)."""
+    """ToolSet is a frozen dataclass of PRESENCE bits, every one defaulting off (the no-tool
+    safe default). `bash` is a plain bool since #575 — it says whether the agent HOLDS the bash
+    tool; WHAT it may run is its def's `bash_shapes` grants, a separate fact."""
     ts = ToolSet()
     assert dataclasses.is_dataclass(ts)
     assert ts.read is False
-    assert ts.bash is None
+    assert ts.bash is False
     assert ts.write is False
     with pytest.raises(dataclasses.FrozenInstanceError):
         ts.read = True  # type: ignore[misc]
 
 
-def test_bashgrammar_shape():
-    """BashGrammar is a frozen dataclass: shims/viewers default to (); adapters/
-    adapter_sql_pipe/operand_gated/raw_reads default to False."""
-    bg = BashGrammar()
-    assert dataclasses.is_dataclass(bg)
-    assert bg.shims == ()
-    assert bg.viewers == ()
-    assert bg.adapters is False
-    assert bg.adapter_sql_pipe is False
-    assert bg.operand_gated is False
-    assert bg.raw_reads is False
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        bg.adapters = True  # type: ignore[misc]
+def test_read_surface_is_the_cat_grants_scope(tmp_path):
+    """There is no `read_shapes` FIELD on a definition any more (#575): the read surface IS the
+    `cat` grant's scope — the same tuple OBJECT, since `cat` is the one program that opens a path
+    on the bash lane, so the set of paths an agent may `cat` IS the set it may read. Parity is
+    identity, not a second grammar kept in sync (#545's two grammars drifted).
 
-
-def test_read_shapes_field():
-    """AgentDefinition carries a read_shapes tuple field (default ()); the FIELD exists and
-    is a tuple. Its filtering SEMANTICS are #535-deferred (read_shapes_semantics waiver)."""
-    defn = AgentDefinition(role=AgentRole.ORACLE, model=lambda: "m", effort=None)
-    assert defn.read_shapes == ()
-    assert isinstance(defn.read_shapes, tuple)
+    NEGATIVE: an agent with NO `cat` grant (the tool-free oracle) gets an EMPTY read_allow — no
+    shape filter — so the identity is not vacuously satisfied by "everything is ()"."""
+    assert not hasattr(AgentDefinition(role=AgentRole.ORACLE, model=_glm_thunk, effort=None),
+                       "read_shapes")
+    pol = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
+    cat_scope = next(g.scope for g in pol.bash_allow if g.program == "cat")
+    assert pol.read_allow is cat_scope                 # the SAME object, not a copy
+    assert pol.read_allow is read_allow_of(pol.bash_allow)
+    assert cat_scope                                    # non-empty — the identity is not vacuous
+    # negative control: no cat grant → no shape filter at all
+    assert read_allow_of(_compile(_defn(role=AgentRole.ORACLE), tmp_path).bash_allow) == ()
 
 
 # ============================================================================
@@ -315,7 +306,7 @@ def test_build_registers_exact_toolset(logger):
     """build_agent_core(defn) registers EXACTLY the present tools in defn.tools and nothing
     else (the always-on register_tools bash+read_file branch is deleted). A read+bash+write
     agent registers ['bash','read_file','write_file','edit_file'] in that order."""
-    defn = _defn(tools=ToolSet(read=True, bash=BashGrammar(), write=True))
+    defn = _defn(tools=ToolSet(read=True, bash=True, write=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
@@ -327,7 +318,7 @@ def test_build_registers_exact_toolset(logger):
 def test_registration_order_bash_before_read(logger):
     """Registered order is bash BEFORE read_file (the current pinned order), NOT ToolSet's
     dataclass field order (read, bash, write): a read+bash agent pins ['bash','read_file']."""
-    defn = _defn(tools=ToolSet(read=True, bash=BashGrammar()))
+    defn = _defn(tools=ToolSet(read=True, bash=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
@@ -338,16 +329,16 @@ def test_registration_order_bash_before_read(logger):
 
 def test_toolset_exact_combos(logger):
     """Each (read,bash,write) combination maps to exactly its tools:
-    ToolSet(read=True, bash=None, write=False) -> ['read_file'];
-    ToolSet(read=False, bash=BashGrammar(), write=True) -> ['bash','write_file','edit_file']."""
+    ToolSet(read=True, bash=False, write=False) -> ['read_file'];
+    ToolSet(read=False, bash=True, write=True) -> ['bash','write_file','edit_file']."""
     with override_allow_model_requests(False):
         read_only = driver.build_agent_core(
-            _defn(tools=ToolSet(read=True, bash=None, write=False)),
+            _defn(tools=ToolSet(read=True, bash=False, write=False)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=_fake_model(_text_fn()),
         )
         bash_writer = driver.build_agent_core(
-            _defn(tools=ToolSet(read=False, bash=BashGrammar(), write=True)),
+            _defn(tools=ToolSet(read=False, bash=True, write=True)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="b", make_model=_fake_model(_text_fn()),
         )
@@ -355,22 +346,26 @@ def test_toolset_exact_combos(logger):
     assert list(bash_writer._function_toolset.tools) == ["bash", "write_file", "edit_file"]
 
 
-def test_toolset_bash_none_vs_empty(logger):
-    """bash=None registers NO bash tool ('bash' absent); bash=BashGrammar() (empty grammar)
-    DOES register it — absence vs present-but-empty are observably distinct."""
+def test_toolset_bash_presence_vs_permission(logger, tmp_path):
+    """Tool PRESENCE and PERMISSION are two facts (#575, which split them into two fields —
+    they used to be one nullable `bash` grammar, so "holds the tool" and "may run something"
+    could not be spelled apart). bash=False registers NO bash tool; bash=True DOES register it
+    even when the def declares NO grants at all — and that agent's compiled policy then has an
+    EMPTY bash_allow, i.e. it holds the tool and the gate denies every command."""
+    granted = _defn(tools=ToolSet(read=True, bash=True))            # tool present, nothing granted
     with override_allow_model_requests(False):
         none_agent = driver.build_agent_core(
-            _defn(tools=ToolSet(read=True, bash=None)),
+            _defn(tools=ToolSet(read=True, bash=False)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="a", make_model=_fake_model(_text_fn()),
         )
-        empty_agent = driver.build_agent_core(
-            _defn(tools=ToolSet(read=True, bash=BashGrammar())),
-            deps_type=AgentDeps, instructions="x", logger=logger,
+        bash_agent = driver.build_agent_core(
+            granted, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="b", make_model=_fake_model(_text_fn()),
         )
-    assert "bash" not in list(none_agent._function_toolset.tools)   # None → unregistered
-    assert "bash" in list(empty_agent._function_toolset.tools)      # BashGrammar() → registered
+    assert "bash" not in list(none_agent._function_toolset.tools)   # False → unregistered
+    assert "bash" in list(bash_agent._function_toolset.tools)       # True  → registered
+    assert _compile(granted, tmp_path).bash_allow == ()             # …and granted nothing
 
 
 # ============================================================================
@@ -388,7 +383,7 @@ def test_oracle_empty_toolset(logger):
             agent_id="oracle", make_model=_fake_model(_text_fn()),
         )
         main = driver.build_agent_core(
-            _defn(tools=ToolSet(read=True, bash=BashGrammar(), write=True)),
+            _defn(tools=ToolSet(read=True, bash=True, write=True)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=_fake_model(_text_fn()),
         )
@@ -405,7 +400,7 @@ def test_verify_empty_toolset(logger):
             agent_id="verify", make_model=_fake_model(_text_fn()),
         )
         judge = driver.build_agent_core(
-            _defn(role=AgentRole.JUDGE, tools=ToolSet(read=True, bash=BashGrammar(operand_gated=True, raw_reads=True))),
+            _defn(role=AgentRole.JUDGE, tools=ToolSet(read=True, bash=True)),
             deps_type=JudgeDeps, instructions="x", logger=logger,
             agent_id="judge", make_model=_fake_model(_text_fn()),
         )
@@ -437,31 +432,40 @@ def test_oracle_no_escape_hatch(logger, tmp_path):
 # compile_policy — step-one characterization (decide_bash/decide_read UNCHANGED)
 # ============================================================================
 
-def test_compile_policy_projects_only_toolset_bits(tmp_path):
-    """SAFE-BY-CONSTRUCTION: compile_policy emits no capability the ToolSet did not declare.
-    ToolSet(read=True, bash=None) -> bash_allow==() and adapters==False; a bit is set only
-    when its ToolSet/BashGrammar source bit is set (positive control: BashGrammar(adapters=
-    True) DOES set adapters, proving the projection fires, not that it always denies)."""
-    no_bash = _compile(_defn(role=AgentRole.MAIN, tools=ToolSet(read=True, bash=None)), tmp_path)
-    assert no_bash.bash_allow == ()          # no grammar → no bash allowlist
-    assert no_bash.adapters is False
-    assert no_bash.adapter_sql_pipe is False
-    assert no_bash.operand_gated is False
-    # positive control: the source bit set -> the projected bit set
-    with_adapters = _compile(
-        _defn(role=AgentRole.GATHER, tools=ToolSet(read=True, bash=BashGrammar(adapters=True))),
-        tmp_path,
-    )
-    assert with_adapters.adapters is True
+def test_compile_policy_emits_only_declared_grants(tmp_path):
+    """SAFE-BY-CONSTRUCTION: compile_policy emits no capability the DEFINITION did not declare.
+    It is a pure composition of the def's own `bash_shapes` builders — there is no capability
+    inference left, which is the point of #575: the capability BITS
+    (`adapters`/`adapter_sql_pipe`/`operand_gated`/`raw_reads`) are gone, and each was a place a
+    declared value could disagree with the lane that enforced it. A capability is now an ADDRESS
+    in the grant list, so "main may not run an adapter" is the absence of that grant.
+
+    A def declaring no builders projects an empty lane (bash_allow == (), and — since the read
+    surface IS the cat grant's scope — an empty read_allow too). POSITIVE CONTROL: gather, whose
+    builder DOES emit the two structurally-routed adapter grants, has them; main does not."""
+    no_bash = _compile(_defn(role=AgentRole.MAIN, tools=ToolSet(read=True)), tmp_path)
+    assert no_bash.bash_allow == ()          # no builders → no grants
+    assert no_bash.read_allow == ()          # …and hence no cat scope → no read shapes
+
+    def _routes(policy) -> set[Route]:
+        return {g.route for g in policy.bash_allow}
+
+    main = _compile(MAIN_DEF, tmp_path)
+    gather = _compile(GATHER_DEF, tmp_path)
+    assert _routes(main) == {Route.PLAIN}                    # main: no adapter address at all
+    assert _routes(gather) == {                              # positive control: gather declared them
+        Route.PLAIN, Route.CAPTURE_ADAPTER, Route.CAPTURE_ADAPTER_SQL,
+    }
+    assert all(isinstance(g, Grant) for g in gather.bash_allow)
 
 
 def test_gate_bash_parity_read_convergent(tmp_path):
     """#551: `compile_policy_for` (the policy-only half of `bind`) and `bind(MAIN).policy` AGREE
-    on every probe — BASH and READ alike, including the read_shapes filename filter. `bind` is
+    on every probe — BASH and READ alike, including the path-shape filter. `bind` is
     `compile_policy_for` + the deps mint, so the two are the SAME projection; this pins that they
-    never diverge, verified through the REAL gate. (The pre-#551 read DIVERGENCE — bind tight, the
-    old broad reader factory — is gone; the tight read behaviour itself is owned by the r3_* /
-    d5_compile_policy_for_read_shapes demands in test_bind_sole_seam_551.py.)"""
+    never diverge, verified through the REAL gate. (The read↔bash agreement WITHIN one policy is
+    structural since #575 — one scope object serves both surfaces, pinned by d4/d5 in
+    test_grant_gate_575.py; what is pinned HERE is that the two COMPILE seams agree.)"""
     dfn = PATHS.defender_dir
     bound = bind(MAIN_DEF, tmp_path).policy
     authored = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=dfn)
@@ -475,7 +479,7 @@ def test_gate_bash_parity_read_convergent(tmp_path):
             permission.decide_bash(cmd, policy=bound, run_dir=tmp_path, defender_dir=dfn).allow
             == permission.decide_bash(cmd, policy=authored, run_dir=tmp_path, defender_dir=dfn).allow
         )
-    # READ: the run-dir + out-of-roots probes agree (read_shapes admits the run-dir branch; both
+    # READ: the run-dir + out-of-roots probes agree (the scope admits the run-dir branch; both
     # deny outside the roots) …
     for p in (tmp_path / "alert.json", tmp_path.parent / "outside.txt"):
         assert (
@@ -483,7 +487,7 @@ def test_gate_bash_parity_read_convergent(tmp_path):
             == permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
         )
     # … and so does a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
-    # defender_dir, outside lessons/skills/examples): the read_shapes filter now on BOTH
+    # defender_dir, outside lessons/skills/examples): the path-shape filter now on BOTH
     # (compile_policy_for carries it) DENIES it, in parity with the bash cat lane. No divergence.
     skill_md = dfn / "SKILL.md"
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
@@ -497,20 +501,22 @@ def test_gate_bash_parity_read_convergent(tmp_path):
 def test_resolve_roots_per_run_no_bleed(tmp_path):
     """resolve_roots(run_A, …) then resolve_roots(run_B, …) yield run-anchored roots with NO
     cross-run bleed (guards the #497/#534-family @cache-on-run_dir hazard): observed through
-    the main policy the roots compile to — run_A's own path is baked into run_A's anchored
-    bash_allow and is ABSENT from run_B's, and vice-versa."""
+    the main policy the roots compile to — run_A's own path is anchored in run_A's path SCOPE
+    (where #575 moved the run's roots: out of the argv shapes, into the grants' scope) and is
+    ABSENT from run_B's, and vice-versa."""
     run_a, run_b = tmp_path / "runA", tmp_path / "runB"
     run_a.mkdir()
     run_b.mkdir()
-    pa = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes, MAIN_DEF.write_shapes,
-                        resolve_roots(run_a, MAIN_DEF.corpus_dirs, RunScope()), MAIN_DEF.deny_reason)
-    pb = compile_policy(MAIN_DEF.tools, MAIN_DEF.read_shapes, MAIN_DEF.write_shapes,
-                        resolve_roots(run_b, MAIN_DEF.corpus_dirs, RunScope()), MAIN_DEF.deny_reason)
+    pa = compile_policy(MAIN_DEF, resolve_roots(run_a, MAIN_DEF.corpus_dirs, RunScope()))
+    pb = compile_policy(MAIN_DEF, resolve_roots(run_b, MAIN_DEF.corpus_dirs, RunScope()))
     na, nb = re.escape(str(run_a)), re.escape(str(run_b))
-    pats_a, pats_b = _patterns(pa), _patterns(pb)
+    pats_a, pats_b = _scope_patterns(pa), _scope_patterns(pb)
     assert any(na in p for p in pats_a)          # run_A anchored to itself
     assert not any(na in p for p in pats_b)      # …and does NOT bleed into run_B's policy
     assert any(nb in p for p in pats_b)          # run_B correctly anchored to itself
+    # the SHAPES carry no path at all now — containment lives in the scope, so a run dir must
+    # never appear in an argv pattern (the textual-containment model #575 deleted).
+    assert not any(na in g.pattern.pattern for g in pa.bash_allow)
 
 
 def test_resolve_roots_corpus_resolution(tmp_path):
@@ -544,10 +550,10 @@ def test_corpus_dirs_excludes_gather_summaries(tmp_path):
 
 def test_agents_registry_covers_every_role():
     """AGENTS covers EXACTLY the AgentRole members (one AgentDefinition each, keyed on its own
-    role — no silent last-wins drop). The spec forked at 6 roles; the #543 merge added a 7th,
-    AgentRole.LEAD_AUTHOR (the loop's first writer), which is folded into the registry — so the
-    invariant is `set(AGENTS.keys()) == set(AgentRole)`, and the count tracks the enum rather than
-    a hardcoded 6."""
+    role — no silent last-wins drop). The roster GROWS (6 at #538, LEAD_AUTHOR at #543,
+    CORPUS_AUTHOR at #556), so the invariant is `set(AGENTS.keys()) == set(AgentRole)` — the count
+    tracks the enum rather than a hardcoded number, and a new role that never registers a
+    definition fails here."""
     assert set(AGENTS.keys()) == set(AgentRole)
     assert len(AGENTS) == len(AgentRole)
     assert AgentRole.LEAD_AUTHOR in AGENTS      # the #543 writer, brought into the AgentDefinition framework
@@ -558,14 +564,14 @@ def test_agents_registry_covers_every_role():
 
 def test_agents_duplicate_role_raises():
     """GUARD: building the registry from a tuple with two AgentDefinitions sharing a role
-    RAISES (vs the dict-comp's silent last-wins overwrite). POSITIVE CONTROL: the 6 distinct
+    RAISES (vs the dict-comp's silent last-wins overwrite). POSITIVE CONTROL: the real, distinct
     defs build the registry successfully."""
     d1 = _defn(role=AgentRole.ORACLE)
     d2 = _defn(role=AgentRole.ORACLE)            # same role — the collision
     # spec-assumption: the duplicate-role error names the offending "role".
     with pytest.raises(ValueError, match="role"):
         build_registry((d1, d2))
-    # positive control: the six distinct defs collect cleanly
+    # positive control: the real, distinct defs collect cleanly
     reg = build_registry(tuple(AGENTS.values()))
     assert set(reg.keys()) == set(AgentRole)
 
@@ -655,7 +661,8 @@ def test_effort_live_on_toolfree(logger, tmp_path):
     independent of, tool registration)."""
     settings = {"extra_body": {"reasoning_effort": "none"}}   # stands for the effort-derived settings
     fake, reqs = _counting_make_model(text=_ORACLE_YAML, settings=settings)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet())
+    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=OracleDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=OracleDeps, instructions="x", logger=logger,
@@ -686,7 +693,8 @@ def test_request_limit_one_sufficient(logger, tmp_path):
     request_limit=1 — 1 request is SUFFICIENT (not merely non-crashing): the tool-free
     predictor makes exactly one model request and returns its output."""
     fake, reqs = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet())
+    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=OracleDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=OracleDeps, instructions="x", logger=logger,
@@ -705,7 +713,8 @@ def test_request_limit_reject_below_one(logger, tmp_path):
     spec-assumption: the <1 floor is realized as usage-limit starvation through the real run,
     not a silent coerce-to-1."""
     fake, _ = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet())
+    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=OracleDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=OracleDeps, instructions="x", logger=logger,
@@ -745,8 +754,7 @@ def test_agentspec_removed_migrated():
 
 def test_main_keeps_tools(logger):
     """Landing oracle/verify ToolSet() does not squeeze main: main's ToolSet(read=True,
-    bash=BashGrammar(shims,viewers), write=True) still registers all four tools — the
-    operator agent is unchanged."""
+    bash=True, write=True) still registers all four tools — the operator agent is unchanged."""
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             MAIN_DEF, deps_type=AgentDeps, instructions="x", logger=logger,

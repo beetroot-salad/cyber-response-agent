@@ -97,12 +97,17 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
 def test_oracle_policy_denies_everything():
     # #551: the standalone `_ORACLE_POLICY` constant retired; `bind(ORACLE_DEF)` compiles the
     # same deny-all policy over ORACLE_DEF's empty ToolSet.
+    #
+    # #575: the `adapters` / `adapter_sql_pipe` / `raw_reads` capability BITS are deleted. Each was
+    # a DECLARED value that could disagree with the lane that enforced it; what an agent may do is
+    # now the grant list itself. For a pure-prediction stage that makes the assertion strictly
+    # stronger AND simpler: an EMPTY `bash_allow` is not "three capabilities declared off" — it is
+    # the absence of any address at all, and the adapter routes are grants too, so
+    # `bash_allow == ()` now subsumes all three bits. The gate denials below are what prove it.
     pol = bind(ORACLE_DEF, Path("/tmp/oracle-run")).policy
-    assert pol.adapters is False
-    assert pol.adapter_sql_pipe is False
-    assert pol.raw_reads is False
+    assert pol.bash_allow == ()          # no grants ⇒ no adapter route, no sql pipe, no viewer
+    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes either
     assert pol.read_roots == ()
-    assert pol.bash_allow == ()
     # a data-source adapter, the adapter|defender-sql pipe, arbitrary python, and arbitrary shell
     # are all denied — the oracle's whole input is inlined in the prompt, so it needs none of them.
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow

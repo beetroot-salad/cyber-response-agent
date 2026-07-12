@@ -13,7 +13,11 @@ of truth, so a newly onboarded adapter auto-gates)."""
 
 from __future__ import annotations
 
-from defender.hooks._cmd_segments import ADAPTER_CLI_RE, NON_ADAPTER_SHIMS
+from defender.hooks._cmd_segments import (
+    ADAPTER_CLI_RE,
+    NON_ADAPTER_SHIMS,
+    OPERATOR_TOOLS,
+)
 from defender.runtime.bash_exec import Pipeline
 
 # The aggregation shim that consumes an adapter's payload on stdin. Only
@@ -33,7 +37,7 @@ def is_adapter_stage(argv: list[str]) -> bool:
     if cmd in ("python", "python3") and len(argv) > 1:
         cmd = argv[1]  # raw `python3 …/<system>_cli.py` form
     if cmd.startswith("defender-"):
-        return cmd not in NON_ADAPTER_SHIMS
+        return cmd not in NON_ADAPTER_SHIMS and cmd not in OPERATOR_TOOLS
     return bool(ADAPTER_CLI_RE.search(cmd))
 
 

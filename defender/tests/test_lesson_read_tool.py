@@ -35,7 +35,7 @@ import defender.runtime.tools as _rt_tools  # noqa: E402  (the shared read core 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.agents import AGENTS  # noqa: E402
+from defender.agents import AGENTS  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
@@ -356,7 +356,8 @@ def test_l12b_read_file_keeps_the_author_corpora_out_of_the_case_trace(tmp_path)
     """demand: L12, scope half — the F3 widening belongs to ``lesson_read``, NOT to every reader.
     The generic ``read_file`` core still records the RUNTIME corpus only: the gray-box actor reads
     ``lessons-actor/`` tradecraft through ``read_file`` on every run (its ``read_confine`` names it
-    and it carries no ``read_shapes``) and its ``run_dir`` IS the durable per-case learning bundle
+    and, having no ``cat`` grant, it carries no path shapes at all — #575, so ``decide_read`` stays
+    root-only inside that confine) and its ``run_dir`` IS the durable per-case learning bundle
     ``trace_lesson`` scans — so recording there would write attacker-corpus rows straight into the
     defender's lesson→outcome trace."""
     scene = _scene(tmp_path)

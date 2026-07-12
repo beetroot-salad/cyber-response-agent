@@ -2,7 +2,13 @@
 
 Thin, stable wrappers the defender agent (orchestrator + gather subagents)
 invokes by a single token — `defender-invlang enum types`,
-`defender-<system> <verb> '<query>'`, `defender-record-query … -- defender-<system> …`.
+`defender-<system> <verb> '<query>'`. A data-source adapter is run STANDALONE and captured
+transparently in-process; the old `defender-record-query … -- defender-<system> …` passthrough
+wrapper is not a form any agent runs (the gate denies it).
+
+`defender-policy` is the odd one out: an OPERATOR tool (`show` / `explain` the gate), listed in
+`hooks/_cmd_segments.OPERATOR_TOOLS` so that no agent's lane admits it — reading your own gate is
+a map of what to attack.
 
 ## Why
 

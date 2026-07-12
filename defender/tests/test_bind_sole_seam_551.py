@@ -2,6 +2,32 @@
 the SOLE production policy seam for all 7 roles (AgentDefinition consolidation step three).
 The demand list, structure, and gate live in `spec_graph_551.yaml` beside this file.
 
+PORTED TO THE #575 CONTAINMENT MODEL. #551's property — bind/compile_policy is the ONE seam
+that turns a definition + a run into deps + policy — survives #575 whole; only the SHAPE of
+what compile_policy emits changed, so almost every demand below is re-expressed, not dropped:
+
+  - `AgentPolicy.bash_allow` is a tuple of `Grant`s (a SHAPE — program + flags + arity, no
+    paths — plus a SCOPE: anchored regexes over the RESOLVED path), not a tuple of anchored
+    argv regexes with the run's roots baked in. So the projection helpers (`_policy_full`)
+    project grants, and the "does the lane admit X" assertions are unchanged (they always
+    went through `decide_bash`, which is the honest surface).
+  - the capability BITS are gone (`operand_gated` / `adapters` / `adapter_sql_pipe` /
+    `raw_reads`). Each was a declared value that could disagree with the lane enforcing it;
+    each is now the grant list itself. Where a demand pinned a bit, it now pins the PROPERTY
+    the bit stood for: `operand_gated` → every `cat` operand is scope-checked at resolve()
+    time (a symlink out of the roots denies); `raw_reads` → the judge's `cat` scope reaches
+    the gather_raw payloads under its comparison roots, and the actor's lane has no `cat`
+    grant at all.
+  - the separate read grammar (`read_shapes` on the def, `AgentPolicy.read_shapes`) is gone:
+    the read surface IS the `cat` grant's scope OBJECT (`read_allow_of`), so the read↔bash
+    parity demands (r3) are now checkable by IDENTITY on top of the behavioural agreement.
+  - `compile_policy(defn, roots)` replaces the 5-positional `(tools, read_shapes,
+    write_shapes, roots, deny_reason)`; `BashGrammar` is deleted (`ToolSet.bash` is a bool +
+    the def's own `bash_shapes` grant builders); the registry moved to `defender.agents`.
+  - deliberate lane subtractions (#575): `grep`/`head`/`tail`/`wc`/`jq` lost their file
+    operand, `ls`/`cd` are gone. Assertions that leaned on them are re-aimed at the same
+    property through a surviving spelling.
+
 #545/#546 shipped `bind` as the production deps+policy seam. #551 finishes the job:
 
   - `resolve_roots` + `bind` gain a unified `defender_dir` param and DROP the `repo_root`
@@ -68,7 +94,6 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.author.verify_forward.engine import VerifierDeps  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
@@ -78,24 +103,23 @@ from defender.learning.pipeline.oracle_engine import OracleDeps  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import files  # noqa: E402
-from defender.runtime.permission.policies._common import (  # noqa: E402
-    READER_VIEWERS,
-    reader_patterns_for,
-)
+from defender.runtime.permission.grant import Grant  # noqa: E402
+from defender.runtime.permission.policies._common import reader_grants  # noqa: E402
 from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
 
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
-    BashGrammar,
+    ResolvedRoots,
     RunScope,
     ToolSet,
     bind,
     compile_policy,
     compile_policy_for,
+    read_allow_of,
     resolve_roots,
 )
-from defender.runtime.agents import (  # noqa: E402
+from defender.agents import (  # noqa: E402
     ACTOR_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
@@ -122,13 +146,24 @@ _CORPUS_MD = _DEFENDER / "lessons" / "_probe_551.md"
 _NON_MD = _DEFENDER / "skills" / "gather" / "run.py"   # a non-.md path under the corpus
 
 
-def _policy9(p) -> tuple:
-    """The 9 LEGACY AgentPolicy fields as a comparable tuple (bash_allow / write_allow
-    Patterns → their source strings). INCLUDES write_allow, EXCLUDES the additive
-    read_shapes (tested separately / folded into `_policy_full`)."""
+def _grant(g: Grant) -> tuple:
+    """One `Grant` as a comparable tuple — the shape (program + argv pattern), the scope (its
+    anchored resolved-path regexes), the route, and the pins_path exemption bit. EVERY field:
+    a projection that silently dropped `scope` would compare two policies anchored on different
+    trees as equal, which is exactly the split d3 exists to catch."""
     return (
-        tuple(pat.pattern for pat in p.bash_allow),
-        p.operand_gated, p.adapters, p.adapter_sql_pipe, p.raw_reads,
+        g.program, g.pattern.pattern, tuple(s.pattern for s in g.scope), g.route, g.pins_path,
+    )
+
+
+def _policy_full(p) -> tuple:
+    """EVERY AgentPolicy field as a comparable tuple (#575's fields — the capability bits and
+    the second read grammar are gone; `read_allow` IS the cat grant's scope object). The
+    projection that proves the defender_dir==PATHS threading is behaviour-preserving over every
+    field a caller reads."""
+    return (
+        tuple(_grant(g) for g in p.bash_allow),
+        tuple(pat.pattern for pat in p.read_allow),
         tuple(str(r) for r in p.read_roots),
         tuple(str(r) for r in p.read_confine),
         tuple(pat.pattern for pat in p.write_allow),
@@ -136,23 +171,37 @@ def _policy9(p) -> tuple:
     )
 
 
-def _policy_full(p) -> tuple:
-    """`_policy9` plus the read_shapes filename grammar — the projection that proves the
-    defender_dir==PATHS threading is behaviour-preserving over EVERY field a caller reads."""
-    return _policy9(p) + (tuple(pat.pattern for pat in p.read_shapes),)
-
-
 def _actor_scope() -> RunScope:
     return RunScope(scripts=(_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
 
 
-def _reader_toolset() -> ToolSet:
-    """A main/gather-shaped reader ToolSet — the full declared viewer/shim set, so a compiled
-    lane equals the production main/gather reader lane."""
-    return ToolSet(
-        read=True,
-        bash=BashGrammar(viewers=READER_VIEWERS, shims=tuple(NON_ADAPTER_SHIMS)),
+def _reader_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
+    """The production main-shaped reader grant builder (`_common.reader_grants`) — so a def
+    compiled here carries the real reader lane (one `cat` opener scoped to the run + corpus,
+    the stdin-only viewers, the non-adapter shims), not a toy one."""
+    return reader_grants(roots.run_dir, roots.defender_dir, raw=False, adapters=False)
+
+
+def _reader_def(*, write=False, write_shapes=()) -> AgentDefinition:
+    """An ad-hoc main-shaped AgentDefinition for the `compile_policy` seam tests. Built INSIDE
+    the helper (never at module level) so a field change is a runtime failure, not a collection
+    error. #575: the lane is the def's OWN `bash_shapes` builder — there is no `BashGrammar`
+    carried on the ToolSet any more; `bash` is presence, the grants are permission."""
+    return AgentDefinition(
+        role=AgentRole.MAIN,
+        model=lambda: "m",
+        effort=None,
+        tools=ToolSet(read=True, bash=True, write=write),
+        bash_shapes=(_reader_bash_shapes,),
+        write_shapes=write_shapes,
+        deps_cls=AgentDeps,
     )
+
+
+def _main_write_shape(roots: ResolvedRoots) -> tuple:
+    """MAIN's write scope builder shape: `(ResolvedRoots) -> patterns` (#575 — one arg, the
+    resolved roots, not the old `(run_dir, defender_dir)` pair)."""
+    return (permission.build_write_allow(roots.run_dir),)
 
 
 # ============================================================================
@@ -180,19 +229,26 @@ def test_d0_bind_return_contract(tmp_path):
 # ============================================================================
 
 def test_d1_judge_via_bind(tmp_path):
-    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs, ticket_cli)) yields an
-    operand_gated + raw_reads policy whose read_roots == add_dirs and whose bash lane
-    carries the pinned --require-closed ticket read."""
-    # GREEN@HEAD: judge binds off scope alone (no defender_dir); stays green post-#551.
+    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs, ticket_cli)) yields a policy
+    whose read_roots == add_dirs, whose `cat` grant is SCOPED to those roots (the #575 successor
+    of the `operand_gated` bit: every cat operand is checked against the scope at resolve() time,
+    which is how the judge reaches a gather_raw payload living under the INVESTIGATION run dir —
+    the `raw_reads` bit's whole content), and whose bash lane carries the pinned --require-closed
+    ticket read."""
+    # GREEN@HEAD: judge binds off scope alone (no defender_dir); stays green post-#551/#575.
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
+    cmp.mkdir()
     tcli = tmp_path / "ticket_cli.py"
     jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,), ticket_cli=("python3", tcli)))
     assert isinstance(jdeps, JudgeDeps)
     jpol = jdeps.policy
-    assert jpol.operand_gated
-    assert jpol.raw_reads  # DECLARED on the grammar — the judge has no adapters bit to imply it
     assert jpol.read_roots == (cmp,)
+    # `raw_reads` as a PROPERTY: the judge's opener reaches gather_raw under the comparison root
+    # (its own run_dir never contains it) — no bit declares this, the cat grant's scope IS it.
+    assert permission.decide_bash(
+        f"cat {cmp}/gather_raw/l-001/0.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
+    ).allow
     # bash lane: a cat operand inside the comparison root is admitted, outside denied.
     assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash("cat /etc/passwd", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
@@ -203,17 +259,30 @@ def test_d1_judge_via_bind(tmp_path):
     # the benign --require-closed ticket read (required flag enforced).
     assert permission.decide_bash(f"python3 {tcli} list-tickets --require-closed", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash(f"python3 {tcli} list-tickets", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    # `operand_gated` as a PROPERTY: the operand is gated at resolve() time, not textually — a
+    # symlink INSIDE the comparison root pointing OUT of it denies (a textual anchor could not
+    # see through it). This is now the model for every agent, so the bit has nothing left to say.
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_text("x")
+    os.symlink(tmp_path / "outside" / "secret", cmp / "evil.json")
+    assert not permission.decide_bash(
+        f"cat {cmp}/evil.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
+    ).allow
 
 
 def test_d1_actor_via_bind(tmp_path):
     """d1_actor_via_bind: bind(ACTOR_DEF, scope=RunScope(scripts, read_confine)) yields a policy
-    with one python3-<script> bash pattern per pinned script, read_confine == the confine, raw_reads False."""
-    # GREEN@HEAD: actor binds off scope alone; stays green post-#551.
+    with one pinned python3-<script> GRANT per script, read_confine == the confine, and NO `cat`
+    grant at all — which is the #575 successor of `raw_reads=False`: the actor has no opener, so
+    it has no read shapes either (`read_allow == ()`, decide_read stays root-only inside the
+    confine) and no address into gather_raw exists to be clamped."""
+    # GREEN@HEAD: actor binds off scope alone; stays green post-#551/#575.
     run = tmp_path / "run"
     scope = _actor_scope()
     apol = bind(ACTOR_DEF, run, scope=scope).policy
     assert apol.read_confine == scope.read_confine
-    assert not apol.raw_reads
+    assert apol.read_allow == ()
+    assert all(g.program == "python3" and g.pins_path for g in apol.bash_allow)
     assert len(apol.bash_allow) == len(scope.scripts)
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --tags", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash("cat /etc/passwd", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
@@ -226,7 +295,9 @@ def test_d1_oracle_via_bind(tmp_path):
     run = tmp_path / "run"
     opol = bind(ORACLE_DEF, run).policy
     assert isinstance(bind(ORACLE_DEF, run), OracleDeps)
-    assert not permission.decide_bash("ls", policy=opol, run_dir=run, defender_dir=_DEFENDER).allow
+    # probe with a command a GRANTED agent could run (`ls` is gone from every lane since #575, so
+    # denying it would prove nothing about this policy) — the deny here is the empty grant list.
+    assert not permission.decide_bash(f"cat {run}/report.md", policy=opol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_write(run / "x.md", "c", policy=opol).allow
 
 
@@ -236,7 +307,7 @@ def test_d1_verifier_via_bind(tmp_path):
     run = tmp_path / "source-run"
     vpol = bind(VERIFY_DEF, run).policy
     assert isinstance(bind(VERIFY_DEF, run), VerifierDeps)
-    assert not permission.decide_bash("ls", policy=vpol, run_dir=run, defender_dir=_DEFENDER).allow
+    assert not permission.decide_bash(f"cat {run}/report.md", policy=vpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_write(run / "x.md", "c", policy=vpol).allow
 
 
@@ -305,23 +376,18 @@ def test_d1_no_factory_in_stage_modules():
 # ============================================================================
 
 def test_d2_write_shapes_field(tmp_path):
-    """d2_write_shapes_field (seam): compile_policy takes write_shapes — per-run (run_dir,
-    defender_dir)->patterns builders resolved into write_allow (exactly like read_shapes); a
-    read-only stage's empty write_shapes ⇒ empty write_allow."""
-    # RED@HEAD: compile_policy is 4-arg (tools, read_shapes, roots, deny_reason) → TypeError.
+    """d2_write_shapes_field (seam): the def carries `write_shapes` — per-run (ResolvedRoots)->
+    patterns builders that `compile_policy(defn, roots)` resolves into write_allow (the write twin
+    of the grant scope); a read-only def's empty write_shapes ⇒ empty write_allow."""
+    # #575: compile_policy is `(defn, roots)` — the ToolSet/read_shapes/deny_reason positionals
+    # folded back onto the definition they always belonged to.
     run = tmp_path / "run"
     roots = resolve_roots(run, (), RunScope())
-    main_shape = lambda rd, dfn: (permission.build_write_allow(rd),)  # noqa: E731
-    pol = compile_policy(_reader_toolset_write(), (), (main_shape,), roots, "d")
+    pol = compile_policy(_reader_def(write=True, write_shapes=(_main_write_shape,)), roots)
     assert permission.decide_write(run / "x.md", "c", policy=pol).allow          # resolved into write_allow
     assert not permission.decide_write(tmp_path / "y.md", "c", policy=pol).allow  # outside the shape
-    ro = compile_policy(_reader_toolset(), (), (), roots, "d")                    # write=False + empty
+    ro = compile_policy(_reader_def(), roots)                                     # write=False + empty
     assert ro.write_allow == ()
-
-
-def _reader_toolset_write() -> ToolSet:
-    """A writer ToolSet (read + bash + write) for the write_shapes compile_policy tests."""
-    return ToolSet(read=True, bash=BashGrammar(), write=True)
 
 
 def test_d2_main_write_shape_anchors_run_dir(tmp_path):
@@ -352,7 +418,7 @@ def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
 def test_d2_write_shape_resolves_symlinked_root(tmp_path):
     """d2_write_shape_resolves_symlinked_root (parity): under a symlinked base, decide_write of a
     real-path target is admitted — the write shape anchors on RESOLVED roots (the write twin of
-    reader_read_shapes' #546 .resolve()); a shape that forgot resolve() bricks every write."""
+    `_common.read_shapes`' #546 .resolve()); a shape that forgot resolve() bricks every write."""
     # GREEN@HEAD: build_write_allow already resolve()s its root; the migration must keep it.
     real = tmp_path / "real"
     real.mkdir()
@@ -657,20 +723,23 @@ def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
 
 
 def test_d5_judge_actor_bash_lane_preserved(tmp_path):
-    """d5_judge_actor_bash_lane_preserved (survival): the judge lane (operand_gated, operands
-    confined to the read roots) and the actor python3-<script> lane are UNCHANGED by the factory
-    retirement — _judge_policy/_actor_policy stay as compile_policy._bash_allow's pattern helpers."""
-    # GREEN@HEAD: decide_bash for judge/actor is identical after #551.
+    """d5_judge_actor_bash_lane_preserved (survival): the judge lane (a `cat` opener whose
+    operands must resolve into its read roots) and the actor pinned python3-<script> lane are
+    UNCHANGED by the factory retirement — each def's own `bash_shapes` builder is now the sole
+    source of its grants, and decide_bash behaves identically."""
+    # GREEN@HEAD: decide_bash for judge/actor is identical after #551/#575.
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
     jpol = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,))).policy
-    assert jpol.operand_gated
     assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash("cat /etc/shadow", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
 
     apol = bind(ACTOR_DEF, run, scope=_actor_scope()).policy
     assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --q x", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
+    # the actor holds NO viewer grant at all (#575 also took grep's file operand away, but the
+    # deny here is the older, stronger one: grep is not in the actor's grant list).
     assert not permission.decide_bash("grep secret /etc/passwd", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
+    assert not permission.decide_bash(f"cat {run}/x.md", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
 
 
 def test_d5_actor_read_confine_not_leaked_from_builder(tmp_path):
@@ -691,8 +760,9 @@ def test_d5_actor_read_confine_not_leaked_from_builder(tmp_path):
 
 def test_d5_compile_policy_for_read_shapes(tmp_path):
     """d5_compile_policy_for_read_shapes (survival): `compile_policy_for` (the policy-only half of
-    `bind`) carries reader_read_shapes, so a non-.md corpus read flips allow→deny to MATCH
-    bind(MAIN_DEF) (hole H4). The retired broad reader factory set read_shapes=() and admitted it."""
+    `bind`) carries the reader's read shapes — post-#575 by IDENTITY, since `read_allow` IS the cat
+    grant's scope — so a non-.md corpus read flips allow→deny to MATCH bind(MAIN_DEF) (hole H4).
+    The retired broad reader factory set no shapes and admitted it."""
     run = tmp_path / "run"
     ppol = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=_DEFENDER)
     assert not permission.decide_read(_NON_MD, run_dir=run, defender_dir=_DEFENDER, policy=ppol).allow
@@ -702,10 +772,12 @@ def test_d5_compile_policy_for_read_shapes(tmp_path):
 
 
 def test_d5_reader_patterns_for_kept(tmp_path):
-    """d5_reader_patterns_for_kept (survival): the parametrized reader_patterns_for STAYS (the
-    compile_policy._bash_allow caller) so every bound main/gather reader lane is unchanged."""
+    """d5_reader_patterns_for_kept (survival; the builder is `_common.reader_grants` since #575 —
+    the demand id is kept so the spec_graph node still resolves): the ONE parametrized reader-lane
+    builder STAYS shared by main + gather (called from each def's own `bash_shapes`), so every
+    bound reader lane is unchanged and the two agents cannot drift into two grammars."""
     # GREEN@HEAD.
-    assert callable(reader_patterns_for)
+    assert callable(reader_grants)
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
     assert permission.decide_bash(f"cat {_CORPUS_MD}", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
@@ -791,10 +863,13 @@ def test_d6_guard_needs_worktree_defender_dir(tmp_path):
 def test_r3_read_bash_filename_parity(tmp_path):
     """r3_read_bash_filename_parity (parity): for a reader agent, decide_read and the bash cat lane
     agree on the SAME probe files — a corpus .md admitted by both, a non-.md corpus file denied by
-    both (the read_shapes filter == the cat operand grammar)."""
+    both. #575 makes the mechanism structural: read_allow IS the `cat` grant's scope OBJECT
+    (`read_allow_of`), so there is no second grammar left to drift; the behavioural agreement below
+    is the property that identity buys."""
     # GREEN@HEAD.
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
+    assert pol.read_allow is read_allow_of(pol.bash_allow)   # one object, not two grammars
     for probe in (_CORPUS_MD, _NON_MD):
         read_ok = permission.decide_read(probe, run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
         bash_ok = permission.decide_bash(f"cat {probe}", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
@@ -805,7 +880,8 @@ def test_r3_symlinked_base_admits(tmp_path):
     """r3_symlinked_base_admits (parity): under a SYMLINKED run base (link->real), decide_read of a
     run-dir file is ADMITTED (resolves through the link) and agrees with the bash cat lane — the #546
     fixture the #545 suite lacked (all its fixtures were canonical)."""
-    # GREEN@HEAD: reader_read_shapes anchors on the RESOLVED run base (#546); the fold must keep it.
+    # GREEN@HEAD: the reader's shapes anchor on the RESOLVED run base (#546 — `_common.read_shapes`
+    # resolve()s its roots, and #575 resolves the OPERAND too); the fold must keep it.
     real = tmp_path / "real"
     real.mkdir()
     (real / "scratch.md").write_text("x")
@@ -868,17 +944,15 @@ def test_r5_tools_write_write_shapes_agree(tmp_path):
     inconsistent AgentDefinition — write=True with empty write_shapes (a writer with no scope →
     would deny all writes) OR write=False with a non-empty write_shape (dead scope). Positive
     control: write=True+non-empty and write=False+empty both compile clean."""
-    # RED@HEAD: compile_policy is 4-arg (no write_shapes) → the 5-arg call TypeErrors before it can validate.
     run = tmp_path / "run"
     roots = resolve_roots(run, (), RunScope())
-    main_shape = lambda rd, dfn: (permission.build_write_allow(rd),)  # noqa: E731
     with pytest.raises((ValueError, TypeError)):
-        compile_policy(_reader_toolset_write(), (), (), roots, "d")           # write=True ⊗ empty → raise
+        compile_policy(_reader_def(write=True), roots)                              # write=True ⊗ empty
     with pytest.raises((ValueError, TypeError)):
-        compile_policy(_reader_toolset(), (), (main_shape,), roots, "d")      # write=False ⊗ non-empty → raise
+        compile_policy(_reader_def(write_shapes=(_main_write_shape,)), roots)       # write=False ⊗ non-empty
     # positive controls compile clean.
-    compile_policy(_reader_toolset_write(), (), (main_shape,), roots, "d")    # write=True + non-empty
-    compile_policy(_reader_toolset(), (), (), roots, "d")                     # write=False + empty
+    compile_policy(_reader_def(write=True, write_shapes=(_main_write_shape,)), roots)
+    compile_policy(_reader_def(), roots)
 
 
 # ============================================================================

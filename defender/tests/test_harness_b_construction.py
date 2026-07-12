@@ -7,9 +7,14 @@ GATHER, `engine_pydantic.build_judge_agent` JUDGE). #493 collapsed them onto one
 path; **#538 then folded the per-agent config into an `AgentDefinition`** — so
 `build_agent_core` now takes an `AgentDefinition` (its `ToolSet` drives registration),
 and the old `AgentSpec` / `spec_for_role` are gone (their shape is now pinned by
-`test_agent_definition.py`, and each agent's `AgentDefinition` lives in
-`runtime.agents`). What remains here covers the provider effort/settings seam and the
-three callers surviving the collapse.
+`test_agent_definition.py`, and the agent REGISTRY now lives at `defender.agents` — #575 moved it
+out of `runtime/`, since a registry ENUMERATES agents and `runtime/` is the library they are built
+on). What remains here covers the provider effort/settings seam and the three callers surviving the
+collapse.
+
+#575 also split tool PRESENCE from PERMISSION: `ToolSet.bash` is a plain `bool` (does the bash tool
+get REGISTERED) and WHAT an agent may then run is its def's `bash_shapes` grants. These construction
+tests only ever asserted registration, so they read the bool; the grants are pinned at the gate.
 
 Resolved design forks (see issue #493 comment thread):
   - EFFORT OMIT = **None-canonical**. `effort_for_role` returns `str | None`; None is
@@ -49,7 +54,6 @@ from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import driver, observe, providers  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
-    BashGrammar,
     ToolSet,
 )
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -215,7 +219,7 @@ def test_build_agent_core_registers_read_only_pair(logger):
     writers reach a read-only agent (the security-relevant default)."""
     fake, _ = _capture_make_model()
     defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort=None,
-                           tools=ToolSet(read=True, bash=BashGrammar()))
+                           tools=ToolSet(read=True, bash=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
@@ -229,7 +233,7 @@ def test_build_agent_core_registers_write_tools(logger):
     authoring surface). The writers bit is the one build-time permission the def carries."""
     fake, _ = _capture_make_model()
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low",
-                           tools=ToolSet(read=True, bash=BashGrammar(), write=True))
+                           tools=ToolSet(read=True, bash=True, write=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,

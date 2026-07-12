@@ -1,10 +1,11 @@
 """Emit spec_graph_575-grant-gate.yaml from a Python structure (so it is valid by construction)."""
 import yaml
 
-D = lambda i, k, f, b, o, r=None: {
-    "id": i, "kind": k, "form": f, "binds": b, "outcome": {"nl": o},
-    **({"rejected": [{"nl": x} for x in r]} if r else {})
-}
+def D(i, k, f, b, o, r=None):
+    return {
+        "id": i, "kind": k, "form": f, "binds": b, "outcome": {"nl": o},
+        **({"rejected": [{"nl": x} for x in r]} if r else {}),
+    }
 
 demands = [
  # §A containment model
@@ -127,7 +128,8 @@ demands = [
    "A wedging stage such as tail -f is bounded by the bash timeout, not by the gate. b7 pins the DENY; the timeout is out of scope."),
 ]
 
-B = lambda i, p, f=None: {"id": i, "provenance": p, "facets": f or {}}
+def B(i, p, f=None):
+    return {"id": i, "provenance": p, "facets": f or {}}
 
 structure = {
  "axes": ["agent_role", "program", "operand_path", "via", "run_dir"],
@@ -213,33 +215,34 @@ structure = {
  ],
 }
 
-O = lambda rule, el, by, w: {"rule": rule, "element": el, "discharged_by": by, "witness": w}
+def Ob(rule, el, by, w):
+    return {"rule": rule, "element": el, "discharged_by": by, "witness": w}
 
 gate = {
  "evaluated": [{"rule":"R0","fired":True},{"rule":"R1","fired":True},{"rule":"R2","fired":False},
                {"rule":"R3","fired":True},{"rule":"R4","fired":True},{"rule":"R5","fired":True}],
  "obligations": [
-   O("R3","read_surface.access[bash]","d4","Read surface reached via bash AND read-tool. The design claims parity becomes structural, so a demand must FALSIFY it (a policy whose two lists differ must fail the harness), not merely sample paths that happen to agree."),
-   O("R3","read_surface.access[read-tool]","d5","Per constraint-by-via cell: confine must hold on BOTH vias for the same agent and path. The allow-matrix over a fixed corpus."),
-   O("R3","read_surface.access[bash]","d6","The denylist constraint is enforced on the read-tool via today; it must still be enforced on the bash via INSIDE scope, since a dot-env file matches the corpus markdown shape."),
-   O("R3","read_surface.access[read-tool]","d2","The gather_raw confine constraint is enforced on the bash via by positive enumeration; the read-tool via loses raw_reads and must enforce it too, or main can read_file any payload."),
-   O("R3","read_surface.access[read-tool]","d3","is_untrusted_read keys on RAW_MARKER to salt-tag payload reads; removing the marker without a shape-based replacement fails the prompt-injection defense OPEN."),
-   O("R4","PROGRAMS.domain.distinguished[cat]","b1","The one member with a real extractor."),
-   O("R4","PROGRAMS.domain.distinguished[absent]","b2","The absent member must FAIL LOUD. It replaces today's silent pass-through, where an untabled program is simply ungated."),
-   O("R4","PROGRAMS.domain.distinguished[OPENS_NOTHING]","b7","OPENS_NOTHING is the DEFAULT member and it skips the scope check entirely, so its shape regex is the sole containment. Every file-opening flag must be exercised against it."),
-   O("R4","Grant.pins_path.domain.distinguished[true]","e1","pins_path true is the exempt member; the judge's mandatory require-closed lookahead lives inside that exemption and must be exercised on BOTH sides."),
-   O("R5","PROGRAMS.domain.distinguished[OPENS_NOTHING]","b8","SAFE-BY-CONSTRUCTION (R5's judgment extension). A future author can declare a program OPENS_NOTHING and write a shape admitting a file-opening flag; the gate then skips the scope check and the program opens a file nobody checked. Assert the grammar CANNOT be built unsafe, not merely that today's grammars happen to be safe."),
-   O("R5","read_surface","c1","The file-operand viewer forms are removed; the cat-piped substitute must demonstrably complete."),
-   O("R5","read_surface","c2","ls and cd are removed from the lane."),
-   O("R5","gather_query_template","c4","The one shipped jq template is a live consumer of the bash lane; it must still run."),
-   O("R5","curator_prompt","c6","The curator prompts positively instruct an ls of the lessons dir and a grep with a file operand; both are removed. The substitute is the #574 manifest plus cat-into-grep."),
-   O("R5","deny_reason","g1","Three deny reasons NAME the removed programs (main and gather policies name ls; the adapter reason says to filter the persisted payload FILE with jq/grep). A reason naming a dead program teaches a dead command."),
-   O("R5","_lane_admits","g2","_lane_admits fullmatches over policy.bash_allow: an AttributeError in production, in the overflow path, the moment that tuple holds Grants."),
-   O("R5","RAW_MARKER","c5","Removing the substring scan LOOSENS: a command merely MENTIONING gather_raw is no longer denied. Verified against HEAD. Pin the new verdict as an examined change, not a regression."),
-   O("R5","reader_patterns_for","h2","reader_patterns_for is an lru_cache of size one and gather binds per DISPATCH; whatever replaces it must not bleed across run dirs."),
-   O("R5","BashGrammar","f1","adapters and adapter_sql_pipe leave BashGrammar, but tools still consumes decision.adapter_argv and .sql_pipe; the Decision contract must survive."),
-   O("R0","harness_lead","h4","check_actors: harness_lead and replay_actor re-exec as subprocesses and RELOCATE the tree anchor (#562). The lead author binds with defender_dir=<worktree> and requires_explicit_tree; if a grant's scope is compiled from the module-level PATHS constant rather than the threaded defender_dir, a worktree run gets grants anchored on the MAIN CHECKOUT."),
-   O("R1","interacts(tool_bash->bash_exec).payload","f6","The gate parses once and the executor runs decision.pipelines. Nothing asserts that what run_parsed RECEIVES is what the gate GATED: capture the inbound argv at the seam, or a parser differential can reopen silently."),
+   Ob("R3","read_surface.access[bash]","d4","Read surface reached via bash AND read-tool. The design claims parity becomes structural, so a demand must FALSIFY it (a policy whose two lists differ must fail the harness), not merely sample paths that happen to agree."),
+   Ob("R3","read_surface.access[read-tool]","d5","Per constraint-by-via cell: confine must hold on BOTH vias for the same agent and path. The allow-matrix over a fixed corpus."),
+   Ob("R3","read_surface.access[bash]","d6","The denylist constraint is enforced on the read-tool via today; it must still be enforced on the bash via INSIDE scope, since a dot-env file matches the corpus markdown shape."),
+   Ob("R3","read_surface.access[read-tool]","d2","The gather_raw confine constraint is enforced on the bash via by positive enumeration; the read-tool via loses raw_reads and must enforce it too, or main can read_file any payload."),
+   Ob("R3","read_surface.access[read-tool]","d3","is_untrusted_read keys on RAW_MARKER to salt-tag payload reads; removing the marker without a shape-based replacement fails the prompt-injection defense OPEN."),
+   Ob("R4","PROGRAMS.domain.distinguished[cat]","b1","The one member with a real extractor."),
+   Ob("R4","PROGRAMS.domain.distinguished[absent]","b2","The absent member must FAIL LOUD. It replaces today's silent pass-through, where an untabled program is simply ungated."),
+   Ob("R4","PROGRAMS.domain.distinguished[OPENS_NOTHING]","b7","OPENS_NOTHING is the DEFAULT member and it skips the scope check entirely, so its shape regex is the sole containment. Every file-opening flag must be exercised against it."),
+   Ob("R4","Grant.pins_path.domain.distinguished[true]","e1","pins_path true is the exempt member; the judge's mandatory require-closed lookahead lives inside that exemption and must be exercised on BOTH sides."),
+   Ob("R5","PROGRAMS.domain.distinguished[OPENS_NOTHING]","b8","SAFE-BY-CONSTRUCTION (R5's judgment extension). A future author can declare a program OPENS_NOTHING and write a shape admitting a file-opening flag; the gate then skips the scope check and the program opens a file nobody checked. Assert the grammar CANNOT be built unsafe, not merely that today's grammars happen to be safe."),
+   Ob("R5","read_surface","c1","The file-operand viewer forms are removed; the cat-piped substitute must demonstrably complete."),
+   Ob("R5","read_surface","c2","ls and cd are removed from the lane."),
+   Ob("R5","gather_query_template","c4","The one shipped jq template is a live consumer of the bash lane; it must still run."),
+   Ob("R5","curator_prompt","c6","The curator prompts positively instruct an ls of the lessons dir and a grep with a file operand; both are removed. The substitute is the #574 manifest plus cat-into-grep."),
+   Ob("R5","deny_reason","g1","Three deny reasons NAME the removed programs (main and gather policies name ls; the adapter reason says to filter the persisted payload FILE with jq/grep). A reason naming a dead program teaches a dead command."),
+   Ob("R5","_lane_admits","g2","_lane_admits fullmatches over policy.bash_allow: an AttributeError in production, in the overflow path, the moment that tuple holds Grants."),
+   Ob("R5","RAW_MARKER","c5","Removing the substring scan LOOSENS: a command merely MENTIONING gather_raw is no longer denied. Verified against HEAD. Pin the new verdict as an examined change, not a regression."),
+   Ob("R5","reader_patterns_for","h2","reader_patterns_for is an lru_cache of size one and gather binds per DISPATCH; whatever replaces it must not bleed across run dirs."),
+   Ob("R5","BashGrammar","f1","adapters and adapter_sql_pipe leave BashGrammar, but tools still consumes decision.adapter_argv and .sql_pipe; the Decision contract must survive."),
+   Ob("R0","harness_lead","h4","check_actors: harness_lead and replay_actor re-exec as subprocesses and RELOCATE the tree anchor (#562). The lead author binds with defender_dir=<worktree> and requires_explicit_tree; if a grant's scope is compiled from the module-level PATHS constant rather than the threaded defender_dir, a worktree run gets grants anchored on the MAIN CHECKOUT."),
+   Ob("R1","interacts(tool_bash->bash_exec).payload","f6","The gate parses once and the executor runs decision.pipelines. Nothing asserts that what run_parsed RECEIVES is what the gate GATED: capture the inbound argv at the seam, or a parser differential can reopen silently."),
  ],
  "holes": [
    {"rule":"R0","element":"Grant.pins_path","resolved_to":"a2","resolution":

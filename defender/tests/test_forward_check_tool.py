@@ -63,7 +63,7 @@ from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa
 from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.agents import AGENTS  # noqa: E402
+from defender.agents import AGENTS  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 # --- THE TARGET (missing until implemented; the ImportError IS the expected red) ---
@@ -1163,20 +1163,35 @@ def test_d25_no_bash_grant_for_the_verifier(tmp_path):
 
 
 def test_d25b_surviving_bash_lane_still_works(tmp_path):
-    """The curator's single-path in-corpus rm and its ls, grep and cat viewers are still
-    admitted."""
+    """The curator's single-path in-corpus rm and its corpus reads are still admitted.
+
+    #575 re-spells WHICH programs express that read, so the paired positive control for d25 (which
+    denies the interpreter) must move with the lane or it would be asserting a dead command:
+
+      * `ls` is DELETED from every lane — the corpus inventory is the #574 manifest now, so the
+        listing is served with no gated program at all;
+      * `grep` lost its FILE operand — it is a stdin-only pipe stage (`cat <file> | grep <pat>`),
+        which is what makes `cat` the sole opener in the one containment model.
+
+    The demand (the curator can still read and prune its corpus from bash after losing the verifier
+    grant) is unchanged; both the surviving forms and the two retired ones are pinned here, so a
+    silent re-grant of `ls`/`grep <file>` to this denylist-free lane would fail."""
     scene = _scene(tmp_path)
     deps = _deps(scene, run_verify=FakeVerify(), queued=set())
-    for cmd in (
-        "rm defender/lessons/draft.md",
-        "ls defender/lessons/",
-        "cat defender/lessons/existing.md",
-        "grep pattern defender/lessons/existing.md",
-    ):
-        d = permission.decide_bash(
+
+    def gate(cmd):
+        return permission.decide_bash(
             cmd, policy=deps.policy, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         )
-        assert d.allow, f"the surviving bash lane rejected {cmd!r}: {d.reason}"
+
+    for cmd in (
+        "rm defender/lessons/draft.md",
+        "cat defender/lessons/existing.md",
+        "cat defender/lessons/existing.md | grep pattern",
+    ):
+        assert gate(cmd).allow, f"the surviving bash lane rejected {cmd!r}: {gate(cmd).reason}"
+    for gone in ("ls defender/lessons/", "grep pattern defender/lessons/existing.md"):
+        assert not gate(gone).allow, f"a program #575 deleted is still admitted: {gone!r}"
 
 
 def test_d26_no_curator_resolves_a_verifier_interpreter(tmp_path):

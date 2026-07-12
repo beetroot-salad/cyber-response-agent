@@ -14,6 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
+from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -22,8 +23,10 @@ from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline import actor_engine  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope, _run_actor_pydantic  # noqa: E402
+from defender.learning.pipeline.actor_engine import ACTOR_DEF  # noqa: E402
 from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
+from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
@@ -82,6 +85,22 @@ def _prompt(tmp_path):
 
 _STORY = "0. Techniques used\n\n1. The adversary logged in with stolen creds and pivoted.\n"
 
+_RUN = Path("/tmp/actor-run")   # absolute (bind's root guard rejects a relative anchor)
+
+
+def _actor_policy(scripts, *, read_confine):
+    """The actor's compiled policy through the REAL seam.
+
+    #575 deleted the module-private `_actor_policy(scripts, read_confine=…)` constructor: each def
+    now hangs its OWN grant builder (`_actor_bash_shapes`) on itself, and the per-leg inputs (which
+    pinned scripts this leg may run, which corpora it may read) ride a `RunScope` that
+    `compile_policy_for` folds into `ResolvedRoots`. The leg variation is unchanged — it just
+    arrives through the one compile seam production uses instead of a private back door."""
+    return compile_policy_for(
+        ACTOR_DEF, run_dir=_RUN,
+        scope=RunScope(scripts=tuple(scripts), read_confine=tuple(read_confine)),
+    )
+
 
 # --- the engine returns the model's final text verbatim + writes its trace ---
 
@@ -116,26 +135,36 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
     assert is_skip_story(out)
 
 
-# --- the two pinned lessons-script patterns -------------------------------------
+# --- the two pinned lessons-script grants ---------------------------------------
 
-def test_script_pattern_accepts_pinned_spellings():
-    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+def test_script_grant_accepts_pinned_spellings():
+    """#575 renamed `_script_pattern` → `_script_grant`, which wraps the same anchored argv regex in
+    a `Grant`. The pattern is one of the three `pins_path` EXEMPTIONS to "no grant pattern embeds a
+    path": here the operand IS the program, so resolving it and checking it against a scope buys
+    nothing the pinned pattern didn't already have (and per #565 the pinned script's own argv is
+    ungated regardless). Pin the exemption flag alongside the shape — it is what tells the a2 audit
+    sweep this embedded path is deliberate rather than a leaked anchor."""
+    g = actor_engine._script_grant(_ENV_RETRIEVE)
+    assert g.pins_path is True
+    assert g.scope == ()      # nothing to resolve — the path lives in the pattern
+    p = g.pattern
     # repo-relative (what the prompt types), absolute, and a bare `python` interpreter
     assert p.fullmatch("python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web")
     assert p.fullmatch(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712")
     assert p.fullmatch(f"python {_ENV_RETRIEVE} --alert-rule-ids 5712")
 
 
-def test_script_pattern_rejects_wrong_shape():
-    p = actor_engine._script_pattern(_ENV_RETRIEVE)
+def test_script_grant_rejects_wrong_shape():
+    p = actor_engine._script_grant(_ENV_RETRIEVE).pattern
     assert not p.fullmatch(f"python3 {_ACTOR_INDEX} --techniques T1078")  # different pinned script
     assert not p.fullmatch("python3 -c print(1)")                         # arbitrary python
     assert not p.fullmatch("cat /etc/passwd")                             # non-python program
 
 
 def test_actor_script_pipe_denied_through_gate():
-    # a pipe re-opens no reader surface: the `| cat` stage matches no actor pattern → denied.
-    pol = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
+    # a pipe re-opens no reader surface: the `| cat` stage is claimed by no actor grant → denied.
+    # (`_decide_readers` requires EVERY stage to be claimed, and the actor grants no viewer at all.)
+    pol = _actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert not permission.decide_bash(
         f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat", policy=pol).allow
 
@@ -143,8 +172,8 @@ def test_actor_script_pipe_denied_through_gate():
 # --- the policy through the full gate -------------------------------------------
 
 def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
-    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
-    # both pinned lesson scripts are allowed by the actor's matchers
+    pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    # both pinned lesson scripts are allowed by the actor's grants
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=pol).allow
     assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=pol).allow
     # arbitrary python, an unpinned script, a data-source adapter, and arbitrary shell are denied
@@ -154,10 +183,27 @@ def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
     assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
 
 
+def test_actor_has_no_viewer_surface_at_all():
+    """The actor's bash lane is JUST its pinned-script grants — no `cat`, so no reader surface and
+    (by `read_allow_of`) no read shapes either: `decide_read` stays root-only inside the confine,
+    which IS the actor's whole read surface.
+
+    This is the property that keeps the actor gray-box: `cat` is the sole opener in the #575 model,
+    so an actor without a `cat` grant cannot address a file from bash AT ALL — not the judge's
+    rubric, not another corpus, not its own transcript. Guarded by construction rather than by a
+    clamp on a wider grant. (Its per-leg confine, enforced on the read tool, is pinned below.)"""
+    pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    assert {g.program for g in pol.bash_allow} == {"python3"}
+    assert all(g.pins_path for g in pol.bash_allow)
+    assert pol.read_allow == ()   # no cat grant → no shape filter; the confine bounds the reads
+    for cmd in (f"cat {_ACTOR_DIR}/T1078.md", "cat /etc/passwd", "grep -n x /etc/passwd", "ls"):
+        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
+
+
 def test_benign_actor_policy_excludes_tradecraft_index():
-    # The benign leg carries only the env-retrieve matcher; the tradecraft index stays a
+    # The benign leg carries only the env-retrieve grant; the tradecraft index stays a
     # malicious-only capability (the actor-settings.json boundary, now enforced by policy).
-    benign = actor_engine._actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
+    benign = _actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=benign).allow
     assert not permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=benign).allow
 
@@ -168,11 +214,20 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     # #512: the actor's read_confine REPLACES the defender_dir base, so a defender_dir
     # file OUTSIDE the confine (SKILL.md, the judge rubric) is no longer readable — the
     # gray-box hole #510 opened. run_dir artifacts and in-confine lessons still are.
-    pol = actor_engine._actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
+    #
+    # #575: the `raw_reads` / `adapters` capability BITS this used to assert are DELETED — each was
+    # a declared value that could disagree with the lane enforcing it. Both properties are now facts
+    # about the grant list, so they are asserted where they are decided: no adapter grant and no
+    # gather_raw shape means the actor has no ADDRESS for either, not a clamp over a wider one.
+    pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
     assert set(pol.read_confine) == set(_MALICIOUS_CONFINE)
     assert pol.read_roots == ()          # confine replaces the corpus base; no widening
-    assert pol.raw_reads is False        # gray-box: never touches gather_raw
-    assert pol.adapters is False
+    # gray-box, by positive enumeration: no adapter route and no viewer surface at all
+    assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
+    assert not permission.decide_bash(
+        "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
+    # (the gather_raw half of the old `raw_reads is False` bit does NOT hold any more —
+    #  see ::test_actor_cannot_read_a_staged_gather_raw_payload below. KNOWN BUG, xfail.)
     lrd = _lrd(tmp_path)
     # in-confine lesson: allowed
     assert permission.decide_read(
@@ -190,6 +245,59 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     assert not permission.decide_read(
         tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#575 REGRESSION (gray-box leak): deleting the `raw_reads` clamp let the actor read a "
+           "staged gather_raw payload out of its own run_dir. Not fixed here — the fix belongs in "
+           "source (give the actor a read_allow shape set, or keep a raw clamp for read_allow=() "
+           "agents). strict=True so this flips to a FAILURE the moment source closes it.",
+)
+def test_actor_cannot_read_a_staged_gather_raw_payload(tmp_path):
+    """THE GRAY-BOX PROPERTY, at the seam that now decides it. Currently BROKEN — read the reason.
+
+    This is what `assert pol.raw_reads is False` used to buy, re-expressed as the observable
+    decision (#575 deleted the BIT; the property it stood for is supposed to survive). It does not.
+
+    The actor is gray-box BY DESIGN: `lead_repository.actor_view` projects queries only and hides
+    `payload_path` precisely so the actor invents its attack story WITHOUT seeing the raw evidence.
+    If it can read the payloads, the whole adversarial signal is contaminated — it is no longer
+    writing a candidate story, it is reading the answer.
+
+    HOW IT BROKE. At HEAD, `files.decide_read` applied a RAW clamp to EVERY agent with
+    `raw_reads=False`, so a `gather_raw/` path was denied wherever it sat. #575 replaced the clamp
+    with positive enumeration over `policy.read_allow` — but the actor has NO `cat` grant, so
+    `read_allow_of` returns `()`, and an empty `read_allow` applies NO shape filter at all
+    (`files.py:143`): `decide_read` falls back to ROOT-ONLY. The actor's `run_dir` is a root.
+
+    WHY THAT IS REACHABLE (not merely theoretical — the actor's run_dir really does hold payloads):
+    the actor's `run_dir` IS the *learning* run dir, and `persist._copy_shared_inputs` →
+    `lead_repository.stage_tables` COPIES the investigation's whole `gather_raw/` tree into it. The
+    two direction legs SHARE one `learning_run_dir` (`orchestrate.py:433`) and run CONCURRENTLY
+    (`ThreadPoolExecutor(max_workers=2)`, `orchestrate.py:450`) as actor → oracle → judge → persist,
+    so on an `inconclusive` case leg A's persist stages the payloads while leg B's actor is still
+    running. `ops/replay_actor.py` replays the actor over an already-staged bundle outright.
+
+    Driven through the REAL production tool (`tools._tool_read_file` on real `bind`-built deps),
+    not a synthetic policy — today it RETURNS THE PAYLOAD CONTENT."""
+    lrd = _lrd(tmp_path)
+    raw = lrd / "gather_raw" / "l-001" / "0.json"
+    raw.parent.mkdir(parents=True)
+    raw.write_text('{"payload": "the evidence the gray-box actor must not see"}\n')
+
+    from defender.runtime.agent_definition import bind
+    from defender.runtime import tools as runtime_tools
+
+    deps = bind(
+        actor_engine.ACTOR_DEF, lrd,
+        scope=RunScope(scripts=(_ENV_RETRIEVE,), read_confine=_MALICIOUS_CONFINE),
+    )
+    assert not permission.decide_read(
+        raw, run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=deps.policy
+    ).allow, "decide_read admits a gather_raw payload for the gray-box actor"
+    with pytest.raises(ModelRetry):          # the real tool must refuse it, not return it
+        runtime_tools._tool_read_file(deps, str(raw))
 
 
 def test_actor_scope_requires_explicit_confine():

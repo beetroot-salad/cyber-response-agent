@@ -78,10 +78,11 @@ the shape above.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
-Gather runs each query through
-`defender-record-query --lead {lead_id} --query-id {id} -- defender-{system} …`
-(see `defender/skills/gather/SKILL.md` §3; `--run-dir` defaults from the run
-env and `--system` is derived from the inner command). The wrapper persists raw output
+Gather runs each query as a PLAIN standalone adapter call —
+`defender-{system} <verb> '<query>'` — and the runtime captures it transparently
+(`runtime/tools._capture_adapter`); there is no wrapper to invoke and no
+`defender-record-query … -- defender-{system} …` form (that wrapper-forcing lane is gone,
+and the gate now denies the passthrough spelling). Capture persists raw output
 by-ref to `{run_dir}/gather_raw/{lead_id}/{seq}.json` and appends one row to
 `executed_queries.jsonl` (the queries table, FK `lead_id`); gather neither
 redirects stdout nor names files. `seq` disambiguates N-queries-per-lead — there
