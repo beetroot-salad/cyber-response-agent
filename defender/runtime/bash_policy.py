@@ -41,7 +41,7 @@ def _load_policy(path: Path) -> dict:
     defaults (and warn) if it is missing/corrupt. Pure in `path` — the injection
     seam the tests exercise, so no monkeypatching of module state is needed."""
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         print(
             f"bash_policy: could not load {path} ({e!r}); "

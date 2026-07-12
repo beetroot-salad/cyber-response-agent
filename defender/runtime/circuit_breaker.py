@@ -114,7 +114,7 @@ def _load(run_dir: Path) -> dict:
     if not p.is_file():
         return _blank()
     try:
-        return json.loads(p.read_text() or "{}") or _blank()
+        return json.loads(p.read_text(encoding="utf-8") or "{}") or _blank()
     except (json.JSONDecodeError, OSError):
         return _blank()
 

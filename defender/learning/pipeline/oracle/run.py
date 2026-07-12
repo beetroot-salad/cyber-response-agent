@@ -64,7 +64,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path, learning_run_dir: Path,
     place, and every other caller — the secondary harness, tests — routes through that adapter or
     injects its own fn, so this module never imports the pydantic-ai graph.
     """
-    story = actor_story_path.read_text()
+    story = actor_story_path.read_text(encoding="utf-8")
     # Per-direction trace discriminator. The adversarial + benign legs run concurrently and share
     # one ``learning_run_dir`` and the same lead set (both read ``run_dir``), so a lead-only trace
     # name would collide across legs (RequestLogger opens mode "w" → the legs truncate/interleave

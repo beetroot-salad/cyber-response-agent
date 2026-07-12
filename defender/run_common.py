@@ -61,7 +61,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     # regenerated per run.
     RunPaths(run_dir).meta.write_text(
         json.dumps({"run_id": run_dir.name, "salt": secrets.token_hex(8)}, indent=2)
-        + "\n"
+        + "\n", encoding="utf-8"
     )
     # Propagate a sibling ground_truth.yaml into the run dir so the learning
     # loop's persist stage can recognise held-out cases and suppress
@@ -110,7 +110,7 @@ def visualize(run_dir: Path) -> None:
     # exist, so the runtime view is the only useful part of this pass.
     proc = subprocess.run(
         [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8"
     )
     sys.stderr.write(proc.stdout)
     if proc.returncode != 0:

@@ -66,12 +66,12 @@ def _cited_policy_read_section(
     Best-effort: a thin alert / absent menu degrades the hint, never the section."""
     inflight_key = learning_run_dir.name
     try:
-        alert = json.loads(RunPaths(run_dir).alert.read_text())
+        alert = json.loads(RunPaths(run_dir).alert.read_text(encoding="utf-8"))
         sig_label = case_ticket.signature_label(alert) or "<sig:RULE_ID>"
     except Exception:  # noqa: BLE001 — the label is a convenience hint only
         sig_label = "<sig:RULE_ID>"
     menu_path = learning_run_dir / "past_tickets.txt"
-    seed_menu = menu_path.read_text().strip() if menu_path.is_file() else ""
+    seed_menu = menu_path.read_text(encoding="utf-8").strip() if menu_path.is_file() else ""
     body = (
         "Confirm a CITED past case against the case-history store with a scoped, "
         "CLOSED-ONLY read — closed cases only, never the in-flight ticket. Use exactly:\n"
@@ -131,12 +131,12 @@ def build_judge_invocation(
 
     report = RunPaths(run_dir).report
     user = (
-        _section("alert", RunPaths(run_dir).alert.read_text())
+        _section("alert", RunPaths(run_dir).alert.read_text(encoding="utf-8"))
         + _section(
-            "report", report.read_text() if report.is_file() else "(report.md missing)",
+            "report", report.read_text(encoding="utf-8") if report.is_file() else "(report.md missing)",
             "the defender's disposition + rationale — the claim you are scoring",
         )
-        + _section("actor_story", actor_story_path.read_text())
+        + _section("actor_story", actor_story_path.read_text(encoding="utf-8"))
         + _section(
             "synthesis", render_synthesis(companion),
             "the defender's cross-lead hypotheses, belief movement, authorization "

@@ -121,12 +121,13 @@ def iter_lessons(
     """
     from defender._frontmatter import FrontmatterError, split_frontmatter
 
+    malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
     label = warn_label or (lambda p: p.name)
     for path in iter_lesson_paths(corpus_dir):
         try:
             text = read_text_utf8(path)
             fm, raw, body = split_frontmatter(text)
-        except (FrontmatterError, *TEXT_READ_ERRORS) as e:
+        except malformed as e:
             print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
             continue
         yield Lesson(path=path, fm=fm, raw=raw, body=body)

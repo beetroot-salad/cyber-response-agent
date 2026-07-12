@@ -65,7 +65,7 @@ def _venv_python(defender: Path) -> str:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=30, encoding="utf-8")
 
 
 def check_adapter(report: Report, defender: Path, system: str, python: str) -> Path | None:
@@ -79,7 +79,7 @@ def check_adapter(report: Report, defender: Path, system: str, python: str) -> P
     # siblings import — e.g. _stub_transport.py) rather than re-implementing
     # the parser/config/exit-codes/auth inline. Don't hard-require _adapter
     # specifically: a populated tree may standardize on a different module.
-    src = cli.read_text()
+    src = cli.read_text(encoding="utf-8")
     adapters = defender / "scripts" / "adapters"
     present = {p.stem for p in adapters.glob("_*.py")}
     referenced = {m for m in present
@@ -132,7 +132,7 @@ def check_config(report: Report, defender: Path, system: str) -> None:
         report.add(WARN, f"no config.env at {path.relative_to(defender)} (fine only if the adapter needs none)")
         return
     secrets_found = False
-    for raw in path.read_text().splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -158,7 +158,7 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
     else:
-        text = skill.read_text()
+        text = skill.read_text(encoding="utf-8")
         front = text.split("---", 2)[1] if text.startswith("---") else ""
         if re.search(rf"^\s*name:\s*defender-{re.escape(system)}\s*$", front, re.M):
             report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
@@ -181,7 +181,7 @@ def check_templates(report: Report, defender: Path, system: str) -> None:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
         return
     bad = [p.name for p in templates
-           if not re.search(rf"^\s*id:\s*{re.escape(system)}\.", p.read_text(), re.M)]
+           if not re.search(rf"^\s*id:\s*{re.escape(system)}\.", p.read_text(encoding="utf-8"), re.M)]
     if bad:
         report.add(FAIL, f"templates missing 'id: {system}.<name>' frontmatter: {', '.join(bad)}")
     else:

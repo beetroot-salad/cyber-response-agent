@@ -32,7 +32,7 @@ from defender.learning.core.config import (
 def normalize_disposition(report_path: Path) -> str:
     if not report_path.is_file():
         raise RunUnprocessable(f"report.md not found: {report_path}")
-    text = report_path.read_text()
+    text = report_path.read_text(encoding="utf-8")
     try:
         fm, _ = parse_frontmatter(text)
     except FrontmatterError as e:

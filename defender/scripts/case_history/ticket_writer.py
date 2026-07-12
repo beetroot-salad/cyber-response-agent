@@ -129,7 +129,7 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
         if not alert_path.is_file():
             _warn(f"alert.json not found in {run_dir}; skipping open")
             return
-        alert = json.loads(alert_path.read_text())
+        alert = json.loads(alert_path.read_text(encoding="utf-8"))
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id)
         status, body = deps.request(config, "POST", "/tickets", payload)
@@ -310,6 +310,6 @@ def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool
         "ok": ok,
     }
     try:
-        (run_dir / "ticket_write.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        (run_dir / "ticket_write.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     except OSError as e:
         _warn(f"could not write receipt: {e}")

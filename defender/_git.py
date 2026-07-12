@@ -74,7 +74,7 @@ def _run(
         text=True,
         errors="surrogateescape",
         timeout=timeout,
-        input=input,
+        input=input, encoding="utf-8"
     )
     if check and proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr)

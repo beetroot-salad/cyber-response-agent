@@ -76,7 +76,7 @@ def read_description(system: str, skills_dir: Path | None = None) -> str | None:
         return None
 
     try:
-        text = skill_path.read_text()
+        text = skill_path.read_text(encoding="utf-8")
     except OSError:
         return None
 

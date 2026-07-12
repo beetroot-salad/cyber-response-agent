@@ -420,7 +420,7 @@ def capture(
 
     try:
         proc = subprocess.run(
-            inner, capture_output=True, text=True, env=env, timeout=timeout
+            inner, capture_output=True, text=True, env=env, timeout=timeout, encoding="utf-8"
         )
         rc, out, err = proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:
@@ -433,7 +433,7 @@ def capture(
     payload_rel = None
     try:
         lead_dir.mkdir(parents=True, exist_ok=True)
-        payload_path.write_text(out)
+        payload_path.write_text(out, encoding="utf-8")
         payload_rel = str(payload_path.relative_to(run_dir))
     except OSError as e:
         print(f"record_query: could not write payload: {e}", file=sys.stderr)

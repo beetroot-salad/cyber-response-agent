@@ -40,7 +40,7 @@ from defender.learning.core.validate import _benign_outcome_keyword, _outcome_ke
 def _flock(lock_path: Path):
     """Exclusive flock over ``lock_path`` for the duration of the block."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_path.open("a+")
+    fh = lock_path.open("a+", encoding="utf-8")
     try:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         yield
@@ -242,7 +242,7 @@ def _write_source_refs(
         "alert_rule_key": alert_rule_key,
     }
     with _SHARED_INPUTS_LOCK:
-        (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs))
+        (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs), encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -279,11 +279,11 @@ def persist_run(
     judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
     telemetry_yaml, telemetry_name = artifacts.telemetry_yaml, artifacts.telemetry_name
     _copy_shared_inputs(run_dir, learning_run_dir)
-    (learning_run_dir / story_name).write_text(actor_story)
+    (learning_run_dir / story_name).write_text(actor_story, encoding="utf-8")
     if telemetry_yaml is not None:
-        (learning_run_dir / telemetry_name).write_text(telemetry_yaml)
+        (learning_run_dir / telemetry_name).write_text(telemetry_yaml, encoding="utf-8")
     if judge_yaml is not None:
-        (learning_run_dir / judge_name).write_text(judge_yaml)
+        (learning_run_dir / judge_name).write_text(judge_yaml, encoding="utf-8")
     _write_source_refs(run_dir, learning_run_dir, disposition, alert_rule_key)
 
 

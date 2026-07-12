@@ -68,7 +68,7 @@ def _config_path(system: str) -> Path:
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -158,7 +158,7 @@ def docker_exec_curl(
     else:
         cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "curl", *flags, *args]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10, encoding="utf-8")
     except FileNotFoundError as e:
         raise TransportError("docker CLI not found on PATH") from e
     except subprocess.TimeoutExpired as e:
@@ -311,7 +311,7 @@ def docker_exec_raw(
     cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", bastion, *argv]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
+            cmd, capture_output=True, text=True, timeout=timeout_sec + 5, encoding="utf-8"
         )
     except FileNotFoundError:
         print("error: docker CLI not found on PATH", file=sys.stderr)
@@ -345,7 +345,7 @@ def docker_inspect_raw(
     cmd.append(target)
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
+            cmd, capture_output=True, text=True, timeout=timeout_sec + 5, encoding="utf-8"
         )
     except FileNotFoundError:
         print("error: docker CLI not found on PATH", file=sys.stderr)

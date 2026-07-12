@@ -103,7 +103,7 @@ def split_investigation_phases(run_dir: Path) -> list[dict]:
     p = RunPaths(run_dir).investigation
     if not p.is_file():
         return []
-    text = p.read_text()
+    text = p.read_text(encoding="utf-8")
     parts = re.split(r"(?m)^(## .*)$", text)
     # re.split with one capturing group yields: [pre, header1, body1, header2, body2, ...]
     out: list[dict] = []

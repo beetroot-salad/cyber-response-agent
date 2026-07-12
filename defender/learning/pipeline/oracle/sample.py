@@ -128,7 +128,7 @@ def lead_sample_text(lead) -> str:
     for q in lead.queries:
         if q.raw_ref is None or not q.raw_ref.is_file():
             continue
-        body = redact_exemplar(q.raw_ref.read_text())
+        body = redact_exemplar(q.raw_ref.read_text(encoding="utf-8"))
         if not body.startswith("("):  # a real skeleton, not a "(no … available)" note
             return body
     return "(no schema sample available for this lead)"
@@ -171,7 +171,7 @@ def real_sample_text(lead) -> str:
     for q in lead.queries:
         if q.raw_ref is None or not q.raw_ref.is_file():
             continue
-        body = unredacted_exemplar(q.raw_ref.read_text())
+        body = unredacted_exemplar(q.raw_ref.read_text(encoding="utf-8"))
         if not body.startswith("("):
             return body
     return "(no sample available for this lead)"

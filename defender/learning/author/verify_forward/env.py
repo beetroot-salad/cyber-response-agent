@@ -68,7 +68,7 @@ def run_retrieval(rule_ids: str, entities: str, corpus: Path) -> list[str]:
         cmd += ["--entities", entities]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=VERIFIER_TIMEOUT,
+            cmd, capture_output=True, text=True, timeout=VERIFIER_TIMEOUT, encoding="utf-8"
         )
     except subprocess.TimeoutExpired as e:
         raise SystemExit(

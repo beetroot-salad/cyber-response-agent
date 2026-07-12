@@ -87,7 +87,7 @@ def read_ground_truth(run_dir: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
-        doc = yaml.safe_load(path.read_text()) or {}
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
         raise RunUnprocessable(f"{path}: malformed YAML: {e}") from e
     if not isinstance(doc, dict):
@@ -120,9 +120,9 @@ def _write_oracle_telemetry(
     """
     stripped = strip_yaml_fence(oracle_raw)
     out_path = learning_run_dir / out_name
-    out_path.write_text(stripped)
+    out_path.write_text(stripped, encoding="utf-8")
     if stripped != oracle_raw:
-        (learning_run_dir / (Path(out_name).stem + ".raw.txt")).write_text(oracle_raw)
+        (learning_run_dir / (Path(out_name).stem + ".raw.txt")).write_text(oracle_raw, encoding="utf-8")
     return out_path
 
 
@@ -137,10 +137,10 @@ def _validate_judge_yaml(
         # RecursionError: yaml.safe_load blows the stack on a deeply nested flow
         # collection (not a YAMLError); dead-letter it like any invalid verdict rather
         # than crash the worker — the eval A/B harness already degrades the same way.
-        raw_path.write_text(judge_raw)
+        raw_path.write_text(judge_raw, encoding="utf-8")
         raise RunUnprocessable(f"judge YAML invalid: {e}") from e
     if stripped != judge_raw:
-        raw_path.write_text(judge_raw)
+        raw_path.write_text(judge_raw, encoding="utf-8")
     return doc, stripped
 
 
@@ -172,7 +172,7 @@ def run_direction(
     # later persist_run re-archives the same path (idempotent) and is the only writer
     # on the SKIP short-circuit below.
     actor_story_path = learning_run_dir / spec.story_name
-    actor_story_path.write_text(actor_story)
+    actor_story_path.write_text(actor_story, encoding="utf-8")
 
     if is_skip_story(actor_story):
         _log(f"actor emitted SKIP ({spec.name}) — persisting, no findings")
@@ -206,7 +206,7 @@ def run_direction(
         artifacts=DirectionArtifacts(
             actor_story=actor_story, story_name=spec.story_name,
             judge_yaml=judge_stripped, judge_name=spec.judge_name,
-            telemetry_yaml=telemetry_path.read_text(), telemetry_name=spec.telemetry_name,
+            telemetry_yaml=telemetry_path.read_text(encoding="utf-8"), telemetry_name=spec.telemetry_name,
         ),
         disposition=disposition, alert_rule_key=alert_rule_key,
     )
@@ -428,7 +428,7 @@ def run_one(
     directions = _directions_for(disposition)
     _prepare_engines_for(directions)
 
-    alert = json.loads(src.alert.read_text())
+    alert = json.loads(src.alert.read_text(encoding="utf-8"))
     alert_rule_key = derive_alert_rule_key(alert)
     learning_run_dir = paths.runs_dir / run_id
     learning_run_dir.mkdir(parents=True, exist_ok=True)
@@ -512,7 +512,7 @@ def _quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -
     failed_dir.mkdir(parents=True, exist_ok=True)
     rec = dict(spec)
     rec["failed"] = reason
-    (failed_dir / marker.name).write_text(json.dumps(rec) + "\n")
+    (failed_dir / marker.name).write_text(json.dumps(rec) + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         marker.unlink()
     _log(f"quarantined {spec.get('run_id')} — {reason}")
@@ -588,7 +588,7 @@ def _pending_queue_count(pending_file: Path) -> int:
     is at threshold."""
     if not pending_file.is_file():
         return 0
-    return sum(1 for line in pending_file.read_text().splitlines() if line.strip())
+    return sum(1 for line in pending_file.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
 def _has_curator_work(paths: LoopPaths) -> bool:
@@ -683,7 +683,7 @@ def _drain_lead_author_markers(
     _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
     for marker in markers:
         try:
-            spec = json.loads(marker.read_text())
+            spec = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
             _log(f"lead_author_drain: unreadable marker {marker.name}: {e!r}; skipping")
             continue
@@ -985,7 +985,7 @@ def _process_marker(
     except FileNotFoundError:
         return False  # another worker claimed it first
     try:
-        spec = json.loads(claimed.read_text())
+        spec = json.loads(claimed.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         _quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
         return False

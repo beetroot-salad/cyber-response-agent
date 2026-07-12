@@ -43,7 +43,7 @@ def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:
         _log(f"no {ADVERSARIAL.judge_name} in {learning_run_dir}; skipping enrichment")
         return None
     try:
-        doc = yaml.safe_load(verdict.read_text())
+        doc = yaml.safe_load(verdict.read_text(encoding="utf-8"))
         if not isinstance(doc, dict):
             _log(f"adversarial verdict is not a mapping ({type(doc).__name__}); "
                  "skipping enrichment")
@@ -63,7 +63,7 @@ def _read_resolution_method(learning_run_dir: Path) -> str | None:
     if not verdict.is_file():
         return None
     try:
-        doc = yaml.safe_load(verdict.read_text())
+        doc = yaml.safe_load(verdict.read_text(encoding="utf-8"))
     except (yaml.YAMLError, OSError) as e:
         _log(f"unusable adversarial verdict for resolution-method ({e}); skipping")
         return None

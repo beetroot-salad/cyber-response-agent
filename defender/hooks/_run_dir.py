@@ -35,7 +35,7 @@ def update_json_locked(
     """
     path = Path(path)
     path.touch(exist_ok=True)
-    with open(path, "r+") as f:
+    with open(path, "r+", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         raw = f.read()
         try:
@@ -68,7 +68,7 @@ def read_meta_salt() -> str:
         meta_path = RunPaths(run_dir).meta
         if meta_path.exists():
             try:
-                salt = json.loads(meta_path.read_text()).get("salt", "")
+                salt = json.loads(meta_path.read_text(encoding="utf-8")).get("salt", "")
                 if salt:
                     return salt
             except (json.JSONDecodeError, OSError):

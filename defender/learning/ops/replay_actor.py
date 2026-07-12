@@ -119,7 +119,7 @@ def main(argv: list[str]) -> int:
     view.setdefault("alert_ref", "alert.json")
 
     actor_input = staging / "actor_input.yaml"
-    actor_input.write_text(yaml.safe_dump(view, sort_keys=False))
+    actor_input.write_text(yaml.safe_dump(view, sort_keys=False), encoding="utf-8")
 
     # invoke_actor seeds menu/archetype from learning_run_dir.name —
     # but in replay we want the seed keyed on the stable case_id
@@ -137,7 +137,7 @@ def main(argv: list[str]) -> int:
     finally:
         sub._actor_seed = original_seed
 
-    (staging / "actor_story.md").write_text(story)
+    (staging / "actor_story.md").write_text(story, encoding="utf-8")
     return 0
 
 

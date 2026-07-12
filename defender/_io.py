@@ -47,8 +47,15 @@ Exported as one name because the *guard* half of the bug is not fixable by a rea
 A caller whose whole response to a bad file is "skip it" can use :func:`read_text_soft` — but a
 caller that reads AND parses under one ``try`` (``iter_lessons``, the curators' yaml loads, the
 invlang companion walk) must still write its own ``except``, and that is precisely where the
-next wrong tuple gets written. Spell it ``except (SomeParseError, *TEXT_READ_ERRORS)`` and a
-grep for this name is the audit of who guards a read correctly.
+next wrong tuple gets written. A pure read-skip is ``except TEXT_READ_ERRORS``; to add a parse
+error, bind the composed tuple first — mypy rejects a star-unpack in an ``except`` display::
+
+    malformed: tuple[type[BaseException], ...] = (SomeParseError, *TEXT_READ_ERRORS)
+    try:
+        ...
+    except malformed as e:
+
+A grep for this name is then the audit of who guards a read correctly.
 """
 
 

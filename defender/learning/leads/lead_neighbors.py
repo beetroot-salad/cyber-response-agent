@@ -150,7 +150,7 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
     for path in paths:
         if "tests" in path.parts:
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         try:
             fm, body = parse_frontmatter(text)
         except FrontmatterError:

@@ -66,7 +66,7 @@ class GhForge:
         proc = subprocess.run(
             ["gh", "pr", "list", *match_args, "--state", "open",
              "--json", "number,headRefName,url"],
-            cwd=self.cwd, capture_output=True, text=True,
+            cwd=self.cwd, capture_output=True, text=True, encoding="utf-8"
         )
         if proc.returncode != 0:
             raise ForgeError(f"gh pr list failed: {proc.stderr.strip()}")
@@ -86,7 +86,7 @@ class GhForge:
         proc = subprocess.run(
             ["gh", "pr", "create", "--base", base, "--head", head,
              "--title", title, "--body", body],
-            cwd=self.cwd, capture_output=True, text=True,
+            cwd=self.cwd, capture_output=True, text=True, encoding="utf-8"
         )
         if proc.returncode != 0:
             raise ForgeError(f"gh pr create failed: {proc.stderr.strip()}")

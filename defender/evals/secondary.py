@@ -188,7 +188,7 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
         gt = child / "ground_truth.yaml"
         if not (alert.is_file() and gt.is_file()):
             continue
-        gt_doc = yaml.safe_load(gt.read_text()) or {}
+        gt_doc = yaml.safe_load(gt.read_text(encoding="utf-8")) or {}
         if not isinstance(gt_doc, dict) or gt_doc.get("held_out") is not True:
             continue
         out.append(HeldOutAlert(child.name, alert, gt_doc))

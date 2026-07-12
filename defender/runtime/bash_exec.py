@@ -253,6 +253,7 @@ def _run_one_pipeline(
                         cwd=str(cwd),
                         env=env,
                         text=True,
+                        encoding="utf-8",  # the lane's own pin — never the ambient locale
                         errors="replace",  # a viewer emitting non-UTF-8 bytes must
                                            # not crash communicate() with a decode error
                     )

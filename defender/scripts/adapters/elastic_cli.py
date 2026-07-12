@@ -99,7 +99,7 @@ def load_config() -> dict:
         )
 
     config: dict[str, str] = {}
-    for line in CONFIG_PATH.read_text().splitlines():
+    for line in CONFIG_PATH.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue

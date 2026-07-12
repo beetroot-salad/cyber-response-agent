@@ -157,7 +157,7 @@ def _prepare(deps: CuratorDeps, pair: Pair) -> _Prepared:
     try:
         if not path.is_file():
             return _Prepared(pair, detail=_one_line(f"lesson not found: {path}"))
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except (StageAbort, FatalConfigError):
         raise  # systemic: never demoted to one pair's ERROR
     except (OSError, ValueError) as e:

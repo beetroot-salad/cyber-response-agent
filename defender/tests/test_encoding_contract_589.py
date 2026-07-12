@@ -258,22 +258,6 @@ def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
 
     from defender.runtime import tools
 
-    _deps, corpus = _curator_deps(tmp_path)
-    (corpus / "corrupt.md").write_bytes(b"---\nname: x\ndescription: \xff\xfe\n---\nbody\n")
-
-    with pytest.raises(ModelRetry, match="not valid UTF-8"):
-        tools._tool_read_file(_deps, "defender/lessons/corrupt.md")
-
-
-def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
-    """demand (#588) — pinning the runtime's read is necessary but not sufficient: on a genuinely
-    undecodable file `read_text(encoding="utf-8")` still raises `UnicodeDecodeError`, and no gate
-    converts a `ValueError`, so it escapes the tool and takes the whole stage down. The agent can
-    act on "that file isn't text"; the run cannot act on a traceback. Locale-independent."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    from defender.runtime import tools
-
     deps, corpus = _curator_deps(tmp_path)
     (corpus / "corrupt.md").write_bytes(b"---\nname: x\ndescription: \xff\xfe\n---\nbody\n")
 

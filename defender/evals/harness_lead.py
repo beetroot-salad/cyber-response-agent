@@ -183,14 +183,14 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     # README invites "re-run for confidence", and a skip run returns sub-second)
     # collides on the second-resolution timestamp dir — don't lose the result.
     out.mkdir(parents=True, exist_ok=True)
-    (out / "lead_author.stdout").write_text(proc.stdout)
-    (out / "lead_author.stderr").write_text(proc.stderr)
-    (out / "rc.txt").write_text(str(proc.returncode))
+    (out / "lead_author.stdout").write_text(proc.stdout, encoding="utf-8")
+    (out / "lead_author.stderr").write_text(proc.stderr, encoding="utf-8")
+    (out / "rc.txt").write_text(str(proc.returncode), encoding="utf-8")
     log = _git.git(["log", "--format=%H %s%n%b%n----", "-n", "5"], cwd=tmp, check=False)
-    (out / "git_log.txt").write_text(log)
+    (out / "git_log.txt").write_text(log, encoding="utf-8")
     show = _git.git(["show", "--stat", "HEAD"], cwd=tmp, check=False)
-    (out / "head_show.txt").write_text(show)
-    (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n")
+    (out / "head_show.txt").write_text(show, encoding="utf-8")
+    (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n", encoding="utf-8")
     # Snapshot the post-run catalog so the disposition is inspectable.
     shutil.copytree(
         tmp / "defender" / "skills" / "gather" / "queries",
@@ -210,7 +210,7 @@ def main() -> int:
         sys.exit(f"scenario not found: {scenario}")
     expect = {}
     if (scenario / "expect.json").is_file():
-        expect = json.loads((scenario / "expect.json").read_text())
+        expect = json.loads((scenario / "expect.json").read_text(encoding="utf-8"))
 
     RESULTS_DIR.mkdir(exist_ok=True)
     # Materialize OUTSIDE the repo. The in-process agent's Bash tool resolves relative tool paths and

@@ -83,7 +83,7 @@ class CaseHit:
 
 def _report_disposition(run_dir: Path) -> str:
     report = RunPaths(run_dir).report
-    fm = parse_frontmatter_or_none(report.read_text()) or {} if report.is_file() else {}
+    fm = parse_frontmatter_or_none(report.read_text(encoding="utf-8")) or {} if report.is_file() else {}
     return str(fm.get("disposition") or "?")
 
 

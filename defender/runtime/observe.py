@@ -114,7 +114,7 @@ class RequestLogger:
 
     def __init__(self, path: Path):
         self.path = path
-        self._fh = path.open("w")
+        self._fh = path.open("w", encoding="utf-8")
         # Read + validate the on-disk cap ONCE, here at construction. The driver
         # builds the logger at run startup (driver.run → RequestLogger(...)),
         # outside the per-request `except Exception` that guards log(). Reading it
@@ -311,4 +311,4 @@ def write_trace(run_dir: Path, messages: list[dict], *, wall_ms: float) -> None:
         "num_turns": main_responses,  # matches the emitted main assistant events
         "usage": totals,
     })
-    (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")

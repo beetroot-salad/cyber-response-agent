@@ -135,12 +135,12 @@ def format_summary_md(s: SecondarySummary) -> str:
 def write_summary(summary: SecondarySummary, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     md = out_dir / f"gen-{summary.current_generation}.summary.md"
-    md.write_text(format_summary_md(summary))
+    md.write_text(format_summary_md(summary), encoding="utf-8")
 
     detail_dir = out_dir / f"gen-{summary.current_generation}"
     detail_dir.mkdir(exist_ok=True)
     for r in summary.results:
-        (detail_dir / f"{r.slug}.json").write_text(json.dumps(r.to_dict(), indent=2))
+        (detail_dir / f"{r.slug}.json").write_text(json.dumps(r.to_dict(), indent=2), encoding="utf-8")
 
     append_jsonl(out_dir / "index.jsonl", [summary.to_index_row()])
     return md

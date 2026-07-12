@@ -56,14 +56,14 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     # python interpreter (no pyyaml dependency).
     m = re.search(
         r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
-        refs.read_text(),
+        refs.read_text(encoding="utf-8"),
         re.MULTILINE,
     )
     if not m:
         raise SystemExit(
             f"verify_forward: source_refs.yaml missing normalized_disposition: {refs}"
         )
-    return investigation.read_text(), m.group(1).strip()
+    return investigation.read_text(encoding="utf-8"), m.group(1).strip()
 
 
 def expected_disposition(direction: str, recorded: str) -> str:
@@ -99,7 +99,7 @@ def _cited_case_ids(run_id: str, *, runs_dir: Path) -> list[str]:
     if not menu.is_file():
         return []
     ids: list[str] = []
-    for line in menu.read_text().splitlines():
+    for line in menu.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if not s.startswith("- "):
             continue
@@ -120,7 +120,7 @@ def _fetch_closed_resolution(case_id: str) -> str | None:
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=_POLICY_FETCH_TIMEOUT, cwd=str(REPO_ROOT),
+            timeout=_POLICY_FETCH_TIMEOUT, cwd=str(REPO_ROOT), encoding="utf-8"
         )
     except (subprocess.SubprocessError, OSError):
         return None
