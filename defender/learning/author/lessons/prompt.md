@@ -26,14 +26,12 @@ have considered Y; here's the check."}
 
 The three retrieval dimensions are **grep-friendly inline lists** (the
 defender discovers lessons at PLAN time by grepping this frontmatter — no
-index). **Before tagging, enumerate the values already in use** so you reuse
-an existing spelling instead of coining a near-synonym that fragments the
-grep:
-
-```bash
-defender-lessons --tags              # every dimension's viable values + counts
-defender-lessons --tags attack_phase # one dimension
-```
+index). **Before tagging, read the values already in use** so you reuse an
+existing spelling instead of coining a near-synonym that fragments the grep:
+the frontmatter manifest above carries every existing lesson's dimensions, so
+the vocabulary in use is already in front of you — there is nothing to
+enumerate. (`defender-lessons` is not on your lane, and it would read the MAIN
+checkout's corpus rather than the worktree you are editing.)
 
 Reuse an existing token whenever one fits; coin a new value only when none
 does, and keep it in the convention below.

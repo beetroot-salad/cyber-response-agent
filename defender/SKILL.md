@@ -253,13 +253,12 @@ for this signature — trust the response.
 Call (arg order is **corpus_root first, then `advisory`**):
 
 ```bash
-defender-invlang advisory \
-    --signature <signature_id> \
-    --class lead_discrimination \
-    --frontier '?hypothesis-one' \
-    --frontier '?hypothesis-two' \
-    --top-k 5
+defender-invlang advisory --signature <signature_id> --class lead_discrimination --frontier '?hypothesis-one' --frontier '?hypothesis-two' --top-k 5
 ```
+
+**One physical line.** There is no shell joining your lines, so a `\` continuation
+does not continue anything — each line is lexed on its own and the command fails to
+tokenize. Long invocations stay on one line.
 
 Pass `--signature` from `alert.rule.id` in `alert.json`. Each
 `--frontier` takes one `?hypothesis` name; repeat the flag for each
@@ -290,16 +289,13 @@ Two verbs cover this:
 
 ```bash
 # Cross-signature, topology-scoped: names for this kind of fork, anywhere.
-defender-invlang hypothesis-shape \
-    --parent-type identity \
-    --parent-class 'service-account/*' \
-    --rel modified \
-    --attached-to-type configuration
+defender-invlang hypothesis-shape --parent-type identity --parent-class 'service-account/*' --rel modified --attached-to-type configuration
 
 # Signature-scoped: names this rule has historically used.
-defender-invlang hypothesis-vocabulary \
-    --signature <signature_id>
+defender-invlang hypothesis-vocabulary --signature <signature_id>
 ```
+
+(One physical line each — see above.)
 
 Call both when normalizing — signature first (canonical for this
 rule), then shape (canonical for this topology). `--parent-class`

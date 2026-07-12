@@ -37,13 +37,12 @@ goal: <one-sentence: what the caller wants past cases to tell them>
 3. **Call the CLI** (the `defender-invlang` shim injects the corpus root):
 
    ```bash
-   defender-invlang advisory \
-       --signature <signature_id> \
-       --class lead_discrimination \
-       --frontier '?hypothesis-one' \
-       --frontier '?hypothesis-two' \
-       --top-k 5
+   defender-invlang advisory --signature <signature_id> --class lead_discrimination --frontier '?hypothesis-one' --frontier '?hypothesis-two' --top-k 5
    ```
+
+   **One physical line.** No shell joins your lines, so a `\` continuation
+   continues nothing: each line is lexed on its own and the command fails to
+   tokenize. Long invocations stay on one line.
 
    `--frontier` is repeatable — one flag per hypothesis name, not
    comma-joined. When the dispatch frontier is empty, omit the
