@@ -17,7 +17,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime.agent_definition import BashGrammar, ToolSet, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import ToolSet, compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 
@@ -37,13 +37,15 @@ class _ToolRecorder:
 
 
 def test_register_tools_registers_exactly_the_toolset():
-    # #538: registration derives from the ToolSet — gather's read + bash grammar (no write)
-    # registers the read-only pair; main's read + bash + write registers the full four.
+    # #538: registration derives from the ToolSet — gather's read + bash (no write) registers the
+    # read-only pair; main's read + bash + write registers the full four. #575 split PRESENCE from
+    # PERMISSION: `bash` is a plain bool (does the tool get REGISTERED), and WHAT the agent may then
+    # run is its def's `bash_shapes` grants — so registration reads a bool, never a grammar object.
     ro = _ToolRecorder()
-    tools.register_tools(ro, ToolSet(read=True, bash=BashGrammar()))
+    tools.register_tools(ro, ToolSet(read=True, bash=True))
     assert ro.names == ["bash", "read_file"]  # gather: read-only pair, no writers
     full = _ToolRecorder()
-    tools.register_tools(full, ToolSet(read=True, bash=BashGrammar(), write=True))  # main: the full four
+    tools.register_tools(full, ToolSet(read=True, bash=True, write=True))  # main: the full four
     assert full.names == ["bash", "read_file", "write_file", "edit_file"]
 
 

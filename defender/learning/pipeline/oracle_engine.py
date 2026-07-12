@@ -61,7 +61,7 @@ class OracleDeps(AgentDeps):
 # The oracle's AgentDefinition (#538): TOOL-FREE (``tools=ToolSet()`` — the build site registers
 # nothing, closing the ``read_file`` answer-key affordance structurally). ``model``/``effort`` are the
 # declarative stage defaults (glm-5.2, reasoning off); each fan-out call re-binds its own per-lead
-# model/effort in ``build_stage_agent``. Collected into ``runtime.agents.AGENTS`` and used by the
+# model/effort in ``build_stage_agent``. Collected into ``defender.agents.AGENTS`` and used by the
 # stage harness to register the empty toolset and by ``bind`` for the deny-all policy (#551 — the
 # standalone ``_ORACLE_POLICY`` constant retired; ``compile_policy`` over this empty ``ToolSet``
 # emits the same deny-all, so there is no second policy source to keep honest by a parity test).
@@ -70,6 +70,7 @@ ORACLE_DEF = AgentDefinition(
     model=lambda: ORACLE_MODEL,
     effort=ORACLE_EFFORT,
     tools=ToolSet(),
+    deps_cls=OracleDeps,
     deny_reason=_ORACLE_DENY_REASON,
 )
 

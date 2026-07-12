@@ -10,6 +10,10 @@ __pycache__/
 env/
 venv/
 .venv/
+# ...and a .venv SYMLINK, not just a directory: a git worktree shares the main checkout's venv
+# by symlinking it, and the trailing-slash forms above match directories only — so without this
+# a worktree's symlink gets committed, and CI's `uv sync` then dies on "File exists".
+.venv
 .mypy_cache/
 ENV/
 *.egg-info/

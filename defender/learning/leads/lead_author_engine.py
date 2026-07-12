@@ -44,21 +44,22 @@ from defender.learning.core.config import RunUnprocessable
 from defender.learning.leads.path_validation import SKILLS_REL
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet, bind
+from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import build_write_allow
+from defender.runtime.permission.grant import Grant
 from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
     "Blocked: the lead author curates the gather catalog + system skills under "
-    "defender/skills only. It reads the corpus, writes/edits skill files there, and rm's a "
+    "defender/skills only. It reads the corpus, writes and edits skill files there, and rm's a "
     "draft it promotes or discards — no data-source adapters, no gather_raw reads, no shell "
     "beyond the scoped rm, no writes outside defender/skills."
 )
 
 
-def _rm_skills_pattern(skills_dir: Path) -> re.Pattern[str]:
+def _rm_skills_grant(skills_dir: Path) -> Grant:
     """The lead author's ONE bash grant: ``rm`` of a SINGLE path under ``defender/skills``
     (promote = write the established template + rm the draft; discard = rm the draft). Mirrors the
     actor's ``_script_pattern`` — an anchored regex over the tokenized argv (operands are unconfined
@@ -79,10 +80,22 @@ def _rm_skills_pattern(skills_dir: Path) -> re.Pattern[str]:
     # matching as one long "segment" (a token boundary is a real space; an in-token space is the
     # `_TOKEN_SPACE` \x00 sentinel, which `[^/ ]` still admits, so a space-in-filename draft works).
     seg = r"(?!\.\.(?:/|$))[^/ ]+"
-    return re.compile(rf"^rm (?:{spellings})(?:/{seg})+$")
+    return Grant(
+        program="rm",
+        pattern=re.compile(rf"^rm (?:{spellings})(?:/{seg})+$"),
+        pins_path=True,
+    )
 
 
-def _lead_author_write_shape(run_dir: Path, defender_dir: Path) -> tuple[re.Pattern[str], ...]:
+def _lead_author_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
+    """The lead author's ONE bash grant, anchored on the run's ``defender_dir`` — the WORKTREE
+    ``bind`` threads in, never the import-time ``PATHS`` constant. That is not a style point: the
+    lead-author drain re-execs into a throwaway worktree (#562), so a grant compiled from ``PATHS``
+    would let it ``rm`` files in the MAIN CHECKOUT."""
+    return (_rm_skills_grant(roots.defender_dir / "skills"),)
+
+
+def _lead_author_write_shape(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...]:
     """The lead author's write scope (#551 — its ``write_shapes`` builder, resolved by
     ``compile_policy`` into ``write_allow``): a single flat pattern admitting
     ``<defender_dir>/skills/**.md`` ONLY (the corpus is ``.md`` — SKILL.md / execution.md / query
@@ -94,7 +107,7 @@ def _lead_author_write_shape(run_dir: Path, defender_dir: Path) -> tuple[re.Patt
     writer its ``run_dir`` (nor the pitfalls curator its ``PENDING_DIR``). Reads under
     ``defender_dir`` stay allowed by ``decide_read``'s defaults (it reads the catalog + siblings —
     LEAD_AUTHOR_DEF carries no ``read_confine`` and no ``read_shapes``)."""
-    return (build_write_allow(defender_dir / "skills", suffix=".md"),)
+    return (build_write_allow(roots.defender_dir / "skills", suffix=".md"),)
 
 
 @dataclass(frozen=True)
@@ -123,8 +136,10 @@ LEAD_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.LEAD_AUTHOR,
     model=lambda: config.LEAD_AUTHOR_MODEL,
     effort=config.LEAD_AUTHOR_EFFORT,
-    tools=ToolSet(read=True, bash=BashGrammar(skills_rm=True), write=True),
+    tools=ToolSet(read=True, bash=True, write=True),
+    bash_shapes=(_lead_author_bash_shapes,),
     write_shapes=(_lead_author_write_shape,),
+    deps_cls=LeadAuthorDeps,
     requires_explicit_tree=True,
     deny_reason=_LEAD_AUTHOR_DENY_REASON,
 )

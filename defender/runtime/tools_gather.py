@@ -333,7 +333,7 @@ async def _run_gather(
     from defender.runtime.agent_definition import bind
     from defender.runtime.driver import GATHER_DEF
     gbase = bind(GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir)
-    assert isinstance(gbase, GatherDeps)  # bind(GATHER_DEF) → GatherDeps (_deps_class); narrows for lead_id
+    assert isinstance(gbase, GatherDeps)  # bind(GATHER_DEF) → GatherDeps (its def's deps_cls); narrows for lead_id
     gdeps = replace(gbase, run_id=deps.run_id, lead_id=lead_id)
     prompt = _gather_prompt(deps, request, catalog)
     try:

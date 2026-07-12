@@ -9,6 +9,9 @@ they unit-test for free, with no model call.
 
 Three previously-tangled concerns, now one module each:
 
+  - `grant.py` — the containment model (#575): `Grant` (a SHAPE + a SCOPE), the global
+    `PROGRAMS` table of what each program opens, and `under` (a path shape over the RESOLVED
+    path). One model, three surfaces.
   - `bash.py` — the Bash gate (`decide_bash`), structured around the no-shell
     executor (#379) and returning a `BashDecision` that carries the gate's single
     parse so dispatch + execution never re-decompose the command (#456).
@@ -33,18 +36,23 @@ from .bash import (
 )
 from .decision import Decision
 from .files import build_write_allow, decide_read, decide_write, is_untrusted_read
+from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
 from .policies.gather import GATHER_FALLTHROUGH_DENY_REASON
 from .policies.main import FALLTHROUGH_DENY_REASON
 from .policy import AgentPolicy
 
 __all__ = [
     "ADAPTER_STANDALONE_REASON",
+    "OPENS_NOTHING",
+    "PROGRAMS",
     "FALLTHROUGH_DENY_REASON",
     "GATHER_FALLTHROUGH_DENY_REASON",
     "UNTOKENIZABLE_REASON",
     "AgentPolicy",
     "BashDecision",
     "Decision",
+    "Grant",
+    "Route",
     "build_write_allow",
     "command_shape",
     "decide_bash",
@@ -52,4 +60,5 @@ __all__ = [
     "decide_write",
     "is_untrusted_read",
     "require_anchor_root",
+    "under",
 ]

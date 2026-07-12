@@ -22,12 +22,31 @@ from defender.learning.core import subagents  # noqa: E402
 from defender.learning.core.directions import ADVERSARIAL_WIRING  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic  # noqa: E402
+from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
 from defender.learning.pipeline.judge.run import _ToolScope  # noqa: E402
 from defender.runtime import permission  # noqa: E402
+from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _PY = "/venv/bin/python3"  # a full path, like sys.executable
 _CLI = Path("/repo/defender/scripts/adapters/ticket_cli.py")
+
+
+def _judge_policy(tmp_path, *, ticket_cli=None, read_roots=()):
+    """The judge's compiled policy through the REAL seam.
+
+    #575 deleted the module-private `_judge_policy(read_roots=…, ticket_cli=…)` constructor: a
+    definition now hangs its OWN grant builder (`_judge_bash_shapes`) on its OWN def, and the
+    per-invocation inputs (the comparison roots, the benign leg's ticket CLI) ride a `RunScope`
+    that `compile_policy_for` folds into `ResolvedRoots`. So the policy is built the way production
+    builds it — through the one compile seam — instead of through a private back door that could
+    drift from it. `run_dir`/`defender_dir` matter now (the `cat` grant's scope anchors on the
+    RESOLVED roots), so every caller threads a real tmp tree."""
+    return compile_policy_for(
+        JUDGE_DEF, run_dir=tmp_path,
+        scope=RunScope(add_dirs=tuple(read_roots), ticket_cli=ticket_cli),
+        defender_dir=tmp_path,
+    )
 
 _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 
@@ -195,8 +214,17 @@ def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
 
 # --- the benign closed-ticket read (the judge's pinned bash_allow pattern, #338) -------
 
-def test_ticket_pattern_shape():
-    p = engine_pydantic._ticket_pattern(_PY, _CLI)
+def test_ticket_grant_pattern_shape():
+    """The ticket grant's SHAPE (#575 renamed `_ticket_pattern` → `_ticket_grant`, which wraps the
+    pattern in a `Grant`). The pattern itself is KEPT VERBATIM — mandatory `--require-closed`
+    lookahead included — which is exactly why the grant carries `pins_path=True`: its operand IS the
+    program, and a boolean-flag allowlist (what every other program migrated to) makes every flag
+    OPTIONAL, so a mechanical migration would have dropped the judge's whole security property
+    silently. Pin both the shape and the exemption flag that protects it."""
+    g = engine_pydantic._ticket_grant(_PY, _CLI)
+    assert g.pins_path is True      # the R1 exemption — the pattern IS the containment
+    assert g.scope == ()            # nothing to resolve: there is no file operand
+    p = g.pattern
     # accepted: the pinned CLI, a ticket subcommand, and --require-closed present
     assert p.fullmatch(f"{_PY} {_CLI} get-ticket CASE-9 --require-closed")
     assert p.fullmatch(f"{_PY} {_CLI} list-tickets --status closed --require-closed --label sig")
@@ -218,9 +246,15 @@ def test_judge_ticket_pipe_and_arbitrary_denied_through_gate(tmp_path):
     a deliberate relaxation, not a hole. A `cat` with no operand is the identity on stdin
     and `defender-sql` opens no file, so piping a ticket the judge may ALREADY read through
     either yields nothing new. What must stay denied is a pipe stage that opens a file
-    (`cat /etc/passwd`, caught by the operand gate) or is not in the lane at all (`head`).
-    Previously this was denied only incidentally, because `cat` matched no judge pattern."""
-    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    (`cat /etc/passwd`, caught by the SCOPE check on the resolved operand) or is not in the lane at
+    all (`head` — the judge grants only `cat` + `defender-sql` + its ticket CLI).
+
+    #575: the operand gate is no longer a judge-only special case (`AgentPolicy.operand_gated` is
+    deleted). Every agent's `cat` grant carries a scope over the RESOLVED path, and the judge's
+    scope simply names three roots instead of two — which is how it reaches a `gather_raw` under the
+    INVESTIGATION run dir while its own run_dir is the LEARNING one. The behavior below is
+    unchanged; the mechanism under it is now the shared one."""
+    benign = _judge_policy(tmp_path, ticket_cli=(_PY, _CLI))
     ticket = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed"
 
     def gate(cmd):
@@ -230,18 +264,24 @@ def test_judge_ticket_pipe_and_arbitrary_denied_through_gate(tmp_path):
     assert gate(f"{ticket} | cat")
     assert gate(f"{ticket} | defender-sql 'SELECT 1'")
     # ...but a pipe stage may not OPEN a new file, nor leave the lane
-    assert not gate(f"{ticket} | cat /etc/passwd")   # operand gate bites inside the pipe
-    assert not gate(f"{ticket} | head")              # `head` matches no judge pattern
-    assert not permission.decide_bash(f"{_PY} -c 'print(1)'", policy=benign).allow
+    assert not gate(f"{ticket} | cat /etc/passwd")   # the scope check bites inside the pipe
+    assert not gate(f"{ticket} | head")              # `head` matches no judge grant
+    assert not gate(f"{_PY} -c 'print(1)'")
 
 
-def test_judge_ticket_require_closed_spoof_denied_through_gate():
+def test_judge_ticket_require_closed_spoof_denied_through_gate(tmp_path):
     """SECURITY (#338): the `--require-closed` guard is enforced on the ACTUAL argv token,
     not on a lossy `" ".join(argv)`. A command that only smuggles the flag's TEXT inside a
     quoted argument value (so argparse binds it as data and `require_closed` stays False,
     leaving the OPEN in-flight ticket readable) must be DENIED even though the flag's bytes
-    appear in the joined string. Regression for the token-boundary spoof."""
-    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    appear in the joined string. Regression for the token-boundary spoof — and the reason the
+    grant is `pins_path` and its pattern kept VERBATIM through #575."""
+    benign = _judge_policy(tmp_path, ticket_cli=(_PY, _CLI))
+
+    def gate(cmd):
+        return permission.decide_bash(
+            cmd, policy=benign, run_dir=tmp_path, defender_dir=tmp_path).allow
+
     # The flag lives inside a single `--q`/`--status`/`--label`/`key` VALUE token → not a real
     # flag at exec time. The double-`--q` form (last `--q` wins → broad filter) is the full-leak
     # variant. All must be denied; the honest flagless form is denied too (control).
@@ -251,42 +291,82 @@ def test_judge_ticket_require_closed_spoof_denied_through_gate():
         f'{_PY} {_CLI} list-tickets --label "x --require-closed" --label sig',
         f'{_PY} {_CLI} get-ticket "SOC-OPEN --require-closed"',
     ):
-        assert not permission.decide_bash(spoof, policy=benign).allow, spoof
+        assert not gate(spoof), spoof
     # sanity: an honest --require-closed read whose OTHER arg legitimately carries a space
     # (a multi-word `--q`) is still allowed — the fix only rejects the FORGED boundary.
-    assert permission.decide_bash(
-        f'{_PY} {_CLI} list-tickets --require-closed --q "foo bar"', policy=benign).allow
+    assert gate(f'{_PY} {_CLI} list-tickets --require-closed --q "foo bar"')
 
 
 def test_judge_policy_ticket_read_through_the_gate(tmp_path):
-    # The matcher, wired into the benign judge's AgentPolicy, is honored by decide_bash.
-    benign = engine_pydantic._judge_policy(read_roots=(), ticket_cli=(_PY, _CLI))
+    """The ticket grant, wired into the benign judge's AgentPolicy, is honored by decide_bash — and
+    the judge's `cat | defender-sql` aggregation lane still reaches an IN-SCOPE gather_raw payload
+    while a cat of an out-of-scope file is refused.
+
+    #575: `raw_reads` / `operand_gated` are gone as declared BITS. "The judge may read gather_raw"
+    is now simply "the gather_raw path resolves inside the `cat` grant's scope" — positive
+    enumeration, so there is no clamp that could disagree with the grant that admits it."""
+    benign = _judge_policy(tmp_path, ticket_cli=(_PY, _CLI))
+
+    def gate(cmd, policy=None):
+        return permission.decide_bash(
+            cmd, policy=policy if policy is not None else benign,
+            run_dir=tmp_path, defender_dir=tmp_path,
+        ).allow
+
     ok = f"{_PY} {_CLI} get-ticket CASE-9 --require-closed"
-    assert permission.decide_bash(ok, policy=benign).allow
-    # Without --require-closed the matcher declines → generic gate denies (python not a viewer).
-    assert not permission.decide_bash(f"{_PY} {_CLI} get-ticket CASE-9", policy=benign).allow
-    # The adversarial judge has no matcher → even the pinned form is denied.
-    adversarial = engine_pydantic._judge_policy(read_roots=(), ticket_cli=None)
-    assert not permission.decide_bash(ok, policy=adversarial).allow
+    assert gate(ok)
+    # Without --require-closed the grant declines → generic gate denies (python is on no other lane).
+    assert not gate(f"{_PY} {_CLI} get-ticket CASE-9")
+    # The adversarial judge carries no ticket grant at all → even the pinned form is denied.
+    adversarial = _judge_policy(tmp_path, ticket_cli=None)
+    assert not gate(ok, policy=adversarial)
     # The judge (either direction) still refuses data-source adapters + arbitrary shell,
-    # but MAY aggregate an IN-ROOTS gather_raw payload (raw_reads + the operand-gated
-    # `cat | defender-sql` lane).
-    assert not permission.decide_bash("defender-elastic query x", policy=benign).allow
-    assert not permission.decide_bash("rm -rf /tmp/x", policy=benign).allow
+    # but MAY aggregate an IN-SCOPE gather_raw payload through the `cat | defender-sql` lane.
+    assert not gate("defender-elastic query x")
+    assert not gate("rm -rf /tmp/x")
     raw = tmp_path / "gather_raw" / "l-001" / "0.json"
-    assert permission.decide_bash(
-        f"cat {raw} | defender-sql 'SELECT count(*) FROM data'",
-        policy=benign, run_dir=tmp_path, defender_dir=tmp_path,
-    ).allow
-    # …but a cat of an OUT-OF-ROOTS file is denied (the reader surface is path-gated).
-    assert not permission.decide_bash(
-        "cat /etc/passwd | defender-sql 'SELECT 1'",
-        policy=benign, run_dir=tmp_path, defender_dir=tmp_path,
-    ).allow
+    assert gate(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'")
+    # …but a cat of an OUT-OF-SCOPE file is denied (the reader surface is path-gated).
+    assert not gate("cat /etc/passwd | defender-sql 'SELECT 1'")
     # …and jq is gone from the judge's lane entirely.
-    assert not permission.decide_bash(
-        f"jq '.' {raw}", policy=benign, run_dir=tmp_path, defender_dir=tmp_path
-    ).allow
+    assert not gate(f"jq '.' {raw}")
+    assert not gate(f"cat {raw} | jq '.'")   # not even as a stdin stage — jq is not granted here
+
+
+def test_judge_read_roots_reach_a_gather_raw_outside_the_run_dir(tmp_path):
+    """The judge's distinctive containment problem, pinned on the bash lane (its read-tool twin is
+    ::test_run_judge_pydantic_reads_gather_raw_through_read_roots).
+
+    The judge's `gather_raw` lives under the INVESTIGATION run dir — a tree its OWN (learning)
+    run_dir never contains — so it arrives only via `RunScope.add_dirs` → `read_roots`. The old
+    textual anchors could not express that (they knew only the agent's own run dir), which is why
+    the judge needed a bespoke resolve()-time operand gate (`operand_gated`, now deleted). One scope
+    over the RESOLVED path expresses both roots, so the special case is gone — but the CAPABILITY
+    must survive, and a scope built without the extra root would silently starve the judge of its
+    evidence. Guarded negative: drop the root and the same cat DENIES."""
+    investigation = tmp_path / "investigation-run"
+    raw = investigation / "gather_raw" / "l-001" / "0.json"
+    raw.parent.mkdir(parents=True)
+    raw.write_text("{}\n")
+    learning = tmp_path / "learning-run"
+    learning.mkdir()
+
+    def gate(policy):
+        return permission.decide_bash(
+            f"cat {raw} | defender-sql 'SELECT 1'", policy=policy,
+            run_dir=learning, defender_dir=tmp_path / "defender",
+        ).allow
+
+    with_root = compile_policy_for(
+        JUDGE_DEF, run_dir=learning,
+        scope=RunScope(add_dirs=(investigation / "gather_raw",)),
+        defender_dir=tmp_path / "defender",
+    )
+    without_root = compile_policy_for(
+        JUDGE_DEF, run_dir=learning, defender_dir=tmp_path / "defender",
+    )
+    assert gate(with_root)
+    assert not gate(without_root)   # the widening is what makes the read possible
 
 
 # --- InProcessSubagents.judge always runs the in-process judge -----------

@@ -168,13 +168,19 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
     """Safe-by-construction (#536 required-policy): a LeadAuthorDeps built WITHOUT a policy is a
     TypeError — a writer subtype can't silently inherit the MAIN policy by omission. Positive
-    control: for_run supplies the lead-author policy (write_allow non-empty; adapters/raw off)."""
+    control: for_run supplies the lead-author policy (write_allow non-empty; no data-source reach).
+
+    #575: the `adapters` / `raw_reads` capability bits are deleted. Their content — "this agent has
+    no data-source reach and no payload address" — is now a fact about the GRANT LIST (the adapter
+    capability IS a routed Grant; a raw read IS a shape in `read_allow`), so it is asserted through
+    the gate, where it is actually decided, rather than as a declared bit that could disagree."""
     with pytest.raises(TypeError):
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x", salt="s")
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
     assert deps.policy.write_allow  # non-empty
-    assert deps.policy.adapters is False
-    assert deps.policy.raw_reads is False
+    assert not permission.decide_bash("defender-elastic query x", policy=deps.policy).allow
+    assert not permission.decide_bash(
+        "defender-elastic query x | defender-sql 'SELECT 1'", policy=deps.policy).allow
 
 
 # ===========================================================================
@@ -182,9 +188,17 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 # ===========================================================================
 
 def test_lead_author_policy_shape():
-    """write_allow = one flat skills/**.md pattern, exactly ONE bash matcher (the rm grant —
+    """write_allow = one flat skills/**.md pattern, exactly ONE bash grant (the `rm` of drafts —
     discovery is driver-precomputed, no Glob/Grep), read_confine empty (reads under defender_dir
-    stay allowed), every other capability bit off."""
+    stay allowed), and NOTHING else on the bash lane.
+
+    #575 dissolved the four capability BITS this used to enumerate
+    (`adapters`/`adapter_sql_pipe`/`raw_reads`/`operand_gated`) into the grant list itself: the
+    adapter capability is a routed `Grant`, a raw read is a shape in a `cat` grant's scope, and
+    "operand-gated" is just "this grant's program has an extractor". So the single strongest
+    statement of the same property is that the lane holds EXACTLY ONE grant and it is the `rm` —
+    which subsumes all four bits at once (an agent with one `rm` grant has no adapter route, no
+    payload address and no opener) and cannot drift from the lane the way a declared bit could."""
     skills = Path("/wt/defender/skills")
     pol = _lead_policy(skills)
     assert len(pol.write_allow) == 1
@@ -192,11 +206,13 @@ def test_lead_author_policy_shape():
     assert pol.write_allow[0].fullmatch(str(skills / "elastic" / "x.md"))
     assert not pol.write_allow[0].fullmatch(str(skills / "invlang" / "validate.py"))
     assert pol.read_confine == ()
+    # exactly one grant, and it is the pins_path `rm` — no adapter, no viewer, no opener
     assert len(pol.bash_allow) == 1
-    assert pol.adapters is False
-    assert pol.adapter_sql_pipe is False
-    assert pol.raw_reads is False
-    assert pol.operand_gated is False
+    (rm,) = pol.bash_allow
+    assert rm.program == "rm"
+    assert rm.pins_path is True          # `rm` unlinks the LINK — resolve() is the wrong model
+    assert rm.route is permission.Route.PLAIN
+    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes (decide_read stays root-only)
 
 
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):

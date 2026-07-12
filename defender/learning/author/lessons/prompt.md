@@ -26,14 +26,12 @@ have considered Y; here's the check."}
 
 The three retrieval dimensions are **grep-friendly inline lists** (the
 defender discovers lessons at PLAN time by grepping this frontmatter — no
-index). **Before tagging, enumerate the values already in use** so you reuse
-an existing spelling instead of coining a near-synonym that fragments the
-grep:
-
-```bash
-defender-lessons --tags              # every dimension's viable values + counts
-defender-lessons --tags attack_phase # one dimension
-```
+index). **Before tagging, read the values already in use** so you reuse an
+existing spelling instead of coining a near-synonym that fragments the grep:
+the frontmatter manifest above carries every existing lesson's dimensions, so
+the vocabulary in use is already in front of you — there is nothing to
+enumerate. (`defender-lessons` is not on your lane, and it would read the MAIN
+checkout's corpus rather than the worktree you are editing.)
 
 Reuse an existing token whenever one fits; coin a new value only when none
 does, and keep it in the convention below.
@@ -67,22 +65,19 @@ For each finding, in order, decide one of:
 
 To decide, two passes — and you **must run both**, because the dimensions alone will not catch every fold:
 
-1. **Dimension pass (find the obvious same-key candidates).** List the corpus (`ls defender/lessons/`), then `grep` each lesson's frontmatter by the finding's dimensions (per named file — the bash lane does not expand a `*.md` glob):
+1. **Dimension pass (find the obvious same-key candidates).** The frontmatter manifest above IS the corpus inventory — every existing lesson, with its dimensions. Match the finding's `source_signature` / `telemetry_source` / `attack_phase` against it directly; there is nothing to list and nothing to grep for.
+
+   To re-check a dimension in a specific file, pipe it — the viewers read STDIN, they do not open files:
 
    ```bash
-   ls defender/lessons/
-   grep -l 'source_signature:.*<rule-id>' defender/lessons/<name>.md
-   grep -l 'telemetry_source:.*<sensor>' defender/lessons/<name>.md
+   cat defender/lessons/<name>.md | grep -l 'source_signature:.*<rule-id>'
    ```
 
 2. **Description pass (catch cross-key near-duplicates).** The dimension pass misses a near-duplicate that teaches the *same defender mistake* but happens to be tagged on a different signature/sensor/tactic — and a keyed grep can't see that, because the keys don't overlap. So also enumerate the **whole corpus** and scan every `description` for a semantic twin, regardless of dimension overlap:
 
-   ```bash
-   ls defender/lessons/
-   grep '^description:' defender/lessons/<name>.md     # per lesson, or cat the file
-   ```
+   The manifest carries every lesson's `description`, so this pass is a read of what you already have — no enumeration step.
 
-   Read the body of any whose description is conceptually close to the finding, even when no dimension matched.
+   Read the body of any lesson whose description is conceptually close to the finding, even when no dimension matched (`cat defender/lessons/<name>.md`).
 
 Why both: a **runtime** retrieval miss is cheap — the lesson just isn't loaded that run, and the next run recovers it. A **fold** miss is not — it writes a permanent duplicate the dimensions will keep hiding from each other. So retrieval may lean on the dimensions; folding may not. The whole-corpus description scan is the completeness backstop (16 one-line descriptions today; cheap, grows slowly).
 

@@ -48,7 +48,7 @@ class JudgeInvocation:
     comparison_paths: list
     # The benign closed-ticket pins ``(py, ticket_cli)`` when this direction grants the
     # scoped read (#338), else None. The in-process judge_fn turns these into its
-    # closed-ticket bash_allow pattern (see engine_pydantic._ticket_pattern).
+    # closed-ticket bash grant (see engine_pydantic._ticket_grant).
     ticket_cli: tuple[str, Path] | None = None
 
 

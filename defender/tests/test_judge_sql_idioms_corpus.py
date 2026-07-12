@@ -314,10 +314,17 @@ def test_every_command_the_prompt_teaches_passes_the_judges_own_gate(prompt):
     splits on newlines before tokenizing) can never ship in a prompt again."""
     pytest.importorskip("pydantic_ai")
     from defender.runtime import permission
-    from defender.learning.pipeline.judge.engine_pydantic import _judge_policy
+    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    from defender.runtime.agent_definition import RunScope, compile_policy_for
 
+    # Through the REAL seam (#575): the judge's policy is compiled from its own def, and the
+    # prompts' `/abs/path` payloads reach it the way production's do — as a `read_roots` entry
+    # (gather_raw lives under the INVESTIGATION run dir, never the judge's own). The adversarial
+    # leg (no ticket_cli) is the tighter of the two, so a command it allows both legs allow.
     root = Path("/abs/path")
-    policy = _judge_policy(read_roots=(root,), ticket_cli=None)
+    policy = compile_policy_for(
+        JUDGE_DEF, Path("/run"), scope=RunScope(add_dirs=(root,)), defender_dir=_DEFENDER,
+    )
     commands = _PROMPT_CMD_RE.findall((_JUDGE / prompt).read_text())
     assert commands, "the prompt shows no defender-sql command — did the example shape change?"
     for cmd in commands:

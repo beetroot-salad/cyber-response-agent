@@ -96,9 +96,14 @@ def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
 def test_verify_policy_denies_adapters_and_shell():
     # #551: the standalone `_VERIFY_POLICY` constant retired; `bind(VERIFY_DEF)` compiles the
     # same deny-all policy over VERIFY_DEF's empty ToolSet.
+    #
+    # #575: the `adapters` / `raw_reads` capability BITS are deleted — a declared bit could
+    # disagree with the lane enforcing it, so what an agent may do IS its grant list. For this
+    # pure-prediction stage an empty `bash_allow` subsumes both bits (the adapter capability is
+    # itself a routed Grant now), and the gate denials below are what prove it.
     pol = bind(VERIFY_DEF, Path("/tmp/verify-run")).policy
-    assert pol.adapters is False
-    assert pol.raw_reads is False
+    assert pol.bash_allow == ()          # no grants ⇒ no adapter route, no viewer, no opener
+    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes either
     assert pol.read_roots == ()
     # a data-source adapter, an aggregation pipe, and arbitrary shell are all denied
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow

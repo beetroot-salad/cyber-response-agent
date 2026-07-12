@@ -27,7 +27,7 @@ The judge observation already carries the retrieval keys; your job is to place t
 
 For each observation, in order:
 
-1. **Enumerate the corpus.** List it with `ls {lessons_dir}`, then read each lesson's frontmatter (`name`, `subject`, `alert_rule_ids`, `relevance_criteria`) with `cat {lessons_dir}<name>.md` (or `grep` a field across a named file). For any candidate that shares the observation's `subject` or overlaps its `alert_rule_ids`, read the body before deciding.
+1. **Enumerate the corpus.** The frontmatter manifest above IS the inventory — every existing lesson with its `name`, `subject`, `alert_rule_ids` and `relevance_criteria`. For any candidate that shares the observation's `subject` or overlaps its `alert_rule_ids`, read the body before deciding (`cat {lessons_dir}<name>.md`; to filter one file, pipe it: `cat <file> | grep <pattern>` — the viewers read STDIN and do not open files).
 
 2. **Decide fold / supersede / new / skip:**
    - **Fold** — an existing live lesson with the same `subject` already covers this referent. Rewrite the body holistically to subsume both facts, append the new `observation_id` to `source_observation_ids`, union the `alert_rule_ids`, and broaden `relevance_criteria` if scope grew. When unioning `entities`, keep the selector set the **intersection-safe** minimum that still retrieves for every source case — and never add an `identity` row.

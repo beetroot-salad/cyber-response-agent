@@ -16,9 +16,13 @@ from __future__ import annotations
 # Gather IS the data layer, so the main-loop "dispatch gather" advice is nonsensical
 # here — it may run the adapter directly, plus read-only viewers; everything else
 # fails closed.
+# PROMPT SURFACE: the named programs are checked against GATHER's own live grant list. The old
+# text named `ls` (deleted) and `curl/rm/python3` (never granted) — the second is the subtler
+# fault: listing what an agent CANNOT run in the same slash-group vocabulary it reads to learn
+# what it CAN is how a dead program gets learned as a live one.
 GATHER_FALLTHROUGH_DENY_REASON = (
-    "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as "
-    "a standalone command — it is captured automatically — plus read-only viewers "
-    "(jq/grep/ls/cat/…). To read data, run the adapter directly; don't run "
-    "arbitrary shell (no curl/rm/python3, no pipes or redirects into writes)."
+    "Blocked: gather may only run a data-source adapter (`defender-<system> …`) as a standalone "
+    "command — it is captured automatically — plus the read-only viewers (cat/grep/jq/head/tail/"
+    "wc), of which only `cat` opens a file; the rest read STDIN (`cat <payload> | jq '<filter>'`). "
+    "To read data, run the adapter directly; do not run arbitrary shell."
 )

@@ -1,31 +1,39 @@
-"""#535 — the gather+main bash reader lane confines file operands to {run_dir, corpus}.
+"""#535/#575 — the gather+main bash reader lane confines file operands to {run_dir, corpus}.
 
-Spec (write-tests) for the anchored-read migration: gather/main move from a
-program-only bash allowlist (`^cat(?: .*)?$`, ANY operand) to a **per-run,
-full-line regex allowlist whose file operands are ANCHORED** to the run dir +
-corpus — so the bash lane confines reads the SAME way `decide_read` (the read_file
-tool) already does. Closes a demonstrated bypass: pre-#535
-`decide_bash("cat /etc/passwd", policy=compile_policy_for(GATHER_DEF, …)).allow` was True.
+Spec for the confined-read migration, rewritten onto #575's one containment model.
 
-Entry points under test (the per-run contract this spec pins):
-  - `compile_policy_for(<DEF>, run_dir, *, defender_dir)` — the policy-only half of `bind`
-    (#551); RAISES on a missing run_dir / degenerate root (safe-by-construction: no
-    unconfined fallback). The MAIN/GATHER reader defs anchor their lane per-run off these
-    roots.
+  - #535 moved gather/main from a program-only bash allowlist (`^cat(?: .*)?$`, ANY operand) to a
+    per-run regex allowlist whose file operands were ANCHORED to the run dir + corpus, closing a
+    demonstrated bypass (`decide_bash("cat /etc/passwd", policy=…GATHER…).allow` was True).
+  - #575 replaced the ANCHOR with a `Grant`: a SHAPE (program + flags + arity, no paths) plus a
+    SCOPE (anchored regexes over the **RESOLVED** path of everything the program opens). The
+    confinement property is the same; it is now enforced against the path the OS will open rather
+    than the text the model typed. Three consequences run through this file:
+
+      1. `grep`/`head`/`tail`/`wc`/`jq` LOST their file operand — they are stdin-only pipe stages.
+         `grep -n s {run}/x.md` DENIES; `cat {run}/x.md | grep -n s` ALLOWS. Same capability, one
+         extra `cat |`, and `cat` becomes the SOLE opener (one extractor, one scope check).
+      2. `ls` and `cd` are GONE from the lane entirely. `ls`'s anchored DIR operand was the other
+         path-opening slot, and dropping it leaves the whole surface with NO recursive-descent
+         primitive: to reach a path you must NAME it, and a named path is a resolved path is a
+         scope check.
+      3. the symlink RESIDUAL this file used to document as un-closable IS NOW CLOSED (§H): the
+         lane resolve()s, so an in-shape symlink pointing out of the run dir lands outside every
+         scope and denies.
+
+Entry points under test:
+  - `compile_policy_for(<DEF>, run_dir, *, defender_dir)` — the policy-only half of `bind`; RAISES
+    on a missing run_dir / degenerate root (safe-by-construction: no unconfined fallback).
   - `decide_bash(command, *, policy, run_dir, defender_dir) -> BashDecision`
-    (.allow / .reason / .adapter_argv / .sql_pipe).
+    (.allow / .reason / .adapter_argv / .sql_pipe). `defender_dir` is load-bearing now: a RELATIVE
+    operand is rebased on the executor's cwd (`defender_dir.parent`) before it resolves.
 
-Resolved forks (see scratchpad 535-resolved.md): jq = stdin-compute-only, NO file
-slot; adapter|jq denied; corpus = tight `.md` under lessons/skills/examples;
-grep/wc/ls flag-aware (deny file-opening flags, gate ls); relative operands denied;
-parity with decide_read (out-of-root + denylist + raw-clamp); ln -s denied
-(pre-existing symlink = documented residual, NOT asserted).
-
-The gate does not stat operands (only `decide_read` resolves), so the anchored
-roots here are real tmp dirs and commands interpolate their ABSOLUTE paths.
+The gate RESOLVES operands (it still never stats them — `resolve(strict=False)`), so the roots here
+are real tmp dirs and commands interpolate their ABSOLUTE paths.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,15 +41,14 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
+from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures: a per-run run dir + corpus, and the two per-run policies built off  #
-# them. decide_bash never stats operands, so these need only exist for the      #
-# decide_read parity assertions (which do resolve()).                           #
+# them. The dirs are real because both surfaces resolve() their operands.       #
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def env(tmp_path):
@@ -83,7 +90,7 @@ def test_compile_policy_for_requires_run_dir():
 
 def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
     """An empty-string / '/' root — run_dir OR an explicit defender_dir — must RAISE, not anchor
-    the reader lane to the CWD / filesystem root (which would allow reading anything). The shared
+    the grant scopes to the CWD / filesystem root (which would allow reading anything). The shared
     `require_anchor_root` guard rejects both.
 
     (Unlike the retired `policy_for`, `compile_policy_for`'s `defender_dir` legitimately DEFAULTS
@@ -98,7 +105,7 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
 
 
 # ===========================================================================  #
-# B. In-root reads ALLOW (positive controls — the reads real runs actually make) #
+# B. In-scope reads ALLOW (positive controls — the reads real runs actually make)#
 # ===========================================================================  #
 
 def test_cat_run_investigation_allowed(env):
@@ -109,7 +116,7 @@ def test_cat_run_investigation_allowed(env):
 
 def test_cat_run_gather_summary_allowed(env):
     """cat {RUN}/gather_summaries/l-001.md → ALLOW: the per-lead summary (built inline at
-    tools_gather.py, NOT a RunPaths prop — the anchoring must still cover it)."""
+    tools_gather.py, NOT a RunPaths prop — the scope must still cover it)."""
     assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
 
 
@@ -118,11 +125,14 @@ def test_cat_run_executed_queries_allowed(env):
     assert _bash(env, f"cat {env.run}/executed_queries.jsonl", "main").allow
 
 
-def test_tail_wc_grep_over_investigation_allowed(env):
-    """tail/wc/grep over {RUN}/investigation.md → ALLOW: the real read/format shapes from run traces."""
-    for cmd in (f"tail -5 {env.run}/investigation.md",
-                f"wc -l {env.run}/investigation.md",
-                f'grep -n "T resolutions" {env.run}/investigation.md'):
+def test_tail_wc_grep_over_investigation_allowed_as_pipe_stages(env):
+    """The real read/format shapes from run traces, in their #575 form: the viewers have NO file
+    slot, so `cat` opens the file and the reduction happens on STDIN. The FILE forms of the same
+    three commands are the deny half of the c1 ledger (test_viewer_file_operand_denied below);
+    these are the surviving capability — identical, one extra `cat |`."""
+    for cmd in (f"cat {env.run}/investigation.md | tail -5",
+                f"cat {env.run}/investigation.md | wc -l",
+                f'cat {env.run}/investigation.md | grep -n "T resolutions"'):
         assert _bash(env, cmd, "main").allow, cmd
 
 
@@ -133,7 +143,8 @@ def test_cat_corpus_lesson_allowed(env):
 
 def test_cat_multi_lesson_allowed(env):
     """cat {DFN}/lessons/a.md {DFN}/lessons/b.md 2>/dev/null → ALLOW: the real multi-file lesson cat
-    (multiple anchored operands + benign stderr discard)."""
+    (multiple in-scope operands + benign stderr discard). EVERY operand is resolved and scope-checked,
+    not just the first."""
     cmd = (f"cat {env.dfn}/lessons/a.md {env.dfn}/lessons/b.md 2>/dev/null")
     assert _bash(env, cmd, "main").allow
 
@@ -144,164 +155,190 @@ def test_cat_corpus_skill_and_query_template_allowed(env):
     assert _bash(env, f"cat {env.dfn}/skills/gather/queries/elastic/x.md", "gather").allow
 
 
-def test_cd_prefixed_shim_allowed(env):
-    """cd {DFN} && defender-lessons --tags → ALLOW: the real cd-prefixed shim shape from traces."""
-    assert _bash(env, f"cd {env.dfn} && defender-lessons --tags", "main").allow
-
-
 def test_gather_reads_its_own_gather_raw_absolute(env):
-    """cat {RUN}/gather_raw/l-001/1.json → ALLOW for gather (raw_reads), absolute + in-shape."""
+    """cat {RUN}/gather_raw/l-001/1.json → ALLOW for gather: the machine-tight payload shape
+    (`gather_raw/l-<digits>/<seq>.json`) is in GATHER's grants — and in nobody else's."""
     assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather").allow
 
 
 # ===========================================================================  #
-# C. Out-of-root reads DENY (guarded negatives, each with a positive control)   #
+# C. Out-of-scope reads DENY (guarded negatives, each with a positive control)  #
 # ===========================================================================  #
 
 def test_cat_etc_passwd_denied_both(env):
-    """cat /etc/passwd → DENY (both agents): the demonstrated bypass #535 closes.
-    Positive control: cat {RUN}/investigation.md (same program, in-root) is allowed."""
+    """cat /etc/passwd → DENY (both agents): the demonstrated bypass #535 closed.
+    Positive control: cat {RUN}/investigation.md (same program, in-scope) is allowed."""
     assert not _bash(env, "cat /etc/passwd", "gather").allow
     assert not _bash(env, "cat /etc/passwd", "main").allow
     assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow  # positive control
 
 
-def test_grep_out_of_root_denied(env):
-    """grep root /etc/passwd → DENY: grep's trailing file operand escapes the roots.
-    Positive control: grep root {RUN}/investigation.md (in-root file) is allowed."""
-    assert not _bash(env, "grep root /etc/passwd", "gather").allow
-    assert _bash(env, f"grep root {env.run}/investigation.md", "gather").allow  # positive control
+def test_out_of_scope_file_denied_through_a_pipe(env):
+    """The out-of-root read cannot be laundered through the pipe lane either: `cat /etc/passwd |
+    grep root` DENIES on the cat stage's SCOPE (grep opens nothing, so it is not what saves us).
+    Positive control: the same pipe over an in-scope file is allowed."""
+    assert not _bash(env, "cat /etc/passwd | grep root", "gather").allow
+    assert _bash(env, f"cat {env.run}/investigation.md | grep root", "gather").allow
 
 
 def test_cat_traversal_out_of_prefix_denied(env):
-    """cat {RUN}/../outside.txt → DENY: a `..` segment escapes the run dir; the anchored pattern
-    must reject `..` TEXTUALLY (the bash lane does no resolve()).
+    """cat {RUN}/../outside.txt → DENY: `..` collapses at resolve() and the result lands outside
+    every scope shape. (#535 rejected `..` TEXTUALLY because the lane did not resolve; #575 resolves,
+    so the traversal is closed by the same check that closes symlinks — one mechanism, not two.)
     Positive control: cat {RUN}/report.md (no traversal) is allowed."""
-    # rejected: rely on resolve() to collapse `..` (the bash lane deliberately does not resolve)
     assert not _bash(env, f"cat {env.run}/../outside.txt", "gather").allow
     assert _bash(env, f"cat {env.run}/report.md", "gather").allow  # positive control
 
 
 def test_cat_in_prefix_traversal_escape_denied(env):
     """cat {RUN}/gather_raw/../../../etc/passwd → DENY: starts with the run-dir prefix (would pass a
-    naive startswith) but the `..` segments tunnel out — the textual `..` reject must catch it."""
+    naive startswith) but the `..` segments tunnel out — resolve() collapses them to /etc/passwd."""
     assert not _bash(env, f"cat {env.run}/gather_raw/../../../etc/passwd", "gather").allow
 
 
 def test_second_operand_escape_denied(env):
-    """cat {RUN}/investigation.md /etc/passwd → DENY: the FIRST operand is in-root but the SECOND
-    escapes — every operand must be anchored, not just the first.
-    Positive control: cat {RUN}/investigation.md {RUN}/report.md (both in-root) is allowed."""
+    """cat {RUN}/investigation.md /etc/passwd → DENY: the FIRST operand is in-scope but the SECOND
+    escapes — every operand the extractor reports is scope-checked, not just the first.
+    Positive control: cat {RUN}/investigation.md {RUN}/report.md (both in-scope) is allowed."""
     assert not _bash(env, f"cat {env.run}/investigation.md /etc/passwd", "gather").allow
     assert _bash(env, f"cat {env.run}/investigation.md {env.run}/report.md", "gather").allow
 
 
 def test_corpus_lookalike_sibling_denied(env):
     """cat {DFN}-evil/x.md → DENY: a sibling dir sharing the corpus PREFIX but not under it must
-    not match (the anchor is a path-boundary, not a string prefix)."""
+    not match — `under()` closes the root with a `/` boundary, so the anchor is a path boundary,
+    not a string prefix."""
     assert not _bash(env, f"cat {env.dfn}-evil/x.md", "gather").allow
 
 
 # ===========================================================================  #
-# D. File-opening FLAGS — the escape that a clean trailing operand hides         #
+# D. File-opening FLAGS — the escape a clean trailing operand hides             #
+#    (`OPENS_NOTHING` is a CLAIM the SHAPE must earn: the gate skips the scope   #
+#     check for those programs, so any flag that opens a file is a fail-open)    #
 # ===========================================================================  #
 
 def test_grep_dash_f_patternfile_escapes(env):
-    """grep -f /etc/passwd {RUN}/inv.md → DENY: -f opens the out-of-root PATTERN file even though the
-    trailing operand is in-root. Positive control: grep -f {DFN}/lessons/pats.md {RUN}/inv.md (in-root
-    pattern file) is allowed OR grep with no -f is allowed."""
-    # rejected: gate only the trailing operand (misses -f's file)
+    """grep -f /etc/passwd → DENY: `-f` opens the out-of-root PATTERN file. grep is `OPENS_NOTHING`,
+    so NOTHING scope-checks that file — the shape's positive flag allowlist is the only thing
+    standing between it and the read, which is why `-f` is not in it.
+    Positive control: the flagless stdin form is allowed."""
+    # rejected: gate only the trailing operand (misses -f's file) — and there IS no trailing operand now
     assert not _bash(env, f"grep -f /etc/passwd {env.run}/investigation.md", "gather").allow
-    assert _bash(env, f"grep root {env.run}/investigation.md", "gather").allow  # positive control
+    assert not _bash(env, "grep -f /etc/passwd x", "gather").allow
+    assert _bash(env, f"cat {env.run}/investigation.md | grep root", "gather").allow  # positive control
 
 
 def test_grep_dash_e_promotes_positional_to_file(env):
-    """grep -e root /etc/shadow → DENY: -e fills the pattern slot so /etc/shadow becomes a FILE
-    operand (not a pattern) and escapes."""
+    """grep -e root /etc/shadow → DENY: `-e` fills the pattern slot so /etc/shadow becomes a FILE
+    operand. Doubly denied now (grep has no file slot at all, and `-e` is an arg-taker excluded from
+    the flag allowlist) — the belt and the suspenders are both pinned."""
     # rejected: model grep as always pattern+files positionally (ignores -e)
     assert not _bash(env, "grep -e root /etc/shadow", "gather").allow
 
 
 def test_grep_recursive_denied(env):
-    """grep -r secret {RUN}/gather_raw → DENY: -r/-R walks a dir operand (and follows symlinks out of
-    root), reading files the trailing-operand anchor can't bound. The dir is IN-ROOT on purpose — a
-    naive `grep -r secret /etc` would deny on the out-of-root operand no matter what `_GREP_FLAG`
-    does, so it can't see a regression that admits `r`/`R`; anchoring the deny on `-r` itself (in-root
-    dir + an out-of-root variant) is what pins that `r`/`R` stays out of the safe-flag class."""
-    # rejected: allow -r/-R over an in-root dir (recursive walk / symlink follow escapes the anchor)
+    """grep -r/-R → DENY: recursion walks a dir (and follows symlinks out of root), reading files no
+    operand ever named — the one primitive that reaches a subtree WITHOUT naming it, which is exactly
+    what positive-enumeration containment must not hand back (an in-root dir operand on purpose: a
+    `grep -r secret /etc` would deny on the operand no matter what the flag class does, so it cannot
+    see a regression that admits `r`/`R`).
+    Positive control: the same search as a stdin stage is allowed."""
+    # rejected: allow -r/-R over an in-root dir (recursive walk / symlink follow escapes containment)
     assert not _bash(env, f"grep -r secret {env.run}/gather_raw", "gather").allow
     assert not _bash(env, f"grep -R secret {env.run}/gather_raw", "gather").allow
     assert not _bash(env, "grep -r secret /etc", "gather").allow
-    assert _bash(env, f"grep secret {env.run}/investigation.md", "gather").allow  # positive control (no -r)
+    assert _bash(env, f"cat {env.run}/investigation.md | grep secret", "gather").allow  # control
 
 
 def test_grep_recursive_single_operand_denied(env):
-    """grep -r {RUN}/x.md → DENY. The SINGLE-operand form the two-operand
-    `test_grep_recursive_denied` misses: `-r` is (correctly) excluded from `_GREP_FLAG`, but without
-    the `(?!-)` guard the free-text PATTERN slot RE-ABSORBS it — the argv matches and runs as
-    `grep -r <path>` = `-r` flag + pattern + NO FILE operand, which walks the CWD (the repo root),
-    reading every file under it including denylisted ones (#579). With two positional tokens the
-    extra token has nowhere to land so it already denied; with ONE it slipped through. Positive
-    control: `grep -n secret {RUN}/inv.md` (a real leading-dash-free pattern + anchored file)."""
-    # rejected: `pat = r"[^ ]+"` (a leading-dash pattern slot re-absorbs the rejected -r)
+    """grep -r <pattern> → DENY. The SINGLE-operand form: `-r` is (correctly) excluded from the flag
+    class, but without the `(?!-)` guard on the free-text PATTERN slot it is RE-ABSORBED there — the
+    argv matches and runs as `grep -r <pattern>` = `-r` flag + pattern + NO operand, which walks the
+    CWD (the repo root), reading every file under it including denylisted ones (#579). Positive
+    control: a real leading-dash-free pattern on the stdin lane."""
+    # rejected: `VALUE = r"[^ ]+"` (a leading-dash pattern slot re-absorbs the rejected -r)
     for which in ("main", "gather"):
         assert not _bash(env, f"grep -r {env.run}/investigation.md", which).allow, which
         assert not _bash(env, f"grep -R {env.run}/investigation.md", which).allow, which
         assert not _bash(env, f"grep -rn {env.run}/investigation.md", which).allow, which
-        assert _bash(env, f"grep -n secret {env.run}/investigation.md", which).allow, which  # control
+        assert not _bash(env, "grep -r secret", which).allow, which
+        assert _bash(env, f"cat {env.run}/investigation.md | grep -n secret", which).allow, which
 
 
-def test_tail_head_arg_consuming_flag_stays_anchored(env):
-    """tail -n /etc/passwd → DENY. tail/head's `-n`/`-c` DO consume the next token (unlike cat/wc),
-    but — unlike `ls -I` (#579) — that is NOT a read leak: the consumed token must still match the
-    anchored `{f}` operand slot to pass the grammar, so an out-of-root path denies outright, and an
-    in-root path used as a line/byte COUNT merely errors at runtime (no out-of-root read is
-    reachable). `-n`/`-c` are therefore ADMITTED, and this pins that the ANCHORING (not the flag
-    class) is what protects them, so a future operand-grammar change can't silently reintroduce a
-    leak.
+def test_tail_head_have_no_file_slot_and_no_arg_taking_flag(env):
+    """tail/head keep their COUNT flags (`-n`/`-c`, fused `-5`) and lose their file operand (#575).
 
-    `-f`/`-F` are a separate story and are DENIED: they open no new file, but a follow never
-    returns, so `tail -f` wedges the stage until the executor's wall-clock timeout fires — a
-    liveness bug, not a confinement one. `-s SECS` is out as an arg-taker. Positive controls: the
-    fused-count forms `tail -5` / `head -5` and the separated `tail -n 20` over an in-root file."""
-    # rejected: treat tail/head like ls and assume -n/-c can smuggle an out-of-root read
+    Pre-#575 the operand was ANCHORED, and `-n`'s arg-consumption was safe only because the token it
+    ate still had to match the anchored operand slot. With no file slot at all, the argument is
+    simply not there to smuggle: `tail -n /etc/passwd` denies because /etc/passwd matches no slot in
+    the shape, not because of an anchor that can be edited away. `-f`/`-F` (follow) stay DENIED for a
+    liveness reason — a follow never returns, so the stage burns the executor's whole timeout budget
+    — and `-s SECS` is out as an arg-taker.
+    Positive controls: the count forms on the stdin lane, which is where they now live."""
     for which in ("main", "gather"):
         assert not _bash(env, "tail -n /etc/passwd", which).allow, which
         assert not _bash(env, "head -c /etc/shadow", which).allow, which
-        # follow never terminates → burns the stage's whole timeout budget
+        assert not _bash(env, f"tail -5 {env.run}/investigation.md", which).allow, which  # file slot: gone
         assert not _bash(env, f"tail -f {env.run}/investigation.md", which).allow, which
         assert not _bash(env, f"tail -F {env.run}/investigation.md", which).allow, which
         assert not _bash(env, f"tail -s 5 {env.run}/investigation.md", which).allow, which
-        assert _bash(env, f"tail -5 {env.run}/investigation.md", which).allow, which     # control
-        assert _bash(env, f"head -5 {env.run}/investigation.md", which).allow, which     # control
-        assert _bash(env, f"tail -n 20 {env.run}/investigation.md", which).allow, which  # control
-        assert _bash(env, f"head -c 100 {env.run}/investigation.md", which).allow, which # control
+        inv = f"cat {env.run}/investigation.md"
+        assert _bash(env, f"{inv} | tail -5", which).allow, which        # control
+        assert _bash(env, f"{inv} | head -5", which).allow, which        # control
+        assert _bash(env, f"{inv} | tail -n 20", which).allow, which     # control
+        assert _bash(env, f"{inv} | head -c 100", which).allow, which    # control
 
 
-def test_grep_free_text_pattern_not_anchored(env):
-    """grep "/home/x/.ssh/authorized_keys" {RUN}/investigation.md → ALLOW: the path-LOOKING token is
-    the search PATTERN, not a file; only the trailing operand is anchored (real trace shape)."""
+@pytest.mark.parametrize(("file_form", "pipe_form"), [
+    ("grep -n secret {p}", "cat {p} | grep -n secret"),
+    ("head -5 {p}", "cat {p} | head -5"),
+    ("tail -3 {p}", "cat {p} | tail -3"),
+    ("wc -l {p}", "cat {p} | wc -l"),
+    ("jq -r '.' {p}", "cat {p} | jq -r '.'"),
+])
+def test_viewer_file_operand_denied_pipe_form_allowed(env, file_form, pipe_form):
+    """The c1 ledger, BOTH sides, on a fully IN-SCOPE path: the file form DENIES (it ALLOWed before
+    #575 — this is the documented behavior change) and the `cat … |` form ALLOWS. Pinning the file
+    form against an in-scope path is what makes this a test of the SHAPE (the slot is gone) rather
+    than of the scope (which would deny an out-of-root path anyway)."""
+    p = f"{env.run}/investigation.md"
+    for which in ("main", "gather"):
+        assert not _bash(env, file_form.format(p=p), which).allow, f"{which}: {file_form}"
+        assert _bash(env, pipe_form.format(p=p), which).allow, f"{which}: {pipe_form}"
+
+
+def test_grep_free_text_pattern_is_not_a_path(env):
+    """cat {RUN}/investigation.md | grep "/home/x/.ssh/authorized_keys" → ALLOW: the path-LOOKING
+    token is the search PATTERN, not a file. Only what a program OPENS is scope-checked (`cat`'s
+    operands), so a token that merely looks like an out-of-root path — even one carrying a denylisted
+    `.ssh` component — must not be denied. The real trace shape, and the honest statement of what
+    "resolve the operand" buys over "scan the command text"."""
     # rejected: deny because a token looks like an out-of-root path (over-anchors the pattern)
-    assert _bash(env, f'grep "/home/x/.ssh/authorized_keys" {env.run}/investigation.md', "main").allow
+    assert _bash(env, f'cat {env.run}/investigation.md | grep "/home/x/.ssh/authorized_keys"', "main").allow
 
 
 def test_wc_files0_from_escapes(env):
-    """wc --files0-from=/etc/passwd → DENY: --files0-from opens the named file AND every path inside it,
-    a two-hop out-of-root read the trailing-operand view misses."""
+    """wc --files0-from=/etc/passwd → DENY: it opens the named file AND every path inside it, a
+    two-hop out-of-root read. `wc` is `OPENS_NOTHING`, so the shape's flag allowlist (short boolean
+    bundles only — no `--long` option anywhere) is the sole thing that denies it."""
     # rejected: leave --files0-from ungated
     assert not _bash(env, "wc --files0-from=/etc/passwd", "gather").allow
+    assert not _bash(env, f"cat {env.run}/report.md | wc --files0-from=/etc/passwd", "gather").allow
 
 
 def test_jq_standalone_file_operand_denied(env):
     """jq '.x' {RUN}/gather_raw/l-001/1.json → DENY: jq is stdin-compute-only, NO file slot — even an
-    IN-ROOT positional file is denied (flips the pre-#535 allow). Substitute: cat FILE | jq '.x'."""
-    # rejected: allow an in-root positional file (the pre-#535 behavior; then jq needs a file slot)
+    IN-SCOPE positional file is denied. Substitute: cat FILE | jq '.x'."""
+    # rejected: allow an in-scope positional file (then jq needs a file slot, and jq's file slot
+    #           drags in an option parser for -f/-L/--slurpfile/--rawfile — the reason cat is the
+    #           sole opener)
     assert not _bash(env, f"jq '.x' {env.run}/gather_raw/l-001/1.json", "gather").allow
+    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json | jq '.x'", "gather").allow
 
 
 def test_jq_stdin_rawfile_flag_escapes(env):
     """cat {RUN}/gather_raw/l-001/1.json | jq --rawfile y /etc/passwd '.' → DENY: --rawfile opens
-    /etc/passwd EVEN in a stdin pipe stage; the jq pattern must carry no file-flag slot."""
+    /etc/passwd EVEN in a stdin pipe stage; jq's shape carries no file-flag slot."""
     # rejected: ALLOW (a free `^jq .*$` stdin pattern lets --rawfile through)
     cmd = f"cat {env.run}/gather_raw/l-001/1.json | jq --rawfile y /etc/passwd '.'"
     assert not _bash(env, cmd, "gather").allow
@@ -316,7 +353,7 @@ def test_jq_stdin_slurpfile_and_L_escape(env):
 
 def test_jq_stdin_compute_only_allowed(env):
     """cat {RUN}/executed_queries.jsonl | jq -r 'select(.lead_id=="l-001")' → ALLOW: the real jq shape
-    (stdin formatter over an in-root artifact, no file operand, boolean/value flags only)."""
+    (stdin formatter over an in-scope artifact, no file operand, boolean/value flags only)."""
     cmd = f"""cat {env.run}/executed_queries.jsonl | jq -r 'select(.lead_id=="l-001")'"""
     assert _bash(env, cmd, "gather").allow
 
@@ -343,33 +380,46 @@ def test_jq_stdin_arg_and_argjson_allowed(env):
 # ===========================================================================  #
 
 def test_stdin_consuming_viewers_in_pipe_allowed(env):
-    """`<in-root reader | shim> | grep/wc/head/tail/cat` → ALLOW: a downstream viewer reads STDIN and
-    names no file operand, so the anchored file grammar must be OPTIONAL (`{f}*`, not `{f}+`). These
-    are common in-root read/filter idioms the pre-#535 `^{name}(?: .*)?$` viewers allowed; only `jq`/
-    `defender-sql` survived the migration, silently dropping grep/wc/head/tail/cat stdin forms."""
-    # rejected: require >=1 anchored file operand (`{f}+`), denying every piped-into viewer
+    """`<in-scope cat | shim> | grep/wc/head/tail/cat` → ALLOW: a downstream viewer reads STDIN and
+    names no file operand, so `cat`'s operand grammar must be OPTIONAL (a bare `cat` / `cat -` in a
+    pipe is inert) and the viewers' shapes must admit a flags-only argv. These are the in-scope
+    read/filter idioms every run uses; they are ALL of the viewers' capability now."""
+    # rejected: require >=1 operand on cat (denying every stdin-consuming pipe stage)
     for cmd in (f"cat {env.run}/investigation.md | grep -n resolved",
-                f"tail -50 {env.run}/investigation.md | grep err",
-                f"grep foo {env.run}/investigation.md | head -5",
+                f"cat {env.run}/investigation.md | tail -50 | grep err",
+                f"cat {env.run}/investigation.md | grep foo | head -5",
                 f"cat {env.run}/investigation.md | wc -l",
                 "defender-lessons --tags | grep auth",
                 "defender-lessons --tags | wc -l",
+                f"cat {env.run}/investigation.md | cat -",
                 f"cat {env.run}/investigation.md | tail -5"):
         assert _bash(env, cmd, "gather").allow, cmd
         assert _bash(env, cmd, "main").allow, cmd
 
 
-def test_stdin_viewer_second_stage_still_anchors_files(env):
-    """The `{f}*` relaxation must NOT admit an out-of-root FILE on a downstream stage: a viewer that
-    names a file still has it anchored. `… | grep foo /etc/passwd` and `… | cat /etc/passwd` DENY."""
+def test_stdin_viewer_second_stage_still_gated(env):
+    """A downstream stage cannot smuggle a file back in: `… | grep foo /etc/passwd` and
+    `… | wc -l /etc/passwd` DENY at the SHAPE (the viewers have no file slot — an in-scope path
+    would deny there too), and `… | cat /etc/passwd` DENIES at the SCOPE (cat does have a slot, and
+    every stage is scope-checked against the grant that claimed IT)."""
     assert not _bash(env, f"cat {env.run}/investigation.md | grep foo /etc/passwd", "gather").allow
     assert not _bash(env, f"cat {env.run}/investigation.md | cat /etc/passwd", "gather").allow
     assert not _bash(env, f"cat {env.run}/investigation.md | wc -l /etc/passwd", "gather").allow
 
 
 # ===========================================================================  #
-# E. Cross-surface PARITY: bash denies everything decide_read denies            #
+# E. Cross-surface PARITY: the read tool and the bash lane share ONE object     #
 # ===========================================================================  #
+
+def test_read_allow_is_the_cat_grants_scope(env):
+    """The parity MECHANISM, not just its symptom: `policy.read_allow` IS the `cat` grant's `scope` —
+    the same tuple OBJECT (#575), so the read tool admits exactly the paths `cat` does and there is
+    nothing to keep in sync. #545's two grammars (one for each surface, built from one source) drifted;
+    one object cannot. The rows below are the symptom."""
+    for pol in (env.main, env.gather):
+        (cat_grant,) = [g for g in pol.bash_allow if g.program == "cat"]
+        assert pol.read_allow is cat_grant.scope
+
 
 def test_parity_out_of_root(env):
     """/etc/passwd: decide_read DENIES and decide_bash("cat …") DENIES — the two read surfaces agree.
@@ -382,192 +432,239 @@ def test_parity_out_of_root(env):
 
 def test_parity_ground_truth_inside_corpus(env):
     """{DFN}/fixtures/held-out/m01/ground_truth.yaml lives INSIDE defender_dir; decide_read denies it
-    (denylist substring) — the bash lane must deny it too. Positive control: a lessons .md is allowed
-    on both."""
+    and the bash lane must too. (Doubly denied: it is outside the tight corpus `.md` shape AND its
+    basename hits the denylist — the shape half is what the `.md`-named probe below removes.)
+    Positive control: a lessons .md is allowed on both."""
     gt = f"{env.dfn}/fixtures/held-out/m01/ground_truth.yaml"
     assert not _read(env, gt, "gather").allow
     assert not _bash(env, f"cat {gt}", "gather").allow
-    assert not _bash(env, f"grep x {gt}", "gather").allow
     assert _bash(env, f"cat {env.dfn}/lessons/ok.md", "gather").allow  # positive control
 
 
 def test_parity_captured_env_in_run_dir(env):
-    """A captured .env inside the run dir: decide_read denies it (denylist), so the bash lane must too —
-    an in-root operand is NOT sufficient; the secret denylist applies on both surfaces."""
+    """A captured .env at the top of the run dir: it is IN-SHAPE (`under(run, SEG)` admits any
+    run-dir file), so the secret denylist is the ONLY thing that can deny it — and it denies on BOTH
+    surfaces. An in-scope operand is necessary, not sufficient."""
     dotenv = f"{env.run}/.env"
     assert not _read(env, dotenv, "gather").allow
     assert not _bash(env, f"cat {dotenv}", "gather").allow
 
 
 def test_parity_ssh_dir_component(env):
-    """A path with an `.ssh` component is denied on both surfaces (dir-component denylist). The path is
-    UNDER the run root on purpose — otherwise the corpus/run shape gate denies it first and the
-    `.ssh` dir_component lookahead is never exercised; here `{RUN}/.ssh/id_rsa` and `ls {RUN}/.ssh`
-    are in-SHAPE (a run-dir path), so ONLY the dir-component denylist can deny them.
-    Positive control: `{RUN}/investigation.md` (same root, no `.ssh`) is allowed on both surfaces."""
-    p = f"{env.run}/.ssh/id_rsa"
+    """The denylist's path-COMPONENT axis (`.ssh`), probed where only it can decide: `{DFN}/lessons/
+    .ssh/key.md` matches the tight corpus `.md` shape (`.ssh` is a legal path segment), so the shape
+    gate admits it and the component denylist is what denies it — on both surfaces. A `{RUN}/.ssh/…`
+    probe would deny at the SHAPE (the run-dir shape is one segment deep) and prove nothing about the
+    denylist. Positive control: the same shape with no denied component is allowed on both."""
+    p = f"{env.dfn}/lessons/.ssh/key.md"
     assert not _read(env, p, "gather").allow
     assert not _bash(env, f"cat {p}", "gather").allow
-    assert not _bash(env, f"grep k {p}", "gather").allow
-    assert not _bash(env, f"ls {env.run}/.ssh", "gather").allow
-    assert not _bash(env, f"cat {env.dfn}/.ssh/id_rsa", "gather").allow  # out-of-shape variant also denies
-    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow  # positive control
+    assert _read(env, f"{env.dfn}/lessons/auth/key.md", "gather").allow      # positive control
+    assert _bash(env, f"cat {env.dfn}/lessons/auth/key.md", "gather").allow  # positive control
 
 
 def test_parity_corpus_non_listed_denied_on_both_lanes(env):
-    """Read↔bash PARITY on a non-listed corpus file (#545/#546, propagated to the compiled reader
-    policy by #551): a corpus file NOT under the tight lessons/skills/examples/**.md grammar
-    ({DFN}/docs/x.md) is DENIED on BOTH the read tool (the `read_shapes` filename filter
-    `compile_policy_for` carries) AND the bash cat lane (the operand grammar). The
-    pre-#546 'read broad, bash tight' asymmetry is CLOSED — the two surfaces now agree. Positive
-    control: a tight-corpus lessons/**.md is allowed on both."""
+    """Read↔bash PARITY on a non-listed corpus file (#545/#546): a corpus file NOT under the tight
+    lessons/skills/examples/**.md grammar ({DFN}/docs/x.md) is DENIED on BOTH the read tool and the
+    bash cat lane. The pre-#546 'read broad, bash tight' asymmetry is CLOSED — and since #575 it is
+    closed BY CONSTRUCTION (one object), not by two grammars that agree today. Positive control: a
+    tight-corpus lessons/**.md is allowed on both."""
     docs = f"{env.dfn}/docs/learning-loop.md"
-    assert not _read(env, docs, "gather").allow           # read tool: read_shapes denies non-tight corpus
-    assert not _bash(env, f"cat {docs}", "gather").allow  # bash cat lane denies it too — parity
+    assert not _read(env, docs, "gather").allow
+    assert not _bash(env, f"cat {docs}", "gather").allow
     ok = f"{env.dfn}/lessons/notes.md"
-    assert _read(env, ok, "gather").allow                 # positive control (tight corpus .md, read admits)
-    assert _bash(env, f"cat {ok}", "gather").allow        # … and the bash cat lane admits it too
+    assert _read(env, ok, "gather").allow
+    assert _bash(env, f"cat {ok}", "gather").allow
 
 
 def test_corpus_md_named_secret_denied(env):
     """A `.md`-named secret UNDER a corpus subdir — `{DFN}/lessons/credentials.md` — passes the corpus
     `.md` SHAPE gate, so the basename-substring denylist is the ONLY thing that can deny it. Unlike
-    the out-of-corpus `ground_truth.yaml`/`.env` parity cases (which the shape gate denies first),
-    this exercises `_deny_lookahead`'s basename axis in isolation on BOTH surfaces.
+    the `ground_truth.yaml`/`.env` cases (which the shape gate denies first), this exercises the
+    basename axis in isolation on BOTH surfaces.
     Positive control: `{DFN}/lessons/notes.md` (same subdir, benign name) is allowed on both."""
-    # rejected: drop the basename-substring lookahead (a `credentials.md`/`.env.md` in-corpus leaks)
+    # rejected: drop the basename-substring axis (a `credentials.md`/`.env.md` in-corpus leaks)
     for secret in (f"{env.dfn}/lessons/credentials.md",
                    f"{env.dfn}/skills/elastic/ground_truth.md",
                    f"{env.dfn}/lessons/x.env.md"):
         assert not _bash(env, f"cat {secret}", "gather").allow, secret
         assert not _read(env, secret, "gather").allow, secret
-    assert _bash(env, f"{'cat'} {env.dfn}/lessons/notes.md", "gather").allow  # positive control
+    assert _bash(env, f"cat {env.dfn}/lessons/notes.md", "gather").allow  # positive control
 
 
 @pytest.mark.parametrize("axis", ["substring", "dir"])
 def test_denylist_parity_bash_matches_decide_read(env, axis):
-    """For every configured denylist entry, an OTHERWISE-in-shape in-root operand carrying it denies on
-    BOTH the bash lane and decide_read (the two surfaces agree). Iterating the live denylist (not a
-    hardcoded sample) keeps the regex `_deny_lookahead` and Python `files._denylisted` from drifting:
-    add a new substring/dir to bash_policy.json and this pins both surfaces honor it."""
+    """For every configured denylist entry, an OTHERWISE-IN-SCOPE operand carrying it denies on BOTH
+    the bash lane and decide_read. Both probes are chosen to be in-shape (a run-dir file at depth 1;
+    a corpus `.md` under a denied dir component) so the denylist — not the enumeration — is what
+    decides. Iterating the LIVE denylist (not a hardcoded sample) is what keeps a new entry in
+    bash_policy.json honored on both surfaces: since #575 both call the same `files.denylisted`, and
+    this pins that they still do."""
     from defender.runtime import bash_policy
     if axis == "substring":
         for sub in bash_policy.read_deny_substrings():
-            p = f"{env.run}/sub/{sub}xyz"          # denied substring inside an in-root basename
+            p = f"{env.run}/{sub}xyz"                     # denied substring in an in-shape basename
             assert not _bash(env, f"cat {p}", "gather").allow, p
             assert not _read(env, p, "gather").allow, p
     else:
         for d in bash_policy.read_deny_dirs():
-            p = f"{env.run}/{d}/inner.json"        # denied dir as an in-root path component
+            p = f"{env.dfn}/lessons/{d}/inner.md"         # denied dir as an in-shape path component
             assert not _bash(env, f"cat {p}", "gather").allow, p
             assert not _read(env, p, "gather").allow, p
 
 
-def test_empty_denylist_does_not_brick_reader_lane(tmp_path, monkeypatch):
-    """A regression guard for the empty-denylist footgun: if `read_deny.substrings` (or dirs) is ever
-    emptied, `_deny_lookahead` must contribute NO lookahead — an empty `(?:)` alternation would match
-    everywhere and flip the negative lookahead to DENY every operand, silently bricking the lane."""
-    from defender.runtime.permission.policies import _common
-    monkeypatch.setattr(_common.bash_policy, "read_deny_substrings", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
-    monkeypatch.setattr(_common.bash_policy, "read_deny_dirs", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
-    assert _common._deny_lookahead() == ""     # no clause, not `(?:)` deny-all
-    # end-to-end (fresh roots dodge reader_patterns' cache): an in-root read still ALLOWS
-    run, dfn = tmp_path / "run", tmp_path / "dfn"
-    pol = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
-    assert permission.decide_bash(f"cat {run}/x.md", policy=pol, run_dir=run, defender_dir=dfn).allow
+def test_empty_denylist_cannot_brick_the_reader_lane(env, monkeypatch):
+    """The empty-denylist footgun, closed BY CONSTRUCTION. Pre-#575 the denylist was compiled INTO the
+    reader regexes as a negative lookahead, so an emptied `read_deny` config produced an empty `(?:)`
+    alternation that matches everywhere and flipped the lookahead to DENY every operand — a config
+    change that silently bricks the lane. Now the denylist is a resolve()-time SUBTRACTION
+    (`files.denylisted`) and no path shape carries a lookahead at all, so emptying it can subtract
+    nothing and brick nothing.
+
+    Asserted both ways: structurally (no scope/read shape contains `(?!`) and end-to-end (with the
+    denylist emptied, an in-scope read still ALLOWs — and the `.env` it used to deny is now admitted,
+    which is what proves the emptied config is the thing being exercised)."""
+    from defender.runtime import bash_policy
+    for pol in (env.main, env.gather):
+        for shape in [s for g in pol.bash_allow for s in g.scope] + list(pol.read_allow):
+            assert "(?!" not in shape.pattern, shape.pattern
+    monkeypatch.setattr(bash_policy, "read_deny_substrings", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
+    monkeypatch.setattr(bash_policy, "read_deny_dirs", lambda: ())  # lint-monkeypatch: ok — force the degenerate empty-denylist config
+    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow   # not bricked
+    assert _bash(env, f"cat {env.run}/.env", "gather").allow               # the axis really is empty
 
 
 # ===========================================================================  #
-# F. gather_raw RAW clamp — parity with decide_read's raw clamp                  #
+# F. gather_raw: POSITIVE ENUMERATION replaces the raw clamp                    #
 # ===========================================================================  #
 
-def test_raw_clamp_main_denied_gather_allowed(env):
-    """cat {RUN}/gather_raw/l-001/1.json: DENY for main (raw_reads=False, consumes the summary),
-    ALLOW for gather (raw_reads=True) — bash-lane parity with decide_read's raw clamp."""
-    raw = f"cat {env.run}/gather_raw/l-001/1.json"
-    d_main = _bash(env, raw, "main")
-    assert not d_main.allow
-    assert "gather_raw" in (d_main.reason or "")
-    assert _bash(env, raw, "gather").allow
+def test_raw_payload_is_gathers_shape_and_not_mains(env):
+    """cat {RUN}/gather_raw/l-001/1.json: DENY for main, ALLOW for gather — same program, same
+    extractor, same resolved operand. Main is not "clamped off" gather_raw by a `RAW_MARKER in cmd`
+    substring scan (deleted): the gather_raw SHAPE is simply not in main's grants, so it never had
+    the address. The read tool agrees (it enforces the same object) and keeps the gather_raw-specific
+    deny REASON, which the e2e deny-tail asserts as a substring."""
+    raw = f"{env.run}/gather_raw/l-001/1.json"
+    assert not _bash(env, f"cat {raw}", "main").allow
+    assert _bash(env, f"cat {raw}", "gather").allow
+    d_read = _read(env, raw, "main")
+    assert not d_read.allow
+    assert "gather_raw" in (d_read.reason or "")
 
 
-def test_raw_clamp_precedes_shape_gate(env):
-    """The raw clamp fires for main even on an otherwise in-shape read — it is a security invariant
-    that runs before the reader lane, not something the anchored allowlist can rescue."""
+def test_gather_raw_as_a_grep_pattern_is_not_a_read(env):
+    """cat {RUN}/report.md | grep gather_raw (main) → ALLOW. It DENIED before #575: the raw clamp was
+    a substring scan over the unparsed command TEXT, so it over-fired whenever `gather_raw` appeared
+    as a grep PATTERN rather than a path. Containment is now decided by what the command OPENS (an
+    in-scope report.md; grep opens nothing), so text that merely mentions the word decides nothing.
+    Positive control — the property that must NOT regress: main still cannot open the payload."""
+    assert _bash(env, f"cat {env.run}/report.md | grep gather_raw", "main").allow
     assert not _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "main").allow
 
 
-def test_coarse_clamp_over_denies_gather_raw_as_grep_pattern(env):
-    """grep gather_raw {RUN}/investigation.md (main) → DENY: the coarse substring clamp over-fires when
-    'gather_raw' is a grep PATTERN, not a path. This is the ACCEPTED fail-safe over-deny (SF4) — the
-    clamp stays dumb and un-bypassable."""
-    # rejected: make the clamp operand-aware (reintroduces a path parse = a new bypass surface)
-    assert not _bash(env, f"grep gather_raw {env.run}/investigation.md", "main").allow
-
-
-def test_gather_summaries_not_tripped_by_raw_clamp(env):
-    """cat {RUN}/gather_summaries/l-001.md (main) → ALLOW: 'gather_summaries' does NOT contain the
-    'gather_raw' marker, so the summary read is not swept up by the coarse clamp."""
+def test_gather_summaries_readable_by_main(env):
+    """cat {RUN}/gather_summaries/l-001.md (main) → ALLOW: the summary is main's sanctioned view of a
+    lead's data (the raw payload is gather's), and it is a shape main's grants carry."""
     assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
 
 
-def test_recursive_ls_cannot_dodge_the_raw_clamp(env):
-    """ls -R {RUN} → DENY. The clamp above is a SUBSTRING test on the command text (`RAW_MARKER in
-    cmd`), so it only fires on a command that NAMES `gather_raw` — and recursion is precisely the
-    primitive that reaches a subtree WITHOUT naming it: `ls -R {RUN}` walks into `gather_raw/` and
-    lists the whole raw tree (lead dirs + payload files) while spelling the marker nowhere. So the
-    clamp is complete only if the reader lane has no recursive descent at all; `_LS_FLAG` drops
-    `-R` (grep's `-r`/`-R` were already out, and there is no find/tree), which makes "to reach a
-    path you must name it, and naming it trips the clamp" a real invariant instead of an accident.
-    Denied on BOTH agents — the flag is off the lane, not conditioned on `raw_reads` (gather reads
-    raw by NAMING it, which its policy allows). Positive control: non-recursive `ls` still works,
-    and gather can still list the raw dir explicitly."""
-    # rejected: keep `-R` and special-case recursive ls inside the clamp (a path/flag parse in the
-    # security check = the new bypass surface SF4 exists to avoid — see the test above)
+def test_no_recursive_descent_primitive_on_any_lane(env):
+    """The invariant that made the old clamp complete rather than lucky, KEPT after the clamp died:
+    the lane has NO recursive-descent primitive, so a subtree cannot be reached without NAMING a path
+    — and a named path is a resolved path is a scope check. `ls -R` (ls is gone entirely) and
+    `grep -r/-R` (excluded from the flag class) deny on BOTH agents.
+    Without this, positive enumeration would be bypassable: `ls -R {run}` would walk into gather_raw/
+    and list the whole payload tree for main, naming nothing."""
     for which in ("main", "gather"):
-        assert not _bash(env, f"ls -R {env.run}", which).allow, which
-        assert not _bash(env, f"ls -lR {env.run}", which).allow, which   # bundled
-        assert _bash(env, f"ls {env.run}", which).allow, which           # control
-    assert _bash(env, f"ls {env.run}/gather_raw", "gather").allow        # control: named, allowed
-    assert not _bash(env, f"ls {env.run}/gather_raw", "main").allow      # ...and clamped for main
+        for cmd in (f"ls -R {env.run}", f"ls -lR {env.run}", f"grep -r x {env.run}",
+                    f"grep -R x {env.run}", f"find {env.run} -name '*.json'"):
+            assert not _bash(env, cmd, which).allow, f"{which}: {cmd}"
+
+
+def test_ls_and_cd_are_gone_from_the_lane(env):
+    """`ls` and `cd` — in ANY form — DENY for main and gather (#575 behavior change #2), and no grant
+    names them. `ls DIR` was the other path-opening slot (a bash-lane-only recon primitive with no
+    decide_read counterpart); removing the program is what removes the whole `-I`/`-w`-consumes-the-
+    operand-and-falls-back-to-the-CWD bug class (#579) rather than enumerating 37 safe flags to hold
+    it back. `cd` fell with it: the executor's cwd is fixed, so a relative operand always resolves
+    against one known dir.
+    Positive controls: the surviving programs still run — including the shim `cd` used to prefix."""
+    for which in ("main", "gather"):
+        assert "ls" not in {g.program for g in (env.main if which == "main" else env.gather).bash_allow}
+        for cmd in ("ls", f"ls {env.run}", f"ls -la {env.run}", f"ls {env.run}/gather_raw",
+                    "ls /etc", f"cd {env.run}", f"cd {env.dfn} && defender-lessons --tags"):
+            assert not _bash(env, cmd, which).allow, f"{which}: {cmd}"
+        assert _bash(env, "defender-lessons --tags", which).allow, which          # control
+        assert _bash(env, f"cat {env.run}/investigation.md", which).allow, which  # control
 
 
 # ===========================================================================  #
-# G. Relative-operand convention (consensus): absolute required                 #
+# G. Relative operands: rebased on the EXECUTOR's cwd, then resolved            #
 # ===========================================================================  #
 
-def test_relative_operand_denied(env):
-    """cat gather_raw/l-001/1.json (relative) → DENY: a pure-regex anchor can't resolve a relative
-    path against run_dir; the convention is absolute {RUN}/…. Positive control: the absolute form
-    is allowed (for gather)."""
-    # rejected: resolve the relative path against run_dir in the gate
+def test_relative_operand_is_rebased_not_guessed(env):
+    """A relative operand is rebased on `defender_dir.parent` — the cwd `tools._tool_bash` hands the
+    executor — before it resolves (#575). Pre-#535 the convention was "absolute only" because a pure
+    regex anchor cannot resolve a relative path; resolving one against the EXECUTOR's cwd is not a
+    widening but a correctness fix: without it the gate validates one file while `cat` opens another.
+
+    So `cat gather_raw/l-001/1.json` still DENIES — rebased on the tmp cwd, it names nothing in scope
+    — while the same relative spelling that really does land in the corpus ALLOWs, and a `..` escape
+    from it DENIES."""
     assert not _bash(env, "cat gather_raw/l-001/1.json", "gather").allow
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather").allow
+    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather").allow   # absolute control
+    assert _bash(env, "cat defender/lessons/x.md", "gather").allow                # rebased into corpus
+    assert not _bash(env, "cat ../../etc/passwd", "gather").allow                 # rebase is not a widening
 
 
 def test_relative_after_cd_still_denied(env):
-    """cd {RUN} && cat gather_raw/l-001/1.json → DENY: the gate is cwd-blind (no resolve), so a
-    relative read after `cd` still fails to anchor."""
+    """cd {RUN} && cat gather_raw/l-001/1.json → DENY, now for two independent reasons: `cd` is not a
+    granted program at all, and the executor's cwd is FIXED — a relative operand is rebased on
+    `defender_dir.parent` no matter what the model believes the cwd to be. There is no state a
+    command can set that moves where an operand resolves."""
     assert not _bash(env, f"cd {env.run} && cat gather_raw/l-001/1.json", "gather").allow
 
 
 # ===========================================================================  #
-# H. Symlink invariant: creation blocked; pre-existing = documented residual    #
+# H. Symlinks: the residual this file used to DOCUMENT is now CLOSED            #
 # ===========================================================================  #
 
 def test_ln_symlink_creation_denied(env):
-    """ln -s /etc/passwd {RUN}/x → DENY (both): `ln` is in no allowlist, so the agent cannot CREATE a
-    symlink that a later in-shape read would follow out-of-root. This is what closes the symlink
-    residual the anchored regex cannot (the bash lane does no resolve())."""
+    """ln -s /etc/passwd {RUN}/x → DENY (both): `ln` is in no grant (and not in `PROGRAMS`), so the
+    agent cannot CREATE a symlink. Defense in depth — no longer the load-bearing half."""
     assert not _bash(env, f"ln -s /etc/passwd {env.run}/x", "gather").allow
     assert not _bash(env, f"ln -s /etc/passwd {env.run}/x", "main").allow
 
-# NOTE (documented residual — deliberately NOT asserted): a PRE-EXISTING symlink at an in-shape path
-# (e.g. {RUN}/gather_raw/l-001/1.json -> /etc/passwd) is judged by the bash lane on its literal shape
-# only (no resolve() on viewer operands), so the bash gate does NOT catch it. It is closed by (a) `ln`
-# denied above, (b) run-dir writes being write_text (regular files), (c) the OS sandbox (#540). A test
-# asserting `cat {RUN}/<symlink>` DENY would FAIL and would force resolve() on every operand — not this
-# design. See #540.
+
+def test_preexisting_symlink_out_of_root_denied(env):
+    """THE RESIDUAL, CLOSED (#575 behavior change #4). This file used to carry a NOTE saying a
+    PRE-EXISTING symlink at an in-shape path could not be caught by the bash lane — the anchored
+    regex judged the operand's literal TEXT, so `{RUN}/gather_raw/l-001/9.json -> /etc/passwd` read
+    as in-root, and containment rested on a side invariant (no sanctioned writer creates a link) plus
+    the OS sandbox. The lane resolve()s now: the link collapses to /etc/passwd, which no scope shape
+    admits, and it DENIES — a check, not an invariant.
+
+    Positive control: a symlink to an IN-ROOT, in-shape target ALLOWs. The deny is for the ESCAPE,
+    not for being a symlink; containment is where a path RESOLVES and nothing else."""
+    escape = env.run / "gather_raw" / "l-001" / "9.json"
+    os.symlink("/etc/passwd", escape)
+    assert not _bash(env, f"cat {escape}", "gather").allow
+    assert not _read(env, escape, "gather").allow          # ...and the read tool agrees
+
+    (env.run / "gather_raw" / "l-001" / "0.json").write_text("{}\n")
+    inside = env.run / "gather_raw" / "l-001" / "1.json"
+    os.symlink(env.run / "gather_raw" / "l-001" / "0.json", inside)
+    assert _bash(env, f"cat {inside}", "gather").allow     # positive control
+
+
+def test_symlink_loop_fails_closed(env):
+    """A symlink LOOP makes `resolve()` raise `RuntimeError` — the gate must DENY, never propagate
+    (a raise out of decide_bash is a 500 in the driver, not a deny the model can retry)."""
+    a = env.run / "gather_raw" / "l-001" / "2.json"
+    b = env.run / "gather_raw" / "l-001" / "3.json"
+    os.symlink(b, a)
+    os.symlink(a, b)
+    assert not _bash(env, f"cat {a}", "gather").allow      # must not raise
 
 
 # ===========================================================================  #
@@ -614,7 +711,8 @@ def test_standalone_adapter_allowed_and_exposed(env):
 
 def test_adapter_sql_pipe_allowed_and_split(env):
     """defender-elastic … | defender-sql 'SELECT …' → ALLOW for gather, with .sql_pipe split
-    exposed; main never gets the adapter."""
+    exposed; main never gets the adapter. (The capability is now the two structurally-routed GRANTS,
+    not an `adapters`/`adapter_sql_pipe` bit — a bit no grant backs is data nobody enforces.)"""
     cmd = "defender-elastic query 'x' | defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'"
     d = _bash(env, cmd, "gather")
     assert d.allow
@@ -626,72 +724,31 @@ def test_adapter_sql_pipe_allowed_and_split(env):
 
 
 def test_cat_payload_into_defender_sql_allowed(env):
-    """cat {RUN}/gather_raw/l-001/1.json | defender-sql 'SELECT …' → ALLOW for gather: an in-root
-    payload streamed into the sandboxed aggregator (cat anchored, defender-sql opens no file)."""
+    """cat {RUN}/gather_raw/l-001/1.json | defender-sql 'SELECT …' → ALLOW for gather: an in-scope
+    payload streamed into the sandboxed aggregator (cat scope-checked, defender-sql opens nothing)."""
     cmd = f"cat {env.run}/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'"
     assert _bash(env, cmd, "gather").allow
 
 
 def test_adapter_jq_pipe_denied(env):
     """defender-elastic … | jq '.x' → DENY: adapter|jq is NOT a sanctioned pipe (only
-    adapter|defender-sql is); the host-state template is rewritten standalone→read instead."""
+    adapter|defender-sql is), so a live adapter's payload can only ever flow into the sealed
+    aggregator, never into an arbitrary reader stage."""
     # rejected: allow adapter | jq structurally (widens the sanctioned adapter-pipe grammar)
     d = _bash(env, "defender-elastic query 'x' | jq '.x'", "gather")
     assert not d.allow
 
 
 def test_adapter_denied_for_main(env):
-    """A data-source adapter is denied for the main loop (it dispatches gather) — unchanged."""
+    """A data-source adapter is denied for the main loop (it dispatches gather) — unchanged, and the
+    SPECIFIC reason survives: it is prompt surface the e2e deny-tail asserts as a substring."""
     d = _bash(env, "defender-elastic query 'x'", "main")
     assert not d.allow
     assert "data-source CLIs directly" in (d.reason or "")
 
 
 # ===========================================================================  #
-# K. ls is a bash-lane-only recon surface — gate it to in-root dirs             #
-# ===========================================================================  #
-
-def test_ls_out_of_root_dir_denied(env):
-    """ls /etc → DENY: `ls DIR` enumerates out-of-root structure (recon). It has no decide_read
-    counterpart, so it's a bash-lane-only decision — anchor its dir operand.
-    Positive control: ls {RUN}/gather_raw is allowed."""
-    # rejected: leave ls operands unanchored (a low-grade out-of-root recon primitive)
-    assert not _bash(env, "ls /etc", "gather").allow
-    assert _bash(env, f"ls {env.run}/gather_raw", "gather").allow
-
-
-def test_ls_arg_consuming_flag_denied(env):
-    """ls -I {RUN} → DENY: GNU ls's `-I PATTERN`/`-w COLS`/`-T COLS` CONSUME the next token, so a
-    catch-all `-[A-Za-z]+` flag class lets `-I` swallow the anchored dir operand — leaving `ls` with
-    NO operand, which falls back to listing the CWD (the repo root): a fail-open (#579). The explicit
-    `_LS_FLAG` boolean allowlist (I/w/T excluded) closes it. Both agents share the reader lane.
-
-    `_LS_FLAG` is now a load-bearing 37-letter ENUMERATION of GNU coreutils 9.7's boolean ls flags,
-    so the ALLOW side is pinned too: without it, dropping a letter (a coreutils bump, a typo) would
-    silently deny a legitimate recon shape with the suite still green. The allow list below is the
-    regression floor the tightening must not cost us."""
-    # rejected: `-[A-Za-z]+` for ls (admits -I/-w/-T, which then consume the operand)
-    for which in ("main", "gather"):
-        assert not _bash(env, f"ls -I {env.run}", which).allow, which
-        assert not _bash(env, f"ls -w {env.run}", which).allow, which
-        assert not _bash(env, f"ls -T {env.run}", which).allow, which
-        # -I in a boolean bundle still consumes the operand → still denied
-        assert not _bash(env, f"ls -laI {env.run}", which).allow, which
-        # ...and in its attached-argument spellings (`-I<PATTERN>` / `-w<COLS>`), which is how a
-        # short arg-taker is idiomatically written — the letter is excluded, so the bundle fails.
-        # (Deliberately NOT a `gather_raw` pattern: that would trip the raw clamp instead, and the
-        # assertion would pass for a reason other than the flag grammar it is meant to pin.)
-        assert not _bash(env, f"ls -I*.md {env.run}", which).allow, which
-        assert not _bash(env, f"ls -w80 {env.run}", which).allow, which
-        # positive controls — every boolean-flag shape a real run uses must still ALLOW.
-        # `-R` is NOT among them: see `test_recursive_ls_cannot_dodge_the_raw_clamp`.
-        for ok in ("ls", "ls -la", "ls -l", "ls -a", "ls -1", "ls -lt", "ls -lh",
-                   "ls -lS", "ls -ltr", "ls -F", "ls -d"):
-            assert _bash(env, f"{ok} {env.run}", which).allow, f"{which}: {ok}"
-
-
-# ===========================================================================  #
-# L. Degenerate inputs                                                          #
+# K. Degenerate inputs                                                          #
 # ===========================================================================  #
 
 def test_empty_command_allowed(env):
@@ -702,7 +759,9 @@ def test_empty_command_allowed(env):
 
 
 def test_arbitrary_shell_still_denied(env):
-    """curl / rm / python3 → DENY for both agents (regression floor — the allowlist is deny-by-default)."""
+    """curl / rm / python3 → DENY for both agents (regression floor — the grant list is
+    deny-by-default, and `curl` is not even in `PROGRAMS`, so no policy could grant it without
+    failing loud at compile)."""
     for cmd in ("curl http://evil", "rm -rf /tmp/x", "python3 -c 'x'"):
         assert not _bash(env, cmd, "gather").allow, cmd
         assert not _bash(env, cmd, "main").allow, cmd

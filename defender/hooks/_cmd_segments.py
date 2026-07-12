@@ -58,6 +58,18 @@ NON_ADAPTER_SHIMS = frozenset(
      "defender-lessons", "defender-sql"}
 )
 
+# OPERATOR tools: a `defender-*` binary that is neither an adapter NOR a shim any agent may
+# run. `defender-policy` (the gate's audit CLI) is the first: it is for a HUMAN reading a
+# policy, and it must reach no agent's lane — a read of its own gate is a map of what to
+# attack, and for the judge a map of exactly which grants stand between it and the answer key.
+#
+# It needs its own category because the taxonomy above is a BINARY split with a dangerous
+# default: "every `defender-*` that is not a listed shim is a data-source adapter". Dropping a
+# new binary into `defender/bin/` therefore hands it to gather — which may run adapters, and
+# would capture its output into the queries table as if it were evidence. Being in neither set
+# is what makes it deny for everyone (no grant claims it, and no adapter route rescues it).
+OPERATOR_TOOLS = frozenset({"defender-policy"})
+
 # A raw adapter-CLI path form (`scripts/adapters/<name>_cli.py`), i.e. the
 # shim's underlying script invoked directly rather than via its `defender-*`
 # token. The `_cli.py` suffix IS the structural marker for an adapter: every
@@ -78,9 +90,9 @@ def all_defender_shims() -> set[str]:
 
 
 def adapter_shims() -> set[str]:
-    """The data-source adapter shims = every `defender-*` shim minus the
-    non-adapter tooling. These are the calls that must be captured."""
-    return all_defender_shims() - set(NON_ADAPTER_SHIMS)
+    """The data-source adapter shims = every `defender-*` shim minus the non-adapter tooling
+    and the operator tools. These are the calls that must be captured."""
+    return all_defender_shims() - set(NON_ADAPTER_SHIMS) - set(OPERATOR_TOOLS)
 
 
 def _skip_timeout_prefix(tokens: list[str]) -> int:

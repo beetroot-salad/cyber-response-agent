@@ -56,10 +56,12 @@ _BASH_TIMEOUT_S = 120
 
 
 def _lane_admits(policy: permission.AgentPolicy, probe: str) -> bool:
-    """Whether the agent's bash lane would accept `probe` — the one honest way to ask
-    "can this agent run that program?", since `bash_allow` is a regex tuple and carries
-    no program list."""
-    return any(p.fullmatch(probe) for p in policy.bash_allow)
+    """Whether the agent's bash lane would accept `probe` — asked through the REAL decide seam,
+    so the hint can never disagree with the gate. (Reaching into `bash_allow` and matching it
+    directly is how this went wrong before: the tuple's element type is the gate's business, and
+    a probe matched against a `Grant` is an `AttributeError` in production, in the overflow
+    path.) The probes name no file, so the gate needs no roots to decide them."""
+    return permission.decide_bash(probe, policy=policy).allow
 
 
 def _overflow_filter_hint(
@@ -473,11 +475,11 @@ def register_tools(agent, tools: ToolSet) -> None:
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
     edit_file, forward_check, lesson_read` — independent of the `ToolSet` field order, so the
-    pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash is not None`
-    (a `BashGrammar()` with no programs still REGISTERS the tool — the gate then denies
-    every command); the file writers are the `tools.write` opt-in (MAIN only)."""
+    pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash` (an
+    agent may hold the tool and be granted no program — the gate then denies every command; tool
+    PRESENCE and PERMISSION are two facts); the file writers are the `tools.write` opt-in."""
 
-    if tools.bash is not None:
+    if tools.bash:
         @agent.tool
         async def bash(ctx: RunContext[AgentDeps], command: str) -> str:
             """Run a shell command. Use the `defender-*` shims (defender-invlang,
