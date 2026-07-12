@@ -15,6 +15,9 @@ no PyYAML; each script imports ``_lessons_common`` (and so this module) at modul
 then re-execs into the venv. A module-top yaml import here breaks the actor's lesson retrieval
 live in the learning loop. :func:`iter_lessons` therefore imports the parser *lazily*, inside the
 function body — and :class:`Lesson` is a plain stdlib dataclass for the same reason.
+(``defender._io``, imported at module scope below, is pure stdlib for exactly this reason and
+must stay that way; the text-IO contract it owns — the utf-8 pin and the guard that holds it —
+is not lesson-specific and lives there, not here.)
 """
 from __future__ import annotations
 
@@ -23,6 +26,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
 
 @dataclass(frozen=True)
@@ -69,26 +74,6 @@ def iter_lesson_paths(corpus_dir: Path) -> list[Path]:
     return [p for p in sorted(corpus_dir.glob("*.md")) if not p.name.startswith("_")]
 
 
-def use_utf8_stdio() -> None:
-    """Pin this process's stdout/stderr to UTF-8 — the WRITE half of the read's ``encoding`` pin.
-
-    Lessons are UTF-8 and say so: 42 of the checked-in ones carry non-ASCII today, em-dashes in
-    the ``description`` above all. Every corpus CLI *prints* that text, so pinning only the read
-    leaves the other direction decoding under the ambient locale — and the failure is not
-    hypothetical. Under the same C locale :func:`iter_lessons`'s pin is tested against, a bare
-    ``defender-lessons`` over the real corpus dies with an ascii ``UnicodeEncodeError`` on the
-    tenth lesson: the defender's PLAN-time retrieval (``SKILL.md`` §Lessons) exits non-zero having
-    emitted a silently truncated corpus. Same locale dependence as the read bug, one direction over.
-
-    Idempotent. A stream that cannot be reconfigured (a replaced ``sys.stdout`` under pytest's
-    capture) is left alone rather than raising — this is hardening, never a new failure mode.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            reconfigure(encoding="utf-8")
-
-
 def iter_lessons(
     corpus_dir: Path,
     *,
@@ -109,34 +94,39 @@ def iter_lessons(
     curator. It is stable across reruns, which is the property that matters; a stem re-sort to
     serve one consumer would silently reorder the others.
 
-    The read pins ``encoding="utf-8"``. A bare ``read_text()`` decodes under the *ambient* locale,
-    so where the interpreter's encoding really is ascii a valid UTF-8 lesson containing ``café``
-    raises an ascii ``UnicodeDecodeError``, is warn-skipped by the guard below, and vanishes from
-    the actor's retrieval and the curator's manifest — silent data loss dressed up as a malformed
-    lesson, and invisible on a UTF-8 dev machine.
+    The read goes through :func:`defender._io.read_text_utf8`, which pins ``encoding="utf-8"``. A
+    bare ``read_text()`` decodes under the *ambient* locale, so where the interpreter's encoding
+    really is ascii a valid UTF-8 lesson containing ``café`` raises an ascii ``UnicodeDecodeError``,
+    is warn-skipped by the guard below, and vanishes from the actor's retrieval and the curator's
+    manifest — silent data loss dressed up as a malformed lesson, and invisible on a UTF-8 dev
+    machine.
 
     Be precise about the trigger, because a reader who cannot reproduce it will conclude the pin is
     cosmetic and drop it: a *bare* ``LC_ALL=C`` does NOT reproduce it. CPython >= 3.7 coerces the C
     locale to C.UTF-8 (PEP 538) whenever that locale exists, as it does in this repo's runtime
     image, and UTF-8 mode (PEP 540) covers the rest. The pin is therefore latent hardening for the
     images where coercion cannot fire — which is exactly why ``test_d5`` has to disable
-    ``PYTHONCOERCECLOCALE`` and ``PYTHONUTF8`` to drive it. See :func:`use_utf8_stdio` for the
-    matching pin on the WRITE side, without which this one only moves the crash downstream.
+    ``PYTHONCOERCECLOCALE`` and ``PYTHONUTF8`` to drive it. See
+    :func:`defender._io.use_utf8_stdio` for the matching pin on the WRITE side, without which this
+    one only moves the crash downstream.
 
-    "Malformed" covers the READ as well as the PARSE, so the read is inside the ``try``: it raises
-    ``UnicodeDecodeError`` on undecodable bytes, which is a ``ValueError`` and NOT an ``OSError``
-    — outside the guard it would escape and take the whole caller down (the actor's
+    "Malformed" covers the READ as well as the PARSE, so the read is inside the ``try``, and the
+    guard names ``TEXT_READ_ERRORS`` rather than restating it: an undecodable lesson raises
+    ``UnicodeDecodeError``, which is a ``ValueError`` and NOT an ``OSError``, so an ``except
+    OSError`` would let it escape and take the whole caller down (the actor's
     ``lessons_actor_index`` / ``lessons_env_retrieve`` run this on their bash lane mid-run),
-    defeating the skip-one-bad-file contract this function exists to provide.
+    defeating the skip-one-bad-file contract this function exists to provide. That is not a
+    hypothetical: #589 is a hand-rolled copy of this guard, one directory over, that caught only
+    ``OSError``.
     """
     from defender._frontmatter import FrontmatterError, split_frontmatter
 
     label = warn_label or (lambda p: p.name)
     for path in iter_lesson_paths(corpus_dir):
         try:
-            text = path.read_text(encoding="utf-8")
+            text = read_text_utf8(path)
             fm, raw, body = split_frontmatter(text)
-        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
+        except (FrontmatterError, *TEXT_READ_ERRORS) as e:
             print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
             continue
         yield Lesson(path=path, fm=fm, raw=raw, body=body)

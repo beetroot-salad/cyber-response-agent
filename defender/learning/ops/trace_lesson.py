@@ -33,7 +33,8 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._corpus import iter_lessons, use_utf8_stdio
+from defender._corpus import iter_lessons
+from defender._io import use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
