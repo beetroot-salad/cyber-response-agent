@@ -26,7 +26,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from defender.runtime import bash_policy
+from defender.runtime import bash_policy, gnu_flags
 
 # The corpus subdirs whose `.md` files a runtime agent may read on the bash lane —
 # lessons (pitfalls), skills (per-system references + gather query templates), and
@@ -105,15 +105,29 @@ def _dir_operand(run: str, dfn: str) -> str:
     return _deny_lookahead() + r"(?:" + _at_or_under(run) + r"|" + _at_or_under(dfn) + r")"
 
 
-# Per-program safe flag classes (single-dash bundles). A flag that OPENS a file or
-# recurses is deliberately EXCLUDED so it fails the grammar (fail closed) rather than
-# smuggling an out-of-root read: grep's `-f`/`-e`/`-r`/`-R`, `wc --files0-from`
-# (double-dash → not a short bundle), jq's `-f`/`-L`. Double-dash long options are not
-# admitted anywhere, so `--files0-from=…`/`--rawfile` fail too.
-_GREP_FLAG = r"-[nicovwxHhsEFabz]+"    # safe grep short flags (NO f/e/r/R/L/l/d)
-_JQ_FLAG = r"-[rjcnesRaSCM]+"          # safe jq boolean short flags (NO f/L file-openers)
-_VIEW_FLAG = r"-[A-Za-z]+"             # cat/wc/ls: any short flag (none open a 2nd file)
-_NUM_FLAG = r"-[A-Za-z0-9]+"           # tail/head: `-5`/`-1`/`-n`/`-c`
+# Per-program flag classes (single-dash bundles), each a POSITIVE boolean-flag allowlist built
+# from the shared GNU arity facts in `runtime/gnu_flags.py` — read that module's header for WHY a
+# catch-all minus the known-bad fails open (#579). Double-dash long options are admitted nowhere,
+# so `wc --files0-from=…` / `jq --rawfile` / `grep --file=…` fail the grammar too.
+_CAT_FLAG = gnu_flags.bundle(gnu_flags.CAT_BOOL)
+_WC_FLAG = gnu_flags.bundle(gnu_flags.WC_BOOL)
+_GREP_FLAG = gnu_flags.bundle(gnu_flags.GREP_BOOL)   # no f/e/r/R/l/L/d/D/m/A/B/C
+# ls MINUS `-R`. Recursion is the one primitive that reaches a subtree WITHOUT NAMING it, and this
+# lane's `run_dir` holds exactly such a subtree: `gather_raw/`, which an agent lacking `raw_reads`
+# (the main loop) may not touch. That clamp is a SUBSTRING test on the command text
+# (`bash.decide_bash`: `RAW_MARKER in cmd`), so `ls -R {run_dir}` would enumerate the whole raw
+# tree while spelling `gather_raw` nowhere — dodging the clamp entirely. Dropping `-R` leaves the
+# reader lane with NO recursive-descent primitive at all (grep's `-r`/`-R` are already out, and
+# there is no `find`/`tree`), which is what makes the textual clamp COMPLETE rather than merely
+# lucky: to reach a path under `run_dir`, a viewer must now name it, and naming it trips the clamp.
+_LS_FLAG = gnu_flags.bundle(gnu_flags.LS_BOOL, drop=gnu_flags.LS_RECURSE)
+# tail/head: the boolean flags + `-n`/`-c` (whose NUM must still match the anchored operand slot,
+# so they cannot smuggle an out-of-root read) + a fused count (`-5`, `-50`). `-f`/`-F` are excluded:
+# a follow never returns, so it wedges the stage until the executor's wall-clock timeout fires.
+_NUM_FLAG = gnu_flags.bundle(gnu_flags.TAIL_HEAD_BOOL + gnu_flags.DIGITS)
+# jq is not a GNU coreutil, so its set stays local: the safe boolean short flags (NO `-f`/`-L`,
+# which open a filter file / a module dir).
+_JQ_FLAG = r"-[rjcnesRaSCM]+"
 
 # jq's file-FREE key/value flags: `--arg NAME VALUE` / `--argjson NAME VALUE` bind a
 # shell var into the filter as a STRING/JSON literal — they open NO file (unlike the
@@ -151,7 +165,13 @@ def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
     grammar can compile just the subset a `BashGrammar` declares."""
     f = _file_operand(run, dfn)
     d = _dir_operand(run, dfn)
-    pat = r"[^ ]+"  # a free-text grep search pattern / a jq filter program (one token)
+    # a free-text grep search PATTERN / a jq filter program (one token). A leading `-` is
+    # FORBIDDEN (`(?!-)`): without it a rejected file-opening flag (grep's `-r`/`-R`/`-f`/`-e`,
+    # excluded from `_GREP_FLAG`) is silently re-absorbed HERE as the pattern, so `grep -r
+    # {run_dir}/x.md` matches and then runs `grep -r <path>` = recursive walk of the CWD with no
+    # FILE operand (#579). A real grep pattern / jq filter never starts with `-` (a literal
+    # leading-dash search needs `-e`/`--`, neither admitted), so this loses no legitimate shape.
+    pat = r"(?!-)[^ ]+"
     return {
         # single file-reader + the read/format viewers: PROG (flag)* FILE* — the file
         # operands are OPTIONAL (`*`, not `+`): a viewer reading STDIN in a downstream
@@ -159,15 +179,16 @@ def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
         # must still match. Any file operand that IS present is anchored; an out-of-root
         # operand still fails `fullmatch` (it matches neither a flag nor `{f}`), so the
         # `*` re-admits the stdin shape without widening file access.
-        "cat": rf"cat(?: {_VIEW_FLAG})*(?: {f})*",
-        "wc": rf"wc(?: {_VIEW_FLAG})*(?: {f})*",
+        "cat": rf"cat(?: {_CAT_FLAG})*(?: {f})*",
+        "wc": rf"wc(?: {_WC_FLAG})*(?: {f})*",
         "tail": rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
         "head": rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
         # grep: safe-flags, one free-text PATTERN (may look like a path), anchored FILE*
         "grep": rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
         # ls/cd: anchored DIR operand (recon confined to the read roots). ls REQUIRES a
-        # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon).
-        "ls": rf"ls(?: {_VIEW_FLAG})*(?: {d})+",
+        # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon). Listing is
+        # NON-recursive (`_LS_FLAG` drops `-R`), so every dir a viewer reaches is a dir it named.
+        "ls": rf"ls(?: {_LS_FLAG})*(?: {d})+",
         "cd": rf"cd(?: {d})?",
         # jq: stdin-compute-only — safe boolean flags + file-free `--arg`/`--argjson`
         # key/value flags + exactly one filter, NO file slot.
