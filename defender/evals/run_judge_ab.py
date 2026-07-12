@@ -77,7 +77,7 @@ def load_cases(cases_dir: Path) -> list[FrozenCase]:
         # abort the whole loader (JSONDecodeError subclasses ValueError). A valid-JSON but
         # non-object payload falls through to the bad-direction skip below (direction=None).
         try:
-            meta = json.loads(meta_path.read_text())
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
             print(f"skip {case_dir.name}: unreadable/invalid meta.json ({e})", file=sys.stderr)
             continue

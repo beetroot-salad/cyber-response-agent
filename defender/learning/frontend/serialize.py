@@ -53,7 +53,8 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender._corpus import iter_lessons, use_utf8_stdio
+from defender._corpus import iter_lessons
+from defender._io import use_utf8_stdio
 
 
 def _json_safe(obj):

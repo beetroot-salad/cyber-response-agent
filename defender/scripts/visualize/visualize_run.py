@@ -120,8 +120,8 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
     landed. Mirrored into a per-run subdir because the pages cross-link via
     relative hrefs.
     """
-    (run_dir / JUDGE_FILENAME).write_text(render_judge_page(run_dir))
-    (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir))
+    (run_dir / JUDGE_FILENAME).write_text(render_judge_page(run_dir), encoding="utf-8")
+    (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
     mirrored: list[Path] = []
     for fname in (JUDGE_FILENAME, RUNTIME_FILENAME):

@@ -8,6 +8,7 @@ and the generation counters all take their root/lock-file by param via the confi
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import shutil
@@ -620,33 +621,59 @@ def test_rotate_queue_preserves_held_and_appends_consumed(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+def _defender_import_closure(script: Path, repo_src: Path) -> set[str]:
+    """Every `defender.*` module reachable from `script`, through imports at ANY depth.
+
+    `ast.walk`, not `tree.body`: `_corpus.iter_lessons` imports `defender._frontmatter` INSIDE
+    the function (deliberately — the module must stay yaml-free at import time for the actor's
+    system-interpreter bootstrap). A module-level-only closure misses it, and the subprocess dies
+    with ModuleNotFoundError the moment nothing else puts the real tree on sys.path."""
+    def direct(src: Path) -> set[str]:
+        found: set[str] = set()
+        for node in ast.walk(ast.parse(src.read_text())):
+            if isinstance(node, ast.Import):
+                found |= {a.name for a in node.names if a.name.startswith("defender.")}
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.level == 0
+                and node.module.startswith("defender.")
+            ):
+                found.add(node.module)
+        return found
+
+    seen: set[str] = set()
+    queue = direct(script)
+    while queue:
+        module = queue.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        real = repo_src / (module.replace(".", "/") + ".py")
+        if real.exists():
+            queue |= direct(real)
+    return seen
+
+
 def _index_cli_runner(ctx: dict):
     """Mirror lessons_actor_index.py + its import deps into ctx's tmp repo (at the real
     scripts/lessons/ depth, so the script's REPO_ROOT resolves to the fake repo) and return a
     ``_run(extra_argv) -> stdout`` closure that runs it against ctx's isolated corpus."""
     defender_src = Path(__file__).resolve().parents[1]
+    repo_src = defender_src.parent
     script = defender_src / "scripts" / "lessons" / "lessons_actor_index.py"
     fake_scripts = ctx["repo"] / "defender" / "scripts" / "lessons"
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
-    # The script imports defender._frontmatter and the shared scripts.lessons._lessons_common
-    # helper (both via its sys.path bootstrap), which re-exports defender._corpus (the shared
-    # lesson walk) and defender.scripts._venv — mirror all four. The copy list is the script's
-    # transitive module-level defender.* import closure; test_corpus_fold_seed::test_c4 pins that
-    # structurally, so a module the CLIs pick up later fails there rather than as a
-    # ModuleNotFoundError inside this subprocess.
-    (ctx["repo"] / "defender" / "_frontmatter.py").write_text(
-        (defender_src / "_frontmatter.py").read_text()
-    )
-    (ctx["repo"] / "defender" / "_corpus.py").write_text(
-        (defender_src / "_corpus.py").read_text()
-    )
-    (fake_scripts / "_lessons_common.py").write_text(
-        (defender_src / "scripts" / "lessons" / "_lessons_common.py").read_text()
-    )
-    (ctx["repo"] / "defender" / "scripts" / "_venv.py").write_text(
-        (defender_src / "scripts" / "_venv.py").read_text()
-    )
+    # Mirror the script's transitive module-level `defender.*` import closure, COMPUTED rather
+    # than listed: the closure moves (it has picked up defender._corpus, then defender._io), and
+    # a hardcoded list re-arms the same ModuleNotFoundError-in-a-subprocess trap every time it
+    # does. test_corpus_fold_seed::test_c4 pins the property; this is the fixture that satisfies
+    # it by construction.
+    for module in _defender_import_closure(script, repo_src):
+        dst = ctx["repo"] / (module.replace(".", "/") + ".py")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text((repo_src / (module.replace(".", "/") + ".py")).read_text())
 
     def _run(extra: list[str]) -> str:
         proc = subprocess.run(

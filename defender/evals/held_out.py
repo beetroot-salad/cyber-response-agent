@@ -38,7 +38,7 @@ def _read_frontmatter(report_path: Path) -> dict | None:
     """Return the YAML frontmatter as a dict, or None if unparseable/missing."""
     if not report_path.is_file():
         return None
-    return parse_frontmatter_or_none(report_path.read_text())
+    return parse_frontmatter_or_none(report_path.read_text(encoding="utf-8"))
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
@@ -59,7 +59,7 @@ def held_out_runs(runs_dir: Path) -> list[Path]:
         gt = child / "ground_truth.yaml"
         if not gt.is_file():
             continue
-        doc = yaml.safe_load(gt.read_text()) or {}
+        doc = yaml.safe_load(gt.read_text(encoding="utf-8")) or {}
         if isinstance(doc, dict) and doc.get("held_out") is True:
             out.append(child)
     return out
@@ -74,7 +74,7 @@ def report(runs_dir: Path) -> int:
     by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
     failures: list[tuple[str, str]] = []
     for run_dir in runs:
-        gt_doc = yaml.safe_load((run_dir / "ground_truth.yaml").read_text())
+        gt_doc = yaml.safe_load((run_dir / "ground_truth.yaml").read_text(encoding="utf-8"))
         true_disp = gt_doc.get("disposition")
         pred = predicted_disposition(run_dir)
         verdict = "ok" if pred == true_disp else "wrong"

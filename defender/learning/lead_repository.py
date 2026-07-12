@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from defender._io import read_jsonl_rows
+from defender._io import read_jsonl_rows, read_text_utf8
 from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import error_class_for_exit
 
@@ -132,7 +132,7 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
         if not lead_id:
             continue
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(read_text_utf8(path))
         except (OSError, json.JSONDecodeError, ValueError):
             continue
         if not isinstance(data, dict):
@@ -401,7 +401,7 @@ def narration_crosscheck_from_run(run_dir: Path) -> dict:
     run_dir = Path(run_dir)
     from defender.skills.invlang.parser import parse_dense_companion
 
-    text = RunPaths(run_dir).investigation.read_text()
+    text = read_text_utf8(RunPaths(run_dir).investigation)
     companion, _ = parse_dense_companion(text)
     return narration_crosscheck(run_dir, _lead_ids_from_companion(companion))
 

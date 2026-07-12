@@ -102,7 +102,7 @@ def read_head_disposition(run_dir: Path) -> str | None:
     report = RunPaths(run_dir).report
     if not report.is_file():
         return None
-    text = report.read_text()
+    text = report.read_text(encoding="utf-8")
     if not text.startswith("---"):
         return None
     end = text.find("\n---", 3)
@@ -183,7 +183,7 @@ def run_head_oracle_and_judge(
     invalid oracle/judge output.
     """
     actor_story_path = staging_dir / "actor_story.md"
-    actor_story = actor_story_path.read_text()
+    actor_story = actor_story_path.read_text(encoding="utf-8")
     if loop_mod.is_skip_story(actor_story):
         return SKIP_OUTCOME
 
@@ -212,7 +212,7 @@ def run_head_oracle_and_judge(
     # from the join); the only model-authored content is each lead's events list, read
     # by the LLM judge as text. No structural validation gate — just strip + write.
     projected_path = staging_dir / "projected_telemetry.yaml"
-    projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml))
+    projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml), encoding="utf-8")
 
     try:
         judge_yaml = loop_mod.InProcessSubagents().judge(
@@ -228,7 +228,7 @@ def run_head_oracle_and_judge(
     # (fence/envelope + prose-preamble strip) so a preamble'd judge verdict is not
     # dead-lettered here while the other two consumers parse it — the #492 drift.
     judge_stripped = loop_mod.normalize_judge_yaml(judge_yaml)
-    (staging_dir / "judge_findings.yaml").write_text(judge_stripped)
+    (staging_dir / "judge_findings.yaml").write_text(judge_stripped, encoding="utf-8")
     try:
         judge_doc = yaml.safe_load(judge_stripped)
         loop_mod.validate_judge_doc(judge_doc)

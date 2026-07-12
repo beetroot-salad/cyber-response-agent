@@ -102,7 +102,7 @@ def cmd_health_check(args, _config):
     """Lightweight: verify the docker context can list containers."""
     cmd = ["docker", "--context", transport.DOCKER_CONTEXT, "ps", "--format", "{{.Names}}"]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, encoding="utf-8")
     except FileNotFoundError:
         print("error: docker CLI not found on PATH", file=sys.stderr)
         sys.exit(2)

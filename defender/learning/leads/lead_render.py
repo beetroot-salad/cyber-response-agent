@@ -48,7 +48,7 @@ def render_query(template_path: Path, params: dict[str, Any]) -> str:
     Returns the raw body when the template has no recognized query
     section.
     """
-    text = template_path.read_text()
+    text = template_path.read_text(encoding="utf-8")
     body = _extract_query_body(text)
     if not body:
         return ""

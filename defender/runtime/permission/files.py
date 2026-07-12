@@ -246,7 +246,7 @@ def decide_write(
         )
 
     if path.name == "investigation.md":
-        current = path.read_text() if path.is_file() else None
+        current = path.read_text(encoding="utf-8") if path.is_file() else None
         # Fail closed on an internal validator error — same as invlang_validate's
         # hook, which exits 2 (block) rather than letting the write through.
         try:

@@ -30,7 +30,7 @@ def extract_case_entities(investigation_path: Path) -> str:
         return ""
     seen: list[str] = []
     in_block = False
-    for line in investigation_path.read_text().splitlines():
+    for line in investigation_path.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if s.startswith(":V prologue.vertices"):
             in_block = True

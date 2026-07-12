@@ -45,7 +45,7 @@ def invoke_actor_benign(
     offline and non-fatal: an empty pool (cold start / store unreachable) yields no
     section and the actor grounds off the systems-of-record exactly as before.
     """
-    alert_text = alert_path.read_text()
+    alert_text = alert_path.read_text(encoding="utf-8")
     user = (
         _section("alert", alert_text)
         + _section("alert_rule_id", alert_rule_key)
@@ -57,7 +57,7 @@ def invoke_actor_benign(
     seeds = ticket_seeds.sample_seeds(json.loads(alert_text), case_id, case_id)
     if seeds:
         menu_text = ticket_seeds.format_seeds(seeds)
-        (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n")
+        (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n", encoding="utf-8")
         user += _section("past_tickets", menu_text)
     # DI seam that owns its default (CLAUDE.md conventions): the in-process actor engine in
     # production; InProcessSubagents / tests pass an explicit actor_fn.

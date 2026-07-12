@@ -46,7 +46,7 @@ def load_yaml(path: Path) -> dict | list | None:
     if not path.is_file() or yaml is None:
         return None
     try:
-        return yaml.safe_load(path.read_text())
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
         return None
 
@@ -260,7 +260,7 @@ def parse_report(run_dir: Path) -> dict:
     p = RunPaths(run_dir).report
     if not p.is_file():
         return {}
-    text = p.read_text()
+    text = p.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         return {"body": text}
     end = text.find("\n---", 4)
@@ -312,9 +312,9 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
         body = '<div class="empty">no alert.json</div>'
     else:
         try:
-            body = pretty_json_html(json.loads(p.read_text()))
+            body = pretty_json_html(json.loads(p.read_text(encoding="utf-8")))
         except json.JSONDecodeError:
-            body = pre_text(p.read_text())
+            body = pre_text(p.read_text(encoding="utf-8"))
     return section(anchor, "alert", "Alert", "— input to the defender runtime", body)
 
 

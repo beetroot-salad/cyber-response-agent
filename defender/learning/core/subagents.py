@@ -49,7 +49,7 @@ class InProcessSubagents:
         # The actor-facing view is queries-only (no goal / what_to_summarize) —
         # written as a real side-artifact for transcripts/visualizers.
         actor_input_path = learning_run_dir / "actor_input.yaml"
-        actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir))
+        actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir), encoding="utf-8")
         return invoke_actor(RunPaths(run_dir).alert, actor_input_path, learning_run_dir,
                             actor_fn=_run_actor_pydantic)
 

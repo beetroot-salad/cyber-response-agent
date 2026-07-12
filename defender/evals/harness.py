@@ -142,12 +142,12 @@ def capture_results(tmp: Path, scenario_name: str, proc: AuthorRun,
     git_log = _git.git(
         ["log", "--all", "--format=%H %s%n%b%n----"], cwd=tmp, check=False
     )
-    (out / "git_log.txt").write_text(git_log)
+    (out / "git_log.txt").write_text(git_log, encoding="utf-8")
 
     # Author stdout/stderr.
-    (out / "author.stdout").write_text(proc.stdout)
-    (out / "author.stderr").write_text(proc.stderr)
-    (out / "rc.txt").write_text(str(proc.returncode))
+    (out / "author.stdout").write_text(proc.stdout, encoding="utf-8")
+    (out / "author.stderr").write_text(proc.stderr, encoding="utf-8")
+    (out / "rc.txt").write_text(str(proc.returncode), encoding="utf-8")
 
     if wall_seconds is not None:
         # The per-check verifier timing came from the deleted CLI's `_verify_timing.log`
@@ -155,7 +155,7 @@ def capture_results(tmp: Path, scenario_name: str, proc: AuthorRun,
         effort = os.environ.get("LEARNING_AUTHOR_EFFORT", "(default)")
         (out / "timing.txt").write_text(
             f"wall_seconds={wall_seconds:.1f}\n"
-            f"effort={effort}\n"
+            f"effort={effort}\n", encoding="utf-8"
         )
 
     return out

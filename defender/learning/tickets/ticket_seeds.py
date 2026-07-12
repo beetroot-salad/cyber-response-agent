@@ -72,7 +72,7 @@ def _list_closed(label: str) -> list:
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=_LIST_TIMEOUT_SEC, cwd=str(REPO_ROOT),
+            timeout=_LIST_TIMEOUT_SEC, cwd=str(REPO_ROOT), encoding="utf-8"
         )
     except (subprocess.SubprocessError, OSError) as e:
         _log(f"list-tickets failed to run ({e!r}); empty pool")

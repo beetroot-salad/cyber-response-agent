@@ -190,11 +190,16 @@ def _capture_adapter_sql(
     # Aggregate the FULL captured payload: the passthrough view is truncated for
     # the model's context, but defender-sql must see every row, so read it back
     # from the by-ref file.
-    raw = (deps.run_dir / record["payload_path"]).read_text()
+    raw = (deps.run_dir / record["payload_path"]).read_text(encoding="utf-8")
     try:
         proc = subprocess.run(
             sql_argv, input=raw, capture_output=True, text=True,
             env=env, timeout=_BASH_TIMEOUT_S,
+            # Lossy, like the adapter pipe upstream: defender-sql echoes the captured payload's
+            # own cells back out, so a byte the adapter mangled must not become a strict-decode
+            # UnicodeDecodeError here — a ValueError no gate converts, escaping this in-process
+            # tool and killing the stage.
+            encoding="utf-8", errors="replace",
         )
     except subprocess.TimeoutExpired as e:
         raise ModelRetry(f"defender-sql timed out after {_BASH_TIMEOUT_S}s") from e
@@ -266,7 +271,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
     try:
         d = run_dir / "gather_summaries"
         d.mkdir(parents=True, exist_ok=True)
-        (d / f"{lead_id}.md").write_text(wrapped)
+        (d / f"{lead_id}.md").write_text(wrapped, encoding="utf-8")
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
         print(f"[run.py] gather-summary persist skipped for {lead_id}: {e!r}",
               file=sys.stderr)

@@ -68,15 +68,15 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     rng = random.Random(_actor_seed(learning_run_dir.name))
     archetype = rng.choice(["internal", "external"])
     menu_text = mitre_corpus.format_menu(mitre_corpus.sample_menu(rng))
-    (learning_run_dir / "actor_archetype.txt").write_text(archetype + "\n")
-    (learning_run_dir / "actor_menu.txt").write_text(menu_text + "\n")
+    (learning_run_dir / "actor_archetype.txt").write_text(archetype + "\n", encoding="utf-8")
+    (learning_run_dir / "actor_menu.txt").write_text(menu_text + "\n", encoding="utf-8")
 
-    alert_rule_key = derive_alert_rule_key(json.loads(alert_path.read_text()))
+    alert_rule_key = derive_alert_rule_key(json.loads(alert_path.read_text(encoding="utf-8")))
     user = (
-        _section("alert", alert_path.read_text())
+        _section("alert", alert_path.read_text(encoding="utf-8"))
         + _section("alert_rule_id", alert_rule_key,
                    "canonical rule key; pass verbatim to environment-fact retrieval")
-        + _section("actor_input", actor_input_path.read_text(),
+        + _section("actor_input", actor_input_path.read_text(encoding="utf-8"),
                    "lead sequence projected for the actor")
         + _section("actor_archetype", archetype)
         + _section("mitre_menu", menu_text)

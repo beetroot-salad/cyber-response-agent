@@ -186,7 +186,7 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     if not refs.is_file():
         return None
     try:
-        doc = yaml.safe_load(refs.read_text())
+        doc = yaml.safe_load(refs.read_text(encoding="utf-8"))
     except yaml.YAMLError:
         return None
     if not isinstance(doc, dict):
@@ -344,7 +344,7 @@ def write_held_report(
         f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
         f"skipped_ids={[s.get('finding_id') for s in skipped]}\n"
     )
-    with cfg.held_report.open("a") as fh:
+    with cfg.held_report.open("a", encoding="utf-8") as fh:
         fh.write(line)
 
 

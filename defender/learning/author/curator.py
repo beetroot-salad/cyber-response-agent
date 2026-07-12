@@ -206,7 +206,7 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
     if not path.is_file():
         return False
     try:
-        doc = yaml.safe_load(path.read_text()) or {}
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return False
     return isinstance(doc, dict) and doc.get("held_out") is True

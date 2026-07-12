@@ -96,7 +96,7 @@ def _load_mapping() -> dict[str, Any]:
     import yaml  # the defender venv's one runtime dep
 
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):
@@ -181,7 +181,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     report = RunPaths(run_dir).report
     if not report.is_file():
         raise CaseTicketError(f"report.md not found: {report}")
-    fm, body = _parse_frontmatter(report.read_text())
+    fm, body = _parse_frontmatter(report.read_text(encoding="utf-8"))
 
     disposition = fm.get("disposition")
     if disposition not in DISPOSITION_ENUM:
@@ -204,7 +204,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         # signature stays fallback on a malformed/unreadable alert; non-fatal,
         # the disposition still records
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            signature_id = _signature_id(json.loads(alert_path.read_text()), mapping)
+            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), mapping)
 
     return CaseRecord(
         case_id=case_id,

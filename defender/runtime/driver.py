@@ -81,7 +81,7 @@ DEFAULT_TOOL_RETRIES = 10
 
 
 def _main_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "SKILL.md").read_text()
+    return (defender_dir / "SKILL.md").read_text(encoding="utf-8")
 
 
 def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
@@ -284,7 +284,7 @@ GATHER_DEF = AgentDefinition(
 
 
 def _gather_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text()
+    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
 
 
 def build_gather_agent(
@@ -370,7 +370,7 @@ def _compact_messages(messages: list, run_dir: Path) -> list:
     growing rows are excluded — so the prefix caches within a loop. Returns the
     original objects on passthrough; never raises (the caller guards too)."""
     inv = RunPaths(run_dir).investigation
-    inv_text = inv.read_text() if inv.is_file() else ""
+    inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""
     fold = compaction.fold_boundary(inv_text)
     marker = _frontier_index(messages)
     if fold <= 0:

@@ -76,7 +76,7 @@ def acquire_repo_lock(lock_file: Path, *, timeout_seconds: int) -> Any:
     # mkdir the lock's own parent — the out-of-repo state_dir when
     # DEFENDER_LEARNING_STATE_DIR is set, not the repo's learning dir.
     lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_file.open("a+")
+    fh = lock_file.open("a+", encoding="utf-8")
     deadline = time.monotonic() + max(1, timeout_seconds)
     while True:
         try:
@@ -136,7 +136,7 @@ def acquire_flock(path: Path) -> Any | None:
     ``release_flock``.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fh = path.open("a+")
+    fh = path.open("a+", encoding="utf-8")
     try:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

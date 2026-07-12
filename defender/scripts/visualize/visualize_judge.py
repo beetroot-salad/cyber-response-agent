@@ -97,8 +97,8 @@ def render_judge_actor_section(run_id: str) -> str:
     subtitle = "— adversarial counterfactual"
     if not story.is_file():
         return section("sec-actor", "actor", "Actor", subtitle, '<div class="empty">no actor_story.md</div>')
-    arch = archetype.read_text().strip() if archetype.is_file() else "?"
-    menu_txt = menu.read_text().strip() if menu.is_file() else ""
+    arch = archetype.read_text(encoding="utf-8").strip() if archetype.is_file() else "?"
+    menu_txt = menu.read_text(encoding="utf-8").strip() if menu.is_file() else ""
     meta_html = (
         f'<div class="actor-meta"><span class="key">archetype:</span> '
         f'<span class="val">{esc(arch)}</span></div>'
@@ -107,7 +107,7 @@ def render_judge_actor_section(run_id: str) -> str:
     if menu_txt:
         menu_block = block("actor-menu", "MITRE technique menu (sampled)", pre_text(menu_txt))
 
-    story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
+    story_html = f'<pre class="text story">{esc(story.read_text(encoding="utf-8"))}</pre>'
 
     body = f"""{meta_html}
   {menu_block}
@@ -159,9 +159,9 @@ def render_judge_oracle_section(run_id: str) -> str:
     proj_raw = learn_dir / "projected_telemetry.raw.txt"
     inner = ""
     if proj.is_file():
-        inner += block("oracle-yaml", "projected_telemetry.yaml", pre_text(proj.read_text()))
+        inner += block("oracle-yaml", "projected_telemetry.yaml", pre_text(proj.read_text(encoding="utf-8")))
     if proj_raw.is_file():
-        inner += block("oracle-raw", "projected_telemetry.raw.txt (raw fallback)", pre_text(proj_raw.read_text()))
+        inner += block("oracle-raw", "projected_telemetry.raw.txt (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
     if not inner:
         inner = '<div class="empty">no oracle artifacts</div>'
     return section("sec-oracle", "oracle", "Oracle", "— projected telemetry (collapsed by default)", inner)
@@ -206,7 +206,7 @@ def render_judge_actor_benign_section(run_id: str) -> str:
     story = learn_dir / "actor_benign_story.md"
     if not story.is_file():
         return ""
-    story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
+    story_html = f'<pre class="text story">{esc(story.read_text(encoding="utf-8"))}</pre>'
     body = f"""<h3>actor_benign_story.md</h3>
   {story_html}"""
     return section("sec-actor-benign", "actor", "Actor (benign)", "— routine-operation counterfactual", body)
@@ -265,9 +265,9 @@ def render_judge_oracle_benign_section(run_id: str) -> str:
     proj_raw = learn_dir / "projected_telemetry_benign.raw.txt"
     inner = ""
     if proj.is_file():
-        inner += block("oracle-yaml", "projected_telemetry_benign.yaml", pre_text(proj.read_text()))
+        inner += block("oracle-yaml", "projected_telemetry_benign.yaml", pre_text(proj.read_text(encoding="utf-8")))
     if proj_raw.is_file():
-        inner += block("oracle-raw", "projected_telemetry_benign.raw.txt (raw fallback)", pre_text(proj_raw.read_text()))
+        inner += block("oracle-raw", "projected_telemetry_benign.raw.txt (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
     if not inner:
         return ""
     return section(
@@ -284,12 +284,12 @@ def render_judge_raw_bundle(run_id: str) -> str:
     for fname in ("actor_input.yaml", "source_refs.yaml", "executed_queries.jsonl", "alert.json"):
         p = learn_dir / fname
         if p.is_file():
-            panels.append(block("artifact", fname, pre_text(p.read_text())))
+            panels.append(block("artifact", fname, pre_text(p.read_text(encoding="utf-8"))))
     for raw in sorted(learn_dir.glob("*.raw.txt")):
-        panels.append(block("artifact raw", raw.name, pre_text(raw.read_text())))
+        panels.append(block("artifact raw", raw.name, pre_text(raw.read_text(encoding="utf-8"))))
     trace = learn_dir / "actor_trace.jsonl"
     if trace.is_file():
-        panels.append(block("artifact", "actor_trace.jsonl", pre_text(trace.read_text())))
+        panels.append(block("artifact", "actor_trace.jsonl", pre_text(trace.read_text(encoding="utf-8"))))
     if not panels:
         return ""
     return section("sec-raw-bundle", "raw", "Raw bundle", "— learning-loop inputs &amp; fallbacks", "".join(panels))

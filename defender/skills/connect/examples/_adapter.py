@@ -90,7 +90,7 @@ def load_config(system: str) -> dict[str, str]:
     )
     config: dict[str, str] = {}
     if path.exists():
-        for raw in path.read_text().splitlines():
+        for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

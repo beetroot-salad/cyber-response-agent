@@ -67,7 +67,7 @@ def build_stage_agent(
     return build_agent_core(
         defn,
         deps_type=deps_type,
-        instructions=prompt_path.read_text(),
+        instructions=prompt_path.read_text(encoding="utf-8"),
         logger=logger,
         agent_id=label,
         make_model=make_model,

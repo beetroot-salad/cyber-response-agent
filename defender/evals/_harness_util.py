@@ -31,7 +31,7 @@ def run(cmd: list[str], cwd: Path, env: dict | None = None,
     never uses it, so it defaults to None — a superset of both old copies)."""
     return subprocess.run(
         cmd, cwd=cwd, env=env, input=input_,
-        capture_output=True, text=True, check=check,
+        capture_output=True, text=True, check=check, encoding="utf-8"
     )
 
 

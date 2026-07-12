@@ -194,7 +194,7 @@ def synthesize_drafts(
         try:
             draft.parent.mkdir(parents=True, exist_ok=True)
             draft.write_text(
-                _draft_skeleton(qid, system, lead.goal_text, query_body)
+                _draft_skeleton(qid, system, lead.goal_text, query_body), encoding="utf-8"
             )
             created.append(draft)
             by_id.add(qid)

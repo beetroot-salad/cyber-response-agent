@@ -29,6 +29,7 @@ from pathlib import Path
 
 import yaml
 
+from defender._io import read_text_utf8
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.learning.pipeline.oracle.sample import real_sample_text
@@ -58,7 +59,7 @@ def parse_investigation_companion(run_dir: Path) -> dict:
         return {}
     try:
         parser, _w = _invlang()
-        companion, _warnings = parser.parse_dense_companion(inv.read_text())
+        companion, _warnings = parser.parse_dense_companion(read_text_utf8(inv))
         return companion if isinstance(companion, dict) else {}
     except Exception:  # noqa: BLE001 — degrade, never crash the judge step
         return {}
@@ -87,7 +88,7 @@ class LeadComparison:
 def _projection_index(projected_telemetry_path: Path) -> dict:
     """`{lead_id: events}` from the oracle doc, defensively (any failure → `{}`)."""
     try:
-        doc = yaml.safe_load(Path(projected_telemetry_path).read_text())
+        doc = yaml.safe_load(read_text_utf8(Path(projected_telemetry_path)))
     except Exception:  # noqa: BLE001
         return {}
     if not isinstance(doc, dict):
@@ -260,7 +261,7 @@ def write_comparison_files(
     paths: list[Path] = []
     for c in comparisons:
         p = out_dir / f"{c.lead_id}.md"
-        p.write_text(_render_lead_file(c, Path(gather_raw)))
+        p.write_text(_render_lead_file(c, Path(gather_raw)), encoding="utf-8")
         paths.append(p)
     return paths
 
