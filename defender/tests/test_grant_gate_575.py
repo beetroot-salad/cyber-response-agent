@@ -505,7 +505,21 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
                 for argv in (f"{g.program} {probe}", f"{g.program} x {probe}",
                              f"{g.program} {probe} x"):
                     assert not g.pattern.fullmatch(argv), f"{name}/{g.program}: admits {argv!r}"
-    assert checked >= 5   # grep/head/tail/wc/jq at minimum
+    assert checked >= 5   # grep/head/tail/wc/jq at minimum — never iterate an empty set
+
+    # Positive control: the SAME patterns still admit their legitimate short-bundle forms.
+    # Without this the test passes for a grammar that admits nothing at all.
+    admits = {
+        "grep": "grep -n secret", "head": "head -5", "tail": "tail -3",
+        "wc": "wc -l", "jq": "jq -r .",
+    }
+    main_pol = _all_policies(env)["main"]
+    for g in _opens_nothing_grants(main_pol):
+        if g.program in admits:
+            assert g.pattern.fullmatch(admits[g.program]), (
+                f"{g.program}: rejects its own legitimate stdin form {admits[g.program]!r} — "
+                "the b8 exclusions have over-tightened the lane into uselessness"
+            )
 
 
 # ===========================================================================  #
@@ -870,12 +884,26 @@ def test_g1_no_deny_reason_or_hint_names_a_program_the_agent_cannot_run(env):
     payload FILE with jq/grep" — after both lose their file slot).
     Derived from the LIVE lane, never a hardcoded dead-name list: it must keep working after the
     next deletion."""
+    seen = 0
     for name, pol in _all_policies(env).items():
         granted = {g.program for g in pol.bash_allow}
         text = (pol.deny_reason or "") + "\n" + tools._overflow_filter_hint(
             f"{env.run}/gather_raw/l-001/0.json", pol)
         for prog in _named_programs(text):
+            seen += 1
             assert prog in granted, f"{name}: names {prog!r}, which its own lane denies"
+
+    # Positive controls. Without these the test is VACUOUS: it passes for an extractor that
+    # finds no programs at all, and for a reason set that has been emptied to dodge it.
+    assert seen >= 3, (
+        "_named_programs found no program names in ANY deny reason or overflow hint — "
+        "the extractor is blind, so this test proves nothing"
+    )
+    # (a) the extractor demonstrably FINDS a program that IS on the lane,
+    assert "cat" in _named_programs("only the read-only viewers (cat/grep) are permitted")
+    # (b) and it demonstrably CATCHES a reason naming a program the lane denies.
+    assert "ls" in _named_programs("only the read-only viewers (jq/ls/cat) are permitted")
+    assert "ls" not in {g.program for g in _all_policies(env)["main"].bash_allow}
 
 
 def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
@@ -1026,3 +1054,97 @@ def test_i3_defender_policy_is_not_a_shim_any_agent_can_run(env):
     for name, pol in _all_policies(env).items():
         assert not _bash(env, f"defender-policy show main --run-dir {env.run}", pol).allow, name
     assert _bash(env, "defender-lessons --tags", "main").allow      # positive control
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §F (cont.) — R1's obligation: the outbound channel to the executor.
+#
+# The gate parses ONCE and the executor runs `decision.pipelines` (#456,
+# tools.py:301 hands `list(decision.pipelines or ())` straight to run_parsed).
+# Nothing today asserts that what the executor RECEIVES is what the gate GATED —
+# and that gap IS the validator/executor parser differential the no-shell lane
+# (#379) exists to close. R1 computed this; no lens volunteered it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cat {run}/investigation.md",
+        "cat {run}/investigation.md | grep -n secret",
+        "cat {run}/report.md | wc -l",
+        "defender-lessons --tags",
+    ],
+)
+def test_f6_executed_argv_is_the_gated_argv(env, cmd):
+    """f6 — the argv EXECUTED is the argv GATED.
+
+    `decision.pipelines` (what tools.py hands run_parsed) must be exactly the
+    decomposition `bash_exec.parse` produces for the same command — so the
+    executor never re-parses the raw string and no parser differential can
+    reopen. Compared as argv structure, not object identity."""
+    from defender.hooks._cmd_segments import unwrap
+    from defender.runtime import bash_exec
+
+    resolved = cmd.format(run=env.run)
+    decision = _bash(env, resolved, "main")
+    assert decision.allow, resolved
+
+    gated = [[list(st.argv) for st in pl.stages] for pl in (decision.pipelines or ())]
+    executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(unwrap(resolved))]
+    assert gated == executed, (
+        f"the gate approved {gated!r} but the executor would run {executed!r} — "
+        "a validator/executor parser differential"
+    )
+
+
+def test_f6_denied_command_carries_no_executable_pipeline(env):
+    """f6 (positive control) — a DENIED command hands the executor nothing.
+
+    Proves the observation channel can see the difference: an allowed command
+    carries a non-empty `pipelines`, a denied one carries nothing to run."""
+    denied = _bash(env, "cat /etc/passwd", "main")
+    assert not denied.allow
+    assert not denied.pipelines
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §H (cont.) — h4: the PATHS-relocation hazard (#562).
+#
+# `check_actors` surfaced this: `harness_lead.py` and `replay_actor.py` re-exec
+# as subprocesses and RELOCATE the tree anchor onto whatever tree they run in.
+# LEAD_AUTHOR_DEF is `requires_explicit_tree=True` and is bound with a WORKTREE
+# `defender_dir`. If a grant's scope/pattern is compiled from the module-level
+# `PATHS` constant instead of the threaded `defender_dir`, a worktree run gets
+# grants anchored on the MAIN CHECKOUT — it would delete the wrong tree's files.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
+    """h4 — grants anchor on the defender_dir THREADED IN, never on import-time PATHS.
+
+    Bind the lead author against a worktree tree: its `rm` grant must admit that
+    worktree's skills dir and DENY the main checkout's. The two trees differ, so a
+    policy compiled from `PATHS` (the main checkout) fails this outright."""
+    worktree = tmp_path / "wt" / "defender"
+    (worktree / "skills").mkdir(parents=True)
+    run = tmp_path / "learn-run"
+    run.mkdir()
+
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=worktree)
+    pol = deps.policy
+
+    def verdict(cmd: str) -> bool:
+        return permission.decide_bash(
+            cmd, policy=pol, run_dir=run, defender_dir=worktree
+        ).allow
+
+    assert worktree.resolve() != PATHS.defender_dir.resolve(), "fixture must differ from PATHS"
+
+    # the tree it was BOUND to
+    assert verdict(f"rm {worktree}/skills/stale.md")
+    # the tree PATHS points at — the main checkout. A PATHS-anchored grant would allow this.
+    assert not verdict(f"rm {PATHS.defender_dir}/skills/stale.md"), (
+        "the lead author's rm grant is anchored on the import-time PATHS constant, "
+        "not on the defender_dir it was bound with — a worktree run would rm the main checkout"
+    )
