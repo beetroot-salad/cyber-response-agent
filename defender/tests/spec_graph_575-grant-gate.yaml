@@ -1,0 +1,1045 @@
+schema_version: 1
+design: '#575 (issue body plus its Resolved-forks addendum)'
+base: 09e0a93cd6e43939d89182e97e5a9c567e654f7c
+demands:
+- id: a1
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  - Grant.pattern
+  - Grant.scope
+  outcome:
+    nl: A command is allowed only if it matches a grant's pattern AND every operand PROGRAMS extracts
+      resolves into that grant's scope.
+- id: a2
+  kind: negative
+  form: test
+  binds:
+  - Grant.pattern
+  - Grant.pins_path
+  outcome:
+    nl: No unmarked grant's compiled pattern embeds a path; the three program-operand grants carry pins_path=True.
+  rejected:
+  - nl: 'Write an execute-extractor for python3/rm instead. Rejected: python3 -c puts the flag itself
+      in the argv slot, and rm unlinks the LINK rather than resolve()''s target.'
+- id: a3
+  kind: behavior
+  form: test
+  binds:
+  - under
+  outcome:
+    nl: under(root, tail) fullmatches against the RESOLVED path.
+- id: a4
+  kind: negative
+  form: test
+  binds:
+  - GATHER_RAW_SHAPE
+  - RUN_NO_RAW_SHAPE
+  - CORPUS_MD_SHAPE
+  outcome:
+    nl: No path shape uses an any-byte-but-NUL class; the machine-generated gather_raw shape is tight
+      (gather_raw/l-N/N.json).
+- id: a5
+  kind: negative
+  form: test
+  binds:
+  - decide_bash
+  - Grant.scope
+  - read_surface.access[bash]
+  outcome:
+    nl: A symlink inside run_dir pointing outside it is DENIED for cat on the bash lane.
+- id: a6
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  - Grant.scope
+  outcome:
+    nl: A symlink inside run_dir pointing to another in-root file is ALLOWED, so a5 denies for escape
+      rather than because symlinks are banned. This is a5's positive control.
+- id: a7
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  outcome:
+    nl: A symlink loop raises RuntimeError inside resolve() and the gate fails closed with a DENY, never
+      an escaping exception.
+- id: a8
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  - Grant.scope
+  outcome:
+    nl: resolve(strict=False) does not raise on a missing path, so a not-yet-written gather_raw payload
+      still scope-matches and gather may cat it.
+- id: a9
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  outcome:
+    nl: An embedded-NUL operand raises ValueError inside resolve() and the gate fails closed with a DENY.
+- id: a10
+  kind: behavior
+  form: test
+  binds:
+  - Grant.scope
+  - resolve_roots
+  outcome:
+    nl: Scope patterns anchor on the RESOLVED root, so a run_dir reached through a symlinked base still
+      admits its own files.
+- id: a11
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  outcome:
+    nl: A relative operand is rebased on defender_dir.parent, the cwd the executor uses, before it is
+      resolved.
+- id: a12
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  outcome:
+    nl: 'Every pipe stage is operand-gated: an in-scope cat piped into a cat of /etc/passwd is DENIED
+      on the second stage.'
+- id: b1
+  kind: behavior
+  form: test
+  binds:
+  - PROGRAMS
+  - PROGRAMS.domain.distinguished[cat]
+  - PROGRAMS.domain.distinguished[OPENS_NOTHING]
+  outcome:
+    nl: PROGRAMS maps cat to the real extractor and every other granted program to OPENS_NOTHING.
+- id: b2
+  kind: behavior
+  form: test
+  binds:
+  - compile_policy
+  - PROGRAMS.domain.distinguished[absent]
+  outcome:
+    nl: 'compile_policy RAISES when a grant names a program absent from PROGRAMS: loud at compile, never
+      fail-open at first decide.'
+- id: b3
+  kind: behavior
+  form: test
+  binds:
+  - compile_policy
+  - _corpus_author_policy
+  outcome:
+    nl: Every AgentPolicy in the registry passes the program-table validation, including CORPUS_AUTHOR's,
+      which is built directly and never calls compile_policy today.
+- id: b4
+  kind: domain-outcome
+  form: test
+  binds:
+  - _cat_input_files
+  outcome:
+    nl: _cat_input_files returns None (DENY) for every unrecognized dash-prefixed token, and the known
+      boolean bundles extract their file operands correctly.
+- id: b5
+  kind: domain-outcome
+  form: test
+  binds:
+  - _cat_input_files
+  outcome:
+    nl: 'A cat whose operand follows a bare double-dash still DENIES out of scope: post-double-dash tokens
+      are appended as file operands and are therefore scope-checked.'
+- id: b6
+  kind: domain-outcome
+  form: test
+  binds:
+  - _cat_input_files
+  outcome:
+    nl: A bare dash is stdin and extracts no operand, so the stdin pipe shape still allows.
+- id: b7
+  kind: negative
+  form: test
+  binds:
+  - PROGRAMS.domain.distinguished[OPENS_NOTHING]
+  - read_surface.access[bash]
+  outcome:
+    nl: Every OPENS_NOTHING program's shape regex admits no file-opening or arg-consuming flag (wc files0-from,
+      grep -f/-e/-r/--file, jq -f/-L/--rawfile/--slurpfile, tail -f, head -c FILE all DENY), because the
+      gate skips the scope check for them entirely.
+- id: b8
+  kind: negative
+  form: test
+  binds:
+  - PROGRAMS.domain.distinguished[OPENS_NOTHING]
+  - Grant.pattern
+  outcome:
+    nl: Structurally, no OPENS_NOTHING grant's pattern admits a long option or a dash-prefixed positional,
+      so the single-dash-bundle and no-leading-dash conventions become enforced properties a future grammar
+      author cannot silently drop.
+  rejected:
+  - nl: 'Leave it as the convention it is today (gnu_flags.bundle emits single-dash only). Rejected: that
+      is exactly what let the judge''s unrestricted cat shape be written.'
+- id: c1
+  kind: domain-outcome
+  form: test
+  binds:
+  - Grant.pattern
+  - read_surface.access[bash]
+  outcome:
+    nl: The file-operand viewer forms now DENY and their cat-piped equivalents ALLOW, for grep, head,
+      tail and wc alike.
+- id: c2
+  kind: negative
+  form: test
+  binds:
+  - MAIN_DEF.bash_allow
+  - GATHER_DEF.bash_allow
+  outcome:
+    nl: ls and cd are denied in every form for main and gather, while the surviving programs still allow.
+- id: c3
+  kind: negative
+  form: test
+  binds:
+  - MAIN_DEF.bash_allow
+  outcome:
+    nl: 'Main has no recursive-descent primitive: recursive ls and recursive grep both deny, so no path
+      under run_dir is reachable without naming it.'
+- id: c4
+  kind: survival
+  form: test
+  binds:
+  - Grant.pattern
+  - gather_query_template
+  outcome:
+    nl: The shipped query template's literal piped-jq command still allows for gather; a shipped template
+      the gate denies is a documented dead command.
+- id: c5
+  kind: domain-outcome
+  form: test
+  binds:
+  - decide_bash
+  - RAW_MARKER
+  outcome:
+    nl: 'The RAW_MARKER substring scan is gone: a main command that merely MENTIONS gather_raw in a grep
+      pattern now ALLOWS, where at HEAD it denies purely because the command string contains the literal
+      text.'
+- id: c6
+  kind: survival
+  form: test
+  binds:
+  - CORPUS_AUTHOR_DEF.bash_allow
+  - curator_prompt
+  outcome:
+    nl: 'On the curator lane a grep with a file operand denies, its cat-piped equivalent allows, and ls
+      of the lessons dir denies because the corpus manifest shipped in #574 replaces the listing.'
+- id: d1
+  kind: domain-outcome
+  form: test
+  binds:
+  - GATHER_RAW_SHAPE
+  - MAIN_DEF.bash_allow
+  - GATHER_DEF.bash_allow
+  outcome:
+    nl: A cat of a gather_raw payload ALLOWS for gather and DENIES for main, by positive enumeration rather
+      than a substring clamp.
+- id: d2
+  kind: behavior
+  form: test
+  binds:
+  - decide_read
+  - read_surface.access[read-tool]
+  outcome:
+    nl: decide_read of a gather_raw payload DENIES for main with a reason naming gather_raw, and the e2e
+      deny-tail substring still matches.
+  rejected:
+  - nl: 'Relax the e2e assertion to the generic deny reason. Rejected: that silently loosens a security
+      assertion.'
+- id: d3
+  kind: negative
+  form: test
+  binds:
+  - is_untrusted_read
+  - GATHER_RAW_SHAPE
+  outcome:
+    nl: is_untrusted_read is still True for a gather_raw payload so the read stays salt-tag wrapped; removing
+      RAW_MARKER must not untag the primary attacker-influenced channel.
+- id: d4
+  kind: parity
+  form: test
+  binds:
+  - read_surface.access[bash]
+  - read_surface.access[read-tool]
+  outcome:
+    nl: The path-shape tuple decide_read enforces IS the same object the cat grant's scope carries, so
+      the two surfaces cannot drift, and a policy whose two lists differ fails the parity harness.
+- id: d5
+  kind: parity
+  form: test
+  binds:
+  - read_surface.access[bash]
+  - read_surface.access[read-tool]
+  outcome:
+    nl: 'The allow-matrix: for every agent and path in a fixed corpus, the read-tool verdict equals the
+      bash-lane cat verdict.'
+- id: d6
+  kind: negative
+  form: test
+  binds:
+  - read_surface.access[bash]
+  - read_surface.access[read-tool]
+  - denylist
+  outcome:
+    nl: 'The secret denylist still applies INSIDE scope: a dot-env file whose name matches the corpus
+      markdown shape still denies, and so does an ssh-key path.'
+- id: e1
+  kind: negative
+  form: test
+  binds:
+  - JUDGE_DEF.bash_allow
+  - ticket_grant
+  outcome:
+    nl: A judge ticket command WITHOUT the require-closed flag DENIES and with it ALLOWS; the mandatory-flag
+      lookahead is the security property, and a boolean-flag allowlist would silently make it optional.
+- id: e2
+  kind: behavior
+  form: test
+  binds:
+  - JUDGE_DEF.bash_allow
+  - ticket_grant
+  outcome:
+    nl: The adversarial judge, bound with no ticket CLI, has no ticket grant at all, so even the well-formed
+      require-closed command denies.
+- id: e3
+  kind: behavior
+  form: test
+  binds:
+  - ticket_grant
+  outcome:
+    nl: The require-closed flag cannot be smuggled inside a quoted operand, because the NUL token-space
+      sentinel keeps every space in the joined argv a true token boundary.
+- id: e4
+  kind: behavior
+  form: test
+  binds:
+  - ACTOR_DEF.bash_allow
+  - LEAD_AUTHOR_DEF.bash_allow
+  outcome:
+    nl: The actor's pinned python script and the lead author's rm of a skills markdown file still allow,
+      while an arbitrary script path and a traversing rm deny.
+- id: f1
+  kind: seam
+  form: test
+  binds:
+  - BashDecision
+  - interacts(tool_bash->bash_exec)
+  outcome:
+    nl: BashDecision still carries pipelines, adapter_argv and sql_pipe, all three consumed by the tool's
+      capture path, and Grant.route tags reader-lane grants only.
+- id: f2
+  kind: behavior
+  form: test
+  binds:
+  - decide_bash
+  - _decide_adapter
+  outcome:
+    nl: Adapter classification stays structural and runs AFTER the reader lane declines, so the ORDER
+      is pinned and not merely the verdict.
+- id: f3
+  kind: survival
+  form: test
+  binds:
+  - _decide_adapter
+  - ADAPTER_DENY_REASON
+  - ADAPTER_STANDALONE_REASON
+  outcome:
+    nl: Both specific adapter deny reasons survive as the substrings the e2e deny-tail asserts.
+- id: f4
+  kind: behavior
+  form: test
+  binds:
+  - _decide_adapter
+  - Route
+  outcome:
+    nl: The sanctioned two-stage adapter-into-defender-sql pipe allows for gather with a correct split,
+      and an adapter piped into a viewer denies.
+- id: f5
+  kind: negative
+  form: test
+  binds:
+  - runtime_package
+  outcome:
+    nl: No module under runtime imports a private symbol from the learning package (lazy and function-body
+      imports count) and nothing under runtime enumerates agents, while the relocated agents module DOES
+      import the six defs, proving the scan can see one.
+- id: f6
+  kind: shape
+  form: test
+  binds:
+  - interacts(tool_bash->bash_exec).payload
+  outcome:
+    nl: 'The argv EXECUTED is the argv GATED: run_parsed receives exactly the pipelines the decision carries,
+      so no validator/executor parser differential can reopen.'
+  rejected:
+  - nl: 'Re-parse the command string in the executor. Rejected: that differential is what shell=False
+      plus the single-parse decision exist to close.'
+- id: g1
+  kind: negative
+  form: test
+  binds:
+  - deny_reason
+  - _overflow_filter_hint
+  outcome:
+    nl: 'No deny reason and no overflow hint names a program the agent cannot run: each program-looking
+      word is checked against that agent''s OWN lane, not against a hardcoded dead-name list.'
+- id: g2
+  kind: behavior
+  form: test
+  binds:
+  - _overflow_filter_hint
+  - _lane_admits
+  outcome:
+    nl: The overflow hint still reaches the jq branch for main and gather, the sql branch for the judge,
+      and the read-tool fold for the rest, and _lane_admits goes through the real decide seam rather than
+      fullmatching over a tuple that now holds Grants.
+- id: h1
+  kind: behavior
+  form: test
+  binds:
+  - compile_policy_for
+  outcome:
+    nl: compile_policy_for is idempotent for the same definition and roots.
+- id: h2
+  kind: uniqueness
+  form: test
+  binds:
+  - compile_policy_for
+  - resolve_roots
+  outcome:
+    nl: 'No cross-run bleed: two run dirs compiled in one process yield policies whose scopes anchor on
+      their OWN run dir, which matters because gather binds per dispatch, many times per run.'
+- id: h3
+  kind: survival
+  form: test
+  binds:
+  - denylist
+  outcome:
+    nl: An empty denylist axis contributes no lookahead and does not brick the reader lane.
+- id: h4
+  kind: behavior
+  form: test
+  binds:
+  - compile_policy_for
+  - resolve_roots
+  - LEAD_AUTHOR_DEF.bash_allow
+  outcome:
+    nl: 'Grants anchor on the defender_dir and run_dir THREADED IN, never on the import-time PATHS constant:
+      a lead author bound with a worktree defender_dir gets an rm grant anchored on the WORKTREE''s skills
+      dir, and the main checkout''s skills dir DENIES. Both re-exec drivers (replay_actor, harness_lead)
+      relocate the tree anchor onto whatever tree they run in.'
+- id: i1
+  kind: behavior
+  form: test
+  binds:
+  - defender_policy_cli
+  outcome:
+    nl: defender-policy show prints each agent's read, write and bash grants with their scopes, and an
+      exempt grant reports its PATTERN as the containment rather than a misleading empty scope.
+- id: i2
+  kind: parity
+  form: test
+  binds:
+  - defender_policy_cli
+  - decide_bash
+  outcome:
+    nl: defender-policy explain reports the same verdict and the same matched-grant or deny-reason as
+      decide_bash, so the CLI is a second consumer of the gate and never a second implementation.
+- id: i3
+  kind: negative
+  form: test
+  binds:
+  - defender_policy_cli
+  - NON_ADAPTER_SHIMS
+  outcome:
+    nl: defender-policy is not a shim in any agent lane, since adding it to the shim taxonomy would hand
+      every agent policy introspection for free.
+- id: w1
+  kind: behavior
+  form: waiver
+  binds:
+  - runtime_package
+  outcome:
+    nl: 'Net LOC across the permission package and agent_definition does not increase. A review property,
+      not observable behavior: checked at human review.'
+- id: w2
+  kind: behavior
+  form: waiver
+  binds:
+  - interacts(tool_bash->bash_exec)
+  outcome:
+    nl: A wedging stage such as tail -f is bounded by the bash timeout, not by the gate. b7 pins the DENY;
+      the timeout is out of scope.
+structure:
+  axes:
+  - agent_role
+  - program
+  - operand_path
+  - via
+  - run_dir
+  actors:
+  - id: decide_bash
+    frame: leg
+    provenance: code
+  - id: decide_read
+    frame: leg
+    provenance: code
+  - id: compile_policy
+    frame: leg
+    provenance: code
+  - id: compile_policy_for
+    frame: composition
+    provenance: code
+  - id: tool_bash
+    frame: composition
+    provenance: code
+  - id: defender_policy_cli
+    frame: leg
+    provenance: design
+  - id: _corpus_author_policy
+    frame: leg
+    provenance: code
+  - id: run_investigation
+    frame: composition
+    provenance: code
+  - id: replay_actor
+    frame: composition
+    provenance: code
+  - id: harness_lead
+    frame: composition
+    provenance: code
+  boundaries:
+  - id: read_surface
+    provenance: code
+    facets:
+      access:
+        constraints_by_via:
+          bash:
+            trust: attacker-influenced
+            constraints:
+            - confine
+            - denylist
+            - resolve
+          read-tool:
+            trust: attacker-influenced
+            constraints:
+            - confine
+            - denylist
+            - resolve
+      identity:
+        key_axes:
+        - operand_path
+        evidence:
+          nl: The resolved operand path is the full key, read off files.read_allowed_path and the cat
+            grant's scope, which the design makes the same shape objects.
+        sharing: unique-key
+  - id: PROGRAMS
+    provenance: design
+    facets:
+      domain:
+        type: enum
+        refinement:
+          nl: Which files does this program's argv open? cat has a real extractor; every other granted
+            program opens nothing; an ABSENT program is a compile-time error.
+        default: OPENS_NOTHING
+        distinguished:
+        - cat
+        - OPENS_NOTHING
+        - absent
+        falsy_valid: false
+        documented_alternatives: []
+  - id: Grant.pattern
+    provenance: design
+    facets: {}
+  - id: Grant.scope
+    provenance: design
+    facets: {}
+  - id: Grant.pins_path
+    provenance: design
+    facets:
+      domain:
+        type: bool
+        refinement:
+          nl: True for the three grants whose operand IS the program (actor python script, rm, judge ticket
+            CLI); their pattern legitimately pins a path and carries the mandatory require-closed lookahead.
+        default: false
+        distinguished:
+        - true
+        - false
+        falsy_valid: true
+        documented_alternatives: []
+  - id: ticket_grant
+    provenance: code
+    facets: {}
+  - id: denylist
+    provenance: code
+    facets: {}
+  - id: RAW_MARKER
+    provenance: code
+    facets: {}
+  - id: is_untrusted_read
+    provenance: code
+    facets: {}
+  - id: _overflow_filter_hint
+    provenance: code
+    facets: {}
+  - id: deny_reason
+    provenance: code
+    facets: {}
+  - id: _lane_admits
+    provenance: code
+    facets: {}
+  - id: curator_prompt
+    provenance: code
+    facets: {}
+  - id: gather_query_template
+    provenance: code
+    facets: {}
+  - id: runtime_package
+    provenance: code
+    facets: {}
+  - id: BashDecision
+    provenance: code
+    facets: {}
+  - id: BashGrammar
+    provenance: code
+    facets: {}
+  - id: read_shapes
+    provenance: code
+    facets: {}
+  - id: reader_patterns_for
+    provenance: code
+    facets: {}
+  - id: raw_reads
+    provenance: code
+    facets: {}
+  - id: GATHER_RAW_SHAPE
+    provenance: design
+    facets: {}
+  - id: RUN_NO_RAW_SHAPE
+    provenance: design
+    facets: {}
+  - id: CORPUS_MD_SHAPE
+    provenance: design
+    facets: {}
+  - id: under
+    provenance: design
+    facets: {}
+  - id: Route
+    provenance: design
+    facets: {}
+  - id: _cat_input_files
+    provenance: code
+    facets: {}
+  - id: resolve_roots
+    provenance: code
+    facets: {}
+  - id: _decide_adapter
+    provenance: code
+    facets: {}
+  - id: ADAPTER_DENY_REASON
+    provenance: code
+    facets: {}
+  - id: ADAPTER_STANDALONE_REASON
+    provenance: code
+    facets: {}
+  - id: NON_ADAPTER_SHIMS
+    provenance: code
+    facets: {}
+  - id: MAIN_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: GATHER_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: JUDGE_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: ACTOR_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: LEAD_AUTHOR_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: CORPUS_AUTHOR_DEF.bash_allow
+    provenance: code
+    facets: {}
+  - id: bash_exec
+    provenance: code
+    facets:
+      payload:
+        parts:
+        - role: argv
+          source: const:decision.pipelines
+        invariants:
+        - all-slots-bound
+        nl: 'run_parsed receives exactly the pipelines the gate already parsed: the single-parse decision
+          that collapses the validator/executor differential.'
+  interacts:
+  - from: decide_bash
+    to: read_surface
+    mode: read
+    via: bash
+    provenance: design
+  - from: decide_read
+    to: read_surface
+    mode: read
+    via: read-tool
+    provenance: design
+  - from: decide_bash
+    to: PROGRAMS
+    mode: read
+    via: api
+    provenance: design
+  - from: compile_policy
+    to: PROGRAMS
+    mode: read
+    via: api
+    provenance: design
+  - from: _corpus_author_policy
+    to: PROGRAMS
+    mode: read
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: Grant.pattern
+    mode: read
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: Grant.scope
+    mode: read
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: Grant.pins_path
+    mode: read
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: ticket_grant
+    mode: read
+    via: api
+    provenance: code
+  - from: decide_read
+    to: denylist
+    mode: read
+    via: api
+    provenance: code
+  - from: decide_bash
+    to: denylist
+    mode: read
+    via: api
+    provenance: code
+  - from: is_untrusted_read
+    to: RAW_MARKER
+    mode: read
+    via: api
+    provenance: code
+  - from: tool_bash
+    to: bash_exec
+    mode: invoke
+    via: subprocess
+    provenance: code
+    sends: payload
+    transport: subprocess
+  - from: tool_bash
+    to: BashDecision
+    mode: read
+    via: api
+    provenance: code
+  - from: tool_bash
+    to: _overflow_filter_hint
+    mode: read
+    via: api
+    provenance: code
+  - from: _overflow_filter_hint
+    to: _lane_admits
+    mode: read
+    via: api
+    provenance: code
+  - from: defender_policy_cli
+    to: decide_bash
+    mode: invoke
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: RAW_MARKER
+    mode: remove
+    via: bash
+    provenance: design
+  - from: decide_read
+    to: read_shapes
+    mode: remove
+    via: read-tool
+    provenance: design
+  - from: compile_policy
+    to: BashGrammar
+    mode: remove
+    via: api
+    provenance: design
+  - from: compile_policy
+    to: reader_patterns_for
+    mode: remove
+    via: api
+    provenance: design
+  - from: decide_bash
+    to: raw_reads
+    mode: remove
+    via: api
+    provenance: design
+  - from: curator_prompt
+    to: read_surface
+    mode: read
+    via: bash
+    provenance: code
+  - from: gather_query_template
+    to: read_surface
+    mode: read
+    via: bash
+    provenance: code
+  - from: deny_reason
+    to: read_surface
+    mode: read
+    via: bash
+    provenance: code
+  drives:
+  - from: compile_policy_for
+    to: compile_policy
+    provenance: code
+    multiplicity: serial
+  - from: run_investigation
+    to: tool_bash
+    provenance: code
+    multiplicity: serial
+  - from: tool_bash
+    to: decide_bash
+    provenance: code
+    multiplicity: serial
+  - from: replay_actor
+    to: run_investigation
+    provenance: code
+    multiplicity: serial
+  - from: harness_lead
+    to: compile_policy_for
+    provenance: code
+    multiplicity: serial
+gate:
+  evaluated:
+  - rule: R0
+    fired: true
+  - rule: R1
+    fired: true
+  - rule: R2
+    fired: false
+  - rule: R3
+    fired: true
+  - rule: R4
+    fired: true
+  - rule: R5
+    fired: true
+  obligations:
+  - rule: R3
+    element: read_surface.access[bash]
+    discharged_by: d4
+    witness: Read surface reached via bash AND read-tool. The design claims parity becomes structural,
+      so a demand must FALSIFY it (a policy whose two lists differ must fail the harness), not merely
+      sample paths that happen to agree.
+  - rule: R3
+    element: read_surface.access[read-tool]
+    discharged_by: d5
+    witness: 'Per constraint-by-via cell: confine must hold on BOTH vias for the same agent and path.
+      The allow-matrix over a fixed corpus.'
+  - rule: R3
+    element: read_surface.access[bash]
+    discharged_by: d6
+    witness: The denylist constraint is enforced on the read-tool via today; it must still be enforced
+      on the bash via INSIDE scope, since a dot-env file matches the corpus markdown shape.
+  - rule: R3
+    element: read_surface.access[read-tool]
+    discharged_by: d2
+    witness: The gather_raw confine constraint is enforced on the bash via by positive enumeration; the
+      read-tool via loses raw_reads and must enforce it too, or main can read_file any payload.
+  - rule: R3
+    element: read_surface.access[read-tool]
+    discharged_by: d3
+    witness: is_untrusted_read keys on RAW_MARKER to salt-tag payload reads; removing the marker without
+      a shape-based replacement fails the prompt-injection defense OPEN.
+  - rule: R4
+    element: PROGRAMS.domain.distinguished[cat]
+    discharged_by: b1
+    witness: The one member with a real extractor.
+  - rule: R4
+    element: PROGRAMS.domain.distinguished[absent]
+    discharged_by: b2
+    witness: The absent member must FAIL LOUD. It replaces today's silent pass-through, where an untabled
+      program is simply ungated.
+  - rule: R4
+    element: PROGRAMS.domain.distinguished[OPENS_NOTHING]
+    discharged_by: b7
+    witness: OPENS_NOTHING is the DEFAULT member and it skips the scope check entirely, so its shape regex
+      is the sole containment. Every file-opening flag must be exercised against it.
+  - rule: R4
+    element: Grant.pins_path.domain.distinguished[true]
+    discharged_by: e1
+    witness: pins_path true is the exempt member; the judge's mandatory require-closed lookahead lives
+      inside that exemption and must be exercised on BOTH sides.
+  - rule: R5
+    element: PROGRAMS.domain.distinguished[OPENS_NOTHING]
+    discharged_by: b8
+    witness: SAFE-BY-CONSTRUCTION (R5's judgment extension). A future author can declare a program OPENS_NOTHING
+      and write a shape admitting a file-opening flag; the gate then skips the scope check and the program
+      opens a file nobody checked. Assert the grammar CANNOT be built unsafe, not merely that today's
+      grammars happen to be safe.
+  - rule: R5
+    element: read_surface
+    discharged_by: c1
+    witness: The file-operand viewer forms are removed; the cat-piped substitute must demonstrably complete.
+  - rule: R5
+    element: read_surface
+    discharged_by: c2
+    witness: ls and cd are removed from the lane.
+  - rule: R5
+    element: gather_query_template
+    discharged_by: c4
+    witness: The one shipped jq template is a live consumer of the bash lane; it must still run.
+  - rule: R5
+    element: curator_prompt
+    discharged_by: c6
+    witness: 'The curator prompts positively instruct an ls of the lessons dir and a grep with a file
+      operand; both are removed. The substitute is the #574 manifest plus cat-into-grep.'
+  - rule: R5
+    element: deny_reason
+    discharged_by: g1
+    witness: Three deny reasons NAME the removed programs (main and gather policies name ls; the adapter
+      reason says to filter the persisted payload FILE with jq/grep). A reason naming a dead program teaches
+      a dead command.
+  - rule: R5
+    element: _lane_admits
+    discharged_by: g2
+    witness: '_lane_admits fullmatches over policy.bash_allow: an AttributeError in production, in the
+      overflow path, the moment that tuple holds Grants.'
+  - rule: R5
+    element: RAW_MARKER
+    discharged_by: c5
+    witness: 'Removing the substring scan LOOSENS: a command merely MENTIONING gather_raw is no longer
+      denied. Verified against HEAD. Pin the new verdict as an examined change, not a regression.'
+  - rule: R5
+    element: reader_patterns_for
+    discharged_by: h2
+    witness: reader_patterns_for is an lru_cache of size one and gather binds per DISPATCH; whatever replaces
+      it must not bleed across run dirs.
+  - rule: R5
+    element: BashGrammar
+    discharged_by: f1
+    witness: adapters and adapter_sql_pipe leave BashGrammar, but tools still consumes decision.adapter_argv
+      and .sql_pipe; the Decision contract must survive.
+  - rule: R0
+    element: harness_lead
+    discharged_by: h4
+    witness: 'check_actors: harness_lead and replay_actor re-exec as subprocesses and RELOCATE the tree
+      anchor (#562). The lead author binds with defender_dir=<worktree> and requires_explicit_tree; if
+      a grant''s scope is compiled from the module-level PATHS constant rather than the threaded defender_dir,
+      a worktree run gets grants anchored on the MAIN CHECKOUT.'
+  - rule: R1
+    element: interacts(tool_bash->bash_exec).payload
+    discharged_by: f6
+    witness: 'The gate parses once and the executor runs decision.pipelines. Nothing asserts that what
+      run_parsed RECEIVES is what the gate GATED: capture the inbound argv at the seam, or a parser differential
+      can reopen silently.'
+  holes:
+  - rule: R0
+    element: Grant.pins_path
+    resolved_to: a2
+    resolution: 'The design''s no-pattern-embeds-a-path invariant is FALSE for three grants whose operand
+      IS the program (actor python script, rm path, judge ticket CLI). Human chose an explicit pins_path
+      exemption marker over execute-extractors: python -c puts the flag in the argv slot; rm unlinks the
+      LINK not resolve()''s target; and require-closed is a MANDATORY flag that a boolean-flag allowlist
+      would silently make optional. The invariant becomes: no UNMARKED pattern embeds a path.'
+  - rule: R0
+    element: _corpus_author_policy
+    resolved_to: b3
+    resolution: 'CORPUS_AUTHOR builds AgentPolicy DIRECTLY, so compile_policy''s fail-loud PROGRAMS check
+      never fires for the one denylist-free lane; and its prompts need grep WITH a file operand, which
+      a global OPENS_NOTHING mapping makes a fail-open. Human chose: keep cat the sole opener and PROGRAMS
+      global; move the curator prompts to cat-into-grep and replace ls with the #574 manifest; validate
+      EVERY policy against the table.'
+  - rule: R0
+    element: read_surface.access[read-tool]
+    resolved_to: d3
+    resolution: 'read_shapes and raw_reads were to be deleted with NO stated replacement on the read tool:
+      decide_read would fall back to root-only (main could read_file any gather_raw payload) and is_untrusted_read
+      would stop salt-tagging the attacker-influenced channel. Human chose a broad-minus-carve-out read
+      scope (the run subtree minus gather_raw, plus the tight machine-generated gather_raw shape), with
+      is_untrusted_read keyed on the SHAPE rather than the substring.'
+  - rule: R0
+    element: GATHER_RAW_SHAPE
+    resolved_to: d5
+    resolution: 'The design''s path shapes were factually WRONG: the real layout carries a lead-id directory
+      level the design omitted, plus a sibling leads-table file; and alert.json and the queries table
+      were missing entirely, while main''s write_allow is already the WHOLE run subtree, so a four-shape
+      read enumeration was both a narrowing and incoherent with writes. Re-grounded against record_query.py.'
+  - rule: R0
+    element: Route
+    resolved_to: f2
+    resolution: 'Route was specified as a per-Grant field, but the adapter-sql capture is a TWO-stage
+      relation while a Grant matches ONE stage; adapters are not in bash_allow today (they route structurally
+      after the reader lane declines, an ordering an existing test pins) and produce two SPECIFIC deny
+      reasons the e2e deny-tail asserts as substrings, which a positive-enumeration list cannot produce.
+      Human chose: adapter classification stays structural; Grant.route tags reader-lane grants only.'
+  pre_discharged:
+  - rule: R4
+    element: _cat_input_files.domain
+    by: b4
+  - rule: R5
+    element: read_shapes
+    by: d4
+handoff:
+  forks:
+  - 'F0 Decision''s shape: does BashDecision keep adapter_argv and sql_pipe, or switch purely to route?
+    RESOLVED: keep them as the route''s payload, because tools consumes them and feeds the circuit breaker.
+    Grant.route tags reader-lane grants only. (demand f1)'
+  - 'F1 the RAW_MARKER substring scan: dropping it is a SECOND behavior change the issue''s parity criterion
+    did not name. VERIFIED against HEAD: main''s cat-report-piped-into-grep-gather_raw DENIES today purely
+    because the command string contains the literal text; under positive enumeration it ALLOWS. RESOLVED:
+    intended, it is the point of positive enumeration. Pinned as an examined change (demand c5), not a
+    regression.'
+  - 'F2 is jq retired? The conversation said jq is effectively retired, but the resolved design keeps
+    it as a stdin-only filter. DISSOLVED: piped jq works at HEAD for both agents, so stdin-only jq is
+    genuinely zero-change, and the one shipped template is ALREADY in the piped form, so there is no template
+    rewrite. (demand c4)'
+  - 'F3 program-operand grants: RESOLVED to an explicit pins_path exemption. See gate.holes[0]. The judge''s
+    mandatory require-closed lookahead is the load-bearing case.'
+  - 'F4 the curator lane: RESOLVED to cat-into-grep plus the #574 manifest. See gate.holes[1]. This is
+    behavior change #4.'
+  - 'F5 the read surface: RESOLVED to broad-minus-carve-out. See gate.holes[2].'
+  - 'F6 adapter routing: RESOLVED to leave it structural. See gate.holes[4].'
+  deviations:
+  - 'The formal-slot closed-vocabulary check was done BY HAND: the #537 spec_graph linter does not exist
+    yet.'
+  - 'Step 4 (diff-by-address) ran COLLAPSED: the lead aligned the five derivations'' stubs directly rather
+    than spawning a separate diff agent. Two misreadings were caught and corrected in the process. An
+    enumerator claimed a post-double-dash operand is not extracted (it is: post-double-dash tokens are
+    appended, so believing it would have shipped a fail-open; pinned as demand b5), and another claimed
+    a broken symlink raises OSError (it does not: resolve with strict=False returns the target, so it
+    denies via SCOPE; pinned as a8).'
+  - 'grep''s arg-consuming flag facts (demand b7) come from gnu_flags.py plus GNU documentation, NOT from
+    the runtime binary: the dev box ships ugrep, not GNU grep. cat, wc, head and tail WERE verified against
+    coreutils 9.7, which matches the runtime image. Per the #579/#581 lesson, b7 must be re-validated
+    against the RUNTIME container''s grep before merge.'
+  behavior_change_ledger:
+  - 1. The file-operand form of grep, head, tail, wc and jq now requires a cat-pipe prefix (demand c1).
+  - '2. ls and cd are gone: main, gather, AND the curator lane (demands c2, c6).'
+  - 3. The RAW_MARKER substring scan is gone, so a command merely MENTIONING gather_raw is no longer denied
+    for that reason (demand c5).
+  - '4. The curator''s grep-with-file becomes cat-into-grep, and its ls of the lessons dir becomes the
+    #574 manifest (demand c6).'
