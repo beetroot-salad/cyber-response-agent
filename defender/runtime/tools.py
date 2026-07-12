@@ -23,7 +23,7 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import append_jsonl
+from defender._io import append_jsonl, read_text_utf8
 from . import bash_exec
 from . import permission
 from .agent_definition import ToolSet
@@ -351,7 +351,15 @@ def _gated_read(
         raise ModelRetry(decision.reason)
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
-    text = p.read_text()
+    # Pinned utf-8, and an undecodable file is a ModelRetry, not a stage kill (#588). The pin
+    # alone is not enough: `read_text` under the ambient locale mangles a lesson's em-dash, and
+    # `read_text(encoding="utf-8")` on a genuinely undecodable file raises UnicodeDecodeError —
+    # a ValueError no gate converts, so it escapes the tool and takes the run down. The agent
+    # can act on "this file isn't text"; the run cannot act on a traceback.
+    try:
+        text = read_text_utf8(p)
+    except UnicodeDecodeError:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
     _record_lesson_load(deps, p, lesson_corpora)  # lesson→outcome traceability (best-effort)
     return p, text
 
@@ -412,7 +420,10 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     # whole run and discarding every valid in-tree edit already made. The gate ran
     # first, so we only ever mkdir under an allowed (write_allow) path.
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content)
+    # Pinned to match the read (#588). An ambient-locale WRITE beside a utf-8-pinned READ is the
+    # silent-loss half: a lesson containing `café` is written as latin-1 bytes, committed, and
+    # then warn-skipped as "malformed" by every corpus walk that reads it back.
+    p.write_text(content, encoding="utf-8")
     return f"wrote {path} ({len(content)} bytes)"
 
 
@@ -433,7 +444,10 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    current = p.read_text() if p.is_file() else ""
+    try:
+        current = read_text_utf8(p) if p.is_file() else ""
+    except UnicodeDecodeError:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
     if not old_string and p.is_file():
         # Empty old_string against an existing file would replace the WHOLE
         # file with new_string (silent clobber). Mirror Claude Code's Edit:
@@ -464,7 +478,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     # uncaught FileNotFoundError that quarantines the run. No-op on the common in-place
     # edit (parent already exists); only runs after the gate approved the path.
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(new_text)
+    p.write_text(new_text, encoding="utf-8")  # pinned to match the read (#588)
     return f"edited {path} ({len(new_text)} bytes)"
 
 

@@ -64,9 +64,11 @@ def read_text_utf8(path: Path) -> str:
 def read_text_soft(path: Path) -> tuple[str | None, str | None]:
     """``(text, None)``, or ``(None, reason)`` when ``path`` can't be read OR decoded.
 
-    The skip-one-bad-file contract, defined once. Branch on ``reason is not None``, never on
-    ``if not text``: an empty file legitimately returns ``("", None)``, and treating that as a
-    failure converts a valid read into a silent drop — the same class of loss this guards.
+    The skip-one-bad-file contract, defined once. Branch on ``text is None`` (or equivalently
+    ``reason is not None``) — never on ``if not text``: an empty file legitimately returns
+    ``("", None)``, and treating that as a failure converts a valid read into a silent drop, the
+    same class of loss this guards against. ``text is None`` is also the check that narrows the
+    type for the caller.
 
     ``reason`` is ``str(e)`` with no prefix baked in, so a caller can frame it in its own terms
     (invlang's corpus report says ``f"read error: {reason}"``).

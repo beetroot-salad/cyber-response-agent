@@ -29,6 +29,8 @@ import json
 import sys
 from pathlib import Path
 
+from defender._io import use_utf8_stdio
+
 from .advisory import VALID_CLASSES, advisory_recall
 from .corpus import load_corpus
 from .queries import (
@@ -177,6 +179,12 @@ def _handle_advisory_cmd(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The corpus is model-authored and carries non-ASCII (em-dashes in hypothesis names, `≥` in
+    # the advisory render), and the renderer subcommands stream it straight to stdout. Pinning the
+    # READ without pinning the WRITE just moves the ascii crash from `read_text` to `print` — the
+    # #586 finding, one skill over. (The `--json` paths are already safe by `ensure_ascii=True`,
+    # which is exactly why a C-locale test has to drive a *renderer* subcommand to prove anything.)
+    use_utf8_stdio()
     args = _build_parser().parse_args(argv)
 
     if args.cmd == "enum":

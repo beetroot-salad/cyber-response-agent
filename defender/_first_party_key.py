@@ -18,15 +18,15 @@ from functools import lru_cache
 from pathlib import Path
 
 from defender._git import REPO_ROOT, GitError, git
+from defender._io import read_text_soft
 
 
 def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
     """Extract a single var from a `.env` file. Deliberately *not* a full dotenv
     load — we only want the API key, not to clobber adapter config (data-source creds,
     docker-context vars) that also live in these files. Returns the value or None."""
-    try:
-        text = env_file.read_text()
-    except OSError:
+    text, _err = read_text_soft(env_file)
+    if text is None:
         return None
     for raw in text.splitlines():
         line = raw.strip()

@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from defender._io import read_text_soft, use_utf8_stdio
 from defender._run_paths import RunPaths
 
 from .parser import ParseWarning, parse_dense_companion
@@ -77,10 +78,17 @@ class LoadReport:
 
 
 def _read_signature_id(alert_path: Path) -> str | None:
+    # Read through `read_text_soft`, not `alert_path.open()` + `json.load`. The old guard was
+    # `except (OSError, json.JSONDecodeError)`, and JSONDecodeError is a *sibling* of
+    # UnicodeDecodeError under ValueError, not its superclass — so an undecodable alert.json
+    # (vendor-supplied bytes) escaped this guard and killed the whole corpus walk. Same defect as
+    # `_load_one` below, same file. A missing signature degrades the companion; it never sinks it.
+    text, _err = read_text_soft(alert_path)
+    if text is None:
+        return None
     try:
-        with alert_path.open() as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(text)
+    except json.JSONDecodeError:
         return None
     rule = data.get("rule") if isinstance(data, dict) else None
     if not isinstance(rule, dict):
@@ -111,10 +119,15 @@ def _load_one(
 ) -> tuple[Companion | None, str | None, list[ParseWarning]]:
     if path.suffix != ".md":
         return None, f"not a .md file: {path.name}", []
-    try:
-        text = path.read_text()
-    except OSError as e:
-        return None, f"read error: {e}", []
+    # `read_text_soft` owns both halves of the read (#589): the utf-8 pin, and the guard — which
+    # must catch UnicodeDecodeError, a ValueError and NOT an OSError. The `except OSError` that
+    # stood here let an undecodable investigation.md escape `_load_one`, escape `load_corpus`
+    # (which has no try), and take down `defender-invlang` — an allowed main-loop shim — over one
+    # bad byte in one past run. `defender/_corpus.py` had the guard right; this was a hand-rolled
+    # copy of it that dropped half.
+    text, err = read_text_soft(path)
+    if text is None:
+        return None, f"read error: {err}", []
     body, warnings = parse_dense_companion(text)
     for w in warnings:
         w.file_path = str(path)
@@ -163,6 +176,7 @@ def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
 
 
 def _main(argv: list[str]) -> int:
+    use_utf8_stdio()  # the corpus is model-authored and carries non-ASCII; see cli.main
     verbose = "--verbose" in argv
     args = [a for a in argv if not a.startswith("--")]
     root = (
