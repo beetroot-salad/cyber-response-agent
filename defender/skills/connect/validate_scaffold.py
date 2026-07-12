@@ -27,6 +27,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Put the workspace root on sys.path so the `defender.*` import below resolves when this file is
+# run directly as the CLI in the usage above — where sys.path[0] is this script's own dir and the
+# package would not resolve. Same bootstrap as `scripts/workspace_map.py`.
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._corpus import iter_query_templates  # noqa: E402
+
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
 
@@ -176,16 +184,28 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
 
 def check_templates(report: Report, defender: Path, system: str) -> None:
     qdir = defender / "skills" / "gather" / "queries" / system
-    templates = [p for p in qdir.glob("*.md") if p.is_file()] if qdir.exists() else []
-    if not templates:
+    files = sorted(p for p in qdir.glob("*.md") if p.is_file()) if qdir.is_dir() else []
+    if not files:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
         return
-    bad = [p.name for p in templates
-           if not re.search(rf"^\s*id:\s*{re.escape(system)}\.", p.read_text(encoding="utf-8"), re.M)]
+    # `iter_query_templates` is THE walk over this corpus (#585) — this was the third hand-rolled
+    # one, and folding it is what makes that claim true. It also tightens the check: the regex it
+    # replaces ran `^\s*id:` over the WHOLE file under re.M, so an `id:` line inside a ## Query
+    # body satisfied it; the walk reads real frontmatter, which cannot be faked from the body.
+    #
+    # The walk SKIPS a template it cannot parse (bad frontmatter, or no `id:` at all) — and that
+    # defect is precisely what this check exists to FAIL on. So the verdict is taken against the
+    # file listing, not against the walk's output: a file the walk dropped is bad, not absent.
+    walked = {
+        t.path: t.id
+        for t in iter_query_templates(qdir.parent)
+        if t.system == system and "_draft" not in t.path.parts
+    }
+    bad = [p.name for p in files if not walked.get(p, "").startswith(f"{system}.")]
     if bad:
         report.add(FAIL, f"templates missing 'id: {system}.<name>' frontmatter: {', '.join(bad)}")
     else:
-        report.add(PASS, f"{len(templates)} seed template(s) have valid id frontmatter")
+        report.add(PASS, f"{len(files)} seed template(s) have valid id frontmatter")
 
 
 def main() -> None:

@@ -39,7 +39,7 @@ from .tools import (
     _format_bash_result,
 )
 
-from defender._corpus import iter_query_templates
+from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender.hooks.tag_tool_results import wrap as _wrap
@@ -341,6 +341,16 @@ _NO_HITS = (
     "a path), or coin a fresh query id for this lead."
 )
 
+# The return is bounded on BOTH axes it can grow along. The pattern is a plain substring, so a
+# broad one is not an error the model can be told to avoid — `user` and `host` are exactly the
+# words an analyst types, and uncapped they return 25 and 41 of the 63 templates (14 KB / 21 KB
+# of dispatch context); a bare `e` returns all 63 (~52 KB). The empty-pattern guard below rejects
+# only the degenerate case, and a per-template line cap alone does not help, because the cost is
+# dominated by how many TEMPLATES match, not how many lines each one contributes. Both caps
+# announce what they dropped.
+_SEARCH_MAX_TEMPLATES = 20
+_SEARCH_LINES_PER_TEMPLATE = 3
+
 
 def _search_root(deps: AgentDeps, system: str | None) -> Path:
     """Resolve the search root for a model-supplied `system`, or the whole corpus for None.
@@ -390,6 +400,19 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
     Still a plain substring, never a regex: a model-supplied regex is a ReDoS surface, and an
     unescaped `.` or `|` silently over-matches.
 
+    The search reads the WHOLE template body, not just the two parsed sections. `## Goal` and
+    `## Query` are the sections consumers RENDER, but they are not the whole of a template's
+    recall vocabulary: `## What to summarize` is on 54 of the 63, and the `## Pitfalls` /
+    `## Filter binding` sections on ~30 more. Searching only Goal+Query would let this tool answer
+    "no template's text carries that text" — `_NO_HITS` says exactly that — about a field name a
+    template names in plain sight, and gather would coin a duplicate. Every claim the return makes
+    has to be true of the file, so the search must read what the file says.
+
+    Output is bounded on both axes (`_SEARCH_MAX_TEMPLATES`, `_SEARCH_LINES_PER_TEMPLATE`), with
+    the template list ranked by match density so a cap keeps the STRONGEST candidates. Every
+    truncation is ANNOUNCED and says how to narrow — a silently-clipped result reads as a complete
+    one, which is the same lie as the silent empty this tool exists to replace.
+
     A hit in a `_draft/` template comes back salt-wrapped as untrusted (`is_untrusted_read`) — it is
     text `draft_synthesis` minted from attacker-influenced alert data. An established hit is
     returned bare: it is the curated catalog gather exists to reuse.
@@ -403,25 +426,38 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
     needle = pattern.lower()
     scope = f"system `{system}`" if system else "every system"
 
-    trusted: list[str] = []
-    untrusted: list[str] = []
+    hits: list[tuple[QueryTemplate, list[str]]] = []
     for t in iter_query_templates(_catalog_dir(deps.defender_dir)):
         if root not in t.path.parents:
             continue
-        lines = [
-            f"    {ln.strip()}"
-            for ln in (t.goal + "\n" + t.query).splitlines()
-            if needle in ln.lower()
-        ]
-        if not lines:
-            continue
+        matched = [ln.strip() for ln in t.body.splitlines() if needle in ln.lower()]
+        if matched:
+            hits.append((t, matched))
+
+    if not hits:
+        return _NO_HITS.format(pattern=pattern, scope=scope)
+
+    # Densest match first, path as the tiebreak — a stable order, no clock and no randomness in a
+    # return the model reasons over. The rank is what makes the list cap safe: when a broad
+    # pattern overruns the budget, what survives is the templates that matched HARDEST, not the
+    # ones whose system name happens to sort first.
+    hits.sort(key=lambda h: (-len(h[1]), str(h[0].path)))
+    listed, spilled = hits[:_SEARCH_MAX_TEMPLATES], hits[_SEARCH_MAX_TEMPLATES:]
+
+    trusted: list[str] = []
+    untrusted: list[str] = []
+    dropped = 0
+    for t, matched in listed:
+        shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
+        dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [f"- `{t.id}` — `{_repo_rel(deps.defender_dir, t.path)}`", *lines]
+            [
+                f"- `{t.id}` — `{_repo_rel(deps.defender_dir, t.path)}`",
+                *(f"    {ln}" for ln in shown),
+            ]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 
-    if not trusted and not untrusted:
-        return _NO_HITS.format(pattern=pattern, scope=scope)
     out = "\n".join(trusted)
     if untrusted:
         # The draft half only. Wrapping the whole return would teach gather to distrust the
@@ -433,7 +469,25 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
             "untrusted", deps.salt,
         )
         out = f"{out}\n\n{drafts}" if out else drafts
-    return out
+
+    # Truncation is ANNOUNCED, never silent. A quietly-clipped result reads as a complete one,
+    # which is the same lie as the silent empty this whole tool exists to kill: gather would take
+    # what it got as all there is, and coin. "38 more matched, narrow the pattern" cannot be
+    # misread as "the catalog is bare" — it is the one honest way to bound the return.
+    notices = []
+    if spilled:
+        notices.append(
+            f"{len(spilled)} further template(s) ALSO matched and are not listed (the "
+            f"{_SEARCH_MAX_TEMPLATES} densest matches are shown). This pattern is too broad to "
+            "locate one template — narrow it, or pass `system=` to scope the search."
+        )
+    if dropped:
+        notices.append(
+            f"{dropped} further matching line(s) inside the templates above are not shown (each "
+            f"is capped at {_SEARCH_LINES_PER_TEMPLATE} lines of evidence). The templates "
+            "themselves are all listed — `read_file` a path for its full body."
+        )
+    return f"{out}\n\n[{' '.join(notices)}]" if notices else out
 
 
 def register_template_search_tool(agent) -> None:
@@ -446,11 +500,12 @@ def register_template_search_tool(agent) -> None:
     ) -> str:
         """Search the gather query-template catalog for a keyword — when the template index in
         your dispatch prompt reads too coarse to tell whether a template already measures this.
-        `pattern` is plain text (not a regex, not a glob), matched case-insensitively against
-        every template's `## Goal` and `## Query` body, including the uncurated `_draft/` ones the
-        index omits. `system` optionally restricts the search to one system's dir; omit it to
-        search all of them. Each hit gives you the template's `id` and its path — Read the path
-        before you bind the `id` with `--query-id`."""
+        `pattern` is plain text (not a regex, not a glob), matched case-insensitively against the
+        FULL body of every template (`## Goal`, `## Query`, `## What to summarize`, the pitfalls —
+        everything below the frontmatter), including the uncurated `_draft/` ones the index omits.
+        `system` optionally restricts the search to one system's dir; omit it to search all of
+        them. Each hit gives you the template's `id` and its path — Read the path before you bind
+        the `id` with `--query-id`."""
         return _tool_template_search(ctx.deps, pattern, system)
 
 

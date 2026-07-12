@@ -149,8 +149,17 @@ _SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 
 @dataclass(frozen=True)
 class QueryTemplate:
-    """One well-formed query template: its file, its identity, and the two section bodies every
-    consumer reads.
+    """One well-formed query template: its file, its identity, the two section bodies every
+    consumer reads, and the whole markdown body they were sliced out of.
+
+    ``body`` is the full post-frontmatter markdown — every section, not just the two named ones.
+    A template carries more prose than ``Goal`` + ``Query``: ``## What to summarize`` is on 54 of
+    the 63 in the corpus, and the ``## Pitfalls`` / ``## Filter binding`` sections on ~30 more, all
+    of it exactly the concrete-artifact vocabulary ``SCHEMA.md`` tells authors to write for keyword
+    recall. A searcher that reads only the two parsed sections would report "no template's text
+    carries that text" about text a template plainly carries (see
+    ``tools_gather._tool_template_search``), which is the same coin-a-duplicate failure as an
+    empty return.
 
     ``status`` is the frontmatter value verbatim when it is a non-empty string, and ``""`` when the
     key is absent or empty — NOT ``"established"``. The pre-fold walk defaulted it with
@@ -168,6 +177,7 @@ class QueryTemplate:
     status: str
     goal: str
     query: str
+    body: str
 
 
 def _sections(body: str) -> dict[str, str]:
@@ -235,4 +245,5 @@ def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
             status=status if isinstance(status, str) else "",
             goal=sections.get("Goal", ""),
             query=sections.get("Query", ""),
+            body=body,
         )

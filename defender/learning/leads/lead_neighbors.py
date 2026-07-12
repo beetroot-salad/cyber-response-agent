@@ -53,7 +53,11 @@ class Template:
     goal: str
     query_variants: tuple[frozenset[str], ...]
     cli: str
-    status: str  # "established" | "draft"
+    # The frontmatter value verbatim: "established" | "draft" | "" — NOT defaulted. The pre-fold
+    # walk coalesced an absent key to "established" with `or`, which promoted a draft that had
+    # lost its key; `_corpus.QueryTemplate` fails that closed, so a curation defect now surfaces
+    # here as "" rather than as a silent promotion. Consumers must test positively.
+    status: str
 
 
 def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:

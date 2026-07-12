@@ -722,3 +722,87 @@ def test_d24_status_agrees_with_the_draft_directory():
     for r in _corpus.iter_query_templates(_REAL_CATALOG):
         in_draft_dir = "_draft" in r.path.parts
         assert in_draft_dir == (r.status == "draft"), f"{r.path}: status {r.status!r} vs its location"
+
+
+# ==========================================================================
+# review — the search reads the WHOLE body, and it is bounded on both axes
+#
+# Both pinned in review of the shipped PR (#592), neither covered by the spec above.
+# ==========================================================================
+
+def test_search_reads_sections_beyond_goal_and_query(tmp_path):
+    """The search must read the FULL body, not just the two parsed sections.
+
+    `_NO_HITS` asserts "no template's text carries that text". A search that reads only `## Goal`
+    and `## Query` makes that claim FALSE of every other section — and a template carries more:
+    `## What to summarize` is on 54 of the 63 in the shipped corpus, the pitfalls sections on ~30
+    more, all of it the concrete-artifact vocabulary SCHEMA.md tells authors to write FOR keyword
+    recall. Answering "no template carries that text" about a field a template names in plain
+    sight is the same coin-a-duplicate failure as a silent empty return."""
+    dfn = _catalog(tmp_path)
+    tpl = dfn / "skills" / "gather" / "queries" / "elastic" / "sshd-auth-history.md"
+    tpl.write_text(
+        tpl.read_text() + "\n## What to summarize\n\n- the winlogbeat agent_ephemeral_id\n"
+    )
+    deps = _deps(tmp_path, dfn)
+
+    out = tools_gather._tool_template_search(deps, "agent_ephemeral_id")
+    assert "elastic.sshd-auth-history" in out
+    assert not out.startswith("no template matches")
+
+
+def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
+    """A plain substring has no lower bound on breadth, and the guard above rejects only the
+    EMPTY pattern. `user` and `host` are exactly the words an analyst types, and uncapped they
+    return 25 and 41 of the 63 shipped templates (14 KB / 21 KB of dispatch context); a bare `e`
+    returns all 63. Both caps must hold, and both must ANNOUNCE — a silently clipped result reads
+    as a complete one, which is the same lie as the silent empty this tool exists to replace."""
+    # The fixture is a FIXED size, never `_SEARCH_MAX_TEMPLATES + k`. Sizing a corpus off the
+    # constant under test couples the fixture to the value it is meant to bound: raise the cap and
+    # the test silently writes that many files (at 10**6 it writes a million and fills the disk).
+    # The corpus is a constant; the assertion is an inequality against the cap.
+    corpus, lines_each = 40, 8
+    assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
+    assert lines_each > tools_gather._SEARCH_LINES_PER_TEMPLATE, "fixture too thin for the cap"
+
+    dfn = tmp_path / "wt" / "defender"
+    q = dfn / "skills" / "gather" / "queries" / "elastic"
+    q.mkdir(parents=True)
+    body = "\n".join(f"widget line {j}" for j in range(lines_each))
+    for i in range(corpus):
+        (q / f"t{i:02d}.md").write_text(_tpl("elastic", f"t{i:02d}", goal=body, query=body))
+    deps = _deps(tmp_path, dfn)
+
+    out = tools_gather._tool_template_search(deps, "widget")
+
+    listed = out.count("` — `")
+    assert listed == tools_gather._SEARCH_MAX_TEMPLATES, f"list is unbounded: {listed} templates"
+    assert "not listed" in out                                        # spilled templates ANNOUNCED
+    assert str(corpus - tools_gather._SEARCH_MAX_TEMPLATES) in out    # ...and counted
+    assert "not shown" in out                                         # clipped evidence lines too
+    # The bound is on the RETURN, not on the truth: the sentinel must not appear.
+    assert not out.startswith("no template matches")
+
+
+def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
+    """Which templates survive the cap is not incidental. Ranked by match density, the strongest
+    candidate survives; in corpus-walk order it would be whichever system sorts first, so the
+    best template could be dropped for an alphabetical accident while 20 weaker ones are shown."""
+    corpus = 40                                    # fixed, not derived from the cap (see above)
+    assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
+
+    dfn = tmp_path / "wt" / "defender"
+    q = dfn / "skills" / "gather" / "queries" / "zzz-last-system"
+    q.mkdir(parents=True)
+    # The strongest match sorts LAST by path — it survives only if density is what ranks.
+    (q / "the-one.md").write_text(
+        _tpl("zzz-last-system", "the-one", goal="widget\nwidget\nwidget\nwidget", query="widget")
+    )
+    for i in range(corpus):
+        sysdir = dfn / "skills" / "gather" / "queries" / f"aaa{i:02d}"
+        sysdir.mkdir(parents=True)
+        (sysdir / "weak.md").write_text(_tpl(f"aaa{i:02d}", "weak", goal="widget", query="x"))
+    deps = _deps(tmp_path, dfn)
+
+    out = tools_gather._tool_template_search(deps, "widget")
+    assert "zzz-last-system.the-one" in out, "the densest match was dropped for an alphabetical one"

@@ -43,9 +43,9 @@ queries you narrow**; fork on capability, not parameter axis.
 
 Your dispatch prompt carries the **template index**: every established template, every system,
 each as its `id`, its path, and its `## Goal`. Scan it first. When the Goals read too coarse to
-tell whether one already measures this, call **`template_search`** — it searches the full `## Goal`
-and `## Query` bodies (case-insensitively, and including the uncurated `_draft/` templates the
-index omits) for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
+tell whether one already measures this, call **`template_search`** — it searches each template's
+full body, every section (case-insensitively, and including the uncurated `_draft/` templates the
+index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
 `listening port`).
 
 **Read the template body with `read_file` before you tag `--query-id` with its id.** The index

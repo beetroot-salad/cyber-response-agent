@@ -109,31 +109,49 @@ def workspace_map(run_dir: Path) -> str:
         lines.append("- (none yet — v2 adapters TBD)")
     lines.append("")
 
-    # Gather query templates — one line per system, COUNTS only.
-    #
-    # This section names no template filename, and above all no `_draft/` filename. A draft's
-    # name is a verb the gather LLM coined in response to alert data and `draft_synthesis` wrote
-    # to disk, so it is attacker-influenced text — and this map is injected verbatim into MAIN's
-    # message 0, where `defender/SKILL.md` forbids main the query corpus in the first place. The
-    # filenames were never actionable there either: main dispatches leads by SYSTEM, and it is
-    # GATHER that binds a template (from the index `tools_gather._template_index` injects into
-    # its dispatch prompt, #585). Counts keep the one fact main can use — which systems have a
-    # curated catalog behind them, and how deep it is.
     queries_dir = DEFENDER_DIR / "skills" / "gather" / "queries"
     lines.append(f"## Gather query templates — `{_rel(queries_dir)}/`")
-    rows = list(iter_query_templates(queries_dir))
-    if rows:
-        for system in sorted({r.system for r in rows}):
-            established = sum(
-                1 for r in rows if r.system == system and r.status == "established"
-            )
-            drafts = sum(1 for r in rows if r.system == system and r.status == "draft")
-            lines.append(f"- {system}/ — {established} established, {drafts} draft")
-    else:
-        lines.append("- (no queries dir)")
+    lines.extend(_template_counts(queries_dir))
     lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+def _template_counts(queries_dir: Path) -> list[str]:
+    """The query-template section of the map: one line per system, COUNTS only.
+
+    This section names no template filename, and above all no `_draft/` filename. A draft's name
+    is a verb the gather LLM coined in response to alert data and `draft_synthesis` wrote to disk,
+    so it is attacker-influenced text — and this map is injected verbatim into MAIN's message 0,
+    where `defender/SKILL.md` forbids main the query corpus in the first place. The filenames were
+    never actionable there either: main dispatches leads by SYSTEM, and it is GATHER that binds a
+    template (from the index `tools_gather._template_index` injects into its dispatch prompt,
+    #585). Counts keep the one fact main can use — which systems have a curated catalog behind
+    them, and how deep it is.
+    """
+    if not queries_dir.is_dir():
+        return ["- (no queries dir)"]
+    rows = list(iter_query_templates(queries_dir))
+    if not rows:
+        # An empty walk is NOT a missing dir. Reporting one as the other would tell main the
+        # catalog surface does not exist when in truth it exists and is bare (or unreadable) —
+        # two different facts, and only the second is a curation defect worth seeing.
+        return ["- (queries dir is present but holds no readable template)"]
+
+    out: list[str] = []
+    for system in sorted({r.system for r in rows}):
+        srows = [r for r in rows if r.system == system]
+        established = sum(1 for r in srows if r.status == "established")
+        drafts = sum(1 for r in srows if r.status == "draft")
+        line = f"- {system}/ — {established} established, {drafts} draft"
+        # `status` is the frontmatter value VERBATIM and no longer defaults to "established"
+        # (#585), so a template can carry neither value — an absent key, or a typo. Counting only
+        # the two known buckets would drop it from both and make it vanish from the map entirely:
+        # the counts would silently fail to sum to the corpus. Name the remainder instead.
+        if unknown := len(srows) - established - drafts:
+            line += f", {unknown} unknown status"
+        out.append(line)
+    return out
 
 
 def main(argv: list[str]) -> int:
