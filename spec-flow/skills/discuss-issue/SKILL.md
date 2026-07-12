@@ -2,6 +2,7 @@
 name: discuss-issue
 description: "Explain a GitHub issue in plain terms, check it against the current codebase, and surface the open questions that need answering before anyone designs or implements. Use when a bare issue report needs to be understood and grounded in the real code."
 argument-hint: "[issue number]"
+effort: medium
 ---
 
 # Discuss issue

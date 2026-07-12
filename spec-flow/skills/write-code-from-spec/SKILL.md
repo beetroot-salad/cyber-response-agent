@@ -2,6 +2,7 @@
 name: write-code-from-spec
 description: "Turn an approved design and its pre-written test spec into shipped, CI-green code. Work in an isolated worktree, read the issue/design and the committed tests, implement real code until the suite passes locally, ship a PR that closes the issue, then watch CI and repair failures until green — honestly (fix the cause, never weaken a test or a gate) and within a bounded repair loop that hands a stuck run back to a human with the PR and session linked. Use after write-tests, once the spec is approved; it is write-tests' mirror — write-tests pins intent as tests, write-code-from-spec makes the code match."
 argument-hint: "[issue # or design doc path]"
+effort: medium
 ---
 
 # Write code from spec

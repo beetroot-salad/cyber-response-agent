@@ -2,6 +2,7 @@
 name: handoff
 description: "Write a terse handoff note (~1 paragraph) that lets a fresh session resume the current work without re-deriving it. Use when wrapping up mid-task, or when the user asks for a handoff or to continue later. Takes an optional GitHub issue to post the note to."
 argument-hint: "[issue number or URL]"
+effort: low
 ---
 
 # Handoff

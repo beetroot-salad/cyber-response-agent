@@ -2,6 +2,7 @@
 name: review
 description: "Review the green PR that write-code-from-spec shipped: apply every fix you're confident in inline, file the rest as follow-up issues, and re-green the PR before handing it to the human merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-spec, as the last stage before a human merges."
 argument-hint: "[issue # or PR #]"
+effort: xhigh
 ---
 
 # Review

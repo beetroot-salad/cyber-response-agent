@@ -2,6 +2,7 @@
 name: write-tests
 description: "Turn an approved design into an executable spec — a demand list bound to a spec-coverage graph, realized as end-to-end tests, so 'tests green' means 'code follows intent.' Gate rules over the graph compute the known blind-spot shapes instead of relying on the author to remember them. Use after a design is approved and before the implementation is written — the tests + spec_graph are the spec the code is coded against, and the tests+spec_graph-only diff is the reviewable artifact."
 argument-hint: "[design doc path or issue #]"
+effort: xhigh
 ---
 
 # Write tests
