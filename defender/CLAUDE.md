@@ -117,6 +117,7 @@ defender/
     bash_exec.py        # shell=False executor for the read-only Bash lane; parse() is the shared decomposition the gate validates against (#379), run_parsed() runs the gate's parse (#456)
     bash_policy.json    # declarative deny-by-default allowlist: read-only viewers + per-agent adapter capability + the read denylist
     bash_policy.py      # loader for bash_policy.json (fails closed to built-in defaults if unreadable)
+    gnu_flags.py        # the GNU short-flag ARITY facts every bash reader lane compiles its flag classes from (#579) — a flag class must be a POSITIVE boolean allowlist, because an arg-consuming flag (`ls -I`, `grep -m`) eats the anchored operand behind it and the program falls back to the CWD. One home, because two lanes consume it (permission/policies/_common.py + learning/author/curator_engine.py) and the sets are a property of the runtime image's binaries, not of any agent's policy
     orient.py  observe.py  compaction.py  circuit_breaker.py
   hooks/                # gate LOGIC, imported as plain libraries by runtime/ (no longer wired as Claude Code hooks)
     record_lead.py                      # claim_lead: writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse raises)

@@ -52,7 +52,7 @@ from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline._pydantic_stage import run_stage
-from defender.runtime import providers
+from defender.runtime import gnu_flags, providers
 from defender.runtime.agent_definition import AgentDefinition, BashGrammar, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
@@ -115,12 +115,24 @@ def _find_balanced_json_object(text: str, start: int) -> str | None:
 # real space keeps a multi-path `rm a b` from matching as one long "segment".
 _SEG = r"(?!\.\.(?:/| |$))[^/ ]+"
 
-# Safe short-flag bundle for the corpus viewers — any letter EXCEPT lowercase `f`, the
-# file-opening flag (`grep -f patternfile` would read an out-of-corpus file, and the operand
-# gate can't see a second file the flag pulls in). Recursion (`-r`/`-R`) and `-l` stay in-corpus
-# because the file/dir operand is corpus-anchored; there is no auto secret-denylist on this
-# hand-built lane, so the anchored operand is the sole containment (bash lane: no resolve()).
-_VIEW_FLAG = r"-[a-eg-zA-Z]+"
+# Per-program BOOLEAN short-flag allowlists for the corpus viewers, built from the shared GNU
+# arity facts in `runtime/gnu_flags.py` — the same source the main/gather reader lane
+# (`runtime/permission/policies/_common.py`) compiles its classes from. Read that module's header
+# for WHY a catch-all minus the known-bad fails open: an arg-CONSUMING short flag eats the
+# corpus-anchored operand behind it, leaving the program with none, and `ls`/`grep` then fall back
+# to the CWD — which for a curator is its git worktree, i.e. the whole repo (#579). This lane
+# carries NO auto secret-denylist, so the anchored operand is its sole containment (bash lane: no
+# resolve()) and a flag that dislodges the operand is the whole ballgame.
+_CAT_FLAG = gnu_flags.bundle(gnu_flags.CAT_BOOL)
+# `-R` is KEPT here, unlike the runtime lane: the corpus holds no subtree this agent is barred
+# from enumerating, so recursion reaches nothing the anchor doesn't already admit.
+_LS_FLAG = gnu_flags.bundle(gnu_flags.LS_BOOL)
+# grep's booleans + list-only + recursion. Recursion is admissible HERE (and not on the runtime
+# lane) for one structural reason: this grammar REQUIRES a file operand (`+`), so a recursive grep
+# always has a corpus-anchored root to descend from and can never fall back to the CWD.
+_GREP_FLAG = gnu_flags.bundle(
+    gnu_flags.GREP_BOOL + gnu_flags.GREP_LIST + gnu_flags.GREP_RECURSE
+)
 
 _CORPUS_AUTHOR_DENY_REASON = (
     "Blocked: the lesson curator writes/edits .md lessons under its OWN corpus only. It reads the "
@@ -160,15 +172,18 @@ def _viewer_patterns(corpus_dir: Path) -> tuple[re.Pattern[str], ...]:
     d = _corpus_dir_operand(corpus_dir)
     # A free-text grep search pattern (one token; may look like a path). The leading `(?!-)`
     # is load-bearing: without it this slot swallows any `-`-prefixed token, so a file-opening
-    # option the `_VIEW_FLAG` `-f` exclusion is meant to block (`grep --file=<out-of-corpus>`,
-    # `grep --exclude-from=…`, `grep -r -f <corpus-probe>`) would fall through here and grep
-    # would OPEN an out-of-corpus file — the anchored operand is the sole containment on this
-    # denylist-free lane, so the search token must not be a flag.
+    # option `_GREP_FLAG` is meant to block (`grep --file=<out-of-corpus>`, `grep
+    # --exclude-from=…`, `grep -r -f <corpus-probe>`) would fall through here and grep would OPEN
+    # an out-of-corpus file — the anchored operand is the sole containment on this denylist-free
+    # lane, so the search token must not be a flag. `(?!-)` alone is NOT sufficient: it only stops
+    # a REJECTED flag from re-entering as the pattern, and says nothing about an ADMITTED flag that
+    # consumes this token (`grep -m 1 <corpus>/x.md`). That half is `_GREP_FLAG`'s job — it admits
+    # boolean flags only, so the slot grep binds a token to is the slot this grammar sees.
     pat = r"(?!-)[^ ]+"
     return (
-        re.compile(rf"^cat(?: {_VIEW_FLAG})*(?: {f})+$"),
-        re.compile(rf"^grep(?: {_VIEW_FLAG})*(?: {pat})(?: {f})+$"),
-        re.compile(rf"^ls(?: {_VIEW_FLAG})*(?: {d})+$"),  # `+`: bare `ls` (=cwd recon) denied
+        re.compile(rf"^cat(?: {_CAT_FLAG})*(?: {f})+$"),
+        re.compile(rf"^grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})+$"),
+        re.compile(rf"^ls(?: {_LS_FLAG})*(?: {d})+$"),  # `+`: bare `ls` (=cwd recon) denied
     )
 
 

@@ -253,18 +253,29 @@ def test_grep_recursive_single_operand_denied(env):
 
 def test_tail_head_arg_consuming_flag_stays_anchored(env):
     """tail -n /etc/passwd → DENY. tail/head's `-n`/`-c` DO consume the next token (unlike cat/wc),
-    but — unlike `ls -I` (#579) — that is NOT a leak: the consumed token must still match the
+    but — unlike `ls -I` (#579) — that is NOT a read leak: the consumed token must still match the
     anchored `{f}` operand slot to pass the grammar, so an out-of-root path denies outright, and an
     in-root path used as a line/byte COUNT merely errors at runtime (no out-of-root read is
-    reachable). So tail/head need no `_LS_FLAG`-style tightening; this pins that the ANCHORING is
-    what protects them, so a future operand-grammar change can't silently reintroduce a leak.
-    Positive controls: the real fused-count forms `tail -5` / `head -5` over an in-root file."""
+    reachable). `-n`/`-c` are therefore ADMITTED, and this pins that the ANCHORING (not the flag
+    class) is what protects them, so a future operand-grammar change can't silently reintroduce a
+    leak.
+
+    `-f`/`-F` are a separate story and are DENIED: they open no new file, but a follow never
+    returns, so `tail -f` wedges the stage until the executor's wall-clock timeout fires — a
+    liveness bug, not a confinement one. `-s SECS` is out as an arg-taker. Positive controls: the
+    fused-count forms `tail -5` / `head -5` and the separated `tail -n 20` over an in-root file."""
     # rejected: treat tail/head like ls and assume -n/-c can smuggle an out-of-root read
     for which in ("main", "gather"):
         assert not _bash(env, "tail -n /etc/passwd", which).allow, which
         assert not _bash(env, "head -c /etc/shadow", which).allow, which
-        assert _bash(env, f"tail -5 {env.run}/investigation.md", which).allow, which  # control
-        assert _bash(env, f"head -5 {env.run}/investigation.md", which).allow, which  # control
+        # follow never terminates → burns the stage's whole timeout budget
+        assert not _bash(env, f"tail -f {env.run}/investigation.md", which).allow, which
+        assert not _bash(env, f"tail -F {env.run}/investigation.md", which).allow, which
+        assert not _bash(env, f"tail -s 5 {env.run}/investigation.md", which).allow, which
+        assert _bash(env, f"tail -5 {env.run}/investigation.md", which).allow, which     # control
+        assert _bash(env, f"head -5 {env.run}/investigation.md", which).allow, which     # control
+        assert _bash(env, f"tail -n 20 {env.run}/investigation.md", which).allow, which  # control
+        assert _bash(env, f"head -c 100 {env.run}/investigation.md", which).allow, which # control
 
 
 def test_grep_free_text_pattern_not_anchored(env):
@@ -500,6 +511,27 @@ def test_gather_summaries_not_tripped_by_raw_clamp(env):
     assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
 
 
+def test_recursive_ls_cannot_dodge_the_raw_clamp(env):
+    """ls -R {RUN} → DENY. The clamp above is a SUBSTRING test on the command text (`RAW_MARKER in
+    cmd`), so it only fires on a command that NAMES `gather_raw` — and recursion is precisely the
+    primitive that reaches a subtree WITHOUT naming it: `ls -R {RUN}` walks into `gather_raw/` and
+    lists the whole raw tree (lead dirs + payload files) while spelling the marker nowhere. So the
+    clamp is complete only if the reader lane has no recursive descent at all; `_LS_FLAG` drops
+    `-R` (grep's `-r`/`-R` were already out, and there is no find/tree), which makes "to reach a
+    path you must name it, and naming it trips the clamp" a real invariant instead of an accident.
+    Denied on BOTH agents — the flag is off the lane, not conditioned on `raw_reads` (gather reads
+    raw by NAMING it, which its policy allows). Positive control: non-recursive `ls` still works,
+    and gather can still list the raw dir explicitly."""
+    # rejected: keep `-R` and special-case recursive ls inside the clamp (a path/flag parse in the
+    # security check = the new bypass surface SF4 exists to avoid — see the test above)
+    for which in ("main", "gather"):
+        assert not _bash(env, f"ls -R {env.run}", which).allow, which
+        assert not _bash(env, f"ls -lR {env.run}", which).allow, which   # bundled
+        assert _bash(env, f"ls {env.run}", which).allow, which           # control
+    assert _bash(env, f"ls {env.run}/gather_raw", "gather").allow        # control: named, allowed
+    assert not _bash(env, f"ls {env.run}/gather_raw", "main").allow      # ...and clamped for main
+
+
 # ===========================================================================  #
 # G. Relative-operand convention (consensus): absolute required                 #
 # ===========================================================================  #
@@ -633,18 +665,29 @@ def test_ls_arg_consuming_flag_denied(env):
     catch-all `-[A-Za-z]+` flag class lets `-I` swallow the anchored dir operand — leaving `ls` with
     NO operand, which falls back to listing the CWD (the repo root): a fail-open (#579). The explicit
     `_LS_FLAG` boolean allowlist (I/w/T excluded) closes it. Both agents share the reader lane.
-    Positive controls: a bare `ls {RUN}` and a boolean-flag bundle `ls -la {RUN}` still list an
-    in-root dir."""
-    # rejected: `_VIEW_FLAG = -[A-Za-z]+` for ls (admits -I/-w/-T, which then consume the operand)
+
+    `_LS_FLAG` is now a load-bearing 37-letter ENUMERATION of GNU coreutils 9.7's boolean ls flags,
+    so the ALLOW side is pinned too: without it, dropping a letter (a coreutils bump, a typo) would
+    silently deny a legitimate recon shape with the suite still green. The allow list below is the
+    regression floor the tightening must not cost us."""
+    # rejected: `-[A-Za-z]+` for ls (admits -I/-w/-T, which then consume the operand)
     for which in ("main", "gather"):
         assert not _bash(env, f"ls -I {env.run}", which).allow, which
         assert not _bash(env, f"ls -w {env.run}", which).allow, which
         assert not _bash(env, f"ls -T {env.run}", which).allow, which
         # -I in a boolean bundle still consumes the operand → still denied
         assert not _bash(env, f"ls -laI {env.run}", which).allow, which
-        # positive controls: no flag, and a real boolean bundle
-        assert _bash(env, f"ls {env.run}", which).allow, which
-        assert _bash(env, f"ls -la {env.run}", which).allow, which
+        # ...and in its attached-argument spellings (`-I<PATTERN>` / `-w<COLS>`), which is how a
+        # short arg-taker is idiomatically written — the letter is excluded, so the bundle fails.
+        # (Deliberately NOT a `gather_raw` pattern: that would trip the raw clamp instead, and the
+        # assertion would pass for a reason other than the flag grammar it is meant to pin.)
+        assert not _bash(env, f"ls -I*.md {env.run}", which).allow, which
+        assert not _bash(env, f"ls -w80 {env.run}", which).allow, which
+        # positive controls — every boolean-flag shape a real run uses must still ALLOW.
+        # `-R` is NOT among them: see `test_recursive_ls_cannot_dodge_the_raw_clamp`.
+        for ok in ("ls", "ls -la", "ls -l", "ls -a", "ls -1", "ls -lt", "ls -lh",
+                   "ls -lS", "ls -ltr", "ls -F", "ls -d"):
+            assert _bash(env, f"{ok} {env.run}", which).allow, f"{which}: {ok}"
 
 
 # ===========================================================================  #

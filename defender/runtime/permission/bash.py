@@ -51,7 +51,7 @@ from defender.hooks.block_main_loop_raw_access import (
     RAW_DENY_REASON,
     RAW_MARKER,
 )
-from defender.runtime import bash_exec
+from defender.runtime import bash_exec, gnu_flags
 
 from . import command_shape
 from .decision import Decision
@@ -88,11 +88,11 @@ _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # program: "which files does this argv open?" is answerable without reimplementing an
 # option parser (jq's `-f`/`-L`/`--slurpfile`/`--rawfile`/`--argfile` + short-bundle arg
 # consumption needed ~60 lines and three fail-closed branches to answer the same
-# question). This is the SOLE encoding of that option set: the judge's admitting pattern
-# (`engine_pydantic._CAT_PATTERN`) deliberately does not repeat it, so the grammar and
-# the extractor cannot drift apart. Anything else `-`-prefixed fails closed below, which
-# also covers a non-coreutils `cat` whose flags differ.
-_CAT_BOOL_BUNDLE = re.compile(r"-[AbeEnstTuv]+")
+# question). `gnu_flags.CAT_BOOL` is the SOLE encoding of that option set: this extractor
+# and every reader-lane `cat` grammar compile it from there, so they cannot drift apart.
+# Anything else `-`-prefixed fails closed below, which also covers a non-coreutils `cat`
+# whose flags differ.
+_CAT_BOOL_BUNDLE = re.compile(gnu_flags.bundle(gnu_flags.CAT_BOOL))
 
 
 @dataclass(frozen=True)

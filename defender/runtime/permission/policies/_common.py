@@ -26,7 +26,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from defender.runtime import bash_policy
+from defender.runtime import bash_policy, gnu_flags
 
 # The corpus subdirs whose `.md` files a runtime agent may read on the bash lane —
 # lessons (pitfalls), skills (per-system references + gather query templates), and
@@ -105,25 +105,29 @@ def _dir_operand(run: str, dfn: str) -> str:
     return _deny_lookahead() + r"(?:" + _at_or_under(run) + r"|" + _at_or_under(dfn) + r")"
 
 
-# Per-program safe flag classes (single-dash bundles). A flag that OPENS a file or
-# recurses is deliberately EXCLUDED so it fails the grammar (fail closed) rather than
-# smuggling an out-of-root read: grep's `-f`/`-e`/`-r`/`-R`, `wc --files0-from`
-# (double-dash → not a short bundle), jq's `-f`/`-L`. Double-dash long options are not
-# admitted anywhere, so `--files0-from=…`/`--rawfile` fail too.
-_GREP_FLAG = r"-[nicovwxHhsEFabz]+"    # safe grep short flags (NO f/e/r/R/L/l/d)
-_JQ_FLAG = r"-[rjcnesRaSCM]+"          # safe jq boolean short flags (NO f/L file-openers)
-_VIEW_FLAG = r"-[A-Za-z]+"             # cat/wc ONLY: neither has an arg-taking short option, so
-                                       # every short flag is boolean (none opens a 2nd file). NOT
-                                       # for ls — GNU ls DOES have arg-consuming short flags; see
-                                       # `_LS_FLAG` (#579).
-# ls IS flag-aware, unlike cat/wc: `-I PATTERN`/`-w COLS`/`-T COLS` consume the NEXT token, so a
-# catch-all `-[A-Za-z]+` lets `ls -I {run_dir}` swallow the anchored dir operand and fall back to
-# listing the CWD (the repo root) — a fail-open (#579). An EXPLICIT boolean-flag allowlist (like
-# `_GREP_FLAG`/`_JQ_FLAG`, not a catch-all minus the known-bad) closes it and fails CLOSED if a
-# future coreutils adds another arg-consuming short flag. Letters = the GNU-coreutils-9.7 boolean
-# ls short-flag set MINUS the three arg-takers `I`/`w`/`T`.
-_LS_FLAG = r"-[aAbBcCdDfFgGhHiklLmnNopqQrRsStuUvxXZ1]+"
-_NUM_FLAG = r"-[A-Za-z0-9]+"           # tail/head: `-5`/`-1`/`-n`/`-c`
+# Per-program flag classes (single-dash bundles), each a POSITIVE boolean-flag allowlist built
+# from the shared GNU arity facts in `runtime/gnu_flags.py` — read that module's header for WHY a
+# catch-all minus the known-bad fails open (#579). Double-dash long options are admitted nowhere,
+# so `wc --files0-from=…` / `jq --rawfile` / `grep --file=…` fail the grammar too.
+_CAT_FLAG = gnu_flags.bundle(gnu_flags.CAT_BOOL)
+_WC_FLAG = gnu_flags.bundle(gnu_flags.WC_BOOL)
+_GREP_FLAG = gnu_flags.bundle(gnu_flags.GREP_BOOL)   # no f/e/r/R/l/L/d/D/m/A/B/C
+# ls MINUS `-R`. Recursion is the one primitive that reaches a subtree WITHOUT NAMING it, and this
+# lane's `run_dir` holds exactly such a subtree: `gather_raw/`, which an agent lacking `raw_reads`
+# (the main loop) may not touch. That clamp is a SUBSTRING test on the command text
+# (`bash.decide_bash`: `RAW_MARKER in cmd`), so `ls -R {run_dir}` would enumerate the whole raw
+# tree while spelling `gather_raw` nowhere — dodging the clamp entirely. Dropping `-R` leaves the
+# reader lane with NO recursive-descent primitive at all (grep's `-r`/`-R` are already out, and
+# there is no `find`/`tree`), which is what makes the textual clamp COMPLETE rather than merely
+# lucky: to reach a path under `run_dir`, a viewer must now name it, and naming it trips the clamp.
+_LS_FLAG = gnu_flags.bundle(gnu_flags.LS_BOOL, drop=gnu_flags.LS_RECURSE)
+# tail/head: the boolean flags + `-n`/`-c` (whose NUM must still match the anchored operand slot,
+# so they cannot smuggle an out-of-root read) + a fused count (`-5`, `-50`). `-f`/`-F` are excluded:
+# a follow never returns, so it wedges the stage until the executor's wall-clock timeout fires.
+_NUM_FLAG = gnu_flags.bundle(gnu_flags.TAIL_HEAD_BOOL + gnu_flags.DIGITS)
+# jq is not a GNU coreutil, so its set stays local: the safe boolean short flags (NO `-f`/`-L`,
+# which open a filter file / a module dir).
+_JQ_FLAG = r"-[rjcnesRaSCM]+"
 
 # jq's file-FREE key/value flags: `--arg NAME VALUE` / `--argjson NAME VALUE` bind a
 # shell var into the filter as a STRING/JSON literal — they open NO file (unlike the
@@ -175,14 +179,15 @@ def _viewer_program_patterns(run: str, dfn: str) -> dict[str, str]:
         # must still match. Any file operand that IS present is anchored; an out-of-root
         # operand still fails `fullmatch` (it matches neither a flag nor `{f}`), so the
         # `*` re-admits the stdin shape without widening file access.
-        "cat": rf"cat(?: {_VIEW_FLAG})*(?: {f})*",
-        "wc": rf"wc(?: {_VIEW_FLAG})*(?: {f})*",
+        "cat": rf"cat(?: {_CAT_FLAG})*(?: {f})*",
+        "wc": rf"wc(?: {_WC_FLAG})*(?: {f})*",
         "tail": rf"tail(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
         "head": rf"head(?: (?:{_NUM_FLAG}|[0-9]+))*(?: {f})*",
         # grep: safe-flags, one free-text PATTERN (may look like a path), anchored FILE*
         "grep": rf"grep(?: {_GREP_FLAG})*(?: {pat})(?: {f})*",
         # ls/cd: anchored DIR operand (recon confined to the read roots). ls REQUIRES a
-        # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon).
+        # dir operand (`+`): a bare `ls` lists cwd (= repo root, out-of-root recon). Listing is
+        # NON-recursive (`_LS_FLAG` drops `-R`), so every dir a viewer reaches is a dir it named.
         "ls": rf"ls(?: {_LS_FLAG})*(?: {d})+",
         "cd": rf"cd(?: {d})?",
         # jq: stdin-compute-only — safe boolean flags + file-free `--arg`/`--argjson`

@@ -318,7 +318,7 @@ def test_bash_nav_outside_corpus_denied(tmp_path):
 
 def test_bash_grep_file_option_exfil_denied(tmp_path):
     """A grep FILE-opening option must not smuggle an out-of-corpus read through the free-text
-    search slot. `_VIEW_FLAG` excludes short `-f`, but the search token slot would otherwise admit
+    search slot. `_GREP_FLAG` excludes short `-f`, but the search token slot would otherwise admit
     any `-`-prefixed token, so `grep --file=<out-of-corpus>` / `--exclude-from=<...>` (grep OPENS
     that file) and `grep -r -f <in-corpus-probe>` (no file operand → `-r` recurses the worktree cwd)
     would exfiltrate arbitrary files this denylist-free lane's operand anchor is the sole guard
@@ -334,6 +334,52 @@ def test_bash_grep_file_option_exfil_denied(tmp_path):
     ):
         assert not permission.decide_bash(cmd, policy=pol).allow, cmd
     assert permission.decide_bash(f"grep needle {rel}/x.md", policy=pol).allow  # positive control
+
+
+def test_bash_arg_consuming_flag_denied(tmp_path):
+    """An ADMITTED flag that CONSUMES the next token must not eat the corpus-anchored operand.
+    This is the #579 bug class on the curator's lane — the `(?!-)` guard on the search slot does
+    NOT cover it, because the token these flags swallow carries no leading dash. A catch-all flag
+    class (`-[a-eg-zA-Z]+`, "any letter but `-f`") admitted all three shapes below; per-program
+    BOOLEAN allowlists (`_CAT_FLAG`/`_GREP_FLAG`/`_LS_FLAG`) are what close them, and they fail
+    CLOSED if a future coreutils/grep grows another arg-taker. Verified against the runtime
+    container's GNU coreutils 9.7 / grep 3.11 — the dev box's `ls`/`ugrep` are not the gate's
+    target. Every deny is paired with the boolean-flag positive control it must not cost us."""
+    wt = _make_worktree(tmp_path)
+    pol = _policy(wt, "B")  # corpus lessons-actor/
+    rel = _rel("B")
+    for cmd in (
+        # `-e` supplies the PATTERN, so grep demotes the free-text slot to a FILE it OPENS —
+        # an arbitrary out-of-corpus read on a lane with no secret denylist.
+        f"grep -eNEEDLE /etc/passwd {rel}/x.md",
+        f"grep -e NEEDLE /etc/passwd {rel}/x.md",
+        # each of these eats the search token, shifting the corpus path into the PATTERN slot and
+        # leaving grep with NO file operand → GNU grep then walks the worktree cwd.
+        f"grep -d recurse {rel}/x.md",
+        f"grep -D skip {rel}/x.md",
+        f"grep -m 1 {rel}/x.md",
+        f"grep -A 2 {rel}/x.md",
+        f"grep -B 2 {rel}/x.md",
+        f"grep -C 2 {rel}/x.md",
+        # ls: `-I PATTERN` / `-w COLS` / `-T COLS` swallow the dir operand, so `ls` falls back to
+        # listing the cwd — the worktree root. Defeats the `+` that makes bare `ls` cwd-recon deny.
+        f"ls -I {rel}",
+        f"ls -w {rel}",
+        f"ls -T {rel}",
+        f"ls -laI {rel}",   # bundled: still contains an arg-taker
+    ):
+        assert not permission.decide_bash(cmd, policy=pol).allow, cmd
+    # positive controls — the boolean-flag shapes the curator prompts actually tell it to run
+    # (`ls defender/<corpus>/`, `grep -l '<key>:.*<val>' <file>`, `cat` a lesson) must survive.
+    for cmd in (
+        f"grep -l 'source_signature:.*rule-id' {rel}/x.md",
+        f"grep -rn needle {rel}/sub",   # `-r` stays: the FILE operand is required, so it has an
+                                        # anchored root to descend from and cannot reach the cwd
+        f"cat -n {rel}/x.md",
+        f"ls -la {rel}",
+        f"ls {rel}",
+    ):
+        assert permission.decide_bash(cmd, policy=pol).allow, cmd
 
 
 def test_bash_arbitrary_program_denied(tmp_path):
