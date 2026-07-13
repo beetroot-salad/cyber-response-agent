@@ -156,6 +156,27 @@ def test_the_discovery_rule_has_one_definition(tmp_path):
     assert iter_lesson_paths(d / "does-not-exist") == []  # a missing corpus is empty, not an error
 
 
+def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
+    """``on_skip`` is the walk's own report of what it skipped (#590): it must fire for every
+    warn-skipped DISCOVERED lesson (malformed and unreadable alike), in walk order, and never
+    for a well-formed lesson or a file the discovery rule excludes — so a consumer that
+    accounts for skipped lessons (``trace_lesson --all``'s marker rows) needs no second glob
+    to diff against, and nothing to race."""
+    d = tmp_path / "lessons"
+    d.mkdir()
+    (d / "good.md").write_text("---\nname: good\n---\nbody\n")
+    (d / "unfenced.md").write_text("no fence")  # discovered, unparseable → skipped
+    (d / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")  # discovered, unreadable → skipped
+    (d / "_TEMPLATE.md").write_text("no fence either")  # excluded by discovery → NOT a skip
+
+    skipped: list[Path] = []
+    yielded = [lesson.path.name for lesson in iter_lessons(d, on_skip=skipped.append)]
+
+    assert yielded == ["good.md"]
+    assert [p.name for p in skipped] == ["undecodable.md", "unfenced.md"]  # walk (sorted) order
+    assert "_TEMPLATE" not in capsys.readouterr().err  # excluded-by-discovery is not "skipped"
+
+
 def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
     """demand (review) — ``Lesson.raw`` comes back FROM the parser that computed the fence offsets,
     rather than being re-derived by the walk with its own ``text[4:find("\\n---", 4)]``.

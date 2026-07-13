@@ -108,6 +108,23 @@ def _normalize(
     }
 
 
+def _skipped_record(path: Path, *, group: str, root: Path) -> dict:
+    """A DISCOVERED lesson the walk warn-skipped → a degraded view record (#590's rule, the
+    posture-view half): omitting it hides from ``lessons.html`` exactly the broken lesson a
+    human should be looking at. Same shape as :func:`_normalize` so the template renders it
+    with zero special-casing — the marker description is what makes it visible, and
+    ``status: malformed`` is honest data for the view to style when it grows a badge for it."""
+    return {
+        "group": group,
+        "title": path.stem,
+        "description": "(malformed or unreadable lesson — frontmatter unavailable)",
+        "status": "malformed",
+        "source_path": str(path.relative_to(root)),
+        "metadata": {},
+        "body": "",
+    }
+
+
 class GroupSpec(TypedDict):
     label: str
     dir: str
@@ -170,11 +187,15 @@ def build_view(defender_dir: Path = DEFENDER) -> dict:
     """
     groups: dict[str, dict] = {}
     for name, spec in GROUPS.items():
+        skipped: list[Path] = []
         lessons = [
             _normalize(lesson.path, lesson.fm, lesson.body, group=name,
                        title_keys=spec["title_keys"], desc_key=spec["desc_key"],
                        root=defender_dir.parent)
-            for lesson in iter_lessons(defender_dir / spec["dir"])
+            for lesson in iter_lessons(defender_dir / spec["dir"], on_skip=skipped.append)
+        ]
+        lessons += [
+            _skipped_record(path, group=name, root=defender_dir.parent) for path in skipped
         ]
         lessons.sort(key=lambda rec: rec["title"].lower())
         groups[name] = {

@@ -560,7 +560,13 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     contract, so a fold that keyed records by stem alone would collide same-stem lessons across
     groups; each record still carries its ``group``.
 
-    Rejected: pinning only ``'empty-fm' in titles``."""
+    Rejected: pinning only ``'empty-fm' in titles``.
+
+    UPDATED by #590's rule (review of PR #608): the "every FrontmatterError file stays dropped"
+    half is overturned — a DISCOVERED lesson the walk warn-skips now renders as a degraded marker
+    record (``status: malformed``) instead of leaving the posture view, which completes the
+    no-silent-subtraction property this test exists for. The truth table's CLASS boundary moves
+    from parse-success to discovery: ``_TEMPLATE`` alone stays out."""
     root = _fixture_defender(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "good")
@@ -570,8 +576,13 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
 
     view = serialize.build_view(defender_dir=root)
-    assert _titles(view) == {"good", "empty-fm"}  # EXACTLY — nothing added, nothing subtracted
+    assert _titles(view) == {"good", "empty-fm", "unfenced", "no-close", "bad-yaml", "null-doc",
+                             "bom", "undecodable"}  # EXACTLY — discovery, minus the `_`-skip
     assert {rec["group"] for rec in _records(view)} == {"defender"}
+    by_title = {rec["title"]: rec for rec in _records(view)}
+    assert by_title["empty-fm"]["status"] == "live"  # a valid {} parse is NOT a marker (d15)
+    for skipped in ("unfenced", "no-close", "bad-yaml", "null-doc", "bom", "undecodable"):
+        assert by_title[skipped]["status"] == "malformed", skipped
 
     err = capsys.readouterr().err
     for name in ("unfenced.md", "no-close.md", "bad-yaml.md", "null-doc.md", "bom.md",
@@ -616,7 +627,11 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
     point of having one walk.
 
     Rejected: pinning the exact warn text — #577's w1 settled that the FORMAT is free and the NAME
-    is the contract; pinning the message would freeze an exception's ``str()`` into the spec."""
+    is the contract; pinning the message would freeze an exception's ``str()`` into the spec.
+
+    UPDATED by #590's rule (review of PR #608): the bad files keep degraded marker records in the
+    view instead of vanishing — see test_d14's update note. Survival (RETURNS, siblings render,
+    stderr names each bad file) is unchanged and still the demand."""
     root = _fixture_defender(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "survivor")
@@ -624,7 +639,8 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
     _oserror_members(corpus)
 
     view = serialize.build_view(defender_dir=root)  # must not raise
-    assert _titles(view) == {"survivor"}
+    assert _titles(view) == {"survivor", "undecodable", "foo", "dead"}
+    assert {r["title"] for r in _records(view) if r["status"] != "malformed"} == {"survivor"}
 
     err = capsys.readouterr().err
     for name in ("undecodable.md", "foo.md", "dead.md"):
@@ -762,7 +778,12 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     Well-formed siblings are still listed, one TSV line each, and the exit code stays 0 — a
     warn-skip that also dropped a good lesson, or that turned a warn into a nonzero rc, would be a
-    regression dressed as a fix."""
+    regression dressed as a fix.
+
+    UPDATED by #590: the original pin asserted a skipped lesson lost its row entirely. That half
+    was a resolved design fork, overturned — the audit index must keep a marker row for a
+    discovered-but-skipped lesson (it may still have in-context cases). The rest of the demand
+    (underscore-skip, warn to stderr, rc 0, well-formed siblings untouched) is unchanged."""
     tl = _load_by_path("trace_lesson_584", TL_PATH)
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -776,8 +797,11 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     assert rc == 0  # one bad file does not fail the run
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-    assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta"]
+    # well-formed rows first, then #590's marker rows for the skipped-but-discovered lessons
+    assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
     assert all(len(ln.split("\t")) == 3 for ln in lines)  # <name>\t<description>\t<count>
+    marker_rows = [ln for ln in lines if "(malformed lesson" in ln]
+    assert [ln.split("\t")[0] for ln in marker_rows] == ["undecodable", "unfenced"]
     assert "_TEMPLATE" not in captured.out  # the `_`-skip it never had
     assert "unfenced.md" in captured.err
     assert "undecodable.md" in captured.err  # the read guard it never had
@@ -1000,7 +1024,10 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     ``existing_finding_ids`` and ``existing_observation_ids`` still collect their id sets and still
     survive an undecodable lesson. These three are how a curator knows what the corpus already
     contains — an id set that silently came back short means findings are re-authored as duplicate
-    lessons."""
+    lessons.
+
+    UPDATED by #590's rule (review of PR #608): the skipped lesson now claims a marker section in
+    the manifest (see test_m6) — the stem stays on the curator's menu."""
     from defender.learning.author.curator import existing_observation_ids
     from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
     from defender.learning.core.config import LoopPaths
@@ -1015,7 +1042,7 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     _undecodable(corpus)
 
     manifest = _shared.build_corpus_manifest(corpus)  # must not raise
-    assert _headers(manifest) == ["good", "obs"]
+    assert _headers(manifest) == ["good", "obs", "undecodable"]  # #590: the bad stem is claimed
     assert "description: DESC" in manifest
 
     assert existing_finding_ids(cfg) == {"fid/0", "fid/1"}

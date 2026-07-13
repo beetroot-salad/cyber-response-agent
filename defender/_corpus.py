@@ -85,6 +85,7 @@ def iter_lessons(
     corpus_dir: Path,
     *,
     warn_label: Callable[[Path], str] | None = None,
+    on_skip: Callable[[Path], None] | None = None,
 ) -> Iterator[Lesson]:
     """Yield a :class:`Lesson` per well-formed lesson under ``corpus_dir``: ``*.md`` sorted,
     skipping ``_``-prefixed files, warning-and-skipping on a malformed one.
@@ -92,7 +93,11 @@ def iter_lessons(
     One shape, always populated: ``raw`` and ``body`` are slices of text already read, so
     materializing them unconditionally is free and there is no flag to get wrong.
     ``warn_label`` formats the skipped path in the warning (default ``path.name``; the actor index
-    passes a repo-relative label, the curators name their stage). The yaml-backed parser is
+    passes a repo-relative label, the curators name their stage). ``on_skip`` (when given)
+    receives each warn-skipped path, in walk order — the seam for a consumer that must account
+    for every DISCOVERED lesson rather than silently losing the skipped ones (#590:
+    ``trace_lesson --all``'s marker rows). It reports from the same single walk, so there is no
+    second glob for a consumer to race against. The yaml-backed parser is
     imported lazily so this module stays importable before the venv re-exec.
 
     Sorted by full path, not by stem — the two keys diverge when one stem is a prefix of
@@ -136,6 +141,8 @@ def iter_lessons(
             fm, raw, body = split_frontmatter(text)
         except malformed as e:
             print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
+            if on_skip is not None:
+                on_skip(path)
             continue
         yield Lesson(path=path, fm=fm, raw=raw, body=body)
 
