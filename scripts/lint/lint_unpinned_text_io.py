@@ -205,12 +205,14 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     return findings
 
 
-def _scan() -> list[Finding]:
+def _scan(root: Path) -> list[Finding]:
+    """Findings under ``root``, fingerprints relative to it — so the gate is
+    drivable on an injected tmp tree, not just the repo checkout."""
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
-        rel = path.relative_to(REPO_ROOT).as_posix()
+        rel = path.relative_to(root).as_posix()
         if _is_test_module(rel):
             continue
         try:
@@ -225,18 +227,27 @@ def _scan() -> list[Finding]:
 HEADER = (
     "lint_unpinned_text_io baseline — text reads/writes under defender/ that decode or "
     "encode under the AMBIENT LOCALE instead of pinning encoding=\"utf-8\" (#588/#589). "
-    "Fingerprint is file:function:kind (read|write|open|subprocess; no line number). CI "
-    "fails on a fingerprint absent here. This baseline ships EMPTY — an entry in it is a "
-    "regression someone chose. Regenerate: python scripts/lint/lint_unpinned_text_io.py "
-    "--update-baseline."
+    "Fingerprint is file:function:kind (read|write|open|subprocess; no line number), file "
+    "relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships "
+    "EMPTY — an entry in it is a regression someone chose. Regenerate: python scripts/lint/"
+    "lint_unpinned_text_io.py --update-baseline."
 )
 
 
-def main(argv: list[str]) -> int:
-    if not SCOPE.is_dir():
-        print(f"defender/ not found at {SCOPE}", file=sys.stderr)
+def main(
+    argv: list[str] | None = None,
+    *,
+    scope: Path | None = None,
+    baseline_path: Path | None = None,
+) -> int:
+    # DI/test seams: the tests drive injected tmp trees and baselines.
+    args = sys.argv[1:] if argv is None else argv
+    root = SCOPE if scope is None else scope
+    baseline = BASELINE_PATH if baseline_path is None else baseline_path
+    if not root.is_dir():
+        print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    findings = _scan()
+    findings = _scan(root)
     print(
         'Pin every text read/write to UTF-8: defender._io.read_text_utf8 / read_text_soft '
         'for reads, encoding="utf-8" on write_text/open, encoding="utf-8" on a '
@@ -245,10 +256,10 @@ def main(argv: list[str]) -> int:
     )
     print("Mark a deliberate site with `# lint-text-io: ok — <reason>`.")
     return gate(
-        findings, BASELINE_PATH, argv,
+        findings, baseline, args,
         label="lint_unpinned_text_io", header=HEADER,
     )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

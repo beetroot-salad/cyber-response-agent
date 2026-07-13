@@ -323,9 +323,11 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     return findings
 
 
-def _scan() -> list[Finding]:
+def _scan(root: Path) -> list[Finding]:
+    """Findings under ``root``, fingerprints relative to it — so the gate is
+    drivable on an injected tmp tree, not just the repo checkout."""
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
         try:
@@ -333,7 +335,7 @@ def _scan() -> list[Finding]:
             tree = ast.parse(text)
         except (OSError, SyntaxError):
             continue
-        rel = path.relative_to(REPO_ROOT).as_posix()
+        rel = path.relative_to(root).as_posix()
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
@@ -342,18 +344,27 @@ HEADER = (
     "lint_unsafe_jsonl_io baseline — hand-rolled per-line json.loads readers and "
     "json.dumps+newline appends under defender/ that bypass _io.read_jsonl_rows / "
     "_io.append_jsonl (a dedup smell + the #446 torn-line read crash). Fingerprint "
-    "is file:function (':append' suffix for the append check; no line number). CI "
-    "fails on a fingerprint absent here. Regenerate: python "
-    "scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate intentional "
-    'entries; "" = un-triaged debt to route through the shared _io helpers.'
+    "is file:function (':append' suffix for the append check; no line number), file "
+    "relative to the scan scope. CI fails on a fingerprint absent here. Regenerate: "
+    "python scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate "
+    'intentional entries; "" = un-triaged debt to route through the shared _io helpers.'
 )
 
 
-def main(argv: list[str]) -> int:
-    if not SCOPE.is_dir():
-        print(f"defender/ not found at {SCOPE}", file=sys.stderr)
+def main(
+    argv: list[str] | None = None,
+    *,
+    scope: Path | None = None,
+    baseline_path: Path | None = None,
+) -> int:
+    # DI/test seams: the tests drive injected tmp trees and baselines.
+    args = sys.argv[1:] if argv is None else argv
+    root = SCOPE if scope is None else scope
+    baseline = BASELINE_PATH if baseline_path is None else baseline_path
+    if not root.is_dir():
+        print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    findings = _scan()
+    findings = _scan(root)
     print(
         "Route file-line JSON reads through defender._io.read_jsonl_rows (tolerant "
         "of torn/blank lines; a bare json.loads(line) crashes the drains on a torn "
@@ -361,10 +372,10 @@ def main(argv: list[str]) -> int:
     )
     print("Mark a sanctioned reader/appender with `# lint-jsonl-io: ok — <reason>`.")
     return gate(
-        findings, BASELINE_PATH, argv,
+        findings, baseline, args,
         label="lint_unsafe_jsonl_io", header=HEADER,
     )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())
