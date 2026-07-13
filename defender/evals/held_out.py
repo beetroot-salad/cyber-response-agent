@@ -29,16 +29,25 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._io import read_text_soft
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DISPOSITION_ENUM
 from defender.run_common import resolve_runs_base
 
 
 def _read_frontmatter(report_path: Path) -> dict | None:
-    """Return the YAML frontmatter as a dict, or None if unparseable/missing."""
+    """Return the YAML frontmatter as a dict, or None if unreadable/unparseable/missing.
+
+    Soft read: an unreadable or undecodable report counts as unparseable (None),
+    per the "unparseable counts as wrong" accounting above — a crash would abort
+    the whole eval instead of scoring the run.
+    """
     if not report_path.is_file():
         return None
-    return parse_frontmatter_or_none(report_path.read_text(encoding="utf-8"))
+    text, _reason = read_text_soft(report_path)
+    if text is None:
+        return None
+    return parse_frontmatter_or_none(text)
 
 
 def predicted_disposition(run_dir: Path) -> str | None:

@@ -1,0 +1,4 @@
+{
+  "//": "lint_hand_rolled_frontmatter baseline — fence arithmetic under defender/ that bypasses the canonical grammar in defender/_frontmatter.py (#591). Fingerprint is file:function:kind (find|split|startswith|regex; no line number), file relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships EMPTY — the five hand-rolled sites were folded when the gate landed, so an entry in it is a regression someone chose. Regenerate: python scripts/lint/lint_hand_rolled_frontmatter.py --update-baseline.",
+  "entries": {}
+}

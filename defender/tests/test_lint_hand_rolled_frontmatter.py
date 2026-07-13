@@ -32,7 +32,8 @@ def _load_gate():
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     spec = importlib.util.spec_from_file_location("lint_hand_rolled_frontmatter", LINT_PATH)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)   # RED until the gate lands: FileNotFoundError (missing module)
     return mod

@@ -34,10 +34,16 @@ from __future__ import annotations
 import json
 import re
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
-import yaml
+# Workspace root on sys.path so the `defender.*` namespace imports resolve
+# whether this module is imported (runtime/tools_gather.py) or run directly.
+if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
+from defender._io import read_text_soft  # noqa: E402
 
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
@@ -47,9 +53,6 @@ ADAPTERS_DIR = DEFENDER_DIR / "scripts" / "adapters"
 
 FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
 SYSTEM_KEY_RE = re.compile(r"^system:\s*([A-Za-z0-9_.-]+)\s*$", re.MULTILINE)
-
-# Capture the frontmatter block — first --- to next ---.
-FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*$", re.DOTALL | re.MULTILINE)
 
 
 def extract_system(prompt: str) -> str | None:
@@ -63,9 +66,15 @@ def extract_system(prompt: str) -> str | None:
     return match.group(1)
 
 
-def read_description(system: str, skills_dir: Path | None = None) -> str | None:
-    """Return the SKILL.md frontmatter `description:` for the named system."""
-    skills_dir = skills_dir or SKILLS_DIR
+def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
+    """Return the SKILL.md frontmatter `description:` for the named system.
+
+    Routes through the canonical grammar (#591): a SKILL.md the canonical parser
+    rejects — unfenced, loose opener, non-mapping — yields None rather than
+    letting an interior thematic break fake a frontmatter block. Soft read: an
+    unreadable or undecodable file is None, never a raised decode error into the
+    gather dispatch path.
+    """
     skill_path = (skills_dir / system / "SKILL.md").resolve()
     # Path-traversal guard: must live under skills_dir.
     try:
@@ -75,19 +84,11 @@ def read_description(system: str, skills_dir: Path | None = None) -> str | None:
     if not skill_path.is_file():
         return None
 
-    try:
-        text = skill_path.read_text(encoding="utf-8")
-    except OSError:
+    text, _reason = read_text_soft(skill_path)
+    if text is None:
         return None
-
-    fm = FRONTMATTER_RE.search(text)
-    if not fm:
-        return None
-    try:
-        front = yaml.safe_load(fm.group(1))
-    except yaml.YAMLError:
-        return None
-    if not isinstance(front, dict):
+    front = parse_frontmatter_or_none(text)
+    if front is None:
         return None
     desc = front.get("description")
     if not isinstance(desc, str):
@@ -96,23 +97,28 @@ def read_description(system: str, skills_dir: Path | None = None) -> str | None:
     return desc or None
 
 
-@lru_cache(maxsize=1)
-def descriptor_catalog() -> str | None:
+@cache
+def descriptor_catalog(
+    skills_dir: Path = SKILLS_DIR, adapters_dir: Path = ADAPTERS_DIR
+) -> str | None:
     """The progressive-disclosure index for the gather subagent: every data-source
     system + its one-line SKILL `description:`. Scoped to systems that have an
     adapter CLI (`scripts/adapters/<system>_cli.py`) — the things gather can actually
     query — so meta-skills (gather/invlang/handbook/advisory) are excluded with no
     hardcoded roster. Gather scans this to confirm its target, then Reads that
     system's full SKILL.md + execution.md on demand (the skills model — descriptors
-    injected, bodies loaded on decision). Static for the process; memoized."""
+    injected, bodies loaded on decision). Static for the process; memoized — the
+    lru_cache keys on the directory arguments, so a test driving an injected tree
+    never sees a stale hit from the real one (call ``cache_clear()`` between
+    tree-varying calls)."""
     suffix = "_cli.py"
     systems = sorted(
         p.name[: -len(suffix)].replace("_", "-")
-        for p in ADAPTERS_DIR.glob("*" + suffix)
+        for p in adapters_dir.glob("*" + suffix)
     )
     lines = []
     for system in systems:
-        desc = read_description(system)
+        desc = read_description(system, skills_dir)
         if desc:
             lines.append(f"- `{system}`: {desc}")
     return "\n".join(lines) or None

@@ -35,6 +35,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
+from defender._io import read_text_soft  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -167,20 +168,21 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
     else:
-        text = skill.read_text(encoding="utf-8")
         # The canonical grammar (#591), not a hand-rolled `text.split("---", 2)`. The split was
         # LOOSER than `_frontmatter`: it fenced on a bare `---` prefix rather than `---\n`, and it
         # then regex-matched `name:` over the raw YAML text, so a `name:` inside a quoted string or
         # a nested mapping satisfied it. A scaffold linter that accepts documents the real parser
         # rejects passes files the runtime will later fail on — which is the one thing it exists
-        # not to do.
-        fm = parse_frontmatter_or_none(text) or {}
-        if fm.get("name") == f"defender-{system}":
+        # not to do. Soft read: unreadable bytes are a FAIL row, not a crash.
+        text, _reason = read_text_soft(skill)
+        front = parse_frontmatter_or_none(text) if text is not None else None
+        if front is not None and front.get("name") == f"defender-{system}":
             report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
         else:
             report.add(FAIL, f"skills/{system}/SKILL.md frontmatter name is not 'defender-{system}'")
-        report.add(PASS if "## Execution" in text else WARN,
-                   "SKILL.md has a ## Execution pointer" if "## Execution" in text
+        has_execution = text is not None and "## Execution" in text
+        report.add(PASS if has_execution else WARN,
+                   "SKILL.md has a ## Execution pointer" if has_execution
                    else "SKILL.md has no ## Execution pointer to execution.md")
 
     execution = defender / "skills" / system / "execution.md"

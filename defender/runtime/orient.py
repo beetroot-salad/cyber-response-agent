@@ -34,6 +34,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import read_text_soft, read_text_utf8
 from defender.hooks.tag_tool_results import wrap
 
@@ -99,7 +100,12 @@ def _raw_alert(alert_path: Path, salt: str) -> str | None:
 
 
 def _strip_frontmatter(text: str) -> str:
-    return re.sub(r"\A---\n.*?\n---\n", "", text, count=1, flags=re.DOTALL)
+    """The canonical stripped body, or the input unchanged when it has no
+    parseable frontmatter (#591 — no reader re-derives the fence offsets)."""
+    try:
+        return split_frontmatter(text)[2]
+    except FrontmatterError:
+        return text
 
 
 def _invlang_grammar(defender_dir: Path) -> str | None:

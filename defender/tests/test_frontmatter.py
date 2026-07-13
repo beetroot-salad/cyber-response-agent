@@ -74,7 +74,8 @@ def test_d_canonical_grammar_pin():
 
     # --- parse_frontmatter is the two-value view of the same contract ---
     fm6, body6 = parse_frontmatter("---\nk: v\n---\nB\n")
-    assert fm6 == {"k": "v"} and body6 == "B"
+    assert fm6 == {"k": "v"}
+    assert body6 == "B"
 
     # --- parse_frontmatter_or_none absorbs FrontmatterError -> None, nothing else ---
     assert parse_frontmatter_or_none("no leading fence") is None

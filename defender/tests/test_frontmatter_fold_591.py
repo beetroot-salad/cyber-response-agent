@@ -25,8 +25,6 @@ import inspect
 import sys
 from pathlib import Path
 
-import pytest
-
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.evals.held_out import predicted_disposition
 from defender.learning.core.config import DISPOSITION_ENUM
@@ -43,7 +41,8 @@ _EVALS = DEFENDER / "evals"
 # ---------------------------------------------------------------------------
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
