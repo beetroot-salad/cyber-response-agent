@@ -19,6 +19,8 @@ The **project profile** — `.claude/spec-flow.json` in the repo you are working
 
 Scale the ceremony to the delta. When the design touches no shared sink, removes nothing, and yields only a handful of demands, run two lenses plus the strong author, align the stubs yourself (step 4 collapsed), and keep the graph to the touched neighborhood — recording the reduced mode in the artifact's `handoff.deviations`. The gate rules always run; over a small graph they are cheap.
 
+At the other end: when a design is too large to spec in one clean pass, decide *where* to cut it into several **before** you start — each piece a focused subagent dispatch, not sequential work in one growing context. A bad cut splits a correctness property across dispatches so each reads green while the whole breaks. **references/decomposition.md** carries the test for a sound cut (each dispatch's demands cite only *grounded* external referents; the dispatches' demands reconstruct the whole's) plus the execution-context and interface-grounding checks the demand tests alone don't cover. Read it when you are splitting a design; a single-pass spec doesn't need it.
+
 ## 0. Work in a dedicated worktree
 
 Write the spec in a **dedicated git worktree** — confirm you are on one before starting, and create one if not. The deliverable is a tests + spec_graph diff (step 10); an isolated worktree keeps it off the main checkout and clean to hand off.
