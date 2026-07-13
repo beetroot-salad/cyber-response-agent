@@ -32,6 +32,17 @@ or a name bound to one of those in a ``with``/assignment) whose body calls
 ``json.loads(...)`` on the loop line (directly or via an intermediate like
 ``s = line.strip()``).
 
+The ``json`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not
+by the spelling ``json.``: ``import json as j`` and ``from json import loads`` are the same
+case as the dotted form. Before #602 the check required ``call.func.value.id == "json"``,
+so either of those made the gate blind to the very idiom it exists to stop.
+
+The OPENER is resolved the same way (``_astlib.opener_slot`` / ``open_mode``), so the
+handle's mode comes out of the callee's own positional slot. A private ``_open_mode`` here
+used to read ``args[0]`` as the mode of every ``<x>.open(...)`` — true only for
+``Path.open(mode)`` — so ``codecs.open(p, "a")`` read the PATH as its mode and the append
+handle went unrecognised.
+
 What the APPEND check flags: ``<fh>.write(json.dumps(...) + "\n")`` where ``<fh>``
 is a local handle opened in *append* mode (``open(p, "a")`` / ``p.open("a")``) in
 the same function. Restricting to append-mode local handles is deliberate: it
@@ -62,6 +73,15 @@ import ast
 import sys
 from pathlib import Path
 
+from _astlib import (
+    ModuleEnv,
+    callee,
+    module_env,
+    open_mode,
+    opener_slot,
+    root_name,
+    str_value,
+)
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -95,37 +115,21 @@ def _is_test_module(rel: str) -> bool:
     )
 
 
-def _is_open_call(node: ast.expr) -> bool:
-    """``open(...)`` or ``<expr>.open(...)`` (Path.open) — yields a file handle."""
-    if not isinstance(node, ast.Call):
-        return False
-    func = node.func
-    if isinstance(func, ast.Name) and func.id == "open":
-        return True
-    return isinstance(func, ast.Attribute) and func.attr == "open"
+def _is_open_call(node: ast.expr, env: ModuleEnv) -> bool:
+    """``open(...)`` / ``io.open(...)`` / ``<p>.open(...)`` — anything that yields a file
+    handle, identified by its RESOLVED origin (``_astlib.opener_slot``).
+
+    This used to be a spelled-name test (``func.id == "open"`` or ``func.attr == "open"``)
+    paired with a private ``_open_mode`` that read ``args[0]`` as the mode of every
+    ``<x>.open(...)`` — the identical positional-slot bug #602 fixed in the text-io gate,
+    left standing here. Every module opener is path-FIRST, so ``codecs.open(p, "a")`` read
+    the PATH as its mode, returned None, and the append handle went unrecognised: a
+    hand-rolled ``json.dumps`` append onto it walked straight through this gate.
+    """
+    return isinstance(node, ast.Call) and opener_slot(node, env) is not None
 
 
-def _open_mode(call: ast.Call) -> str | None:
-    """The mode string of an ``open(...)``/``.open(...)`` call, or None if not a
-    string literal. ``open(p, "a")`` reads the 2nd positional; ``p.open("a")``
-    the 1st; both honor a ``mode=`` keyword. A mode-less open defaults to read."""
-    func = call.func
-    mode_arg: ast.expr | None = None
-    if isinstance(func, ast.Name) and func.id == "open":
-        mode_arg = call.args[1] if len(call.args) >= 2 else None
-    elif isinstance(func, ast.Attribute) and func.attr == "open":
-        mode_arg = call.args[0] if call.args else None
-    if mode_arg is None:
-        for kw in call.keywords:
-            if kw.arg == "mode":
-                mode_arg = kw.value
-                break
-    if mode_arg is None:
-        return "r"  # open default
-    return mode_arg.value if isinstance(mode_arg, ast.Constant) and isinstance(mode_arg.value, str) else None
-
-
-def _iterates_file_lines(it: ast.expr, fh_names: set[str]) -> bool:
+def _iterates_file_lines(it: ast.expr, fh_names: set[str], env: ModuleEnv) -> bool:
     """True if ``for _ in <it>`` walks the lines of a file on disk.
 
     Matches the read-text-and-split idiom, direct file-handle iteration, and a
@@ -144,24 +148,24 @@ def _iterates_file_lines(it: ast.expr, fh_names: set[str]) -> bool:
     ):
         return True
     # `for line in open(p):` / `for line in p.open():`
-    if _is_open_call(it):
+    if _is_open_call(it, env):
         return True
     # `with p.open() as fh: for line in fh:` / `fh = open(p); for line in fh:`
     return isinstance(it, ast.Name) and it.id in fh_names
 
 
-def _filehandle_names(func: ast.AST, *, append_only: bool = False) -> set[str]:
-    """Names bound to a file handle (``open``/``.open``) anywhere in ``func``,
-    via a ``with`` item or a plain assignment. With ``append_only``, restrict to
-    handles opened in append mode (mode string containing ``a``)."""
+def _filehandle_names(func: ast.AST, env: ModuleEnv, *, append_only: bool = False) -> set[str]:
+    """Names bound to a file handle anywhere in ``func``, via a ``with`` item or a plain
+    assignment. With ``append_only``, restrict to handles opened in append mode — the mode
+    read out of the callee's own resolved slot, never guessed from the call's shape."""
     names: set[str] = set()
 
     def _accept(call: ast.expr) -> bool:
-        if not _is_open_call(call):
+        if not _is_open_call(call, env):
             return False
         if not append_only:
             return True
-        mode = _open_mode(call)  # type: ignore[arg-type]
+        mode = open_mode(call, env)  # type: ignore[arg-type]
         return mode is not None and "a" in mode
 
     for node in ast.walk(func):
@@ -176,31 +180,13 @@ def _filehandle_names(func: ast.AST, *, append_only: bool = False) -> set[str]:
     return names
 
 
-def _root_name(expr: ast.expr) -> str | None:
-    """The root ``Name`` id of an attribute/call/subscript chain, e.g.
-    ``line.strip()`` -> ``line``; ``s`` -> ``s``."""
-    cur: ast.expr = expr
-    while True:
-        if isinstance(cur, ast.Name):
-            return cur.id
-        if isinstance(cur, ast.Attribute):
-            cur = cur.value
-        elif isinstance(cur, ast.Call):
-            cur = cur.func
-        elif isinstance(cur, ast.Subscript):
-            cur = cur.value
-        else:
-            return None
+def _is_json_call(call: ast.AST, attr: str, env: ModuleEnv) -> bool:
+    """True if ``call`` lands in ``json.<attr>`` — however it was SPELLED.
 
-
-def _is_json_call(call: ast.AST, attr: str) -> bool:
-    return (
-        isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Attribute)
-        and call.func.attr == attr
-        and isinstance(call.func.value, ast.Name)
-        and call.func.value.id == "json"
-    )
+    This used to require ``call.func.value.id == "json"``, so ``import json as j`` or
+    ``from json import loads`` made the whole gate blind to the very idiom it exists to
+    stop (#602). Resolving the callee makes every spelling one case."""
+    return isinstance(call, ast.Call) and callee(call, env) == f"json.{attr}"
 
 
 def _loop_targets(target: ast.expr) -> set[str]:
@@ -211,7 +197,7 @@ def _loop_targets(target: ast.expr) -> set[str]:
     return set()
 
 
-def _parses_line_as_json(for_node: ast.For) -> bool:
+def _parses_line_as_json(for_node: ast.For, env: ModuleEnv) -> bool:
     """True if the loop body calls ``json.loads`` on the loop line — directly or
     through an intermediate (``s = line.strip(); json.loads(s)``)."""
     derived = _loop_targets(for_node.target)
@@ -225,20 +211,20 @@ def _parses_line_as_json(for_node: ast.For) -> bool:
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
-                and _root_name(node.value) in derived
+                and root_name(node.value) in derived
             ):
                 derived.add(node.targets[0].id)
     for node in ast.walk(for_node):
         if (
-            _is_json_call(node, "loads")
+            _is_json_call(node, "loads", env)
             and node.args
-            and _root_name(node.args[0]) in derived
+            and root_name(node.args[0]) in derived
         ):
             return True
     return False
 
 
-def _writes_json_line(call: ast.Call, append_fh_names: set[str]) -> bool:
+def _writes_json_line(call: ast.Call, append_fh_names: set[str], env: ModuleEnv) -> bool:
     """True if ``call`` is ``<fh>.write(<expr containing json.dumps(...) and a
     newline literal>)`` on a local append-mode handle — the ``append_jsonl`` body."""
     func = call.func
@@ -252,10 +238,14 @@ def _writes_json_line(call: ast.Call, append_fh_names: set[str]) -> bool:
         return False
     has_dumps = has_newline = False
     for node in ast.walk(call.args[0]):
-        if _is_json_call(node, "dumps"):
+        if _is_json_call(node, "dumps", env):
             has_dumps = True
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and "\n" in node.value:
-            has_newline = True
+        elif isinstance(node, (ast.Constant, ast.Name)):
+            # Through module consts too: hoisting `NEWLINE = "\n"` is good style and
+            # must not double as the way to evade the append check.
+            value = str_value(node, env)
+            if value is not None and "\n" in value:
+                has_newline = True
     return has_dumps and has_newline
 
 
@@ -273,6 +263,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()  # one finding per (fingerprint) per file
     is_test = _is_test_module(rel)  # append check is skipped for test fixtures
+    env = module_env(tree)
 
     def report(fingerprint: str, finding: Finding) -> None:
         if fingerprint not in seen:
@@ -282,12 +273,12 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     def visit(node: ast.AST, func_name: str, fh_names: set[str], append_fh_names: set[str]) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
-            fh_names = _filehandle_names(node)
-            append_fh_names = _filehandle_names(node, append_only=True)
+            fh_names = _filehandle_names(node, env)
+            append_fh_names = _filehandle_names(node, env, append_only=True)
         if (
             isinstance(node, ast.For)
-            and _iterates_file_lines(node.iter, fh_names)
-            and _parses_line_as_json(node)
+            and _iterates_file_lines(node.iter, fh_names, env)
+            and _parses_line_as_json(node, env)
             and not _suppressed(node, lines)
         ):
             report(
@@ -303,7 +294,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
         if (
             not is_test
             and isinstance(node, ast.Call)
-            and _writes_json_line(node, append_fh_names)
+            and _writes_json_line(node, append_fh_names, env)
             and not _suppressed(node, lines)
         ):
             report(
@@ -323,9 +314,11 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     return findings
 
 
-def _scan() -> list[Finding]:
+def _scan(root: Path) -> list[Finding]:
+    """Findings under ``root``, fingerprints relative to it — so the gate is
+    drivable on an injected tmp tree, not just the repo checkout."""
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
         try:
@@ -333,7 +326,7 @@ def _scan() -> list[Finding]:
             tree = ast.parse(text)
         except (OSError, SyntaxError):
             continue
-        rel = path.relative_to(REPO_ROOT).as_posix()
+        rel = path.relative_to(root).as_posix()
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
@@ -342,18 +335,27 @@ HEADER = (
     "lint_unsafe_jsonl_io baseline — hand-rolled per-line json.loads readers and "
     "json.dumps+newline appends under defender/ that bypass _io.read_jsonl_rows / "
     "_io.append_jsonl (a dedup smell + the #446 torn-line read crash). Fingerprint "
-    "is file:function (':append' suffix for the append check; no line number). CI "
-    "fails on a fingerprint absent here. Regenerate: python "
-    "scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate intentional "
-    'entries; "" = un-triaged debt to route through the shared _io helpers.'
+    "is file:function (':append' suffix for the append check; no line number), file "
+    "relative to the scan scope. CI fails on a fingerprint absent here. Regenerate: "
+    "python scripts/lint/lint_unsafe_jsonl_io.py --update-baseline. Annotate "
+    'intentional entries; "" = un-triaged debt to route through the shared _io helpers.'
 )
 
 
-def main(argv: list[str]) -> int:
-    if not SCOPE.is_dir():
-        print(f"defender/ not found at {SCOPE}", file=sys.stderr)
+def main(
+    argv: list[str] | None = None,
+    *,
+    scope: Path | None = None,
+    baseline_path: Path | None = None,
+) -> int:
+    # DI/test seams: the tests drive injected tmp trees and baselines.
+    args = sys.argv[1:] if argv is None else argv
+    root = SCOPE if scope is None else scope
+    baseline = BASELINE_PATH if baseline_path is None else baseline_path
+    if not root.is_dir():
+        print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    findings = _scan()
+    findings = _scan(root)
     print(
         "Route file-line JSON reads through defender._io.read_jsonl_rows (tolerant "
         "of torn/blank lines; a bare json.loads(line) crashes the drains on a torn "
@@ -361,10 +363,10 @@ def main(argv: list[str]) -> int:
     )
     print("Mark a sanctioned reader/appender with `# lint-jsonl-io: ok — <reason>`.")
     return gate(
-        findings, BASELINE_PATH, argv,
+        findings, baseline, args,
         label="lint_unsafe_jsonl_io", header=HEADER,
     )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

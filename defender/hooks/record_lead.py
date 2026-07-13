@@ -152,7 +152,7 @@ def claim_lead(dispatch: dict) -> int:
             return 2
         return 0
     try:
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(payload)
     except OSError:
         # Don't leave a 0-byte sidecar: load_leads would skip it (degrading the
