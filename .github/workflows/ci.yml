@@ -180,6 +180,10 @@ jobs:
       # and an unpinned write silently emits latin-1 bytes the next walk warn-skips as
       # "malformed". Also flags a subprocess text=True pipe with no encoding=. The
       # baseline ships EMPTY: every defender/ site was pinned when the gate landed.
+      # Since #602 all three AST gates resolve a callee to its ORIGIN MODULE via
+      # scripts/lint/_astlib.py rather than matching how it was spelled, so an alias
+      # or a from-import cannot walk past them — and the opener's mode slot/default
+      # come from that resolved callee instead of being guessed from the call shape.
       - name: Unpinned text-io gate (utf-8 pin on every text read/write — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unpinned_text_io.py
 

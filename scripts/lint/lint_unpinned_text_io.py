@@ -29,16 +29,34 @@ check is syntactic on purpose.)
 What it flags, under ``defender/`` production code:
 
 - ``<x>.read_text(...)`` / ``<x>.write_text(...)`` with no ``encoding=`` keyword
-- ``open(...)`` / ``<x>.open(...)`` in TEXT mode (mode literal absent, or present with no
-  ``b``) with no ``encoding=``
-- ``subprocess.run/Popen/check_output(..., text=True | universal_newlines=True)`` with no
-  ``encoding=``
+- an OPENER in TEXT mode with no ``encoding=`` — ``open`` / ``io.open`` / ``codecs.open``,
+  the compression openers ``gzip``/``bz2``/``lzma`` (binary by default, but they take
+  ``encoding=`` in text mode), the ``tempfile`` openers, and the duck-typed
+  ``<p>.open(...)``
+- ``subprocess.run/Popen/check_output/call/check_call(..., text=True |
+  universal_newlines=True)`` with no ``encoding=``
 
-What it does NOT flag: ``read_bytes``/``write_bytes`` and any binary mode (there is nothing
-to decode); ``os.open`` and the ``gzip``/``io``/``tarfile``/``zipfile`` openers (fds and
-binary streams, no encoding parameter to give); a ``subprocess`` call with no ``text=True``
-(bytes in, bytes out); an ``open(p, mode)`` whose mode is a non-literal expression (the gate
-cannot know it is text, and guessing would make it unusable).
+Each callee is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not by how
+it was spelled — ``from subprocess import run`` and ``import gzip as gz`` are the same case
+as the dotted form. That is not merely alias-proofing: the mode's positional slot and its
+default are properties of the callee (``open(file, mode)`` is path-first, ``Path.open(mode)``
+is not; ``gzip.open`` defaults to ``"rb"`` where ``open`` defaults to ``"r"``), and this gate
+used to GUESS both — reading ``args[0]`` as the mode of any ``<x>.open(...)``, i.e. reading
+the file path as the mode string (#594/#602).
+
+What it does NOT flag: ``read_bytes``/``write_bytes`` and any binary mode (nothing to
+decode); ``os.open`` (an fd — its third arg is the PERMISSION bits, not a text mode) and
+``tarfile.open`` (no ``encoding`` parameter to give); a ``subprocess`` call with no
+``text=True`` (bytes in, bytes out); an opener whose mode is a non-literal expression the
+gate cannot read (guessing would make it unusable — a hoisted ``MODE = "r"`` module constant
+IS resolved, so tidying a literal into a constant is not an escape hatch).
+
+Known limitation — a handle bound to a local: ``zf = zipfile.ZipFile(p); zf.open(n)``. The
+receiver is a VALUE, so its callee is unresolvable and indistinguishable from the Path-like
+``p.open(n)`` the gate exists to catch — it is therefore treated as a text opener and
+flagged. Telling the two apart needs local-binding tracking, which ``_astlib`` deliberately
+does not do. It fails SAFE (a false alarm, not a missed violation) and there is no such site
+under ``defender/``; ``# lint-text-io: ok — <reason>`` is the sanctioned remedy.
 
 Tests are out of scope: a fixture must be free to ``write_bytes`` a deliberately-undecodable
 file, or to shape a latin-1 one, which is exactly what the #589/#588 suite does.

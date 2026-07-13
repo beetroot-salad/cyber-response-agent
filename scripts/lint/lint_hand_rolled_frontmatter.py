@@ -25,9 +25,12 @@ What it flags — parse-shaped **Call** nodes in defender/ production code:
 - ``re.compile/search/match/fullmatch/sub/subn/finditer/findall/split`` with a
   fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal)
 
-String args are read inline AND through module-level constants: ``FENCE = "---\\n"``
-followed by ``text.startswith(FENCE)`` is flagged, because hoisting the literal to a
-constant is good style and must not double as the way to evade the gate.
+The ``re`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not by
+the spelling ``re.``: ``import re as regex`` and ``from re import search`` are the same
+case as the dotted form (#602). String args are read inline AND through module-level
+constants: ``FENCE = "---\\n"`` followed by ``text.startswith(FENCE)`` is flagged, because
+hoisting the literal to a constant is good style and must not double as the way to evade
+the gate.
 
 What it does NOT flag: string constants and writer f-strings that merely EMIT fences
 and are never passed into a parse-shaped call (``f"---\\nid: …"``, a ``"--- stdout ---"``
@@ -38,6 +41,16 @@ in-containment Compare nodes — flagging them risks false positives on separato
 checks. Tests are excluded (fixtures legitimately hand-build fence documents),
 and ``defender/_frontmatter.py`` itself is exempt by name — the canonical module
 is where the fence arithmetic is SUPPOSED to live.
+
+Known limitation — a CALL-FREE parser is out of reach BY CONSTRUCTION. The detector keys
+on ``ast.Call``, so a fence parser that makes no fence-shaped call is invisible: a
+slice-compare (``if text[:4] == "---\\n":``) or a line loop (``lines = text.split("\\n")``
+— the separator is ``"\\n"``, not fence-shaped — then ``if lines[0] == "---":`` and a
+``for`` scanning for the closer). Widening to ``Compare`` nodes is what
+``w_containment_detector`` already rejected on false-positive grounds, and a slice-compare
+rule would drag in every ``x[:n] == "…"`` in the tree. This is an accepted limit, not an
+oversight: the gate stops the IDIOMATIC sixth copy — the shape someone actually reaches
+for when re-deriving a parser — and a hand-written line loop is not it (#602).
 
 Mark a deliberate site with ``# lint-frontmatter: ok — <reason>`` on the call's
 line span. Pre-existing sites are ratcheted via

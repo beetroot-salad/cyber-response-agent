@@ -32,6 +32,11 @@ or a name bound to one of those in a ``with``/assignment) whose body calls
 ``json.loads(...)`` on the loop line (directly or via an intermediate like
 ``s = line.strip()``).
 
+The ``json`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not
+by the spelling ``json.``: ``import json as j`` and ``from json import loads`` are the same
+case as the dotted form. Before #602 the check required ``call.func.value.id == "json"``,
+so either of those made the gate blind to the very idiom it exists to stop.
+
 What the APPEND check flags: ``<fh>.write(json.dumps(...) + "\n")`` where ``<fh>``
 is a local handle opened in *append* mode (``open(p, "a")`` / ``p.open("a")``) in
 the same function. Restricting to append-mode local handles is deliberate: it
