@@ -18,7 +18,8 @@ queries/
 
 `{system}` is a system the gather subagent knows how to dispatch against
 (one dir per onboarded system of record). It doubles as the routing
-prefix for the template id and as a coarse `ls`-time filter.
+prefix for the template id and as the optional `system` argument that
+narrows a `template_search` to one system's dir.
 
 `{template-id}` is kebab-case. Name it for **what the query measures**
 (`auth-events`), not the axis you happen to filter on (`auth-events-by-host`)
@@ -40,9 +41,9 @@ What this query measures, in one or two sentences, **plus an explicit note
 that it is a wide/superset query you narrow** (see below). **Write for keyword
 recall** — name the concrete artifacts a future analyst would type when
 searching: daemon names (sshd, sudo), file paths (/etc/passwd), log fields
-(`source.ip`, `user.name`), syscalls. Gather greps `## Goal` across the catalog
-to find the right template at scale, so a wide template's recall keywords are
-what keep a future narrowing from re-coining a sibling.
+(`source.ip`, `user.name`), syscalls. This body IS the template's entry in the index injected
+into every gather dispatch, and it is what `template_search` matches against, so a wide
+template's recall keywords are what keep a future narrowing from re-coining a sibling.
 
 ## Query
 

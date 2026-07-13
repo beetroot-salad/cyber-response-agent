@@ -13,14 +13,20 @@ stays ``${host}``) — the doc explicitly wants leaks visible.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
+# Same bootstrap as `lead_neighbors` — this file carries a shebang and the package has no
+# top-level installable, so the `defender.*` import below must resolve whether it is imported by
+# the lead-author driver or reached directly.
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender import _corpus  # noqa: E402
+
 
 _FENCE_RE = re.compile(r"```(?:[\w-]+)?\n(.*?)```", re.DOTALL)
-_QUERY_SECTION_RE = re.compile(
-    r"^## Query\s*\n(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL
-)
 _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}|\{(\w+)\}")
 
 
@@ -30,11 +36,17 @@ def _extract_query_body(template_text: str) -> str:
     If no fenced block is present, return the section body verbatim
     (some templates inline the query without a fence). Returns the
     empty string when there is no ## Query section.
+
+    The section split goes through ``_corpus.section_bodies`` — the ONE parser (#598). This
+    function carried its own ``^## Query\\s*\\n(.*?)(?=^## |\\Z)`` copy, which, like the one it
+    now calls, was blind to code fences: a ``## `` line inside the query's own fence ended the
+    section early, and the fence it left behind was unterminated, so the ``_FENCE_RE`` search
+    below missed it and this returned a truncated query body verbatim. That body is what the lead
+    author renders as the template's query.
     """
-    section = _QUERY_SECTION_RE.search(template_text)
-    if not section:
+    body = _corpus.section_bodies(template_text).get("Query", "")
+    if not body:
         return ""
-    body = section.group(1)
     fenced = _FENCE_RE.search(body)
     if fenced:
         return fenced.group(1).rstrip("\n")

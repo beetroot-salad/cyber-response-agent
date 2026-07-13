@@ -31,16 +31,13 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._corpus import iter_query_templates
 from defender._paths import PATHS
 
 
 PLUMBING_TOKENS = frozenset(
     {"run_dir", "position", "window", "start", "end", "limit"}
 )
-
-
-_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -53,20 +50,14 @@ class Template:
     id: str
     system: str
     path: Path
-    goal_text: str
+    goal: str
     query_variants: tuple[frozenset[str], ...]
     cli: str
-    status: str  # "established" | "draft"
-
-
-def _sections(body: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    matches = list(_SECTION_RE.finditer(body))
-    for i, m in enumerate(matches):
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        out[m.group(1).strip()] = body[start:end].strip()
-    return out
+    # The frontmatter value verbatim: "established" | "draft" | "" — NOT defaulted. The pre-fold
+    # walk coalesced an absent key to "established" with `or`, which promoted a draft that had
+    # lost its key; `_corpus.QueryTemplate` fails that closed, so a curation defect now surfaces
+    # here as "" rather than as a silent promotion. Consumers must test positively.
+    status: str
 
 
 def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
@@ -133,50 +124,30 @@ def _resolve_cli(template_id: str) -> str:
 
 
 def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
-    """Walk the catalog and return one Template per ``.md`` file.
+    """Return one scoring :class:`Template` per template in the catalog.
 
-    Walks both established templates at ``{system}/*.md`` and drafts at
-    ``{system}/_draft/*.md``. The ``status`` frontmatter field
-    distinguishes them; for compatibility with pre-refinement templates
-    the field defaults to ``"established"`` when absent.
+    A thin consumer of :func:`defender._corpus.iter_query_templates` — the ONE walk over this
+    corpus (#585). This function owns only what the scorer adds on top of a walked record: the
+    per-variant query tokenization and the CLI firewall prefix. It re-globbed the corpus itself
+    until the fold, and it was one of three walks that did.
 
     ``catalog_dir`` defaults to ``PATHS.catalog_dir`` — this function stays the
     single owner of the ``None → default`` catalog-dir resolution (#475/#476), so
     callers forward ``None`` through rather than pre-resolving it.
     """
     root = catalog_dir if catalog_dir is not None else PATHS.catalog_dir
-    out: list[Template] = []
-    paths = sorted(list(root.glob("*/*.md")) + list(root.glob("*/_draft/*.md")))
-    for path in paths:
-        if "tests" in path.parts:
-            continue
-        text = path.read_text(encoding="utf-8")
-        try:
-            fm, body = parse_frontmatter(text)
-        except FrontmatterError:
-            fm, body = {}, text
-        tid = fm.get("id")
-        if not tid:
-            continue
-        status = fm.get("status") or "established"
-        sections = _sections(body)
-        goal = sections.get("Goal", "")
-        query = sections.get("Query", "")
-        # The system dir is the parent's parent for _draft/ files,
-        # otherwise the immediate parent.
-        system = path.parent.parent.name if path.parent.name == "_draft" else path.parent.name
-        out.append(
-            Template(
-                id=tid,
-                system=system,
-                path=path,
-                goal_text=goal,
-                query_variants=_query_variants(query),
-                cli=_resolve_cli(tid),
-                status=status,
-            )
+    return [
+        Template(
+            id=t.id,
+            system=t.system,
+            path=t.path,
+            goal=t.goal,
+            query_variants=_query_variants(t.query),
+            cli=_resolve_cli(t.id),
+            status=t.status,
         )
-    return out
+        for t in iter_query_templates(root)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +301,7 @@ def _cmd_dump(args: argparse.Namespace) -> int:
     width_id = max(len(t.id) for t in catalog)
     width_sys = max(len(t.system) for t in catalog)
     for t in catalog:
-        first_line = (t.goal_text.splitlines() or [""])[0].strip()
+        first_line = (t.goal.splitlines() or [""])[0].strip()
         if len(first_line) > 80:
             first_line = first_line[:77] + "..."
         print(

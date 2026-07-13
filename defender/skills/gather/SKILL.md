@@ -39,9 +39,21 @@ you need the index list or CLI flags.
 
 A template is the right reuse when its `## Goal` describes the same
 **measurement** — even with different bound params. Templates are **wide/superset
-queries you narrow**; fork on capability, not parameter axis. Read the catalog
-dir; past ~15 templates, `Grep` the `## Goal` bodies for the concept terms an
-analyst would type (`sshd`, `sudo`, `/etc/passwd`, `listening port`).
+queries you narrow**; fork on capability, not parameter axis.
+
+Your dispatch prompt carries the **template index**: every established template, every system,
+each as its `id`, its path, and its `## Goal`. Scan it first. When the Goals read too coarse to
+tell whether one already measures this, call **`template_search`** — it searches each template's
+full body, every section (case-insensitively, and including the uncurated `_draft/` templates the
+index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
+`listening port`).
+
+**Read the template body with `read_file` before you tag `--query-id` with its id.** The index
+gives you the id, the Goal and the path — not the query — so an id you take from the index is an
+id you have not yet opened. Adapt the `## Query` body you actually read. A tagged id is recorded
+as a *reuse* of that template, so tagging one you never read files a query you coined under a
+query you did not run, and silently corrupts the `(query_id, params)` join the offline
+lead-author builds the catalog from.
 
 No template fits → **don't author one**; coin a descriptive id
 (`sshd-auth-failures-by-srcip`, not `query1`) and write the query yourself. Before

@@ -495,7 +495,7 @@ def register_tools(agent, tools: ToolSet) -> None:
     pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
-    edit_file, forward_check, lesson_read` — independent of the `ToolSet` field order, so the
+    edit_file, forward_check, lesson_read, template_search` — independent of the `ToolSet` field order, so the
     pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash` (an
     agent may hold the tool and be granted no program — the gate then denies every command; tool
     PRESENCE and PERMISSION are two facts); the file writers are the `tools.write` opt-in."""
@@ -534,23 +534,39 @@ def register_tools(agent, tools: ToolSet) -> None:
             file. The resulting full text is validated (invlang for investigation.md)."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
+    _register_deferred_tools(agent, tools)
+
+
+def _register_deferred_tools(agent, tools: ToolSet) -> None:
+    """The tools whose BODY lives in the owning agent's own package rather than here, and which
+    therefore have to be imported at registration time instead of at module top.
+
+    Every one of them reaches back into this module's core (the read/bash foundation, or the
+    re-exported gather surface at the bottom of this file), so a module-scope import would close a
+    cycle. Registration runs at agent-build time, long after both modules are loaded, so it never
+    does. Same shape as `register_gather_tool`. Split out of `register_tools` so the presence
+    checks it composes stay one flat table rather than pushing the caller over its complexity
+    budget — the ORDER here is the tail of `register_tools`' fixed order."""
     if tools.forward_check:
-        # Deferred import: the curator's tool pulls the verify transport (and the pydantic-ai
-        # graph under it), which imports this module. Registration runs at agent-build time,
-        # long after both modules are loaded, so the cycle never closes. Same shape as
-        # `register_gather_tool` — the tool body lives in the agent's own package, not here.
+        # The curators' author-time forward check (#558): pulls the verify transport, and the
+        # pydantic-ai graph under it.
         from defender.learning.author.verify_forward.tool import register_forward_check_tool
 
         register_forward_check_tool(agent)
 
     if tools.lesson_read:
-        # Same deferred-import shape as `forward_check`: the curator's read tool lives in the
-        # author package (it pulls `_frontmatter` for the body/full split) and reuses THIS
-        # module's read core, so importing it at module top would close a cycle. Registration
-        # runs at agent-build time, long after both modules load, so the cycle never closes.
+        # The curators' scoped read tool (#559): lives in the author package (it pulls
+        # `_frontmatter` for the body/full split) and reuses this module's read core.
         from defender.learning.author.lesson_read import register_lesson_read_tool
 
         register_lesson_read_tool(agent)
+
+    if tools.template_search:
+        # Gather's query-catalog search (#585): `tools_gather` imports this module's foundation,
+        # and this module re-exports its surface at the bottom.
+        from defender.runtime.tools_gather import register_template_search_tool
+
+        register_template_search_tool(agent)
 
 
 # --- gather dispatch & in-process adapter capture ----------------------------

@@ -1,0 +1,602 @@
+# spec-coverage graph — issue #585
+# "restore gather's query-template discovery: the injected index + a gated template_search"
+#
+# base: 995f58e3   branch: 585-write-tests   (rebased onto main after #586/#587/#593 landed)
+#
+# Demand ids are stable slugs. Structure ids are the code's names.
+
+base: 995f58e3
+
+axes: [system, template_id, status, defender_tree]
+
+# ---------------------------------------------------------------------------
+# DEMANDS — the spec proper
+# ---------------------------------------------------------------------------
+demands:
+
+  # --- #0: the return-value contracts (three new callables) -----------------
+  - id: d0a_walk_yields_template_records
+    kind: behavior
+    form: test
+    outcome: {nl: "iter_query_templates(catalog_dir) yields one record per well-formed template — id, system, status, goal, query, path — sorted by full path, for every established AND draft template under the catalog root."}
+    binds: ["iter_query_templates", "interacts(iter_query_templates->query_corpus)"]
+
+  - id: d0b_search_returns_locators
+    kind: behavior
+    form: test
+    outcome: {nl: "template_search(pattern, system=None) returns hits that each carry the template's id AND its repo-relative path alongside the matching line, so gather can read the body before it binds the id."}
+    binds: ["template_search", "interacts(gather_agent->template_search).response"]
+    rejected:
+      - {nl: "return bare newline-joined matching lines — that is read_file(path, pattern=) with a different name, and it gives gather no locator to read the body from"}
+
+  - id: d0c_gather_prompt_returns_str_with_index
+    kind: behavior
+    form: test
+    outcome: {nl: "_gather_prompt returns the dispatch prompt string with a template-index block appended; the existing Dispatch YAML block and the descriptor catalog block are unchanged."}
+    binds: ["interacts(gather_dispatch->gather_agent).payload"]
+
+  # --- D1: no description: frontmatter; the Goal IS the index entry ---------
+  - id: d1_no_description_field
+    kind: negative
+    form: test
+    outcome: {nl: "No template under skills/gather/queries/ carries a `description:` frontmatter key; the index's description text is the file's `## Goal` body."}
+    binds: ["query_corpus.identity", "template_index"]
+
+  - id: d2_index_entry_is_the_goal_body
+    kind: shape
+    form: test
+    outcome: {nl: "Each index entry renders the template's id, its repo-relative path, and its `## Goal` body verbatim — not the frontmatter, not the `## Query`, not `## Pitfalls`."}
+    binds: ["interacts(gather_dispatch->gather_agent).payload", "template_index"]
+
+  # --- D2: the index covers all systems, established only -------------------
+  - id: d3_index_covers_all_systems
+    kind: behavior
+    form: test
+    outcome: {nl: "The injected index carries every established template from every system, not only the dispatched request.system; dispatching the same lead with system=cmdb and with system=elastic yields the same index block."}
+    binds: ["template_index", "GatherRequest.system", "system",
+            "GatherRequest.system.domain.distinguished[cmdb]",
+            "GatherRequest.system.domain.distinguished[elastic]"]
+
+  - id: d4_index_excludes_drafts
+    kind: negative
+    form: test
+    outcome: {nl: "No template under a `_draft/` directory appears in the injected index."}
+    binds: ["template_index", "status_field.domain.distinguished[draft]"]
+
+  - id: d4b_index_positive_control_established
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control for d4: an established template in the same system DOES appear in the index, so the exclusion is a filter and not an empty render."}
+    binds: ["template_index", "status_field.domain.distinguished[established]"]
+
+  - id: d4c_absent_status_is_not_established
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A template whose `status:` key is absent or empty is NOT admitted to the index as established: load_catalog's `fm.get('status') or 'established'` would promote a draft_synthesis skeleton that lost its frontmatter straight into gather's prompt. The established/draft split must fail closed when the status field and the _draft/ path segment disagree."}
+    binds: ["status_field.domain.distinguished[absent]", "template_index"]
+    rejected:
+      - {nl: "keep load_catalog's `or 'established'` default — it is an `or` mis-fire on a valid-falsy value, exactly what defender/CLAUDE.md's anchor-a-default rule bans"}
+
+  # --- D3: template_search ---------------------------------------------------
+  - id: d5_search_registered_on_gather_only
+    kind: seam
+    form: test
+    outcome: {nl: "template_search is registered on the GATHER agent's toolset via the ToolSet bit + deferred-import shape lesson_read uses, and is NOT registered on the main agent."}
+    binds: ["gather_toolset", "main_toolset"]
+
+  - id: d5b_main_does_not_get_template_search
+    kind: negative
+    form: test
+    outcome: {nl: "The main agent's registered tool list does not contain template_search (defender/SKILL.md forbids main the query corpus). Positive control: gather's list does."}
+    binds: ["main_toolset", "gather_toolset"]
+
+  - id: d6_search_takes_no_model_supplied_path
+    kind: seam
+    form: test
+    outcome: {nl: "template_search's registered schema exposes exactly {pattern, system} — no path, dir, or root parameter. The corpus root is harness-owned, derived from deps.defender_dir."}
+    binds: ["template_search", "interacts(gather_agent->template_search).payload"]
+
+  - id: d7_search_cannot_escape_the_corpus_root
+    kind: negative
+    form: test
+    outcome: {nl: "No value of the model-supplied `system` argument reads outside {defender_dir}/skills/gather/queries/ — '..', '../..', an absolute path, and a NUL-bearing value are each rejected rather than joined onto the root. Positive control: system='elastic' returns that system's hits."}
+    binds: ["system_param.access[tool]", "query_corpus.access[tool]"]
+
+  - id: d8_system_none_searches_every_system
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "system=None (the default, and the falsy member) searches every system; system='elastic' restricts to that system's dir."}
+    binds: ["system_param.domain.distinguished[None]", "system_param.domain.distinguished[elastic]"]
+
+  - id: d9_search_admits_drafts
+    kind: behavior
+    form: test
+    outcome: {nl: "template_search returns hits from `_draft/` templates as well as established ones — the asymmetry with the index (d4) is deliberate, and both halves are pinned so a future author cannot collapse them onto one predicate."}
+    binds: ["template_search", "template_index", "status_field.domain.distinguished[draft]"]
+
+  # --- the trust boundary (FORK F1 — see gate/holes) -------------------------
+  - id: d10_draft_hit_is_tagged_untrusted
+    kind: negative
+    form: test
+    outcome: {nl: "A template_search hit whose file lies under `_draft/` is wrapped in the run's <run-{salt}-untrusted> tags before it reaches gather's context: a draft body is synthesized from attacker-influenced alert data (draft_synthesis embeds the lead goal text and the model-coined query body). Positive control: an established template's hit is returned unwrapped, so the observation channel can see the difference."}
+    binds: ["is_untrusted_read", "interacts(gather_agent->template_search).response", "query_corpus.access[tool]"]
+    rejected:
+      - {nl: "wrap the whole search return unconditionally — that teaches gather to distrust the 24 curated templates it exists to reuse"}
+      - {nl: "exclude drafts from search entirely — loses the draft's real query body, which is the reason to search them"}
+
+  # --- D4: one walk, and the constraints it inherits -------------------------
+  - id: d11_one_walk_three_consumers
+    kind: parity
+    form: test
+    outcome: {nl: "load_catalog, the gather index, and workspace_map's counts all resolve to the SAME iter_query_templates function object; no consumer re-globs the corpus."}
+    binds: ["iter_query_templates", "interacts(lead_neighbors->query_corpus)", "interacts(workspace_map->query_corpus)", "interacts(gather_dispatch->query_corpus)"]
+
+  - id: d12_corpus_module_stays_yaml_free_at_import
+    kind: negative
+    form: test
+    outcome: {nl: "Importing defender._corpus does not import yaml (or defender._frontmatter) at module scope: the actor's pinned lesson scripts import it under the SYSTEM python, which has no PyYAML, before re-execing into the venv. The frontmatter parser is imported lazily inside iter_query_templates, exactly as iter_lessons does."}
+    binds: ["corpus_module_import.access[system-python]", "iter_query_templates"]
+
+  - id: d12b_positive_control_walk_parses_under_venv
+    kind: behavior
+    form: test
+    outcome: {nl: "Positive control for d12: under the venv (PyYAML present) the lazy import fires and iter_query_templates returns fully-parsed records — id, status and goal populated. Without this control, a walk that imports nothing and yields nothing would pass d12 vacuously."}
+    binds: ["iter_query_templates", "corpus_module_import.access[venv]"]
+
+  - id: d13_malformed_template_is_skipped_not_raised
+    kind: behavior
+    form: test
+    outcome: {nl: "A malformed template (bad fence, invalid YAML, non-mapping doc, undecodable bytes, missing id) is skipped with a warning on stderr and the walk yields the rest — iter_lessons' skip-one-bad-file contract, with read_text() INSIDE the try. load_catalog reads outside the try today; post-fold that walk runs on every gather dispatch, so one bad byte in one of 63 templates would take down every dispatch."}
+    binds: ["iter_query_templates", "query_corpus.identity"]
+    rejected:
+      - {nl: "raise on a malformed template — fail-closed bricks the run for a curation defect the learning loop is expected to introduce"}
+
+  # --- D5: workspace_map ------------------------------------------------------
+  - id: d14_map_names_no_filenames
+    kind: negative
+    form: test
+    outcome: {nl: "workspace_map's `## Gather query templates` section names no template filename and no _draft filename. A draft filename is a model-coined verb minted from attacker-influenced alert data, and orient injects the map into MAIN's message 0 — while defender/SKILL.md forbids main the corpus. Positive control: the section keeps its header and carries one line per system with established and draft counts that match the corpus."}
+    binds: ["interacts(workspace_map->main_prompt).payload", "query_corpus.identity"]
+
+  # --- D6: the prose ----------------------------------------------------------
+  - id: d15_prose_stops_teaching_the_dead_route
+    kind: negative
+    form: test
+    outcome: {nl: "Neither skills/gather/SKILL.md nor skills/gather/queries/SCHEMA.md instructs an agent to ls, find, or Grep the catalog directory, or to Read the catalog dir (a directory Read raises ModelRetry 'file not found'). Positive control: both name the surfaces that exist — the injected index and template_search."}
+    binds: ["gather_skill_prose", "schema_prose"]
+
+  - id: d16_skill_demands_read_before_tag
+    kind: behavior
+    form: test
+    outcome: {nl: "gather/SKILL.md instructs gather to read the bound template's body before tagging --query-id with its id. An index of ids + Goals WITHOUT the body invites gather to tag an id it never opened; draft_synthesis skips any query_id that resolves to an existing template, so a mis-tagged coined query is laundered as a template reuse — the draft is never minted and the (query_id, params) join the whole learning loop rests on is silently corrupted."}
+    binds: ["gather_skill_prose", "query_id_binding", "template_index"]
+
+  - id: d17_workflow_survives_the_removed_route
+    kind: survival
+    form: test
+    outcome: {nl: "The workflow that depended on the removed ls/grep discovery route — gather binding a template for its lead — still completes end-to-end via its substitute: a real gather dispatch through the replay harness picks an established template from the injected index and binds its id."}
+    binds: ["template_index", "template_search", "query_id_binding"]
+
+  # --- tree threading ----------------------------------------------------------
+  - id: d18_index_built_from_threaded_tree
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "The index is built from deps.defender_dir, not from a __file__-derived module constant, and is not memoized process-wide: with deps.defender_dir pointed at a synthetic tree holding one template, the prompt names that template and no id from the real repo catalog. Two runs against two trees in ONE process each get their own index. descriptor_catalog's @lru_cache(maxsize=1) + __file__ roots is the mould NOT to copy — it is the #551 bug bind() already fixed for the policy anchor."}
+    binds: ["defender_tree.domain.distinguished[worktree]", "template_index", "interacts(gather_dispatch->query_corpus)"]
+
+  - id: d18b_walk_honours_its_catalog_dir_argument
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "iter_query_templates reads the catalog_dir it is GIVEN, never a module-level PATHS fallback resolved behind the caller's back. The eval harness (evals/harness_lead.py) materializes a tmp tree, copies the real catalog into it and overlays scenario templates on top, then re-execs the lead-author against that tree — so a walk that resolves off PATHS silently reads the REAL repo's catalog and the scenario's catalog_overlay/ is ignored, scoring the eval against the wrong corpus."}
+    binds: ["defender_tree.domain.distinguished[eval-tmp-tree]", "iter_query_templates", "interacts(harness_lead->query_corpus)"]
+
+  # --- degradation (FORK F4) -----------------------------------------------------
+  - id: d19_unbuildable_index_degrades_loudly
+    kind: behavior
+    form: test
+    outcome: {nl: "When the index cannot be built (corpus dir missing/unreadable), the dispatch prompt still names the fallback surface (template_search) and says the index is unavailable, rather than silently omitting the block. `if catalog:` is fail-open today; once the SKILL's ls/Grep instructions are deleted, a silently-omitted index leaves gather with NO discovery path at all — it coins a fresh query for every lead, catalog reuse collapses, and nothing is ever raised."}
+    binds: ["interacts(gather_dispatch->gather_agent).payload", "template_index"]
+    rejected:
+      - {nl: "keep the silent fail-open — parity with the descriptor catalog, but the descriptor catalog has a live fallback (Read the SKILL) and the index will not"}
+
+  # --- search semantics (FORK F3/F6) ----------------------------------------------
+  - id: d20_search_is_case_insensitive_substring
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "template_search matches case-insensitively: 'SSHD' and 'sshd' return the same hits. SCHEMA.md tells authors to write Goals for keyword recall, and _grep_lines (the fold lesson_read reuses) is a CASE-SENSITIVE plain substring — a model typing the wrong case gets a silent empty and concludes the catalog is bare."}
+    binds: ["pattern_param.domain.distinguished[case-variant]", "template_search"]
+    rejected:
+      - {nl: "full regex — a model-supplied regex is a ReDoS surface and an unescaped . or | silently over-matches"}
+      - {nl: "reuse _grep_lines verbatim — case-sensitive, which is the bug"}
+
+  - id: d21_zero_matches_says_so
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A pattern matching nothing returns an explicit no-hits message naming the pattern and the corpus searched — not the empty string. _grep_lines returns '' on no match (a valid empty); fed to a model, '' reads as 'the catalog is empty' and gather coins. Positive control: a matching pattern returns hits and NOT the sentinel."}
+    binds: ["pattern_param.domain.distinguished[no-match]", "template_search"]
+
+  - id: d22_empty_pattern_is_not_a_wildcard
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "template_search(pattern='') does not dump every line of all 63 templates into gather's context (an empty substring is `in` every line). It is rejected, or returns the no-hits sentinel."}
+    binds: ["pattern_param.domain.distinguished[empty]", "template_search"]
+    rejected:
+      - {nl: "treat '' as a wildcard listing the whole corpus"}
+
+  - id: d23_index_stays_under_a_char_budget
+    kind: shape
+    form: test
+    outcome: {nl: "The rendered index block stays under a pinned character ceiling. 24 established Goals run 231-915 chars each and the block is NOT bounded by _read_char_cap — it is prompt text paid on EVERY gather dispatch, on a cheap model with reasoning off. A ceiling makes a future 'just add ## Pitfalls too' a red test rather than a silent per-dispatch token tax."}
+    binds: ["interacts(gather_dispatch->gather_agent).payload", "template_index"]
+
+  # --- the invariant nothing asserts ------------------------------------------
+  - id: d24_template_id_matches_its_location
+    kind: uniqueness
+    form: test
+    outcome: {nl: "For every template in the corpus, `id` == f'{system_dir}.{path.stem}' — currently true 63/63 and asserted NOWHERE in CI. The index keys on id and gather tags --query-id {id} against the dispatched system's adapter, so a template whose id says elastic.x while it sits in cmdb/ puts an elastic id in cmdb's index, writes a cross-system queries-table row, and makes draft_synthesis mint elastic/_draft/x.md from a cmdb query."}
+    binds: ["query_corpus.identity", "template_id", "system"]
+
+  # --- clauses (deliberate prose deferrals) --------------------------------------
+  - id: d25_eval_pass
+    kind: behavior
+    form: clause
+    outcome: {nl: "An eval pass, not just a green suite: the share of gather dispatches binding an established template id via --query-id (vs coining a fresh one) is measured on the gather-verifiable fixtures against the current traces as baseline. Offline/human gate, not an e2e test."}
+    binds: ["query_id_binding"]
+
+# ---------------------------------------------------------------------------
+# STRUCTURE
+# ---------------------------------------------------------------------------
+structure:
+
+  actors:
+    - {id: gather_dispatch,       frame: leg,         provenance: code}   # _run_gather / _gather_prompt
+    - {id: gather_agent,          frame: leg,         provenance: code}   # the nested LLM subagent
+    - {id: workspace_map,         frame: leg,         provenance: code}
+    - {id: run_investigation,     frame: composition, provenance: code}   # driver -> orient -> workspace_map
+    - {id: lead_neighbors,        frame: leg,         provenance: code}   # load_catalog + its CLI
+    - {id: lead_author_drain,     frame: composition, provenance: code}   # loads the catalog per tick
+    - {id: draft_synthesis,       frame: leg,         provenance: code}   # WRITES {system}/_draft/{verb}.md
+    - {id: lead_author_agent,     frame: leg,         provenance: code}   # LLM: promotes drafts -> established
+    - {id: validate_scaffold,     frame: leg,         provenance: code}   # the third partial walk
+    - {id: actor_lesson_scripts,  frame: leg,         provenance: code}   # imports _corpus under SYSTEM python
+    - {id: harness_lead,          frame: composition, provenance: code}   # evals: re-execs lead_author against a tmp tree + catalog_overlay/
+    - {id: iter_query_templates,  frame: leg,         provenance: design}  # the folded walk
+    - {id: template_search,       frame: leg,         provenance: design}
+    - {id: template_index,        frame: leg,         provenance: design}
+
+  boundaries:
+    - id: query_corpus
+      provenance: code
+      facets:
+        identity:
+          key_axes: [system, template_id]
+          evidence: {nl: "Read off the resource: established live at {system}/{id}.md and drafts at {system}/_draft/{id}.md (queries/SCHEMA.md 'Layout'); draft_synthesis.py:187 writes catalog_dir/system/_draft/{verb}.md; lead_neighbors.py:167 derives system from the parent (or grandparent under _draft/). Verified 63/63: id == f'{system}.{stem}', and status agrees with the _draft/ location."}
+          derivations:
+            - {value: status, fn_of: template_id, injective: false}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            fs:          {trust: attacker-influenced, constraints: [scope-clamp]}      # draft_synthesis + the lead-author LLM write here
+            bash:        {trust: derived, constraints: [confine, denylist]}            # cat/grep, anchored to the corpus .md grammar
+            read-tool:   {trust: derived, constraints: [confine, denylist]}            # decide_read -> read_shapes
+            tool:        {trust: derived, constraints: [confine]}                      # template_search: harness-owned root, NO model path
+
+    - id: iter_query_templates
+      provenance: design
+      facets: {}
+
+    - id: template_index
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:INDEX_HEADER}
+            - {role: user,   source: template:INDEX_ENTRY, slots: {id: template_id, path: query_corpus, goal: query_corpus}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "one line per established template: its id, its repo-relative path, and its ## Goal body"
+
+    - id: template_search
+      provenance: design
+      facets: {}
+
+    - id: system_param
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the name of a system dir under the catalog root, or None for every system"}
+          default: null
+          distinguished: [None, "", "elastic", "..", "ELASTIC", "nonexistent"]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: pattern_param
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "free search text; a plain substring, never a regex or a glob"}
+          default: unknown
+          distinguished: ["", "case-variant", "no-match", "regex-metachar"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: status_field
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "established | draft; today an absent or empty value silently becomes established (lead_neighbors.py:158, `fm.get('status') or 'established'`)"}
+          default: established
+          distinguished: [established, draft, absent]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: defender_tree
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the checkout the run resolves the corpus against"}
+          default: PATHS.defender_dir
+          distinguished: [main-checkout, worktree, eval-tmp-tree]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: worktree, crosses_validation: unknown}
+            - {value: eval-tmp-tree, crosses_validation: unknown}
+
+    - id: corpus_module_import
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            system-python: {trust: operator, constraints: [no-yaml-at-import]}
+            venv:          {trust: operator, constraints: unknown}
+
+    - id: is_untrusted_read
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "files.py:178-182 — True only for alert.json or a gather_raw path. A query-template path is False, so template text reaches the model unwrapped."}
+          default: false
+          distinguished: ["alert.json", "gather_raw", "queries/_draft", "queries/established"]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: gather_toolset
+      provenance: code
+      facets: {}
+    - id: main_toolset
+      provenance: code
+      facets: {}
+    - id: gather_skill_prose
+      provenance: code
+      facets: {}
+    - id: schema_prose
+      provenance: code
+      facets: {}
+    - id: main_prompt
+      provenance: code
+      facets: {}
+    - id: query_id_binding
+      provenance: code
+      facets:
+        identity:
+          key_axes: [template_id]
+          evidence: {nl: "the (query_id, params) join the learning loop rests on — defender/CLAUDE.md 'Two-table schema'. draft_synthesis skips any query_id that resolves to an existing template, so a query_id gather tagged without reading the template is laundered as a reuse."}
+          sharing: unique-key
+    - id: GatherRequest.system
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the system main routes the lead to; the index deliberately does not vary on it (d3)"}
+          default: unknown
+          distinguished: [elastic, cmdb]
+          falsy_valid: false
+          documented_alternatives: []
+
+  interacts:
+    # the walk and its three consumers
+    - {from: iter_query_templates, to: query_corpus,  mode: read,   via: fs,        provenance: design}
+    - {from: gather_dispatch,      to: query_corpus,  mode: read,   via: fs,        provenance: design}
+    - {from: workspace_map,        to: query_corpus,  mode: read,   via: fs,        provenance: code}
+    - {from: lead_neighbors,       to: query_corpus,  mode: read,   via: fs,        provenance: code}
+    - {from: validate_scaffold,    to: query_corpus,  mode: read,   via: fs,        provenance: code}
+    - {from: harness_lead,         to: query_corpus,  mode: read,   via: fs,        provenance: code}
+    - {from: harness_lead,         to: defender_tree, mode: read,   via: argv,      provenance: code}
+    # the writers (attacker-influenced)
+    - {from: draft_synthesis,      to: query_corpus,  mode: write,  via: fs,        provenance: code, interpolates: [system, template_id]}
+    - {from: lead_author_agent,    to: query_corpus,  mode: write,  via: fs,        provenance: code, interpolates: [system, template_id]}
+    - {from: lead_author_agent,    to: query_corpus,  mode: remove, via: bash,      provenance: code}
+    # the outbound payloads
+    - {from: gather_dispatch,      to: gather_agent,  mode: invoke, via: api,       provenance: design, sends: payload, transport: llm}
+    - {from: workspace_map,        to: main_prompt,   mode: write,  via: fs,        provenance: design, sends: payload}
+    # the new tool
+    - {from: gather_agent,         to: template_search, mode: invoke, via: api,     provenance: design, sends: payload, transport: llm}
+    - {from: template_search,      to: query_corpus,  mode: read,   via: tool,      provenance: design}
+    - {from: template_search,      to: is_untrusted_read, mode: read, via: api,     provenance: design}
+    - {from: gather_agent,         to: system_param,  mode: read,   via: api,       provenance: design}
+    - {from: gather_agent,         to: pattern_param, mode: read,   via: api,       provenance: design}
+    # tree + import context
+    - {from: gather_dispatch,      to: defender_tree, mode: read,   via: api,       provenance: design}
+    - {from: actor_lesson_scripts, to: corpus_module_import, mode: read, via: argv,  provenance: code}
+    # prose consumed by the LLM
+    - {from: gather_agent,         to: gather_skill_prose, mode: read, via: api,    provenance: code}
+    - {from: gather_agent,         to: query_id_binding,   mode: write, via: argv,  provenance: code}
+    - {from: gather_agent,         to: gather_toolset,     mode: read, via: api,    provenance: design}
+
+  drives:
+    - {from: run_investigation, to: gather_dispatch,   provenance: code, multiplicity: concurrent}  # sibling leads dispatch in parallel
+    - {from: run_investigation, to: workspace_map,     provenance: code, multiplicity: serial}
+    - {from: gather_dispatch,   to: gather_agent,      provenance: code, multiplicity: serial}
+    - {from: lead_author_drain, to: lead_neighbors,    provenance: code, multiplicity: serial}
+    - {from: lead_author_drain, to: draft_synthesis,   provenance: code, multiplicity: serial}
+    - {from: lead_author_drain, to: lead_author_agent, provenance: code, multiplicity: serial}
+    - {from: harness_lead,      to: lead_author_drain, provenance: code, multiplicity: serial}
+
+# replay_actor: defender/learning/ops/replay_actor.py re-execs lead_repository + run as a subprocess,
+# so check_actors flags it as a tree-relocating driver. Genuinely out of scope for THIS change: it
+# replays the frozen actor stage over the two run-dir tables (gather_raw/ + executed_queries.jsonl)
+# and never reads the query-template catalog (grep: no `catalog` / `queries/` reference in the module).
+# The folded walk is not on any path it drives. harness_lead, the other flagged driver, is NOT waived —
+# it is modelled as an actor above and pinned by d18b.
+#
+# trace_lesson + frontend/serialize: both import `defender._corpus` — for `iter_lessons` ONLY (the
+# LESSONS walk, which this change does not touch). They are flagged because the fold ADDS
+# `iter_query_templates` to that module, so `_corpus` lands in the changed set and every importer of
+# it reaches "the changed subsystem". Neither module references the query catalog at all (grep: no
+# `catalog` / `queries` / `iter_query_templates`), so the folded walk is on no path they drive. The
+# one property of `_corpus` they DO depend on — that importing it pulls no yaml at module scope,
+# because the actor's pinned lesson scripts import it under the system python — is preserved and
+# pinned by d12 (its parser import is lazy, exactly as `iter_lessons`' is).
+actor_waivers:
+  - replay_actor
+  - trace_lesson
+  - serialize
+
+# ---------------------------------------------------------------------------
+# GATE
+# ---------------------------------------------------------------------------
+gate:
+  evaluated:
+    - rule: R0
+      fired: true
+      note: >-
+        Two unknowns and one dangling-address class. (a) defender_tree's documented_alternatives
+        carry crosses_validation: unknown for worktree and eval-tmp-tree — re-grounded: workspace_map
+        and descriptor_catalog BOTH resolve off __file__ and ignore the threaded defender_dir, so the
+        shipped default does NOT stay valid under a relocated tree. Minted d18. (b)
+        corpus_module_import.access[venv].constraints is unknown — benign (the venv imposes no
+        constraint; the system-python lane is the one with the invariant). (c) is_untrusted_read's
+        domain distinguishes queries/_draft from queries/established, but the code has no such
+        member today (both are False) — that gap IS fork F1, routed to step 7, provisionally
+        discharged by d10.
+    - rule: R1
+      fired: true
+      note: >-
+        interacts(gather_dispatch->gather_agent) sends a payload (template_index) whose facet declares
+        all-slots-bound; no kind:shape demand bound it. Minted d2 (the entry renders id + path + Goal
+        and nothing else) and d23 (the rendered block stays under a char ceiling — the payload is paid
+        on every dispatch and is bounded by nothing today). interacts(workspace_map->main_prompt) also
+        sends a payload; d14 binds it.
+    - rule: R2
+      fired: true
+      note: >-
+        query_corpus has THREE writers (draft_synthesis, lead_author_agent) and FOUR readers, sharing
+        key_axes [system, template_id], with a non-injective derivation (status fn_of template_id) —
+        and run_investigation drives gather_dispatch CONCURRENTLY (sibling leads dispatch in parallel).
+        The uniqueness obligation is d24 (id == system.stem, asserted nowhere in CI). The concurrent
+        form is discharged by d18's second half (two trees in one process each get their own index —
+        no shared memoized state).
+    - rule: R3
+      fired: true
+      note: >-
+        query_corpus.access has FOUR vias (fs, bash, read-tool, tool). The new `tool` via
+        (template_search) must enforce what the others do: confinement to the corpus root. d7 is the
+        parity demand — no model-supplied path, no traversal via `system`. NOTE the vias do NOT agree
+        on trust: `fs` is attacker-influenced (draft_synthesis + the LLM lead-author write here), while
+        every reader treats what it finds as derived/trusted. That disagreement is fork F1 → d10.
+    - rule: R4
+      fired: true
+      note: >-
+        Undersampled domains. system_param: distinguished [None, "", "elastic", "..", "ELASTIC",
+        "nonexistent"] — d7/d8 cover None/elastic/traversal; "" and "ELASTIC" and "nonexistent" are
+        minted into d8's test as domain rows. pattern_param: "" and case-variant and no-match are the
+        falsy/boundary members — minted d20, d21, d22. status_field: the `absent` member is the
+        distinguished one (an `or` mis-fire promotes it to established) — minted d4c. defender_tree:
+        worktree/eval-tmp-tree cross the shipped default — minted d18.
+    - rule: R5
+      fired: true
+      note: >-
+        The change REMOVES three things. (a) The bash ls/grep discovery route — its consumer is gather's
+        SKILL.md §2 prose and SCHEMA.md, found by READING the prompts, not by grep. Survival demand:
+        d17; the prose correction: d15. (b) workspace_map's per-template filename listing — its consumer
+        is MAIN's message 0; no test asserts on it (test_workspace_map.py asserts only the section
+        HEADER), so removal is safe, but d14 pins the replacement and its positive control. (c)
+        load_catalog's walk body — its four consumers (lead_extraction, lead_author, draft_synthesis, its
+        own CLI) survive via the fold; d11 pins the single-function identity, and d13 pins that the folded
+        walk's malformed-file contract is iter_lessons' (skip+warn), NOT load_catalog's (raise), because
+        the fold moves it onto the per-dispatch hot path.
+
+  obligations:
+    - {rule: R1, discharged_by: [d2, d23, d14]}
+    - {rule: R2, discharged_by: [d24, d18]}
+    - {rule: R3, discharged_by: [d7, d10]}
+    - {rule: R4, discharged_by: [d4c, d8, d20, d21, d22, d18]}
+    - {rule: R5, discharged_by: [d17, d15, d14, d11, d13]}
+
+  # All four forks were RESOLVED by the human at step 7, each as its provisional reading — so no
+  # demand or stub outcome had to be re-derived under a flipped contract.
+  holes:
+    - id: F0_the_walk
+      status: resolved
+      nl: >-
+        RESOLVED — FOLD. load_catalog (lead_neighbors.py:135) already walks this corpus with exactly the
+        fields the index needs, and there are three walks at HEAD (load_catalog, validate_scaffold's
+        check_templates, workspace_map). runtime/ may not import defender.learning.* (#575 is deleting
+        those 16 imports), so the walk relocates to defender/_corpus.py beside iter_lessons (the #582
+        move) and load_catalog becomes a thin consumer. Pinned by d11 (one function object, three
+        consumers), d11's characterization test (load_catalog's four consumers must not notice), and d13
+        (the folded walk takes iter_lessons' skip-one-bad-file contract, NOT load_catalog's raise —
+        post-fold it runs on the per-dispatch hot path).
+    - id: F1_draft_trust
+      status: resolved
+      nl: >-
+        RESOLVED — WRAP DRAFTS. is_untrusted_read extends to the _draft/ segment under the catalog: a
+        template_search hit under _draft/ arrives inside <run-{salt}-untrusted>; an established hit stays
+        bare. Drafts are synthesized by draft_synthesis from attacker-influenced alert data; established
+        templates are promoted by the LLM lead-author and auto-committed by the loop, so NEITHER tier is
+        human-curated — but the provenance gradient is real and the mechanism already exists. Pinned by
+        d10 + its positive control + the predicate's own seam test. Rejected: exclude drafts from search
+        (loses the draft's real query body); accept the status quo.
+    - id: F2_index_carries_path
+      status: resolved
+      nl: >-
+        RESOLVED — id + PATH + Goal, and the SKILL demands read-before-tag. An index of ids + Goals alone
+        lets gather tag --query-id for a template it never opened; draft_synthesis SKIPS any query_id that
+        resolves to an existing template, so the coined query is laundered as a reuse — no draft is minted
+        and the (query_id, params) join the learning loop rests on is silently corrupted. Today's ls/cat
+        route had read-before-tag for free (you had to open the file to get the query); the index would
+        have removed that property silently. Pinned by d0b, d2, d16. Rejected: id + Goal only (the issue's
+        text); inlining the full ## Query (triples the per-dispatch block).
+    - id: F3_search_semantics
+      status: resolved
+      nl: >-
+        RESOLVED — all three departures from _grep_lines adopted: case-insensitive (d20), an explicit
+        no-hits message (d21), and a rejected empty pattern (d22). _grep_lines is a case-sensitive plain
+        substring returning '' on no match; SCHEMA.md tells authors to write Goals for keyword recall, so
+        a model typing SSHD would get '' and read it as "the catalog is empty" — which makes it coin, the
+        exact failure this issue exists to fix. Rejected: full regex (ReDoS surface; unescaped . or |
+        over-matches); reuse _grep_lines verbatim.
+    - id: F4_degradation
+      status: resolved
+      nl: >-
+        RESOLVED — DEGRADE LOUDLY (d19). `if catalog:` is fail-open today, which was safe while gather
+        could still `ls` the catalog. It no longer can, so a silently-omitted index leaves gather with NO
+        discovery path: it coins for every lead, catalog reuse collapses, and nothing is raised. The
+        dispatch still runs (never fail a run over a curation defect), but the prompt says the index is
+        unavailable and names template_search as the fallback. Rejected: keep the silent fail-open (parity
+        with the descriptor catalog — but that has a live fallback and the index will not).
+
+handoff:
+  branch: 585-write-tests
+  suite:
+    - defender/tests/test_gather_template_discovery.py      # 45 tests, 44 red / 1 green
+    - defender/tests/e2e/test_gather_template_index.py      # the survival demand, -m e2e
+    - defender/tests/test_harness_b_construction.py         # UPDATED: the one pre-existing pin the new intent overturns
+  target_api:
+    - "defender/_corpus.py :: iter_query_templates(catalog_dir) -> Iterator[record(path, system, id, status, goal, query)] — lazy frontmatter import, path-sorted, skip-one-bad-file + stderr warn"
+    - "defender/runtime/tools_gather.py :: _template_index(defender_dir) -> str — established only, all systems, id + repo-relative path + ## Goal; built off the THREADED tree, not memoized"
+    - "defender/runtime/tools_gather.py :: _tool_template_search(deps, pattern, system=None) -> str + register_template_search_tool(agent)"
+    - "defender/runtime/agent_definition.py :: ToolSet.template_search: bool  (GATHER_DEF True, MAIN_DEF False)"
+    - "defender/runtime/permission/files.py :: is_untrusted_read extends to the queries/*/_draft/ segment"
+    - "defender/learning/leads/lead_neighbors.py :: load_catalog becomes a thin consumer of iter_query_templates"
+    - "defender/scripts/workspace_map.py :: the ## Gather query templates section renders counts, not filenames"
+  green_at_head:
+    - "test_d1_no_template_carries_a_description_frontmatter_key — a corpus invariant that already holds; it is the guard against the rejected `description:` design, so green-against-HEAD is correct, not a vacuous pass."
+  deviations:
+    - "Step 4 (diff-by-address) ran COLLAPSED: the alignment was done by the lead, not a separate agent, after all five stub sets were collected."
+    - "The closed-vocabulary slot check was HAND-checked (the #537 linter slice is not shipped)."
+    - "The strong author corrected the grounding brief: test_gather_engine_seam.py:44 feeds a SYNTHETIC ToolSet and stays green when GATHER_DEF drifts; the real pins on gather's registered surface are test_harness_b_construction.py:224 and :288. Both must be UPDATED to the new intent (they are pre-existing characterization tests the new intent overturns), not worked around."
