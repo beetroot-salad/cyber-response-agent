@@ -68,8 +68,15 @@ def module_env(tree: ast.AST) -> ModuleEnv:
 
     Imports are collected from the WHOLE tree, not just ``tree.body``: a function-local
     ``import re as regex`` is a plausible evasion, and a module-level-only resolver would
-    reproduce the exact blind spot this module exists to close. Colliding aliases are
-    last-write-wins — the failure mode is a false positive, and the shape does not occur.
+    reproduce the exact blind spot this module exists to close.
+
+    The cost of that choice is that the map is SCOPE-BLIND, and the collision shape is
+    real, not hypothetical: ``learning/pipeline/judge/compare.py`` binds ``p`` to a module
+    inside ``_invlang()`` (``from ...invlang import parser as p``) while an unrelated
+    function 200 lines away uses ``p`` as a local ``Path``. A call on that local therefore
+    resolves to a module origin. Callers must not read "the origin resolved" as "the
+    receiver is a module" — see ``opener_slot``, which skips only via a POSITIVE table for
+    exactly this reason. Making the resolver scope-aware is the real fix (#607).
 
     ``consts`` stays MODULE-LEVEL only, deliberately asymmetric: an import unambiguously
     binds a name to a module, a local string assignment does not, and widening it is a
@@ -198,18 +205,10 @@ def str_args(call: ast.Call, env: ModuleEnv) -> list[str]:
     way to evade the gate.
     """
     out: list[str] = []
-
-    def resolve(node: ast.expr) -> str | None:
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
-        if isinstance(node, ast.Name):
-            return env.consts.get(node.id)
-        return None
-
     for arg in [*call.args, *(kw.value for kw in call.keywords)]:
         if isinstance(arg, ast.Tuple):
-            out.extend(v for el in arg.elts if (v := resolve(el)) is not None)
-        elif (v := resolve(arg)) is not None:
+            out.extend(v for el in arg.elts if (v := str_value(el, env)) is not None)
+        elif (v := str_value(arg, env)) is not None:
             out.append(v)
     return out
 
@@ -234,6 +233,75 @@ def str_value(node: ast.expr | None, env: ModuleEnv) -> str | None:
     if isinstance(node, ast.Name):
         return env.consts.get(node.id)
     return None
+
+
+# Openers that DO take `encoding=`, keyed by resolved origin -> (mode's positional slot,
+# mode's default). Both facts are properties of the CALLEE, and both used to be guessed:
+# the old `_open_mode` read args[0] as the mode for every `<x>.open(...)`, which is right
+# only for `Path.open(mode)`. Every module-level opener is path-FIRST, so the gate read the
+# file path as the mode string (#594/#602). Verified against inspect.signature.
+OPENERS = {
+    "builtins.open": (1, "r"),
+    "io.open": (1, "r"),                          # io.open IS builtins.open
+    "codecs.open": (1, "r"),
+    "os.fdopen": (1, "r"),                        # wraps an fd — still decodes under the locale
+    "gzip.open": (1, "rb"),                       # binary by default, but takes encoding= in text mode
+    "bz2.open": (1, "rb"),
+    "lzma.open": (1, "rb"),
+    "tempfile.NamedTemporaryFile": (0, "w+b"),
+    "tempfile.TemporaryFile": (0, "w+b"),
+    "tempfile.SpooledTemporaryFile": (1, "w+b"),  # max_size comes FIRST — mode is slot 1
+}
+# `Path.open(mode)` and friends: the receiver is a VALUE, so the callee never resolves.
+# Duck-typed on purpose — this is the case the gates most exist to catch.
+DUCK_OPENER = (0, "r")
+# Genuinely encoding-less: `os.open` returns an fd (its third arg is the PERMISSION bits,
+# not a text mode); `tarfile.open` has no `encoding` parameter.
+NO_ENCODING_OPENERS = ("os.open", "tarfile.open")
+
+
+def opener_slot(call: ast.Call, env: ModuleEnv) -> tuple[int, str] | None:
+    """``(mode's positional slot, mode's default)`` for an opener call, or None if this
+    call is not an opener at all.
+
+    An origin is skipped only via the POSITIVE ``NO_ENCODING_OPENERS`` table — never
+    because it merely resolved. "It resolved, so the receiver is a module, so it is not a
+    duck-typed opener" is FALSE twice over: the receiver may be an imported OBJECT
+    (``PATHS.lessons_dir.open()`` resolves to ``defender._paths.PATHS.lessons_dir.open``),
+    or a local that happens to collide with an import elsewhere in the file (``compare.py``
+    binds ``p`` to a module in one function and to a ``Path`` in another). Reading either
+    as "not an opener" silently drops the Path-like text open these gates most exist to
+    catch, and the empty baseline would stay green while it happened.
+
+    So: a tabled origin gets the callee's real slot/default; any OTHER ``.open`` on a
+    receiver falls back to the duck opener. The cost is a possible false alarm on an
+    untabled module opener called with a literal path — a false alarm the suppression
+    marker answers, where the reverse error is a violation that ships.
+    """
+    o = callee(call, env)
+    if o in NO_ENCODING_OPENERS:
+        return None
+    if o in OPENERS:
+        return OPENERS[o]
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr == "open":
+        return DUCK_OPENER
+    return None
+
+
+def open_mode(call: ast.Call, env: ModuleEnv) -> str | None:
+    """The mode an opener call opens in — the CALLEE's own default when no mode is passed.
+
+    None means "no mode this checker can read": either the call is not an opener, or the
+    mode is an expression rather than a literal/module-const. Both mean the same thing to
+    every caller (there is nothing to decide on), so they share the return.
+    """
+    slot = opener_slot(call, env)
+    if slot is None:
+        return None
+    index, default = slot
+    arg = arg_at(call, index, "mode")
+    return default if arg is None else str_value(arg, env)
 
 
 def has_kw(call: ast.Call, name: str) -> bool:

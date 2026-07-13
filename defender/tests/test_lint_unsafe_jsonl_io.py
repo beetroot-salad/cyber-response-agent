@@ -166,3 +166,40 @@ def test_aliased_json_appender_is_flagged(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _appender("import json as j", "j.dumps"))
     assert any(f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree))
+
+
+def test_append_handle_from_a_module_opener_is_flagged(tmp_path):
+    """This gate kept a private `_open_mode` that read `args[0]` as the mode of every
+    `<x>.open(...)` — the identical positional-slot bug #602 fixed next door in the text-io
+    gate. Every module opener is path-FIRST, so `codecs.open(p, "a")` read the PATH as its
+    mode, failed to recognise the append handle, and let the hand-rolled json.dumps append
+    walk straight through."""
+    for imp, opener in (
+        ("import codecs", "codecs.open"),
+        ("import io", "io.open"),
+        ("import gzip", "gzip.open"),
+    ):
+        tree = tmp_path / opener.replace(".", "_")
+        _pyfile(tree, "prod.py", (
+            f"import json\n{imp}\n"
+            "def append(p, row):\n"
+            f'    with {opener}(p, "a") as fh:\n'
+            '        fh.write(json.dumps(row) + "\\n")\n'
+        ))
+        assert any(
+            f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree)
+        ), f"{opener} append handle went unrecognised"
+
+
+def test_a_read_mode_module_opener_is_not_an_append_handle(tmp_path):
+    """The other direction: resolving the slot must not turn every module opener into an
+    append handle. `codecs.open(p, "r")` is a READ handle — the append check must stay off
+    it (the whole-file json.dumps write below is not the append_jsonl shape)."""
+    tree = tmp_path / "scope"
+    _pyfile(tree, "prod.py", (
+        "import json, codecs\n"
+        "def dump(p, row):\n"
+        '    with codecs.open(p, "r") as fh:\n'
+        '        fh.write(json.dumps(row) + "\\n")\n'
+    ))
+    assert not any(f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree))

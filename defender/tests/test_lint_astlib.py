@@ -170,6 +170,79 @@ def test_str_value_resolves_a_hoisted_mode_constant():
     assert astlib.str_value(astlib.arg_at(call, 1, "mode"), env) == "r"
 
 
+# --- the opener table -----------------------------------------------------------
+def test_opener_table_matches_the_real_signatures():
+    """The slot and default in OPENERS are claims about the stdlib. Check them against the
+    stdlib rather than against a hand-written table — `tempfile.SpooledTemporaryFile` was
+    tabled at slot 0 like its siblings when max_size actually comes first, so the gate read
+    an int as the mode string."""
+    import bz2
+    import codecs
+    import gzip
+    import inspect
+    import io
+    import lzma
+    import os
+    import tempfile
+
+    astlib = _load()
+    live = {
+        "builtins.open": open,
+        "io.open": io.open,
+        "codecs.open": codecs.open,
+        "os.fdopen": os.fdopen,
+        "gzip.open": gzip.open,
+        "bz2.open": bz2.open,
+        "lzma.open": lzma.open,
+        "tempfile.NamedTemporaryFile": tempfile.NamedTemporaryFile,
+        "tempfile.TemporaryFile": tempfile.TemporaryFile,
+        "tempfile.SpooledTemporaryFile": tempfile.SpooledTemporaryFile,
+    }
+    assert set(astlib.OPENERS) == set(live), "table and fixture must cover the same openers"
+    for origin, fn in live.items():
+        params = list(inspect.signature(fn).parameters)
+        slot, default = astlib.OPENERS[origin]
+        assert params.index("mode") == slot, f"{origin}: mode is not at slot {slot}"
+        assert inspect.signature(fn).parameters["mode"].default == default, origin
+        assert "encoding" in params, f"{origin} must actually take encoding="
+
+
+def test_opener_slot_never_skips_merely_because_the_origin_resolved():
+    """`callee() is not None` does NOT mean "the receiver is a module". It may be an
+    imported OBJECT, or a local colliding with an import elsewhere in the file. Reading a
+    resolved origin as "not an opener" drops the Path-like open the gates exist for."""
+    astlib = _load()
+    for src in (
+        "from defender._paths import PATHS\nPATHS.lessons_dir.open()\n",
+        "from x import parser as p\ndef w(d):\n    p = d / 'f'\n    return p.open('w')\n",
+    ):
+        tree = ast.parse(src)
+        env = astlib.module_env(tree)
+        call = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "open"
+        )
+        assert astlib.callee(call, env) is not None, "precondition: the origin resolves"
+        assert astlib.opener_slot(call, env) == astlib.DUCK_OPENER
+
+
+def test_open_mode_falls_back_to_the_callees_own_default():
+    astlib = _load()
+    cases = [
+        ("import gzip\ngzip.open(p)\n", "rb"),          # binary by default
+        ("open(p)\n", "r"),                             # text by default
+        ("import tempfile\ntempfile.TemporaryFile()\n", "w+b"),
+        ('open(p, "a")\n', "a"),                        # explicit wins
+    ]
+    for src, expected in cases:
+        tree = ast.parse(src)
+        env = astlib.module_env(tree)
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
+        assert astlib.open_mode(call, env) == expected, src
+
+
 def test_root_name_walks_through_calls_unlike_origin():
     astlib = _load()
     tree = ast.parse("line.strip().lower()\n")

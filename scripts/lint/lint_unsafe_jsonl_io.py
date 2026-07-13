@@ -37,6 +37,12 @@ by the spelling ``json.``: ``import json as j`` and ``from json import loads`` a
 case as the dotted form. Before #602 the check required ``call.func.value.id == "json"``,
 so either of those made the gate blind to the very idiom it exists to stop.
 
+The OPENER is resolved the same way (``_astlib.opener_slot`` / ``open_mode``), so the
+handle's mode comes out of the callee's own positional slot. A private ``_open_mode`` here
+used to read ``args[0]`` as the mode of every ``<x>.open(...)`` — true only for
+``Path.open(mode)`` — so ``codecs.open(p, "a")`` read the PATH as its mode and the append
+handle went unrecognised.
+
 What the APPEND check flags: ``<fh>.write(json.dumps(...) + "\n")`` where ``<fh>``
 is a local handle opened in *append* mode (``open(p, "a")`` / ``p.open("a")``) in
 the same function. Restricting to append-mode local handles is deliberate: it
@@ -67,7 +73,15 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ModuleEnv, callee, module_env, root_name, str_value
+from _astlib import (
+    ModuleEnv,
+    callee,
+    module_env,
+    open_mode,
+    opener_slot,
+    root_name,
+    str_value,
+)
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -101,37 +115,21 @@ def _is_test_module(rel: str) -> bool:
     )
 
 
-def _is_open_call(node: ast.expr) -> bool:
-    """``open(...)`` or ``<expr>.open(...)`` (Path.open) — yields a file handle."""
-    if not isinstance(node, ast.Call):
-        return False
-    func = node.func
-    if isinstance(func, ast.Name) and func.id == "open":
-        return True
-    return isinstance(func, ast.Attribute) and func.attr == "open"
+def _is_open_call(node: ast.expr, env: ModuleEnv) -> bool:
+    """``open(...)`` / ``io.open(...)`` / ``<p>.open(...)`` — anything that yields a file
+    handle, identified by its RESOLVED origin (``_astlib.opener_slot``).
+
+    This used to be a spelled-name test (``func.id == "open"`` or ``func.attr == "open"``)
+    paired with a private ``_open_mode`` that read ``args[0]`` as the mode of every
+    ``<x>.open(...)`` — the identical positional-slot bug #602 fixed in the text-io gate,
+    left standing here. Every module opener is path-FIRST, so ``codecs.open(p, "a")`` read
+    the PATH as its mode, returned None, and the append handle went unrecognised: a
+    hand-rolled ``json.dumps`` append onto it walked straight through this gate.
+    """
+    return isinstance(node, ast.Call) and opener_slot(node, env) is not None
 
 
-def _open_mode(call: ast.Call) -> str | None:
-    """The mode string of an ``open(...)``/``.open(...)`` call, or None if not a
-    string literal. ``open(p, "a")`` reads the 2nd positional; ``p.open("a")``
-    the 1st; both honor a ``mode=`` keyword. A mode-less open defaults to read."""
-    func = call.func
-    mode_arg: ast.expr | None = None
-    if isinstance(func, ast.Name) and func.id == "open":
-        mode_arg = call.args[1] if len(call.args) >= 2 else None
-    elif isinstance(func, ast.Attribute) and func.attr == "open":
-        mode_arg = call.args[0] if call.args else None
-    if mode_arg is None:
-        for kw in call.keywords:
-            if kw.arg == "mode":
-                mode_arg = kw.value
-                break
-    if mode_arg is None:
-        return "r"  # open default
-    return mode_arg.value if isinstance(mode_arg, ast.Constant) and isinstance(mode_arg.value, str) else None
-
-
-def _iterates_file_lines(it: ast.expr, fh_names: set[str]) -> bool:
+def _iterates_file_lines(it: ast.expr, fh_names: set[str], env: ModuleEnv) -> bool:
     """True if ``for _ in <it>`` walks the lines of a file on disk.
 
     Matches the read-text-and-split idiom, direct file-handle iteration, and a
@@ -150,24 +148,24 @@ def _iterates_file_lines(it: ast.expr, fh_names: set[str]) -> bool:
     ):
         return True
     # `for line in open(p):` / `for line in p.open():`
-    if _is_open_call(it):
+    if _is_open_call(it, env):
         return True
     # `with p.open() as fh: for line in fh:` / `fh = open(p); for line in fh:`
     return isinstance(it, ast.Name) and it.id in fh_names
 
 
-def _filehandle_names(func: ast.AST, *, append_only: bool = False) -> set[str]:
-    """Names bound to a file handle (``open``/``.open``) anywhere in ``func``,
-    via a ``with`` item or a plain assignment. With ``append_only``, restrict to
-    handles opened in append mode (mode string containing ``a``)."""
+def _filehandle_names(func: ast.AST, env: ModuleEnv, *, append_only: bool = False) -> set[str]:
+    """Names bound to a file handle anywhere in ``func``, via a ``with`` item or a plain
+    assignment. With ``append_only``, restrict to handles opened in append mode — the mode
+    read out of the callee's own resolved slot, never guessed from the call's shape."""
     names: set[str] = set()
 
     def _accept(call: ast.expr) -> bool:
-        if not _is_open_call(call):
+        if not _is_open_call(call, env):
             return False
         if not append_only:
             return True
-        mode = _open_mode(call)  # type: ignore[arg-type]
+        mode = open_mode(call, env)  # type: ignore[arg-type]
         return mode is not None and "a" in mode
 
     for node in ast.walk(func):
@@ -275,11 +273,11 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     def visit(node: ast.AST, func_name: str, fh_names: set[str], append_fh_names: set[str]) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
-            fh_names = _filehandle_names(node)
-            append_fh_names = _filehandle_names(node, append_only=True)
+            fh_names = _filehandle_names(node, env)
+            append_fh_names = _filehandle_names(node, env, append_only=True)
         if (
             isinstance(node, ast.For)
-            and _iterates_file_lines(node.iter, fh_names)
+            and _iterates_file_lines(node.iter, fh_names, env)
             and _parses_line_as_json(node, env)
             and not _suppressed(node, lines)
         ):

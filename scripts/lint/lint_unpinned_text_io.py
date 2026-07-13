@@ -29,10 +29,10 @@ check is syntactic on purpose.)
 What it flags, under ``defender/`` production code:
 
 - ``<x>.read_text(...)`` / ``<x>.write_text(...)`` with no ``encoding=`` keyword
-- an OPENER in TEXT mode with no ``encoding=`` — ``open`` / ``io.open`` / ``codecs.open``,
-  the compression openers ``gzip``/``bz2``/``lzma`` (binary by default, but they take
-  ``encoding=`` in text mode), the ``tempfile`` openers, and the duck-typed
-  ``<p>.open(...)``
+- an OPENER in TEXT mode with no ``encoding=`` — ``open`` / ``io.open`` / ``codecs.open`` /
+  ``os.fdopen``, the compression openers ``gzip``/``bz2``/``lzma`` (binary by default, but
+  they take ``encoding=`` in text mode), the ``tempfile`` openers, and any other
+  ``<x>.open(...)`` (the duck-typed ``<p>.open(...)`` above all — see below)
 - ``subprocess.run/Popen/check_output/call/check_call(..., text=True |
   universal_newlines=True)`` with no ``encoding=``
 
@@ -51,12 +51,21 @@ decode); ``os.open`` (an fd — its third arg is the PERMISSION bits, not a text
 gate cannot read (guessing would make it unusable — a hoisted ``MODE = "r"`` module constant
 IS resolved, so tidying a literal into a constant is not an escape hatch).
 
+An ``.open`` whose origin is NOT in the opener tables is treated as the duck-typed opener,
+never skipped. "It resolved, so the receiver is a module, so it is not a Path" is false
+twice over — the receiver may be an imported OBJECT (``PATHS.lessons_dir.open()``), or a
+local colliding with an import elsewhere in the file (``_astlib.module_env`` is scope-blind;
+``judge/compare.py`` binds ``p`` to a module in one function and to a ``Path`` in another,
+#607). Skipping on "it resolved" would drop exactly the Path-like open this gate exists for,
+with the empty baseline staying green throughout. Skips come from a POSITIVE table only.
+
 Known limitation — a handle bound to a local: ``zf = zipfile.ZipFile(p); zf.open(n)``. The
 receiver is a VALUE, so its callee is unresolvable and indistinguishable from the Path-like
 ``p.open(n)`` the gate exists to catch — it is therefore treated as a text opener and
 flagged. Telling the two apart needs local-binding tracking, which ``_astlib`` deliberately
-does not do. It fails SAFE (a false alarm, not a missed violation) and there is no such site
-under ``defender/``; ``# lint-text-io: ok — <reason>`` is the sanctioned remedy.
+does not do (#605). It fails SAFE (a false alarm, not a missed violation) and there is no
+such site under ``defender/``; ``# lint-text-io: ok — <reason>`` is the sanctioned remedy.
+The same is true of an untabled module opener called with a literal path.
 
 Tests are out of scope: a fixture must be free to ``write_bytes`` a deliberately-undecodable
 file, or to shape a latin-1 one, which is exactly what the #589/#588 suite does.
@@ -83,7 +92,15 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ModuleEnv, arg_at, callee, has_kw, kw_is_true, module_env, str_value
+from _astlib import (
+    ModuleEnv,
+    callee,
+    has_kw,
+    kw_is_true,
+    module_env,
+    open_mode,
+    opener_slot,
+)
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -92,30 +109,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_unpinned_text_io_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
 SUPPRESS_MARKERS = ("lint-text-io: ok",)
-
-# Openers that DO take `encoding=`, keyed by resolved origin -> (mode's positional slot,
-# mode's default). Both facts are properties of the CALLEE, and both were previously
-# guessed: `_open_mode` read args[0] as the mode for every `<x>.open(...)`, which is right
-# only for `Path.open(mode)`. Every module-level opener is path-FIRST, so the gate read the
-# file path as the mode string — `codecs.open("f.bin", "rb")` scanned "clean" because the
-# letter 'b' appears in "f.bin" (#594/#602). Verified against inspect.signature.
-_OPENERS = {
-    "builtins.open": (1, "r"),
-    "io.open": (1, "r"),                          # io.open IS builtins.open
-    "codecs.open": (1, "r"),
-    "gzip.open": (1, "rb"),                       # binary by default, but takes encoding= in text mode
-    "bz2.open": (1, "rb"),
-    "lzma.open": (1, "rb"),
-    "tempfile.NamedTemporaryFile": (0, "w+b"),
-    "tempfile.TemporaryFile": (0, "w+b"),
-    "tempfile.SpooledTemporaryFile": (0, "w+b"),
-}
-# `Path.open(mode)` and friends: the receiver is a VALUE, so the callee never resolves.
-# Duck-typed on purpose — this is the case the gate most exists to catch.
-_DUCK_OPENER = (0, "r")
-# Genuinely encoding-less: `os.open` returns an fd (its 3rd arg is the PERMISSION bits,
-# not a text mode); `tarfile.open` has no `encoding` parameter.
-_NO_ENCODING_OPENERS = ("os.open", "tarfile.open")
 
 _SUBPROCESS_ORIGINS = tuple(
     f"subprocess.{f}" for f in ("run", "Popen", "check_output", "call", "check_call")
@@ -134,30 +127,6 @@ def _is_test_module(rel: str) -> bool:
         or (p.name.startswith("test_") and p.suffix == ".py")
         or p.name.endswith("_test.py")
     )
-
-
-def _opener_slot(call: ast.Call, env: ModuleEnv) -> tuple[int, str] | None:
-    """``(mode's positional slot, mode's default)`` for an opener call, or None if this
-    call is not an opener at all.
-
-    The slot and the default come from the RESOLVED callee — never from the call's shape.
-    A duck-typed receiver (``p.open("r")``, callee unresolvable) is an opener too, and the
-    most important one: it is the Path-like case the gate exists to catch. Treating
-    "unresolvable" as "skip" would silently gut this gate while the empty baseline stayed
-    green.
-    """
-    origin = callee(call, env)
-    if origin in _NO_ENCODING_OPENERS:
-        return None
-    if origin in _OPENERS:
-        return _OPENERS[origin]
-    if origin is not None:
-        return None  # resolves to something else entirely — not an opener
-    # Unresolvable callee: an opener only if it is spelled `.open(...)` on a value.
-    func = call.func
-    if isinstance(func, ast.Attribute) and func.attr == "open":
-        return _DUCK_OPENER
-    return None
 
 
 def _kind(call: ast.Call, env: ModuleEnv) -> str | None:
@@ -179,15 +148,12 @@ def _kind(call: ast.Call, env: ModuleEnv) -> str | None:
             return "subprocess"
         return None
 
-    slot = _opener_slot(call, env)
-    if slot is None:
+    if opener_slot(call, env) is None:
         return None
-    index, default = slot
-    mode_arg = arg_at(call, index, "mode")
-    # No mode passed -> the callee's own default (text for open/io/codecs, BINARY for
-    # gzip/bz2/lzma/tempfile). A mode expression we cannot read -> unflagged; the gate
-    # does not guess.
-    mode = default if mode_arg is None else str_value(mode_arg, env)
+    # The mode comes from the callee's resolved slot, falling back to the callee's own
+    # default (text for open/io/codecs, BINARY for gzip/bz2/lzma/tempfile). A mode
+    # expression the gate cannot read -> unflagged; the gate does not guess.
+    mode = open_mode(call, env)
     return "open" if mode is not None and "b" not in mode else None
 
 
