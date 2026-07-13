@@ -223,10 +223,11 @@ def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
 
 
 def _catalog_dir(defender_dir: Path) -> Path:
-    """The query-template corpus root of a GIVEN tree. Never a module constant: `descriptor_catalog`
-    roots off `__file__` behind an `@lru_cache`, which is the #551 bug `bind` already fixed for the
-    policy anchor — copy that mould and a worktree (or an eval's tmp tree) silently serves the main
-    checkout's templates."""
+    """The query-template corpus root of a GIVEN tree. Never a module constant: root a
+    tree-dependent path off `__file__` behind a memo and a worktree (or an eval's tmp tree)
+    silently serves the main checkout's templates — the #551 bug `bind` fixed for the policy
+    anchor, and the one `descriptor_catalog` carried until #591 gave it an injectable
+    (skills_dir, adapters_dir) seam that the dispatch now threads from `deps.defender_dir`."""
     return defender_dir / "skills" / "gather" / "queries"
 
 
@@ -572,8 +573,15 @@ async def _run_gather(
 
     # 2. Inject the descriptor catalog (all data-source systems + descriptions) —
     # the progressive-disclosure index. Gather confirms its target from it, then
-    # Reads that system's full SKILL.md + execution.md on demand.
-    catalog = _descriptor_catalog()
+    # Reads that system's full SKILL.md + execution.md on demand. Built from the
+    # THREADED tree, like `_catalog_dir` and the `bind()` below: `descriptor_catalog`
+    # defaults to `__file__`-derived roots, so calling it bare is the #551 bug —
+    # a worktree (or an eval's tmp tree) run would serve the MAIN CHECKOUT's system
+    # descriptors into a gather dispatch whose policy anchor and deps are the other
+    # tree. The memo keys on these args, so two trees in ONE process stay distinct.
+    catalog = _descriptor_catalog(
+        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters"
+    )
 
     # 3. Run the nested gather agent. It gets its OWN usage object: sharing the
     # main run's usage would make request_limit (a cumulative check) abort gather

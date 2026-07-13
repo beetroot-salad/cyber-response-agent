@@ -16,14 +16,23 @@ gate keeps a sixth copy from growing back.
 What it flags — parse-shaped **Call** nodes in defender/ production code:
 
 - ``<x>.find/rfind/index("…---…")`` — fence-offset arithmetic
-- ``<x>.split/rsplit/partition/rpartition("---…")`` — a ``---``-leading separator
-- ``<x>.startswith("---…")`` — a hand-rolled opening-fence check
+- ``<x>.split/rsplit/partition/rpartition("---…" | "\\n---…")`` — a fence separator.
+  BOTH halves of the grammar count: ``"\\n---"`` is the closing fence
+  ``split_frontmatter`` itself searches for, so splitting on it is a hand-rolled
+  parser exactly as much as splitting on the opener is.
+- ``<x>.startswith/removeprefix/removesuffix("---…" | "\\n---…")`` — a hand-rolled
+  opening/closing-fence check or strip
 - ``re.compile/search/match/fullmatch/sub/subn/finditer/findall/split`` with a
   fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal)
 
-What it does NOT flag: string **constants** and writer f-strings that merely EMIT
-fences (``f"---\\nid: …"``, a ``"--- stdout ---"`` separator, docstrings) — the
-detector keys on Call nodes, never on Constant/JoinedStr content. Also waived by
+String args are read inline AND through module-level constants: ``FENCE = "---\\n"``
+followed by ``text.startswith(FENCE)`` is flagged, because hoisting the literal to a
+constant is good style and must not double as the way to evade the gate.
+
+What it does NOT flag: string constants and writer f-strings that merely EMIT fences
+and are never passed into a parse-shaped call (``f"---\\nid: …"``, a ``"--- stdout ---"``
+separator, docstrings) — the detector keys on Call nodes, never on a Constant/JoinedStr
+in its own right; a constant only matters once it is HANDED to one. Also waived by
 design (spec_graph_591 ``w_containment_detector``): ``"\\n---" in text``
 in-containment Compare nodes — flagging them risks false positives on separator
 checks. Tests are excluded (fixtures legitimately hand-build fence documents),
@@ -58,6 +67,7 @@ CANONICAL_MODULE = "_frontmatter.py"
 
 _FIND_METHODS = ("find", "rfind", "index")
 _SPLIT_METHODS = ("split", "rsplit", "partition", "rpartition")
+_PREFIX_METHODS = ("startswith", "removeprefix", "removesuffix")
 _RE_FUNCS = (
     "compile", "search", "match", "fullmatch",
     "sub", "subn", "finditer", "findall", "split",
@@ -80,19 +90,52 @@ def _is_test_module(rel: str) -> bool:
     )
 
 
-def _str_args(call: ast.Call) -> list[str]:
-    """The string-literal args of a call — positional and keyword (so
+def _module_str_consts(tree: ast.AST) -> dict[str, str]:
+    """Module-level ``NAME = "<literal>"`` bindings.
+
+    A fence hoisted to a module constant (``FENCE = "---\\n"`` … ``text.startswith(FENCE)``)
+    must still be seen: hoisting the literal is *good* style, so a detector that only reads
+    inline ``ast.Constant`` args makes the tidiest way to write the sixth copy the one way to
+    evade the gate. Same blind spot #594 documents for ``lint_unpinned_text_io``.
+    """
+    out: dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        target: ast.expr | None = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        else:
+            continue
+        value = node.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        ):
+            out[target.id] = value.value
+    return out
+
+
+def _str_args(call: ast.Call, consts: dict[str, str]) -> list[str]:
+    """The string args of a call — positional and keyword (so
     ``re.compile(pattern=r"^---…")`` is seen), tuple elements flattened (so
-    ``startswith(("---", "…"))`` is)."""
+    ``startswith(("---", "…"))`` is), and module-constant Names resolved through
+    ``consts`` (so a hoisted fence literal is not an escape hatch)."""
     out: list[str] = []
+
+    def resolve(node: ast.expr) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            return consts.get(node.id)
+        return None
+
     for arg in [*call.args, *(kw.value for kw in call.keywords)]:
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            out.append(arg.value)
-        elif isinstance(arg, ast.Tuple):
-            out.extend(
-                el.value for el in arg.elts
-                if isinstance(el, ast.Constant) and isinstance(el.value, str)
-            )
+        if isinstance(arg, ast.Tuple):
+            out.extend(v for el in arg.elts if (v := resolve(el)) is not None)
+        elif (v := resolve(arg)) is not None:
+            out.append(v)
     return out
 
 
@@ -112,13 +155,22 @@ def _is_fence_pattern(value: str) -> bool:
     return value.startswith("---") or any(m in value for m in _FENCE_PATTERN_MARKS)
 
 
-def _kind(call: ast.Call) -> str | None:
+def _is_fence_literal(value: str) -> bool:
+    """A fence-shaped separator/opener: the OPENING fence (``---\\n…``) or the CLOSING
+    one (``\\n---``) — the two halves of the canonical grammar. Both count: the closing
+    half is what ``split_frontmatter`` itself searches for (``text.find("\\n---", 4)``),
+    so ``text.split("\\n---", 1)`` is a hand-rolled parser every bit as much as
+    ``text.split("---", 2)`` is."""
+    return value.startswith("---") or value.startswith("\n---")
+
+
+def _kind(call: ast.Call, consts: dict[str, str]) -> str | None:
     """Which hand-rolled fence-parse shape this call is, or None."""
     func = call.func
     if not isinstance(func, ast.Attribute):
         return None
     attr = func.attr
-    args = _str_args(call)
+    args = _str_args(call, consts)
     if not args:
         return None
     if _receiver_root(call) == "re" and attr in _RE_FUNCS:
@@ -127,9 +179,9 @@ def _kind(call: ast.Call) -> str | None:
         return None
     if attr in _FIND_METHODS and any("---" in v for v in args):
         return "find"
-    if attr in _SPLIT_METHODS and args[0].startswith("---"):
+    if attr in _SPLIT_METHODS and any(_is_fence_literal(v) for v in args):
         return "split"
-    if attr == "startswith" and any(v.startswith("---") for v in args):
+    if attr in _PREFIX_METHODS and any(_is_fence_literal(v) for v in args):
         return "startswith"
     return None
 
@@ -155,11 +207,12 @@ _ADVICE = {
 def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()
+    consts = _module_str_consts(tree)
 
     def visit(node: ast.AST, func_name: str) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
-        if isinstance(node, ast.Call) and (kind := _kind(node)) and not _suppressed(node, lines):
+        if isinstance(node, ast.Call) and (kind := _kind(node, consts)) and not _suppressed(node, lines):
             fingerprint = f"{rel}:{func_name}:{kind}"
             if fingerprint not in seen:
                 seen.add(fingerprint)
@@ -184,9 +237,13 @@ def _scan(root: Path) -> list[Finding]:
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
-        if path.name == CANONICAL_MODULE:
-            continue
         rel = path.relative_to(root).as_posix()
+        # Exempt the canonical module by its PATH, not its basename: a basename match
+        # would exempt any new `<pkg>/_frontmatter.py` anywhere under the scope — i.e.
+        # a verbatim second copy of the grammar, which is the one thing this gate exists
+        # to stop, waved through for being named after the module it duplicates.
+        if rel == CANONICAL_MODULE:
+            continue
         if _is_test_module(rel):
             continue
         try:

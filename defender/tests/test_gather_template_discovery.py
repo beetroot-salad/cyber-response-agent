@@ -338,10 +338,11 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
 
 
 def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path):
-    """descriptor_catalog is @lru_cache(maxsize=1) with __file__-derived roots and IGNORES
-    deps.defender_dir (inject_system_skill_description.py:99-118) — the #551 bug bind() already
-    fixed for the policy anchor. Copy that mould for the index and a worktree run injects the
-    MAIN CHECKOUT's templates. Two trees, ONE process: each dispatch gets its own index."""
+    """Root a tree-dependent path off __file__ behind a memo and a worktree run injects the MAIN
+    CHECKOUT's templates — the #551 bug bind() already fixed for the policy anchor, and the one
+    descriptor_catalog carried until #591 (it now takes injectable skills_dir/adapters_dir, keys
+    its memo on them, and the dispatch threads deps.defender_dir into it). The index must not
+    re-grow that mould. Two trees, ONE process: each dispatch gets its own index."""
     tree_a = _catalog(tmp_path / "a")
     tree_b = tmp_path / "b" / "defender"
     qb = tree_b / "skills" / "gather" / "queries" / "identity"

@@ -107,10 +107,10 @@ def descriptor_catalog(
     query — so meta-skills (gather/invlang/handbook/advisory) are excluded with no
     hardcoded roster. Gather scans this to confirm its target, then Reads that
     system's full SKILL.md + execution.md on demand (the skills model — descriptors
-    injected, bodies loaded on decision). Static for the process; memoized — the
-    lru_cache keys on the directory arguments, so a test driving an injected tree
-    never sees a stale hit from the real one (call ``cache_clear()`` between
-    tree-varying calls)."""
+    injected, bodies loaded on decision). Static per tree; memoized — the cache keys on
+    the directory arguments, so two trees in one process (a worktree run, an eval's tmp
+    tree) each get their own catalog instead of the first caller's. Callers thread the
+    run's tree: see ``tools_gather._run_gather`` (#551/#591)."""
     suffix = "_cli.py"
     systems = sorted(
         p.name[: -len(suffix)].replace("_", "-")

@@ -16,10 +16,7 @@ import json
 import re
 from pathlib import Path
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover — yaml is in defender deps
-    yaml = None
+import yaml
 
 
 # Repo root — re-exported for the git-backed renderers (visualize_runtime uses it as
@@ -45,7 +42,7 @@ def esc(s) -> str:
 
 
 def load_yaml(path: Path) -> dict | list | None:
-    if not path.is_file() or yaml is None:
+    if not path.is_file():
         return None
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8"))
