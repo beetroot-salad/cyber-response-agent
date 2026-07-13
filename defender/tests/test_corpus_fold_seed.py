@@ -393,12 +393,16 @@ def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, capsys):
     """demand: w1 — after the fold the warn text is ``iter_lessons``' format, but the contract that
     survives is the one that matters: the offending file is NAMED on stderr, one bad file never aborts
     the manifest, and its well-formed siblings still render. (#559's M6/M6b assert a substring of the
-    filename, so the message FORMAT was always free — the fold may adopt the iterator's.)"""
+    filename, so the message FORMAT was always free — the fold may adopt the iterator's.)
+
+    UPDATED by #590's rule (review of PR #608): a warn-skipped lesson now claims a marker section
+    instead of vanishing from the menu (see test_m6) — survival and the stderr naming are the
+    unchanged half of the demand."""
     corpus = _corpus_of(tmp_path, "good")
     (corpus / "bad.md").write_text("no fence\n")
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
     manifest = _shared.build_corpus_manifest(corpus)  # must not raise
-    assert _headers(manifest) == ["good"]  # the well-formed sibling survives both bad files
+    assert _headers(manifest) == ["good", "bad", "corrupt"]  # sibling survives; bad stems claimed
     err = capsys.readouterr().err
     assert "bad.md" in err
     assert "corrupt.md" in err

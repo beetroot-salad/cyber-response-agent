@@ -59,6 +59,37 @@ def test_in_context_cases_dedups_per_case_keeps_earliest(tmp_path):
     assert hits[0].loaded_at == "2026-06-05T00:00:00+00:00"
 
 
+def test_earliest_load_is_chronological_not_lexicographic(tmp_path):
+    """The earliest qualifying load is picked by parsed instant, not string order: a
+    ``+09:00`` spelling of an earlier instant sorts lexicographically AFTER the canonical
+    ``+00:00`` row that is chronologically later. Latent while both production writers go
+    through ``now_iso()``'s canonical UTC; wrong the day a migration or hand-edit doesn't."""
+    tl = _load()
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_run(runs, "caseA", disposition="benign", loads=[
+        {"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"},  # later instant, sorts first
+        {"lesson_name": "L", "ts": "2026-06-05T08:00:00+09:00"},  # = 2026-06-04T23:00Z, earlier
+    ])
+    hits = tl.in_context_cases("L", None, runs)
+    assert [h.loaded_at for h in hits] == ["2026-06-05T08:00:00+09:00"]
+
+
+def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
+    """The description column is LLM-authored; a tab or newline in it would forge a column
+    or split the row, so the TSV flattens both (the ``lessons_fm._emit_match`` idiom)."""
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L",
+               body_frontmatter='name: L\ndescription: "a\\tb\\nc"')
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == ["L\ta b c\t0"]  # one row, three columns
+
+
 def test_in_context_cases_missing_runs_dir_is_empty(tmp_path):
     tl = _load()
     assert tl.in_context_cases("L", None, tmp_path / "nope") == []
@@ -231,7 +262,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     assert rc == 0
     lines = cap.out.splitlines()
     assert "ok\tfine\t1" in lines
-    assert "broken\t(malformed frontmatter — unwindowed count)\t1" in lines
+    assert "broken\t(malformed lesson — unwindowed count)\t1" in lines
     assert "skipping broken.md" in cap.err  # the walk's warning still fires
 
 

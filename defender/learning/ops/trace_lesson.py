@@ -47,6 +47,9 @@ from defender.learning.core.config import DEFAULT_PATHS
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
+# Sorts an unparseable-ts load row after every parseable one (see _earliest_load).
+_DT_MAX = datetime.max.replace(tzinfo=UTC)
+
 
 def _default_runs_dir() -> Path:
     """The durable learning runs dir, NOT the ephemeral ``$DEFENDER_RUNS_BASE``
@@ -94,7 +97,13 @@ def _report_disposition(run_dir: Path) -> str:
     audit (#595, the #588/#589 ``UnicodeDecodeError ⊄ OSError`` class again; the guard is
     ``read_text_soft``, the shared skip-one-bad-file read). Cached per run dir: under
     ``--all`` the same report is hit once per lesson that cites the run, and each miss
-    would re-read, re-parse, and re-warn."""
+    would re-read, re-parse, and re-warn.
+
+    Third reader of report.md frontmatter, by design, not by drift: the LEARN gate is
+    fail-loud (``core/validate.normalize_disposition`` raises ``RunUnprocessable``) and the
+    renderer degrades to a body-only dict (``scripts/visualize`` ``parse_report``). All
+    three share the #591 grammar (``_frontmatter``) and the pinned-read primitives — only
+    the *posture* differs, and each posture is that consumer's contract."""
     report = RunPaths(run_dir).report
     if not report.is_file():
         return "?"
@@ -112,17 +121,28 @@ def _earliest_load(
 ) -> str | None:
     """Earliest ``ts`` in one run's ``lessons_loaded.jsonl`` that cites
     ``lesson_name`` at/after ``created_at`` (the lesson's current incarnation),
-    or None if it was never qualifyingly loaded."""
-    earliest: str | None = None
+    or None if it was never qualifyingly loaded.
+
+    Earliest is CHRONOLOGICAL (the parsed ts), not lexicographic — a string min is
+    only correct while every writer emits one canonical offset+precision, and the
+    windowing five lines up already parses. A row whose ts doesn't parse (reachable
+    only when ``created_at`` is None — the window guard drops it otherwise) sorts
+    after every parseable row, lexicographic among its own kind; the raw string is
+    the tiebreak so equal instants in different spellings stay deterministic."""
+    qualifying: list[tuple[datetime | None, str]] = []
     for row in read_jsonl_rows(loaded):
         if row.get("lesson_name") != lesson_name:
             continue
         ts = _parse_dt(row.get("ts"))
         if created_at is not None and (ts is None or ts < created_at):
             continue  # loaded before this lesson's current incarnation
-        if earliest is None or str(row.get("ts")) < earliest:
-            earliest = str(row.get("ts"))
-    return earliest
+        qualifying.append((ts, str(row.get("ts"))))
+    if not qualifying:
+        return None
+    return min(
+        qualifying,
+        key=lambda q: (q[0] is None, q[0] if q[0] is not None else _DT_MAX, q[1]),
+    )[1]
 
 
 def in_context_cases(
@@ -156,7 +176,10 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
         name = lesson.path.stem
         created_at = _parse_dt(lesson.fm.get("created_at"))
         n = len(in_context_cases(name, created_at, runs_dir))
-        print(f"{name}\t{str(lesson.fm.get('description') or '')}\t{n}")
+        # The description is LLM-authored and this is a TSV row — flatten the two chars that
+        # would forge a column or a row (same idiom as lessons_fm._emit_match).
+        desc = str(lesson.fm.get("description") or "").strip().replace("\t", " ").replace("\n", " ")
+        print(f"{name}\t{desc}\t{n}")
     # A lesson iter_lessons warn-skipped (malformed/unreadable — e.g. a curator edit broke
     # its YAML) must still get an audit row: dropping it here loses exactly the lesson a
     # human is most likely investigating, while the named path still traces it (#590).
@@ -166,7 +189,9 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     # normal-looking row.
     for path in skipped:
         n = len(in_context_cases(path.stem, None, runs_dir))
-        print(f"{path.stem}\t(malformed frontmatter — unwindowed count)\t{n}")
+        # "malformed lesson" is the walk's own vocabulary for all three skip causes (parse,
+        # read, decode) — its stderr warn right above carries the specific reason.
+        print(f"{path.stem}\t(malformed lesson — unwindowed count)\t{n}")
 
 
 def main(argv: list[str]) -> int:

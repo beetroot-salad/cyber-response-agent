@@ -153,7 +153,14 @@ def test_m5_built_from_the_passed_corpus_dir(tmp_path):
 
 def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, capsys):
     """demand: M6 — a ``_``-prefixed file and a malformed (non-fenced) ``.md`` are warn-skipped
-    (stderr, not raised) while a well-formed sibling still renders."""
+    (stderr, not raised) while a well-formed sibling still renders.
+
+    UPDATED by #590's rule (review of PR #608): the original pin asserted the malformed lesson
+    lost its manifest section entirely (``"bad" not in heads``). Overturned — the manifest is the
+    menu the curator folds against, and a discovered stem missing from it is exactly how the
+    curator authors an overlapping lesson it cannot see. A warn-skipped lesson now claims its
+    ``## <stem>`` section with a fixed marker body in place of the frontmatter. The rest of the
+    demand (underscore-skip, no raise, stderr warn, well-formed sibling renders) is unchanged."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _findings_lesson(corpus, "good")
@@ -162,9 +169,10 @@ def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, capsys):
     manifest = _shared.build_corpus_manifest(corpus)  # one bad file does NOT abort the batch
     heads = _headers(manifest)
     assert "good" in heads  # the well-formed sibling renders
-    assert "_TEMPLATE" not in heads  # _-prefixed skipped
+    assert "_TEMPLATE" not in heads  # _-prefixed skipped (excluded by discovery, no marker)
     assert "TEMPLATE" not in heads
-    assert "bad" not in heads  # malformed dropped
+    assert "bad" in heads  # #590: the stem stays on the menu…
+    assert "the stem is taken" in manifest.lower()  # …as a marker, not as frontmatter
     assert "bad" in capsys.readouterr().err  # warned to stderr, not raised
 
 
@@ -172,13 +180,17 @@ def test_m6b_undecodable_bytes_are_skipped_not_raised(tmp_path, capsys):
     """demand: M6, decode half — "one bad file never aborts the manifest" has to cover UNDECODABLE
     bytes too: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and NOT an
     ``OSError``, so an except tuple naming only ``(FrontmatterError, OSError)`` lets it escape and
-    take the whole curator drain down with it."""
+    take the whole curator drain down with it.
+
+    UPDATED by #590's rule (review of PR #608): the undecodable lesson keeps a marker section
+    instead of vanishing from the menu — see test_m6."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _findings_lesson(corpus, "good")
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe not utf-8\n")
     manifest = _shared.build_corpus_manifest(corpus)  # must not raise
-    assert _headers(manifest) == ["good"]  # the well-formed sibling survives the bad byte
+    assert _headers(manifest) == ["good", "corrupt"]  # sibling survives; the bad stem is claimed
+    assert "frontmatter cannot be shown" in manifest  # marker body, not parsed frontmatter
     assert "corrupt" in capsys.readouterr().err  # warned to stderr, not raised
 
 

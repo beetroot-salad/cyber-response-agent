@@ -578,10 +578,17 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
 
     Tolerant: a missing / empty / non-directory ``corpus_dir`` yields ``''`` (a first-ever run in a
     fresh worktree), and a single malformed ``.md`` is warned to stderr and skipped — one bad file
-    never aborts the manifest and loses its well-formed siblings."""
+    never aborts the manifest and loses its well-formed siblings. Skipped is not DROPPED, though:
+    a warn-skipped lesson still claims its ``## <stem>`` section, with a fixed marker body in
+    place of the frontmatter it doesn't have (#590's rule, the manifest half). The manifest is the
+    menu the curator folds against — losing a discovered stem from it is precisely how the curator
+    authors an overlapping lesson it cannot see (the drift ``iter_lesson_paths``' docstring calls
+    one-directionally dangerous). The marker body is a literal, so nothing model-authored reaches
+    it; the stem gets the same whitespace collapse as a well-formed section's."""
     sections: list[str] = []
+    skipped: list[Path] = []
     for lesson in iter_lessons(
-        corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}"
+        corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}", on_skip=skipped.append
     ):
         kept = {k: v for k, v in lesson.fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
         rendered = yaml.safe_dump(
@@ -590,6 +597,13 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
         # a model-chosen stem is not a safe protocol field
         slug = " ".join(lesson.path.stem.split())
         sections.append(f"## {slug}\n{rendered}")
+    for path in skipped:
+        slug = " ".join(path.stem.split())
+        sections.append(
+            f"## {slug}\n(unavailable: this lesson file is malformed or unreadable, so its "
+            "frontmatter cannot be shown. The stem is taken — repair this lesson rather than "
+            "authoring an overlapping one.)\n"
+        )
     if seed is not None:
         random.Random(seed).shuffle(sections)
     return "\n".join(sections)

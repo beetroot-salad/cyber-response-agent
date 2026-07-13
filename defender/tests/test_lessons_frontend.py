@@ -11,7 +11,7 @@ from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
-from defender._corpus import iter_lessons  # noqa: E402
+from defender._corpus import iter_lesson_paths  # noqa: E402
 from defender.learning.frontend import serialize  # noqa: E402
 
 
@@ -23,18 +23,14 @@ CORPUS_DIR = {
 
 
 def _on_disk(corpus: Path) -> set[str]:
-    """Stems the serializer enumerates: non-underscore ``*.md`` whose frontmatter parses.
+    """Stems the serializer enumerates: every DISCOVERED lesson — non-underscore ``*.md``.
 
-    The serializer warns+skips malformed files, so counting raw ``*.md`` would diverge the moment a
-    lesson lands with a YAML typo — mirror the skip through the SAME primitive the serializer now
-    walks (#584: the serializer's private reader/walk are deleted and ``build_view`` goes through
-    ``iter_lessons``; this oracle used to reach into that private reader). Deliberately NOT rebuilt
-    on ``build_view``'s own output: an oracle derived from the thing it checks is a tautology.
-
-    Note the semantics shift with the fold, and it is the fix, not a regression: a lesson whose
-    frontmatter is a valid EMPTY MAPPING (``fm == {}``) is now COUNTED — the old ``if fm`` filter
-    mirrored the serializer's falsy skip, which is the very bug #584 closes."""
-    return {lesson.path.stem for lesson in iter_lessons(corpus)}
+    UPDATED by #590's rule (review of PR #608): the serializer no longer omits a lesson whose
+    frontmatter fails to parse — a warn-skipped lesson gets a degraded marker record instead of
+    vanishing from the posture view. The oracle is therefore the DISCOVERY rule
+    (``iter_lesson_paths``), not the walk's parse-success subset. Deliberately NOT rebuilt on
+    ``build_view``'s own output: an oracle derived from the thing it checks is a tautology."""
+    return {path.stem for path in iter_lesson_paths(corpus)}
 
 
 def test_build_view_is_pure():
@@ -66,7 +62,7 @@ def test_lesson_record_shape():
                 "group", "title", "description", "status", "source_path", "metadata", "body",
             }
             assert lesson["title"]
-            assert lesson["status"] in {"live", "stale"}
+            assert lesson["status"] in {"live", "stale", "malformed"}
             assert isinstance(lesson["metadata"], dict)
 
 
@@ -107,6 +103,32 @@ def test_environment_field_mapping_unit():
     assert rec["description"] == "egress from the corp VPN range is expected"
     assert rec["metadata"]["alert_rule_ids"] == [5712]
     assert rec["body"] == "body text"
+
+
+def test_skipped_lesson_gets_a_degraded_record(tmp_path):
+    """A DISCOVERED lesson the walk warn-skips must still appear in the view (#590's rule, the
+    posture-view half): omitting it hides from ``lessons.html`` exactly the broken lesson a
+    human should be looking at. The record is degraded (marker description, ``status:
+    malformed``, no metadata) but shape-compatible, so the template renders it unchanged."""
+    import json
+
+    fixture = tmp_path / "defender"
+    for spec in serialize.GROUPS.values():
+        (fixture / spec["dir"]).mkdir(parents=True)
+    (fixture / "lessons" / "good.md").write_text("---\nname: good\ndescription: d\n---\nbody\n")
+    (fixture / "lessons" / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
+    (fixture / "lessons" / "_draft.md").write_text("not a lesson\n")  # excluded by discovery
+
+    lessons = serialize.build_view(defender_dir=fixture)["groups"]["defender"]["lessons"]
+
+    assert [rec["title"] for rec in lessons] == ["broken", "good"]  # sorted, both present
+    broken = lessons[0]
+    assert broken["status"] == "malformed"
+    assert "frontmatter unavailable" in broken["description"]
+    assert broken["metadata"] == {}
+    assert broken["body"] == ""
+    assert broken["source_path"] == "defender/lessons/broken.md"
+    json.dumps(lessons)  # the degraded record is as JSON-safe as a normal one
 
 
 def test_metadata_is_json_safe():
