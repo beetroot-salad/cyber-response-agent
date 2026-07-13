@@ -20,12 +20,14 @@ Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
 ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``, so it inherits the
 corpus discovery rules (underscore-skip, warn on a malformed or unreadable lesson). A lesson the
 walk skips still gets a marker row — the audit index must not silently lose a lesson that has
-in-context cases (#590), so ``--all`` diffs the walk against ``iter_lesson_paths`` (the shared
-discovery rule) and prints the skipped ones with an unwindowed count.
+in-context cases (#590), so ``--all`` collects the skipped paths through ``iter_lessons``'
+``on_skip`` seam (the same single walk — no second glob to race) and prints them with an
+unwindowed count.
 """
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, UTC
@@ -36,8 +38,8 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._corpus import iter_lesson_paths, iter_lessons
-from defender._io import TEXT_READ_ERRORS, read_jsonl_rows, read_text_utf8, use_utf8_stdio
+from defender._corpus import iter_lessons
+from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
@@ -83,19 +85,22 @@ class CaseHit:
     loaded_at: str
 
 
+@functools.cache
 def _report_disposition(run_dir: Path) -> str:
     """The run's recorded disposition, or ``"?"`` when it cannot be known.
 
     ``report.md`` is model-authored, and this runs once per hit inside the whole-runs-dir
-    walk — one undecodable historical report must cost that one row's disposition, not the
-    audit (#595, the #588/#589 ``UnicodeDecodeError ⊄ OSError`` class again)."""
+    walk — one unreadable historical report must cost that one row's disposition, not the
+    audit (#595, the #588/#589 ``UnicodeDecodeError ⊄ OSError`` class again; the guard is
+    ``read_text_soft``, the shared skip-one-bad-file read). Cached per run dir: under
+    ``--all`` the same report is hit once per lesson that cites the run, and each miss
+    would re-read, re-parse, and re-warn."""
     report = RunPaths(run_dir).report
     if not report.is_file():
         return "?"
-    try:
-        text = read_text_utf8(report)
-    except TEXT_READ_ERRORS as e:
-        print(f"warn: cannot read {report.parent.name}/report.md ({e}) — disposition unknown",
+    text, reason = read_text_soft(report)
+    if text is None:
+        print(f"warn: cannot read {report.parent.name}/report.md ({reason}) — disposition unknown",
               file=sys.stderr)
         return "?"
     fm = parse_frontmatter_or_none(text) or {}
@@ -146,8 +151,8 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     ``lessons_loaded.jsonl`` and what ``trace_lesson <name>`` / ``revert_lesson <name>`` take.
     A ``Lesson`` carries no ``.name``, and joining on the frontmatter ``name`` (which nothing
     forces to equal the stem) would silently miss every recorded load and report zero cases."""
-    lessons = list(iter_lessons(lessons_dir))
-    for lesson in lessons:
+    skipped: list[Path] = []
+    for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
         created_at = _parse_dt(lesson.fm.get("created_at"))
         n = len(in_context_cases(name, created_at, runs_dir))
@@ -155,12 +160,11 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     # A lesson iter_lessons warn-skipped (malformed/unreadable — e.g. a curator edit broke
     # its YAML) must still get an audit row: dropping it here loses exactly the lesson a
     # human is most likely investigating, while the named path still traces it (#590).
-    # With no parseable created_at the count cannot be windowed to the current incarnation,
-    # so the marker says so instead of printing a normal-looking row.
-    yielded = {lesson.path for lesson in lessons}
-    for path in iter_lesson_paths(lessons_dir):
-        if path in yielded:
-            continue
+    # ``on_skip`` reports from the walk itself, so the marker set is exactly the skipped
+    # set — no second glob to race. With no parseable created_at the count cannot be
+    # windowed to the current incarnation, so the marker says so instead of printing a
+    # normal-looking row.
+    for path in skipped:
         n = len(in_context_cases(path.stem, None, runs_dir))
         print(f"{path.stem}\t(malformed frontmatter — unwindowed count)\t{n}")
 
@@ -182,6 +186,12 @@ def main(argv: list[str]) -> int:
     runs_dir = ns.runs_dir or _default_runs_dir()
     lessons_dir = ns.lessons_dir
 
+    # The two forms answer different questions; silently preferring one would hand the
+    # operator the wrong report under a stray extra argument.
+    if ns.all and ns.lesson_name:
+        print("give a <lesson_name> or --all, not both", file=sys.stderr)
+        return 1
+
     if not lessons_dir.is_dir():
         print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
         return 1
@@ -198,22 +208,27 @@ def main(argv: list[str]) -> int:
         print(f"no such lesson: {path}", file=sys.stderr)
         return 1
     # ``iter_lessons`` is a directory walk and cannot serve a single named lesson without turning
-    # an O(1) read into a whole-corpus parse, so this path keeps its own read. The posture is
-    # tri-state: an UNREADABLE named lesson is an ERROR (printing "0 case(s)" for a file that was
-    # never read is worse than failing); a readable lesson with MALFORMED/missing frontmatter
-    # still traces, but warns that the trace is unwindowed (no created_at to window on); ``--all``
-    # warn-skips the walk and prints a marker row instead.
-    try:
-        text = read_text_utf8(path)
-    except TEXT_READ_ERRORS as e:
-        print(f"error: cannot read {path.name}: {e}", file=sys.stderr)
+    # an O(1) read into a whole-corpus parse, so this path keeps its own read (``read_text_soft``,
+    # the shared skip-one-bad-file guard). The posture is tri-state: an UNREADABLE named lesson is
+    # an ERROR (printing "0 case(s)" for a file that was never read is worse than failing); a
+    # readable lesson with nothing to window on — malformed/missing frontmatter, or a
+    # missing/unparseable ``created_at`` — still traces, but warns that the trace is unwindowed;
+    # ``--all`` warn-skips the walk and prints a marker row instead.
+    text, reason = read_text_soft(path)
+    if text is None:
+        print(f"error: cannot read {path.name}: {reason}", file=sys.stderr)
         return 1
     parsed = parse_frontmatter_or_none(text)
+    fm = parsed or {}
+    created_at = _parse_dt(fm.get("created_at"))
     if parsed is None:
         print(f"warn: {path.name}: malformed or missing frontmatter — trace is unwindowed",
               file=sys.stderr)
-    fm = parsed or {}
-    created_at = _parse_dt(fm.get("created_at"))
+    elif created_at is None:
+        # Valid frontmatter whose LLM-authored created_at is absent or unparseable is just as
+        # unwindowed — "since None" must never print silently (#596's named-path half).
+        print(f"warn: {path.name}: no parseable created_at — trace is unwindowed",
+              file=sys.stderr)
     hits = in_context_cases(path.stem, created_at, runs_dir)
     print(f"# {path.stem} — {len(hits)} case(s) in context since {created_at}")
     for h in hits:

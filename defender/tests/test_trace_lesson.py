@@ -270,6 +270,43 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
     assert "trace is unwindowed" in cap.err
 
 
+def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys):
+    """Valid frontmatter whose LLM-authored ``created_at`` doesn't parse (or is absent) is just
+    as unwindowed as malformed frontmatter — the warning keys on "no created_at to window on",
+    so ``since None`` never prints silently (#596's named-path half; the ``--all`` row shape is
+    still #596's open design question)."""
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L",
+               body_frontmatter="name: L\ndescription: d\ncreated_at: not-a-date")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_run(runs, "caseA", disposition="benign",
+            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
+
+    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 0
+    assert _case_ids(cap.out) == ["caseA"]  # still traces — unwindowed, not refused
+    assert "trace is unwindowed" in cap.err
+
+
+def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
+    """``--all`` and a positional <lesson_name> answer different questions; silently preferring
+    one (the old behavior ran ``--all`` and dropped the name) hands the operator the wrong
+    report under a stray extra argument. Both together is a usage error."""
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    rc = tl.main(["L", "--all",
+                  "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert cap.out == ""
+    assert "not both" in cap.err
+
+
 def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     """An UNREADABLE named lesson stays an ERROR (exit 1): printing "0 case(s)" for a file
     that was never read is worse than failing. Pins the tri-state posture's hard edge so the
