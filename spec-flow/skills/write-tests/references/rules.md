@@ -11,7 +11,7 @@ The gate computes the join of the behavior layer against the structure layer and
    - **Design hole** — a decision is missing, not a test: an `unknown` invariant, an unresolvable address, a substitute that structurally cannot discharge its survival demand. Routed to the human (fact-shaped `unknown`s are re-grounded first — SKILL.md step 6).
    - **Pre-discharged** — an *executable* demand already exists (the design stated it and step 2 extracted it as `form: test`). Credit it explicitly; don't re-litigate. A clause-form binding does not pre-discharge — it leaves the obligation open (that is the worked example's R4 firing).
    - **Waiver candidate** — plausibly acceptable to skip; the human decides, and the decision is recorded as `Demand {form: waiver}`.
-4. The gate closes when every rule has its `evaluated` entry, every obligation is discharged — by an executable demand or a recorded waiver — and every hole has a human answer.
+4. The gate closes when every rule has its `evaluated` entry, every obligation is discharged — by an executable demand or a recorded waiver, never by a ledger claim — every hole has a human answer, and every load-bearing claim in the ledger carries an executed probe (a `reachability` or `behavior` claim left `unprobed` is itself a hole — see "Probed claims").
 
 The types are **routes, not partitions**: one element can be both. A design hole, once the human resolves it, frequently spawns a test obligation (the undecided cache key becomes, decided, a uniqueness demand) — record the element in both lists, linked (`resolved_to: <demand id>` on the hole).
 
@@ -71,6 +71,23 @@ Each rule: **trigger** (a predicate over formal slots) → **obligation** (the d
 - **Judgment extension — not slot-computable, and flagged as such:** when the delta *tightens* a constraint or flips a default rather than removing anything, ask whether a security-critical caller is left constructible in the newly-unsafe state; if so, mint a safe-by-construction demand — the critical caller *cannot be built* unsafe; assert the constructor raises, not merely that it behaves when configured right. This half rests on the author asking the question, not on a trigger — record in `gate.evaluated` that it was considered.
 - **Canonical:** #517 — the suite tested only the new restriction and silently regressed the workflows the old surface quietly served.
 
+## Probed claims — the ledger
+
+The rules compute the right *questions*; the ledger keeps their *answers* honest. Every statement the spec rests on about reality-as-it-is is a falsifiable prediction, recorded with the probe that tests it and what the probe observed — because the escapes that ship past a green suite are dominated by plausible prose answers one probe would have refuted. Five kinds, keyed by what the probe is:
+
+- **census** — a completeness claim (all writers / readers / copies / consumers of X). Probe: the search plus its full hit list.
+- **behavior** — a claim about what existing code does (a design's bug story, a stated default, "already handles Y"). Probe: run it and watch.
+- **reachability** — who or what can reach a surface, and whether a value or state is constructible ("main cannot read that dir", "the stem is filesystem-constrained"). Probe: the grep, or drive the seam.
+- **discharge** — a pre-discharge credit or a waiver's rationale. Probe: whatever the rationale rests on (and pre-discharge binds the same *edge*, not merely the same boundary).
+- **primitive** — an I/O primitive's contract (its exception taxonomy, its normalization, its defaults). Probe: execute the primitive, in the runtime container when the binary matters.
+
+Two guards make the ledger bite:
+
+- **A probe does not discharge a test obligation.** A claim can inform a waiver or correct the design, but an obligation still closes only via an executable demand or a recorded waiver. A probed tolerance that no test pins ships untested — the ledger's own failure mode, and the thing a later change silently breaks.
+- **A trust-resolving claim is the first thing to probe.** When a rule's `fired: false`, a hole's resolution, or a waiver turns on "it's unreachable / constrained / already gated / cannot be built unsafe", that claim is where a blind spot hardens into green. Reachability and safety are `reachability`-kind claims with *executed* probes, never prose — "the OS/gate/filesystem constrains it" is a probe target, not an answer.
+
+A claim only the not-yet-written implementation can settle is `verdict: deferred` and transfers to write-code-from-spec, which probes it when there is code to probe.
+
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
 One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), reviewed by the human *as part of the spec*:
@@ -81,14 +98,20 @@ design: <issue # or doc path>
 base: <SHA the spec branch forked from — write-code-from-spec's gate diffs against it>
 demands:   [...]      # the resolved demand list, waivers included — the spec proper
 structure: {axes: [...], actors: [...], boundaries: [...], interacts: [...], drives: [...]}
+claims:              # every load-bearing statement about existing reality, probed not asserted
+  - {id: <slug>, kind: census | behavior | reachability | discharge | primitive,
+     claim: "<one falsifiable sentence>", probe: "<the exact command or procedure run>",
+     observed: "<what happened>", verdict: holds | refuted | unprobed | deferred}
 gate:
   evaluated: [{rule: R0..R5, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
   obligations: [{rule: R2, element: <address>, witness: "<one sentence>", discharged_by: <demand id>}]
   holes:       [{rule: R0, element: <address>, resolution: "<the human's decision>", resolved_to: <demand id>}]
                         # resolved_to: present when the resolution spawned a demand
-  pre_discharged: [{rule: R4, element: <address>, by: <demand id>}]
+  pre_discharged: [{rule: R4, element: <address>, by: <demand id>, edge: <interacts/drives address>}]
 handoff:
   forks:      ["<the fork and how it was resolved>", ...]
+  refuted:    ["<a design claim the ledger refuted, and the correction>", ...]
+  deferred:   ["<a claim only the implementation can settle — write-code-from-spec's probe>", ...]
   deviations: ["<degraded strong author | collapsed diff | manual slot check | reduced small-delta mode>", ...]
 ```
 
