@@ -161,3 +161,127 @@ def test_lesson_identity_is_stem_not_frontmatter_name(tmp_path, capsys):
     assert rc == 0
     assert out.startswith("# foo-bar")  # the stem, not the frontmatter "foo_bar"
     assert _case_ids(out) == ["caseA"]
+
+
+# ---------------------------------------------------------------------------
+# #595 — one undecodable report.md costs one row's disposition, not the audit
+# ---------------------------------------------------------------------------
+
+
+def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
+    """``report.md`` is model-authored and read once per hit in the whole-runs-dir walk; an
+    undecodable byte in ONE historical report must degrade that row to ``"?"`` with a stderr
+    warning, not kill the walk with a UnicodeDecodeError traceback (#595 — the walk's last
+    unguarded read; UnicodeDecodeError is a ValueError, not an OSError)."""
+    tl = _load()
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    broken = _mk_run(runs, "caseA", disposition="benign",
+                     loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
+    (broken / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
+    _mk_run(runs, "caseB", disposition="malicious",
+            loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
+
+    hits = tl.in_context_cases("L", None, runs)
+    err = capsys.readouterr().err
+    # the broken report costs its own row's disposition; the healthy sibling is untouched
+    assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "?"), ("caseB", "malicious")]
+    assert "caseA/report.md" in err
+
+
+def test_all_survives_undecodable_report(tmp_path, capsys):
+    """The same property at the seam a user drives: ``--all`` over a runs dir containing an
+    undecodable report exits 0 and still prints every lesson's row."""
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    rd = _mk_run(runs, "caseA", disposition="benign",
+                 loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
+    (rd / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
+
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    assert rc == 0
+    assert "L\td\t1" in capsys.readouterr().out.splitlines()
+
+
+# ---------------------------------------------------------------------------
+# #590 — a malformed lesson keeps its audit row (marker), on both output paths
+# ---------------------------------------------------------------------------
+
+
+def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
+    """A lesson the ``iter_lessons`` walk warn-skips (e.g. a curator edit broke its YAML) must
+    still get a row in the ``--all`` audit table — losing it silently hides exactly the lesson
+    a human is most likely investigating, while the named path still traces it (#590). The
+    marker's count is unwindowed (no parseable ``created_at``), and the row says so."""
+    tl = _load()
+    lessons = tmp_path / "lessons"
+    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine")
+    (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_run(runs, "caseA", disposition="malicious",
+            loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
+    _mk_run(runs, "caseB", disposition="benign",
+            loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"}])
+
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 0
+    lines = cap.out.splitlines()
+    assert "ok\tfine\t1" in lines
+    assert "broken\t(malformed frontmatter — unwindowed count)\t1" in lines
+    assert "skipping broken.md" in cap.err  # the walk's warning still fires
+
+
+def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
+    """The marker pass diffs against ``iter_lesson_paths`` (the shared discovery rule), so an
+    ``_``-prefixed draft is not a "skipped lesson" and gets no marker row."""
+    tl = _load()
+    lessons = tmp_path / "lessons"
+    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine")
+    (lessons / "_draft.md").write_text("not a lesson\n")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0"]
+
+
+def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsys):
+    """Naming a malformed-but-readable lesson still traces it (an audit of a broken lesson is
+    the tool's most likely use), but warns that the trace is unwindowed — silently printing
+    ``since None`` hid that the window never engaged (#590's named-path half)."""
+    tl = _load()
+    lessons = tmp_path / "lessons"
+    lessons.mkdir()
+    (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_run(runs, "caseA", disposition="malicious",
+            loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
+
+    rc = tl.main(["broken", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 0
+    assert _case_ids(cap.out) == ["caseA"]
+    assert "trace is unwindowed" in cap.err
+
+
+def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
+    """An UNREADABLE named lesson stays an ERROR (exit 1): printing "0 case(s)" for a file
+    that was never read is worse than failing. Pins the tri-state posture's hard edge so the
+    malformed-lesson tolerance above cannot creep into the unreadable case."""
+    tl = _load()
+    lessons = tmp_path / "lessons"
+    lessons.mkdir()
+    (lessons / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    rc = tl.main(["undecodable", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert "cannot read undecodable.md" in cap.err

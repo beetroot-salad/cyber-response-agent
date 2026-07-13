@@ -762,7 +762,12 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     Well-formed siblings are still listed, one TSV line each, and the exit code stays 0 — a
     warn-skip that also dropped a good lesson, or that turned a warn into a nonzero rc, would be a
-    regression dressed as a fix."""
+    regression dressed as a fix.
+
+    UPDATED by #590: the original pin asserted a skipped lesson lost its row entirely. That half
+    was a resolved design fork, overturned — the audit index must keep a marker row for a
+    discovered-but-skipped lesson (it may still have in-context cases). The rest of the demand
+    (underscore-skip, warn to stderr, rc 0, well-formed siblings untouched) is unchanged."""
     tl = _load_by_path("trace_lesson_584", TL_PATH)
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -776,8 +781,11 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     assert rc == 0  # one bad file does not fail the run
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-    assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta"]
+    # well-formed rows first, then #590's marker rows for the skipped-but-discovered lessons
+    assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
     assert all(len(ln.split("\t")) == 3 for ln in lines)  # <name>\t<description>\t<count>
+    marker_rows = [ln for ln in lines if "(malformed frontmatter" in ln]
+    assert [ln.split("\t")[0] for ln in marker_rows] == ["undecodable", "unfenced"]
     assert "_TEMPLATE" not in captured.out  # the `_`-skip it never had
     assert "unfenced.md" in captured.err
     assert "undecodable.md" in captured.err  # the read guard it never had
