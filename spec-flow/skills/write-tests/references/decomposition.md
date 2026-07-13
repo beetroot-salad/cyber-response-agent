@@ -42,6 +42,46 @@ else. The parent does not do leaf work — it holds the seams, dispatches the le
 their outputs. The instant the parent starts doing a leaf itself, its own context is contaminated and
 the decomposition has bought nothing: keep the orchestrator thin.
 
+## Recursion — one level by default, and what must not recurse
+
+A leaf that is separable but still too big to hold can become a **sub-parent** that fans out its own
+dispatches, and so on down a tree. This is sometimes the only way to handle a genuinely large
+hierarchy — but naive recursion amplifies the one failure the demand tests can't catch, so it is a
+guarded exception, not the norm. **Default to one level of fan-out.** One level already buys the whole
+payoff (focus, cheap models, boundary-checkable output); each extra level multiplies the composition
+surface and pushes invariants further from the human who reviews only the root. A leaf that is "too
+big to hold" is often the coupled core in disguise — do it whole on the frontier model, don't recurse
+it.
+
+When you do recurse, the checks split on whether they **compose bottom-up**, and the split is the
+whole discipline:
+
+- **The demand partition recurses.** A subtree's acceptance is the union of its children's acceptance
+  plus its seam contracts, so a sub-parent reconciles its own children and correctness propagates up —
+  *provided* the reconciliation stays a demand-set operation (does the union of child demands equal
+  this node's demands?), not an LLM judgement call. Keep it mechanical, or reconciliation errors
+  compound multiplicatively up the tree and the root's green means nothing.
+- **The execution-context census and the interface-grounding do *not* recurse.** Both need a
+  whole-system view a narrowed subtree structurally lacks — the census must see the whole call graph to
+  find a harness that re-runs a cut module from outside the subtree; grounding must reach the real
+  external system. So they stay pinned at the **root** (or wherever the whole-system view lives) and
+  run **once over the flattened leaf set**, never delegated into a subtree that cannot see what they
+  check. Recursion does not remove the whole-system context — it concentrates it into one cheap global
+  pass instead of smearing it across the tree.
+
+At each node, sort three ways — the middle case is where recursion goes wrong:
+
+- **separable but big → recurse** (make it a sub-parent);
+- **the coupled core → stop, do not recurse** — a piece that is big *because* a spanning invariant
+  runs through it; recursing here cuts through the invariant and manufactures a composition failure.
+  The local test is the guard: if the only referent a sub-cut can cite is a sibling's output or an
+  internal snapshot, there is no real seam there;
+- **small and dispatchable → leaf.**
+
+That gives the depth bound: **recurse until the next cut would have no grounded external referent.**
+When the only referents left are internal, you have cut past the logical seams into arbitrary slicing
+verifiable against nothing real — the same signal that a single cut is fake, applied to depth.
+
 ## The two tests — a leaf is dispatchable iff both hold
 
 Both are stated in **acceptance criteria** (demands), so both are checkable, not felt.
