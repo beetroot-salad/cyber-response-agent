@@ -22,6 +22,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
 LINT_PATH = LINT_DIR / "lint_hand_rolled_frontmatter.py"
@@ -260,3 +262,30 @@ def test_d_lint_fingerprint_dedup(tmp_path):
     by_func = _by_function(gate._scan(tree))
     assert len(by_func.get("same", [])) == 1
     assert len(by_func.get("two", [])) == 2
+
+
+# ===========================================================================
+# #602 — the regex detector keys on the SPELLED name `re.`, so an aliased or
+# bare-name import walks straight through it. Each xfail is the executable
+# statement of that bug; deleting the marker is the proof of the fix.
+# ===========================================================================
+@pytest.mark.xfail(strict=True, reason="#602: `import re as regex` evades _receiver_root == 're'")
+def test_aliased_re_import_is_flagged(tmp_path):
+    gate = _load_gate()
+    tree = tmp_path / "scope"
+    _pyfile(tree, "prod.py", (
+        "import re as regex\n\n"
+        'def f(t):\n    return regex.compile(r"\\A---\\n")\n'
+    ))
+    assert gate._scan(tree)
+
+
+@pytest.mark.xfail(strict=True, reason="#602: a from-import callee is an ast.Name, not an Attribute")
+def test_from_import_re_is_flagged(tmp_path):
+    gate = _load_gate()
+    tree = tmp_path / "scope"
+    _pyfile(tree, "prod.py", (
+        "from re import search\n\n"
+        'def f(t):\n    return search(r"^---\\n(.*?)\\n---", t)\n'
+    ))
+    assert gate._scan(tree)
