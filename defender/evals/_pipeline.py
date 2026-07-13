@@ -97,27 +97,6 @@ def run_head_defender(
     return run_dir
 
 
-def read_head_disposition(run_dir: Path) -> str | None:
-    """Parse ``report.md`` frontmatter, return disposition or None."""
-    report = RunPaths(run_dir).report
-    if not report.is_file():
-        return None
-    text = report.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        return None
-    end = text.find("\n---", 3)
-    if end == -1:
-        return None
-    try:
-        fm = yaml.safe_load(text[3:end])
-    except yaml.YAMLError:
-        return None
-    if not isinstance(fm, dict):
-        return None
-    disp = fm.get("disposition")
-    return disp if isinstance(disp, str) else None
-
-
 def run_frozen_actor(
     head_run_dir: Path,
     staging_dir: Path,

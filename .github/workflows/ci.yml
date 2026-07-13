@@ -200,6 +200,15 @@ jobs:
       - name: Unanchored-default gate (single-source param defaults — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unanchored_default.py
 
+      # Hand-rolled frontmatter fence arithmetic under defender/ that bypasses the
+      # canonical grammar in defender/_frontmatter.py (#591): find/split/startswith/
+      # regex fence-parse call sites. Five readers each re-derived the fence offsets
+      # with a subtly different grammar — a parser differential injected into exactly
+      # the primary-vs-secondary divergence signal the eval exists to measure. The
+      # baseline ships EMPTY: the five sites were folded when the gate landed.
+      - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py
+
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.

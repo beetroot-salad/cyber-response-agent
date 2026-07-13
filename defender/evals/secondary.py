@@ -129,10 +129,13 @@ from _generation import (  # noqa: E402, F401  (parse_trailers/list_actor_commit
 from _pipeline import (  # noqa: E402
     AlertResult,
     run_head_defender,
-    read_head_disposition,
     run_frozen_actor,
     run_head_oracle_and_judge,
 )
+# The head disposition resolves through the SAME function the primary metric
+# uses (#591): one canonical grammar + enum filter, so primary and secondary
+# accept/reject identical reports by construction.
+from held_out import predicted_disposition  # noqa: E402
 from _summary import (  # noqa: E402
     SecondarySummary,
     format_summary_md,
@@ -278,7 +281,7 @@ def run_secondary(
         try:
             head_run_dir = run_head_defender(alert, run_id, runs_base)
             result.head_run_dir = str(head_run_dir)
-            head_disp = read_head_disposition(head_run_dir)
+            head_disp = predicted_disposition(head_run_dir)
             result.head_disposition = head_disp
             if head_disp == ESCALATED_DISPOSITION:
                 result.status = "not_executed"

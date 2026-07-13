@@ -16,10 +16,7 @@ import json
 import re
 from pathlib import Path
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover — yaml is in defender deps
-    yaml = None
+import yaml
 
 
 # Repo root — re-exported for the git-backed renderers (visualize_runtime uses it as
@@ -28,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The two-table read/join surface + loop config live in defender/learning/ — reached
 # via the `defender.learning` namespace package (callers put the repo root on sys.path).
+from defender._frontmatter import FrontmatterError, parse_frontmatter  # noqa: E402
+from defender._io import TEXT_READ_ERRORS, read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core import config as _loop_config  # noqa: E402
@@ -43,7 +42,7 @@ def esc(s) -> str:
 
 
 def load_yaml(path: Path) -> dict | list | None:
-    if not path.is_file() or yaml is None:
+    if not path.is_file():
         return None
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -257,25 +256,20 @@ def render_event(event: dict) -> str:
 
 
 def parse_report(run_dir: Path) -> dict:
+    """One fallback contract (#591): ``{}`` when the report is missing or unreadable,
+    ``{'body': <whole text, fences visible>}`` when it does not parse under the
+    canonical grammar, ``{**fm, 'body': <stripped body>}`` when it does."""
     p = RunPaths(run_dir).report
     if not p.is_file():
         return {}
-    text = p.read_text(encoding="utf-8")
-    if not text.startswith("---\n"):
+    try:
+        text = read_text_utf8(p)
+    except TEXT_READ_ERRORS:
+        return {}
+    try:
+        fm, body = parse_frontmatter(text)
+    except FrontmatterError:
         return {"body": text}
-    end = text.find("\n---", 4)
-    if end == -1:
-        return {"body": text}
-    fm_text = text[4:end]
-    body = text[end + 4 :].lstrip("\n")
-    fm: dict = {}
-    if yaml is not None:
-        try:
-            loaded = yaml.safe_load(fm_text)
-            if isinstance(loaded, dict):
-                fm = loaded
-        except yaml.YAMLError:
-            fm = {}
     return {**fm, "body": body}
 
 
