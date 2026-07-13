@@ -55,6 +55,7 @@ import ast
 import sys
 from pathlib import Path
 
+from _astlib import ModuleEnv, callee, module_env, str_args
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -90,67 +91,6 @@ def _is_test_module(rel: str) -> bool:
     )
 
 
-def _module_str_consts(tree: ast.AST) -> dict[str, str]:
-    """Module-level ``NAME = "<literal>"`` bindings.
-
-    A fence hoisted to a module constant (``FENCE = "---\\n"`` … ``text.startswith(FENCE)``)
-    must still be seen: hoisting the literal is *good* style, so a detector that only reads
-    inline ``ast.Constant`` args makes the tidiest way to write the sixth copy the one way to
-    evade the gate. Same blind spot #594 documents for ``lint_unpinned_text_io``.
-    """
-    out: dict[str, str] = {}
-    for node in getattr(tree, "body", []):
-        target: ast.expr | None = None
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-        elif isinstance(node, ast.AnnAssign):
-            target = node.target
-        else:
-            continue
-        value = node.value
-        if (
-            isinstance(target, ast.Name)
-            and isinstance(value, ast.Constant)
-            and isinstance(value.value, str)
-        ):
-            out[target.id] = value.value
-    return out
-
-
-def _str_args(call: ast.Call, consts: dict[str, str]) -> list[str]:
-    """The string args of a call — positional and keyword (so
-    ``re.compile(pattern=r"^---…")`` is seen), tuple elements flattened (so
-    ``startswith(("---", "…"))`` is), and module-constant Names resolved through
-    ``consts`` (so a hoisted fence literal is not an escape hatch)."""
-    out: list[str] = []
-
-    def resolve(node: ast.expr) -> str | None:
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
-        if isinstance(node, ast.Name):
-            return consts.get(node.id)
-        return None
-
-    for arg in [*call.args, *(kw.value for kw in call.keywords)]:
-        if isinstance(arg, ast.Tuple):
-            out.extend(v for el in arg.elts if (v := resolve(el)) is not None)
-        elif (v := resolve(arg)) is not None:
-            out.append(v)
-    return out
-
-
-def _receiver_root(call: ast.Call) -> str | None:
-    """For ``<root>.….attr(...)``, the root Name id (so ``re.search`` can be told
-    from ``text.split``). None for an unnamable receiver."""
-    func = call.func
-    if not isinstance(func, ast.Attribute):
-        return None
-    cur: ast.expr = func.value
-    while isinstance(cur, (ast.Attribute, ast.Subscript, ast.Call)):
-        cur = cur.value if not isinstance(cur, ast.Call) else cur.func
-    return cur.id if isinstance(cur, ast.Name) else None
-
-
 def _is_fence_pattern(value: str) -> bool:
     return value.startswith("---") or any(m in value for m in _FENCE_PATTERN_MARKS)
 
@@ -164,19 +104,30 @@ def _is_fence_literal(value: str) -> bool:
     return value.startswith("---") or value.startswith("\n---")
 
 
-def _kind(call: ast.Call, consts: dict[str, str]) -> str | None:
-    """Which hand-rolled fence-parse shape this call is, or None."""
+def _kind(call: ast.Call, env: ModuleEnv) -> str | None:
+    """Which hand-rolled fence-parse shape this call is, or None.
+
+    The regex branch resolves the CALLEE, so every spelling of the same origin is one
+    case: ``re.search`` / ``regex.search`` (aliased) / a bare ``search`` (from-import).
+    It must be tested BEFORE the ast.Attribute guard below — a from-import callee is an
+    ``ast.Name``, and the old guard returned None before it could be reached (#602).
+    """
+    args = str_args(call, env)
+    if not args:
+        return None
+
+    o = callee(call, env)
+    if o is not None and o.startswith("re.") and o.rpartition(".")[2] in _RE_FUNCS:
+        # Early return: `re.split(p, t)` on a NON-fence pattern is not a hand-rolled
+        # parser, and must not fall through into the str `.split` branch below.
+        return "regex" if any(_is_fence_pattern(v) for v in args) else None
+
+    # The remaining shapes are str METHODS — duck-typed on purpose (the receiver is a
+    # value, so its callee never resolves). Key on the attribute name.
     func = call.func
     if not isinstance(func, ast.Attribute):
         return None
     attr = func.attr
-    args = _str_args(call, consts)
-    if not args:
-        return None
-    if _receiver_root(call) == "re" and attr in _RE_FUNCS:
-        if any(_is_fence_pattern(v) for v in args):
-            return "regex"
-        return None
     if attr in _FIND_METHODS and any("---" in v for v in args):
         return "find"
     if attr in _SPLIT_METHODS and any(_is_fence_literal(v) for v in args):
@@ -207,12 +158,12 @@ _ADVICE = {
 def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()
-    consts = _module_str_consts(tree)
+    env = module_env(tree)
 
     def visit(node: ast.AST, func_name: str) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
-        if isinstance(node, ast.Call) and (kind := _kind(node, consts)) and not _suppressed(node, lines):
+        if isinstance(node, ast.Call) and (kind := _kind(node, env)) and not _suppressed(node, lines):
             fingerprint = f"{rel}:{func_name}:{kind}"
             if fingerprint not in seen:
                 seen.add(fingerprint)

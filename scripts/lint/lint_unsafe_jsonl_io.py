@@ -62,6 +62,7 @@ import ast
 import sys
 from pathlib import Path
 
+from _astlib import ModuleEnv, callee, module_env, root_name, str_value
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -176,31 +177,13 @@ def _filehandle_names(func: ast.AST, *, append_only: bool = False) -> set[str]:
     return names
 
 
-def _root_name(expr: ast.expr) -> str | None:
-    """The root ``Name`` id of an attribute/call/subscript chain, e.g.
-    ``line.strip()`` -> ``line``; ``s`` -> ``s``."""
-    cur: ast.expr = expr
-    while True:
-        if isinstance(cur, ast.Name):
-            return cur.id
-        if isinstance(cur, ast.Attribute):
-            cur = cur.value
-        elif isinstance(cur, ast.Call):
-            cur = cur.func
-        elif isinstance(cur, ast.Subscript):
-            cur = cur.value
-        else:
-            return None
+def _is_json_call(call: ast.AST, attr: str, env: ModuleEnv) -> bool:
+    """True if ``call`` lands in ``json.<attr>`` — however it was SPELLED.
 
-
-def _is_json_call(call: ast.AST, attr: str) -> bool:
-    return (
-        isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Attribute)
-        and call.func.attr == attr
-        and isinstance(call.func.value, ast.Name)
-        and call.func.value.id == "json"
-    )
+    This used to require ``call.func.value.id == "json"``, so ``import json as j`` or
+    ``from json import loads`` made the whole gate blind to the very idiom it exists to
+    stop (#602). Resolving the callee makes every spelling one case."""
+    return isinstance(call, ast.Call) and callee(call, env) == f"json.{attr}"
 
 
 def _loop_targets(target: ast.expr) -> set[str]:
@@ -211,7 +194,7 @@ def _loop_targets(target: ast.expr) -> set[str]:
     return set()
 
 
-def _parses_line_as_json(for_node: ast.For) -> bool:
+def _parses_line_as_json(for_node: ast.For, env: ModuleEnv) -> bool:
     """True if the loop body calls ``json.loads`` on the loop line — directly or
     through an intermediate (``s = line.strip(); json.loads(s)``)."""
     derived = _loop_targets(for_node.target)
@@ -225,20 +208,20 @@ def _parses_line_as_json(for_node: ast.For) -> bool:
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
-                and _root_name(node.value) in derived
+                and root_name(node.value) in derived
             ):
                 derived.add(node.targets[0].id)
     for node in ast.walk(for_node):
         if (
-            _is_json_call(node, "loads")
+            _is_json_call(node, "loads", env)
             and node.args
-            and _root_name(node.args[0]) in derived
+            and root_name(node.args[0]) in derived
         ):
             return True
     return False
 
 
-def _writes_json_line(call: ast.Call, append_fh_names: set[str]) -> bool:
+def _writes_json_line(call: ast.Call, append_fh_names: set[str], env: ModuleEnv) -> bool:
     """True if ``call`` is ``<fh>.write(<expr containing json.dumps(...) and a
     newline literal>)`` on a local append-mode handle — the ``append_jsonl`` body."""
     func = call.func
@@ -252,10 +235,14 @@ def _writes_json_line(call: ast.Call, append_fh_names: set[str]) -> bool:
         return False
     has_dumps = has_newline = False
     for node in ast.walk(call.args[0]):
-        if _is_json_call(node, "dumps"):
+        if _is_json_call(node, "dumps", env):
             has_dumps = True
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and "\n" in node.value:
-            has_newline = True
+        elif isinstance(node, (ast.Constant, ast.Name)):
+            # Through module consts too: hoisting `NEWLINE = "\n"` is good style and
+            # must not double as the way to evade the append check.
+            value = str_value(node, env)
+            if value is not None and "\n" in value:
+                has_newline = True
     return has_dumps and has_newline
 
 
@@ -273,6 +260,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()  # one finding per (fingerprint) per file
     is_test = _is_test_module(rel)  # append check is skipped for test fixtures
+    env = module_env(tree)
 
     def report(fingerprint: str, finding: Finding) -> None:
         if fingerprint not in seen:
@@ -287,7 +275,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
         if (
             isinstance(node, ast.For)
             and _iterates_file_lines(node.iter, fh_names)
-            and _parses_line_as_json(node)
+            and _parses_line_as_json(node, env)
             and not _suppressed(node, lines)
         ):
             report(
@@ -303,7 +291,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
         if (
             not is_test
             and isinstance(node, ast.Call)
-            and _writes_json_line(node, append_fh_names)
+            and _writes_json_line(node, append_fh_names, env)
             and not _suppressed(node, lines)
         ):
             report(

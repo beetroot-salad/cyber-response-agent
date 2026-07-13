@@ -1,23 +1,21 @@
-"""Characterization + intent tests for the lint_unpinned_text_io gate (#594/#602).
+"""Tests for the lint_unpinned_text_io gate (#594/#602).
 
-Two kinds of test live here, and the difference is the point:
+The first block characterizes the detector — the net under a gate that had no
+tests at all. The second block is the bugs the resolver fixed; each was an
+``xfail(strict=True)`` when it was written, so the fix announced itself as an
+XPASS and the deleted marker is the proof.
 
-- **Characterization** — what the gate does TODAY. These are green against the
-  detector as it stands and must stay green through the resolver refactor. They
-  are the net under a rewrite of a gate that had no tests at all.
-- **`xfail(strict=True)`** — what the gate SHOULD do. Each one is the executable
-  statement of a known bug: it asserts the intended behavior and fails today, on
-  purpose. Deleting the marker is the proof the bug is fixed. No prose, no issue
-  comment — the suite itself carries the claim.
+Every one of those bugs came from ONE mistake. The old ``_open_mode`` read
+``call.args[0]`` as the mode of any ``<x>.open(...)`` — right for
+``Path.open(mode)``, wrong for every module-level opener, which is path-FIRST
+(``codecs.open(file, mode)``, ``io.open(file, mode)``, ``gzip.open(file, mode)``).
+So the gate read the FILE PATH as the mode string, and every verdict on that
+family turned on whether the path was a literal containing the letter ``b``:
+``codecs.open("f.bin", "rb")`` scanned clean because of the ``b`` in ``"f.bin"``.
+The mode's slot and default are properties of the CALLEE — which is why resolving
+the callee is what makes this gate correct, not merely alias-proof.
 
-The bugs, all rooted in ONE mistake: ``_open_mode`` reads ``call.args[0]`` as the
-mode for any ``<x>.open(...)``. That is right for ``Path.open(mode)`` and wrong for
-every module-level opener, which is path-first — ``codecs.open(file, mode)``,
-``io.open(file, mode)``, ``gzip.open(file, mode)``. So the gate reads the FILE PATH
-as the mode string, and every verdict on that family turns on whether the path is a
-literal and whether it happens to contain the letter ``b``.
-
-The gate is driven through its DI seam (added in the parent commit):
+The gate is driven through its DI seam:
   - main(argv=None, *, scope=None, baseline_path=None) -> exit code
   - _scan(root) -> list[Finding]
 """
@@ -27,8 +25,6 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-
-import pytest
 
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
@@ -177,9 +173,11 @@ def test_binary_tempfile_in_the_real_tree_stays_clean(tmp_path):
 
 
 # ===========================================================================
-# Intent — each xfail is a known bug. Deleting the marker proves the fix.
+# The bugs, now fixed. Each of these was an xfail(strict=True) in the parent
+# commit — the executable statement of a bug — and landing the resolver flipped
+# every one to XPASS. The deleted markers ARE the proof; these are plain
+# regression tests from here on.
 # ===========================================================================
-@pytest.mark.xfail(strict=True, reason="#594: from-import evades the spelled `subprocess.` check")
 def test_from_import_subprocess_is_flagged(tmp_path):
     assert _flags(tmp_path, (
         "from subprocess import run\n"
@@ -187,7 +185,6 @@ def test_from_import_subprocess_is_flagged(tmp_path):
     ))
 
 
-@pytest.mark.xfail(strict=True, reason="#602: `attr in _SUBPROCESS_FUNCS` has NO receiver check")
 def test_local_run_wrapper_is_not_flagged(tmp_path):
     """The other half of the same bug: the gate matches ANY `.run(..., text=True)`,
     so a local wrapper that has nothing to do with subprocess is a false positive."""
@@ -196,7 +193,6 @@ def test_local_run_wrapper_is_not_flagged(tmp_path):
     ))
 
 
-@pytest.mark.xfail(strict=True, reason="#594: _open_mode reads the PATH as the mode")
 def test_codecs_open_text_is_flagged(tmp_path):
     assert _flags(tmp_path, (
         "import codecs\n"
@@ -204,12 +200,10 @@ def test_codecs_open_text_is_flagged(tmp_path):
     ))
 
 
-@pytest.mark.xfail(strict=True, reason="#594: `io` is skipped, but io.open IS the builtin open")
 def test_io_open_is_flagged(tmp_path):
     assert _flags(tmp_path, "import io\ndef f(p):\n    return io.open(p)\n")
 
 
-@pytest.mark.xfail(strict=True, reason="#602: gzip.open takes encoding= in text mode")
 def test_gzip_open_text_mode_is_flagged(tmp_path):
     assert _flags(tmp_path, (
         "import gzip\n"
@@ -224,7 +218,6 @@ def test_gzip_open_binary_default_is_clean(tmp_path):
     assert not _flags(tmp_path, "import gzip\ndef f(p):\n    return gzip.open(p)\n")
 
 
-@pytest.mark.xfail(strict=True, reason="#602: 'clean' only because the letter b is in 'f.bin'")
 def test_codecs_open_binary_literal_is_not_flagged_for_the_right_reason(tmp_path):
     """`codecs.open("f.bin", "rb")` is clean today because _open_mode returns the
     FILENAME "f.bin", which contains a "b". Rename the file and it flags. This
@@ -235,7 +228,6 @@ def test_codecs_open_binary_literal_is_not_flagged_for_the_right_reason(tmp_path
     ))
 
 
-@pytest.mark.xfail(strict=True, reason="#594: tempfile text-mode openers unhandled")
 def test_tempfile_text_mode_is_flagged(tmp_path):
     assert _flags(tmp_path, (
         "import tempfile\n"
@@ -243,7 +235,6 @@ def test_tempfile_text_mode_is_flagged(tmp_path):
     ))
 
 
-@pytest.mark.xfail(strict=True, reason="#602: a hoisted mode constant defeats the inline-literal read")
 def test_hoisted_mode_constant_is_resolved(tmp_path):
     assert _flags(tmp_path, 'MODE = "r"\ndef f(p):\n    return open(p, MODE)\n')
 

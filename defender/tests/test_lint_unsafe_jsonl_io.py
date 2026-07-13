@@ -1,11 +1,11 @@
 """Characterization + intent tests for the lint_unsafe_jsonl_io gate (#602).
 
-Same two-tier shape as test_lint_unpinned_text_io.py: green tests pin what the
-detector does today (the net under the resolver refactor), and each
-`xfail(strict=True)` is the executable statement of a known bug — it asserts the
-intended behavior and fails on purpose. Deleting the marker proves the fix.
+Same two-block shape as test_lint_unpinned_text_io.py: the first block pins what
+the detector does (the net under the resolver refactor), the second is the bugs
+the resolver fixed — each written as an `xfail(strict=True)` first, so the fix
+announced itself as an XPASS and the deleted marker is the proof.
 
-The bug here is narrow and total: `_is_json_call` requires
+The bug here was narrow and total: `_is_json_call` required
 `call.func.value.id == "json"`, i.e. the callee must be SPELLED `json.loads`. An
 alias (`import json as j`) or a from-import (`from json import loads`) makes the
 whole gate blind, and the shape it exists to stop — a hand-rolled per-line
@@ -21,8 +21,6 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-
-import pytest
 
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
@@ -151,19 +149,19 @@ def test_real_tree_clean():
 
 
 # ===========================================================================
-# Intent — each xfail is a known bug. Deleting the marker proves the fix.
+# The bugs, now fixed. Each of these was an xfail(strict=True) in the parent
+# commit — the executable statement of a bug — and landing the resolver flipped
+# every one to XPASS. The deleted markers ARE the proof; these are plain
+# regression tests from here on.
 # ===========================================================================
-@pytest.mark.xfail(strict=True, reason="#602: `import json as j` evades func.value.id == 'json'")
 def test_aliased_json_reader_is_flagged(tmp_path):
     assert _flags(tmp_path, _reader("import json as j", "j.loads"))
 
 
-@pytest.mark.xfail(strict=True, reason="#602: from-import gives a Name callee, not an Attribute")
 def test_from_import_json_reader_is_flagged(tmp_path):
     assert _flags(tmp_path, _reader("from json import loads", "loads"))
 
 
-@pytest.mark.xfail(strict=True, reason="#602: `import json as j` evades the append check too")
 def test_aliased_json_appender_is_flagged(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _appender("import json as j", "j.dumps"))
