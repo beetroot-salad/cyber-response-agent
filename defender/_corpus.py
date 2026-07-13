@@ -144,7 +144,11 @@ def iter_lessons(
 # The query-template corpus
 # ---------------------------------------------------------------------------
 
-_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+# Matched per LINE, never with re.MULTILINE over the whole body — the fence state (see
+# `_sections`) is what decides whether a `## ` line is a heading at all, and a whole-body sweep
+# has no way to know it.
+_HEADING_RE = re.compile(r"^## (.+)$")
+_FENCE_RE = re.compile(r"^(?:```|~~~)")
 
 
 @dataclass(frozen=True)
@@ -180,13 +184,40 @@ class QueryTemplate:
     body: str
 
 
-def _sections(body: str) -> dict[str, str]:
-    """The ``## Heading`` → body map of a template's markdown, headings stripped."""
+def section_bodies(body: str) -> dict[str, str]:
+    """The ``## Heading`` → body map of a template's markdown, headings stripped.
+
+    Public because it has two consumers: the walk below, and ``learning/leads/lead_render.py``,
+    which renders a template's ``## Query`` for the lead author. That one carried its own
+    fence-blind copy of this parse until #598 — the same defect, one file over. One parser, so a
+    fix lands once.
+
+    A heading is only a heading OUTSIDE a fenced code block (#598). Every template's ``## Query``
+    is a fence, and a query body is free to contain a line that starts with ``## `` — a shell or
+    ES|QL comment, an embedded markdown snippet, a ``#``-prefixed literal inside a string. A
+    regex sweep for ``^## `` treats that line as the next section, which does two things at once:
+    it TRUNCATES ``## Query`` at the comment, and it invents a section named after whatever
+    followed. Both are silent. The truncated body is the one gather reads before it binds
+    ``--query-id``, and the ``(query_id, params)`` join keys on templates gather says it reused —
+    so a half-read query corrupts the join rather than failing loudly.
+
+    No template in the shipped corpus trips this today; the guard is here because the fold (#585)
+    put this parser on the runtime dispatch path, where it now runs on every gather dispatch.
+    """
+    heads: list[tuple[str, int, int]] = []   # (name, heading start, content start)
+    pos = 0
+    fenced = False
+    for line in body.splitlines(keepends=True):
+        if _FENCE_RE.match(line.lstrip()):
+            fenced = not fenced
+        elif not fenced and (m := _HEADING_RE.match(line)):
+            heads.append((m.group(1).strip(), pos, pos + len(line)))
+        pos += len(line)
+
     out: dict[str, str] = {}
-    matches = list(_SECTION_RE.finditer(body))
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        out[m.group(1).strip()] = body[m.end():end].strip()
+    for i, (name, _start, content) in enumerate(heads):
+        end = heads[i + 1][1] if i + 1 < len(heads) else len(body)
+        out[name] = body[content:end].strip()
     return out
 
 
@@ -234,7 +265,7 @@ def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
             print(f"warn: skipping {path.name} (malformed template: no `id:`)", file=sys.stderr)
             continue
         status = fm.get("status")
-        sections = _sections(body)
+        sections = section_bodies(body)
         # A draft's system dir is the GRANDparent — it sits under `{system}/_draft/`.
         parent = path.parent
         system = parent.parent.name if parent.name == "_draft" else parent.name

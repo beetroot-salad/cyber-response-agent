@@ -806,3 +806,64 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
 
     out = tools_gather._tool_template_search(deps, "widget")
     assert "zzz-last-system.the-one" in out, "the densest match was dropped for an alphabetical one"
+
+
+# ==========================================================================
+# #598 — a `## ` line inside a code fence is NOT a heading
+# ==========================================================================
+
+def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
+    """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences. Every
+    template's `## Query` IS a fence, and a query body may legitimately carry a `## ` line — a
+    shell/ES|QL comment, an embedded markdown snippet, a `#`-prefixed literal in a string. The
+    sweep read that line as the next heading, which TRUNCATED `## Query` at it and invented a
+    section named after whatever followed. Both silent, and the truncated body is the one gather
+    reads before it binds --query-id."""
+    body = (
+        "---\nid: elastic.x\nstatus: established\n---\n\n"
+        "## Goal\n\nmeasures x\n\n"
+        "## Query\n\n```esql\nFROM logs\n## not a heading — a comment inside the fence\n| LIMIT 5\n```\n\n"
+        "## What to summarize\n\n- the count\n"
+    )
+    sections = _corpus.section_bodies(body.split("---\n", 2)[2])
+
+    assert set(sections) == {"Goal", "Query", "What to summarize"}, (
+        f"a fenced `## ` line invented a section: {sorted(sections)}"
+    )
+    assert "LIMIT 5" in sections["Query"], "the ## Query body was truncated at the fenced `## ` line"
+    assert "## not a heading" in sections["Query"]     # the comment stays IN the query
+    assert sections["What to summarize"] == "- the count"
+
+
+def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
+    """The two consumers of the section parse must not disagree. `lead_render` carried its own
+    fence-blind `^## Query…(?=^## |\\Z)` copy: it truncated the section at the fenced `## ` line,
+    which left the fence UNTERMINATED, so its `_FENCE_RE` search missed and it returned the
+    truncated text verbatim as the query the lead author renders."""
+    from defender.learning.leads import lead_render
+
+    q = tmp_path / "t.md"
+    q.write_text(
+        "---\nid: elastic.x\nstatus: established\n---\n\n## Goal\n\ng\n\n"
+        "## Query\n\n```esql\nFROM logs\n## a comment, not a heading\n| LIMIT 5\n```\n\n"
+        "## Pitfalls\n\n- none\n"
+    )
+    rendered = lead_render.render_query(q, {})
+
+    assert "LIMIT 5" in rendered, "lead_render truncated the query at the fenced `## ` line"
+    assert "Pitfalls" not in rendered, "lead_render leaked the next section into the query"
+
+
+def test_598_no_shipped_template_hides_a_heading_in_a_fence():
+    """The corpus invariant the parser now enforces, pinned so it stops holding by luck: no `## `
+    line sits inside a fence, and every template resolves a non-empty `## Query` body."""
+    for r in _corpus.iter_query_templates(_REAL_CATALOG):
+        assert r.query.strip(), f"{r.path}: empty ## Query body (a section-parse casualty?)"
+        fenced = False
+        for ln in r.body.splitlines():
+            if ln.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+            elif fenced and ln.startswith("## "):
+                # Not a failure of the parser (it handles this) — a heads-up that the corpus now
+                # exercises the fence path, so the guard above is load-bearing, not decorative.
+                assert r.query.strip(), f"{r.path}: fenced `## ` line truncated the query"

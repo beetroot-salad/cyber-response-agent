@@ -34,6 +34,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
+from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -167,8 +168,14 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
     else:
         text = skill.read_text(encoding="utf-8")
-        front = text.split("---", 2)[1] if text.startswith("---") else ""
-        if re.search(rf"^\s*name:\s*defender-{re.escape(system)}\s*$", front, re.M):
+        # The canonical grammar (#591), not a hand-rolled `text.split("---", 2)`. The split was
+        # LOOSER than `_frontmatter`: it fenced on a bare `---` prefix rather than `---\n`, and it
+        # then regex-matched `name:` over the raw YAML text, so a `name:` inside a quoted string or
+        # a nested mapping satisfied it. A scaffold linter that accepts documents the real parser
+        # rejects passes files the runtime will later fail on — which is the one thing it exists
+        # not to do.
+        fm = parse_frontmatter_or_none(text) or {}
+        if fm.get("name") == f"defender-{system}":
             report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
         else:
             report.add(FAIL, f"skills/{system}/SKILL.md frontmatter name is not 'defender-{system}'")
