@@ -26,6 +26,13 @@ origins — "skip whatever resolves" would turn every resolvable receiver into a
 negative. ``zf.open(n)`` and ``p.open("r")`` are indistinguishable here by construction;
 telling them apart needs local-binding tracking, which this module deliberately does not do.
 
+Names resolve against the SCOPE they are used in, not against one flat module map (#607).
+Collecting function-local imports is necessary — a local ``import re as regex`` is a
+plausible evasion — but binding them module-wide makes any local of the same name resolve
+to a module, which is how a real ``Path.open`` in ``judge/compare.py`` came to resolve as
+``…invlang.parser.open`` and got skipped. ``module_env`` therefore builds a scope tree, and
+a local binding shadows an import exactly as far as Python says it does.
+
 The one unsound hole — ``from re import *`` — is closed outside the gates: ruff runs
 ``--select E,F`` repo-wide, so F403 already makes a star-import unmergeable. That is why
 this resolver can be sound without dataflow.
@@ -34,14 +41,17 @@ from __future__ import annotations
 
 import ast
 import builtins
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
 @dataclass(frozen=True)
 class ModuleEnv:
-    """What a module binds at import time.
+    """What one SCOPE binds — the module's, or a function's.
 
     ``imports`` — bound name -> dotted ORIGIN::
 
@@ -53,85 +63,175 @@ class ModuleEnv:
         from re import search as s  -> {"s": "re.search"}
         from .mod import y          -> {"y": ".mod.y"}     # leading dot: never collides
                                                            # with a stdlib origin
-    ``consts``  — module-level ``NAME = "<str literal>"`` bindings.
-    ``defines`` — module-level def/class/assign names, i.e. the names that are therefore
-    NOT the builtin of the same name.
+    ``consts``  — module-level ``NAME = "<str literal>"`` bindings, minus any the scope
+    rebinds (a function that reassigns ``FENCE`` no longer carries the module's value).
+    ``defines`` — the names bound to something OTHER than an import: def/class names,
+    assignments, parameters, loop and ``with`` targets. These are the names that are
+    therefore NOT the builtin, and NOT the import, of the same name.
+
+    ``scope_of`` maps every node of the tree to the env of the scope it sits in. It is
+    keyed by the node OBJECT (AST nodes hash by identity), so the map both resolves
+    correctly and keeps the nodes alive — an ``id()``-keyed map would be a
+    use-after-free waiting to alias a recycled address onto the wrong scope.
     """
 
     imports: dict[str, str]
     consts: dict[str, str]
     defines: frozenset[str]
+    scope_of: dict[ast.AST, ModuleEnv] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
 
-def module_env(tree: ast.AST) -> ModuleEnv:
-    """Build the import/const/define environment for one module.
+def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
+    """``(imports, other bindings)`` made DIRECTLY in one scope.
 
-    Imports are collected from the WHOLE tree, not just ``tree.body``: a function-local
-    ``import re as regex`` is a plausible evasion, and a module-level-only resolver would
-    reproduce the exact blind spot this module exists to close.
-
-    The cost of that choice is that the map is SCOPE-BLIND, and the collision shape is
-    real, not hypothetical: ``learning/pipeline/judge/compare.py`` binds ``p`` to a module
-    inside ``_invlang()`` (``from ...invlang import parser as p``) while an unrelated
-    function 200 lines away uses ``p`` as a local ``Path``. A call on that local therefore
-    resolves to a module origin. Callers must not read "the origin resolved" as "the
-    receiver is a module" — see ``opener_slot``, which skips only via a POSITIVE table for
-    exactly this reason. Making the resolver scope-aware is the real fix (#607).
-
-    ``consts`` stays MODULE-LEVEL only, deliberately asymmetric: an import unambiguously
-    binds a name to a module, a local string assignment does not, and widening it is a
-    detector-semantics change with real false-positive risk on live code.
+    Walks the scope's own statements and stops at every nested function/lambda/class: a
+    name bound inside a nested scope belongs to THAT scope, not this one. The nested def's
+    NAME, however, is bound here — so it is collected before the descent is cut off.
     """
     imports: dict[str, str] = {}
+    bound: set[str] = set()
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(child.name)  # the def binds its name HERE; its body is elsewhere
+                continue
+            if isinstance(child, ast.Lambda):
+                continue  # params + body are a scope of their own
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    if alias.asname:
+                        imports[alias.asname] = alias.name
+                    else:
+                        # `import a.b.c` binds only `a`, and `a` refers to package `a`.
+                        root = alias.name.split(".")[0]
+                        imports[root] = root
+                continue
+            if isinstance(child, ast.ImportFrom):
+                # `level` > 0 is a relative import; keep the leading dots so a relative
+                # `.re` can never be mistaken for the stdlib `re`.
+                prefix = "." * child.level + (child.module or "")
+                for alias in child.names:
+                    if alias.name == "*":
+                        continue  # unresolvable — but ruff F403 makes it unmergeable
+                    imports[alias.asname or alias.name] = f"{prefix}.{alias.name}"
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                bound.add(child.id)          # assign, augassign, for/with target, walrus
+            elif isinstance(child, ast.arg):
+                bound.add(child.arg)         # a parameter
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                bound.add(child.name)        # `except E as name`
+            walk(child)
+
+    walk(scope)
+    return imports, bound
+
+
+def _module_consts(tree: ast.AST) -> dict[str, str]:
+    """Top-level ``NAME = "<str literal>"`` bindings.
+
+    MODULE-LEVEL only, deliberately asymmetric with ``imports``: an import unambiguously
+    binds a name to a module, a function-local string assignment does not, and widening it
+    is a detector-semantics change with real false-positive risk on live code (#605).
+    """
     consts: dict[str, str] = {}
-    defines: set[str] = set()
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.asname:
-                    imports[alias.asname] = alias.name
-                else:
-                    # `import a.b.c` binds only `a`, and `a` refers to package `a`.
-                    root = alias.name.split(".")[0]
-                    imports[root] = root
-        elif isinstance(node, ast.ImportFrom):
-            # `level` > 0 is a relative import; keep the leading dots so a relative
-            # `.re` can never be mistaken for the stdlib `re`.
-            prefix = "." * node.level + (node.module or "")
-            for alias in node.names:
-                if alias.name == "*":
-                    continue  # unresolvable — but ruff F403 makes it unmergeable
-                imports[alias.asname or alias.name] = f"{prefix}.{alias.name}"
-
     for node in getattr(tree, "body", []):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            defines.add(node.name)
-            continue
         target: ast.expr | None = None
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
         elif isinstance(node, ast.AnnAssign):
             target = node.target
-        else:
-            continue
-        if not isinstance(target, ast.Name):
-            continue
-        defines.add(target.id)
-        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            consts[target.id] = node.value.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(getattr(node, "value", None), ast.Constant)
+            and isinstance(node.value.value, str)  # type: ignore[attr-defined]
+        ):
+            consts[target.id] = node.value.value  # type: ignore[attr-defined]
+    return consts
 
-    return ModuleEnv(imports=imports, consts=consts, defines=frozenset(defines))
+
+def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
+    """The env INSIDE one function: the enclosing env, with this scope's own bindings
+    applied. A local (non-import) binding SHADOWS an inherited import — that is the whole
+    point — and a local import rebinds on top of it."""
+    local_imports, bound = _scope_bindings(func)
+    imports = {n: o for n, o in parent.imports.items() if n not in bound}
+    imports.update(local_imports)
+    return ModuleEnv(
+        imports=imports,
+        consts={n: v for n, v in parent.consts.items() if n not in bound},
+        defines=frozenset((set(parent.defines) | bound) - set(local_imports)),
+        scope_of=parent.scope_of,
+    )
+
+
+def _tag(node: ast.AST, env: ModuleEnv, scope_of: dict[ast.AST, ModuleEnv]) -> None:
+    """Record, for every node, the env of the scope it sits in."""
+    for child in ast.iter_child_nodes(node):
+        scope_of[child] = env
+        # A ClassDef is NOT in the chain: Python does not close methods over the class
+        # body, so a method's enclosing scope is the module (or the enclosing function).
+        # Recursing with the same env is exactly that. Class-body bindings are therefore
+        # invisible — accepted, and vanishingly rare in this tree.
+        _tag(child, _child_env(child, env) if isinstance(child, _SCOPES) else env, scope_of)
+
+
+def module_env(tree: ast.AST) -> ModuleEnv:
+    """Build the SCOPE TREE for one module and return its root (module-level) env.
+
+    Every node is tagged with the env of the scope it sits in, so ``callee``/``origin``/
+    ``str_value`` resolve a name the way Python would — against the innermost scope that
+    binds it — while callers keep passing the one env this returns.
+
+    Scope-awareness is what makes collecting function-local imports SAFE. A local
+    ``import re as regex`` is a plausible evasion, so it must be seen; but binding it
+    module-wide (the pre-#607 resolver did) makes any local of the same name resolve to a
+    module. That is not hypothetical: ``learning/pipeline/judge/compare.py`` binds ``p`` to
+    a module inside ``_invlang()`` while ``write_comparison_files()`` uses ``p`` as a
+    ``Path``, so ``p.write_text(...)`` resolved to ``…invlang.parser.write_text``. Scoped,
+    the local ``p`` shadows the import in the function that rebinds it, and nowhere else.
+
+    Note the two directions of "unresolvable", which is why a bail-out was never an option
+    here: for ``lint_unpinned_text_io`` a None callee means FLAG (the duck-typed
+    ``p.open()``), while for the jsonl and frontmatter gates it means SKIP. Only real
+    scoping is safe for all three at once.
+    """
+    scope_of: dict[ast.AST, ModuleEnv] = {}
+    imports, bound = _scope_bindings(tree)
+    root = ModuleEnv(
+        imports=imports,
+        consts=_module_consts(tree),
+        defines=frozenset(bound),
+        scope_of=scope_of,
+    )
+    _tag(tree, root, scope_of)
+    return root
+
+
+def _env_at(node: ast.AST, env: ModuleEnv) -> ModuleEnv:
+    """The env of the scope ``node`` sits in. Falls back to ``env`` for a node that was
+    not tagged — a synthetic node, or one from a different tree."""
+    return env.scope_of.get(node, env)
 
 
 def origin(node: ast.expr, env: ModuleEnv) -> str | None:
-    """The dotted origin of a PURE ``Name.attr.attr`` chain rooted at an imported name.
+    """The dotted origin of a PURE ``Name.attr.attr`` chain rooted at an imported name,
+    resolved against the scope ``node`` sits in.
 
     ``os`` -> ``"os"``; ``regex`` -> ``"re"``; ``re.error`` -> ``"re.error"``.
-    ``p`` -> None (a local value). ``zipfile.ZipFile(p)`` -> None: a Call in the chain
+    ``p`` -> None (a local value — including one that merely SHARES a name with an import
+    bound in some other function). ``zipfile.ZipFile(p)`` -> None: a Call in the chain
     makes it a VALUE, not an attribute path — never walk through one, or the value's
     origin gets confused with its constructor's.
     """
+    return _origin(node, _env_at(node, env))
+
+
+def _origin(node: ast.expr, env: ModuleEnv) -> str | None:
+    """``origin`` against an ALREADY-resolved scope env."""
     parts: list[str] = []
     cur: ast.expr = node
     while isinstance(cur, ast.Attribute):
@@ -139,6 +239,8 @@ def origin(node: ast.expr, env: ModuleEnv) -> str | None:
         cur = cur.value
     if not isinstance(cur, ast.Name):
         return None
+    if cur.id in env.defines:
+        return None  # a local/param of that name shadows the import
     base = env.imports.get(cur.id)
     if base is None:
         return None
@@ -154,21 +256,28 @@ def callee(call: ast.Call, env: ModuleEnv) -> str | None:
         open(...)      [not imported, not shadowed]        -> "builtins.open"
         p.open("r") / p.read_text() / zf.open(n)           -> None   <- DUCK-TYPED
 
-    The ``builtins.<id>`` fallback fires ONLY in call position, and only for a Name that
-    is in neither ``env.imports`` nor ``env.defines`` — so a parameter named ``input`` or
-    a module-level ``def open(...)`` cannot fabricate an origin.
+    Everything resolves against the scope the CALL sits in, so a function-local import is
+    seen inside that function and nowhere else, and a local that merely shares a name with
+    an import elsewhere in the file stays a local (#607).
+
+    ``env.defines`` — the names bound to something that is not an import — is consulted
+    BEFORE ``env.imports``, so a shadowing local wins over an ambiguous module-level
+    binding. The ``builtins.<id>`` fallback fires ONLY in call position, and only for a
+    Name in neither map, so a parameter named ``input`` or a ``def open(...)`` cannot
+    fabricate an origin.
     """
+    env = _env_at(call, env)
     func = call.func
     if isinstance(func, ast.Name):
-        if func.id in env.imports:
-            return env.imports[func.id]
         if func.id in env.defines:
             return None
+        if func.id in env.imports:
+            return env.imports[func.id]
         if func.id in _BUILTIN_NAMES:
             return f"builtins.{func.id}"
         return None
     if isinstance(func, ast.Attribute):
-        return origin(func, env)
+        return origin(func, env)  # re-resolves func's scope — the same one, by construction
     return None
 
 
@@ -227,11 +336,12 @@ def arg_at(call: ast.Call, index: int, keyword: str) -> ast.expr | None:
 
 
 def str_value(node: ast.expr | None, env: ModuleEnv) -> str | None:
-    """A single expression's string value — an inline literal or a module constant."""
+    """A single expression's string value — an inline literal, or a module constant that
+    the node's own scope has not rebound to something else."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.Name):
-        return env.consts.get(node.id)
+        return _env_at(node, env).consts.get(node.id)
     return None
 
 
@@ -266,12 +376,12 @@ def opener_slot(call: ast.Call, env: ModuleEnv) -> tuple[int, str] | None:
 
     An origin is skipped only via the POSITIVE ``NO_ENCODING_OPENERS`` table — never
     because it merely resolved. "It resolved, so the receiver is a module, so it is not a
-    duck-typed opener" is FALSE twice over: the receiver may be an imported OBJECT
-    (``PATHS.lessons_dir.open()`` resolves to ``defender._paths.PATHS.lessons_dir.open``),
-    or a local that happens to collide with an import elsewhere in the file (``compare.py``
-    binds ``p`` to a module in one function and to a ``Path`` in another). Reading either
-    as "not an opener" silently drops the Path-like text open these gates most exist to
-    catch, and the empty baseline would stay green while it happened.
+    duck-typed opener" is FALSE: the receiver may be an imported OBJECT, and
+    ``PATHS.lessons_dir.open()`` duly resolves to
+    ``defender._paths.PATHS.lessons_dir.open``. Reading that as "not an opener" silently
+    drops the Path-like text open these gates most exist to catch, and the empty baseline
+    would stay green while it happened. Scoping (#607) does not close this — ``PATHS`` is
+    a genuine import, never rebound — so the positive table is what carries it.
 
     So: a tabled origin gets the callee's real slot/default; any OTHER ``.open`` on a
     receiver falls back to the duck opener. The cost is a possible false alarm on an

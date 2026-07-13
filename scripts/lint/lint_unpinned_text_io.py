@@ -52,12 +52,10 @@ gate cannot read (guessing would make it unusable — a hoisted ``MODE = "r"`` m
 IS resolved, so tidying a literal into a constant is not an escape hatch).
 
 An ``.open`` whose origin is NOT in the opener tables is treated as the duck-typed opener,
-never skipped. "It resolved, so the receiver is a module, so it is not a Path" is false
-twice over — the receiver may be an imported OBJECT (``PATHS.lessons_dir.open()``), or a
-local colliding with an import elsewhere in the file (``_astlib.module_env`` is scope-blind;
-``judge/compare.py`` binds ``p`` to a module in one function and to a ``Path`` in another,
-#607). Skipping on "it resolved" would drop exactly the Path-like open this gate exists for,
-with the empty baseline staying green throughout. Skips come from a POSITIVE table only.
+never skipped. "It resolved, so the receiver is a module, so it is not a Path" is false: the
+receiver may be an imported OBJECT — ``PATHS.lessons_dir.open()`` resolves cleanly, and
+skipping it would drop exactly the Path-like open this gate exists for, with the empty
+baseline staying green throughout. Skips come from a POSITIVE table only.
 
 Known limitation — a handle bound to a local: ``zf = zipfile.ZipFile(p); zf.open(n)``. The
 receiver is a VALUE, so its callee is unresolvable and indistinguishable from the Path-like

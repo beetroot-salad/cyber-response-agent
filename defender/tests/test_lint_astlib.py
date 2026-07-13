@@ -128,6 +128,82 @@ def test_function_local_import_is_seen():
     assert astlib.callee(call, env) == "re.search"
 
 
+# --- scoping (#607): a binding reaches exactly as far as Python says it does ---------
+def test_a_function_local_import_does_not_leak_into_a_sibling_function():
+    """The other half of #607. Collecting a local import must not BIND it module-wide —
+    in a sibling function that name is whatever that function makes it."""
+    astlib = _load()
+    tree = ast.parse(
+        "def a():\n"
+        "    import json as j\n"
+        "    return j.loads('{}')\n"
+        "\n"
+        "def b(j):\n"
+        "    return j.loads('{}')\n"          # `j` is a PARAMETER here — not the module
+    )
+    env = astlib.module_env(tree)
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    ]
+    inside, sibling = calls[0], calls[1]
+    assert astlib.callee(inside, env) == "json.loads"
+    assert astlib.callee(sibling, env) is None
+
+
+def test_a_parameter_shadows_a_module_import():
+    call, env, astlib = _first_call(
+        "import json\ndef f(json):\n    return json.loads(x)\n"
+    )
+    assert astlib.callee(call, env) is None
+
+
+def test_a_parameter_cannot_fabricate_a_builtin_origin():
+    """`defines` now carries params and locals, so a parameter named `open` shadows the
+    builtin the way Python does."""
+    call, env, astlib = _first_call("def f(open, p):\n    return open(p)\n")
+    assert astlib.callee(call, env) is None
+
+
+def test_a_module_import_still_reaches_into_every_function():
+    """The load-bearing non-regression: scoping must not make the jsonl/frontmatter gates
+    BLIND. For those two, an unresolvable callee means SKIP — so a module-level import
+    failing to reach a nested call would silently switch the gate off."""
+    astlib = _load()
+    tree = ast.parse(
+        "import json\n"
+        "class C:\n"
+        "    def m(self, line):\n"                 # a method: class body is NOT in the chain
+        "        def inner(s):\n"                  # and a nested closure
+        "            return json.loads(s)\n"
+        "        return inner(line)\n"
+    )
+    env = astlib.module_env(tree)
+    call = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    )
+    assert astlib.callee(call, env) == "json.loads"
+
+
+def test_a_local_const_rebind_does_not_carry_the_module_value():
+    """`consts` is scoped the same way: a function that rebinds FENCE to something the
+    gate cannot read must not keep resolving it to the module's literal."""
+    astlib = _load()
+    tree = ast.parse(
+        'FENCE = "---\\n"\n'
+        "def keeps(t):\n"
+        "    return t.startswith(FENCE)\n"
+        "def rebinds(t, sep):\n"
+        "    FENCE = sep\n"
+        "    return t.startswith(FENCE)\n"
+    )
+    env = astlib.module_env(tree)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    assert astlib.str_args(calls[0], env) == ["---\n"]
+    assert astlib.str_args(calls[1], env) == []
+
+
 # --- args ---------------------------------------------------------------------
 def test_str_args_reads_positional_keyword_tuple_and_consts():
     astlib = _load()
@@ -207,25 +283,49 @@ def test_opener_table_matches_the_real_signatures():
         assert "encoding" in params, f"{origin} must actually take encoding="
 
 
-def test_opener_slot_never_skips_merely_because_the_origin_resolved():
-    """`callee() is not None` does NOT mean "the receiver is a module". It may be an
-    imported OBJECT, or a local colliding with an import elsewhere in the file. Reading a
-    resolved origin as "not an opener" drops the Path-like open the gates exist for."""
+def _open_call(src: str):
     astlib = _load()
-    for src in (
-        "from defender._paths import PATHS\nPATHS.lessons_dir.open()\n",
-        "from x import parser as p\ndef w(d):\n    p = d / 'f'\n    return p.open('w')\n",
-    ):
-        tree = ast.parse(src)
-        env = astlib.module_env(tree)
-        call = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Attribute)
-            and n.func.attr == "open"
-        )
-        assert astlib.callee(call, env) is not None, "precondition: the origin resolves"
-        assert astlib.opener_slot(call, env) == astlib.DUCK_OPENER
+    tree = ast.parse(src)
+    env = astlib.module_env(tree)
+    call = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "open"
+    )
+    return call, env, astlib
+
+
+def test_opener_slot_never_skips_merely_because_the_origin_resolved():
+    """`callee() is not None` does NOT mean "the receiver is a module" — it may be an
+    imported OBJECT. `PATHS` is a module-level Path-holder, so `PATHS.lessons_dir.open()`
+    resolves; reading "it resolved" as "not an opener" would drop a real text open.
+
+    Scoping (#607) does NOT close this one — `PATHS` is never rebound, so it still
+    resolves — which is why opener_slot's positive-table rule stays load-bearing."""
+    call, env, astlib = _open_call(
+        "from defender._paths import PATHS\nPATHS.lessons_dir.open()\n"
+    )
+    assert astlib.callee(call, env) is not None, "precondition: the origin resolves"
+    assert astlib.opener_slot(call, env) == astlib.DUCK_OPENER
+
+
+def test_a_local_shadows_an_import_bound_in_another_function():
+    """#607. `module_env` collects function-local imports (a local `import re as regex` is
+    a plausible evasion), but binds them to THEIR OWN SCOPE. Before scoping, the `p` bound
+    by one function's import made every other function's local `p` resolve to that module —
+    live in judge/compare.py, and it turned a real `Path.open` into a missed violation."""
+    call, env, astlib = _open_call(
+        "def _invlang():\n"
+        "    from defender.skills.invlang import parser as p\n"
+        "    return p\n"
+        "\n"
+        "def w(d):\n"
+        "    p = d / 'f'\n"
+        "    return p.open('w')\n"
+    )
+    assert astlib.callee(call, env) is None, "the local `p` is a Path, not the module"
+    assert astlib.opener_slot(call, env) == astlib.DUCK_OPENER
 
 
 def test_open_mode_falls_back_to_the_callees_own_default():
