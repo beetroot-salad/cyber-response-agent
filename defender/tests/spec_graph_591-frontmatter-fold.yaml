@@ -1,0 +1,545 @@
+schema_version: 1
+design: "issue #591 + decisions comment (2026-07-12) + fork resolutions (2026-07-13, recorded in handoff.forks)"
+base: 995f58e3
+
+# ============================================================================
+# DEMANDS — the spec proper. All outcomes are POST-fold contracts.
+# ============================================================================
+demands:
+  # ---- #0 return-value contracts -------------------------------------------
+  - id: d0_predicted_disposition
+    kind: behavior
+    form: test
+    outcome: {nl: "predicted_disposition(run_dir) returns fm['disposition'] when report.md soft-reads, parses under the canonical grammar, and the disposition is in DISPOSITION_ENUM; it returns None when the file is missing, the read raises TEXT_READ_ERRORS, the text is not canonical frontmatter, or the disposition is absent/non-str/non-enum."}
+    binds: [predicted_disposition, report_md.domain, DISPOSITION_ENUM.domain, text_read_guard]
+  - id: d0_read_description
+    kind: behavior
+    form: test
+    outcome: {nl: "read_description(system, skills_dir) returns the stripped non-empty description string from the SKILL.md's canonical frontmatter mapping; it returns None when the file is missing, the resolved path escapes skills_dir, the read raises TEXT_READ_ERRORS, the text is not canonical frontmatter, the document is not a mapping, or description is missing/non-str/whitespace-only."}
+    binds: [read_description, skill_md.domain, text_read_guard]
+  - id: d0_descriptor_catalog_seam
+    kind: seam
+    form: test
+    outcome: {nl: "descriptor_catalog(skills_dir=None, adapters_dir=None) accepts injectable directories defaulting to the module constants, keys its lru_cache on those arguments, and returns one '- `{system}`: {description}' line per adapter-backed system whose SKILL.md yields a description, or None when no line survives; tree-varying tests call cache_clear()."}
+    binds: [descriptor_catalog, descriptor_catalog_seam]
+  - id: d0_parse_report
+    kind: behavior
+    form: test
+    outcome: {nl: "parse_report(run_dir) returns {} when report.md is missing or the read raises TEXT_READ_ERRORS; {'body': <the whole text>} when the text does not parse under the canonical grammar (no fence, no closer, invalid YAML, or non-mapping — the old three-way fallback collapses); and {**fm, 'body': <canonical .strip()'d body>} when it does."}
+    binds: [parse_report, report_md.domain, text_read_guard]
+  - id: d0_check_skill
+    kind: behavior
+    form: test
+    outcome: {nl: "check_skill's name check PASSes exactly when SKILL.md soft-reads, parses under the canonical grammar, and fm.get('name') == f'defender-{system}' as a top-level mapping key; any other state (missing file keeps its distinct FAIL row; unreadable bytes, unfenced, no closer, malformed YAML, non-mapping, nested name) records FAIL without crashing."}
+    binds: [check_skill, skill_md.domain, text_read_guard]
+  - id: d0_strip_frontmatter
+    kind: behavior
+    form: test
+    outcome: {nl: "_strip_frontmatter(text) returns split_frontmatter(text)'s stripped body when the text parses under the canonical grammar, and returns the input text unchanged when parsing raises FrontmatterError."}
+    binds: [strip_frontmatter, invlang_skill_md]
+  - id: d0_lint_gate
+    kind: behavior
+    form: test
+    outcome: {nl: "lint_hand_rolled_frontmatter scans defender/ *.py (skipping EXCLUDED_DIRS, test modules, and defender/_frontmatter.py), emits one Finding per (file, function, detector kind) for hand-rolled fence-parse call sites, runs the shared _baseline.gate ratchet, and exits 0 when no finding is new, 1 when one is, 2 when the scope directory is missing."}
+    binds: [lint_hand_rolled_frontmatter, lint_scope_tree.domain, lint_baseline.domain, lint_exit_code.domain]
+
+  # ---- grammar parity + canonical anchor -----------------------------------
+  - id: d_parity_grammar
+    kind: parity
+    form: test
+    outcome: {nl: "Over the shared corpus of report texts — well-formed, junk-on-opening-fence, trailing-space opener, four-dash opener, CRLF, no closer, loose closer ('--- junk'), empty mapping ('---\\n---\\n'), non-mapping list, second fence block in the body, non-str disposition, non-enum disposition — predicted_disposition returns non-None exactly when parse_frontmatter_or_none yields a mapping whose disposition is a str in DISPOSITION_ENUM; since secondary now calls the same function, the primary and secondary metrics accept/reject identical documents by construction."}
+    binds: [predicted_disposition, canonical_grammar, report_md.domain, "report_md.access[eval-read]", "report_md.access[loop-read]", "report_md.access[viewer-read]"]
+  - id: d_canonical_grammar_pin
+    kind: behavior
+    form: test
+    outcome: {nl: "A dedicated test file pins the canonical grammar directly: CRLF is normalized first; '--- \\n' and '----\\n' openers are rejected; the closing fence is a substring search that accepts '\\n----', '\\n---text', and '\\n--- ' and a closer at EOF without a trailing newline; '---\\n---' (empty mapping) raises; the body is .strip()'d on both sides; raw is the text between the fences; FrontmatterError is a ValueError; parse_frontmatter_or_none absorbs FrontmatterError to None and nothing else."}
+    binds: [canonical_grammar]
+    rejected:
+      - {nl: "Rely on the five site tests to pin the canonical grammar transitively — a future grammar widening would silently move all five sites with nothing pinning the center."}
+
+  # ---- site A / eval metric (consolidated) ----------------------------------
+  - id: d_read_head_removed
+    kind: seam
+    form: test
+    outcome: {nl: "evals/_pipeline no longer defines read_head_disposition; evals/secondary resolves the head disposition through held_out.predicted_disposition (the module object secondary uses is the same function held_out exports)."}
+    binds: [secondary_cli, predicted_disposition]
+  - id: d_junk_opener_none
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A report whose opening fence line carries content ('---disposition: benign\\n...') — accepted by the old loose parser — yields None from predicted_disposition, so secondary scores the head as failed ('no eligible disposition (got None)') instead of counting it."}
+    binds: [predicted_disposition, "report_md.domain.distinguished[junk-opener]"]
+    rejected:
+      - {nl: "Keep the loose leading fence — would keep secondary and the loop's normalize_disposition on two grammars, the divergence #591 exists to kill."}
+  - id: d_crlf_report_parses
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A CRLF-authored report (binary-written fixture) parses deterministically to its disposition. SURVIVAL PIN, not a flip: Path.read_text's universal-newline translation converts CRLF before any parser sees it, so the old parser was already masked; the parser-level CRLF normalization is pinned directly by d_canonical_grammar_pin."}
+    binds: [predicted_disposition, "report_md.domain.distinguished[crlf]"]
+  - id: d_non_enum_none
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A canonically-parseable report with disposition 'escalate' (a str outside DISPOSITION_ENUM) yields None — the consolidation onto predicted_disposition adds the enum filter to the secondary path."}
+    binds: [predicted_disposition, "DISPOSITION_ENUM.domain.distinguished[non-enum-str]"]
+  - id: d_non_utf8_report_none
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A report.md containing non-UTF8 bytes yields None from predicted_disposition (the widened read guard treats TEXT_READ_ERRORS as unparseable) instead of raising UnicodeDecodeError — aligning held_out with its own 'unparseable counts as wrong' accounting."}
+    binds: [predicted_disposition, "report_md.domain.distinguished[non-utf8]", text_read_guard]
+  - id: d_wellformed_report_unflipped
+    kind: behavior
+    form: test
+    outcome: {nl: "A canonically well-formed report ('---\\ndisposition: benign\\n---\\nbody') still yields 'benign' — the fold must not flip a canonically-valid report (the old offset-3 slice difference is a no-op for well-formed docs)."}
+    binds: [predicted_disposition, "report_md.domain.distinguished[well-formed]"]
+  - id: d_secondary_import_safe
+    kind: behavior
+    form: test
+    outcome: {nl: "Importing evals/secondary (which now pulls in held_out) under pytest does not re-exec the interpreter and does not raise."}
+    binds: [secondary_cli, predicted_disposition]
+
+  # ---- site B / skill descriptions ------------------------------------------
+  - id: d_unfenced_skill_none
+    kind: negative
+    form: test
+    outcome: {nl: "An unfenced SKILL.md whose body contains two mid-document '---' thematic breaks around attacker-chosen text yields read_description None, and the system is absent from descriptor_catalog(skills_dir=<fake tree>, adapters_dir=<fake adapters>) output — the bogus text reaches neither surface."}
+    binds: [read_description, "skill_md.domain.distinguished[interior-fence-unfenced]", descriptor_catalog, "interacts(descriptor_catalog->gather_prompt)"]
+  - id: d_fenced_skill_desc
+    kind: behavior
+    form: test
+    outcome: {nl: "POSITIVE CONTROL for d_unfenced_skill_none: a well-fenced SKILL.md yields its description from read_description and a '- `{system}`: {description}' line in descriptor_catalog over the same fake tree."}
+    binds: [read_description, descriptor_catalog, "skill_md.domain.distinguished[well-formed]"]
+  - id: d_trailing_space_opener_none
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A SKILL.md opening with '--- \\n' (trailing whitespace, accepted by the old regex) yields None."}
+    binds: [read_description, "skill_md.domain.distinguished[trailing-space-opener]"]
+  - id: d_crlf_skill_gains_description
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A CRLF-authored SKILL.md (binary-written fixture) yields its description. SURVIVAL PIN — the design's 'gains a description' framing was wrong: read_text's newline translation already masked the old regex's LF requirement; no observable flip exists at this site."}
+    binds: [read_description, "skill_md.domain.distinguished[crlf]"]
+  - id: d_block_scalar_fence_truncation
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A description block scalar containing an UNindented '---' line is truncated at that line by the canonical substring closer (the inherited quirk, pinned as-is); an INDENTED '  ---' line stays inside the value intact."}
+    binds: [read_description, "skill_md.domain.distinguished[block-scalar-unindented-fence]", canonical_grammar]
+  - id: d_traversal_guard_regression
+    kind: negative
+    form: test
+    outcome: {nl: "A system name that path-escapes skills_dir ('../../secret') still yields None through the new parse path (the relative_to guard is upstream of the parse and survives the fold); the paired positive control is d_fenced_skill_desc on a normal system name."}
+    binds: [read_description, "skill_md.access[system-name]"]
+  - id: d_non_utf8_skill_none
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A SKILL.md containing non-UTF8 bytes yields None (widened read guard: TEXT_READ_ERRORS covers UnicodeDecodeError, which the old 'except OSError' let escape into the gather dispatch)."}
+    binds: [read_description, "skill_md.domain.distinguished[non-utf8]", text_read_guard]
+  - id: d_block_scalar_multiparagraph_green
+    kind: behavior
+    form: test
+    outcome: {nl: "A '|' block-scalar description with a blank line between two indented paragraphs still yields both paragraphs (canonical hands yaml.safe_load the same interior the old regex did) — the existing green test's behavior survives the fold."}
+    binds: [read_description, "skill_md.domain.distinguished[multiparagraph-block-scalar]"]
+  - id: d_catalog_survival
+    kind: survival
+    form: test
+    outcome: {nl: "descriptor_catalog() over the REAL defender/skills tree still emits a line for every adapter-backed system (all real SKILL.md files are canonically fenced, so removing the loose grammar drops none of them)."}
+    binds: [descriptor_catalog, skill_md]
+
+  # ---- site C / viewer -------------------------------------------------------
+  - id: d_malformed_yaml_collapse
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A fenced report with invalid YAML returns {'body': <the whole text, fences visible>} — the old fm={} + sliced-body middle case collapses into the fallback."}
+    binds: [parse_report, "report_md.domain.distinguished[malformed-yaml]"]
+    rejected:
+      - {nl: "Preserve fm={} + sliced body — defeats the one-fallback-contract decision."}
+  - id: d_non_mapping_collapse
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A fenced report whose frontmatter is a YAML list returns {'body': <the whole text>}."}
+    binds: [parse_report, "report_md.domain.distinguished[non-mapping]"]
+  - id: d_crlf_viewer_fix
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A CRLF-authored report returns its parsed frontmatter plus body through parse_report. SURVIVAL PIN — the 'latent viewer bug' framing was wrong: read_text translates CRLF before startswith ever ran, so the old code already parsed these; no flip."}
+    binds: [parse_report, "report_md.domain.distinguished[crlf]"]
+  - id: d_parse_report_body_strip
+    kind: behavior
+    form: test
+    outcome: {nl: "The returned body is the canonical .strip()'d body (both sides), where the old slice only lstrip'd newlines."}
+    binds: [parse_report, "report_md.domain.distinguished[well-formed]"]
+
+  # ---- site D / scaffold linter ----------------------------------------------
+  - id: d_no_closer_fail
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A SKILL.md with an opening fence but no closer now FAILs the name check (the old split()[1] tail let the regex PASS it)."}
+    binds: [check_skill, "skill_md.domain.distinguished[no-closer]"]
+  - id: d_nested_name_fail
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A name nested under a parent mapping key ('map:\\n  name: defender-x') FAILs — fm.get('name') sees only top-level keys (the old '^\\\\s*name:' regex matched it)."}
+    binds: [check_skill, "skill_md.domain.distinguished[nested-name]"]
+    rejected:
+      - {nl: "Keep the regex over split_frontmatter's raw slice — preserves the nested-key laxity."}
+  - id: d_uniform_indent_name_pass
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A uniformly-indented top-level key ('  name: defender-x' as the whole document) still parses to a mapping with 'name' present and PASSes — distinct member from nested-name."}
+    binds: [check_skill, "skill_md.domain.distinguished[uniform-indent-name]"]
+  - id: d_scaffold_wellformed_pass
+    kind: survival
+    form: test
+    outcome: {nl: "A well-formed scaffold SKILL.md ('---\\nname: defender-foo\\n---\\n## Execution...') still records PASS for the name check — the fold must not flip a valid scaffold."}
+    binds: [check_skill, "skill_md.domain.distinguished[well-formed]"]
+  - id: d_unreadable_skill_fail_row
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A SKILL.md whose read raises TEXT_READ_ERRORS (non-UTF8 bytes) records a FAIL row instead of crashing the linter (widened read guard); a missing file keeps its distinct 'is missing' FAIL row."}
+    binds: [check_skill, "skill_md.domain.distinguished[non-utf8]", text_read_guard]
+
+  # ---- site E / orient -------------------------------------------------------
+  - id: d_closer_at_eof_strips
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "Text whose closing fence is the last line with no trailing newline is now stripped (the old regex required '\\n---\\n' and leaked the fence into the ORIENT pack)."}
+    binds: [strip_frontmatter, "invlang_skill_md.domain.distinguished[closer-at-eof]"]
+  - id: d_no_fence_unchanged
+    kind: behavior
+    form: test
+    outcome: {nl: "Text with no leading fence (or any FrontmatterError input, e.g. '---\\n---\\n' empty mapping) is returned unchanged — the except branch returns the raw input, never a parsed body."}
+    binds: [strip_frontmatter, "invlang_skill_md.domain.distinguished[no-fence]"]
+
+  # ---- lint gate --------------------------------------------------------------
+  - id: d_lint_flags_each_idiom
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "POSITIVE CONTROL for the lint negatives: each detector-kind member — find/rfind/index with a '\\n---' constant; split/rsplit/partition with a '---'-leading constant; a startswith('---') reader; re.compile/search/match/sub/fullmatch/finditer/split with a fence pattern ('^---', '\\\\A---', '\\n---') — placed in a synthetic non-test production file under the scanned tree produces a finding naming the file, and the gate exits 1 against an empty baseline."}
+    binds: [lint_hand_rolled_frontmatter, "lint_scope_tree.domain.distinguished[each-detector-kind]"]
+  - id: d_lint_writer_fstrings_clean
+    kind: negative
+    form: test
+    outcome: {nl: "Sources that only EMIT fences in string constants — writer f-strings ('---\\nid: ...'), separator constants ('--- stdout ---'), docstrings — produce zero findings: the detector keys on parse-shaped Call nodes, never on Constant/JoinedStr content. Paired positive control: d_lint_flags_each_idiom."}
+    binds: [lint_hand_rolled_frontmatter, "lint_scope_tree.domain.distinguished[writer-fstring]"]
+  - id: d_lint_tests_excluded
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A detector idiom inside a test module is excluded from the scan (house _is_test_module rule) — zero findings."}
+    binds: [lint_hand_rolled_frontmatter, "lint_scope_tree.domain.distinguished[test-module]"]
+  - id: d_lint_canonical_exempt
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "defender/_frontmatter.py's own fence arithmetic is never flagged — the canonical module is exempt by name."}
+    binds: [lint_hand_rolled_frontmatter, "lint_scope_tree.domain.distinguished[canonical-module]"]
+  - id: d_lint_suppression
+    kind: behavior
+    form: test
+    outcome: {nl: "A '# lint-frontmatter: ok — <reason>' marker on ANY line within the flagged node's [lineno..end_lineno] span suppresses the finding; a marker outside the span does not; a bare marker without reason text also suppresses (house substring rule)."}
+    binds: [lint_hand_rolled_frontmatter, suppression_marker]
+  - id: d_lint_real_tree_clean
+    kind: survival
+    form: test
+    outcome: {nl: "The gate run over the REAL post-fold working tree emits zero findings and exits 0 against the shipped EMPTY baseline — the executable form of 'baseline empty once the five sites land'."}
+    binds: [lint_hand_rolled_frontmatter, lint_scope_tree, "lint_baseline.domain.distinguished[empty]"]
+  - id: d_lint_baseline_lifecycle
+    kind: behavior
+    form: test
+    outcome: {nl: "--update-baseline merges current fingerprints (preserving annotations, dropping resolved) and exits 0; a subsequent plain run exits 0; a stale baseline entry whose finding was fixed keeps plain runs at 0 until the next update; a MISSING baseline file behaves as empty (all current findings are new)."}
+    binds: [lint_hand_rolled_frontmatter, "lint_baseline.domain.distinguished[update-flow]", "lint_baseline.domain.distinguished[missing]", "lint_baseline.domain.distinguished[stale-entry]"]
+  - id: d_lint_exit2_scope_missing
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A missing scope directory exits 2 (infrastructure fault, distinct from findings)."}
+    binds: [lint_hand_rolled_frontmatter, "lint_exit_code.domain.distinguished[2]"]
+  - id: d_lint_syntax_error_skipped
+    kind: domain-outcome
+    form: test
+    outcome: {nl: "A syntax-error .py file in the scanned tree is silently skipped (house precedent: except (OSError, SyntaxError) around ast.parse) — no crash, no finding from that file."}
+    binds: [lint_hand_rolled_frontmatter, "lint_scope_tree.domain.distinguished[syntax-error-file]"]
+  - id: d_lint_fingerprint_dedup
+    kind: behavior
+    form: test
+    outcome: {nl: "Two occurrences of the SAME detector kind in one function dedup to one finding (fingerprint = file:function:kind, no line number); two DIFFERENT kinds in one function are two findings."}
+    binds: [lint_hand_rolled_frontmatter, lint_scope_tree]
+
+  # ---- clauses + waivers (recorded decisions, not tests) -----------------------
+  - id: c_lint_ci_step
+    kind: behavior
+    form: clause
+    outcome: {nl: "ci.yml's lint job gains an explicitly-listed step 'defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py' — implementation-time wiring outside a tests-only diff's reach; verified at PR review."}
+    binds: [ci_lint_job, lint_hand_rolled_frontmatter]
+  - id: c_narrow_except
+    kind: behavior
+    form: clause
+    outcome: {nl: "Every fold fallback catches FrontmatterError exactly — never bare ValueError (which would also swallow UnicodeDecodeError, itself a ValueError). Under the widened soft reads the two are observationally near-equivalent, so this is pinned as a review clause plus the canonical pin that FrontmatterError is a ValueError."}
+    binds: [canonical_grammar, text_read_guard]
+  - id: w_containment_detector
+    kind: negative
+    form: waiver
+    outcome: {nl: "WAIVED (fork resolution 'wide, calls only'): '\\n---' in-containment Compare nodes are documented out of the detector's scope — flagging them risks false positives on separator checks; the gate's module docstring records the exclusion."}
+    binds: [lint_hand_rolled_frontmatter]
+  - id: w_gather_prompt_layer
+    kind: negative
+    form: waiver
+    outcome: {nl: "WAIVED: the d_unfenced_skill_none negative is driven to the descriptor_catalog string, not through _gather_prompt — the catalog->prompt edge is unchanged verbatim append (provenance: code, no delta) and driving it needs a full deps object; the catalog binding covers the last changed hop."}
+    binds: ["interacts(descriptor_catalog->gather_prompt).payload"]
+  - id: w_vestigial_hook_surface
+    kind: behavior
+    form: waiver
+    outcome: {nl: "WAIVED: main()/extract_system/build_augmented_prompt (the unwired hook entrypoint) are untouched by the fold; their existing tests keep them green; no new demands."}
+    binds: [read_description]
+
+# ============================================================================
+# STRUCTURE
+# ============================================================================
+structure:
+  axes: [doc_text, system, detector_kind, file_class, baseline_state]
+  actors:
+    - {id: predicted_disposition, frame: leg, provenance: design}
+    - {id: read_description, frame: leg, provenance: design}
+    - {id: descriptor_catalog, frame: composition, provenance: design}
+    - {id: parse_report, frame: leg, provenance: design}
+    - {id: check_skill, frame: leg, provenance: design}
+    - {id: strip_frontmatter, frame: leg, provenance: design}
+    - {id: lint_hand_rolled_frontmatter, frame: leg, provenance: design}
+    - {id: secondary_cli, frame: composition, provenance: code}     # evals/secondary.py (re-exec gate; drives predicted_disposition post-fold)
+    - {id: held_out_cli, frame: composition, provenance: code}      # evals/held_out.py (already canonical; gains soft read)
+    - {id: run_investigation, frame: composition, provenance: code} # run.py: drives orientation + visualize post-step (re-execs into .venv)
+    - {id: learn_loop, frame: composition, provenance: code}        # loop.py: re-renders visualize pages
+    - {id: gather_dispatch, frame: composition, provenance: code}   # runtime/tools_gather.py: calls descriptor_catalog in-process
+    - {id: validate_scaffold_cli, frame: composition, provenance: code} # __main__ argv=[prog, system]; exit 0/1/2
+    - {id: orientation, frame: composition, provenance: code}       # runtime/orient.py orientation(): calls strip_frontmatter
+    - {id: ci_lint_job, frame: composition, provenance: code}       # .github/workflows/ci.yml lint job: explicit per-gate steps
+  boundaries:
+    - id: canonical_grammar          # defender/_frontmatter.py's contract — the one grammar
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the document-text grammar: CRLF-normalized, strict '---\\n' opener, substring '\\n---' closer, YAML mapping required, body .strip()'d"}
+          default: well-formed
+          distinguished: [well-formed, junk-opener, trailing-space-opener, four-dash-opener, crlf, no-closer, loose-closer, empty-mapping, non-mapping, second-fence-block, block-scalar-unindented-fence, closer-at-eof, no-fence, empty-file]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: report_md
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "runtime-agent-authored report text; the doc_text members above plus disposition-value members"}
+          default: well-formed
+          distinguished: [well-formed, junk-opener, crlf, no-closer, loose-closer, empty-mapping, non-mapping, malformed-yaml, second-fence-block, non-str-disposition, non-utf8, missing-file]
+          falsy_valid: false
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            eval-read:   {trust: derived, constraints: [canonical-grammar, enum-filter, soft-read]}
+            loop-read:   {trust: derived, constraints: [canonical-grammar, enum-filter]}
+            viewer-read: {trust: derived, constraints: [canonical-grammar, soft-read]}
+            judge-raw:   {trust: derived, constraints: []}   # reads raw text, never fence-parses — no parity obligation
+    - id: skill_md
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "lead-author-drain-authored SKILL.md text (LLM-written; description lands verbatim in the gather prompt)"}
+          default: well-formed
+          distinguished: [well-formed, interior-fence-unfenced, trailing-space-opener, crlf, no-closer, nested-name, uniform-indent-name, block-scalar-unindented-fence, multiparagraph-block-scalar, non-str-description, empty-description, non-utf8, missing-file]
+          falsy_valid: false
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            descriptor-read: {trust: derived, constraints: [canonical-grammar, traversal-guard, soft-read]}
+            scaffold-read:   {trust: operator, constraints: [canonical-grammar, soft-read]}
+            system-name:     {trust: attacker-influenced, constraints: [traversal-guard]}   # the `system` slot in a gather dispatch
+    - id: invlang_skill_md
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "repo-committed invlang grammar SKILL; stripped body inlined into the ORIENT pack (prose reference; no downstream parser)"}
+          default: well-formed
+          distinguished: [well-formed, closer-at-eof, no-fence, crlf]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: text_read_guard             # the widened read contract (fork B4 resolution)
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "TEXT_READ_ERRORS = (OSError, UnicodeDecodeError) from defender/_io.py — the one tuple a soft read absorbs; each folded site maps it to its own fallback value"}
+          default: utf-8
+          distinguished: [non-utf8]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: DISPOSITION_ENUM
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "closed disposition enum from learning.core.config; predicted_disposition filters on membership"}
+          default: benign
+          distinguished: [non-enum-str]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: descriptor_catalog_seam     # fork X4 resolution: injectable dirs
+      provenance: design
+      facets: {}
+    - id: gather_prompt
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: request, source: template:GATHER_PROMPT, slots: {catalog: descriptor_catalog}}
+          invariants: [all-slots-bound]
+          nl: "the gather subagent's user prompt; the catalog is appended verbatim (trusted, unsalted) under the systems-of-record header"
+    - id: lint_scope_tree
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the file population the gate scans: defender/ *.py minus EXCLUDED_DIRS"}
+          default: production-file
+          distinguished: [each-detector-kind, writer-fstring, test-module, canonical-module, syntax-error-file, suppressed-site]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: lint_baseline
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "snapshot ratchet JSON beside the gate; membership-only fingerprint check"}
+          default: empty
+          distinguished: [empty, missing, stale-entry, update-flow]
+          falsy_valid: true
+          documented_alternatives: []
+        identity:
+          key_axes: [detector_kind, file_class]
+          evidence: {nl: "fingerprint = 'rel:function:kind' read off _baseline.Finding usage in the two exemplar gates (no line numbers, dedup via seen-set)"}
+          derivations: []
+          sharing: unique-key
+    - id: lint_exit_code
+      provenance: design
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "process exit contract"}
+          default: 0
+          distinguished: [0, 1, 2]
+          falsy_valid: true
+          documented_alternatives: []
+    - id: suppression_marker
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "'# lint-frontmatter: ok' substring on any line of the node span; reason text conventional, not enforced"}
+          default: absent
+          distinguished: [on-span, off-span, bare-no-reason]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: ci_lint_step
+      provenance: design
+      facets: {}
+  interacts:
+    - {from: predicted_disposition, to: report_md, mode: read, via: fs, provenance: design}
+    - {from: predicted_disposition, to: DISPOSITION_ENUM, mode: read, via: api, provenance: code}
+    - {from: predicted_disposition, to: text_read_guard, mode: read, via: api, provenance: design}
+    - {from: read_description, to: skill_md, mode: read, via: fs, provenance: design}
+    - {from: read_description, to: text_read_guard, mode: read, via: api, provenance: design}
+    - {from: descriptor_catalog, to: descriptor_catalog_seam, mode: read, via: api, provenance: design}
+    - {from: descriptor_catalog, to: gather_prompt, mode: invoke, via: api, provenance: code, sends: payload, transport: llm}
+    - {from: parse_report, to: report_md, mode: read, via: fs, provenance: design}
+    - {from: parse_report, to: text_read_guard, mode: read, via: api, provenance: design}
+    - {from: check_skill, to: skill_md, mode: read, via: fs, provenance: design}
+    - {from: check_skill, to: text_read_guard, mode: read, via: api, provenance: design}
+    - {from: strip_frontmatter, to: invlang_skill_md, mode: read, via: api, provenance: design}
+    - {from: predicted_disposition, to: canonical_grammar, mode: read, via: api, provenance: design}
+    - {from: read_description, to: canonical_grammar, mode: read, via: api, provenance: design}
+    - {from: parse_report, to: canonical_grammar, mode: read, via: api, provenance: design}
+    - {from: check_skill, to: canonical_grammar, mode: read, via: api, provenance: design}
+    - {from: strip_frontmatter, to: canonical_grammar, mode: read, via: api, provenance: design}
+    - {from: lint_hand_rolled_frontmatter, to: lint_scope_tree, mode: read, via: fs, provenance: design}
+    - {from: lint_hand_rolled_frontmatter, to: lint_baseline, mode: write, via: fs, provenance: design, interpolates: [detector_kind, file_class]}
+    - {from: lint_hand_rolled_frontmatter, to: suppression_marker, mode: read, via: fs, provenance: design}
+    - {from: ci_lint_job, to: ci_lint_step, mode: invoke, via: argv, provenance: design}
+  drives:
+    - {from: secondary_cli, to: predicted_disposition, provenance: design, multiplicity: serial}
+    - {from: held_out_cli, to: predicted_disposition, provenance: code, multiplicity: serial}
+    - {from: gather_dispatch, to: descriptor_catalog, provenance: code, multiplicity: serial}
+    - {from: run_investigation, to: orientation, provenance: code, multiplicity: serial}
+    - {from: orientation, to: strip_frontmatter, provenance: code, multiplicity: serial}
+    - {from: run_investigation, to: parse_report, provenance: code, multiplicity: serial}
+    - {from: learn_loop, to: parse_report, provenance: code, multiplicity: serial}
+    - {from: validate_scaffold_cli, to: check_skill, provenance: code, multiplicity: serial}
+    - {from: ci_lint_job, to: lint_hand_rolled_frontmatter, provenance: design, multiplicity: serial}
+
+# ============================================================================
+# GATE
+# ============================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # reconciliation ran; unknowns (detector set, lint-test form, read-guard scope) resolved as holes below
+    - {rule: R1, fired: false}   # the one sends-edge (descriptor_catalog->gather_prompt) is provenance:code, unchanged by the delta; catalog content pinned by d_unfenced/d_fenced; prompt layer waived (w_gather_prompt_layer)
+    - {rule: R2, fired: false}   # lint_baseline has one writer, serial (--update-baseline); no multi-writer identity boundary in the delta
+    - {rule: R3, fired: true}    # report_md multi-via (eval/loop/viewer) + skill_md two-via (descriptor/scaffold): canonical-grammar parity per via
+    - {rule: R4, fired: true}    # domain facets: doc_text members per boundary, DISPOSITION_ENUM non-enum member, lint file_class/baseline/exit members
+    - {rule: R5, fired: true}    # removals: read_head_disposition (live dependent secondary.py:281) + the loose grammars (live consumers: real corpus). Judgment extension considered: the tightening is fail-closed at every site (None/FAIL/failed-row); no security-critical caller becomes constructible-unsafe; the widened read guard converts a crash path to the sites' explicit fallbacks.
+  obligations:
+    - {rule: R3, element: "report_md.access[eval-read]", witness: "secondary read the same report.md through a looser grammar than the loop", discharged_by: d_parity_grammar}
+    - {rule: R3, element: "report_md.access[viewer-read]", witness: "parse_report's grammar differed from canonical on opener/CRLF/body-slice", discharged_by: d0_parse_report}
+    - {rule: R3, element: "skill_md.access[descriptor-read]", witness: "read_description's unanchored regex accepted docs canonical rejects", discharged_by: d_unfenced_skill_none}
+    - {rule: R3, element: "skill_md.access[scaffold-read]", witness: "check_skill's split admitted closer-less and nested-name docs", discharged_by: d_no_closer_fail}
+    - {rule: R4, element: "report_md.domain.distinguished[junk-opener]", witness: "the loose-only member the old parser accepted", discharged_by: d_junk_opener_none}
+    - {rule: R4, element: "report_md.domain.distinguished[crlf]", witness: "CRLF member flips outcome at two sites", discharged_by: d_crlf_report_parses}
+    - {rule: R4, element: "report_md.domain.distinguished[non-utf8]", witness: "decode-error member: crash vs fallback", discharged_by: d_non_utf8_report_none}
+    - {rule: R4, element: "DISPOSITION_ENUM.domain.distinguished[non-enum-str]", witness: "consolidation adds the enum filter to the secondary path", discharged_by: d_non_enum_none}
+    - {rule: R4, element: "skill_md.domain.distinguished[interior-fence-unfenced]", witness: "the issue's headline bogus-description member", discharged_by: d_unfenced_skill_none}
+    - {rule: R4, element: "skill_md.domain.distinguished[block-scalar-unindented-fence]", witness: "canonical substring-closer truncation quirk, confirmed by execution", discharged_by: d_block_scalar_fence_truncation}
+    - {rule: R4, element: "skill_md.domain.distinguished[nested-name]", witness: "name-check tightening member (dict lookup)", discharged_by: d_nested_name_fail}
+    - {rule: R4, element: "skill_md.domain.distinguished[uniform-indent-name]", witness: "the member the ensemble confused with nested-name", discharged_by: d_uniform_indent_name_pass}
+    - {rule: R4, element: "canonical_grammar.domain.distinguished[empty-mapping]", witness: "lens-completeness gap: bound only inside the parity corpus", discharged_by: d_canonical_grammar_pin}
+    - {rule: R4, element: "lint_scope_tree.domain.distinguished[each-detector-kind]", witness: "one positive per detector kind or the negative controls are vacuous", discharged_by: d_lint_flags_each_idiom}
+    - {rule: R4, element: "lint_scope_tree.domain.distinguished[writer-fstring]", witness: "the false-positive boundary the census named", discharged_by: d_lint_writer_fstrings_clean}
+    - {rule: R4, element: "lint_scope_tree.domain.distinguished[syntax-error-file]", witness: "house precedent: silent skip", discharged_by: d_lint_syntax_error_skipped}
+    - {rule: R4, element: "lint_baseline.domain.distinguished[missing]", witness: "_load_entries returns {} on missing file", discharged_by: d_lint_baseline_lifecycle}
+    - {rule: R5, element: predicted_disposition, witness: "read_head_disposition removed; dependent secondary.py:281", discharged_by: d_read_head_removed}
+    - {rule: R5, element: skill_md, witness: "loose grammar removed; live consumer = the real skills tree via descriptor_catalog", discharged_by: d_catalog_survival}
+    - {rule: R5, element: invlang_skill_md, witness: "orientation depends on the strip; real file must keep stripping", discharged_by: d0_strip_frontmatter}
+    - {rule: R5, element: lint_scope_tree, witness: "the post-fold tree itself must be clean or the empty baseline is a lie", discharged_by: d_lint_real_tree_clean}
+  holes:
+    - {rule: R0, element: text_read_guard, resolution: "HUMAN (fork B4): widen the four sites' reads to the TEXT_READ_ERRORS soft-read contract — decode errors become each site's fallback value", resolved_to: d_non_utf8_report_none}
+    - {rule: R0, element: predicted_disposition, resolution: "HUMAN (fork X2): consolidate — delete read_head_disposition, secondary imports held_out.predicted_disposition (gains the enum filter)", resolved_to: d_read_head_removed}
+    - {rule: R0, element: check_skill, resolution: "HUMAN (fork D2): dict lookup — fm.get('name') on the parsed mapping; nested-name tightens to FAIL", resolved_to: d_nested_name_fail}
+    - {rule: R0, element: lint_hand_rolled_frontmatter, resolution: "HUMAN (fork L1): the gate gets pytest coverage (departs from the no-lint-tests house convention); the ci.yml step stays a clause", resolved_to: d0_lint_gate}
+    - {rule: R0, element: lint_scope_tree, resolution: "HUMAN (fork L4): detector set = wide, calls only (find/rfind/index, split/rsplit/partition, startswith, fence regexes); in-containment waived", resolved_to: d_lint_flags_each_idiom}
+    - {rule: R0, element: descriptor_catalog_seam, resolution: "HUMAN (fork X4): add the seam — descriptor_catalog(skills_dir=None, adapters_dir=None), cache keyed on args", resolved_to: d0_descriptor_catalog_seam}
+    - {rule: R0, element: canonical_grammar, resolution: "AUTO (strong-author fork X3, uncontroversial): add the dedicated direct grammar pin", resolved_to: d_canonical_grammar_pin}
+  pre_discharged:
+    - {rule: R5, element: invlang_skill_md, by: "existing green tests/test_orient.py:39 (orientation strips frontmatter) — kept green, characterized by d0_strip_frontmatter"}
+    - {rule: R4, element: "skill_md.domain.distinguished[multiparagraph-block-scalar]", by: "existing green test_inject_system_skill_description.py:74 — re-pinned at the read_description level by d_block_scalar_multiparagraph_green"}
+
+# check_actors waivers are stems; rationale here:
+# - replay_actor: re-executes run.py in a frozen-generation worktree; it drives the changed
+#   parsers (orient/visualize) only transitively through the same run_investigation composition
+#   already modelled, and the fold relocates no path anchors — pure text parsers, no tree-anchored constants.
+# - harness_lead: re-executes lead_author (a skill_md WRITER, modelled as the boundary's author);
+#   it reads none of the five folded parsers and no demand's outcome varies by which tree it runs in.
+actor_waivers: [replay_actor, harness_lead]
+
+# ============================================================================
+# HANDOFF
+# ============================================================================
+handoff:
+  forks:
+    - "B4 read-guard scope: RESOLVED widen — sites A(consolidated)/B/C/D guard reads with TEXT_READ_ERRORS (defender/_io.py); decode errors become each site's fallback (None / None / {} / FAIL row). Site E already soft-reads at its caller."
+    - "X2 site-A shape: RESOLVED consolidate — read_head_disposition deleted; evals/secondary.py imports predicted_disposition from held_out (held_out verified import-safe: no module-level re-exec). Secondary path gains the DISPOSITION_ENUM filter; error text reads got None."
+    - "D2 name check: RESOLVED dict lookup — fm.get('name') == f'defender-{system}'; nested-name FAILs (tightens), uniform-indent top-level key still PASSes."
+    - "L1 lint-test form: RESOLVED pytest the gate — new defender/tests/test_lint_hand_rolled_frontmatter.py drives the gate's scan seam + a real-tree clean run; ci.yml wiring stays clause c_lint_ci_step."
+    - "L4 detector set: RESOLVED wide-calls-only — find/rfind/index('\\n---'), split/rsplit/partition('---'…), startswith('---') readers, fence regexes; in-containment Compare nodes waived (w_containment_detector)."
+    - "X4 catalog seam: RESOLVED add seam — descriptor_catalog(skills_dir=None, adapters_dir=None), lru_cache keyed on args; the unfenced-SKILL negative drives the catalog end-to-end; tree-varying tests cache_clear()."
+    - "X3 canonical grammar pin: AUTO-ACCEPTED — dedicated defender/tests/test_frontmatter.py pins the grammar directly (parity anchor)."
+    - "Placement (all-lens blind spot): every CI-load-bearing test lives under defender/tests/ — CI collects only tests/ + learning/; evals/ is dark (a parity test colocated in evals/ would silently never run)."
+  deviations:
+    - "Formal-slot closed-vocabulary check was manual (the #537 spec_graph linter does not exist yet)."
+    - "The lint tests pin concrete seams the implementation must honor: main(argv=None, *, scope=None, baseline_path=None) keyword overrides and _scan(root) with fingerprints computed relative to ROOT (not a fixed REPO_ROOT) — required so the gate is drivable on injected tmp trees (fork L1)."
+    - "Author-stage spec correction: the three CRLF demands were downgraded from behavior-change flips to survival pins — Path.read_text's universal-newline translation already masked CRLF from every old parser (verified empirically); the grounding brief and design both overstated this axis. Parser-level CRLF normalization is pinned in test_frontmatter.py."
+    - "Several site-A demands (d_junk_opener_none, d_non_enum_none, d_wellformed_report_unflipped, d_parity_grammar) are GREEN against HEAD by design: held_out.predicted_disposition is already canonical; the consolidation makes SECONDARY adopt it. The red site-A pins are d_read_head_removed and d_non_utf8_report_none."
