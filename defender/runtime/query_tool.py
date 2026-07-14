@@ -215,6 +215,37 @@ class QueryCapture(AbstractCapability[Any]):
             )
         return validate_params(verbs[verb], params)
 
+    def _reject_guarded(
+        self, system: str, verb: str, params: dict, model_query_id: Any = None,
+    ) -> tuple[str | None, str | None]:
+        """`_reject`, plus the one fault it can raise instead of returning: `_reject` IMPORTS the
+        adapter module (the registry imports lazily, at first use), so this is the first place a
+        broken `{system}_cli.py` can surface — and it sits OUTSIDE the handler's catch-all, so an
+        escape here unwinds `agent.iter()` with no row and no breaker outcome.
+
+        Returns `(reason, None)` for a clean admission check, `(None, detail)` when the module
+        would not load.
+
+        `BaseException`, not `Exception`: a module whose import body calls `sys.exit()` — a
+        top-level `parse_args()`, which is what every one of these files looked like before #611
+        and what `connect` still scaffolds from — raises `SystemExit`, which is not an
+        `Exception`. That is the same fatal shape the execute catch-all already guards, one seam
+        earlier.
+
+        A module that will not import is a BROKEN DATA SOURCE, so it files as infra (2), not as
+        the model's mistake: the model cannot fix it, and exit 64 would only loop it. The breaker
+        takes that one system down and the investigation continues against the others — which is
+        exactly what the taxonomy already means by "the system is down".
+        """
+        try:
+            return self._reject(system, verb, params, model_query_id), None
+        except CONTROL_FLOW_EXCEPTIONS:
+            raise
+        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            raise
+        except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
+            return None, f"{system} adapter failed to load: {type(e).__name__}: {e}"
+
     # --- the two hooks ------------------------------------------------------
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
@@ -261,36 +292,14 @@ class QueryCapture(AbstractCapability[Any]):
         # 2. Our own validation (the registry + the query_id shape). It writes its row BEFORE it
         # raises: `ModelRetry` bypasses `on_tool_execute_error` AND `after_tool_execute`, so a
         # write placed after the raise would simply never happen.
-        try:
-            reason = self._reject(system, verb, params, model_query_id)
-        except CONTROL_FLOW_EXCEPTIONS:
-            raise
-        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            raise
-        except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
-            # BaseException, not Exception: `_reject` IMPORTS the adapter module, and a module
-            # whose import body calls `sys.exit()` (a top-level `parse_args()` — what every one
-            # of these files looked like before #611, and what `connect` scaffolds from) raises
-            # SystemExit, which is not an Exception. Catching only Exception would let it unwind
-            # out of `agent.iter()`: no row, no breaker outcome, run dead — the exact failure the
-            # execute catch-all below exists to prevent, one seam earlier.
-            # A `{system}_cli.py` that will not import is a BROKEN DATA SOURCE: not the model's
-            # mistake (it cannot fix it, so exit 64 would loop it), and not a reason to kill the
-            # run. File it as infra (2) — the breaker takes that ONE system down and the
-            # investigation continues against the others, which is exactly what the taxonomy
-            # already means by "the system is down".
-            #
-            # It has to be caught HERE because this call sits outside the handler's catch-all:
-            # the resolution+import happens during validation, so an ImportError escaped
-            # `wrap_tool_execute` entirely and unwound the run. The registry only imports a
-            # module at first use, so this is also the first place the failure can surface.
-            detail = f"{system} adapter failed to load: {type(e).__name__}: {e}"
+        reason, load_error = self._reject_guarded(system, verb, params, model_query_id)
+        if load_error is not None:
             row, text = await self._record(
                 deps, system=system, verb=verb,
                 query_id=resolve_query_id(system, verb, None), params=params, payload=None,
-                exit_code=DEFAULT_FAULT_EXIT, detail=detail,
+                exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
             )
-            return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, detail)
+            return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
         if reason is not None:
             await self._record(
                 deps, system=system, verb=verb,
