@@ -1,0 +1,80 @@
+schema_version: 1
+design: "issues #613 + #614 — the two seams the #596/#609 review extracted, landed in the same PR (#610)"
+base: fbc72810  # review commit on spec/596-609-trace-lesson-hardening
+
+# Review-stage spec: these demands pin the CONSOLIDATION (one safe-load seam, one
+# breaker set) plus the call sites the #609 pass left exposed. The #596/#609 demands
+# in spec_graph_596_609.yaml keep pinning the original behavior through the fold —
+# every d_b*/d_a* test stayed green across this refactor by construction.
+
+# ── Demands — the spec proper ────────────────────────────────────────────────
+demands:
+  # #613 — the seam
+  - {id: s1_seam_folds_flood, kind: behavior, form: test,
+     outcome: {nl: "defender._yaml.safe_load surfaces flow AND block nesting floods as
+       yaml.YAMLError with a bounded message (never a bare RecursionError), and a healthy
+       doc still parses in the same process afterwards."},
+     binds: ["yaml_seam.domain.distinguished[flood_flow]",
+             "yaml_seam.domain.distinguished[flood_block]"]}
+  - {id: s2_seam_is_drop_in, kind: behavior, form: test,
+     outcome: {nl: "Control: values, types, and None-on-empty behave exactly like
+       yaml.safe_load — the seam adds the fold and nothing else."},
+     binds: ["yaml_seam.domain.distinguished[healthy]"]}
+  # #613 — previously exposed call sites, each pinned at its own posture
+  - {id: s3_oracle_flood_unprocessable, kind: behavior, form: test,
+     outcome: {nl: "A flooded LLM oracle reply raises the typed RunUnprocessable the
+       docstring promises (raw reply embedded), not a bare RecursionError."},
+     binds: ["interacts(oracle_parse->yaml_seam)"]}
+  - {id: s4_ground_truth_flood_dead_letters, kind: behavior, form: test,
+     outcome: {nl: "read_ground_truth on a flooded ground_truth.yaml raises RunUnprocessable
+       (dead-letter the run) instead of crashing the drain — parity with its already-guarded
+       sibling at the judge-validate site."},
+     binds: ["interacts(orchestrate_gt->yaml_seam)"]}
+  - {id: s5_held_out_walk_survives, kind: survival, form: test,
+     outcome: {nl: "held_out_runs: one corrupt ground_truth.yaml costs that one run's row
+       (warn to stderr), not the whole held-out report; the healthy sibling is found."},
+     binds: ["interacts(held_out_walk->yaml_seam)"]}
+  - {id: s6_secondary_fixtures_survive, kind: survival, form: test,
+     outcome: {nl: "load_held_out_fixtures: the flooded fixture is skipped with a warn, the
+       healthy sibling loads — the same walk-survival property at the secondary eval."},
+     binds: ["interacts(secondary_fixtures->yaml_seam)"]}
+  - {id: s7_visualize_flood_none, kind: behavior, form: test,
+     outcome: {nl: "The renderer's load_yaml treats a flooded run YAML like any malformed
+       one: None, not a crash of the whole visualization."},
+     binds: ["interacts(visualize_shim->yaml_seam)"]}
+  # #614 — the breaker set and the sibling emitters
+  - {id: t1_breakers_derived_not_asserted, kind: behavior, form: test,
+     outcome: {nl: "The _tsv breaker set equals {every codepoint str.splitlines treats as a
+       boundary} ∪ {tab}, DERIVED by sweeping the full codepoint space — a Python version
+       that widens splitlines fails the pin instead of silently reopening the forgery."},
+     binds: ["tsv_flatten.domain"]}
+  - {id: t2_sibling_emitters_flatten, kind: behavior, form: test,
+     outcome: {nl: "lessons_fm, lessons_env_retrieve and lessons_actor_index (previously on
+       the 2-char replace) hold trace_lesson's property: a value carrying every breaker
+       forges no extra row and no extra column."},
+     binds: ["interacts(lessons_fm->tsv_flatten)", "interacts(lessons_env_retrieve->tsv_flatten)",
+             "interacts(lessons_actor_index->tsv_flatten)"]}
+
+# ── Structure ────────────────────────────────────────────────────────────────
+structure:
+  concepts:
+    - id: yaml_seam        # defender/_yaml.py safe_load — the one RecursionError fold
+    - id: tsv_flatten      # defender/_tsv.py flatten_cell — the one breaker set
+  actors:
+    - {id: oracle_parse,        frame: leg, provenance: code}   # oracle/sample.parse_lead_events
+    - {id: orchestrate_gt,      frame: leg, provenance: code}   # core/orchestrate.read_ground_truth
+    - {id: held_out_walk,       frame: leg, provenance: code}   # evals/held_out.held_out_runs + report
+    - {id: secondary_fixtures,  frame: leg, provenance: code}   # evals/secondary.load_held_out_fixtures
+    - {id: visualize_shim,      frame: leg, provenance: code}   # scripts/visualize load_yaml
+    - {id: lessons_fm,          frame: leg, provenance: code}
+    - {id: lessons_env_retrieve, frame: leg, provenance: code}
+    - {id: lessons_actor_index, frame: leg, provenance: code}
+  notes:
+    - "Sites NOT pinned by a dedicated test, and why: evals/_pipeline.py judge parse and the
+       four #609 sites (curator, lessons author, ticket enrichment x2) are covered by their
+       existing d_b10–b14 posture pins in test_hardening_596_609.py, which stayed green
+       across the migration onto the seam; judge_equivalence.py:90 and judge/compare.py:91
+       keep raw yaml.safe_load under `except Exception`, which already covers RecursionError
+       — migrating them would be import churn with no behavior change."
+    - "case_ticket._load_mapping is on the seam (flood → CaseTicketError) but unpinned: the
+       mapping is repo-maintained, not LLM-authored; the seam pin (s1) carries the fold."

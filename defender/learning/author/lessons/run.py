@@ -65,6 +65,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 # Subprocess driver + repo-lock helpers shared with author_actor.py.
 from defender.learning.author import curator as _curator
 from defender.learning.author import shared as _shared
+from defender._yaml import safe_load
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
@@ -186,8 +187,9 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     if not refs.is_file():
         return None
     try:
-        doc = yaml.safe_load(refs.read_text(encoding="utf-8"))
+        doc = safe_load(refs.read_text(encoding="utf-8"))
     except yaml.YAMLError:
+        # Including a nesting flood — the shared seam folds it into YAMLError (#609/#613).
         return None
     if not isinstance(doc, dict):
         return None

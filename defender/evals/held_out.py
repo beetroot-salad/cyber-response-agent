@@ -28,6 +28,7 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._yaml import safe_load
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
 from defender._run_paths import RunPaths
@@ -68,7 +69,14 @@ def held_out_runs(runs_dir: Path) -> list[Path]:
         gt = child / "ground_truth.yaml"
         if not gt.is_file():
             continue
-        doc = yaml.safe_load(gt.read_text(encoding="utf-8")) or {}
+        try:
+            doc = safe_load(gt.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as e:
+            # One corrupt ground_truth.yaml must cost that one run's row, not the whole
+            # held-out report (#613; the #595 walk-survival class).
+            print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — skipped",
+                  file=sys.stderr)
+            continue
         if isinstance(doc, dict) and doc.get("held_out") is True:
             out.append(child)
     return out
@@ -83,8 +91,12 @@ def report(runs_dir: Path) -> int:
     by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
     failures: list[tuple[str, str]] = []
     for run_dir in runs:
-        gt_doc = yaml.safe_load((run_dir / "ground_truth.yaml").read_text(encoding="utf-8"))
-        true_disp = gt_doc.get("disposition")
+        try:
+            gt_doc = safe_load((run_dir / "ground_truth.yaml").read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            gt_doc = {}  # held_out_runs parsed it a moment ago; a re-read race costs one row
+        # "?" (not None): a missing disposition still needs a printable, sortable class key.
+        true_disp = str(gt_doc.get("disposition") or "?")
         pred = predicted_disposition(run_dir)
         verdict = "ok" if pred == true_disp else "wrong"
         if pred is None:

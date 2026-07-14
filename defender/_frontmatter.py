@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from defender._yaml import safe_load
+
 
 class FrontmatterError(ValueError):
     """Text has no parseable leading '---' YAML-mapping frontmatter fence."""
@@ -43,7 +45,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str, str]:
         raise FrontmatterError("missing closing '---' frontmatter fence")
     raw = text[4:end]
     try:
-        fm = yaml.safe_load(raw)
+        fm = safe_load(raw)
     except yaml.YAMLError as e:
         raise FrontmatterError(f"frontmatter is not valid YAML: {e}") from e
     if not isinstance(fm, dict):

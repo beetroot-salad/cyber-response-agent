@@ -41,6 +41,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._tsv import flatten_cell as _flatten
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
 
@@ -49,6 +50,25 @@ LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 # Sorts an unparseable-ts load row after every parseable one (see _earliest_load).
 _DT_MAX = datetime.max.replace(tzinfo=UTC)
+
+
+def _echo_value(raw: object) -> str:
+    """Quoted, flattened, clamped rendering of an untrusted value for one-line output.
+
+    The quoting makes empty/whitespace-only breakage visible; the clamp (first 80
+    flattened chars + ``…``) keeps a garbage payload from bloating the row."""
+    flat = _flatten(str(raw))
+    if len(flat) > 80:
+        flat = flat[:80] + "…"
+    return f'"{flat}"'
+
+
+def _unwindowed_reason(raw: object) -> str:
+    """Why a valid lesson can't be windowed: never stamped vs stamped garbage —
+    different curator fixes, so the marker distinguishes them (#596)."""
+    if raw is None:  # absent key and explicit ``created_at: null`` both read as never stamped
+        return "no created_at"
+    return f"created_at {_echo_value(raw)} is unparseable"
 
 
 def _default_runs_dir() -> Path:
@@ -174,12 +194,20 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     skipped: list[Path] = []
     for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
-        created_at = _parse_dt(lesson.fm.get("created_at"))
+        raw_created = lesson.fm.get("created_at")
+        created_at = _parse_dt(raw_created)
         n = len(in_context_cases(name, created_at, runs_dir))
-        # The description is LLM-authored and this is a TSV row — flatten the two chars that
-        # would forge a column or a row (same idiom as lessons_fm._emit_match).
-        desc = str(lesson.fm.get("description") or "").strip().replace("\t", " ").replace("\n", " ")
-        print(f"{name}\t{desc}\t{n}")
+        # The description is LLM-authored and this is a TSV row — same value-in-TSV class
+        # as created_at/disposition/loaded_at, so it gets the same full-breaker flatten.
+        desc = _flatten(str(lesson.fm.get("description") or "")).strip()
+        # A VALID lesson with nothing to window on must say so on its own row — the count
+        # is the unwindowed count, and a normal-looking row would pass it off as windowed
+        # (#596; a stderr-only warn is exactly what #590 rejected). Not "malformed": the
+        # lesson parses fine, only its created_at needs the curator's attention.
+        if created_at is None:
+            desc = f"{desc} ({_unwindowed_reason(raw_created)} — unwindowed count)"
+        # The stem is a filename, and Unix filenames may legally carry any breaker.
+        print(f"{_flatten(name)}\t{desc}\t{n}")
     # A lesson iter_lessons warn-skipped (malformed/unreadable — e.g. a curator edit broke
     # its YAML) must still get an audit row: dropping it here loses exactly the lesson a
     # human is most likely investigating, while the named path still traces it (#590).
@@ -191,7 +219,7 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
         n = len(in_context_cases(path.stem, None, runs_dir))
         # "malformed lesson" is the walk's own vocabulary for all three skip causes (parse,
         # read, decode) — its stderr warn right above carries the specific reason.
-        print(f"{path.stem}\t(malformed lesson — unwindowed count)\t{n}")
+        print(f"{_flatten(path.stem)}\t(malformed lesson — unwindowed count)\t{n}")
 
 
 def main(argv: list[str]) -> int:
@@ -245,19 +273,26 @@ def main(argv: list[str]) -> int:
         return 1
     parsed = parse_frontmatter_or_none(text)
     fm = parsed or {}
-    created_at = _parse_dt(fm.get("created_at"))
+    raw_created = fm.get("created_at")
+    created_at = _parse_dt(raw_created)
     if parsed is None:
         print(f"warn: {path.name}: malformed or missing frontmatter — trace is unwindowed",
               file=sys.stderr)
     elif created_at is None:
         # Valid frontmatter whose LLM-authored created_at is absent or unparseable is just as
-        # unwindowed — "since None" must never print silently (#596's named-path half).
-        print(f"warn: {path.name}: no parseable created_at — trace is unwindowed",
+        # unwindowed — "since None" must never print silently, and the echoed value tells the
+        # curator what to fix without opening the file (#596's named-path half).
+        print(f"warn: {path.name}: {_unwindowed_reason(raw_created)} — trace is unwindowed",
               file=sys.stderr)
     hits = in_context_cases(path.stem, created_at, runs_dir)
-    print(f"# {path.stem} — {len(hits)} case(s) in context since {created_at}")
+    # The header must stay honest too: never the Python ``None`` sentinel — an unwindowed
+    # trace says so and names the reason (#596).
+    since = str(created_at) if created_at is not None else f"? ({_unwindowed_reason(raw_created)})"
+    print(f"# {_flatten(path.stem)} — {len(hits)} case(s) in context since {since}")
     for h in hits:
-        print(f"{h.case_id}\t{h.disposition}\t{h.loaded_at}")
+        # disposition is model-authored (report.md), loaded_at hook-written, and case_id a
+        # run-dir filename — all the same value-in-TSV class as created_at (#596).
+        print(f"{_flatten(h.case_id)}\t{_flatten(h.disposition)}\t{_flatten(h.loaded_at)}")
     return 0
 
 

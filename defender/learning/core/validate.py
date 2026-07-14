@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from defender._yaml import safe_load
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender.learning.core.config import (
     ACTOR_OBSERVATION_TYPES,
@@ -106,11 +107,10 @@ def strip_yaml_preamble(text: str) -> str:
     for i in range(len(lines)):
         candidate = text if i == 0 else "\n".join(lines[i:])
         try:
-            doc = yaml.safe_load(candidate)
-        except (yaml.YAMLError, RecursionError):
-            # RecursionError (a deeply nested flow collection) is not a YAMLError, so it
-            # would otherwise escape and crash the caller; treat it like any unparseable
-            # candidate and keep the walk fail-closed.
+            doc = safe_load(candidate)
+        except yaml.YAMLError:
+            # A nesting flood arrives as YAMLError via the shared seam (#613): like any
+            # unparseable candidate, the walk stays fail-closed.
             continue
         if isinstance(doc, dict):
             if not i:

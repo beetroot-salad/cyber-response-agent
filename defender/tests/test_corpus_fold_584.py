@@ -872,7 +872,11 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     tl = _load_by_path("trace_lesson_584", TL_PATH)
     corpus = tmp_path / "defender" / "lessons"
     corpus.mkdir(parents=True)
-    (corpus / "foo-bar.md").write_text("---\nname: foo_bar\ndescription: d\n---\nbody\n")
+    # created_at keeps the fixture windowed so this window-independent subject (the join
+    # key) stays green beside #596's unwindowed marker; the load below is inside the window.
+    (corpus / "foo-bar.md").write_text(
+        "---\nname: foo_bar\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
+    )
     runs = tmp_path / "runs"
     runs.mkdir()
     _mk_run(runs, "caseA", disposition="malicious",

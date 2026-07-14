@@ -24,6 +24,7 @@ from _secondary_config import (  # noqa: E402
 )
 from _generation import GenerationPin, replay_script_path  # noqa: E402
 
+from defender._yaml import safe_load
 from defender._run_paths import RunPaths  # noqa: E402
 
 
@@ -209,7 +210,7 @@ def run_head_oracle_and_judge(
     judge_stripped = loop_mod.normalize_judge_yaml(judge_yaml)
     (staging_dir / "judge_findings.yaml").write_text(judge_stripped, encoding="utf-8")
     try:
-        judge_doc = yaml.safe_load(judge_stripped)
+        judge_doc = safe_load(judge_stripped)  # floods fold into YAMLError via the shared seam (#613)
         loop_mod.validate_judge_doc(judge_doc)
     except (yaml.YAMLError, loop_mod.RunUnprocessable) as e:
         raise SecondaryError(f"judge YAML invalid: {e}") from e
