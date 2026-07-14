@@ -90,7 +90,16 @@ jobs:
   code-smells:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 — the stale-ref gate diffs `origin/main...HEAD`, and the three-dot
+      # form needs a MERGE-BASE. The default depth-1 checkout grafts HEAD
+      # (refs/pull/N/merge), and a `--depth=N` fetch of the base ref creates the ref but
+      # NOT a common ancestor: the diff exits 128 and the gate reported clean on every PR
+      # for its whole life (#618). Only full history removes the graft. The repo is ~44MB,
+      # so this is free. The `lint` and `test` jobs run nothing diff-relative and stay
+      # shallow.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -216,9 +225,6 @@ jobs:
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.
-      - name: Fetch base ref (for stale-ref diff)
-        run: git fetch origin main:refs/remotes/origin/main --depth=50 || true
-
       - name: Hygiene gate (paths, interpreter, hook matchers — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_ci_hygiene.py
 
@@ -228,6 +234,10 @@ jobs:
       - name: Ground-truth-leak gate (baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_ground_truth_leak.py
 
+      # For symbols this PR removed, the post-PR tree must hold no surviving reference.
+      # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
+      # above. Fails CLOSED: exit 2 if the base ref or the merge-base is unavailable, so
+      # an unusable diff base can never again read as a clean bill of health (#618).
       - name: Stale-reference gate (vs origin/main — baseline-ratcheted)
         env:
           STALE_REF_BASE: origin/main

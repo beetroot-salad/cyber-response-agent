@@ -1,11 +1,4 @@
 {
-  "//": "lint_stale_refs baseline \u2014 references that survive a rename/delete in the PR diff. Fingerprint is file:ident. CI fails on a surviving reference absent here. Regenerate: python scripts/lint/lint_stale_refs.py --update-baseline. This baseline is normally empty (the check is diff-relative); an entry means a knowingly-tolerated stray reference. \"\" means un-triaged.",
-  "entries": {
-    "defender/tests/spec_graph_551.yaml:_deps_class": "frozen spec artifact of the MERGED #551 \u2014 it records what that issue pinned at the time (bind/_deps_class, reader_patterns_for, reader_read_shapes). Rewriting it to name #575 symbols would falsify the record; the names are dead, the document is not.",
-    "defender/tests/spec_graph_551.yaml:reader_patterns_for": "frozen spec artifact of the MERGED #551 \u2014 it records what that issue pinned at the time (bind/_deps_class, reader_patterns_for, reader_read_shapes). Rewriting it to name #575 symbols would falsify the record; the names are dead, the document is not.",
-    "defender/tests/spec_graph_551.yaml:reader_read_shapes": "frozen spec artifact of the MERGED #551 \u2014 it records what that issue pinned at the time (bind/_deps_class, reader_patterns_for, reader_read_shapes). Rewriting it to name #575 symbols would falsify the record; the names are dead, the document is not.",
-    "scripts/lint/lint_stale_refs_baseline.json:_deps_class": "self-reference: this baseline file necessarily spells the identifiers it tolerates.",
-    "scripts/lint/lint_stale_refs_baseline.json:reader_patterns_for": "self-reference: this baseline file necessarily spells the identifiers it tolerates.",
-    "scripts/lint/lint_stale_refs_baseline.json:reader_read_shapes": "self-reference: this baseline file necessarily spells the identifiers it tolerates."
-  }
+  "//": "lint_stale_refs baseline — references that survive a rename/delete in the PR diff. Fingerprint is file:ident. CI fails on a surviving reference absent here. Regenerate: python scripts/lint/lint_stale_refs.py --update-baseline. This baseline is normally EMPTY: the check is diff-relative, and the recurring not-a-reference shapes (spec artifacts, frozen spec graphs, frontmatter `name:` declarations, deliberate `# lint-stale-ref: ok` references) are rules in the lint rather than entries here. An entry means a knowingly-tolerated stray reference; \"\" means un-triaged.",
+  "entries": {}
 }
