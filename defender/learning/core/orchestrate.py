@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 import yaml
 
+from defender._yaml import safe_load
 from defender.learning.core.config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
@@ -87,8 +88,10 @@ def read_ground_truth(run_dir: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        doc = safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
+        # Including a nesting flood — folded into YAMLError by the shared seam (#613),
+        # so a flooded ground_truth.yaml dead-letters the run instead of crashing the drain.
         raise RunUnprocessable(f"{path}: malformed YAML: {e}") from e
     if not isinstance(doc, dict):
         raise RunUnprocessable(f"{path}: expected a mapping at top level")
@@ -132,11 +135,10 @@ def _validate_judge_yaml(
     """Strip + validate judge YAML; on failure/mutation dump the raw to ``raw_path``."""
     stripped = normalize_judge_yaml(judge_raw)
     try:
-        doc = validate(yaml.safe_load(stripped))
-    except (yaml.YAMLError, RunUnprocessable, RecursionError) as e:
-        # RecursionError: yaml.safe_load blows the stack on a deeply nested flow
-        # collection (not a YAMLError); dead-letter it like any invalid verdict rather
-        # than crash the worker — the eval A/B harness already degrades the same way.
+        doc = validate(safe_load(stripped))
+    except (yaml.YAMLError, RunUnprocessable) as e:
+        # A nesting flood arrives as YAMLError via the shared seam (#613); dead-letter it
+        # like any invalid verdict rather than crash the worker.
         raw_path.write_text(judge_raw, encoding="utf-8")
         raise RunUnprocessable(f"judge YAML invalid: {e}") from e
     if stripped != judge_raw:

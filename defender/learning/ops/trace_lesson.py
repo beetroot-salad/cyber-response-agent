@@ -41,6 +41,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._tsv import flatten_cell as _flatten
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
 
@@ -49,17 +50,6 @@ LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 # Sorts an unparseable-ts load row after every parseable one (see _earliest_load).
 _DT_MAX = datetime.max.replace(tzinfo=UTC)
-
-# Every char ``str.splitlines`` treats as a line boundary, plus tab. The known consumer
-# idiom parses this TSV via splitlines() + '#'-prefix drop, so ANY of these in an
-# LLM/hook-authored value forges a row or a column — the \t/\n-only flatten is not
-# enough for a value that must stay inside one cell (#596).
-_BREAKERS = dict.fromkeys(map(ord, "\t\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"), " ")
-
-
-def _flatten(value: str) -> str:
-    """One cell, one line: every line/column breaker becomes a single space."""
-    return value.translate(_BREAKERS)
 
 
 def _echo_value(raw: object) -> str:

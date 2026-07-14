@@ -33,6 +33,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._tsv import flatten_cell
 from defender.scripts.lessons._lessons_common import (
     as_str_set,
     csv_set,
@@ -93,7 +94,8 @@ def main(argv: list[str]) -> int:
             continue
 
         criteria = fm.get("relevance_criteria") or ""
-        criteria = str(criteria).strip().replace("\t", " ").replace("\n", " ")
+        # LLM-authored value in a TSV cell: the shared full-breaker flatten (#614).
+        criteria = flatten_cell(str(criteria)).strip()
         rel = rel_to_repo(path, REPO_ROOT)
         print(f"{rel}\t{criteria}")
     return 0

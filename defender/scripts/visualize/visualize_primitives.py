@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The two-table read/join surface + loop config live in defender/learning/ — reached
 # via the `defender.learning` namespace package (callers put the repo root on sys.path).
+from defender._yaml import safe_load  # noqa: E402
 from defender._frontmatter import FrontmatterError, parse_frontmatter  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
@@ -45,8 +46,9 @@ def load_yaml(path: Path) -> dict | list | None:
     if not path.is_file():
         return None
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        return safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
+        # Including a nesting flood — folded into YAMLError by the shared seam (#613).
         return None
 
 

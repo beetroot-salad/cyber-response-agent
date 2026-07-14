@@ -142,6 +142,7 @@ from _summary import (  # noqa: E402
     write_summary,
 )
 
+from defender._yaml import safe_load  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 
 
@@ -191,7 +192,13 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
         gt = child / "ground_truth.yaml"
         if not (alert.is_file() and gt.is_file()):
             continue
-        gt_doc = yaml.safe_load(gt.read_text(encoding="utf-8")) or {}
+        try:
+            gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as e:
+            # One corrupt ground_truth.yaml must cost that one fixture, not the eval (#613).
+            print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
+                  file=sys.stderr)
+            continue
         if not isinstance(gt_doc, dict) or gt_doc.get("held_out") is not True:
             continue
         out.append(HeldOutAlert(child.name, alert, gt_doc))

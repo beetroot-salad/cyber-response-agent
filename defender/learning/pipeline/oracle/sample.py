@@ -22,6 +22,7 @@ import re
 
 import yaml
 
+from defender._yaml import safe_load
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import strip_yaml_fence
 
@@ -257,7 +258,7 @@ def parse_lead_events(raw: str, lead_id) -> list:
     """
     cleaned = _quote_unquoted_markers(strip_yaml_fence(raw))
     try:
-        doc = yaml.safe_load(cleaned)
+        doc = safe_load(cleaned)  # floods fold into YAMLError via the shared seam (#613)
     except yaml.YAMLError as e:
         raise RunUnprocessable(
             f"oracle lead {lead_id}: reply is not valid YAML: {e}\n"

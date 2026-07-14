@@ -95,8 +95,10 @@ def _load_mapping() -> dict[str, Any]:
         raise CaseTicketError(f"case-history mapping not found: {path}")
     import yaml  # the defender venv's one runtime dep
 
+    from defender._yaml import safe_load  # lazy like yaml itself
+
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):

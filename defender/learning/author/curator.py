@@ -41,6 +41,7 @@ import yaml
 
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
+from defender._yaml import safe_load
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
@@ -206,9 +207,9 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
     if not path.is_file():
         return False
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (yaml.YAMLError, RecursionError):
-        # RecursionError: safe_load on a nesting flood — same malformed class (#609).
+        doc = safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        # Including a nesting flood — the shared seam folds it into YAMLError (#609/#613).
         return False
     return isinstance(doc, dict) and doc.get("held_out") is True
 
