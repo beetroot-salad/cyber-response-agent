@@ -39,6 +39,7 @@ from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime import tools_gather  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.scripts import workspace_map as wsm  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
@@ -382,13 +383,14 @@ def test_d5_gather_registers_template_search_and_main_does_not():
     while GATHER_DEF drifts. Feed the REAL defs. Negative + positive control in one: gather has
     template_search, main does not (defender/SKILL.md forbids main the corpus)."""
     g = _ToolRecorder()
-    tools.register_tools(g, GATHER_DEF.tools)
+    tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
-    assert g.names == ["bash", "read_file", "template_search"]   # register_tools' FIXED order
+    assert g.names == ["bash", "read_file", "template_search", "query"]   # register_tools' FIXED order
 
     m = _ToolRecorder()
     tools.register_tools(m, MAIN_DEF.tools)
     assert "template_search" not in m.names                      # negative
+    assert "query" not in m.names                                # #611: main reaches no data source
     assert "read_file" in m.names                                # positive control: main still reads
 
 
@@ -406,7 +408,7 @@ def test_d6_template_search_exposes_no_path_parameter():
     system — so there is no path to point outside the corpus, and the tool is gated by
     construction rather than by a check."""
     rec = _ToolRecorder()
-    tools.register_tools(rec, GATHER_DEF.tools)
+    tools.register_tools(rec, GATHER_DEF.tools, FakeVerbs({}))
     import inspect
 
     params = set(inspect.signature(rec.fns["template_search"]).parameters) - {"ctx"}

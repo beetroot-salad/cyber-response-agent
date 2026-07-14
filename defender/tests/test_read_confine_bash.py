@@ -25,8 +25,10 @@ Entry points under test:
   - `compile_policy_for(<DEF>, run_dir, *, defender_dir)` — the policy-only half of `bind`; RAISES
     on a missing run_dir / degenerate root (safe-by-construction: no unconfined fallback).
   - `decide_bash(command, *, policy, run_dir, defender_dir) -> BashDecision`
-    (.allow / .reason / .adapter_argv / .sql_pipe). `defender_dir` is load-bearing now: a RELATIVE
-    operand is rebased on the executor's cwd (`defender_dir.parent`) before it resolves.
+    (.allow / .reason; since #611 there are no `.adapter_argv` / `.sql_pipe` routing fields — a
+    data source is reached through the `query` tool, not from bash). `defender_dir` is load-bearing
+    now: a RELATIVE operand is rebased on the executor's cwd (`defender_dir.parent`) before it
+    resolves.
 
 The gate RESOLVES operands (it still never stats them — `resolve(strict=False)`), so the roots here
 are real tmp dirs and commands interpolate their ABSOLUTE paths.
@@ -699,52 +701,59 @@ def test_write_investigation_invalid_invlang_denied(env):
 
 
 # ===========================================================================  #
-# J. Adapter/compute routing preserved (the gather data lane is untouched)       #
+# J. #611 — the adapter lane is gone; the local-compute lane over payloads       #
+#    already on disk survives, and an adapter denies on BOTH lanes.              #
 # ===========================================================================  #
 
-def test_standalone_adapter_allowed_and_exposed(env):
-    """defender-elastic query 'x' → ALLOW for gather, with .adapter_argv exposed for capture."""
+def test_standalone_adapter_denied_for_gather(env):
+    """#611 FLIP: `defender-elastic query 'x'` used to be ALLOW for gather (its payload captured
+    transparently). A data source is now reached through the `query` tool, so the adapter is
+    unreachable from bash — the standalone form DENIES for gather, and the decision carries no
+    routing fields for a capture layer that no longer exists."""
     d = _bash(env, "defender-elastic query 'x'", "gather")
-    assert d.allow
-    assert d.adapter_argv == ["defender-elastic", "query", "x"]
+    assert not d.allow
+    assert d.reason == permission.ADAPTER_RETIRED_REASON
+    assert not hasattr(d, "adapter_argv")
+    assert not hasattr(d, "sql_pipe")
 
 
-def test_adapter_sql_pipe_allowed_and_split(env):
-    """defender-elastic … | defender-sql 'SELECT …' → ALLOW for gather, with .sql_pipe split
-    exposed; main never gets the adapter. (The capability is now the two structurally-routed GRANTS,
-    not an `adapters`/`adapter_sql_pipe` bit — a bit no grant backs is data nobody enforces.)"""
+def test_adapter_sql_pipe_denied_split_became_tool_then_bash(env):
+    """#611 FLIP: `defender-elastic … | defender-sql …` was the sanctioned capture+aggregate pipe.
+    It is now two steps — `query(…)` produces the payload, then `cat <payload> | defender-sql …`
+    aggregates it — so the single-command pipe DENIES for gather (its adapter stage is unreachable),
+    on the adapter reason. Main never got the adapter and still doesn't."""
     cmd = "defender-elastic query 'x' | defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'"
     d = _bash(env, cmd, "gather")
-    assert d.allow
-    assert d.sql_pipe is not None
-    adapter_av, sql_av = d.sql_pipe
-    assert adapter_av == ["defender-elastic", "query", "x"]
-    assert sql_av[0] == "defender-sql"
+    assert not d.allow
+    assert d.reason == permission.ADAPTER_RETIRED_REASON
     assert not _bash(env, cmd, "main").allow
 
 
 def test_cat_payload_into_defender_sql_allowed(env):
     """cat {RUN}/gather_raw/l-001/1.json | defender-sql 'SELECT …' → ALLOW for gather: an in-scope
-    payload streamed into the sandboxed aggregator (cat scope-checked, defender-sql opens nothing)."""
+    payload streamed into the sandboxed aggregator (cat scope-checked, defender-sql opens nothing).
+    This is the SURVIVING half of the retired capture+aggregate pipe — the `defender-sql` step of
+    the new tool-then-bash flow."""
     cmd = f"cat {env.run}/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'"
     assert _bash(env, cmd, "gather").allow
 
 
 def test_adapter_jq_pipe_denied(env):
-    """defender-elastic … | jq '.x' → DENY: adapter|jq is NOT a sanctioned pipe (only
-    adapter|defender-sql is), so a live adapter's payload can only ever flow into the sealed
-    aggregator, never into an arbitrary reader stage."""
-    # rejected: allow adapter | jq structurally (widens the sanctioned adapter-pipe grammar)
+    """defender-elastic … | jq '.x' → DENY. This was denied because adapter|jq was not the
+    sanctioned adapter pipe; post-#611 it denies because the adapter stage is unreachable from bash
+    at all. Either way a live adapter's payload never flows into an arbitrary reader stage."""
     d = _bash(env, "defender-elastic query 'x' | jq '.x'", "gather")
     assert not d.allow
+    assert d.reason == permission.ADAPTER_RETIRED_REASON
 
 
 def test_adapter_denied_for_main(env):
-    """A data-source adapter is denied for the main loop (it dispatches gather) — unchanged, and the
-    SPECIFIC reason survives: it is prompt surface the e2e deny-tail asserts as a substring."""
+    """A data-source adapter is denied for the main loop — unchanged in verdict. Since #611 the
+    reason is the shared `ADAPTER_RETIRED_REASON` (it names the `query` tool); it is prompt surface
+    the e2e deny-tail asserts as a substring, so it is pinned here too."""
     d = _bash(env, "defender-elastic query 'x'", "main")
     assert not d.allow
-    assert "data-source CLIs directly" in (d.reason or "")
+    assert d.reason == permission.ADAPTER_RETIRED_REASON
 
 
 # ===========================================================================  #

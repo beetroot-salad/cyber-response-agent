@@ -1,20 +1,19 @@
-"""Gather dispatch & in-process adapter capture: the main agent → nested gather
-subagent path, factored out of the generic-tools foundation in `tools.py`.
+"""Gather dispatch: the main agent → nested gather subagent path, factored out of the
+generic-tools foundation in `tools.py`.
 
-The transparent adapter-capture core (`_capture_adapter`, `_capture_adapter_sql`
-and their `_capture_query` prelude) is what `tools._tool_bash` reaches for when a
-`GatherDeps`-scoped bash call runs a standalone adapter; `register_gather_tool`
-installs the main agent's `gather` dispatch tool, whose `_run_gather` drives the
-nested subagent. These import the shared foundation (`AgentDeps`, `GatherDeps`,
-`_format_bash_result`, `_bash_env`, `_BASH_TIMEOUT_S`) from `tools.py`; `tools.py`
-re-exports the names back at its own module bottom (after the foundation is
-defined), so there is no import cycle.
+`register_gather_tool` installs the main agent's `gather` dispatch tool, whose `_run_gather`
+drives the nested subagent; `template_search` is gather's catalog discovery route. The two
+breaker/payload helpers here (`_tripped_message`, `_payload_note`) are shared with the `query`
+tool's capture capability (`query_tool.py`), which is where the queries-table row and the by-ref
+payload are now written — capture stopped being a bash-tool call with #611.
+
+This module imports the shared foundation from `tools.py`; `tools.py` re-exports these names
+back at its own module bottom (after the foundation is defined), so there is no import cycle.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -34,19 +33,13 @@ from . import tools
 from .tools import (
     GatherDeps,
     AgentDeps,
-    _BASH_TIMEOUT_S,
-    _bash_env,
-    _format_bash_result,
 )
 
 from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender.hooks.tag_tool_results import wrap as _wrap
-from defender.scripts.gather_tools.record_query import (
-    capture as _capture,
-    LEAD_ID_RE as _LEAD_ID_RE,
-)
+from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 
 
 # --- gather dispatch (slice 2): main agent → nested gather agent (Kimi K2.6) --
@@ -73,42 +66,6 @@ class GatherRequest:
     what_to_summarize: tuple[str, ...]
 
 
-def _extract_query_id(argv: list[str]) -> tuple[list[str], str | None]:
-    """Pull a model-supplied ``--query-id <id>`` (or ``--query-id=<id>``) off an
-    adapter argv, returning (cleaned argv the adapter actually runs, the id).
-
-    The single-agent gather annotates each bare adapter call with the catalog
-    id it bound (e.g. ``{system}.sshd-auth-history``) or a coined id, because one
-    lead can run several queries with different bindings and a single
-    ``deps.query_id`` can't carry them. The harness strips the flag so the adapter
-    never sees it; capture records it as the queries-table ``query_id`` (the
-    ``(query_id, params)`` join the offline lead-author relies on). Position-
-    independent; absent → None, and capture falls back to ``deps.query_id`` then
-    record_query's ``{system}.{verb}`` default."""
-    out: list[str] = []
-    qid: str | None = None
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a == "--query-id":
-            # `--query-id <id>` consumes its value; a trailing `--query-id` with
-            # no value is still consumed (dropped), never passed through — the
-            # adapter's argparse would reject the unknown flag and fail the query.
-            if i + 1 < len(argv):
-                qid = argv[i + 1]
-                i += 2
-            else:
-                i += 1
-            continue
-        if a.startswith("--query-id="):
-            qid = a.split("=", 1)[1]
-            i += 1
-            continue
-        out.append(a)
-        i += 1
-    return out, qid
-
-
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
     """Circuit-breaker in-gather gate: if `system` is already tripped this run,
     return its down-message so one dispatch can't keep hammering a dead source;
@@ -122,103 +79,17 @@ def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
     return None
 
 
-def _capture_query(
-    deps: GatherDeps, argv: list[str], env: dict[str, str]
-) -> tuple[str, str, dict]:
-    """Shared adapter-capture prelude for the gather bash tool: strip a model
-    ``--query-id``, run the transparent capture (queries table + by-ref payload),
-    and record the circuit-breaker outcome. Returns ``(passthrough, stderr,
-    record)``. Raises ``ModelRetry`` on the structural ``ValueError`` capture raises
-    (undetectable system / malformed lead id) so the model can correct and retry.
-
-    The circuit breaker keys on ``record['system']`` (the system the capture bound
-    the query to — authoritative over re-deriving from argv); an infra failure
-    advances the per-system counter and may raise RunAborted via the run-wide kill
-    switch (caught by the driver, which writes the partial trace)."""
-    argv, model_query_id = _extract_query_id(argv)
-    lead = deps.lead_id
-    if lead is None:
-        # A bind-produced gather deps is per-run only (lead_id unset); the gather dispatch
-        # stamps the real lead before any adapter runs, so an unstamped deps reaching capture
-        # is a wiring bug, not model input. Fail loud with a hard error — a ModelRetry here is
-        # unfixable by the model (the lead stays None across retries), so it would only burn the
-        # tool-retry budget into an UnexpectedModelBehavior crash instead of surfacing the bug.
-        raise RuntimeError("internal: gather reached adapter capture without a dispatched lead_id")
-    try:
-        passthrough, stderr, record = _capture(
-            deps.run_dir, lead, argv, env=env,
-            query_id=model_query_id or deps.query_id,
-        )
-    except ValueError as e:
-        raise ModelRetry(str(e)) from e
-    circuit_breaker.record_outcome(
-        deps.run_dir, record.get("system", ""), record["exit_code"]
-    )
-    return passthrough, stderr, record
-
-
 def _payload_note(deps: GatherDeps, record: dict) -> str:
     """The ``[record_query] raw payload: <path>`` line the gather SKILL filters
     against for large payloads, or "" when no payload was persisted. Report it
     ABSOLUTE: the bash/read tools resolve relative to the repo root, not run_dir, so
-    the relative table FK (``record['payload_path']``) would be unresolvable.
-    Matches build_truncated_view's absolute path."""
+    the relative table FK (``record['payload_path']``) would be unresolvable — and
+    the split `query` → `cat <payload> | defender-sql` pipe is spelled off THIS note,
+    so a relative path here would deny at the gate. Matches build_truncated_view's
+    absolute path."""
     return (
         f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
         if record.get("payload_path") else ""
-    )
-
-
-def _capture_adapter_sql(
-    deps: GatherDeps, adapter_argv: list[str], sql_argv: list[str]
-) -> str:
-    """The `adapter | defender-sql '<SQL>'` pipe (gather only). Capture the
-    adapter's raw payload (queries table + by-ref file), then aggregate that
-    payload through the sandboxed defender-sql on stdin. The queries-table row
-    records the adapter query (audited); defender-sql is a local, self-sandboxed
-    transform over the captured bytes — not a second data-source query, so it is
-    not separately recorded."""
-    env = _bash_env(deps)
-    passthrough, stderr, record = _capture_query(deps, adapter_argv, env)
-    note = _payload_note(deps, record)
-    # The adapter itself failed → surface ITS error (exit code + stderr), exactly as
-    # the standalone _capture_adapter path does, instead of piping an empty/partial
-    # payload into defender-sql and returning its confusing "no input on stdin"
-    # error. capture() writes an (empty) payload file even on a non-zero adapter
-    # exit, so a payload path alone does NOT mean the query succeeded — gate on the
-    # exit code, not on payload_path, to decide whether there is anything to
-    # aggregate.
-    if record["exit_code"] != 0 or not record.get("payload_path"):
-        return _format_bash_result(record["exit_code"], passthrough, stderr, note)
-    # Aggregate the FULL captured payload: the passthrough view is truncated for
-    # the model's context, but defender-sql must see every row, so read it back
-    # from the by-ref file.
-    raw = (deps.run_dir / record["payload_path"]).read_text(encoding="utf-8")
-    try:
-        proc = subprocess.run(
-            sql_argv, input=raw, capture_output=True, text=True,
-            env=env, timeout=_BASH_TIMEOUT_S,
-            # Lossy, like the adapter pipe upstream: defender-sql echoes the captured payload's
-            # own cells back out, so a byte the adapter mangled must not become a strict-decode
-            # UnicodeDecodeError here — a ValueError no gate converts, escaping this in-process
-            # tool and killing the stage.
-            encoding="utf-8", errors="replace",
-        )
-    except subprocess.TimeoutExpired as e:
-        raise ModelRetry(f"defender-sql timed out after {_BASH_TIMEOUT_S}s") from e
-    return _format_bash_result(proc.returncode, proc.stdout, proc.stderr, note)
-
-
-def _capture_adapter(deps: GatherDeps, argv: list[str]) -> str:
-    """Run a standalone adapter command through the transparent capture (queries
-    table + payload), returning the same shape the bash tool would. lead_id comes
-    from deps — the harness owns capture; the model never supplies it. The model
-    MAY tag the call with ``--query-id <id>`` (stripped here) to bind the query to
-    a catalog id; otherwise ``deps.query_id`` (the finder/executor split's bound
-    id) or record_query's default applies."""
-    passthrough, stderr, record = _capture_query(deps, argv, _bash_env(deps))
-    return _format_bash_result(
-        record["exit_code"], passthrough, stderr, _payload_note(deps, record)
     )
 
 

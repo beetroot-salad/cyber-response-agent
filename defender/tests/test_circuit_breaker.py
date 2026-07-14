@@ -21,12 +21,12 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 from defender.scripts.adapters import _stub_transport as transport  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 
-# Every data-source adapter; each fails fast at argparse on a bad invocation,
-# before touching docker, so these run with no environment.
-_ADAPTERS = [
-    "elastic_cli.py", "host_state_cli.py", "cmdb_cli.py", "identity_cli.py",
-    "change_mgmt_cli.py", "threat_intel_cli.py", "ticket_cli.py",
-]
+# #611: six of the seven adapters lost their CLI — a data source is reached through the `query`
+# tool now, so those adapters are VERBS registries with no `main()`/`build_parser()`. Only
+# `ticket_cli.py` keeps its argparse CLI (three subprocess consumers pin it), so the exit-64
+# usage-error contract is asserted against the ONE surviving CLI. It fails fast at argparse on a
+# bad invocation, before touching docker, so it runs with no environment.
+_ADAPTERS = ["ticket_cli.py"]
 _ADAPTERS_DIR = _DEFENDER / "scripts" / "adapters"
 
 

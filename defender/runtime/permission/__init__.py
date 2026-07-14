@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from . import command_shape
 from .bash import (
-    ADAPTER_STANDALONE_REASON,
+    ADAPTER_RETIRED_REASON,
     UNTOKENIZABLE_REASON,
     BashDecision,
     decide_bash,
@@ -42,7 +42,7 @@ from .policies.main import FALLTHROUGH_DENY_REASON
 from .policy import AgentPolicy
 
 __all__ = [
-    "ADAPTER_STANDALONE_REASON",
+    "ADAPTER_RETIRED_REASON",
     "OPENS_NOTHING",
     "PROGRAMS",
     "FALLTHROUGH_DENY_REASON",

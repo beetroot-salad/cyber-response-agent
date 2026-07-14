@@ -1,124 +1,80 @@
-#!/usr/bin/env python3
-"""Identity stub CLI — defender-side adapter.
+"""Identity stub adapter — the `identity` VERBS registry.
 
 Wraps the v2 playground identity stub (FastAPI over keycloak/realm.yaml ×
 hosts/inventory.yaml). Load-bearing for legitimacy checks: "is dev.dana
 authorized on db-1?" answers off `can-access`, not `/etc/passwd`.
 
-Usage:
-    identity_cli.py health-check
-    identity_cli.py can-access dev.dana db-1
-    identity_cli.py get-user sre.alice
-    identity_cli.py list-authorized-hosts dev.dana
-    identity_cli.py list-users [--role developer] [--enabled true]
+Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
+    health-check
+    can-access             user, host
+    get-user               user
+    list-authorized-hosts  user
+    list-users             [role] [enabled]
+    list-roles
 
-Exit codes:
-    0 — success
-    1 — query error (404, bad arg)
-    2 — connectivity / docker / upstream 5xx
-    64 — usage error (bad flag / unknown subcommand)
+Faults (`faults.py`): ConfigFault/TransportFault = infra (2), UpstreamFault = query
+error (1, carrying the stub's own `detail`).
 """
 
 from __future__ import annotations
 
-import json
-
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
+# verb registry loads this module BY PATH (see cmdb_cli.py).
 import sys as _sys
 from pathlib import Path as _Path
+
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 
 SYSTEM = "identity"
 PREFIX = "IDENTITY"
-DEFAULT_LIST_LIMIT = 50
 
 
-def cmd_can_access(args, config):
-    payload = transport.http_get_obj(
-        config, f"/users/{args.user}/can_access", params={"host": args.host},
+def _config(ctx: VerbContext) -> dict[str, str]:
+    return transport.load_config(ctx, SYSTEM, PREFIX)
+
+
+def health_check(ctx: VerbContext) -> dict:
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
+
+
+def can_access(ctx: VerbContext, *, user: str, host: str) -> dict:
+    return transport.http_get_obj(
+        ctx, _config(ctx), f"/users/{user}/can_access", params={"host": host},
     )
-    print(json.dumps(payload))
 
 
-def cmd_get_user(args, config):
-    payload = transport.http_get_obj(config, f"/users/{args.user}")
-    print(json.dumps(payload))
+def get_user(ctx: VerbContext, *, user: str) -> dict:
+    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}")
 
 
-def cmd_list_authorized_hosts(args, config):
-    payload = transport.http_get(config, f"/users/{args.user}/authorized_hosts")
-    print(json.dumps(payload))
+def list_authorized_hosts(ctx: VerbContext, *, user: str) -> dict | list:
+    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts")
 
 
-def cmd_list_users(args, config):
+def list_users(
+    ctx: VerbContext, *, role: str | None = None, enabled: bool | None = None
+) -> dict | list:
     params: dict[str, str] = {}
-    if args.role:
-        params["role"] = args.role
-    if args.enabled is not None:
-        params["enabled"] = "true" if args.enabled else "false"
-    payload = transport.http_get(config, "/users", params=params or None)
-    print(json.dumps(payload))
+    if role:
+        params["role"] = role
+    if enabled is not None:
+        params["enabled"] = "true" if enabled else "false"
+    return transport.http_get(ctx, _config(ctx), "/users", params=params or None)
 
 
-def cmd_list_roles(args, config):
-    payload = transport.http_get(config, "/roles")
-    print(json.dumps(payload))
+def list_roles(ctx: VerbContext) -> dict | list:
+    return transport.http_get(ctx, _config(ctx), "/roles")
 
 
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description="Identity stub CLI — realm-role × inventory-role authorization lookups.",
-    )
-    sub = p.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="GET /health and exit.")
-
-    ca = sub.add_parser("can-access", help="Is <user> authorized on <host>?")
-    ca.add_argument("user")
-    ca.add_argument("host")
-
-    gu = sub.add_parser("get-user", help="Full user record incl. authorized_hosts.")
-    gu.add_argument("user")
-
-    lah = sub.add_parser("list-authorized-hosts", help="Hosts <user> can access.")
-    lah.add_argument("user")
-
-    lu = sub.add_parser("list-users", help="All users (filterable).")
-    lu.add_argument("--role")
-    lu.add_argument("--enabled", type=lambda v: v.lower() in ("true", "1", "yes"))
-    lu.add_argument(
-        "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
-    )
-
-    sub.add_parser("list-roles", help="Inventory roles ↔ realm roles mapping.")
-
-    return p
-
-
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    config = transport.load_config(SYSTEM, PREFIX)
-    if args.subcommand == "health-check":
-        transport.health_check(config, SYSTEM)
-    elif args.subcommand == "can-access":
-        cmd_can_access(args, config)
-    elif args.subcommand == "get-user":
-        cmd_get_user(args, config)
-    elif args.subcommand == "list-authorized-hosts":
-        cmd_list_authorized_hosts(args, config)
-    elif args.subcommand == "list-users":
-        cmd_list_users(args, config)
-    elif args.subcommand == "list-roles":
-        cmd_list_roles(args, config)
-    else:
-        parser.error(f"unknown subcommand: {args.subcommand}")
-
-
-if __name__ == "__main__":
-    main()
+VERBS = {
+    "health-check": health_check,
+    "can-access": can_access,
+    "get-user": get_user,
+    "list-authorized-hosts": list_authorized_hosts,
+    "list-users": list_users,
+    "list-roles": list_roles,
+}

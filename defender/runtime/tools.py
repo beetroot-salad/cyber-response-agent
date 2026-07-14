@@ -34,7 +34,6 @@ from .agent_role import AgentRole
 # via the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
 from defender.hooks.tag_tool_results import wrap as _wrap
 from defender.scripts.gather_tools.record_query import (
-    derive_system as _derive_system,
     _passthrough_max_bytes as _read_char_cap,
 )
 from defender.hooks.record_lesson_load import (
@@ -207,10 +206,10 @@ class GatherDeps(AgentDeps):
     the capture path). The `GATHER` role drives the permission policy; code that
     needs the gather-only fields narrows with `isinstance(deps, GatherDeps)`.
 
-    `query_id` is a fallback capture id stamped on the lead's queries when the
-    model doesn't tag a call with `--query-id`; the gather leaves it unset
-    (None) and tags per query, so capture falls back to record_query's
-    `{system}.{verb}` default."""
+    There is no `query_id` field: it was never assigned anywhere (the finder/executor split it
+    belonged to has been gone since #340), and the `query` tool takes the id as a real param
+    (#611). A dead fallback that no writer ever set was a fallback that could only ever mislead
+    its reader."""
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
@@ -223,10 +222,9 @@ class GatherDeps(AgentDeps):
     # `lead_id` is the PER-DISPATCH capture id — UNSET (None) until the dispatch stamps it
     # (#538): `bind(GATHER_DEF, run_dir)` yields a per-run gather deps with `lead_id=None`
     # (bind is scope-only, no lead param), and the gather dispatch (`register_gather_tool`)
-    # constructs/stamps the real id before any adapter capture runs. The capture path
+    # constructs/stamps the real id before any query capture runs. The capture path
     # asserts it is stamped.
     lead_id: str | None = None
-    query_id: str | None = None
 
 
 def _record_lesson_load(
@@ -268,32 +266,15 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    # The gate parsed the command exactly once and stashed everything on the
-    # decision (#456): the adapter/pipe routing the gather capture path needs and
-    # the `Pipeline` list the executor runs — so neither dispatch nor execution
-    # re-decomposes the string.
+    # The gate parsed the command exactly once and stashed the `Pipeline` list the executor runs
+    # on the decision (#456), so execution never re-decomposes the string.
     #
-    # Gather subagent (not the main session): a standalone adapter call is
-    # captured transparently (the queries table + payload are written by the
-    # harness), so the model never wraps it in record-query — it just runs the
-    # adapter. `GatherDeps` IS the gather context and carries the lead_id/
-    # query_id `_capture_adapter` records, so the isinstance narrow is both the
-    # not-main-session test and the type evidence the capture path needs.
-    if isinstance(deps, GatherDeps):
-        if decision.adapter_argv is not None:
-            tripped = _tripped_message(deps, _derive_system(decision.adapter_argv))
-            if tripped is not None:
-                return tripped
-            return _capture_adapter(deps, decision.adapter_argv)
-        # The sanctioned `adapter | defender-sql '<SQL>'` aggregation pipe:
-        # capture the adapter payload (queries table + by-ref file), then run the
-        # captured bytes through the sandboxed defender-sql.
-        if decision.sql_pipe is not None:
-            adapter_av, sql_av = decision.sql_pipe
-            tripped = _tripped_message(deps, _derive_system(adapter_av))
-            if tripped is not None:
-                return tripped
-            return _capture_adapter_sql(deps, adapter_av, sql_av)
+    # There is no adapter branch here any more (#611). A data source is reached through the
+    # typed `query` tool, and the bash lane keeps only the local-computation half: gather's lane
+    # has no other network-capable program (`python3` is never granted to it), so removing the
+    # adapter route IS "take the network off bash". The sanctioned aggregation pipe survives as
+    # two steps — `query(...)`, then `cat <payload> | defender-sql '<SQL>'`.
+    #
     # Execute the *validated* command without a shell: run the token structure the
     # gate already decomposed (shell=False) instead of re-handing the string to
     # bash. This collapses the validator/executor parser differential — `$VAR`,
@@ -489,16 +470,22 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     return f"edited {path} ({len(new_text)} bytes)"
 
 
-def register_tools(agent, tools: ToolSet) -> None:
+def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     """Register EXACTLY the tools `tools` declares present on `agent` (deps_type must
     be AgentDeps) — the single toolset-registration site (#538). There is no always-on
     pair: a tool exists iff its `ToolSet` bit is set, so the pure-prediction stages
     (`ToolSet()`) register NOTHING (structural tool-freeness, not a runtime gate), while
     main keeps all four. Registration order is fixed — `bash, read_file, write_file,
-    edit_file, forward_check, lesson_read, template_search` — independent of the `ToolSet` field order, so the
-    pinned tool ordering the e2e suite asserts is stable. `bash` is present iff `tools.bash` (an
-    agent may hold the tool and be granted no program — the gate then denies every command; tool
-    PRESENCE and PERMISSION are two facts); the file writers are the `tools.write` opt-in."""
+    edit_file, forward_check, lesson_read, template_search, query` — independent of the `ToolSet`
+    field order, so the pinned tool ordering the e2e suite asserts is stable. `bash` is present
+    iff `tools.bash` (an agent may hold the tool and be granted no program — the gate then denies
+    every command; tool PRESENCE and PERMISSION are two facts); the file writers are the
+    `tools.write` opt-in.
+
+    `verbs` is the data-source registry the `query` tool validates + dispatches against, threaded
+    down the build chain from `run_investigation` exactly like `make_model` (#611). Required iff
+    `tools.query`; a def that declares the tool and is handed no registry fails LOUD at build
+    rather than at the first query."""
 
     if tools.bash:
         @agent.tool
@@ -534,10 +521,10 @@ def register_tools(agent, tools: ToolSet) -> None:
             file. The resulting full text is validated (invlang for investigation.md)."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
-    _register_deferred_tools(agent, tools)
+    _register_deferred_tools(agent, tools, verbs)
 
 
-def _register_deferred_tools(agent, tools: ToolSet) -> None:
+def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     """The tools whose BODY lives in the owning agent's own package rather than here, and which
     therefore have to be imported at registration time instead of at module top.
 
@@ -568,21 +555,31 @@ def _register_deferred_tools(agent, tools: ToolSet) -> None:
 
         register_template_search_tool(agent)
 
+    if tools.query:
+        # Gather's typed data-source access (#611). Deferred like the others: `query_tool` reaches
+        # back into this module's result envelope + run-env core, so a module-scope import would
+        # close a cycle. The registry is REQUIRED here — a `query` tool with no registry has no
+        # allowlist to validate against, which is the fail-open shape this whole change exists to
+        # close, so it fails at BUILD rather than shipping a tool that admits everything.
+        from defender.runtime.query_tool import register_query_tool
 
-# --- gather dispatch & in-process adapter capture ----------------------------
+        if verbs is None:
+            raise ValueError(
+                "ToolSet(query=True) needs a verb registry — thread one from "
+                "run_investigation(verbs=…); a query tool with no registry has no allowlist."
+            )
+        register_query_tool(agent, verbs)
+
+
+# --- gather dispatch ---------------------------------------------------------
 # Lives in tools_gather.py (imports the foundation above). Re-exported here so
 # the historical public surface holds: driver.py imports `register_gather_tool`
-# from `.tools`, and tests/_tool_bash reach `tools._capture_adapter*`,
-# `tools._run_gather`, etc. as attributes of THIS module (the e2e replay test
-# monkeypatches `tools._run_gather`). Imported at the BOTTOM, after the
-# foundation is defined, so the tools_gather → tools import resolves without a
-# cycle.
+# from `.tools`, and tests reach `tools._run_gather` as an attribute of THIS
+# module (the e2e replay test monkeypatches it). Imported at the BOTTOM, after
+# the foundation is defined, so the tools_gather → tools import resolves without
+# a cycle.
 from .tools_gather import (  # noqa: E402, F401  (re-exported — public surface)
     GatherRequest,
-    _capture_adapter,
-    _capture_adapter_sql,
-    _capture_query,
-    _extract_query_id,
     _gather_prompt,
     _payload_note,
     _persist_gather_summary,

@@ -1,47 +1,51 @@
-#!/usr/bin/env python3
-"""Host live-state CLI — defender-side adapter.
+"""Host live-state adapter — the `host-state` VERBS registry.
 
 No HTTP. Each verb wraps a single
-    `docker --context soc-playground exec <host> <command>`
+    `docker --context <the run's context> exec <host> <command>`
 and renders the relevant output. Outputs are point-in-time; two calls
 seconds apart can legitimately disagree on volatile state (process
 tables in particular).
 
-Usage:
-    host_state_cli.py health-check                       # docker context check
-    host_state_cli.py container-inspect <container_id>   # name + image (docker inspect)
-    host_state_cli.py proc-tree web-1
-    host_state_cli.py passwd web-1
-    host_state_cli.py authorized-keys web-1 [--user dev.dana]
-    host_state_cli.py fim-checksum web-1 /etc/passwd
-    host_state_cli.py package-list web-1
+Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
+    health-check
+    container-inspect  container_id
+    proc-tree          host
+    passwd             host
+    authorized-keys    host [user]
+    fim-checksum       host, path
+    package-list       host
 
-Exit codes:
-    0 — success
-    1 — verb-level error (file not found, user not present)
-    2 — docker / host-unreachable / timeout
-    64 — usage error (bad flag / unknown subcommand)
+`fim-checksum`'s `path` is the ONE declared exception to "no verb names a path": it is a
+path on a playground TARGET host, reached through `docker exec` — never a path in the
+driver's namespace. It stays behind SAFE_PATH_RE + the absolute-path check.
+
+Faults (`faults.py`): TransportFault = the host/docker is down (2), UpstreamFault = the
+verb's own answer says no (1) — a missing file, an unknown user, an unsafe argument.
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import subprocess
 import sys
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
+# verb registry loads this module BY PATH (see cmdb_cli.py).
 import sys as _sys
 from pathlib import Path as _Path
+
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters.faults import TransportFault, UpstreamFault
 
 SYSTEM = "host-state"
 # Hosts addressable via the soc-playground docker context. The list is
-# advisory — we don't validate, just surface a hint when the user
+# advisory — we don't validate, just surface a hint when the caller
 # misspells one. Source of truth is `docker context ps`; this list
 # tracks playground-v2/hosts/inventory.yaml.
 KNOWN_HOSTS = (
@@ -51,9 +55,10 @@ KNOWN_HOSTS = (
 SAFE_USERNAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9._-]{0,63}$")
 SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./@:+-]+$")
 DEFAULT_TIMEOUT_SEC = 15
+HEALTH_TIMEOUT_SEC = 10
 
 
-def _check_host(host: str):
+def _check_host(host: str) -> None:
     if host not in KNOWN_HOSTS:
         print(
             f"warning: host {host!r} is not in the known inventory "
@@ -62,22 +67,22 @@ def _check_host(host: str):
         )
 
 
-def _exec(host: str, argv: list[str], *, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> tuple[int, str, str]:
-    return transport.docker_exec_raw(host, argv, timeout_sec=timeout_sec)
+def _exec(
+    ctx: VerbContext, host: str, argv: list[str], *, timeout_sec: int = DEFAULT_TIMEOUT_SEC
+) -> tuple[int, str, str]:
+    return transport.docker_exec_raw(ctx, host, argv, timeout_sec=timeout_sec)
 
 
-def _exit_on_docker_error(rc: int, stderr: str, host: str):
-    """Map docker-exec stderr patterns to clean exits.
+def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) -> None:
+    """Map docker-exec stderr patterns onto the fault taxonomy.
 
-    Transport/unreachable failures exit 2 (the system-of-record contract: 2 =
-    connectivity/docker/unreachable, matching this CLI's SKILL and the gather
-    exit-code protocol) so the circuit breaker counts them. They are identified by
-    docker's own connection/lookup signatures, because docker is *loud* about them
-    (container missing, daemon/context unreachable). Everything else — including a
-    quiet non-zero inner command with empty stderr — is a verb-level error (exit 1)
-    the caller reasons about, not a down host: a quiet command failure has empty
-    stderr precisely because docker exec itself succeeded, and scoring it as infra
-    would spuriously trip the breaker on a perfectly reachable host.
+    Transport/unreachable failures are `TransportFault` (infra, exit 2) so the circuit
+    breaker counts them. They are identified by docker's own connection/lookup signatures,
+    because docker is *loud* about them (container missing, daemon/context unreachable).
+    Everything else — including a quiet non-zero inner command with empty stderr — is a verb
+    -level error the caller reasons about (`UpstreamFault`, exit 1), not a down host: a quiet
+    command failure has empty stderr precisely because docker exec itself succeeded, and
+    scoring it as infra would spuriously trip the breaker on a perfectly reachable host.
     """
     if rc == 0:
         return
@@ -88,45 +93,53 @@ def _exit_on_docker_error(rc: int, stderr: str, host: str):
         or "error during connect" in s
     )
     if transport_down:
-        print(
-            f"error: host {host!r} unreachable: {s}\n"
-            f"hint: `docker --context {transport.DOCKER_CONTEXT} ps` lists running hosts.",
-            file=sys.stderr,
+        raise TransportFault(
+            f"host {host!r} unreachable: {s} — "
+            f"`docker --context {transport.docker_context(ctx)} ps` lists running hosts."
         )
-        sys.exit(2)
-    print(f"error: docker exec on {host} (rc={rc}): {s or 'no stderr'}", file=sys.stderr)
-    sys.exit(1)
+    raise UpstreamFault(f"docker exec on {host} (rc={rc}): {s or 'no stderr'}")
 
 
-def cmd_health_check(args, _config):
-    """Lightweight: verify the docker context can list containers."""
-    cmd = ["docker", "--context", transport.DOCKER_CONTEXT, "ps", "--format", "{{.Names}}"]
+def _utcnow_z() -> str:
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def health_check(ctx: VerbContext) -> dict:
+    """Lightweight: verify the docker context can list containers. RETURNS the roster —
+    the prose this used to print has no answer under "a verb returns its payload", and the
+    queries row would carry an empty payload for the one call whose whole point is to say
+    whether the system is up."""
+    context = transport.docker_context(ctx)
+    cmd = ["docker", "--context", context, "ps", "--format", "{{.Names}}"]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, encoding="utf-8")
-    except FileNotFoundError:
-        print("error: docker CLI not found on PATH", file=sys.stderr)
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print(f"error: `docker --context {transport.DOCKER_CONTEXT} ps` timed out after 10s", file=sys.stderr)
-        sys.exit(2)
-    if proc.returncode != 0:
-        print(
-            f"error: docker context {transport.DOCKER_CONTEXT!r} unreachable: "
-            f"{proc.stderr.strip()}",
-            file=sys.stderr,
+        # LOSSY decode + a MANDATORY timeout, like every other transport in the family:
+        # container names are foreign bytes, and a strict decode raises UnicodeDecodeError —
+        # a ValueError, which sails past every guard below.
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=HEALTH_TIMEOUT_SEC,
+            encoding="utf-8", errors="replace", env=dict(ctx.env),
         )
-        sys.exit(2)
+    except FileNotFoundError as e:
+        raise TransportFault("docker CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise TransportFault(
+            f"`docker --context {context} ps` timed out after {HEALTH_TIMEOUT_SEC}s"
+        ) from e
+    if proc.returncode != 0:
+        raise TransportFault(
+            f"docker context {context!r} unreachable: {proc.stderr.strip()}"
+        )
     names = set(proc.stdout.split())
-    print("connected")
-    print(f"docker context: {transport.DOCKER_CONTEXT}")
-    present = sorted(n for n in KNOWN_HOSTS if n in names)
-    missing = sorted(n for n in KNOWN_HOSTS if n not in names)
-    print(f"hosts present ({len(present)}/{len(KNOWN_HOSTS)}): {', '.join(present) or '—'}")
-    if missing:
-        print(f"hosts missing: {', '.join(missing)}")
+    return {
+        "system": SYSTEM,
+        "connected": True,
+        "docker_context": context,
+        "hosts_present": sorted(n for n in KNOWN_HOSTS if n in names),
+        "hosts_missing": sorted(n for n in KNOWN_HOSTS if n not in names),
+    }
 
 
-def cmd_container_inspect(args, _config):
+def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
     """Container name + image by container id — daemon-level `docker inspect`.
 
     Unlike the other verbs this takes a container id, not a known host name
@@ -135,183 +148,108 @@ def cmd_container_inspect(args, _config):
     ids without a separate lookup.
     """
     fmt = "{{json .Name}}\t{{json .Config.Image}}"
-    rc, out, err = transport.docker_inspect_raw(args.container_id, fmt=fmt)
+    rc, out, err = transport.docker_inspect_raw(ctx, container_id, fmt=fmt)
     if rc != 0:
         s = err.strip()
         if "No such object" in s or "No such container" in s:
-            sys.exit(
-                f"error: no container matching {args.container_id!r} on "
-                f"context {transport.DOCKER_CONTEXT!r}: {s}"
+            raise UpstreamFault(
+                f"no container matching {container_id!r} on "
+                f"context {transport.docker_context(ctx)!r}: {s}"
             )
-        sys.exit(f"error: docker inspect failed (rc={rc}): {s}")
+        raise TransportFault(f"docker inspect failed (rc={rc}): {s}")
     parts = out.strip().split("\t")
     # `.Name` comes back with a leading slash (docker's canonical form).
     name = json.loads(parts[0]).lstrip("/") if parts and parts[0] else ""
     image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
-    print(json.dumps({
-        "container_id": args.container_id,
+    return {
+        "container_id": container_id,
         "captured_at": _utcnow_z(),
         "name": name,
         "image": image,
-    }))
+    }
 
 
-def cmd_proc_tree(args, _config):
-    _check_host(args.host)
-    rc, out, err = _exec(args.host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
-    _exit_on_docker_error(rc, err, args.host)
-    print(json.dumps({"host": args.host, "captured_at": _utcnow_z(), "ps_output": out}))
+def proc_tree(ctx: VerbContext, *, host: str) -> dict:
+    _check_host(host)
+    rc, out, err = _exec(ctx, host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
+    _raise_on_docker_error(ctx, rc, err, host)
+    return {"host": host, "captured_at": _utcnow_z(), "ps_output": out}
 
 
-def cmd_passwd(args, _config):
-    _check_host(args.host)
-    rc, out, err = _exec(args.host, ["cat", "/etc/passwd"])
-    _exit_on_docker_error(rc, err, args.host)
+def passwd(ctx: VerbContext, *, host: str) -> dict:
+    _check_host(host)
+    rc, out, err = _exec(ctx, host, ["cat", "/etc/passwd"])
+    _raise_on_docker_error(ctx, rc, err, host)
     entries = [line for line in out.splitlines() if line and not line.startswith("#")]
-    print(json.dumps({
-        "host": args.host,
-        "captured_at": _utcnow_z(),
-        "entries": entries,
-    }))
+    return {"host": host, "captured_at": _utcnow_z(), "entries": entries}
 
 
-def cmd_authorized_keys(args, _config):
-    _check_host(args.host)
-    user = args.user or "root"
+def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
+    _check_host(host)
     if not SAFE_USERNAME_RE.match(user):
-        sys.exit(f"error: refusing unsafe --user value: {user!r}")
+        raise UpstreamFault(f"refusing unsafe user value: {user!r}")
     # Use getent so we get the right home dir for system + UNIX-PAM users.
-    rc, home_out, err = _exec(args.host, ["getent", "passwd", user])
+    rc, home_out, err = _exec(ctx, host, ["getent", "passwd", user])
     if rc != 0 or not home_out.strip():
-        sys.exit(f"error: user {user!r} not found on {args.host}")
+        raise UpstreamFault(f"user {user!r} not found on {host}")
     parts = home_out.strip().split(":")
     if len(parts) < 6:
-        sys.exit(f"error: malformed passwd record for {user!r}: {home_out!r}")
+        raise UpstreamFault(f"malformed passwd record for {user!r}: {home_out!r}")
     home = parts[5]
     ak_path = f"{home}/.ssh/authorized_keys"
-    rc, out, err = _exec(args.host, ["cat", ak_path])
+    rc, out, err = _exec(ctx, host, ["cat", ak_path])
     if rc != 0:
         s = err.strip()
         # Treat missing file as "no keys" rather than an error — common
         # for unprivileged users on a freshly-seeded host.
-        if "No such file" in s:
-            keys: list[str] = []
-        else:
-            _exit_on_docker_error(rc, err, args.host)
-            keys = []  # unreachable, _exit_on_docker_error sys.exits
+        if "No such file" not in s:
+            _raise_on_docker_error(ctx, rc, err, host)
+        keys: list[str] = []
     else:
         keys = [line for line in out.splitlines() if line.strip() and not line.startswith("#")]
 
-    print(json.dumps({
-        "host": args.host,
+    return {
+        "host": host,
         "user": user,
         "path": ak_path,
         "captured_at": _utcnow_z(),
         "keys": keys,
-    }))
+    }
 
 
-def cmd_fim_checksum(args, _config):
-    _check_host(args.host)
-    if not SAFE_PATH_RE.match(args.path) or not args.path.startswith("/"):
-        sys.exit(f"error: refusing unsafe --path value: {args.path!r}")
-    rc, out, err = _exec(args.host, ["sha256sum", args.path])
+def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
+    """SHA-256 of one file ON THE TARGET HOST. `path` is the declared exception to the
+    no-path rule: it is resolved inside the playground container by `sha256sum`, never in
+    the driver's namespace, and it must be absolute and match SAFE_PATH_RE."""
+    _check_host(host)
+    if not SAFE_PATH_RE.match(path) or not path.startswith("/"):
+        raise UpstreamFault(f"refusing unsafe path value: {path!r}")
+    rc, out, err = _exec(ctx, host, ["sha256sum", path])
     if rc != 0:
         s = err.strip()
         if "No such file" in s:
-            sys.exit(f"error: {args.path!r} does not exist on {args.host}")
-        _exit_on_docker_error(rc, err, args.host)
+            raise UpstreamFault(f"{path!r} does not exist on {host}")
+        _raise_on_docker_error(ctx, rc, err, host)
     digest = out.split()[0] if out.strip() else ""
-    print(json.dumps({
-        "host": args.host,
-        "path": args.path,
-        "captured_at": _utcnow_z(),
-        "sha256": digest,
-    }))
+    return {"host": host, "path": path, "captured_at": _utcnow_z(), "sha256": digest}
 
 
-def cmd_package_list(args, _config):
-    _check_host(args.host)
+def package_list(ctx: VerbContext, *, host: str) -> dict:
+    _check_host(host)
     # dpkg-query is present on every host (ubuntu base in playground-v2).
     fmt = r"${Package} ${Version}\n"
-    rc, out, err = _exec(args.host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
-    _exit_on_docker_error(rc, err, args.host)
+    rc, out, err = _exec(ctx, host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
+    _raise_on_docker_error(ctx, rc, err, host)
     pkgs = [line for line in out.splitlines() if line.strip()]
-    print(json.dumps({
-        "host": args.host,
-        "captured_at": _utcnow_z(),
-        "packages": pkgs,
-    }))
+    return {"host": host, "captured_at": _utcnow_z(), "packages": pkgs}
 
 
-def _utcnow_z() -> str:
-    import datetime
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description="Host live-state CLI — per-host point-in-time observations via docker exec.",
-    )
-    sub = p.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="Verify docker context + list known hosts.")
-
-    ci = sub.add_parser(
-        "container-inspect",
-        help="Container name + image by container id (docker inspect).",
-    )
-    ci.add_argument("container_id")
-
-    pt = sub.add_parser("proc-tree", help="Process forest (ps -eo ... --forest).")
-    pt.add_argument("host")
-
-    pw = sub.add_parser("passwd", help="/etc/passwd contents.")
-    pw.add_argument("host")
-
-    ak = sub.add_parser("authorized-keys", help="<user>'s ~/.ssh/authorized_keys.")
-    ak.add_argument("host")
-    ak.add_argument("--user", help="Default: root.")
-
-    fim = sub.add_parser("fim-checksum", help="SHA-256 of a single file.")
-    fim.add_argument("host")
-    fim.add_argument("path", help="Absolute path on <host>.")
-
-    pl = sub.add_parser("package-list", help="Installed dpkg packages.")
-    pl.add_argument("host")
-    pl.add_argument(
-        "--limit", type=int, default=200,
-        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
-    )
-
-    return p
-
-
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    # host-state has no URL/bastion; the shared config schema (URL_BASE +
-    # BASTION_HOST + TIMEOUT_SEC) doesn't apply. The default timeout lives
-    # in this module; nothing else is configurable today.
-    config: dict[str, str] = {"TIMEOUT_SEC": str(DEFAULT_TIMEOUT_SEC)}
-
-    if args.subcommand == "health-check":
-        cmd_health_check(args, config)
-    elif args.subcommand == "container-inspect":
-        cmd_container_inspect(args, config)
-    elif args.subcommand == "proc-tree":
-        cmd_proc_tree(args, config)
-    elif args.subcommand == "passwd":
-        cmd_passwd(args, config)
-    elif args.subcommand == "authorized-keys":
-        cmd_authorized_keys(args, config)
-    elif args.subcommand == "fim-checksum":
-        cmd_fim_checksum(args, config)
-    elif args.subcommand == "package-list":
-        cmd_package_list(args, config)
-    else:
-        parser.error(f"unknown subcommand: {args.subcommand}")
-
-
-if __name__ == "__main__":
-    main()
+VERBS = {
+    "health-check": health_check,
+    "container-inspect": container_inspect,
+    "proc-tree": proc_tree,
+    "passwd": passwd,
+    "authorized-keys": authorized_keys,
+    "fim-checksum": fim_checksum,
+    "package-list": package_list,
+}

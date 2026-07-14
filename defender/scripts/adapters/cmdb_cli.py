@@ -1,103 +1,72 @@
-#!/usr/bin/env python3
-"""CMDB stub CLI — defender-side adapter.
+"""CMDB stub adapter — the `cmdb` VERBS registry.
 
 Wraps the v2 playground CMDB stub (FastAPI over hosts/inventory.yaml).
 Reads the merged BASE + OVERLAY view — overlay endpoints are chaos-mode
 scaffolding and are not exposed by this adapter.
 
-Usage:
-    cmdb_cli.py health-check
-    cmdb_cli.py get-host web-1
-    cmdb_cli.py list-hosts [--role web] [--criticality prod] [--owner team.web]
-    cmdb_cli.py list-roles
+Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
+    health-check
+    get-host      host
+    list-hosts    [role] [criticality] [owner]
+    list-roles
 
-Exit codes:
-    0 — success
-    1 — query error (404, bad arg)
-    2 — connectivity / docker / upstream 5xx
-    64 — usage error (bad flag / unknown subcommand)
+Faults (`faults.py`): ConfigFault/TransportFault = infra (2), UpstreamFault = query
+error (1, carrying the stub's own `detail`).
 """
 
 from __future__ import annotations
 
-import json
-
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
+# verb registry loads this module BY PATH (importlib.spec_from_file_location), not as a
+# package member — the registry keys on the path precisely so two trees' modules stay two
+# module objects.
 import sys as _sys
 from pathlib import Path as _Path
+
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 
 SYSTEM = "cmdb"
 PREFIX = "CMDB"
-DEFAULT_LIST_LIMIT = 50
 
 
-def cmd_get_host(args, config):
-    payload = transport.http_get_obj(config, f"/hosts/{args.name}")
-    print(json.dumps(payload))
+def _config(ctx: VerbContext) -> dict[str, str]:
+    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
-def cmd_list_hosts(args, config):
-    params: dict[str, str] = {}
-    if args.role:
-        params["role"] = args.role
-    if args.criticality:
-        params["criticality"] = args.criticality
-    if args.owner:
-        params["owner"] = args.owner
-    payload = transport.http_get(config, "/hosts", params=params or None)
-    print(json.dumps(payload))
+def health_check(ctx: VerbContext) -> dict:
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
 
 
-def cmd_list_roles(args, config):
-    payload = transport.http_get(config, "/roles")
-    print(json.dumps(payload))
+def get_host(ctx: VerbContext, *, host: str) -> dict:
+    """The effective record for one host. The param is `host` (not the CLI's old
+    positional `name`): the query-template corpus binds `${host}`, and a placeholder that
+    does not match a declared param is a template the model cannot fill."""
+    return transport.http_get_obj(ctx, _config(ctx), f"/hosts/{host}")
 
 
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description="CMDB stub CLI — host inventory lookups (merged BASE + OVERLAY view).",
-    )
-    sub = p.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="GET /health and exit.")
-
-    gh = sub.add_parser("get-host", help="Effective record for one host.")
-    gh.add_argument("name")
-
-    lh = sub.add_parser("list-hosts", help="All hosts (filterable).")
-    lh.add_argument("--role")
-    lh.add_argument("--criticality")
-    lh.add_argument("--owner")
-    lh.add_argument(
-        "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
-    )
-
-    sub.add_parser("list-roles", help="Inventory role catalog.")
-
-    return p
+def list_hosts(
+    ctx: VerbContext,
+    *,
+    role: str | None = None,
+    criticality: str | None = None,
+    owner: str | None = None,
+) -> dict | list:
+    params = {k: v for k, v in
+              (("role", role), ("criticality", criticality), ("owner", owner)) if v}
+    return transport.http_get(ctx, _config(ctx), "/hosts", params=params or None)
 
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    config = transport.load_config(SYSTEM, PREFIX)
-    if args.subcommand == "health-check":
-        transport.health_check(config, SYSTEM)
-    elif args.subcommand == "get-host":
-        cmd_get_host(args, config)
-    elif args.subcommand == "list-hosts":
-        cmd_list_hosts(args, config)
-    elif args.subcommand == "list-roles":
-        cmd_list_roles(args, config)
-    else:
-        parser.error(f"unknown subcommand: {args.subcommand}")
+def list_roles(ctx: VerbContext) -> dict | list:
+    return transport.http_get(ctx, _config(ctx), "/roles")
 
 
-if __name__ == "__main__":
-    main()
+VERBS = {
+    "health-check": health_check,
+    "get-host": get_host,
+    "list-hosts": list_hosts,
+    "list-roles": list_roles,
+}

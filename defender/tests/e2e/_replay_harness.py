@@ -32,7 +32,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -143,31 +142,6 @@ class NeverEndsModel:
     def __call__(self, messages, info) -> ModelResponse:
         self.calls += 1
         return ModelResponse(parts=[ToolCallPart(tool_name="read_file", args={"path": self._alert})])
-
-
-# --- adapter-subprocess fakes (record_query.subprocess drop-ins) -----------
-# The adapter's external-process IO is the one seam with no in-process twin, so
-# capture stays hermetic by stubbing record_query's `subprocess`. `.TimeoutExpired`
-# keeps capture's except-clause valid on each.
-
-class FakeAdapterSubprocess:
-    """Every adapter call succeeds (exit 0) with a canned one-event payload."""
-    TimeoutExpired = subprocess.TimeoutExpired
-    PAYLOAD = '[{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana", "event.action": "ssh_login"}]'
-
-    @staticmethod
-    def run(inner, **kwargs):
-        return subprocess.CompletedProcess(inner, 0, stdout=FakeAdapterSubprocess.PAYLOAD, stderr="")
-
-
-class FailingAdapterSubprocess:
-    """Every adapter call exits 2 — the connectivity/auth code the circuit breaker
-    counts (circuit_breaker.INFRA_EXIT_CODES)."""
-    TimeoutExpired = subprocess.TimeoutExpired
-
-    @staticmethod
-    def run(inner, **kwargs):
-        return subprocess.CompletedProcess(inner, 2, stdout="", stderr="connection refused")
 
 
 # --- the injected verb-registry seam (#611) --------------------------------

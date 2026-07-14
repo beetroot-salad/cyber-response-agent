@@ -86,8 +86,12 @@ def main(argv: list[str]) -> int:
         print(f"missing {alert}", file=sys.stderr)
         return 2
     if not staging_paths.gather_raw.is_dir() and not staging_paths.executed_queries.is_file():
+        # Name the two artifacts through `staging_paths` rather than hardcoding them beside the
+        # RunPaths that already owns those offsets: one source for "what the tables are called",
+        # so a relocation cannot leave this message pointing at a path that no longer exists.
         print(f"missing the lead/query tables under {staging} "
-              "(gather_raw/ + executed_queries.jsonl)", file=sys.stderr)
+              f"({staging_paths.gather_raw.name}/ + {staging_paths.executed_queries.name})",
+              file=sys.stderr)
         return 2
 
     here = Path(__file__).resolve().parent          # .../defender/learning/ops

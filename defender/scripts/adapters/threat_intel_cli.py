@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Threat-intel stub CLI — defender-side adapter.
+"""Threat-intel stub adapter — the `threat-intel` VERBS registry.
 
 Wraps the v2 playground threat-intel stub (VT/OTX-shaped offline
 reputation lookup).
@@ -10,92 +9,75 @@ IMPORTANT semantics:
     Treat `verdict: unknown` as *absence of signal*, never as
     refutation of a hypothesis.
 
-Usage:
-    threat_intel_cli.py health-check
-    threat_intel_cli.py lookup 185.220.101.45
-    threat_intel_cli.py list-indicators [--verdict malicious] [--type ip]
+Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
+    health-check
+    lookup            value
+    list-indicators   [verdict] [type] [tag]
 
-Exit codes:
-    0 — success (including verdict=unknown)
-    1 — query error (bad arg)
-    2 — connectivity / docker / upstream 5xx
-    64 — usage error (bad flag / unknown subcommand)
+Faults (`faults.py`): ConfigFault/TransportFault = infra (2), UpstreamFault = query
+error (1, carrying the stub's own `detail`).
 """
 
 from __future__ import annotations
 
-import json
 import urllib.parse
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
+# verb registry loads this module BY PATH (see cmdb_cli.py).
 import sys as _sys
 from pathlib import Path as _Path
+
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters.faults import UpstreamFault
 
 SYSTEM = "threat-intel"
 PREFIX = "THREAT_INTEL"
-DEFAULT_LIST_LIMIT = 50
+VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
-def cmd_lookup(args, config):
-    # /lookup/{value:path} — caller's value may contain dots/colons; quote it.
-    quoted = urllib.parse.quote(args.value, safe="")
-    payload = transport.http_get_obj(config, f"/lookup/{quoted}")
-    print(json.dumps(payload))
+def _config(ctx: VerbContext) -> dict[str, str]:
+    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
-def cmd_list_indicators(args, config):
+def health_check(ctx: VerbContext) -> dict:
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
+
+
+def lookup(ctx: VerbContext, *, value: str) -> dict:
+    # /lookup/{value:path} — the value may contain dots/colons; quote it.
+    quoted = urllib.parse.quote(value, safe="")
+    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}")
+
+
+def list_indicators(
+    ctx: VerbContext,
+    *,
+    verdict: str | None = None,
+    type: str | None = None,  # noqa: A002 — the stub's own query param name; `${type}` in the templates
+    tag: str | None = None,
+) -> dict | list:
     params: dict[str, str] = {}
-    if args.verdict:
-        params["verdict"] = args.verdict
-    if args.type:
-        params["type"] = args.type
-    if args.tag:
-        params["tag"] = args.tag
-    payload = transport.http_get(config, "/indicators", params=params or None)
-    print(json.dumps(payload))
+    if verdict:
+        # The CLI enforced this with argparse `choices`; a verb has no argparse, so the
+        # closed enum is checked here, and a bad value is the agent's to fix (exit 1).
+        if verdict not in VERDICTS:
+            raise UpstreamFault(
+                f"unknown verdict {verdict!r} — threat-intel verdicts are {list(VERDICTS)}."
+            )
+        params["verdict"] = verdict
+    if type:
+        params["type"] = type
+    if tag:
+        params["tag"] = tag
+    return transport.http_get(ctx, _config(ctx), "/indicators", params=params or None)
 
 
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description="Threat-intel stub CLI — offline reputation lookups (VT/OTX shape).",
-    )
-    sub = p.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="GET /health and exit.")
-
-    lk = sub.add_parser("lookup", help="Reputation for one IP/domain/hash.")
-    lk.add_argument("value")
-
-    li = sub.add_parser("list-indicators", help="All seed indicators (filterable).")
-    li.add_argument("--verdict", choices=["benign", "suspicious", "malicious", "unknown"])
-    li.add_argument("--type")
-    li.add_argument("--tag")
-    li.add_argument(
-        "--limit", type=int, default=DEFAULT_LIST_LIMIT,
-        help="Accepted for back-compat; the full JSON payload is always returned (no row cap).",
-    )
-
-    return p
-
-
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    config = transport.load_config(SYSTEM, PREFIX)
-    if args.subcommand == "health-check":
-        transport.health_check(config, SYSTEM)
-    elif args.subcommand == "lookup":
-        cmd_lookup(args, config)
-    elif args.subcommand == "list-indicators":
-        cmd_list_indicators(args, config)
-    else:
-        parser.error(f"unknown subcommand: {args.subcommand}")
-
-
-if __name__ == "__main__":
-    main()
+VERBS = {
+    "health-check": health_check,
+    "lookup": lookup,
+    "list-indicators": list_indicators,
+}

@@ -178,8 +178,10 @@ def _actor_scope() -> RunScope:
 def _reader_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     """The production main-shaped reader grant builder (`_common.reader_grants`) — so a def
     compiled here carries the real reader lane (one `cat` opener scoped to the run + corpus,
-    the stdin-only viewers, the non-adapter shims), not a toy one."""
-    return reader_grants(roots.run_dir, roots.defender_dir, raw=False, adapters=False)
+    the stdin-only viewers, the non-adapter shims), not a toy one. The `adapters=` param is gone
+    (#611): a data source is reached through the `query` tool, so the reader lane no longer emits
+    an adapter route on any def."""
+    return reader_grants(roots.run_dir, roots.defender_dir, raw=False)
 
 
 def _reader_def(*, write=False, write_shapes=()) -> AgentDefinition:

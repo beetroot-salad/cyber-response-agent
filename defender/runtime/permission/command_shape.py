@@ -52,37 +52,9 @@ def has_adapter(pipelines: list[Pipeline]) -> bool:
     return any(is_adapter_stage(s) for s in flat_stages(pipelines))
 
 
-def standalone_adapter_argv(pipelines: list[Pipeline]) -> list[str] | None:
-    """If the command is a STANDALONE adapter invocation (the gather-captured
-    case) — a single stage whose command is an adapter — return its argv; else
-    None. The argv IS the shlex-resolved stage, handed straight to the capture
-    path."""
-    stages = flat_stages(pipelines)
-    if len(stages) == 1 and is_adapter_stage(stages[0]):
-        return stages[0]
-    return None
-
-
-def adapter_sql_split(pipelines: list[Pipeline]) -> tuple[list[str], list[str]] | None:
-    """If the command is the sanctioned `defender-<system> … | defender-sql
-    '<SQL>'` shape, return `(adapter_argv, sql_argv)`; else None. The shape is ONE
-    pipeline of exactly two stages — an adapter producing on the left, defender-sql
-    consuming on the right. defender-sql is self-sandboxed (no file/network), so
-    aggregating the captured payload through it is a local transform, not a second
-    data-source query.
-
-    A `;`/`&&`/`||` compound (`adapter ; defender-sql …`) is a SEQUENCE of
-    SEPARATE pipelines, not a pipe, so it can't match this single-`Pipeline` test —
-    the shell would sequence/short-circuit them (with `||`, run defender-sql only on
-    adapter *failure*), whereas the capture path unconditionally streams the captured
-    payload into defender-sql. Accepting those compounds was a validator/executor
-    differential and a hole in the deny-by-default compound rule (#379)."""
-    if len(pipelines) != 1:
-        return None
-    stages = flat_stages(pipelines)
-    if len(stages) != 2:
-        return None
-    adapter, consumer = stages
-    if is_adapter_stage(adapter) and consumer and consumer[0] == SQL_SHIM:
-        return adapter, consumer
-    return None
+# `standalone_adapter_argv` / `adapter_sql_split` went with the routes they fed (#611). They
+# split an adapter command into the argv the capture layer ran and the `(adapter, defender-sql)`
+# pipe it streamed a payload through — and there is no capture-from-bash layer left to hand an
+# argv to. `has_adapter` survives because the CLASSIFICATION still earns an adapter-shaped
+# command its own deny reason (one that names the `query` tool), which is the whole of what the
+# taxonomy is still for on this lane.

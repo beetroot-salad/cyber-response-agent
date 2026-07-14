@@ -26,16 +26,16 @@ Two consequences worth naming, because they REPLACE mechanisms rather than addin
     not in main's grant list — positive enumeration, not a `RAW_MARKER in cmd` substring scan
     over the unparsed command string (which denied `… | grep gather_raw`, where `gather_raw`
     is a search PATTERN and no such path is ever opened);
-  - **there are no capability bits.** `adapters`/`adapter_sql_pipe` are two structurally
-    routed `Grant`s (`Route`), and the adapter classification still runs AFTER the reader lane
-    declines a command — the order the capture layer and the two specific adapter deny reasons
-    depend on (`command_shape`, shared with dispatch).
+  - **there is no adapter route.** Since #611 a data source is reached through the typed `query`
+    tool, so no grant on any lane carries an adapter route and no bash command captures a
+    payload. The structural adapter CLASSIFICATION survives (`command_shape`, shared with
+    dispatch) for exactly one purpose: an adapter-shaped command earns a deny that names the
+    tool that DOES work, instead of the generic fall-through.
 
 **The command is parsed exactly once (#456).** `decide_bash` unwraps + parses, then returns a
 `BashDecision` carrying that parse: the verdict, the `Pipeline` list (for the executor's
-`run_parsed`), the grants that claimed it (for `defender-policy explain`), and the
-adapter/pipe routing the dispatcher consumes — so neither dispatch nor execution re-decomposes
-the string."""
+`run_parsed`), and the grants that claimed it (for `defender-policy explain`) — so neither
+dispatch nor execution re-decomposes the string."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender.hooks._cmd_segments import unwrap
-from defender.hooks.block_main_loop_raw_access import ADAPTER_DENY_REASON
 from defender.runtime import bash_exec
 
 from . import command_shape
@@ -56,17 +55,17 @@ from .policy import AgentPolicy
 # The main / gather fall-through deny reasons live with their policies
 # (`policies/main.py`, `policies/gather.py`); the gate reads `policy.deny_reason`.
 
-# Gather may run a data-source adapter directly — it's captured transparently — but only solo,
-# or as the sanctioned `adapter | defender-sql '<SQL>'` aggregation pipe. Any other
-# pipeline/compound makes "the payload" ambiguous. The advice names only LIVE commands: the
-# viewers lost their file slot (#575), so `jq <file>` is a dead command and the reduction the
-# agent actually has is `cat <payload> | jq …`.
-ADAPTER_STANDALONE_REASON = (
-    "Blocked: run the data-source adapter as a standalone command (it is captured "
-    "automatically — no wrapper needed), then reduce the persisted payload with "
-    "`cat <payload> | jq '<filter>'`, or read it with read_file. The only adapter pipe "
-    "allowed is `defender-<system> … | defender-sql '<SQL>'`. Don't otherwise pipe or chain "
-    "the adapter call."
+# There is no adapter route on ANY bash lane since #611 — a data source is reached through the
+# typed `query` tool. This reason is what an adapter-SHAPED command gets, and it must point at
+# the route that exists rather than the one that does not: a reason naming a dead command teaches
+# a dead command, which this codebase treats as an enforced invariant (the deny reasons are
+# checked against the live grant list) and not a cosmetic string.
+ADAPTER_RETIRED_REASON = (
+    "Blocked: data-source adapters are not runnable from bash. Reach the system through the "
+    "`query` tool instead — `query(system=…, verb=…, params={…}, query_id=…)`; it validates the "
+    "verb's params against the registry, captures the payload to the queries table, and hands "
+    "you the path. To aggregate that payload afterwards: "
+    "`cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
 )
 
 # A leading `VAR=value` env-assignment prefix (the credential-groping vector) — matched
@@ -84,17 +83,13 @@ class BashDecision(Decision):
       - `grants` — the `Grant` that claimed each stage (the adapter grant, for a structurally
         routed adapter). `defender-policy explain` reports it, which is what makes the audit
         CLI a second CONSUMER of the gate rather than a second implementation of it.
-      - `adapter_argv` — the standalone-adapter argv to capture (gather only).
-      - `sql_pipe` — the `(adapter_argv, sql_argv)` split for the sanctioned
-        `adapter | defender-sql` pipe (gather only).
 
-    `adapter_argv`/`sql_pipe` are mutually exclusive and set only when the verdict is allow;
-    both None means the command runs through the plain executor."""
+    Since #611 there are no routing fields: the adapter route the capture layer read
+    (`adapter_argv` / `sql_pipe`) is gone with the capture-from-bash path itself, so an allowed
+    command always runs through the plain executor."""
 
     pipelines: tuple[bash_exec.Pipeline, ...] | None = None
     grants: tuple[Grant, ...] = ()
-    adapter_argv: list[str] | None = None
-    sql_pipe: tuple[list[str], list[str]] | None = None
 
 
 def _stage_unsafe(argv: list[str]) -> bool:
@@ -176,44 +171,9 @@ def require_anchor_root(what: str, p: Path) -> None:
 
 
 def _allow(
-    pipelines: list[bash_exec.Pipeline],
-    *,
-    grants: tuple[Grant, ...] = (),
-    adapter_argv: list[str] | None = None,
-    sql_pipe: tuple[list[str], list[str]] | None = None,
+    pipelines: list[bash_exec.Pipeline], *, grants: tuple[Grant, ...] = (),
 ) -> BashDecision:
-    return BashDecision(
-        True, pipelines=tuple(pipelines), grants=grants,
-        adapter_argv=adapter_argv, sql_pipe=sql_pipe,
-    )
-
-
-def route_grant(policy: AgentPolicy, route: Route) -> Grant | None:
-    """The grant carrying `route`, or None — the replacement for the old `adapters` /
-    `adapter_sql_pipe` capability BITS. The capability IS the grant: a bit no grant backs is
-    data nobody enforces, and a grant no bit exposes is a capability nobody can audit."""
-    return next((g for g in policy.bash_allow if g.route is route), None)
-
-
-def _decide_adapter(pipelines: list[bash_exec.Pipeline], policy: AgentPolicy) -> BashDecision:
-    """Classify a command that contains a data-source adapter. Denied unless the agent holds a
-    `CAPTURE_ADAPTER` grant; when allowed, a standalone call is captured transparently and the
-    only sanctioned multi-stage shape is `adapter | defender-sql '<SQL>'` (a SECOND grant — so
-    a live adapter's output can only ever flow into the sandboxed aggregator, never into an
-    arbitrary reader stage). Any other adapter compound is ambiguous. The adapter/sql payloads
-    are NOT run through the substitution guard (they go straight to subprocess shell=False)."""
-    capture = route_grant(policy, Route.CAPTURE_ADAPTER)
-    if capture is None:
-        return BashDecision(False, ADAPTER_DENY_REASON)
-    standalone = command_shape.standalone_adapter_argv(pipelines)
-    if standalone is not None:
-        return _allow(pipelines, grants=(capture,), adapter_argv=standalone)
-    sql = route_grant(policy, Route.CAPTURE_ADAPTER_SQL)
-    if sql is not None:
-        split = command_shape.adapter_sql_split(pipelines)
-        if split is not None:
-            return _allow(pipelines, grants=(sql,), sql_pipe=split)
-    return BashDecision(False, ADAPTER_STANDALONE_REASON)
+    return BashDecision(True, pipelines=tuple(pipelines), grants=grants)
 
 
 # Sentinel replacing a token's OWN spaces before the argv is joined for shape matching. A plain
@@ -333,8 +293,7 @@ def decide_bash(
     (which is exactly the cross-run bleed a shared roots argument invites).
 
     Returns a `BashDecision` carrying the single parse (see the class): callers read
-    `.allow`/`.reason` as before, and route capture/execution off
-    `.adapter_argv`/`.sql_pipe`/`.pipelines` without re-parsing (#456)."""
+    `.allow`/`.reason` as before, and execute off `.pipelines` without re-parsing (#456)."""
     cmd = command.strip()
     if not cmd:
         return BashDecision(True)
@@ -360,9 +319,11 @@ def decide_bash(
     if reader is not None:
         return reader
 
-    # Not a reader command: a data-source adapter routes structurally (capture / the sanctioned
-    # adapter|defender-sql pipe / the adapter deny reasons).
+    # Not a reader command. An adapter-SHAPED command still gets its OWN reason rather than the
+    # generic fall-through: the model that typed it is trying to reach a data source, and the
+    # cheapest possible correction is the name of the tool that does. The classification survives
+    # (`command_shape`) precisely so the deny can say that; what died is the route behind it.
     if command_shape.has_adapter(pipelines):
-        return _decide_adapter(pipelines, policy)
+        return BashDecision(False, ADAPTER_RETIRED_REASON)
 
     return BashDecision(False, policy.deny_reason)

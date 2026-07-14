@@ -86,16 +86,15 @@ def cat_input_files(argv: list[str]) -> list[str] | None:
     return files
 
 
-# The data-source adapter class. It is not one program: `command_shape.is_adapter_stage`
-# classifies the whole `defender-<system>` / `<system>_cli.py` family STRUCTURALLY, and that
-# classification (not a shape regex) is what routes capture. The name is a placeholder that
-# can never be an argv[0], which is what keeps the adapter grants off the reader lane.
-ADAPTER = "defender-<system>"
-
 # The `defender-*` shims' long options — a POSITIVE allowlist per shim, because a shim grant
 # is `OPENS_NOTHING` and its shape is therefore its only containment. Enumerated from each
 # CLI's argparse; a `--flag` the CLI doesn't define is denied rather than passed through, so
 # a new flag is a deliberate grant change (that is the #579 discipline, applied to the shims).
+#
+# `defender-record-query` left with its shim (#611): the wrapper it fronted is gone, and a shim
+# must leave `NON_ADAPTER_SHIMS` and this table TOGETHER — one left in `NON_ADAPTER_SHIMS` but
+# dropped from here gets a free-text-only shape from `_shim_shape`, which silently WIDENS what it
+# may be handed rather than removing it.
 _SHIM_FLAGS: dict[str, tuple[str, ...]] = {
     "defender-lessons": ("--tags", "--show"),
     "defender-invlang": (
@@ -104,7 +103,6 @@ _SHIM_FLAGS: dict[str, tuple[str, ...]] = {
         "--parent-class", "--parent-type", "--quiet", "--rel", "--signature", "--top-k",
     ),
     "defender-sql": (),
-    "defender-record-query": ("--run-dir", "--lead", "--system", "--query-id"),
 }
 
 #: Every program any agent may be granted → what its argv opens. `cat` is the sole opener.
@@ -128,7 +126,6 @@ PROGRAMS: dict[str, Extractor] = {
     **{shim: OPENS_NOTHING for shim in NON_ADAPTER_SHIMS},
     "python3": OPENS_NOTHING,
     "rm": OPENS_NOTHING,
-    ADAPTER: OPENS_NOTHING,
 }
 
 
@@ -173,23 +170,15 @@ def under(root: Path, tail: str) -> re.Pattern[str]:
 # ── The grant ────────────────────────────────────────────────────────────────
 
 class Route(enum.Enum):
-    """What the gate does with a command a grant claims. `PLAIN` runs it through the
-    executor; the two adapter routes are the STRUCTURAL classification (`command_shape`) the
-    capture layer keys on — they tag the agent's capability, and the grants carrying them
-    never claim a stage on the reader lane (see `STRUCTURAL_SHAPE`)."""
+    """What the gate does with a command a grant claims.
+
+    One member since #611. The two adapter routes (`CAPTURE_ADAPTER`, `CAPTURE_ADAPTER_SQL`) went
+    with the capability they WERE: a data source is reached through the `query` tool, so no grant
+    on any lane may carry an adapter route, and there is nothing left for the bash gate to route.
+    The enum survives as the field's type — a single-valued enum still says "this is a routing
+    decision", and the next route (an MCP capture, say) lands here rather than as a bare bool."""
 
     PLAIN = "plain"
-    CAPTURE_ADAPTER = "capture-adapter"
-    CAPTURE_ADAPTER_SQL = "capture-adapter-sql"
-
-
-# The adapter grants' shape. An adapter command is classified STRUCTURALLY
-# (`command_shape.is_adapter_stage` over the whole `defender-<system>` / `<system>_cli.py`
-# family) and routed AFTER the reader lane declines it — the order the capture layer and the
-# two specific adapter deny reasons depend on. So an adapter grant carries no argv shape at
-# all: this pattern is unmatchable by construction, which is exactly what keeps the reader
-# lane from claiming an adapter command and stripping it of its capture payload.
-STRUCTURAL_SHAPE = re.compile(r"(?!x)x")
 
 
 @dataclass(frozen=True)
@@ -204,7 +193,7 @@ class Grant:
       - `pattern` — the argv shape, `fullmatch`ed against the tokenized stage.
       - `scope` — the path shapes every extracted operand must resolve into. Empty for an
         `OPENS_NOTHING` program (nothing to check).
-      - `route` — `PLAIN`, or one of the two structural adapter routes.
+      - `route` — what the gate does with a claimed command (`PLAIN` — see `Route`).
       - `pins_path` — the R1 exemption: this grant's operand IS the program (the actor's
         pinned `python3 <script>`, the lead author's/curator's `rm <path>`, the judge's
         ticket CLI), so its path legitimately lives in the PATTERN and `resolve()` is the
@@ -294,13 +283,11 @@ STDIN_VIEWERS = ("wc", "tail", "head", "grep", "jq")
 
 
 __all__ = [
-    "ADAPTER",
     "PathShapes",
     "OPENS_NOTHING",
     "PROGRAMS",
     "SEG",
     "STDIN_VIEWERS",
-    "STRUCTURAL_SHAPE",
     "TREE",
     "VALUE",
     "Grant",

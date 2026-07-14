@@ -441,8 +441,12 @@ def test_compile_policy_emits_only_declared_grants(tmp_path):
     in the grant list, so "main may not run an adapter" is the absence of that grant.
 
     A def declaring no builders projects an empty lane (bash_allow == (), and — since the read
-    surface IS the cat grant's scope — an empty read_allow too). POSITIVE CONTROL: gather, whose
-    builder DOES emit the two structurally-routed adapter grants, has them; main does not."""
+    surface IS the cat grant's scope — an empty read_allow too). Since #611 a data source is
+    reached through the `query` TOOL, not from bash: no builder emits an adapter route any more, so
+    every grant on every lane is `Route.PLAIN` (the enum has one member). Gather's data capability
+    now lives in `ToolSet.query`, not in a bash grant — asserted by the query-tool spec
+    (`tests/e2e/test_query_tool_611.py`), not here. This test's surviving claim is that main and
+    gather both project a PLAIN-only bash lane and nothing infers a route."""
     no_bash = _compile(_defn(role=AgentRole.MAIN, tools=ToolSet(read=True)), tmp_path)
     assert no_bash.bash_allow == ()          # no builders → no grants
     assert no_bash.read_allow == ()          # …and hence no cat scope → no read shapes
@@ -453,9 +457,9 @@ def test_compile_policy_emits_only_declared_grants(tmp_path):
     main = _compile(MAIN_DEF, tmp_path)
     gather = _compile(GATHER_DEF, tmp_path)
     assert _routes(main) == {Route.PLAIN}                    # main: no adapter address at all
-    assert _routes(gather) == {                              # positive control: gather declared them
-        Route.PLAIN, Route.CAPTURE_ADAPTER, Route.CAPTURE_ADAPTER_SQL,
-    }
+    assert _routes(gather) == {Route.PLAIN}                  # gather too — the adapter route is gone
+    assert list(Route) == [Route.PLAIN]                      # the enum carries no capture route
+    assert gather.bash_allow                                 # gather still has a (plain) reader lane
     assert all(isinstance(g, Grant) for g in gather.bash_allow)
 
 
