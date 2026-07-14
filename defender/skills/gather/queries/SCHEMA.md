@@ -79,15 +79,15 @@ the shape above.
 
 ## Multi-query dispatches and `gather_raw/` naming
 
-Gather runs each query as a PLAIN standalone adapter call —
-`defender-{system} <verb> '<query>'` — and the runtime captures it transparently
-(`runtime/tools._capture_adapter`); there is no wrapper to invoke and no
-`defender-record-query … -- defender-{system} …` form (that wrapper-forcing lane is gone,
-and the gate now denies the passthrough spelling). Capture persists raw output
-by-ref to `{run_dir}/gather_raw/{lead_id}/{seq}.json` and appends one row to
-`executed_queries.jsonl` (the queries table, FK `lead_id`); gather neither
-redirects stdout nor names files. `seq` disambiguates N-queries-per-lead — there
-is no flat `{position}.json` / `{position}{a..z}.json` projection:
+Gather runs each query through the typed `query` tool —
+`query(system=…, verb=…, params={…}, query_id=…)` — and the runtime captures it
+transparently (the capture capability in `runtime/query_tool.py`). There is no adapter
+command, no shim, and no wrapper to invoke: bash cannot reach a data source at all.
+Capture persists the raw payload by-ref to `{run_dir}/gather_raw/{lead_id}/{seq}.json`
+and appends one row to `executed_queries.jsonl` (the queries table, FK `lead_id`);
+gather neither redirects stdout nor names files. `seq` disambiguates
+N-queries-per-lead — there is no flat `{position}.json` / `{position}{a..z}.json`
+projection:
 
 - `gather_raw/l-001/0.json` — first query for lead `l-001`
 - `gather_raw/l-001/1.json`, `gather_raw/l-001/2.json` — further queries for `l-001`

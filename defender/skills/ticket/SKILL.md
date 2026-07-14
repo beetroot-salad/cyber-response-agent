@@ -89,17 +89,21 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### CLI
 
-```bash
-defender-ticket health-check
-defender-ticket list-tickets [--status X] [--label X] [--q X] [--limit N]
-defender-ticket get-ticket <key>
+```
+query(system="ticket", verb="health-check", params={})
+query(system="ticket", verb="list-tickets", params={"status": "X", "label": "X", "q": "X"})
+query(system="ticket", verb="get-ticket",   params={"key": "<key>"})
 ```
 
-**Do not Read `ticket_cli.py` source to discover flags.** This SKILL
-plus `defender-ticket {subcommand} --help` is the authoritative
-surface.
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types. `get-ticket` requires `key`;
+every `list-tickets` param is an optional filter.
 
-Each subcommand emits the upstream JSON response unchanged.
+**Do not Read `ticket_cli.py` source to discover params.** This SKILL plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
+
+Each verb returns the upstream JSON response unchanged.
 
 ### Connectivity
 

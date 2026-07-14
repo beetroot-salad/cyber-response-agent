@@ -58,3 +58,42 @@ def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
     with pytest.raises(KeyError):
         reg.verbs(rel)
     assert not marker.exists(), "a traversal system name imported (and executed) an out-of-tree module"
+
+
+def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
+    """A `*_cli.py` that will not import costs its OWN system, not the run.
+
+    Reading the roster IMPORTS each adapter (the filename glob never did), so an adapter with a
+    syntax error — a newly onboarded system, say — would otherwise raise straight out of
+    `descriptor_catalog`, killing prompt construction for EVERY system and with it the whole run.
+    The healthy systems must still be advertised."""
+    from defender.hooks.inject_system_skill_description import descriptor_catalog
+
+    adapters = tmp_path / "adapters"
+    adapters.mkdir()
+    (adapters / "good_cli.py").write_text("VERBS = {'health-check': lambda ctx: {}}\n", encoding="utf-8")
+    (adapters / "broken_cli.py").write_text("this is not python(\n", encoding="utf-8")
+
+    skills = tmp_path / "skills"
+    for name in ("good", "broken"):
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: the {name} system\n---\n", encoding="utf-8",
+        )
+
+    catalog = descriptor_catalog(skills, adapters)
+    assert catalog is not None, "one broken adapter emptied the whole catalog"
+    assert "`good`" in catalog
+    assert "`broken`" not in catalog, "a system that cannot be imported was still advertised"
+
+
+def test_a_broken_adapter_module_raises_from_the_registry(tmp_path):
+    """The registry itself stays honest — it does not swallow the failure into a KeyError, which
+    would file a code bug as 'unknown system'. The CALLERS decide what to do with it (the catalog
+    skips the system; the query tool files it as infra against that system)."""
+    adapters = tmp_path / "adapters"
+    adapters.mkdir()
+    (adapters / "broken_cli.py").write_text("this is not python(\n", encoding="utf-8")
+
+    with pytest.raises(SyntaxError):
+        ModuleVerbRegistry(adapters).verbs("broken")

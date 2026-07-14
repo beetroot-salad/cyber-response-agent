@@ -4,22 +4,28 @@ Read this file when gather is dispatched against `system: cmdb`.
 Defender does not read this file; it sees only `SKILL.md`'s visibility
 surface.
 
-## CLI
+## Verbs
 
-```bash
-defender-cmdb health-check
-defender-cmdb get-host <name>
-defender-cmdb list-hosts [--role X] [--criticality X] [--owner X] [--limit N]
-defender-cmdb list-roles
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types.
+
+```
+query(system="cmdb", verb="health-check", params={})
+query(system="cmdb", verb="get-host",   params={"host": "<name>"})
+query(system="cmdb", verb="list-hosts", params={"role": "X", "criticality": "X", "owner": "X"})
+query(system="cmdb", verb="list-roles", params={})
 ```
 
-**Do not Read `cmdb_cli.py` source to discover flags.** This file plus
-`defender-cmdb {subcommand} --help` is the authoritative surface.
+`get-host` requires `host`; every `list-hosts` param is an optional filter.
 
-Each subcommand emits the upstream JSON response unchanged — a flat
-object for `get-host`, a list/object for `list-hosts` / `list-roles`.
-That payload IS the output (there is no separate formatted-text mode);
-gather captures it under `gather_raw/{lead_id}/{seq}.json`.
+**Do not Read `cmdb_cli.py` source to discover params.** This file plus the systems
+catalog in your dispatch prompt is the authoritative surface, and a call with an
+unknown/missing/mistyped param is rejected with the declared list anyway.
+
+Each verb returns the upstream JSON response unchanged — a flat object
+for `get-host`, a list/object for `list-hosts` / `list-roles`. That
+payload IS the output; the harness captures it under
+`gather_raw/{lead_id}/{seq}.json`.
 
 `get-host` is keyed by inventory host name (e.g. `scanner-1`, `web-1`).
 Feeding a runtime identifier — container id, docker container name —

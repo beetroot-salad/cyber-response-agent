@@ -2,36 +2,43 @@
 
 Read this file when gather is dispatched against `system: elastic`.
 Defender does not read this file; it sees only `SKILL.md`'s visibility
-surface. It carries the CLI surface, query syntax, and index scoping.
+surface. It carries the verb surface, query syntax, and index scoping.
 
-## CLI
+## Verbs
 
-```bash
-defender-elastic health-check
-defender-elastic query  '<query_string>' [--index P] [--start T] [--end T] [--limit N]
-defender-elastic alerts '<query_string>' [--index P] [--start T] [--end T] [--limit N]
-defender-elastic esql   '<ES|QL pipe>'
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types (`"limit": 20`, never `"20"`).
+
 ```
+query(system="elastic", verb="health-check", params={})
+query(system="elastic", verb="query",  params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>"})
+query(system="elastic", verb="alerts", params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>"})
+query(system="elastic", verb="esql",   params={"query": "<ES|QL pipe>"})
+```
+
+Only `native_query` (for `query`/`alerts`) and `query` (for `esql`) are required;
+the rest have defaults. `limit` is clamped to a 20-doc cap — read the envelope's
+`total` for magnitudes, never pull-and-count.
 
 `esql` runs a server-side **ES|QL** aggregation and returns the result table
 (`{columns, row_count, values}`) — the rows ARE the answer, with the aggregation
 scalars computed over the full match, so you never pull docs and reduce them. The
 whole query (index via `FROM`, filter via `WHERE`, window via `@timestamp`
-comparison, aggregation via `STATS`) lives in the pipe; `esql` takes no
-`--index/--start/--end/--limit`. Pass the **whole pipe on one line** (the `|`
-separators stay inside the quotes; a literal newline ends the shell command and is
-rejected). ES|QL caps the returned grouping rows at **1000** by default, so a wide
-`BY` (high-cardinality grouping) is silently truncated — narrow the `BY` or add an
-explicit `LIMIT`. Prefer `esql` for any count / distribution / cardinality /
+comparison, aggregation via `STATS`) lives in the pipe, which is why `esql` takes
+no `start`/`end`/`limit`/`index`. Nothing shells out, so the pipe is just a JSON
+string — `|` separators and newlines alike are safe, with no quoting or escaping
+rule to get wrong. ES|QL caps the returned grouping rows at **1000** by default, so
+a wide `BY` (high-cardinality grouping) is silently truncated — narrow the `BY` or
+add an explicit `LIMIT`. Prefer `esql` for any count / distribution / cardinality /
 timing dimension; use `query` (KQL search) only when you need raw event
 documents themselves.
 
-**Do not Read `elastic_cli.py` source to discover flags.** This doc
-plus `defender-elastic {subcommand} --help` is the authoritative
-surface. The source is ~500 lines and reading it shows up as the
-single largest source of wasted Read calls across runs. If a flag
-you need isn't here or in `--help`, treat it as unsupported and
-escalate — don't infer one from the source.
+**Do not Read `elastic_cli.py` source to discover params.** This doc plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
+The source is ~500 lines and reading it shows up as the single largest source of
+wasted Read calls across runs. If a param you need isn't here, treat it as
+unsupported and escalate — don't infer one from the source.
 
 `query` / `alerts` emit a JSON payload
 `{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`

@@ -98,21 +98,25 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### CLI
 
-```bash
-defender-host-state health-check
-defender-host-state container-inspect <container_id>
-defender-host-state proc-tree <host>
-defender-host-state passwd <host>
-defender-host-state authorized-keys <host> [--user U]
-defender-host-state fim-checksum <host> <path>
-defender-host-state package-list <host> [--limit N]
+```
+query(system="host-state", verb="health-check",      params={})
+query(system="host-state", verb="container-inspect", params={"container_id": "<container_id>"})
+query(system="host-state", verb="proc-tree",         params={"host": "<host>"})
+query(system="host-state", verb="passwd",            params={"host": "<host>"})
+query(system="host-state", verb="authorized-keys",   params={"host": "<host>", "user": "U"})
+query(system="host-state", verb="fim-checksum",      params={"host": "<host>", "path": "<path>"})
+query(system="host-state", verb="package-list",      params={"host": "<host>"})
 ```
 
-**Do not Read `host_state_cli.py` source to discover flags.** This
-SKILL plus `defender-host-state {subcommand} --help` is the
-authoritative surface.
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types. `authorized-keys`' `user`
+defaults to `root`; every other param above is required.
 
-Each subcommand emits a JSON object with `captured_at` and the
+**Do not Read `host_state_cli.py` source to discover params.** This SKILL plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
+
+Each verb returns a JSON object with `captured_at` and the
 verb-specific payload. The host-keyed verbs (`proc-tree`, `passwd`,
 `authorized-keys`, `fim-checksum`, `package-list`) also carry `host` plus
 their payload field (`ps_output`, `entries`, `keys`, `sha256`, `packages`);

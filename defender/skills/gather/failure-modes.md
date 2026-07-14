@@ -1,6 +1,6 @@
 ---
 name: defender-gather-failure-modes
-description: Recovery for the gather when a query errors or returns an empty / all-zero / null / garbage result — the adapter exit-code branch, the positive-control tool-fault test, and field-drift recovery. Read this on a non-sane result; the happy path never needs it.
+description: Recovery for the gather when a query errors or returns an empty / all-zero / null / garbage result — the query exit-code branch, the positive-control tool-fault test, and field-drift recovery. Read this on a non-sane result; the happy path never needs it.
 ---
 
 You are here because a query errored or returned a result you could not
@@ -10,15 +10,17 @@ narrowing/shape step — if that can't settle it, stop and report the quirk plai
 in your summary (so the offline lead-author picks it up); do not flail. Never
 report a raw unchecked zero or a null.
 
-## Branch on the adapter exit code
+## Branch on the query's exit code
 
 - **exit 2 — connectivity / auth / config:** the source is **unreachable**.
-  Escalate immediately with the adapter's error and stop. Do **not** probe the
-  connection or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not**
+  Escalate immediately with the error the tool returned and stop. Do **not** probe
+  the connection or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not**
   hunt `.env`/credentials, do **not** re-run "to confirm" — a `2` is a data-source
   outage for a human to resolve, not something you can fix.
-- **exit 64 — usage error:** *you* invoked the adapter wrong. Read the `usage:`
-  line in stderr, fix the invocation, re-run. Not an outage; don't escalate.
+- **exit 64 — usage error:** *you* called the verb wrong — an unknown system or verb,
+  an unknown or missing param, or a param of the wrong type (a quoted number, a quoted
+  boolean). The rejection names the verb's declared params; bind those, by name, with
+  literal JSON types, and re-run. Not an outage; don't escalate.
 - **exit 1 — query error / not-found:** fix the query and re-run, or treat a clean
   not-found as the genuine-absence case (verify it with the empty-result branch).
 - **exit 0:** the source answered but the result isn't sane — use the content
@@ -27,7 +29,7 @@ report a raw unchecked zero or a null.
 ## Empty / all-zero result (exit 0)
 
 The `WHERE` matched nothing: a *filtering* mistake, a genuine absence, or a
-silently-broken adapter. Disambiguate:
+silently-broken source. Disambiguate:
 
 1. Re-run with the suspect predicate dropped (or `... | WHERE <one live filter> |
    LIMIT 1`) to tell "nothing there" from "wrong filter."

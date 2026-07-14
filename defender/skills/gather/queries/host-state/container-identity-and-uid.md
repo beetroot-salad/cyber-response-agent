@@ -16,22 +16,24 @@ Determine container metadata (name, image) and resolve a user ID to its /etc/pas
 
 ## Query
 
-```bash
+```
 # Query 1: Container metadata (name, image) by container id
-defender-host-state container-inspect ${container_id}
+query(system="host-state", verb="container-inspect", params={"container_id": "${container_id}"})
 
-# Query 2: /etc/passwd entry for the target uid — TWO steps. Run the adapter STANDALONE
-# (it is captured to gather_raw automatically), then filter the captured payload with jq
-# reading STDIN. jq is stdin-compute-only here (it never opens a file), so pipe the
-# captured payload in with `cat` rather than `adapter | jq`:
-defender-host-state passwd ${container_id}
+# Query 2: /etc/passwd entry for the target uid — TWO steps. Run the query (it is captured
+# to gather_raw automatically), then filter the captured payload with jq reading STDIN. jq is
+# stdin-compute-only here (it never opens a file), so pipe the captured payload in with `cat`:
+query(system="host-state", verb="passwd", params={"host": "${container_id}"})
+```
+```bash
 cat ${passwd_payload} | jq -r --arg uid "${uid}" '.entries[] | select(split(":")[2] == $uid)'
-
+```
+```
 # Query 3: Process tree on the container
-defender-host-state proc-tree ${container_id}
+query(system="host-state", verb="proc-tree", params={"host": "${container_id}"})
 ```
 
-`${passwd_payload}` is the gather_raw path Query 2's standalone `passwd` call was
+`${passwd_payload}` is the ABSOLUTE gather_raw path Query 2's `passwd` call was
 captured to (shown in that call's result); the filter selects the entry whose 3rd
 `/etc/passwd` field (uid) equals `${uid}`.
 

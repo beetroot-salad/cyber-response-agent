@@ -671,15 +671,22 @@ def test_d15_the_prose_no_longer_instructs_an_impossible_discovery_move():
 def test_d16_the_skill_demands_reading_the_template_before_binding_its_id():
     """The index gives gather an id + a Goal + a path but NOT the query body. Nothing forces it
     to open the file — and draft_synthesis SKIPS any query_id that resolves to an existing
-    template (draft_synthesis.py:146-200), so a coined query mis-tagged with a real template's
+    template (draft_synthesis.py:146-200), so a coined query mis-bound to a real template's
     id is laundered as a reuse: the draft is never minted, and the (query_id, params) join the
-    whole learning loop rests on is silently corrupted. The SKILL must close that."""
+    whole learning loop rests on is silently corrupted. The SKILL must close that.
+
+    The DEMAND is unchanged; only its spelling moved. #611 retired the `--query-id` pseudo-flag
+    (a bash string the harness stripped) for `query_id`, a real param of the typed `query` tool —
+    so an assertion on the flag's literal text now pins a command no agent can run. Worth naming:
+    this test passed on #611's branch only because the SKILL still taught the dead flag."""
     skill = (_DEFENDER / "skills" / "gather" / "SKILL.md").read_text().lower()
 
-    assert "--query-id" in skill
-    assert re.search(r"read[^.]*(template|## query)[^.]*before[^.]*(tag|--query-id)", skill) or \
-           re.search(r"(never|don't|do not)[^.]*tag[^.]*(--query-id|id)[^.]*(without|before)[^.]*read", skill), \
-        "gather/SKILL.md must require reading the template body before binding its --query-id"
+    assert "query_id" in skill
+    assert "--query-id" not in skill, \
+        "gather/SKILL.md still teaches the retired --query-id flag (#611: it is a `query` tool param)"
+    assert re.search(r"read[^.]*(template|## query)[^.]*before[^.]*(pass|bind|query_id)", skill) or \
+           re.search(r"(never|don't|do not)[^.]*(bind|pass)[^.]*query_id[^.]*(without|before)[^.]*read", skill), \
+        "gather/SKILL.md must require reading the template body before binding its query_id"
 
 
 # ==========================================================================

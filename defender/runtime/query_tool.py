@@ -183,9 +183,16 @@ class QueryCapture(AbstractCapability[Any]):
 
     # --- validation ---------------------------------------------------------
 
-    def _reject(self, system: str, verb: str, params: dict) -> str | None:
-        """The registry check: unknown system / unknown verb / unknown or missing param. `None`
-        when the call is admissible."""
+    def _reject(
+        self, system: str, verb: str, params: dict, model_query_id: Any = None,
+    ) -> str | None:
+        """The whole admission check, in one place: unknown system / unknown verb / unknown,
+        missing or MISTYPED param / a `query_id` that is not a path segment. `None` when the
+        call is admissible.
+
+        `KeyError` from the registry means the system does not exist. Anything else it raises
+        means the system exists but its module will not LOAD — a broken data source, not a model
+        mistake — so that one is deliberately NOT caught here; the caller files it as infra."""
         try:
             verbs = self._registry.verbs(system)
         except KeyError:
@@ -201,6 +208,11 @@ class QueryCapture(AbstractCapability[Any]):
             return f"system {system!r} declares no verbs — it is unreachable, not unfiltered."
         if verb not in verbs:
             return f"unknown verb {verb!r} for {system}. Declared verbs: {sorted(verbs)}."
+        if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
+            return (
+                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
+                "catalog path segment. Coin a `{system}.{kebab-name}` id."
+            )
         return validate_params(verbs[verb], params)
 
     # --- the two hooks ------------------------------------------------------
@@ -249,14 +261,26 @@ class QueryCapture(AbstractCapability[Any]):
         # 2. Our own validation (the registry + the query_id shape). It writes its row BEFORE it
         # raises: `ModelRetry` bypasses `on_tool_execute_error` AND `after_tool_execute`, so a
         # write placed after the raise would simply never happen.
-        reason = self._reject(system, verb, params)
-        if reason is None and model_query_id and any(
-            t in str(model_query_id) for t in _QID_TRAVERSAL
-        ):
-            reason = (
-                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
-                "catalog path segment. Coin a `{system}.{kebab-name}` id."
+        try:
+            reason = self._reject(system, verb, params, model_query_id)
+        except Exception as e:  # noqa: BLE001 — the registry could not LOAD this system's module
+            # A `{system}_cli.py` that will not import is a BROKEN DATA SOURCE: not the model's
+            # mistake (it cannot fix it, so exit 64 would loop it), and not a reason to kill the
+            # run. File it as infra (2) — the breaker takes that ONE system down and the
+            # investigation continues against the others, which is exactly what the taxonomy
+            # already means by "the system is down".
+            #
+            # It has to be caught HERE because this call sits outside the handler's catch-all:
+            # the resolution+import happens during validation, so an ImportError escaped
+            # `wrap_tool_execute` entirely and unwound the run. The registry only imports a
+            # module at first use, so this is also the first place the failure can surface.
+            detail = f"{system} adapter failed to load: {type(e).__name__}: {e}"
+            row, text = await self._record(
+                deps, system=system, verb=verb,
+                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
+                exit_code=DEFAULT_FAULT_EXIT, detail=detail,
             )
+            return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, detail)
         if reason is not None:
             await self._record(
                 deps, system=system, verb=verb,

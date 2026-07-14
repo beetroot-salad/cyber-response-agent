@@ -119,11 +119,22 @@ def descriptor_catalog(
 
     The registry resolves each module per TREE (`verbs.ModuleVerbRegistry` keys on the resolved
     path, not the module name), so importing an adapter to read its roster here cannot freeze the
-    first tree it saw into the second tree's run."""
+    first tree it saw into the second tree's run.
+
+    Reading the roster now IMPORTS each adapter, which the filename glob never did — so one
+    `*_cli.py` that will not import (a newly onboarded system with a typo, a missing dep) would
+    take down catalog construction for EVERY system, and with it every gather dispatch and the
+    whole run. A system that cannot be loaded cannot be advertised; it drops out of the catalog
+    alone. The tool agrees (`query_tool` files the same failure as infra against that ONE
+    system), so the two surfaces stay honest with each other: unreachable, not unfiltered."""
     registry = ModuleVerbRegistry(adapters_dir)
     lines = []
     for system in registry.systems():
-        if not registry.verbs(system):
+        try:
+            verbs = registry.verbs(system)
+        except Exception:  # noqa: BLE001 — a system that will not load is unreachable, not fatal
+            continue
+        if not verbs:
             continue
         desc = read_description(system, skills_dir)
         if desc:
@@ -138,8 +149,8 @@ def build_augmented_prompt(original: str, system: str, description: str) -> str:
         f"it's the right target. Use it to confirm your lead actually wants\n"
         f"this system. If it does, **Read the full**\n"
         f"`defender/skills/{system}/SKILL.md` before running anything — the\n"
-        f"body carries CLI conventions, field vocabularies, and load-bearing\n"
-        f"rules that the description does not.\n\n"
+        f"body carries the system's verb/param surface, field vocabularies, and\n"
+        f"load-bearing rules that the description does not.\n\n"
     )
     return f"{original}{header}{description}\n"
 

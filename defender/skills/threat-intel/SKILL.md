@@ -77,15 +77,19 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### CLI
 
-```bash
-defender-threat-intel health-check
-defender-threat-intel lookup <value>
-defender-threat-intel list-indicators [--verdict X] [--type X] [--tag X] [--limit N]
+```
+query(system="threat-intel", verb="health-check",    params={})
+query(system="threat-intel", verb="lookup",          params={"value": "<value>"})
+query(system="threat-intel", verb="list-indicators", params={"verdict": "X", "type": "X", "tag": "X"})
 ```
 
-**Do not Read `threat_intel_cli.py` source to discover flags.** This
-SKILL plus `defender-threat-intel {subcommand} --help` is the
-authoritative surface.
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types. `lookup` requires `value`; every
+`list-indicators` param is an optional filter.
+
+**Do not Read `threat_intel_cli.py` source to discover params.** This SKILL plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
 
 `lookup` emits the upstream JSON payload (`{value, verdict, score, …}`).
 Treat `verdict: unknown` as *absence of signal*, never as refutation.

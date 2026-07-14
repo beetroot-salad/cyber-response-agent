@@ -29,10 +29,12 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import re
+import types
+import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, get_args, get_origin
 
 #: The shape a system NAME may take: lowercase kebab, no separators, no dots. `system` is
 #: MODEL-supplied (the `query` tool passes it straight here), and it is joined into a filesystem
@@ -92,12 +94,71 @@ def declared_params(fn: Verb) -> dict[str, inspect.Parameter]:
     }
 
 
+_NONE_TYPE = type(None)
+
+
+def _resolved_hints(fn: Verb) -> dict[str, Any]:
+    """The verb's annotations as TYPES, not strings. Adapters carry `from __future__ import
+    annotations`, so `inspect.signature` hands back `'int'`/`'str | None'` as text; only
+    `get_type_hints` (which evaluates against the module's own globals) yields something a
+    check can be written against. An annotation that will not resolve is not a rejection —
+    the checker treats it as unconstrained, so a verb author's typo widens nothing."""
+    try:
+        return typing.get_type_hints(fn)
+    except Exception:  # noqa: BLE001 — an unresolvable hint must not deny a well-formed call
+        return {}
+
+
+def _matches(value: Any, ann: Any) -> bool:
+    """Does `value` satisfy the annotation `ann`? Structural and deliberately shallow: the
+    container is checked, its element types are not (`dict[str, str]` asks only for a dict).
+    A deep check would be a schema validator, and the param surface is not a schema — what
+    this has to catch is the WRONG KIND of thing, not a badly-typed leaf."""
+    if ann is inspect.Parameter.empty or ann is Any:
+        return True
+    origin = get_origin(ann)
+    if origin is Union or origin is types.UnionType:      # `str | None`, `dict | list`
+        return any(_matches(value, arg) for arg in get_args(ann))
+    if ann is _NONE_TYPE:
+        return value is None
+    if origin is not None:                                # `dict[str, str]` → check `dict`
+        return isinstance(value, origin)
+    # `bool` is a subclass of `int`, so an unguarded isinstance would let `limit=True` through
+    # as an integer — and a bool that reaches an arithmetic clamp is exactly the silent-wrong
+    # class this check exists to stop.
+    if ann is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if ann is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(ann, type):
+        return isinstance(value, ann)
+    return True                                           # uninterpretable → unconstrained
+
+
+def _ann_name(ann: Any) -> str:
+    return getattr(ann, "__name__", None) or str(ann).replace("typing.", "")
+
+
 def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
     """`None` if `params` satisfies `fn`'s declared surface, else the model-facing reason.
 
-    Rejects an unknown key and a missing required one (a kw-only param with no default). The
-    reason NAMES the declared roster — the model has no `--help` any more, so a rejection that
-    only says "invalid" leaves it guessing at a surface it cannot see.
+    Rejects an unknown key, a missing required one (a kw-only param with no default), and a
+    value of the wrong TYPE. The reason NAMES the declared roster — the model has no `--help`
+    any more, so a rejection that only says "invalid" leaves it guessing at a surface it cannot
+    see.
+
+    The type check is not a nicety, and it is the half that is easy to leave out: the signature
+    is only "the allowlist" if its ANNOTATIONS bind too. `params` arrives as `dict[str, Any]`
+    from the model with no per-key JSON schema behind it (a per-verb `params` cannot be one
+    schema), so nothing upstream constrains a value's kind. Unchecked, a `limit="20"` reaches an
+    arithmetic clamp (`min(limit, cap)`) and raises `TypeError` INSIDE the verb — where the query
+    tool's catch-all maps an unmapped fault to exit 2, the code that means "the system is down".
+    Two of those and `circuit_breaker` trips a perfectly healthy system for the rest of the run;
+    five and the run aborts. The exit-64 usage class exists precisely so the agent's own mistakes
+    can never hide a working system (`circuit_breaker.INFRA_EXIT_CODES`), and before #611
+    argparse's `type=`/`store_true` enforced it — in-process, this is the only thing left that
+    does. The quieter half is the same mistake without the crash: a truthy `enabled="false"`
+    reaching a `bool` param queries the ENABLED users and answers a question nobody asked.
     """
     declared = declared_params(fn)
     unknown = sorted(set(params) - set(declared))
@@ -112,6 +173,19 @@ def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
     )
     if missing:
         return f"missing required param(s) {missing} (declared params: {sorted(declared)})."
+
+    hints = _resolved_hints(fn)
+    mistyped = sorted(
+        f"{name!r} takes {_ann_name(hints[name])}, got "
+        f"{type(params[name]).__name__} ({params[name]!r})"
+        for name in params
+        if name in hints and not _matches(params[name], hints[name])
+    )
+    if mistyped:
+        return (
+            f"wrong param type(s): {'; '.join(mistyped)}. Pass JSON values of the declared "
+            "type — a number is a number, not a quoted string, and a boolean is true/false."
+        )
     return None
 
 
