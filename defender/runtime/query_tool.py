@@ -263,7 +263,17 @@ class QueryCapture(AbstractCapability[Any]):
         # write placed after the raise would simply never happen.
         try:
             reason = self._reject(system, verb, params, model_query_id)
-        except Exception as e:  # noqa: BLE001 — the registry could not LOAD this system's module
+        except CONTROL_FLOW_EXCEPTIONS:
+            raise
+        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            raise
+        except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
+            # BaseException, not Exception: `_reject` IMPORTS the adapter module, and a module
+            # whose import body calls `sys.exit()` (a top-level `parse_args()` — what every one
+            # of these files looked like before #611, and what `connect` scaffolds from) raises
+            # SystemExit, which is not an Exception. Catching only Exception would let it unwind
+            # out of `agent.iter()`: no row, no breaker outcome, run dead — the exact failure the
+            # execute catch-all below exists to prevent, one seam earlier.
             # A `{system}_cli.py` that will not import is a BROKEN DATA SOURCE: not the model's
             # mistake (it cannot fix it, so exit 64 would loop it), and not a reason to kill the
             # run. File it as infra (2) — the breaker takes that ONE system down and the

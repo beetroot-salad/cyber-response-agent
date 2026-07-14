@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender._run_paths import RunPaths
+from defender.run_common import run_env
 from defender.runtime.verbs import VerbContext
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport  # shared transport (adapter family)
@@ -44,9 +45,18 @@ def _verb_context() -> VerbContext:
     """The post-step's own `VerbContext`: this runs in the DRIVER's process at post-step
     time, outside any verb, so its tree and env are the process's own. (`run_dir` is
     carriage the transport never reads — the tree and the env are what it resolves config
-    and forks children with.)"""
+    and forks children with.)
+
+    The env is `run_env`'s SCRUBBED copy, not `os.environ`: this runs in the driver, whose
+    environ holds the billable provider keys, and the transport hands `ctx.env` straight to
+    the `docker exec` child it forks. Passing the raw environ here would opt this one caller
+    out of the invariant `VerbContext.env` exists to carry.
+    """
     defender_dir = Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
-    return VerbContext(defender_dir=defender_dir, run_dir=Path.cwd(), env=dict(os.environ))
+    run_dir = Path.cwd()
+    return VerbContext(
+        defender_dir=defender_dir, run_dir=run_dir, env=run_env(defender_dir, run_dir)
+    )
 
 
 def _log(msg: str) -> None:

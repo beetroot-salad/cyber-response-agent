@@ -154,9 +154,13 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # D1 — the breach: the main loop must NOT run a data-source adapter directly
     # (that's the exfil lane; the gather subagent is the only data-access role). Since #611
     # NO role runs an adapter from bash — the reason names the `query` tool that replaced it.
+    # The reason substring must not appear in the PROMPT: it is matched against the whole
+    # flattened message history, and the orientation pack says "query" a dozen times. A bare
+    # "query" here passes even when the adapter is ALLOWED for main — i.e. it stops testing
+    # the breach. Pin the deny's own words.
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo"},
-     "query", None),
+     "not runnable from bash", None),
     # D6 — a write escaping the run dir must be refused. Main's write_allow is its
     # run-dir subtree only (the flat deny-by-default write allowlist), so a path outside
     # it is not in the agent's declared paths.
