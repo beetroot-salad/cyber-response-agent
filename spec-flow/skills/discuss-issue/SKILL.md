@@ -36,10 +36,11 @@ A few angles often turn up something worth discussing. Pull on the ones that app
 - **Root cause** — is the reported symptom the real problem, or a downstream effect of a deeper cause that's the better thing to fix?
 - **The hard part** — what makes this non-trivial? The constraint in tension, the invariant that's easy to break, the case that resists a clean fix. This is usually where the real forks live.
 - **Scope** — what's in, what's an explicit non-goal, and whether two problems are wearing one issue.
-- **Completeness** — what's missing to act on it: the motivation, the done criteria, the dependencies or prior art.
+- **The same pattern elsewhere** — once the mechanism is clear, look for its other occurrences before the scope freezes: the sites an issue names are where the author happened to look — a sample, not a census. Define "the same" at the issue's own altitude: an issue about folding duplicated parsers into one helper is asking about duplications that helper could plausibly absorb, not duplication in general; an issue about one call mishandling an input class is asking about every call with the same exposure, not every call by that name. Derive the occurrences from the code with a tool, and give each an explicit in-or-out verdict — one the issue missed is a finding, an exclusion is a decision worth recording, and one that looks already handled is a claim to check against the issue's own bar, not a reason to leave it out.
+- **Completeness** — what else is missing to act on it: the motivation, the done criteria, the dependencies or prior art.
 
 Keep it to the questions that matter. The point is to illuminate what's still open, not to resolve everything or design past it.
 
 ---
 
-Then talk it through with the user if they want — no fixed template, no required artifact. If the discussion settles into something worth keeping, offer to fold it back into the issue or a short note.
+Then talk it through with the user if they want — no fixed template, no required artifact. If the discussion settles into something worth keeping, offer to fold it back into the issue or a short note. The occurrence census especially belongs in the issue: the spec and the implementation downstream build on the recorded verdicts, not on whoever re-derives the pattern next.
