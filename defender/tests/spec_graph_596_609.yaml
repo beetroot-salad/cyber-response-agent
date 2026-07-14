@@ -138,6 +138,13 @@ demands:
        (hook-written ts) columns are flattened too: a tab/newline in either forges no column
        and no row — the created_at bug class, one field over."},
      binds: ["interacts(trace_lesson_named->stdout_tsv)", "report_md", "loads_ts"]}
+  - {id: a14_desc_and_id_cols_flattened, kind: behavior, form: test,
+     outcome: {nl: "Review hardening (post-approval): the --all description column
+       (LLM-authored) and the filename-derived id columns (lesson stem, run-dir case_id)
+       reach the same TSV sink as a13's columns, so they get the same full-breaker
+       flatten — no forged row or column from any of them, on either path."},
+     binds: ["interacts(trace_lesson_all->stdout_tsv)",
+             "interacts(trace_lesson_named->stdout_tsv)", "stdout_tsv"]}
 
 # ── Structure ────────────────────────────────────────────────────────────────
 structure:

@@ -457,9 +457,8 @@ def test_d_a8b_header_honest_when_absent(tmp_path, capsys):
 # Every char ``str.splitlines`` treats as a line boundary, plus tab: the \t/\n-only
 # flatten idiom is provably insufficient for a value that lands in a TSV consumed via
 # splitlines() (\r, \x0b, \x0c, \x85,  ,   all split there).
-_HOSTILE_CREATED_AT = (
-    'created_at: "a\\tb\\nc\\rd\\x0Be\\x0Cf\\x85g\\u2028h\\u2029i"'
-)
+_HOSTILE_VALUE = '"a\\tb\\nc\\rd\\x0Be\\x0Cf\\x85g\\u2028h\\u2029i"'
+_HOSTILE_CREATED_AT = f"created_at: {_HOSTILE_VALUE}"
 
 
 def test_d_a9_all_echo_survives_every_line_breaker(tmp_path, capsys):
@@ -559,3 +558,42 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     row = lines[1]
     assert row.count("\t") == 2
     assert row.split("\t") == ["caseA", "ben ign X", "2026-06-05 00:00:00+00:00"]
+
+
+def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
+    """d: a14 — the ``--all`` description column is the same LLM-authored value-in-TSV
+    class as the echo: every splitlines breaker + tab in it forges no row and no column
+    (the \\t/\\n-only flatten this column used to get is provably insufficient)."""
+    row, cap = _all_row(
+        tmp_path, f"name: L\ndescription: {_HOSTILE_VALUE}\ncreated_at: 2026-06-04", capsys
+    )
+    assert len(cap.out.splitlines()) == 1
+    assert row.count("\t") == 2
+    assert row.split("\t")[1] == "a b c d e f g h i"
+
+
+def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
+    """d: a14 — the id columns are filenames (lesson stem, run-dir case_id), and Unix
+    filenames legally carry tab/newline: neither forges a row or a column, on either
+    path, and the named header stays one ``#`` line."""
+    tl = _load_tl()
+    lessons = tmp_path / "lessons"
+    _mk_lesson(lessons, "st\tem", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _mk_run(runs, "case\nA", disposition="benign",
+            loads=[{"lesson_name": "st\tem", "ts": "2026-06-05T00:00:00+00:00"}])
+
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 0
+    [row] = cap.out.splitlines()
+    assert row.split("\t") == ["st em", "d", "1"]
+
+    rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    cap = capsys.readouterr()
+    assert rc == 0
+    lines = cap.out.splitlines()
+    assert len(lines) == 2  # one header + one case row, nothing forged
+    assert lines[0].startswith("# st em — ")
+    assert lines[1].split("\t") == ["case A", "benign", "2026-06-05T00:00:00+00:00"]
