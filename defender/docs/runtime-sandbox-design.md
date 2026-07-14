@@ -1,5 +1,18 @@
 # Runtime sandbox: gVisor isolate + host-side credential broker
 
+> **⚠️ SUPERSEDED IN PART — read
+> [`docs/decisions/runtime-isolation-executor-model.md`](../../docs/decisions/runtime-isolation-executor-model.md)
+> first.** Following #571's brain/hands split to its conclusion removes the
+> **entire broker** from v1: with the LLM, MCP, and adapter clients all host-side,
+> nothing credentialed runs inside the isolate, so there is nothing to inject and
+> no outbound channel to authenticate. The isolate is a credential-free,
+> network-free executor of model-written bash over `run_dir`; credentialed work is
+> a **typed tool call** dispatched host-side. Everything below about the
+> credential-injecting proxy, the vault, session tokens, the capability-RPC, and
+> the per-run egress allowlist is **retained as history, not as the plan**. What
+> still holds: the gVisor isolate, the filesystem mount discipline,
+> `--network=none`, the isolation-strength knob, and both honest limits.
+
 **Status:** design — not yet implemented. **Decision:** run each defender
 investigation inside a per-alert **gVisor (runsc) isolate** whose only route
 off-box is a **host-side broker** that owns every credential and every egress
