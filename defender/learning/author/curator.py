@@ -207,7 +207,8 @@ def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
         return False
     try:
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
+        # RecursionError: safe_load on a nesting flood — same malformed class (#609).
         return False
     return isinstance(doc, dict) and doc.get("held_out") is True
 

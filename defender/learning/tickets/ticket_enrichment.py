@@ -49,7 +49,8 @@ def _read_adversarial_outcome(learning_run_dir: Path) -> str | None:
                  "skipping enrichment")
             return None
         return _outcome_keyword(doc.get("outcome"))
-    except (yaml.YAMLError, OSError, RunUnprocessable) as e:
+    except (yaml.YAMLError, OSError, RunUnprocessable, RecursionError) as e:
+        # RecursionError: safe_load on a nesting flood — same unusable class (#609).
         _log(f"unusable adversarial verdict ({e}); skipping enrichment")
         return None
 
@@ -64,7 +65,8 @@ def _read_resolution_method(learning_run_dir: Path) -> str | None:
         return None
     try:
         doc = yaml.safe_load(verdict.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, OSError) as e:
+    except (yaml.YAMLError, OSError, RecursionError) as e:
+        # RecursionError: safe_load on a nesting flood — same unusable class (#609).
         _log(f"unusable adversarial verdict for resolution-method ({e}); skipping")
         return None
     if not isinstance(doc, dict):

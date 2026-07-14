@@ -44,6 +44,13 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str, str]:
     raw = text[4:end]
     try:
         fm = yaml.safe_load(raw)
+    except RecursionError as e:
+        # PyYAML raises bare RecursionError (not a YAMLError) on deeply nested
+        # input — flow or block — so without this fold one flooded LLM-authored
+        # file escapes every tolerant walk built on this parser (#609). Fixed
+        # message: the offending YAML is multi-KB by construction and this
+        # string lands in stderr warns and dead-letter records.
+        raise FrontmatterError("frontmatter YAML is nested too deeply to parse") from e
     except yaml.YAMLError as e:
         raise FrontmatterError(f"frontmatter is not valid YAML: {e}") from e
     if not isinstance(fm, dict):

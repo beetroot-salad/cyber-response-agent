@@ -187,7 +187,8 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
         return None
     try:
         doc = yaml.safe_load(refs.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
+        # RecursionError: safe_load on a nesting flood — same malformed class (#609).
         return None
     if not isinstance(doc, dict):
         return None
