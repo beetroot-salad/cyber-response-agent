@@ -20,6 +20,12 @@ This is NOT a test module (the leading underscore keeps pytest from collecting
 it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, where
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
+
+Below the model there are exactly TWO fakeable boundaries, and both are INJECTED
+(never monkeypatched): the model itself (`make_model`) and the data-source verb
+registry (`verbs=` → `run_investigation(verbs=…)`, #611). A scenario hands `drive`
+a `FakeVerbs` table of plain annotated functions; the real query tool validates
+against their real signatures, the real capture capability writes the real rows.
 """
 from __future__ import annotations
 
@@ -27,8 +33,10 @@ import asyncio
 import json
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -162,6 +170,72 @@ class FailingAdapterSubprocess:
         return subprocess.CompletedProcess(inner, 2, stdout="", stderr="connection refused")
 
 
+# --- the injected verb-registry seam (#611) --------------------------------
+# The data-source transports are the one boundary below the model with no in-process
+# twin, so a hermetic run fakes them. They enter through an INJECTION seam — the same
+# shape as `make_model` — not by monkeypatching a module attribute: a registry is a
+# VALUE the run is handed, and a fake registry has to satisfy the very signature the
+# real validator reads.
+#
+# A fake verb is a plain annotated function: `def q(ctx, *, index: str) -> dict`. Its
+# keyword-only params ARE its declared param surface, so the real query tool validates
+# a model's `params` against the fake exactly as it would against `elastic_cli.VERBS`.
+# A fake never classifies and never decides policy: it RECORDS what it was handed and
+# then returns its payload or raises its fault. The exit code, the error class, the
+# payload status, the breaker outcome are all the production code's job.
+
+
+@dataclass(frozen=True)
+class VerbCall:
+    """One invocation a fake verb received: the harness-supplied `ctx` (the
+    `VerbContext` — the run's tree + its scrubbed env) and the bound `params`."""
+
+    verb: str
+    ctx: Any
+    params: dict
+
+
+class VerbRecorder:
+    """The observation channel for the injected registry: what each verb was HANDED.
+
+    A fake that only returns a canned value proves nothing about the payload the tool
+    built for it, so every scenario asserts against these records as well as against
+    the row on disk."""
+
+    def __init__(self) -> None:
+        self.calls: list[VerbCall] = []
+
+    def record(self, verb: str, ctx: Any, params: dict) -> None:
+        self.calls.append(VerbCall(verb=verb, ctx=ctx, params=dict(params)))
+
+    @property
+    def verbs(self) -> list[str]:
+        return [c.verb for c in self.calls]
+
+    def only(self) -> VerbCall:
+        assert len(self.calls) == 1, f"expected exactly 1 verb call, got {self.verbs}"
+        return self.calls[0]
+
+
+class FakeVerbs:
+    """An injected verb registry — the drop-in for the production `ModuleVerbRegistry`.
+
+    Dumb data: `{system: {verb: fn}}`. It declares the systems it was built with (a system
+    mapped to an EMPTY dict is a DECLARED system with no verbs — the fail-closed case, and
+    the reason this is a plain table rather than a defaultdict), and hands back the mapping
+    for one. It makes no admission decision: an unknown system raises `KeyError`, and what
+    the tool does about that is the tool's contract, not the fake's."""
+
+    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]]):
+        self._table = {s: dict(v) for s, v in table.items()}
+
+    def systems(self) -> tuple[str, ...]:
+        return tuple(sorted(self._table))
+
+    def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
+        return self._table[system]
+
+
 # --- trace mining (Layer 2): real tool_trace.jsonl -> scripted Turns -------
 
 def _rewrite_paths(v, old: str | None, new: str | None):
@@ -220,11 +294,20 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
-def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None):
+def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
-    plumbing-free. `make_model` is the driver's DI seam — now keyed on `(name, effort)`
+    plumbing-free.
+
+    `verbs` is the SECOND injection seam (#611): a `FakeVerbs` registry handed straight
+    to `run_investigation(verbs=…)`, which threads it to the gather agent's query tool.
+    Omit it and the run resolves the production `ModuleVerbRegistry` off `defender_dir`
+    — a scenario that never calls `query` needs no registry, and one that does never
+    reaches a real transport. It is passed only when supplied, so the seam stays optional
+    at the boundary rather than making every replay name a registry it does not use.
+
+    `make_model` is the driver's DI seam — now keyed on `(name, effort)`
     (#493): it dispatches on the model NAME (`driver.gather_model()` marks the nested
     gather; anything else is the main loop) so the main loop and a nested gather get
     distinct fakes, each returned as a `BuiltModel` (settings=None — a FunctionModel
@@ -250,8 +333,9 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None):
             return gather_built
         return main_built
 
+    verb_seam = {} if verbs is None else {"verbs": verbs}
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=DEFENDER, salt=salt, make_model=make_model,
+            defender_dir=DEFENDER, salt=salt, make_model=make_model, **verb_seam,
         ))
