@@ -79,8 +79,9 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     """The description column is LLM-authored; a tab or newline in it would forge a column
     or split the row, so the TSV flattens both (the ``lessons_fm._emit_match`` idiom)."""
     tl = _load()
+    # created_at keeps the row windowed/unmarked — this test's subject is the flatten (#596).
     _mk_lesson(tmp_path / "lessons", "L",
-               body_frontmatter='name: L\ndescription: "a\\tb\\nc"')
+               body_frontmatter='name: L\ndescription: "a\\tb\\nc"\ncreated_at: 2026-06-04')
     runs = tmp_path / "runs"
     runs.mkdir()
 
@@ -224,7 +225,9 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     """The same property at the seam a user drives: ``--all`` over a runs dir containing an
     undecodable report exits 0 and still prints every lesson's row."""
     tl = _load()
-    _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
+    # created_at keeps the row windowed/unmarked — this test's subject is read survival (#596).
+    _mk_lesson(tmp_path / "lessons", "L",
+               body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
     runs = tmp_path / "runs"
     runs.mkdir()
     rd = _mk_run(runs, "caseA", disposition="benign",
@@ -248,7 +251,8 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     marker's count is unwindowed (no parseable ``created_at``), and the row says so."""
     tl = _load()
     lessons = tmp_path / "lessons"
-    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine")
+    # created_at keeps the healthy row unmarked — this test's subject is the #590 marker.
+    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -271,7 +275,8 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     ``_``-prefixed draft is not a "skipped lesson" and gets no marker row."""
     tl = _load()
     lessons = tmp_path / "lessons"
-    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine")
+    # created_at keeps the row unmarked — this test's subject is the discovery rule.
+    _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "_draft.md").write_text("not a lesson\n")
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -304,8 +309,8 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
 def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys):
     """Valid frontmatter whose LLM-authored ``created_at`` doesn't parse (or is absent) is just
     as unwindowed as malformed frontmatter — the warning keys on "no created_at to window on",
-    so ``since None`` never prints silently (#596's named-path half; the ``--all`` row shape is
-    still #596's open design question)."""
+    so ``since None`` never prints silently (#596's named-path half; the ``--all`` row shape and
+    the value echo are pinned by ``test_hardening_596_609.py``)."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: not-a-date")

@@ -1,0 +1,482 @@
+schema_version: 1
+design: "issues #596 (remainder — scope-update comment 2026-07-13) + #609, one combined spec (the #608 mold)"
+base: bbbac225278429f1708605868624d7fca6028dd3
+
+# ── Demands — the spec proper ────────────────────────────────────────────────
+demands:
+  # #609 — the parser seam
+  - {id: b1_or_none_flood_none, kind: behavior, form: test,
+     outcome: {nl: "parse_frontmatter_or_none returns None on a frontmatter whose YAML parse
+       raises RecursionError (flow AND block nesting), and a healthy document still parses in
+       the same process afterwards."},
+     binds: ["frontmatter_parse.domain.distinguished[flood_flow]",
+             "frontmatter_parse.domain.distinguished[flood_block]"]}
+  - {id: b2_strict_flood_typed, kind: behavior, form: test,
+     outcome: {nl: "parse_frontmatter and split_frontmatter raise FrontmatterError (a ValueError)
+       on a flood, so every existing `except FrontmatterError` catcher inherits the guard."},
+     binds: ["frontmatter_parse.domain.distinguished[flood_flow]"]}
+  - {id: b3_flood_error_bounded, kind: behavior, form: test,
+     outcome: {nl: "The FrontmatterError raised from a flood does not embed the multi-KB raw
+       YAML: str(error) stays under 500 chars."},
+     binds: ["frontmatter_parse.domain.distinguished[flood_flow]"]}
+  # #609 — tolerant walks inherit
+  - {id: b5_iter_lessons_flood_skip, kind: survival, form: test,
+     outcome: {nl: "A flooded lesson is warn-skipped by iter_lessons with its on_skip marker;
+       the healthy sibling is still yielded."},
+     binds: ["iter_lessons_walk", "frontmatter_parse.domain.distinguished[flood_flow]"]}
+  - {id: b6_iter_templates_flood_skip, kind: survival, form: test,
+     outcome: {nl: "A flooded query template is warn-skipped by iter_query_templates; the
+       healthy sibling is still yielded (this walk runs on every gather dispatch)."},
+     binds: ["iter_templates_walk", "frontmatter_parse.domain.distinguished[flood_flow]"]}
+  - {id: b7_report_flood_dispo_qmark, kind: domain-outcome, form: test,
+     outcome: {nl: "One flooded report.md degrades that case's disposition to '?' and the
+       in_context_cases walk completes with the healthy sibling intact."},
+     rejected: [{nl: "a stderr warn for the flood report — parity with the existing
+       malformed-YAML report, which degrades to '?' silently"}],
+     binds: ["report_md.domain.distinguished[flood_flow]", "interacts(trace_lesson_all->report_md)"]}
+  - {id: b8_all_flood_lesson_marker, kind: domain-outcome, form: test,
+     outcome: {nl: "--all over a corpus containing a flooded lesson exits 0 and gives the flood
+       the existing '(malformed lesson — unwindowed count)' marker row; sibling rows intact."},
+     binds: ["stdout_tsv", "frontmatter_parse.domain.distinguished[flood_flow]"]}
+  - {id: b9_named_flood_lesson_traces, kind: behavior, form: test,
+     outcome: {nl: "Naming a flooded lesson keeps the #608 tri-state posture: 'malformed or
+       missing frontmatter' warn + unwindowed trace + rc 0, never a traceback."},
+     binds: ["trace_lesson_named", "frontmatter_parse.domain.distinguished[flood_flow]"]}
+  # #609 — strict context + the four in-scope direct safe_load sites
+  - {id: b10_learn_flood_typed, kind: behavior, form: test,
+     outcome: {nl: "normalize_disposition on a flooded report raises RunUnprocessable (typed,
+       dead-letterable by the learn drain), not RecursionError; control: plain invalid YAML
+       already takes that path."},
+     binds: ["loop", "frontmatter_parse.domain.distinguished[flood_flow]"]}
+  - {id: b11_held_out_flood_false, kind: behavior, form: test,
+     outcome: {nl: "is_held_out_source on a flooded ground_truth.yaml returns False, joining
+       the site's existing YAMLError degrade; controls: held_out true → True, invalid YAML → False."},
+     rejected: [{nl: "fail-closed True on unparseable — the pinned YAMLError posture is False;
+       the flood joins the same malformed class rather than inventing a third posture"}],
+     binds: ["ground_truth_yaml.domain.distinguished[flood_flow]"]}
+  - {id: b12_disposition_for_flood_none, kind: behavior, form: test,
+     outcome: {nl: "disposition_for on a flooded source_refs.yaml returns None ('no ground
+       truth' — the case is held), joining the site's YAMLError degrade; control: healthy file
+       resolves the disposition."},
+     binds: ["source_refs_yaml.domain.distinguished[flood_flow]"]}
+  - {id: b13_ticket_outcome_flood_none, kind: behavior, form: test,
+     outcome: {nl: "_read_adversarial_outcome on a flooded verdict returns None (skip
+       enrichment — non-fatal by construction); control: healthy verdict resolves 'survived'."},
+     binds: ["judge_verdict_yaml.domain.distinguished[flood_flow]"]}
+  - {id: b14_ticket_method_flood_none, kind: behavior, form: test,
+     outcome: {nl: "_read_resolution_method on a flooded verdict returns None; control:
+       healthy verdict resolves the method string."},
+     binds: ["judge_verdict_yaml.domain.distinguished[flood_flow]"]}
+  # #596 — the --all row self-marks and echoes
+  - {id: a1_all_unparseable_marker, kind: domain-outcome, form: test,
+     outcome: {nl: "A valid lesson with an unparseable created_at gets a self-marking --all row:
+       3 columns, real description kept as prefix, marker contains 'unwindowed' and the quoted
+       offending value, count is the UNWINDOWED count (never 0), and the marker does not say
+       'malformed'."},
+     binds: ["created_at_field.domain.distinguished[unparseable_str]", "created_at_echo.access[all_row]",
+             "stdout_tsv"]}
+  - {id: a2_all_absent_marker, kind: domain-outcome, form: test,
+     outcome: {nl: "An absent created_at self-marks distinctly: 'no created_at' instead of a
+       quoted value — a different curator fix than a garbage value; count unwindowed."},
+     binds: ["created_at_field.domain.distinguished[absent]", "created_at_echo.access[all_row]"]}
+  - {id: a3_null_is_absent, kind: domain-outcome, form: test,
+     outcome: {nl: "created_at: null reads as absent (never stamped), with no bogus quoted
+       'None' echo."},
+     rejected: [{nl: "the unparseable flavor echoing '\"None\"' — YAML null carries no value
+       worth quoting"}],
+     binds: ["created_at_field.domain.distinguished[null]"]}
+  - {id: a4_empty_string_visible, kind: domain-outcome, form: test,
+     outcome: {nl: "created_at: \"\" is present-but-unparseable and the quoting makes the
+       emptiness visible ('\"\"' appears in the marker)."},
+     binds: ["created_at_field.domain.distinguished[empty_string]"]}
+  - {id: a5_nonstring_echoed, kind: domain-outcome, form: test,
+     outcome: {nl: "A non-string, non-date created_at (e.g. a YAML list) is unparseable; the
+       echo stringifies it so the curator sees what the field holds; count unwindowed."},
+     binds: ["created_at_field.domain.distinguished[nonstring]"]}
+  # #596 — named path parity
+  - {id: a6_named_warn_echo, kind: parity, form: test,
+     outcome: {nl: "The named-path stderr warn is one line, carries the quoted offending value,
+       and keeps the #608-pinned phrase 'trace is unwindowed'."},
+     binds: ["created_at_echo.access[named_warn]"]}
+  - {id: a7_named_warn_absent, kind: parity, form: test,
+     outcome: {nl: "The absent case warns 'no created_at' + 'trace is unwindowed', one line."},
+     binds: ["created_at_echo.access[named_warn]", "created_at_field.domain.distinguished[absent]"]}
+  - {id: a8_header_honest, kind: negative, form: test,
+     outcome: {nl: "'since None' never appears on stdout (absent or unparseable); the
+       unparseable header carries the quoted value, the absent header says 'no created_at',
+       and the header stays exactly one '#'-prefixed line. Paired positive control: a11's
+       header prints the real window start."},
+     binds: ["created_at_echo.access[header]", "trace_lesson_named"]}
+  # #596 — echo sanitization + clamp
+  - {id: a9_echo_linebreak_safe, kind: negative, form: test,
+     outcome: {nl: "A created_at carrying every str.splitlines boundary char (\\r, \\x0b, \\x0c,
+       \\x85, U+2028, U+2029) plus \\t and \\n forges no extra row and no fourth column on ANY
+       echo surface (--all row, named stderr warn, header). Paired positive control: the
+       flattened value (each breaker → one space) is visible in the marker, proving the echo
+       fired and the observation channel can see it."},
+     binds: ["created_at_echo.access[all_row]", "created_at_echo.access[named_warn]",
+             "created_at_echo.access[header]", "created_at_field.domain.distinguished[hostile_ctl]"]}
+  - {id: a10_echo_clamped, kind: domain-outcome, form: test,
+     outcome: {nl: "A huge value is clamped: the echo shows the first 80 chars of the flattened
+       value plus an '…' continuation, never the full payload."},
+     binds: ["created_at_field.domain.distinguished[huge_str]", "created_at_echo.access[all_row]"]}
+  # #596 — positive control, uniqueness, sibling columns
+  - {id: a11_windowed_no_marker, kind: behavior, form: test,
+     outcome: {nl: "Positive control: a parseable created_at gets exactly the old behavior —
+       plain 3-column row, WINDOWED count, no marker, empty stderr, header prints the real
+       window start."},
+     binds: ["created_at_field.domain.distinguished[parseable_iso]", "stdout_tsv",
+             "created_at_echo.access[header]"]}
+  - {id: a12_row_uniqueness_vocab, kind: uniqueness, form: test,
+     outcome: {nl: "Every discovered lesson appears exactly once in --all (normal XOR marker
+       row), and the two marker vocabularies stay distinct: the flood row says 'malformed
+       lesson', the valid-but-unwindowed row says 'unwindowed' and not 'malformed', the healthy
+       row is plain."},
+     binds: ["stdout_tsv.identity", "stdout_tsv"]}
+  - {id: a13_named_cols_flattened, kind: behavior, form: test,
+     outcome: {nl: "The named path's disposition (model-authored report.md) and loaded_at
+       (hook-written ts) columns are flattened too: a tab/newline in either forges no column
+       and no row — the created_at bug class, one field over."},
+     binds: ["interacts(trace_lesson_named->stdout_tsv)", "report_md", "loads_ts"]}
+
+# ── Structure ────────────────────────────────────────────────────────────────
+structure:
+  axes: [lesson_stem, run_case, created_at_shape, yaml_depth]
+  actors:
+    - {id: trace_lesson_all,   frame: composition, provenance: code}   # _print_index: fans iter_lessons × runs
+    - {id: trace_lesson_named, frame: leg,         provenance: code}
+    - {id: iter_lessons_walk,  frame: leg,         provenance: code}
+    - {id: iter_templates_walk, frame: leg,        provenance: code}
+    - {id: loop,               frame: composition, provenance: code}   # learn drain → normalize_disposition
+    - {id: run_investigation,  frame: composition, provenance: code}   # run.py → orient.py → split_frontmatter
+    - {id: author_drain,       frame: composition, provenance: code}   # curator held-out + disposition_for
+    - {id: ticket_enrichment,  frame: leg,         provenance: code}
+  boundaries:
+    - id: frontmatter_parse    # the split_frontmatter seam — the ONE safe_load under _frontmatter.py
+      provenance: code         # delta: modify — domain gains the flood members (#609)
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the raw text between the frontmatter fences; LLM-authored"}
+          default: ~
+          distinguished: [no_fence, no_close, invalid_yaml, non_mapping, flood_flow, flood_block]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: created_at_field
+      provenance: design       # delta: modify — #596 pins per-member marking/echo
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "LLM-authored lesson frontmatter timestamp; PyYAML may yield str,
+            date, datetime, or any other node type"}
+          default: ~
+          distinguished: [absent, null, empty_string, unparseable_str, hostile_ctl, huge_str,
+                          nonstring, parseable_iso]
+          falsy_valid: true
+          documented_alternatives: []
+    - id: created_at_echo      # the NEW surface: where the offending value is rendered
+      provenance: design       # delta: add (#596)
+      facets:
+        access:
+          constraints_by_via:
+            all_row:    {trust: attacker-influenced, constraints: [flatten-linebreakers, clamp, quote]}
+            named_warn: {trust: attacker-influenced, constraints: [flatten-linebreakers, clamp, quote]}
+            header:     {trust: attacker-influenced, constraints: [flatten-linebreakers, clamp, quote]}
+    - id: stdout_tsv
+      provenance: code         # delta: modify — gains the unwindowed-marker row kind
+      facets:
+        identity:
+          key_axes: [lesson_stem]
+          evidence: {nl: "one row per discovered lesson: normal rows keyed on lesson.path.stem
+            (trace_lesson.py:176-182), marker rows on path.stem (:190-194); the two sets are the
+            walk's yielded/skipped partition of one iter_lessons call — probed disjoint (claim
+            c_yield_skip_disjoint)"}
+          derivations: []
+          sharing: unique-key
+    - id: stderr_diag
+      provenance: code
+      facets: {}
+    - id: report_md            # model-authored; disposition source
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "report.md text; frontmatter model-authored"}
+          default: ~
+          distinguished: [flood_flow]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: loads_ts             # hook-written lessons_loaded.jsonl ts strings
+      provenance: code
+      facets: {}
+    - id: ground_truth_yaml
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "harness/operator-authored whole-file YAML"},
+                 default: ~, distinguished: [flood_flow], falsy_valid: false,
+                 documented_alternatives: []}
+    - id: source_refs_yaml
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "loop-authored whole-file YAML"},
+                 default: ~, distinguished: [flood_flow], falsy_valid: false,
+                 documented_alternatives: []}
+    - id: judge_verdict_yaml
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "judge-(LLM-)authored whole-file YAML on disk"},
+                 default: ~, distinguished: [flood_flow], falsy_valid: false,
+                 documented_alternatives: []}
+  interacts:
+    - {from: trace_lesson_all,   to: created_at_field,  mode: read,  via: fs,     provenance: design}
+    - {from: trace_lesson_all,   to: frontmatter_parse, mode: invoke, via: api,   provenance: code}
+    - {from: trace_lesson_all,   to: report_md,         mode: read,  via: fs,     provenance: code}
+    - {from: trace_lesson_all,   to: stdout_tsv,        mode: write, via: fs,     provenance: design,
+       interpolates: [lesson_stem]}   # normal rows AND marker rows — one actor, two row kinds per invocation fan
+    - {from: trace_lesson_all,   to: created_at_echo,   mode: write, via: fs,     provenance: design}
+    - {from: trace_lesson_named, to: created_at_field,  mode: read,  via: fs,     provenance: design}
+    - {from: trace_lesson_named, to: created_at_echo,   mode: write, via: fs,     provenance: design}
+    - {from: trace_lesson_named, to: stdout_tsv,        mode: write, via: fs,     provenance: code,
+       interpolates: [run_case]}
+    - {from: trace_lesson_named, to: stderr_diag,       mode: write, via: fs,     provenance: design}
+    - {from: trace_lesson_named, to: report_md,         mode: read,  via: fs,     provenance: code}
+    - {from: trace_lesson_named, to: loads_ts,          mode: read,  via: fs,     provenance: code}
+    - {from: iter_lessons_walk,  to: frontmatter_parse, mode: invoke, via: api,   provenance: code}
+    - {from: iter_templates_walk, to: frontmatter_parse, mode: invoke, via: api,  provenance: code}
+    - {from: loop,               to: frontmatter_parse, mode: invoke, via: api,   provenance: code}
+    - {from: run_investigation,  to: frontmatter_parse, mode: invoke, via: api,   provenance: code}
+    - {from: author_drain,       to: ground_truth_yaml, mode: read,  via: fs,     provenance: design}
+    - {from: author_drain,       to: source_refs_yaml,  mode: read,  via: fs,     provenance: design}
+    - {from: ticket_enrichment,  to: judge_verdict_yaml, mode: read, via: fs,     provenance: design}
+  drives:
+    - {from: trace_lesson_all, to: iter_lessons_walk, provenance: code, multiplicity: serial}
+
+# Subprocess re-exec drivers check_actors derives that this delta does not touch: no tree-anchor
+# constant moves here, and the walks they inherit (iter_query_templates via lead_author) are
+# pinned at the library seam by b6 — the relocated-anchor hazard is orthogonal to this change.
+actor_waivers: [replay_actor, harness_lead]
+
+# ── Probed claims — the ledger ───────────────────────────────────────────────
+claims:
+  - {id: c_p2_all_silent, kind: behavior,
+     claim: "At base, --all prints a normal-looking row with an unwindowed count and NO marker
+       and NO stderr warn for a valid lesson with created_at: not-a-date.",
+     probe: "trace_lesson.py --all over a scratch fixture (badts/absent/good lessons, 2 runs);
+       stdout via cat -A, stderr captured",
+     observed: "badts\\treal description of badts\\t2 and absent\\tnever stamped\\t1 — plain rows;
+       stderr empty; good windowed to 1", verdict: holds}
+  - {id: c_p3_flood_report_kills, kind: behavior,
+     claim: "#609's story: one report.md whose frontmatter is '---\\na: ' + '['*3000 aborts the
+       ENTIRE --all walk with a RecursionError traceback at base.",
+     probe: "same fixture, caseB/report.md replaced with the flood; trace_lesson.py --all",
+     observed: "RecursionError: maximum recursion depth exceeded — no rows printed", verdict: holds}
+  - {id: c_p4_named_since_none, kind: behavior,
+     claim: "At base the named path warns (post-#608) but echoes no value, and the header prints
+       'since None'.",
+     probe: "trace_lesson.py badts over the fixture",
+     observed: "warn: badts.md: no parseable created_at — trace is unwindowed / # badts — 2
+       case(s) in context since None", verdict: holds}
+  - {id: c_p6_flood_lesson_kills, kind: behavior,
+     claim: "A flooded LESSON (not just report.md) also aborts the whole --all walk at base —
+       iter_lessons does not tolerate RecursionError (beyond what #609 explicitly claimed).",
+     probe: "flood.md added to the fixture corpus; trace_lesson.py --all",
+     observed: "RecursionError traceback — walk dead", verdict: holds}
+  - {id: c_pyyaml_flood, kind: primitive,
+     claim: "yaml.safe_load raises RecursionError (not a YAMLError) on deep FLOW nesting, and
+       ALSO on deep BLOCK nesting (pyyaml 6.0.3, py3.11).",
+     probe: ".venv/bin/python3: safe_load('a: ' + '['*3000) and a 3000-deep block mapping",
+     observed: "both raise RecursionError; #609's 'flow' framing was too narrow (correction,
+       fixtures cover both)", verdict: holds}
+  - {id: c_census_fm_callers, kind: census,
+     claim: "The complete _frontmatter caller set: 8 strict (iter_lessons _corpus.py:141,
+       iter_query_templates :266, validate.py:37, lesson_read.py:42, lessons_fm.py:146,
+       visualize_primitives.py:270, case_ticket.py:147, orient.py:106) + 5 tolerant
+       (trace_lesson.py:115,:246, held_out.py:50, validate_scaffold.py:178,
+       inject_system_skill_description.py:90).",
+     probe: "grep -rn 'split_frontmatter|parse_frontmatter_or_none|parse_frontmatter|FrontmatterError'
+       --include=*.py . | grep -v .venv (grounding brief §1); lint_hand_rolled_frontmatter baseline
+       is empty (no grandfathered fence parsers)",
+     observed: "13 call sites as listed; every strict catcher windows FrontmatterError (or a tuple
+       containing it)", verdict: holds}
+  - {id: c_no_recursion_reliers, kind: reachability,
+     claim: "No caller anywhere catches RecursionError around a frontmatter call or relies on it
+       propagating — folding it into FrontmatterError strictly widens tolerance on paths that
+       already degrade or raise typed.",
+     probe: "grep -rn RecursionError . | grep -v .venv",
+     observed: "only orchestrate.py:136 and validate.py:110-114 catch it, both around their own
+       direct safe_load, neither a _frontmatter caller", verdict: holds}
+  - {id: c_census_tsv_consumers, kind: census,
+     claim: "trace_lesson's stdout/stderr have NO programmatic consumer — operator CLI + its test
+       file only; changing the row/header wording breaks no machine reader.",
+     probe: "grep -rn trace_lesson repo-wide + subprocess-spawn sweep (grounding brief §2)",
+     observed: "16 files, all prose/docs/tests; no subprocess call, no loop.py wiring, no re-exec",
+     verdict: holds}
+  - {id: c_case_ids_splitlines, kind: behavior,
+     claim: "The one known stdout consumer idiom parses via str.splitlines() + '#'-prefix drop
+       (test_trace_lesson.py:117-119) — so every splitlines boundary char is a row-forgery
+       primitive, which is why a9 demands more than the \\t/\\n flatten.",
+     probe: "read of _case_ids + python3 -c 'print(\"a\\x85b\".splitlines())'",
+     observed: "splitlines splits on \\r, \\x0b, \\x0c, \\x85, U+2028, U+2029 beyond \\n",
+     verdict: holds}
+  - {id: c_yield_skip_disjoint, kind: behavior,
+     claim: "iter_lessons yields a lesson XOR reports it via on_skip — the --all normal and
+       marker row sets partition one walk, so per-stem uniqueness holds by construction.",
+     probe: "read of _corpus.py:84-147 (single loop: continue after on_skip) + a12's executable
+       3-lesson corpus drive",
+     observed: "single walk, skip branch continues; a12 pins it end-to-end", verdict: holds}
+  - {id: c_direct_safeload_sites, kind: census,
+     claim: "Direct (non-_frontmatter) yaml.safe_load sites that will NOT inherit the fold:
+       in-scope 4 (curator.py:209 is_held_out_source, author/lessons/run.py:189 disposition_for,
+       ticket_enrichment.py:46,:66) + out-of-scope 8 (evals/_pipeline.py:212, secondary.py:194,
+       held_out.py:71,:86, oracle/sample.py:260, judge/compare.py:91, case_ticket.py:99,
+       visualize_primitives.py:48) + orchestrate.py/validate.py which already catch
+       RecursionError themselves.",
+     probe: "grep -rn 'safe_load|yaml.load' defender --include=*.py | grep -v tests | grep -v .venv",
+     observed: "sites as listed; #609's 'the curators' yaml loads have the same exposure...
+       every tolerant parser inherits the guard' is REFUTED as written — inheritance covers only
+       _frontmatter callers; human resolved: guard the 4 LLM-adjacent sites in this spec",
+     verdict: refuted}
+  - {id: c_verdict_flood_unreachable_normal, kind: reachability,
+     claim: "A flooded judge verdict cannot reach disk via the normal write path: persist writes
+       it only after _validate_judge_yaml, which already dead-letters RecursionError
+       (orchestrate.py:136-139).",
+     probe: "read of orchestrate.py:129-145 + persist call order (grounding + strong author)",
+     observed: "holds for the loop's own writes; hand edits/older files can still be anything —
+       which is why b13/b14 are pinned regardless", verdict: holds}
+  - {id: c_site_degrades, kind: behavior,
+     claim: "The four in-scope sites' existing YAMLError degrades are: is_held_out_source→False,
+       disposition_for→None, _read_adversarial_outcome→None(+log), _read_resolution_method→None.",
+     probe: "each site's invalid-YAML control INSIDE its demand test (b11–b14) — executed, green
+       at base",
+     observed: "controls pass at base", verdict: holds}
+  - {id: c_blast_radius, kind: census,
+     claim: "Exactly 4 existing assertions break under a1/a2's new marker (fixtures without
+       created_at asserting exact unmarked rows): test_trace_lesson.py:90, :236, :264, :281;
+       test_corpus_hardening_586.py:225 is safe (its fixture is windowed).",
+     probe: "strong-author read of both test files at base",
+     observed: "4 sites as listed; resolved by adding created_at: 2026-06-04 to those fixtures
+       (their subjects — flatten, read-survival, #590 marker, discovery — are window-independent),
+       keeping them green at base AND post-impl", verdict: holds}
+  - {id: c_flood_depth_stable, kind: primitive,
+     claim: "Depth 3000 floods RecursionError reliably under pytest's deeper starting stack
+       without touching sys.setrecursionlimit.",
+     probe: "the suite's own b1/b2 fixtures executed under pytest at base",
+     observed: "RecursionError raised (currently escaping — the expected red)", verdict: holds}
+
+# ── Gate record ──────────────────────────────────────────────────────────────
+gate:
+  evaluated:
+    - {rule: R0, fired: true}   # reconciliation ran; hits below
+    - {rule: R1, fired: false}  # no sends/payload-facet edge in the delta (TSV rows are write
+                                #   edges pinned via identity/access, not an LLM payload)
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: false}  # nothing removed; judgment half CONSIDERED: the fold WIDENS
+                                #   tolerance — c_no_recursion_reliers probes that no caller
+                                #   relies on the crash-loud flood; 'since None' wording removal
+                                #   has no consumer (c_census_tsv_consumers)
+  obligations:
+    - {rule: R2, element: stdout_tsv.identity,
+       witness: "normal rows + marker rows are two row kinds fanned into one stdout per
+         invocation; a lesson landing in both (or twice) would double-count the audit",
+       discharged_by: a12_row_uniqueness_vocab}
+    - {rule: R3, element: "created_at_echo.access[all_row]",
+       witness: "flatten/clamp/quote pinned on the --all row", discharged_by: a1_all_unparseable_marker}
+    - {rule: R3, element: "created_at_echo.access[named_warn]",
+       witness: "same constraints on the stderr warn — a constraint pinned on one surface and
+         absent on its sibling is the canonical fail-open", discharged_by: a6_named_warn_echo}
+    - {rule: R3, element: "created_at_echo.access[header]",
+       witness: "same constraints on the header line", discharged_by: a8_header_honest}
+    - {rule: R3, element: "created_at_echo.access[all_row]",
+       witness: "line-breaker sanitization asserted over ALL vias at once",
+       discharged_by: a9_echo_linebreak_safe}
+    - {rule: R3, element: "interacts(trace_lesson_named->stdout_tsv)",
+       witness: "the named rows' disposition/ts columns reach the same TSV sink with no
+         flatten at all", discharged_by: a13_named_cols_flattened}
+    - {rule: R4, element: "created_at_field.domain.distinguished[absent]",
+       witness: "the falsy/absent member must be individually exercised",
+       discharged_by: a2_all_absent_marker}
+    - {rule: R4, element: "created_at_field.domain.distinguished[null]",
+       witness: "explicit null is a distinct YAML member", discharged_by: a3_null_is_absent}
+    - {rule: R4, element: "created_at_field.domain.distinguished[empty_string]",
+       witness: "the falsy string member (falsy_valid: true)", discharged_by: a4_empty_string_visible}
+    - {rule: R4, element: "created_at_field.domain.distinguished[unparseable_str]",
+       witness: "the headline member", discharged_by: a1_all_unparseable_marker}
+    - {rule: R4, element: "created_at_field.domain.distinguished[hostile_ctl]",
+       witness: "the adversarial member", discharged_by: a9_echo_linebreak_safe}
+    - {rule: R4, element: "created_at_field.domain.distinguished[huge_str]",
+       witness: "the size member", discharged_by: a10_echo_clamped}
+    - {rule: R4, element: "created_at_field.domain.distinguished[nonstring]",
+       witness: "PyYAML yields arbitrary node types", discharged_by: a5_nonstring_echoed}
+    - {rule: R4, element: "created_at_field.domain.distinguished[parseable_iso]",
+       witness: "the healthy member — the positive control", discharged_by: a11_windowed_no_marker}
+    - {rule: R4, element: "frontmatter_parse.domain.distinguished[flood_flow]",
+       witness: "the new exception-class member", discharged_by: b1_or_none_flood_none}
+    - {rule: R4, element: "frontmatter_parse.domain.distinguished[flood_block]",
+       witness: "block nesting floods too (c_pyyaml_flood) — don't pin flow-only",
+       discharged_by: b1_or_none_flood_none}
+    - {rule: R4, element: "report_md.domain.distinguished[flood_flow]",
+       witness: "the model-authored surface #609 names", discharged_by: b7_report_flood_dispo_qmark}
+    - {rule: R4, element: "ground_truth_yaml.domain.distinguished[flood_flow]",
+       witness: "in-scope direct safe_load site", discharged_by: b11_held_out_flood_false}
+    - {rule: R4, element: "source_refs_yaml.domain.distinguished[flood_flow]",
+       witness: "in-scope direct safe_load site", discharged_by: b12_disposition_for_flood_none}
+    - {rule: R4, element: "judge_verdict_yaml.domain.distinguished[flood_flow]",
+       witness: "in-scope direct safe_load site (two readers)", discharged_by: b13_ticket_outcome_flood_none}
+  holes:
+    - {rule: R0, element: "created_at_echo clamp length",
+       resolution: "80 chars of the FLATTENED value + '…' continuation (lead's call, recorded;
+         bounded well under a terminal line, long enough to show any real timestamp attempt)",
+       resolved_to: a10_echo_clamped}
+    - {rule: R0, element: "created_at_field.domain.distinguished[null] classification",
+       resolution: "explicit null = absent flavor (never stamped), not unparseable",
+       resolved_to: a3_null_is_absent}
+    - {rule: R0, element: "#609's curator-inheritance sentence",
+       resolution: "refuted (c_direct_safeload_sites); human chose: guard the 4 LLM-adjacent
+         direct sites in this spec, leave the 8 eval/render sites out",
+       resolved_to: b11_held_out_flood_false}
+  pre_discharged:
+    - {rule: R4, element: "frontmatter_parse.domain.distinguished[invalid_yaml]",
+       by: existing, edge: "defender/tests/test_frontmatter.py::test_d_canonical_grammar_pin"}
+    - {rule: R4, element: "frontmatter_parse.domain.distinguished[no_fence]",
+       by: existing, edge: "defender/tests/test_frontmatter.py::test_d_canonical_grammar_pin"}
+    - {rule: R4, element: "frontmatter_parse.domain.distinguished[non_mapping]",
+       by: existing, edge: "defender/tests/test_frontmatter.py::test_d_canonical_grammar_pin"}
+    - {rule: R4, element: "created_at_field yaml-date/naive-datetime members",
+       by: existing, edge: "test_trace_lesson.py::test_bare_date_created_at_windows_correctly +
+         ::test_naive_created_at_does_not_crash_trace + ::test_parse_dt_normalizes_to_aware"}
+
+# ── Handoff ──────────────────────────────────────────────────────────────────
+handoff:
+  forks:
+    - "Echo sanitization strength: RESOLVED (user) — full splitlines-breaker + tab sanitization
+       on the NEW echo only; the existing description flatten keeps its \\t/\\n idiom (its \\r
+       residual is pre-existing surface, documented here, not widened)."
+    - "Sibling named-path columns (disposition/ts): RESOLVED (user) — IN scope; a13."
+    - "Direct safe_load sites: RESOLVED (user) — the 4 LLM-adjacent sites in scope (b11–b14);
+       the 8 eval/render sites stay out (c_direct_safeload_sites lists them)."
+    - "Flooded lesson on the NAMED path: rc 0 + warn + unwindowed trace (the #608 tri-state
+       posture), NOT an error exit — one enumerator proposed exit-nonzero; overruled for
+       consistency with the malformed-but-readable posture (b9)."
+    - "Flood report.md disposition degrade is SILENT ('?' with no warn) — parity with the
+       existing malformed-YAML report behavior (b7's rejected branch)."
+    - "created_at: null = absent flavor; clamp = 80 flattened chars + '…' (holes above)."
+  refuted:
+    - "#609: 'the curators' yaml loads have the same exposure [and] every tolerant parser
+       inherits the guard' — the curators' loads are DIRECT safe_load, they inherit nothing
+       from the _frontmatter fold; resolved by guarding them explicitly (b11–b14)."
+    - "#609's 'deeply-nested flow YAML' framing — BLOCK nesting floods identically
+       (c_pyyaml_flood); fixtures cover both."
+  deferred:
+    - "None — every load-bearing claim was probeable at base; no claim waits on the
+       implementation."
+  deviations:
+    - "Reduced small-delta mode: 2 cheap lenses (input-surface, adversarial-input) + frontier
+       strong author (a fork of the lead model — NOT degraded); step-4 diff collapsed into the
+       lead after all stubs were collected."
+    - "Formal-slot vocabulary check done by hand against schema.md (the #537 linter does not
+       exist yet)."
+    - "Existing-test blast radius absorbed IN THIS DIFF per the resolved fork: created_at:
+       2026-06-04 added to 4 window-independent fixtures in test_trace_lesson.py (c_blast_radius);
+       one stale docstring parenthetical there updated to point here."
