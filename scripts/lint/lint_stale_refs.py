@@ -14,18 +14,28 @@ Algorithm:
        - `def NAME(` / `class NAME`
        - top-level `NAME =` (uppercase constants)
        - removed `from ... import NAME` targets
-  3. Filter: skip identifiers <6 chars without an underscore, and skip
-     common stdlib symbols (typing/Callable/etc.) — they're never
+  3. Filter: skip identifiers under 8 chars that contain no underscore, and
+     skip common stdlib symbols (typing/Callable/etc.) — they're never
      project-specific stale-ref signal.
   4. Skip identifiers that still have a binding site (def/class/assignment/
      import) ANYWHERE in the post-PR tree — they were moved, re-exported, or
      their import line merely reflowed (single→multi-line), not removed. A
      genuine stale ref is a symbol defined NOWHERE yet still referenced.
-  5. Batch-grep the remaining tree for each survivor in one word-boundary
-     (`git grep -w -F -e A -e B ...`) call — `-w` so a removed `_by_id` does
-     not match `template_path_by_id`. Idents with >50 hits are too common to
-     be signal; skip them. Idents with 1–50 hits in files OUTSIDE the diff's
-     own changed files are surfaced.
+  5. Grep the tree ONCE for all survivors, word-boundary (`git grep -w -F -e A
+     -e B ...`) — `-w` so a removed `_by_id` does not match
+     `template_path_by_id`. Steps 4 and 5 read the same grep. Idents with >50
+     hits are too common to be signal; skip them. Idents with 1–50 hits in
+     files OUTSIDE the diff's own changed files are surfaced.
+
+A hit in a PYTHON file is classified against that file's AST, not against the
+text of the line: a name is bound there (def/class/import/assignment → step 4)
+or declared there (a parameter → not a reference) or read there. The line's text
+cannot answer this. A parameter on its own line of a multi-line signature reads
+as a bare `name,` — indistinguishable, textually, from a multi-line import
+member, so a regex that calls one a binding calls the other one too, and the
+ident drops out of the whole scan. Every non-Python file (markdown prompt, YAML,
+shell) still falls back to the textual heuristics, which is where the actual
+#617-class stale reference lives.
 
 FAIL-CLOSED (#618). Every git command this gate needs is required to succeed; a
 failure raises `GitError` and exits 2. It must never be possible to confuse "git
@@ -61,12 +71,14 @@ Run from repo root:  python scripts/lint/lint_stale_refs.py
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
 import os
 import re
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from _baseline import Finding, gate
@@ -127,7 +139,86 @@ FRONTMATTER_NAME = re.compile(r"^\s*name:\s*(\S+)\s*$")
 
 # A `def`/`class` signature line — the only place a bare `ident` in a parameter slot is a
 # local's DECLARATION rather than a reference to the module-level symbol of that name.
+# The textual FALLBACK, for a file with no AST to ask (see `_PyFacts`).
 DEF_SIGNATURE = re.compile(r"^\s*(?:async\s+)?def\s")
+
+
+@dataclass(frozen=True)
+class _PyFacts:
+    """What each LINE of one Python file binds, declares, and reads — keyed `(lineno, name)`.
+
+    `bindings` is what makes an ident "still defined" (def/class name, import alias,
+    assignment target). A PARAMETER is deliberately NOT one: it binds a local, and reading
+    it as a definition of the module-level symbol of the same name would drop that ident
+    from the ENTIRE scan — an ident-scoped whitelist, the one shape this gate must never
+    have. It lands in `params` instead, which is line-scoped and only says "this line does
+    not REFERENCE the name".
+
+    `loads` is consulted so that `def f(x=x())` — a parameter that also reads the
+    module-level symbol it shadows — stays a reference.
+
+    (`_astlib` resolves a different question: where a CALL comes from. The question here is
+    what a LINE binds, so the facts are collected here.)"""
+
+    bindings: frozenset[tuple[int, str]]
+    params: frozenset[tuple[int, str]]
+    loads: frozenset[tuple[int, str]]
+
+
+def _collect_py_facts(tree: ast.AST) -> _PyFacts:
+    bindings: set[tuple[int, str]] = set()
+    params: set[tuple[int, str]] = set()
+    loads: set[tuple[int, str]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings.add((node.lineno, node.name))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # `alias.lineno` is the MEMBER's own line, so a reflowed multi-line import
+            # binds each name on the line it actually sits on.
+            for alias in node.names:
+                for name in (alias.asname, alias.name.split(".")[0]):
+                    if name and name != "*":
+                        bindings.add((alias.lineno, name))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        bindings.add((sub.lineno, sub.id))
+        elif isinstance(node, ast.arg):
+            params.add((node.lineno, node.arg))
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            loads.add((node.lineno, node.id))
+        elif isinstance(node, ast.Attribute):
+            loads.add((node.lineno, node.attr))
+        elif isinstance(node, ast.keyword) and node.arg:
+            loads.add((node.lineno, node.arg))
+    return _PyFacts(frozenset(bindings), frozenset(params), frozenset(loads))
+
+
+class _PySources:
+    """The AST facts of every Python file a grep hit lands in, parsed once each."""
+
+    def __init__(self, repo_root: Path) -> None:
+        self._repo_root = repo_root
+        self._cache: dict[str, _PyFacts | None] = {}
+
+    def facts(self, rel: str) -> _PyFacts | None:
+        """None when there is no AST to ask — the file is not Python, or does not parse.
+        Callers fall back to the textual heuristics, which is what every markdown prompt,
+        YAML and shell file uses anyway."""
+        if rel not in self._cache:
+            self._cache[rel] = self._parse(rel)
+        return self._cache[rel]
+
+    def _parse(self, rel: str) -> _PyFacts | None:
+        if not rel.endswith(".py"):
+            return None
+        try:
+            text = (self._repo_root / rel).read_text(encoding="utf-8", errors="replace")
+            return _collect_py_facts(ast.parse(text))
+        except (OSError, SyntaxError, ValueError):
+            return None
 
 
 class GitError(RuntimeError):
@@ -265,15 +356,31 @@ def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
     return out.splitlines()
 
 
-def _is_declaration(content: str, ident: str) -> bool:
+def _hits(lines: Sequence[str]) -> list[tuple[str, int, str]]:
+    """Parse `git grep -n` output — `path:lineno:content` — dropping anything malformed."""
+    parsed: list[tuple[str, int, str]] = []
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+        parsed.append((parts[0], int(parts[1]), parts[2]))
+    return parsed
+
+
+def _is_declaration(
+    facts: _PyFacts | None, lineno: int, content: str, ident: str
+) -> bool:
     """True if this LINE declares the name rather than referencing it. Two shapes:
 
     - a YAML frontmatter `name: <ident>` — a skill keeps its own name after a like-named
       CLI shim is deleted;
-    - the ident in a PARAMETER slot of a `def` signature — `def f(cfg, <ident>: Any)`
-      declares a local, and its collision with a deleted module-level symbol of the same
-      name means nothing. It must sit in a parameter position (after `(` or `,`), so a
-      default VALUE — `def f(x=<ident>())` — remains a real reference and is still reported.
+    - the ident in a PARAMETER slot of a signature — `def f(cfg, <ident>: Any)` declares a
+      local, and its collision with a deleted module-level symbol of the same name means
+      nothing. A parameter is what the AST calls a parameter, at whatever line it sits on,
+      so a multi-line signature is read the same as a one-line one. A default VALUE stays a
+      real reference — whether the ident is the callee (`def f(x=<ident>())`) or an argument
+      inside it (`def f(x=g(<ident>))`), both of which a "is it after a `(` or a `,`" regex
+      cannot tell apart from a parameter.
 
     (The prose here says `<ident>`, never a real name: this gate greps its own source, and
     an identifier spelled in a docstring is a reference like any other.)
@@ -284,7 +391,9 @@ def _is_declaration(content: str, ident: str) -> bool:
     m = FRONTMATTER_NAME.match(content)
     if m and m.group(1) == ident:
         return True
-    e = re.escape(ident)
+    if facts is not None:
+        return (lineno, ident) in facts.params and (lineno, ident) not in facts.loads
+    e = re.escape(ident)  # no AST (not Python, or unparseable) — fall back to the text
     return bool(
         DEF_SIGNATURE.match(content)
         and re.search(rf"[(,]\s*\*{{0,2}}{e}\s*[,:)=]", content)
@@ -292,60 +401,68 @@ def _is_declaration(content: str, ident: str) -> bool:
 
 
 def _batch_grep(
-    repo_root: Path, idents: list[str], exclude_files: set[str]
+    idents: list[str], exclude_files: set[str], hits: list[tuple[str, int, str]],
+    py: _PySources,
 ) -> dict[str, list[str]]:
-    """Return {ident: [filtered_lines]} from one combined git grep call.
+    """Return {ident: [filtered_lines]} from the tree-wide grep.
 
     Word-boundary (`-w`) so a removed `_by_id` doesn't match `template_path_by_id`;
     the attribution below is `\\b`-anchored for the same reason."""
     by_ident: dict[str, list[str]] = {i: [] for i in idents}
-    for line in _grep_lines(repo_root, idents):
-        # Format: path:lineno:content
-        parts = line.split(":", 2)
-        if len(parts) < 3:
-            continue
-        rel, content = parts[0], parts[2]
+    for rel, lineno, content in hits:
         if rel in exclude_files or _is_excluded_path(rel):
             continue
         if SUPPRESS in content:
             continue
-        # Determine which ident matched (greedy first whole-word hit).
+        # Attribute the line to the first ident it REFERENCES. A declaration is skipped
+        # rather than breaking the loop: one line can declare `a` and still call `b`.
         for ident in idents:
-            if re.search(rf"\b{re.escape(ident)}\b", content):
-                if not _is_declaration(content, ident):
-                    by_ident[ident].append(line[:200])
-                break
+            if not re.search(rf"\b{re.escape(ident)}\b", content):
+                continue
+            if _is_declaration(py.facts(rel), lineno, content, ident):
+                continue
+            by_ident[ident].append(f"{rel}:{lineno}:{content}"[:200])
+            break
     return by_ident
 
 
-def _is_binding(line: str, ident: str) -> bool:
-    """True if `line` defines or imports `ident` — a `def`/`class`, a module-level
-    assignment, or any `import` line naming it (module path or target)."""
+def _is_binding(
+    facts: _PyFacts | None, lineno: int, line: str, ident: str
+) -> bool:
+    """True if this line DEFINES or IMPORTS `ident` — a `def`/`class`, an assignment, or an
+    import naming it. In Python the AST says so; a parameter is not a binding here (see
+    `_PyFacts`). Otherwise fall back to the text."""
+    if facts is not None:
+        return (lineno, ident) in facts.bindings
     e = re.escape(ident)
     return bool(
         re.search(rf"\b(?:async\s+)?(?:def|class)\s+{e}\b", line)
         or re.search(rf"^\s*{e}\s*(?::[^=]+)?=(?!=)", line)   # assignment / annotated
         or ("import" in line and re.search(rf"\b{e}\b", line))  # import (module or target)
-        or re.fullmatch(rf"\s*{e},?\s*", line)               # multiline import member
     )
 
 
-def _still_defined(repo_root: Path, idents: list[str]) -> set[str]:
+def _still_defined(
+    idents: list[str], hits: list[tuple[str, int, str]], py: _PySources
+) -> set[str]:
     """Idents that still have a binding site (def/class/assignment/import) ANYWHERE
     in the post-PR tree — i.e. moved or re-exported, not removed. A genuine stale
     ref is a symbol defined NOWHERE yet still referenced; a move/rename/import
     reflow leaves the symbol defined elsewhere and is not stale. Scans the whole
-    tree (changed files included — that is where a moved def now lives)."""
+    tree (changed files included — that is where a moved def now lives).
+
+    This is the one ident-SCOPED filter in the gate — a single binding site drops the ident
+    everywhere — so what counts as a binding has to be exact. It is the AST's answer for
+    Python, never the line's text: a parameter on its own line of a multi-line signature,
+    and a name on its own line of a list literal, both read as a bare `name,` — the same
+    text a multi-line import member has."""
     defined: set[str] = set()
-    for line in _grep_lines(repo_root, idents):
-        parts = line.split(":", 2)
-        if len(parts) < 3:
-            continue
-        rel, content = parts[0], parts[2]
+    for rel, lineno, content in hits:
         if _is_excluded_path(rel):
             continue
+        facts = py.facts(rel)
         for ident in idents:
-            if ident not in defined and _is_binding(content, ident):
+            if ident not in defined and _is_binding(facts, lineno, content, ident):
                 defined.add(ident)
     return defined
 
@@ -386,10 +503,15 @@ def _scan(
         print(f"Skipped {len(skipped)} generic identifiers: {', '.join(skipped[:10])}"
               + ("..." if len(skipped) > 10 else ""))
 
+    # ONE tree-wide grep answers both passes below: `_batch_grep`'s idents are a subset of
+    # `_still_defined`'s, so a second call would re-walk the tree for a subset of these hits.
+    py = _PySources(repo_root)
+    grep_hits = _hits(_grep_lines(repo_root, specific))
+
     # Drop idents still defined/imported somewhere post-PR (moved, re-exported, or
     # an import line merely reflowed) — those are not stale, only a removed-AND-
     # undefined symbol with surviving references is.
-    moved = _still_defined(repo_root, specific)
+    moved = _still_defined(specific, grep_hits, py)
     if moved:
         print(f"Skipped {len(moved)} still-defined identifier(s) (moved/re-exported): "
               f"{', '.join(sorted(moved)[:10])}" + ("..." if len(moved) > 10 else ""))
@@ -400,7 +522,7 @@ def _scan(
         return []
 
     print(f"Scanning {len(specific)} specific removed identifier(s) (base={base_ref})")
-    results = _batch_grep(repo_root, specific, changed)
+    results = _batch_grep(specific, changed, grep_hits, py)
 
     findings: list[Finding] = []
     print()
@@ -437,31 +559,31 @@ def _self_reference(baseline_path: Path, repo_root: Path) -> frozenset[str]:
 def main(
     argv: list[str] | None = None,
     *,
-    repo_root: Path | None = None,
-    base_ref: str | None = None,
-    baseline_path: Path | None = None,
+    repo_root: Path = REPO_ROOT,
+    base_ref: str = BASE_REF,
+    baseline_path: Path = BASELINE_PATH,
 ) -> int:
     args = sys.argv[1:] if argv is None else argv
-    root = REPO_ROOT if repo_root is None else repo_root
-    base = BASE_REF if base_ref is None else base_ref
-    baseline = BASELINE_PATH if baseline_path is None else baseline_path
 
     # Preflight first — including before --update-baseline. You must not be able to
     # bless an empty result that was never computed.
-    err = _base_ref_error(root, base)
+    err = _base_ref_error(repo_root, base_ref)
     if err is not None:
         print(f"lint_stale_refs: {err}", file=sys.stderr)
         return 2
 
     try:
-        findings = _scan(root, base, exclude_files=_self_reference(baseline, root))
+        findings = _scan(
+            repo_root, base_ref,
+            exclude_files=_self_reference(baseline_path, repo_root),
+        )
     except GitError as exc:
         print(f"lint_stale_refs: {exc}", file=sys.stderr)
         return 2
 
     print("Suppress a deliberate dead-name reference with `# lint-stale-ref: ok — <reason>`.")
     return gate(
-        findings, baseline, args,
+        findings, baseline_path, args,
         label="lint_stale_refs", header=HEADER,
     )
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +50,10 @@ def _load_gate():
     assert spec is not None
     assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    # Register BEFORE exec: a module executed outside sys.modules cannot resolve its own
+    # __module__, and anything that looks it up — `@dataclass` deciding whether an
+    # annotation is a ClassVar, pickle, typing.get_type_hints — dies on the lookup.
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -56,15 +61,22 @@ def _load_gate():
 GATE = _load_gate()
 
 
-def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _env(repo: Path) -> dict[str, str]:
+    """A hermetic git env: `HOME` points into the throwaway repo, so no contributor's
+    ~/.gitconfig can reach these fixtures. `PATH` comes from the caller's — pinning a
+    literal would decide where git lives (it is not in /usr/bin everywhere)."""
+    return {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(repo),
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=True,
-        env={
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-            "HOME": str(repo),
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-        },
+        ["git", *args], cwd=repo, text=True, capture_output=True, check=check,
+        env=_env(repo),
     )
 
 
@@ -192,9 +204,7 @@ def test_shallow_fixture_really_has_no_merge_base(tmp_path):
     computable, and the regression test would keep passing while testing nothing — the
     very failure mode #618 is about."""
     work = _clone(tmp_path, _upstream(tmp_path), depth=1)
-    run = lambda *a: subprocess.run(  # noqa: E731
-        ["git", *a], cwd=work, capture_output=True, text=True
-    ).returncode
+    run = lambda *a: _git(work, *a, check=False).returncode  # noqa: E731
 
     assert (work / ".git" / "shallow").exists(), "fixture is not actually shallow"
     assert run("rev-parse", "--verify", "origin/main") == 0, "base ref must RESOLVE..."
@@ -330,6 +340,9 @@ def test_reference_in_an_excluded_path_is_not_flagged(tmp_path, rel):
     work = _clone(tmp_path, up)
 
     hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    # A scan that computed NOTHING would satisfy the exclusion assertion vacuously — the
+    # #618 failure passing itself off as a pass. Pin that the scan ran first.
+    assert "caller.py:some_removed_helper" in hits, "the scan found nothing at all"
     assert not any(h.startswith(rel) for h in hits), f"{rel} should be excluded"
 
 
@@ -398,6 +411,99 @@ def test_a_default_VALUE_in_a_signature_is_still_a_real_reference(tmp_path):
     assert _run_gate(work, tmp_path) == 1
     assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
         "sig.py:some_removed_helper"
+    }
+
+
+def test_a_MULTILINE_signature_parameter_does_not_whitelist_the_IDENT(tmp_path):
+    """The same parameter, reflowed onto its own line, must stay a line-scoped declaration.
+
+    Textually it is now a bare `some_removed_helper,` — character-for-character what a
+    multi-line import member looks like — so a text rule that reads one as a BINDING reads
+    the other as one too, and the ident drops out of the whole scan: every surviving
+    reference to it, anywhere in the tree, goes quiet. That is the ident-scoped whitelist
+    the gate must never have. The AST knows a parameter from an import."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "sig.py": "def cmd(\n    cfg: dict,\n    some_removed_helper,\n) -> int:\n"
+                      "    return 0\n",
+            "notes.md": "Run some_removed_helper() to fix things.\n",
+        },
+        pr_files={"caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "notes.md:some_removed_helper"  # the parameter itself is still not a reference
+    }
+
+
+def test_a_bare_name_on_its_own_line_is_a_REFERENCE_not_a_binding(tmp_path):
+    """`HANDLERS = [\\n    some_removed_helper,\\n]` reads as a dead symbol in a list — a
+    NameError waiting to happen — not as a definition of one. Same bare-`name,` text as the
+    import member above; only the AST separates them."""
+    up = _upstream(
+        tmp_path,
+        main_files={"reg.py": "HANDLERS = [\n    some_removed_helper,\n]\n"},
+        pr_files={"caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "reg.py:some_removed_helper"
+    }
+
+
+def test_a_reflowed_multiline_IMPORT_still_counts_as_defined(tmp_path):
+    """The control for the two above, and the reason the bare-`name,` rule existed: a
+    surviving import of the symbol means it was moved or re-exported, not removed. Still
+    ident-scoped, still green."""
+    up = _upstream(
+        tmp_path,
+        main_files={"reexport.py": "from mod import (\n    some_removed_helper,\n)\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 0
+    assert GATE._scan(work, "origin/main") == []
+
+
+def test_a_reference_inside_a_default_VALUE_expression_is_flagged(tmp_path):
+    """The default-value boundary again, one level deeper: the dead symbol is an ARGUMENT
+    inside the default, not the callee. `def f(x=compute(<ident>))` sits after a `(` exactly
+    like a parameter does, so the position of the nearest bracket cannot decide this."""
+    up = _upstream(
+        tmp_path,
+        main_files={"sig.py": "def f(x=compute(some_removed_helper)):\n    return x\n"},
+        pr_files={"caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "sig.py:some_removed_helper"
+    }
+
+
+def test_a_declaration_does_not_mask_another_dead_ident_on_the_SAME_line(tmp_path):
+    """One line can declare one dead name and CALL another. Attribution stops at the first
+    ident the line references — a declaration is skipped, not treated as the line's answer,
+    or the second name (which really is stale) is never looked for."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "mod2.py": "def a_removed_helper():\n    return 2\n",
+            "sig.py": "def f(a_removed_helper, x=some_removed_helper()):\n    return x\n",
+        },
+        pr_files={"mod2.py": None, "caller.py": None},  # both defs deleted by the PR
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "sig.py:some_removed_helper"  # `a_removed_helper` on that line is the parameter
     }
 
 
