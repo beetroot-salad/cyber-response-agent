@@ -157,7 +157,7 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 | `payload.parts` / `.invariants` | R1 trigger + the demanded test's assertion template | rule input + obligation content |
 | `domain.type` / `.default` | R4 obligation content — the baseline column the alternatives cross from | obligation content |
 | `Demand.kind` / `.form`, `binds` | the gate's join (`executable` is derived from `form`) | rule input |
-| `Demand.rejected` | step-4 silent-branch diff; step-7 decision record | decision channel |
+| `Demand.rejected` | step-4 fork detection (a `# rejected:` marks a considered branch); step-7 decision record | decision channel |
 | element `provenance` | R0 routing; "which artifact do I fix" | completeness forcer |
 | mandatory-with-`unknown` on invariants; `identity.evidence` | forces claim-or-confess, with the claim's source cited | completeness forcer |
 | `id` | graph diff across runs; witness text | identity |
@@ -168,7 +168,7 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 
 Two extractors populate the graph; their outputs meet at the gate.
 
-**The grounding agent (structure, `provenance: code`)** emits the neighborhood the change attaches to:
+**The grounding agent (structure, `provenance: code`)** emits the neighborhood the change attaches to. It starts from the design doc's inherited `claims:` block (discuss-issue's sweep) and extends it, and it stays in the reader's lane: discovery and narrative it answers itself; every factual **list** it emits is a census claim whose probe is the search that established it. A census is a trace-back — start at the symbol or resource, close over its references, and continue **across process boundaries** (a subprocess re-exec, a harness or eval entrypoint, cron), because a reader following imports stops silently exactly where the escaped execution-context bugs lived. The brief carries:
 - every shared root the change touches, with **all** its writers, their path templates, and the axes each interpolates — naming the search that established the writer list;
 - every sibling surface reaching the same resources, with the constraints it enforces (as `constraints_by_via`, trust labeled);
 - the consumers of anything the design removes — found by *reading* prompts and call-sites (a prompt line reading "grep, not index" names a consumer of grep), never by signature grep — naming the sweep that established the list;
@@ -183,7 +183,7 @@ Both extractors fill every invariant field or write `unknown`. Reconciliation is
 
 ## Worked example — demands first
 
-Design: *"`summarize(path, out_dir, llm)` reads a text file, has an LLM summarize it, writes `<stem>.summary` into `out_dir`, returns the summary. `SUMM_TIMEOUT` caps the LLM call; 0 means no limit."* Existing code: `batch.py` fans `summarize` serially over many files into one `out_dir`.
+Design: *"`summarize(path, out_dir, llm)` reads a text file, has an LLM summarize it, writes `<stem>.summary` into `out_dir`, returns the summary. `SUMM_TIMEOUT` caps the LLM call (default 30 seconds); 0 means no limit."* Existing code: `batch.py` fans `summarize` serially over many files into one `out_dir`.
 
 ```yaml
 demands:

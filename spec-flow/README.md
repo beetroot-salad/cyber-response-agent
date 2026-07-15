@@ -18,14 +18,17 @@ issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-sp
 ```
 
 Two human gates, both placed where judgment is cheap and mistakes are expensive: once on the spec
-(before code exists), once on the merge. Everything between them runs unattended.
+(before code exists), once on the merge. Everything between them runs unattended. One discipline
+runs the whole pipe: enumerators interpret the design's language, executed probes answer every
+question about existing reality, and humans decide only genuine forks — nothing in between gets
+to guess.
 
 ## The skills
 
 | Skill | What it does |
 |---|---|
-| `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions. Produces understanding, not a design. |
-| `/spec-flow:write-tests` | Turns the approved design into the executable spec: demands → spec-coverage graph → gate rules → binding test suite. Ships a **tests-only diff** and a handoff note. |
+| `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions — and when work heads to implementation, closes by posting the intent+design doc: typed obligations and mechanisms, with probed claims about existing reality. |
+| `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests-only diff** and a handoff note. |
 | `/spec-flow:write-code-from-spec` | Reads the committed spec, writes real code until it passes, ships a PR, watches CI, repairs to green. Never edits a test to make it pass. |
 | `/spec-flow:review` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
