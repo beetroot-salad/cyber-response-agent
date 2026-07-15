@@ -1,6 +1,6 @@
 ---
 name: connect
-description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-CLI integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation.
+description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-adapter integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation.
 ---
 
 # Connect a system of record

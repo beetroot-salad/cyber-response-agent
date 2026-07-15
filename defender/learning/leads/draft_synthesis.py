@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 # A `query_id` segment (`{system}` / `{verb}`) becomes a path component in the
 # `{system}/_draft/{verb}.md` draft path below. The id is model-coined (the
-# gather subagent passes it as `--query-id`), so an untrusted segment containing
+# gather subagent passes it to the `query` tool as `query_id`), so an untrusted segment containing
 # `/`, `\`, or a leading `.` (e.g. `..`) would escape the catalog dir and write
 # an arbitrary `.md` file. Require each segment to be a single safe path
 # component: starts alphanumeric, then `[a-z0-9._-]` — which the real kebab ids
@@ -189,17 +189,17 @@ def synthesize_drafts(
     (`build_handoff`) with WARN-and-draft: the gather subagent ran a query
     under a ``{system}.{verb}`` id that no template covers, so we
     deterministically draft it and let the lead-author's existing
-    promote/discard/skip machinery curate it. ``query_id`` comes from the
-    dispatch contract via the wrapper (``--query-id``); ad-hoc leads
-    (``query_id`` with no ``{system}.`` prefix) and bare untagged verbs
-    (``{system}.esql`` / ``{system}.ad-hoc`` — what a call with no ``--query-id``
-    collapses to) are skipped: they are not catalog candidates. Idempotent —
-    skips drafts that already exist on disk or were minted earlier in this call.
+    promote/discard/skip machinery curate it. ``query_id`` is the id the gather
+    subagent passes to the ``query`` tool; an untagged call (no ``query_id``)
+    collapses to ``{system}.{verb}`` — whose suffix IS the recorded verb — and is
+    skipped along with ad-hoc leads (``query_id`` with no ``{system}.`` prefix):
+    neither is a catalog candidate. Idempotent — skips drafts that already exist
+    on disk or were minted earlier in this call.
 
-    The drafted ``## Query`` is the literal query that ran: under ES|QL the
-    bindings live inside the pipe (``params`` is just ``{"arg0": "<the pipe>"}``),
-    so the captured command — not a ``${param}`` re-render — is the canonical
-    record (see ``_executed_query``).
+    The drafted ``## Query`` is the canonical record of what ran — an engine
+    verb's native-language body verbatim, or a param-only verb's structured
+    ``{verb, params}`` call — never ``raw_command`` and never a ``${param}``
+    re-render (see ``_executed_query``).
     """
     # Reuse the tick's once-loaded catalog when threaded; else load (the direct
     # `catalog_dir`-only call path). This is the FIRST consumer, so the

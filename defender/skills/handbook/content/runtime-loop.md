@@ -37,8 +37,8 @@ when it does, that's signal for the learning loop, not a blocked write.
   (lead) blocks. PLAN does **not** pick a query template — that's gather's
   job. Read any relevant `lessons/` here before writing blocks.
 - **GATHER** — dispatch the gather subagent (Haiku) per lead via `Task`. It
-  picks a query template, binds params, runs the CLI through the capture
-  wrapper, and returns a tight summary plus the `queries[]` it ran and the
+  picks a query template, binds params, calls the typed `query` tool (the
+  harness captures the payload), and returns a tight summary plus the `queries[]` it ran and the
   path to the raw payload. Multiple PLAN leads → parallel `Task` calls in
   one assistant message.
 - **ANALYZE** — record what gather's summary showed and grade it against the

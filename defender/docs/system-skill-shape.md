@@ -31,7 +31,7 @@ split.)
 
 Each system's Visibility surface section uses the same four fields:
 
-- **available_queries** — the templates / subcommands this system
+- **available_queries** — the templates / verbs this system
   answers, with a one-line description of the measurement each
   contract delivers. Source-of-truth for "is this query dispatchable
   as-is?"

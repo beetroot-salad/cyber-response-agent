@@ -31,8 +31,8 @@ payload IS the output; the harness captures it under
 Feeding a runtime identifier — container id, docker container name —
 404s. If a lead needs the inventory record for a runtime entity, run
 the resolution lead first (`list-hosts` plus inventory-side fields, or
-the identity stub's `list-authorized-hosts <user>` if the principal is
-a user), then bind the resolved name into `get-host`.
+the identity stub's `list-authorized-hosts` verb, keyed on `user`, if the
+principal is a user), then bind the resolved name into `get-host`.
 
 ## Connectivity
 

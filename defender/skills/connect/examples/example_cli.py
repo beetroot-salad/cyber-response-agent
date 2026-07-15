@@ -63,7 +63,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from defender.runtime.verbs import VerbContext
+from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import faults
 
 SYSTEM = "example"
@@ -127,10 +127,20 @@ def health_check(ctx: VerbContext) -> dict:
     return {"system": SYSTEM, "status": "connected"}
 
 
+@verb(engine="lucene", body_param="native_query")
 def query(ctx: VerbContext, *, native_query: str, limit: int = 100) -> dict | list:
     """Run a native filter and return the matching rows unmodified. ``native_query``
     passes through untouched (no translation layer); ``limit`` is a real int, so a
-    quoted ``"100"`` is rejected with exit 64 before it reaches the arithmetic."""
+    quoted ``"100"`` is rejected with exit 64 before it reaches the arithmetic.
+
+    The ``@verb`` decoration declares this a NATIVE-QUERY verb: ``engine=`` names the
+    source's own query language (``lucene`` here — change it to ``esql`` / ``spl`` /
+    ``kql`` / ``sql`` to match yours) and ``body_param=`` names the single param the
+    query body rides in. It only stamps two attributes and returns the function
+    unchanged, so the validator still reads the signature — but it is what lets a
+    template put in-body ``${…}`` substitutions into the query text; a param-only
+    verb (``get_record`` below) carries no decoration and requires every ``${…}`` to
+    be a declared param."""
     return _request(ctx, "/events", {"q": native_query, "limit": str(limit)})
 
 

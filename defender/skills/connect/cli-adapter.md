@@ -92,6 +92,19 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   naming the declared roster — so there is no `--help` to author. Give each
   param a real type (`limit: int`, `enabled: bool`); the validator enforces
   it, so a quoted `"20"` or `"false"` is caught before it reaches the body.
+- **A native-query verb declares its engine.** A verb whose body IS a query
+  language — an ES|QL pipe, a Lucene/KQL/SQL string that lives whole in ONE
+  param — imports `verb` from `defender.runtime.verbs` and carries a
+  `@verb(engine=…, body_param=…)` decoration: `engine=` names the language
+  (`esql`, `lucene`, `sql`, …) and `body_param=` names the single param the query
+  body rides in. It only stamps two attributes and returns the function unchanged,
+  so the validator still reads the signature. Declaring it is what lets a template
+  put in-body `${…}` substitutions into the query text — a param-only verb requires
+  every `${…}` to be a *declared param*, so an undeclared body placeholder makes
+  `validate_scaffold` reject the template. `elastic_cli.py`'s `esql`
+  (`@verb(engine="esql", body_param="query")`) and `query`/`alerts`
+  (`@verb(engine="lucene", body_param="native_query")`) are the exemplars;
+  `get-host` above is param-only and carries no decoration.
 - **A verb RETURNS its payload** — a dict or list of the upstream JSON,
   unmodified. It does not print and it does not exit. The query tool
   captures the returned value by-ref under `gather_raw/`.
@@ -130,7 +143,8 @@ Before choosing verbs, place the source on this ladder — it decides the
 adapter's shape:
 
 1. **Native aggregating query language** (ES|QL, SPL, KQL, SQL) — expose it
-   as ONE query-body param and let the model write it. The aggregation runs
+   as ONE query-body param (declared `@verb(engine=…, body_param=…)`; see **The
+   verb contract**) and let the model write it. The aggregation runs
    in the source, exact; the verb returns the answer, not a payload. This is
    the default for any source rich enough to support it. Exemplar:
    `elastic_cli.py`'s `esql` verb (`POST /_query` → `{columns, row_count,
