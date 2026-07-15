@@ -9,8 +9,8 @@ two surfaces by audience, across two files:
   *can* and *cannot* answer in this deployment, and how to read its
   output. Independent of how queries are dispatched.
 - **Execution** — `execution.md`, a sibling file read **only** by the
-  gather subagent when it dispatches a query. Adapter CLI shape, flag
-  conventions, connectivity, exit codes, dispatch-time adapter quirks.
+  gather subagent when it dispatches a query. The `query` tool's verb
+  surface, params, connectivity, exit codes, dispatch-time adapter quirks.
   `SKILL.md` keeps a one-line `## Execution` pointer to it.
 
 The two files exist so the orchestrator — which loads `SKILL.md` to
@@ -48,8 +48,9 @@ Each system's Visibility surface section uses the same four fields:
 
 ## Execution — what belongs here
 
-- Adapter CLI invocation pattern.
-- Flag conventions and what they do at the dispatch layer.
+- The `query` tool's verb surface — which verbs the system's `VERBS`
+  registry exposes.
+- What each declared param binds and does at the dispatch layer.
 - Output-format conventions imposed by the adapter (e.g., salted
   untrusted-data delimiters, raw payload persistence under
   `{run_dir}/gather_raw/`).

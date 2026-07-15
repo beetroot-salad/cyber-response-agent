@@ -41,6 +41,7 @@ class ExecutedLead:
     entry_index: int              # index into the joined-leads list
     query_id: str
     system: str                   # adapter system (siem/cmdb/...), from the queries table
+    verb: str                     # the honest registry verb the row freezes (#620)
     params: dict[str, Any]
     raw_command: str              # verbatim executed command (the literal query)
     goal_text: str
@@ -99,6 +100,7 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     entry_index=entry_idx,
                     query_id=q.query_id,
                     system=q.system,
+                    verb=q.verb,
                     params=dict(q.params),
                     raw_command=q.raw_command,
                     goal_text=goal,
@@ -157,7 +159,7 @@ def collect_general_failures(
             continue
         if lead.query_id in by_id:                       # template failure → existing fold
             continue
-        if _draft_candidate_segments(lead.query_id, by_id) is not None:  # → becomes a draft
+        if _draft_candidate_segments(lead.query_id, lead.verb, by_id) is not None:  # → a draft
             continue
         out.append(
             {

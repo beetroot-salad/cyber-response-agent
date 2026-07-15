@@ -48,7 +48,7 @@ def _query(
         "system": "stub-cmdb",
         "verb": query_id.split(".", 1)[-1],
         "query_id": query_id,
-        "params": params or {"arg0": "web-1"},
+        "params": params or {"host": "web-1"},
         "raw_command": "python3 cmdb_cli.py host-lookup web-1",
         "payload_path": rel,
         "exit_code": 0 if status != "error" else 1,
@@ -187,11 +187,11 @@ def test_joined_orders_ran_before_queryless_and_orphans_last(tmp_path):
 def test_actor_view_only_queries(tmp_path):
     run = tmp_path / "run"
     _lead(run, "l-001", "SECRET GOAL", ["secret dim"])
-    _query(run, "l-001", 0, params={"arg0": "web-1"})
+    _query(run, "l-001", 0, params={"host": "web-1"})
     view = lr.actor_view(run)
     assert view["case_id"] == "run"
     assert view["leads"] == [
-        {"lead_id": "l-001", "queries": [{"query_id": "stub-cmdb.host-lookup", "params": {"arg0": "web-1"}}]}
+        {"lead_id": "l-001", "queries": [{"query_id": "stub-cmdb.host-lookup", "params": {"host": "web-1"}}]}
     ]
 
 

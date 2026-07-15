@@ -1,9 +1,14 @@
 """Tests for lead_author.synthesize_drafts — the WARN-and-draft fix.
 
-An executed query whose `{system}.{verb}` id matches no catalog template must
-be minted as a `{system}/_draft/{verb}.md` skeleton (so the lead-author curates
-it) rather than dropped. Ad-hoc leads (id with no `{system}.` prefix) are not
-catalog candidates and are skipped.
+An executed query whose coined `{system}.{suffix}` id matches no catalog template must
+be minted as a `{system}/_draft/{suffix}.md` skeleton (so the lead-author curates it)
+rather than dropped. Ad-hoc leads (id with no `{system}.` prefix) and untagged calls
+(id suffix == the row's recorded verb) are not catalog candidates and are skipped.
+
+#620: re-pinned off the dead `params['arg0']` positional (the query tool never writes it)
+onto the named-params row shape — the canonical record is the verb's declared body param
+verbatim (an engine verb) or a structured `{verb, params}` call (a param-only verb), and
+candidacy keys on the row's own recorded `verb`, not a hardcoded reserved-verb set.
 """
 from __future__ import annotations
 
@@ -14,17 +19,18 @@ from defender.learning.leads import lead_author
 
 def _lead(
     query_id: str, params: dict | None = None, raw_command: str = "",
-    system: str | None = None,
+    system: str | None = None, verb: str = "get",
 ) -> lead_author.ExecutedLead:
-    # The queries table records ``system`` independently; default it to the
-    # query_id's namespace (how record_query builds the id) so callers only
-    # set it explicitly when exercising a system/id-prefix mismatch.
+    # The queries table records ``system`` + ``verb`` independently; default ``system`` to the
+    # query_id's namespace (how record_query builds the id) so callers only set it explicitly
+    # when exercising a system/id-prefix mismatch. ``verb`` is the honest registry verb the row
+    # freezes; it defaults to a value that is NOT the id suffix (so the id reads as coined).
     if system is None:
         system = query_id.split(".", 1)[0] if "." in query_id else ""
     return lead_author.ExecutedLead(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, system=system, params=params or {}, raw_command=raw_command,
-        goal_text="probe the thing",
+        query_id=query_id, system=system, verb=verb, params=params or {},
+        raw_command=raw_command, goal_text="probe the thing",
         what_to_summarize=(), raw_ref=Path("gather_raw/l-001/0.json"),
         payload_status="ok", payload_digest="2 bytes, 1 line(s)", error_class=None,
     )
@@ -47,7 +53,8 @@ def _catalog(tmp_path) -> Path:
 
 def test_unresolved_verb_is_drafted(tmp_path):
     cat = _catalog(tmp_path)
-    created = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})], catalog_dir=cat)
+    created = lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
     draft = cat / "stub-cmdb" / "_draft" / "network-map.md"
     assert created == [draft]
     text = draft.read_text()
@@ -69,14 +76,16 @@ def test_adhoc_query_id_skipped(tmp_path):
 
 def test_idempotent(tmp_path):
     cat = _catalog(tmp_path)
-    first = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})], catalog_dir=cat)
+    first = lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
     assert first
-    second = lead_author.synthesize_drafts([_lead("stub-cmdb.network-map", {"name": "web-1"})], catalog_dir=cat)
+    second = lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
     assert second == []
 
 
 # ---------------------------------------------------------------------------
-# Lean / ES|QL skeleton shape (#340 / #343 migration)
+# Canonical-record skeleton shape (#340 / #343 / #620 migration)
 # ---------------------------------------------------------------------------
 
 _ESQL_PIPE = (
@@ -87,12 +96,13 @@ _ESQL_PIPE = (
 
 
 def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
-    """An elastic draft's ## Query is the exact pipe that ran, engine-tagged —
-    no KQL 'fill in the invocation' placeholder, no ## What to summarize."""
+    """An elastic esql draft's ## Query is the exact pipe that ran (the verbatim `query` body
+    param), engine-tagged — no KQL 'fill in the invocation' placeholder, no ## What to
+    summarize."""
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts([
-        _lead("elastic.sshd-failed-by-srcip", {"arg0": _ESQL_PIPE},
-              raw_command=f"esql {_ESQL_PIPE!r}"),
+        _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
+              system="elastic"),
     ], catalog_dir=cat)
     text = (cat / "elastic" / "_draft" / "sshd-failed-by-srcip.md").read_text()
     assert "engine: esql" in text
@@ -103,34 +113,35 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
     assert "## Pitfalls" in text
 
 
-def test_arg0_preferred_over_raw_command_for_query_body(tmp_path):
-    """_executed_query prefers the bare pipe (arg0) to the full shim invocation
-    for elastic (where arg0 IS the ES|QL query), but uses raw_command for other
-    systems (where arg0 is a bare positional value, not the query)."""
-    lead = _lead("elastic.x", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}")
+def test_executed_query_is_the_declared_body_or_structured_call(tmp_path):
+    """_executed_query returns the verbatim declared body param for an engine verb (esql →
+    `query`) and a structured `{verb, params}` call for a param-only verb — never raw_command,
+    never a dead `params['arg0']` read."""
+    lead = _lead("elastic.x", {"query": _ESQL_PIPE}, verb="esql", system="elastic")
     assert lead_author._executed_query(lead) == _ESQL_PIPE
-    # No arg0 (flag-shaped adapter) → fall back to raw_command.
-    flag_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, raw_command="host-lookup --host db-1")
-    assert lead_author._executed_query(flag_lead) == "host-lookup --host db-1"
-    # Positional NON-elastic adapter (cmdb.hostname-by-ip ${ip}): arg0 is the bare
-    # value '10.0.0.5', not a query — the canonical record is the full raw_command.
-    pos_lead = _lead("cmdb.hostname-by-ip", {"arg0": "10.0.0.5"},
-                     raw_command="hostname-by-ip 10.0.0.5")
-    assert lead_author._executed_query(pos_lead) == "hostname-by-ip 10.0.0.5"
+    # A param-only verb → the structured call, carrying the verb + every bound param, never the
+    # shlex audit string.
+    param_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, verb="get-host", system="cmdb",
+                       raw_command="cmdb get-host host=db-1")
+    record = lead_author._executed_query(param_lead)
+    assert "get-host" in record
+    assert "db-1" in record
+    assert record != param_lead.raw_command
 
 
-def test_executed_query_keys_on_recorded_system_not_id_prefix(tmp_path):
-    """The engine decision reads the queries-table `system`, not the query_id
-    prefix — a tagged query whose id namespace differs from the adapter that
-    actually ran is still classified by the real engine."""
+def test_executed_query_keys_on_recorded_verb_not_id_prefix(tmp_path):
+    """The engine decision reads the queries-table `(system, verb)`, not the query_id prefix — a
+    tagged query whose id namespace differs from the verb that actually ran is still classified
+    by the real per-verb engine."""
     pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
-    # ES|QL adapter (system=elastic) even though the tagged id namespace differs.
-    el = _lead("custom.tagged", {"arg0": pipe}, raw_command=f"esql {pipe!r}", system="elastic")
-    assert lead_author._executed_query(el) == pipe                    # the arg0 pipe
-    # Non-ES|QL adapter (system=cmdb) even though the id prefix says elastic.
-    non = _lead("elastic.weird", {"arg0": "10.0.0.5"},
-                raw_command="hostname-by-ip 10.0.0.5", system="cmdb")
-    assert lead_author._executed_query(non) == "hostname-by-ip 10.0.0.5"
+    # An esql verb (system=elastic) even though the tagged id namespace differs.
+    el = _lead("custom.tagged", {"query": pipe}, verb="esql", system="elastic")
+    assert lead_author._executed_query(el) == pipe
+    # A param-only verb even though the id prefix says elastic → the structured call.
+    non = _lead("elastic.weird", {"host": "10.0.0.5"}, verb="get-host", system="cmdb")
+    record = lead_author._executed_query(non)
+    assert "get-host" in record
+    assert "10.0.0.5" in record
 
 
 def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path):
@@ -139,8 +150,8 @@ def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path):
     case would land at the catalog root `_draft/` and brick the post-flight)."""
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts([
-        _lead(".verb", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
-        _lead("elastic.", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+        _lead(".verb", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
+        _lead("elastic.", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat)
     assert created == []
     assert not (cat / "_draft").exists()              # no catalog-root draft dir
@@ -152,7 +163,7 @@ def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path):
     cat = _catalog(tmp_path)
     grok_pipe = 'FROM logs-* | GROK message "%{IP:src} %{WORD:action}" | STATS c = COUNT(*) BY action'
     created = lead_author.synthesize_drafts([
-        _lead("elastic.grok-probe", {"arg0": grok_pipe}, raw_command=f"esql {grok_pipe!r}"),
+        _lead("elastic.grok-probe", {"query": grok_pipe}, verb="esql", system="elastic"),
     ], catalog_dir=cat)
     assert created
     assert "%{IP:src}" in (cat / "elastic" / "_draft" / "grok-probe.md").read_text()
@@ -165,12 +176,10 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     line on its own for any already-persisted/foreign row."""
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts([
-        # `/` + `..` in the verb → would resolve outside the catalog.
-        _lead("elastic.../../../../PWNED", {"arg0": _ESQL_PIPE},
-              raw_command=f"esql {_ESQL_PIPE!r}", system="elastic"),
+        # `/` + `..` in the suffix → would resolve outside the catalog.
+        _lead("elastic.../../../../PWNED", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         # traversal in the system segment.
-        _lead("../../etc.passwd", {"arg0": _ESQL_PIPE},
-              raw_command=f"esql {_ESQL_PIPE!r}", system="elastic"),
+        _lead("../../etc.passwd", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat)
     assert created == []
     # No file escaped the catalog (or landed anywhere under the temp tree).
@@ -178,11 +187,11 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     assert list(tmp_path.rglob("PWNED.md")) == []
 
 
-def test_untagged_esql_verb_not_drafted(tmp_path):
-    """A bare `{system}.esql` id (no --query-id tag) is a non-candidate — an
-    untagged ES|QL call must not mint a junk catch-all draft."""
+def test_untagged_verb_not_drafted(tmp_path):
+    """A bare `{system}.{verb}` id whose suffix IS the recorded verb (no coined --query-id) is a
+    non-candidate — an untagged call must not mint a junk catch-all draft."""
     cat = _catalog(tmp_path)
     assert lead_author.synthesize_drafts([
-        _lead("elastic.esql", {"arg0": _ESQL_PIPE}, raw_command=f"esql {_ESQL_PIPE!r}"),
+        _lead("elastic.esql", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat) == []
     assert not (cat / "elastic" / "_draft" / "esql.md").exists()

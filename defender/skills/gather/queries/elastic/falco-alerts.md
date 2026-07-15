@@ -1,7 +1,9 @@
 ---
 id: elastic.falco-alerts
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [container_id, end, evt_type, rule, start]
 ---
 
 ## Goal

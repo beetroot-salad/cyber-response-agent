@@ -1,58 +1,61 @@
-#!/usr/bin/env python3
 """Reference adapter for a generic HTTP read source — the shape `/connect`
 copies into `defender/scripts/adapters/{system}_cli.py`.
+
+An adapter is NOT a CLI: there is no argparse, no `--help`, no `main()`, and
+no `sys.exit`. It is a Python module that exposes a single module-level
+`VERBS` mapping — ``{verb-name: function}`` — and nothing else the model can
+reach. Each function is a plain annotated verb: it takes a ``VerbContext``
+positionally (the run's tree + scrubbed env, handed in by the harness) and
+declares every model-supplied param as a KEYWORD-ONLY argument. Those
+keyword-only params ARE the param contract — the query tool validates a call
+against them and rejects an unknown/missing/mistyped one with exit 64, so the
+model never needs a `--help`. A verb RETURNS its JSON payload (a dict or
+list); it never prints and never exits.
+
+Failures are RAISED, not exited. Import the fault taxonomy from
+``faults.py`` and raise the member that matches the condition — the query
+tool turns the fault into the queries-table row and the exit code the circuit
+breaker keys on:
+
+    ConfigFault    (2) — config.env missing/incomplete: the system is down.
+    TransportFault (2) — the transport failed (unreachable, timeout, 5xx).
+    UpstreamFault  (1) — the system was reached and rejected the query (4xx),
+                         carrying the vendor's own error body as ``detail``.
 
 Pick the query shape before the verbs. Three tiers, best first:
 
   1. The source has a native query language that AGGREGATES server-side
-     (ES|QL, SPL, KQL, SQL). Expose THAT and let the model write it: the
-     aggregation runs in the source, exact, and the result is the answer —
-     nothing to download and reduce. Always first choice. We prefer native
-     aggregation for two compounding reasons: simplicity (the source
-     computes it; there is no payload to reduce) and priors (these query
-     languages are one family the gather model already knows from training,
-     so the instruction surface stays near zero). For a search-engine-class
-     deployment — a rich query language — that means the `esql` verb
-     (`POST /_query` -> {columns, row_count, values}),
-     NOT a Lucene filter that returns raw documents.
-
+     (ES|QL, SPL, KQL, SQL). Expose THAT and let the model write it as one
+     ``native_query`` param: the aggregation runs in the source, exact, and
+     the result is the answer — nothing to download and reduce. Always first
+     choice — these languages are a family the gather model already knows, so
+     the instruction surface stays near zero.
   2. The source only FILTERS and returns rows (what this example shows).
      Expose the native filter passthrough and return the rows; the model
-     aggregates them downstream with `defender-sql` over the adapter's
-     JSON payload — still SQL, a language it knows. This downloads before it
-     reduces, so it is the fallback, not the goal. Document the concrete
-     recipe for the source's row shape in that system's `execution.md`
-     (see `cli-adapter.md` -> "Prefer native aggregation").
-
+     aggregates them downstream with ``defender-sql`` over the returned JSON.
+     This downloads before it reduces, so it is the fallback, not the goal.
   3. The source has NO query language (pure REST / lookup). Key on an
-     identifier and return the record.
+     identifier and return the record — like ``get_record`` below.
 
-Never hand-roll a filter DSL or a bespoke adapter-side reducer — that is
-the pattern the gather redesign removed.
+Never hand-roll a filter DSL or a bespoke adapter-side reducer — that is the
+pattern the gather redesign removed.
 
-This example sits at tier 2 and is deliberately environment-agnostic: it
-talks to whatever `{EXAMPLE_}URL_BASE` points at and authenticates with
-whatever `AUTH_TYPE` config.env declares. Replace `example` with the real
-system name, adjust the verbs and the response parsing to the real API,
-and keep the contract below intact.
-
-The contract every adapter implements (see `_adapter.py`):
-
-    health-check                          — is the system reachable + authed?
-    query '<native query>' [--limit N]    — run a query, return raw results
-        [--start ISO] [--end ISO]
-
-Subcommands are argparse verbs; each command prints its JSON payload on
-stdout — the payload IS the output, with no wrapper envelope — and the
-gather capture persists it by-ref. Exit codes: 0 success (0 hits included),
-1 query rejected, 2 unreachable/unauthed/misconfigured, 64 bad invocation.
-
-Transport here is HTTP via urllib. A `docker exec`, SSH, or
-existing-CLI-wrapping adapter keeps the same contract but swaps this
-`_request` body — that is the only part that should differ.
+This example sits at tier 2, is deliberately environment-agnostic (it talks
+to whatever ``URL_BASE`` config.env points at), and does its transport with
+``urllib``. A ``docker exec``, SSH, or existing-CLI-wrapping adapter keeps the
+same VERBS/VerbContext/faults contract and swaps only the ``_request`` body —
+that is the only part that should differ per system.
 """
 
 from __future__ import annotations
+
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve
+# when the verb registry loads this module BY PATH, not as a package member.
+import sys as _sys
+from pathlib import Path as _Path
+
+if (_root := str(_Path(__file__).resolve().parents[4])) not in _sys.path:
+    _sys.path.insert(0, _root)
 
 import json
 import urllib.error
@@ -60,102 +63,86 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from _adapter import (
-    EXIT_CONN_ERROR,
-    EXIT_OK,
-    EXIT_QUERY_ERROR,
-    AdapterArgumentParser,
-    die,
-    emit_payload,
-    load_config,
-    resolve_auth,
-)
+from defender.runtime.verbs import VerbContext
+from defender.scripts.adapters import faults
 
 SYSTEM = "example"
 
 
-def _request(config: dict[str, str], path: str, params: dict[str, str]) -> Any:
-    """GET `{URL_BASE}{path}?{params}` with the resolved auth headers and
-    the configured timeout. Returns parsed JSON. Maps failures onto the
-    contract's exit codes. This is the one method a non-HTTP adapter
-    rewrites."""
+def _config(ctx: VerbContext) -> dict[str, str]:
+    """Read non-secret config from
+    ``{ctx.defender_dir}/knowledge/environment/systems/{SYSTEM}/config.env``.
+
+    Resolved from the RUN's tree (``ctx.defender_dir``), never from an
+    import-time module constant — a learning-drain worktree or an eval's tmp
+    tree must read ITS OWN config.env, not the main checkout's. Shell-style
+    ``KEY=value`` lines; secrets are NEVER here, only the names of the env
+    vars that hold them."""
+    path = ctx.defender_dir / "knowledge" / "environment" / "systems" / SYSTEM / "config.env"
+    config: dict[str, str] = {}
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            config[key.strip()] = val.strip().strip('"').strip("'")
+    return config
+
+
+def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:
+    """GET ``{URL_BASE}{path}?{params}`` and return parsed JSON, mapping every
+    failure onto the fault taxonomy. This is the one method a non-HTTP adapter
+    rewrites (``docker exec``, SSH, a wrapped vendor CLI) — the VERBS surface
+    above it does not change with the transport."""
+    config = _config(ctx)
     base = config.get("URL_BASE")
     if not base:
-        die(EXIT_CONN_ERROR,
-            f"{SYSTEM}: URL_BASE is not set in config.env.")
+        raise faults.ConfigFault(f"{SYSTEM}: URL_BASE is not set in config.env.")
     timeout = float(config.get("TIMEOUT_SEC", "10"))
-    url = (base or "").rstrip("/") + path
+    url = base.rstrip("/") + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
-
-    request = urllib.request.Request(url, headers=resolve_auth(SYSTEM, config))
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             return json.loads(response.read().decode())
     except urllib.error.HTTPError as exc:
-        # 401/403 are an auth/connectivity problem; other 4xx/5xx mean the
-        # request reached the system but was rejected — a query error.
+        body = exc.read().decode(errors="replace")
         if exc.code in (401, 403):
-            die(EXIT_CONN_ERROR,
+            raise faults.TransportFault(
                 f"{SYSTEM}: authentication failed (HTTP {exc.code}). Check "
-                f"the AUTH_TYPE config and the secret env var it names.")
-        die(EXIT_QUERY_ERROR, f"{SYSTEM}: query rejected (HTTP {exc.code}): {exc.reason}")
+                f"AUTH_TYPE and the secret env var it names."
+            ) from exc
+        # Reached the system and it rejected the call — the agent's own to fix.
+        raise faults.UpstreamFault(body or f"{SYSTEM}: query rejected (HTTP {exc.code}).") from exc
     except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-        die(EXIT_CONN_ERROR,
-            f"{SYSTEM}: cannot reach {base} ({exc}). This is a data-source "
-            f"outage, not a query problem — do not retry-probe.")
-    except json.JSONDecodeError as exc:
-        die(EXIT_QUERY_ERROR, f"{SYSTEM}: response was not valid JSON ({exc}).")
+        raise faults.TransportFault(f"{SYSTEM}: cannot reach {base} ({exc}).") from exc
 
 
-def cmd_health_check(config: dict[str, str], _args: Any) -> int:
-    _request(config, "/health", {})
-    print("connected")
-    return EXIT_OK
+def health_check(ctx: VerbContext) -> dict:
+    """Is the system reachable and authed? RETURNS a small status dict — it
+    does not print and it does not exit. A failed reach raises a
+    ``TransportFault``/``ConfigFault`` from ``_request`` instead."""
+    _request(ctx, "/health")
+    return {"system": SYSTEM, "status": "connected"}
 
 
-def cmd_query(config: dict[str, str], args: Any) -> int:
-    params = {"q": args.query, "limit": str(args.limit)}
-    if args.start:
-        params["start"] = args.start
-    if args.end:
-        params["end"] = args.end
-    result = _request(config, "/events", params)
-    emit_payload(result)
-    return EXIT_OK
+def query(ctx: VerbContext, *, native_query: str, limit: int = 100) -> dict | list:
+    """Run a native filter and return the matching rows unmodified. ``native_query``
+    passes through untouched (no translation layer); ``limit`` is a real int, so a
+    quoted ``"100"`` is rejected with exit 64 before it reaches the arithmetic."""
+    return _request(ctx, "/events", {"q": native_query, "limit": str(limit)})
 
 
-def build_parser() -> AdapterArgumentParser:
-    parser = AdapterArgumentParser(
-        prog=f"{SYSTEM}_cli.py",
-        description=f"Adapter for the {SYSTEM} system of record.",
-    )
-    sub = parser.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="Check reachability + auth; exit 0/2.")
-
-    # Verb and flag names mirror what a fresh-context Haiku reaches for
-    # (positional query, --limit, --start/--end). The --help example
-    # is load-bearing: gather pattern-matches against it, so use a real
-    # query shape, not a placeholder.
-    q = sub.add_parser(
-        "query",
-        help="Run a native query and return matching events.",
-        epilog="example: query 'status:failed AND service:sshd' --limit 5",
-    )
-    q.add_argument("query", help="Native query string, passed through unmodified.")
-    q.add_argument("--limit", type=int, default=100, help="Max results (default 100).")
-    q.add_argument("--start", help="ISO-8601 UTC lower time bound.")
-    q.add_argument("--end", help="ISO-8601 UTC upper time bound.")
-    return parser
+def get_record(ctx: VerbContext, *, id: str) -> dict:
+    """Tier-3 lookup: key on an identifier and return the one record."""
+    return _request(ctx, f"/records/{id}")
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    config = load_config(SYSTEM)
-    handlers = {"health-check": cmd_health_check, "query": cmd_query}
-    return handlers[args.subcommand](config, args)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+# The whole model-facing surface: a mapping of verb name -> function. A required
+# `health-check` plus the verbs this source answers. There is no CLI, no shim.
+VERBS = {
+    "health-check": health_check,
+    "query": query,
+    "get-record": get_record,
+}

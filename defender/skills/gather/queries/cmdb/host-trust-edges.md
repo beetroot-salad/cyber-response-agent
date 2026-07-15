@@ -1,6 +1,8 @@
 ---
 id: cmdb.host-trust-edges
 status: established
+verb: get-host
+params: [host]
 ---
 
 ## Goal
@@ -17,8 +19,10 @@ Retrieve a host's CMDB inventory record to inspect its declared outbound trust e
 
 ## Query
 
-```
-get-host ${host}
+```query
+verb: get-host
+params:
+  host: ${host}
 ```
 
 ## Common pitfalls

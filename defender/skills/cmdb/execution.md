@@ -50,3 +50,9 @@ be overridden by environment variables of the same names.
 - `0` — success
 - `1` — query error (host not found, malformed arg)
 - `2` — connectivity / docker / upstream 5xx
+- `64` — a usage mistake in YOUR call: an unknown verb, or an
+  unknown/missing/mistyped param name (e.g. `name` where the verb
+  declares `host`). The one class you can fix yourself — the rejection
+  names the declared verb/param roster; re-issue with a declared param.
+  It never trips the circuit breaker, so a param typo is not a
+  data-source outage.

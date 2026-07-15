@@ -709,7 +709,10 @@ def test_d1_positive_control_every_template_resolves_a_goal():
     """Positive control for d1: the index CAN be built without a description field, because every
     template already carries the Goal the index renders."""
     rows = list(_corpus.iter_query_templates(_REAL_CATALOG))
-    assert len(rows) >= 60
+    # #620 dropped the 33 machine-generated `_draft/` arg0 templates (the loop refills the queue
+    # on the next real run), so the corpus is smaller than the pre-migration ~63; the count guard
+    # just asserts a non-trivially-populated catalog. The intent is the goal check below.
+    assert len(rows) >= 25
     assert all(r.goal.strip() for r in rows), "a template with no ## Goal has no index entry"
 
 

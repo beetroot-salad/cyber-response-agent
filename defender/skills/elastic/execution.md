@@ -61,6 +61,13 @@ the connection.
   **stop and escalate immediately** with the error. Do not retry-probe,
   run `netstat`/`ss`/`docker`, or hunt for `.env` — that's a
   data-source outage, not a query problem.
+- `64` — a usage mistake in YOUR call: an unknown verb, or an
+  unknown/missing/mistyped param name (e.g. passing `kql` where the verb
+  declares `native_query`). This is the one class you can fix yourself —
+  the rejection names the declared verb/param roster; re-issue the call
+  with a declared param. It never trips the circuit breaker (a typo of
+  yours cannot mask a healthy system), so a param mistake is not a
+  data-source outage.
 
 ## Query syntax
 
@@ -81,16 +88,18 @@ forms used by v2 gather templates:
 
 ## Index-pattern selection
 
-`--index` overrides the per-subcommand default. Common scopes:
+The `index` param of the `query` / `alerts` verb overrides the
+per-verb default — bind it by name (`params={"index": "<pattern>"}`),
+there is no flag. Common scopes:
 
-- `--index 'logs-system.auth-*'` — sshd / sudo / PAM only
-- `--index 'logs-falco.alerts-*'` — Falco rule-fires only
-- `--index 'logs-system.syslog-*'` — general syslog only
-- `--index 'logs-zeek.connection-*'` — Zeek flow records only (the `connection` dataset is what other vendors call `conn.log`)
-- `--index 'logs-zeek.*'` — every Zeek dataset (conn/dns/http/ssl/files/ssh)
-- `--index 'logs-squid.access-*'` — Squid proxy attribution only
-- `--index 'logs-postgresql.log-*'` — Postgres queries / auth / lifecycle only
-- `--index 'logs-nginx.access-*'` — nginx requests only (separate from `nginx.error`)
-- `--index 'logs-keycloak.events-*'` — Keycloak Quarkus log + events stream (scope further with `loggerName:`)
-- `--index 'logs-unbound.queries-*'` — Unbound resolver query/reply lines
-- `--index '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` subcommand's default)
+- `index: 'logs-system.auth-*'` — sshd / sudo / PAM only
+- `index: 'logs-falco.alerts-*'` — Falco rule-fires only
+- `index: 'logs-system.syslog-*'` — general syslog only
+- `index: 'logs-zeek.connection-*'` — Zeek flow records only (the `connection` dataset is what other vendors call `conn.log`)
+- `index: 'logs-zeek.*'` — every Zeek dataset (conn/dns/http/ssl/files/ssh)
+- `index: 'logs-squid.access-*'` — Squid proxy attribution only
+- `index: 'logs-postgresql.log-*'` — Postgres queries / auth / lifecycle only
+- `index: 'logs-nginx.access-*'` — nginx requests only (separate from `nginx.error`)
+- `index: 'logs-keycloak.events-*'` — Keycloak Quarkus log + events stream (scope further with `loggerName:`)
+- `index: 'logs-unbound.queries-*'` — Unbound resolver query/reply lines
+- `index: '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` verb's default)

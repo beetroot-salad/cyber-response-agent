@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 # Put the workspace root on sys.path so the `defender.*` namespace imports below
 # resolve whether this file is imported directly or via lead_author.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -23,17 +25,11 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_DIR
+from defender.runtime.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
 
-
-# Ids gather coins for one-off, no-template probes — never catalog candidates.
-# An *untagged* adapter call (no ``--query-id``) collapses to ``{system}.{verb}``
-# where ``{verb}`` is the adapter subcommand (e.g. an adapter exposing ``esql`` / ``query``)
-# or ``ad-hoc`` for a flags-only call; drafting any of those would mint a junk
-# catch-all template, so they are filtered alongside prefix-less ids.
-_NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
 
 # A `query_id` segment (`{system}` / `{verb}`) becomes a path component in the
 # `{system}/_draft/{verb}.md` draft path below. The id is model-coined (the
@@ -45,55 +41,90 @@ _NON_CANDIDATE_VERBS = frozenset({"esql", "query", "ad-hoc"})
 # `/abs` are rejected. A containment clamp on the resolved path backs this up.
 _SAFE_ID_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-
-# Systems whose query body is a server-side ES|QL pipe — the whole query is one
-# positional (``params["arg0"]``) with the bindings inlined, not flag/positional
-# scalars. The one place the "this system speaks ES|QL" policy lives, so engine
-# shape (which field is the canonical query, draft frontmatter/fence) is decided
-# from the recorded ``system`` rather than re-split out of ``query_id`` or a
-# system literal scattered across call sites.
-_ESQL_SYSTEMS = frozenset({"elastic"})  # lint-shippable: ok — ES|QL system id matched against the queries-table system value (real config, not illustrative)
+# A fence-opening line, matched AFTER lstrip — the same thing `_corpus.section_bodies` toggles
+# on. Any line that starts (post-lstrip) with ``` or ~~~ closes a Markdown code fence there.
+_FENCE_LINE = re.compile(r"^(?:```|~~~)")
 
 
-def _is_esql(system: str) -> bool:
-    return system in _ESQL_SYSTEMS
+def _structured_call(verb_name: str, params: dict) -> str:
+    """The canonical record for a PARAM-ONLY verb: a structured ``{verb, params}`` rendering,
+    re-runnable and derivable from the frozen row alone (never ``raw_command``, never a bare
+    ``${param}`` skeleton). YAML — a REAL serializer, not an f-string — so an adversarial param
+    value (a fence, a colon, a newline, a quote) is quoted/escaped rather than able to inject a
+    sibling key or close the draft's ``## Query`` fence."""
+    doc = {"verb": verb_name, "params": dict(params or {})}
+    return yaml.safe_dump(
+        doc, sort_keys=False, allow_unicode=True, default_flow_style=False
+    ).strip()
 
 
 def _executed_query(lead: ExecutedLead) -> str:
-    """The literal query that ran, as the canonical record.
+    """The literal query that ran, as the canonical record — resolved PER VERB, offline.
 
-    Under ES|QL the whole pipe is a single positional captured as
-    ``params["arg0"]`` — the named bindings (`user`, `src`, window) live
-    *inside* the string, not as separate params — so the ``arg0`` body, not
-    a ``${param}`` re-render, is the canonical query. For other systems
-    ``arg0`` is just a bare positional *value* (an IP for ``cmdb.hostname-by-ip``
-    ``${ip}``, a CR id for ``change-mgmt.get-change`` ``${cr_id}``), not the
-    query — so the full ``raw_command`` is the faithful record there. Pick by
-    the recorded ``system`` (``_is_esql``), falling back to the other form when
-    the preferred one is absent.
+    For an engine verb (the SIEM's esql/query/alerts) the whole query is a native-language body in
+    ONE declared param (``query`` for esql, ``native_query`` for lucene) — so the VERBATIM value
+    of that body param is the record. For a param-only verb the record is the structured
+    ``{verb, params}`` call (:func:`_structured_call`). Never ``raw_command`` (the ``shlex``
+    audit string its own docstring forbids fencing) and never the dead ``params['arg0']`` the
+    query tool stopped writing at #617.
     """
-    arg0 = (lead.params or {}).get("arg0")
-    arg0 = arg0 if isinstance(arg0, str) and arg0.strip() else ""
-    raw = lead.raw_command or ""
-    return (arg0 or raw) if _is_esql(lead.system) else (raw or arg0)
+    engine = engine_for(lead.system, lead.verb)
+    if engine != "none":
+        body_param = body_param_for(lead.system, lead.verb)
+        body = (lead.params or {}).get(body_param) if body_param else None
+        if isinstance(body, str) and body.strip():
+            return body
+        # An engine verb whose body param is absent/blank on this row: fall through to the
+        # structured render rather than leaking raw_command.
+    return _structured_call(lead.verb, lead.params or {})
 
 
-def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> str:
-    """Render a draft skeleton in the lean/ES|QL shape.
+def _fence_safe(text: str) -> bool:
+    """True when ``text`` can sit inside a ``` fence without escaping it: no line opens/closes a
+    fence (``_corpus.section_bodies`` toggles ``fenced`` on any ```/~~~ line, lstripped) and no
+    line starts a ``## `` heading at column 0. A body that trips either could close the draft's
+    ``## Query`` fence and forge a sibling ``## `` section in a file the lead-author LLM reads."""
+    for line in text.splitlines():
+        if _FENCE_LINE.match(line.lstrip()) or line.startswith("## "):
+            return False
+    return True
 
-    Built by concatenation rather than ``str.format`` because ``query_body``
-    is the literal executed query and may itself contain ``{`` / ``}`` (ES|QL
-    ``GROK`` patterns use ``%{WORD:field}``), which a format call would choke on.
 
-    Shape mirrors the migrated catalog (``## Goal`` / ``## Query`` / ``## Pitfalls``
-    + narrowing note) — no ``## What to summarize`` / ``## Baseline`` / KQL
-    placeholder. The ``## Query`` body is the *exact* query that ran (from the
-    queries table), so a promotion is one keyword-recall pass away, not a
-    "fill in the invocation" stub.
+def _render_query_body(record: str, fence_lang: str) -> str:
+    """Render the canonical ``record`` as the draft's ``## Query`` content, injection-safe.
+
+    The safe case is one intact ```<lang> fence. Removing ``raw_command`` removed ``shlex``'s
+    quoting, so an adversarial body carrying a fence-closing ``` or a ``## `` heading must not be
+    able to break out: when ``record`` is unsafe, indent EVERY line so none sits at column 0 — a
+    ``## `` line can no longer be a heading and nothing escapes the ``## Query`` section (the
+    fence-toggle may swallow the fixed skeleton's later ``## Pitfalls`` into the display, but it
+    can never forge a NEW sibling section, which is the property that matters)."""
+    if _fence_safe(record):
+        return f"```{fence_lang}\n{record}\n```"
+    indented = "\n".join("    " + ln for ln in record.splitlines())
+    return (
+        "The executed query body contained a code fence and is shown as an indented literal "
+        "(neutralized — not runnable as-is):\n\n" + indented
+    )
+
+
+def _draft_skeleton(query_id: str, goal: str, record: str, engine: str) -> str:
+    """Render a draft skeleton whose ``## Query`` carries the verb's CANONICAL ``record``.
+
+    The fence language + ``engine:`` frontmatter follow the VERB's declared ``engine`` (``esql`` /
+    ``lucene`` for an engine verb, a structured ```` ```query ```` call for a param-only verb) —
+    resolved offline from ``(system, verb)`` by the caller, never re-guessed from the system.
+    Built by concatenation, not ``str.format`` (an ES|QL ``GROK`` body carries literal ``{`` /
+    ``}``), and the body goes through :func:`_render_query_body` so an attacker-influenced value
+    cannot forge a section. Shape mirrors the migrated catalog (``## Goal`` / ``## Query`` /
+    ``## Pitfalls``).
     """
-    is_esql = _is_esql(system)
-    engine_fm = "\nengine: esql" if is_esql else ""
-    fence_lang = "esql" if is_esql else ""
+    if engine != "none":
+        engine_fm = f"\nengine: {engine}"
+        query_block = _render_query_body(record, engine)
+    else:
+        engine_fm = ""
+        query_block = _render_query_body(record, "query")
     goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
     return (
         f"---\nid: {query_id}\nstatus: draft{engine_fm}\n---\n\n"
@@ -107,15 +138,17 @@ def _draft_skeleton(query_id: str, system: str, goal: str, query_body: str) -> s
         "names a genuinely new measurement.\n\n"
         "## Query\n\n"
         "The exact query that ran (narrow/widen on promote):\n\n"
-        f"```{fence_lang}\n{query_body}\n```\n\n"
+        f"{query_block}\n\n"
         "## Pitfalls\n\n"
         "- (fill in any data-source quirk this query exposed — null-heavy field,\n"
         "  renamed column, case-sensitive match — grounded in the executed payload)\n"
     )
 
 
-def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str] | None:
-    """``(system, verb)`` if ``query_id`` is a mintable draft candidate, else None.
+def _draft_candidate_segments(
+    query_id: str, verb_name: str, by_id: set[str],
+) -> tuple[str, str] | None:
+    """``(system, id-suffix)`` if ``query_id`` is a mintable draft candidate, else None.
 
     The single home for the candidacy rule the WARN-and-draft path applies, so
     ``synthesize_drafts`` (which mints the draft) and ``collect_general_failures``
@@ -125,8 +158,11 @@ def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str]
 
     - the id resolves to an existing catalog template (``by_id``) — not a draft;
     - it carries no ``{system}.`` prefix (an ``ad-hoc`` probe);
-    - the verb is reserved (``esql`` / ``query`` / ``ad-hoc`` — an untagged call) —
-      drafting it would mint a junk catch-all;
+    - the id SUFFIX equals the row's RECORDED VERB — an untagged call (no ``query_id``)
+      collapses to ``{system}.{verb}``, so a suffix that IS the declared verb is not a coined
+      id and drafting it would mint a junk catch-all. Keying on the row's own recorded verb
+      (not a roster re-imported at read time) keeps a persisted artifact's candidacy stable
+      across the tree that resolves it (``frozen_actor_replay`` re-execs in a pinned worktree);
     - either segment is empty or not a single safe path component.
 
     Path-containment (the ``_draft/`` clamp) stays at the write site in
@@ -134,12 +170,12 @@ def _draft_candidate_segments(query_id: str, by_id: set[str]) -> tuple[str, str]
     """
     if not query_id or "." not in query_id or query_id in by_id:
         return None
-    system, verb = query_id.split(".", 1)
-    if not system or not verb or verb in _NON_CANDIDATE_VERBS:
+    system, suffix = query_id.split(".", 1)
+    if not system or not suffix or suffix == verb_name:
         return None
-    if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(verb):
+    if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(suffix):
         return None
-    return system, verb
+    return system, suffix
 
 
 def synthesize_drafts(
@@ -174,27 +210,28 @@ def synthesize_drafts(
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
-        # Candidacy (resolves to no template, real {system}.{verb}, safe segments)
-        # is the shared predicate; the non-candidate cases it rejects — empty
-        # segments, reserved verbs, unsafe path components — are exactly the ones
-        # that would mint junk or escape the catalog dir.
-        segs = _draft_candidate_segments(qid, by_id)
+        # Candidacy (resolves to no template, coined {system}.{suffix} whose suffix is not the
+        # row's own recorded verb, safe segments) is the shared predicate; the non-candidate
+        # cases it rejects — empty segments, an untagged {system}.{verb} id, unsafe path
+        # components — are exactly the ones that would mint junk or escape the catalog dir.
+        segs = _draft_candidate_segments(qid, lead.verb, by_id)
         if segs is None:
             continue
-        system, verb = segs
-        # `system`/`verb` become path components — clamp the resolved draft under
+        system, suffix = segs
+        # `system`/`suffix` become path components — clamp the resolved draft under
         # the system's `_draft/` dir as belt-and-suspenders over the segment check.
-        draft = catalog_dir / system / "_draft" / f"{verb}.md"
+        draft = catalog_dir / system / "_draft" / f"{suffix}.md"
         draft_root = (catalog_dir / system / "_draft").resolve()
         if not draft.resolve().is_relative_to(draft_root):
             continue
         if draft.exists() or draft in created:
             continue
-        query_body = _executed_query(lead) or "# (no command captured for this query)"
+        record = _executed_query(lead) or "# (no command captured for this query)"
+        engine = engine_for(lead.system, lead.verb)
         try:
             draft.parent.mkdir(parents=True, exist_ok=True)
             draft.write_text(
-                _draft_skeleton(qid, system, lead.goal_text, query_body), encoding="utf-8"
+                _draft_skeleton(qid, lead.goal_text, record, engine), encoding="utf-8"
             )
             created.append(draft)
             by_id.add(qid)

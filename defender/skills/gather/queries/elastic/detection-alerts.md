@@ -1,7 +1,9 @@
 ---
 id: elastic.detection-alerts
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [end, host, rule_id, start]
 ---
 
 ## Goal

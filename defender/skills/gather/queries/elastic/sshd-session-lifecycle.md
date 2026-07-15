@@ -1,7 +1,9 @@
 ---
 id: elastic.sshd-session-lifecycle
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [end, host, start, user]
 ---
 
 ## Goal

@@ -212,7 +212,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         head = f"# Lead {c.lead_id}"
 
     q_lines = "\n".join(
-        f"- {q.query_id}  params={json.dumps(q.params or {})}  status={q.payload_status}"
+        f"- {q.query_id}  verb={q.verb}  params={json.dumps(q.params or {})}  status={q.payload_status}"
         for q in c.queries
     ) or "(no queries executed for this lead)"
 

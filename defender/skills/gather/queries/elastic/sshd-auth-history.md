@@ -1,7 +1,9 @@
 ---
 id: elastic.sshd-auth-history
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [dst, end, src, start, user]
 ---
 
 ## Goal

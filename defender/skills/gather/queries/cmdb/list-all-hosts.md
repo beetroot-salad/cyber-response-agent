@@ -1,6 +1,8 @@
 ---
 id: cmdb.list-all-hosts
 status: established
+verb: list-hosts
+params: []
 ---
 
 ## Goal
@@ -18,9 +20,9 @@ is not recognized.
 
 ## Query
 
-```
-# See defender/skills/cmdb/SKILL.md for CLI invocation shape.
-# No host param; returns the full inventory.
+```query
+verb: list-hosts
+params: {}
 ```
 
 ## Common pitfalls

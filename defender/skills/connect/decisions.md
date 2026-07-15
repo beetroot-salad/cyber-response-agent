@@ -6,10 +6,12 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
 
 - **Secrets live in the environment; the skill never handles values.**
   `config.env` holds non-secret config and the *names* of the env vars
-  that hold secrets. One audited code path resolves credentials
-  (`_adapter.resolve_auth`), so a generated adapter can't improvise the
-  credential boundary. An LLM context is not an auditable credential
-  store — this is the single most important property of the layer.
+  that hold secrets. The transport reads a secret only from the run's
+  scrubbed `ctx.env` by the name `config.env` declares — never from
+  `config.env` itself, never from the driver's `os.environ` — so a
+  generated adapter can't improvise the credential boundary and can't leak
+  a provider key into a forked child. An LLM context is not an auditable
+  credential store — this is the single most important property of the layer.
 
 - **Native queries pass through unmodified.** A query source takes its
   native language as-is; a lookup source keys on an identifier. No
@@ -27,9 +29,9 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   payload; we don't write a bespoke reducer. The ladder is in `cli-adapter.md`
   ("Prefer native aggregation").
 
-- **The CLI conforms to the gather subagent, not the reverse.** The
+- **The adapter conforms to the gather subagent, not the reverse.** The
   gather subagent (Haiku) is the adapter's client. On any cosmetic choice
-  — flag names, verb names, ordering — the adapter matches what a
+  — verb names, param names — the adapter matches what a
   fresh-context Haiku reaches for. We document a divergence only when
   it's an irreducible vendor constraint, never to teach the client our
   aesthetics. This keeps the instruction surface minimal. (See
@@ -42,9 +44,10 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   per-vendor PR queue for a marginal speedup.
 
 - **The bundled example is a greenfield seed, not a mandate to duplicate.**
-  On a fresh tree connect installs `_adapter.py` and copies the example; on
-  a populated tree it conforms to the shared module and conventions the
-  existing adapters already use — one shared module per tree, never two. A
+  On a fresh tree connect copies `example_cli.py` and writes its own
+  transport; on a populated tree it conforms to the shared transport module
+  and conventions the existing adapters already use — one shared module per
+  tree, never two. A
   second parallel pattern (duplicate transport/config schemes) is exactly
   the drift per-system consistency exists to avoid, and it fragments the
   prior the gather subagent relies on.

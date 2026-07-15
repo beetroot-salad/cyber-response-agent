@@ -18,7 +18,7 @@ description looks relevant to the alert. Per-system SKILLs use the
 |---|---|---|
 | `skills/invlang/` | The invlang block surface (grammar) + the author-side CLI (`enum`, `advisory`, `hypothesis-shape`, `hypothesis-vocabulary`) | Main loop, when authoring `investigation.md` |
 | `skills/gather/` | The gather subagent body + per-system query templates under `queries/{system}/` and the raw-payload contract | The gather subagent itself, on dispatch — the main loop does **not** load it |
-| `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its CLI is dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (injected by the system-skill hook) |
+| `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its verbs are dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (injected by the system-skill hook) |
 | `skills/connect/` | Maintainer onboarding skill: interview → route (MCP or generated CLI adapter) → scaffold per-system knowledge → test → review branch, one system per run | A maintainer, out-of-band — **not** loaded during an alert run (see §Adding a new system) |
 
 The per-system set is environment-dependent — enumerate

@@ -1,6 +1,8 @@
 ---
 id: host-state.package-list
 status: established
+verb: package-list
+params: [host]
 ---
 
 ## Goal
@@ -22,9 +24,10 @@ on the Docker host rather than being bundled in the container image.
 
 ## Query
 
-```
-# See defender/skills/host-state/SKILL.md for CLI invocation shape.
-# Bound param: ${host}
+```query
+verb: package-list
+params:
+  host: ${host}
 ```
 
 ## Common pitfalls

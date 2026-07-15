@@ -1,6 +1,8 @@
 ---
 id: host-state.authorized-keys
 status: established
+verb: authorized-keys
+params: [host, user]
 ---
 
 ## Goal
@@ -21,9 +23,11 @@ Retrieve the contents of a user's `~/.ssh/authorized_keys` file on a specific ho
 
 ## Query
 
-```
-# See defender/skills/host-state/SKILL.md for CLI invocation shape.
-# Bound params: ${host} ${user}
+```query
+verb: authorized-keys
+params:
+  host: ${host}
+  user: ${user}
 ```
 
 ## Common pitfalls

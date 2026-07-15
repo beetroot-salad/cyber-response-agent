@@ -1,6 +1,8 @@
 ---
 id: change-mgmt.list-changes
 status: established
+verb: list-changes
+params: [host, status]
 ---
 
 ## Goal
@@ -17,8 +19,11 @@ Lists change requests by status for a given host, or across all hosts when no ho
 
 ## Query
 
-```
-list-changes --host ${host} --status ${status}
+```query
+verb: list-changes
+params:
+  host: ${host}
+  status: ${status}
 ```
 
 ## Common pitfalls

@@ -32,7 +32,11 @@ single template can carry several optional filter knobs.
 ---
 id: {system}.sshd-auth-history
 status: established        # or `draft` while under curation
-engine: esql              # for elastic; omit for shell/SQL-shaped systems
+verb: esql                # the declared verb this template dispatches; its engine is a
+                          # property of the VERB (esql / query / a param-only verb like get-host)
+params: [index]           # the verb's declared params, each bound by a `${name}` placeholder
+body_substitutions: [start, end, user, src, dst]  # in-body-text `${name}` substitutions —
+                          # placeholders inside a query LANGUAGE body, NOT declared verb params
 ---
 
 ## Goal
@@ -47,12 +51,26 @@ template's recall keywords are what keep a future narrowing from re-coining a si
 
 ## Query
 
-The query body the system of record executes, fenced and language-tagged
-(```` ```esql ````, ```` ```sql ````, ```` ```bash ````). For elastic this is a
-server-side **ES|QL** aggregation against `logs-*`; the result rows ARE the
-answer. Bindings use `${param}` placeholders (`${start}`, `${user}`, `${src}`)
-where a template parameterizes them; an ES|QL pipe may also inline literals that
-gather rewrites per lead.
+The query the verb runs. For an **engine verb** (elastic `esql`, or `query`/`alerts`)
+this is the native query LANGUAGE body, fenced in that language: an ES|QL pipe in
+```` ```esql ````, or a Lucene/KQL string in an **untagged** ```` ``` ```` fence (KQL has
+no canonical highlighter tag, so its fence carries no language). For a **param-only verb**
+(every non-elastic system) the `## Query` is a structured, re-runnable call fenced
+```` ```query ````:
+
+```` ```query ````
+verb: get-host
+params:
+  host: ${host}
+```` ``` ````
+
+Two kinds of `${name}` placeholder, and the frontmatter classifies each so
+`validate_scaffold` can check them:
+
+- a **declared param** (`params:`) — a `${name}` that binds a param the verb declares;
+- a **body substitution** (`body_substitutions:`) — a `${name}` interpolated INTO a
+  query-language body. The classification is per-VERB, not per-system: `${start}` is a
+  *param* of elastic `query`/`alerts` but a *body substitution* inside an ES|QL pipe.
 
 This is a **wide/superset** query — carry every filter axis (`user`, `src`,
 `dst`, window) and a broad aggregation. **Gather narrows it to the lead**: drops
@@ -96,7 +114,7 @@ projection:
 ## What is *not* a template
 
 Templates measure **primitives** — a single dataset, a single filter shape,
-one CLI invocation. Cross-primitive correlations are not templates.
+one verb invocation. Cross-primitive correlations are not templates.
 
 When a lead asks for "X correlated with Y at time T" (e.g. *who was logged
 in when /etc/passwd changed?*), the right move is: run the two primitives

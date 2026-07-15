@@ -47,7 +47,6 @@ from defender.learning.leads import (  # noqa: E402
     lead_author,
     lead_extraction,
     lead_neighbors,
-    lead_render,
     pitfalls_curator,
 )
 from defender.learning.pipeline.judge import compare  # noqa: E402
@@ -217,7 +216,7 @@ def _executed_leads(run_dir: Path) -> list:
 _UNSET = object()
 
 
-def _row(*, lead_id: str = LEAD, seq: int = 0, system: str = "elastic", verb: str = "query",
+def _row(*, lead_id: str = LEAD, seq: int = 0, system: str = "elastic", verb: str = "query",  # noqa: PLR0913 — a queries-row builder mirrors the table's columns
          query_id: str = "elastic.q", params: dict | None = None, raw_command: str = "",
          payload_path: str | None = None, exit_code: int = 0, error_class=_UNSET,
          payload_status: str = "ok", payload_digest: str = "d") -> dict:
@@ -317,7 +316,8 @@ def test_canonical_record_param_only_is_structured_call(tmp_path):
     assert "```query" in text, "the param-only record is not fenced ```query"
     qbody = _corpus.section_bodies(text).get("Query", "")
     assert "get-host" in qbody, "the structured render dropped the verb"
-    assert "host" in qbody and "db-1" in qbody, "the structured render dropped the params"
+    assert "host" in qbody, "the structured render dropped the param key"
+    assert "db-1" in qbody, "the structured render dropped the param value"
     assert "${" not in qbody, "the record is a bare ${param} skeleton, not the executed call"
     assert row["raw_command"] not in text, "the record leaked the shlex audit string"
 
@@ -355,7 +355,8 @@ def test_canonical_record_never_raw_command_positive_control(tmp_path):
                     turns=[q("cmdb", "get-host", {"host": "db-1"}, query_id="cmdb.c"), DONE],
                     run_id="q620-pc-cmdb")
     record = draft_synthesis._executed_query(_executed_leads(r2.run_dir)[0])
-    assert "get-host" in record and "db-1" in record
+    assert "get-host" in record
+    assert "db-1" in record
 
 
 def test_produced_row_threads_to_the_canonical_record(tmp_path):
@@ -373,7 +374,8 @@ def test_produced_row_threads_to_the_canonical_record(tmp_path):
     leads = lead_extraction.extract_from_joined(lead_repository.joined(r.run_dir))
     record = draft_synthesis._executed_query(leads[0])
     assert record != r.row()["raw_command"]
-    assert "get-host" in record and "web-7" in record
+    assert "get-host" in record
+    assert "web-7" in record
 
 
 def test_handoff_executed_query_and_params_agree(tmp_path):
@@ -399,7 +401,8 @@ def test_handoff_executed_query_and_params_agree(tmp_path):
     assert inv["executed_query"] != row["raw_command"], \
         "executed_query collapsed to the shlex audit string — it disagrees with params"
     for k, v in row["params"].items():
-        assert k in inv["executed_query"] and str(v) in inv["executed_query"]
+        assert k in inv["executed_query"]
+        assert str(v) in inv["executed_query"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -467,7 +470,9 @@ def test_verb_declaration_read_without_importing_the_transport(tmp_path):
     for mod in (draft_synthesis, lead_extraction):
         src = Path(mod.__file__).read_text(encoding="utf-8")
         assert "ModuleVerbRegistry" not in src, f"{mod.__name__} imports the live registry"
-        assert "import elastic_cli" not in src and "adapters" not in src, \
+        assert "import elastic_cli" not in src, \
+            f"{mod.__name__} reaches an adapter/transport to resolve the engine"
+        assert "adapters" not in src, \
             f"{mod.__name__} reaches an adapter/transport to resolve the engine"
 
 
@@ -677,7 +682,8 @@ def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
     # untagged: verb == suffix 'foo' (a declared verb) → non-candidate
     r_a = run_gather(tmp_path / "a", verbs=_elastic_registry(rec), turns=[
         q("elastic", "foo", {"native_query": "x"}), DONE], run_id="q620-st-a")
-    assert r_a.row()["query_id"] == "elastic.foo" and r_a.row()["verb"] == "foo"
+    assert r_a.row()["query_id"] == "elastic.foo"
+    assert r_a.row()["verb"] == "foo"
     drafts_a = draft_synthesis.synthesize_drafts(
         _executed_leads(r_a.run_dir), catalog_dir=tmp_path / "ca", catalog=[])
     assert drafts_a == [], "row whose verb equals its query_id suffix was drafted"
@@ -686,7 +692,8 @@ def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
     r_b = run_gather(tmp_path / "b", verbs=_elastic_registry(rec), turns=[
         q("elastic", "query", {"native_query": "x"}, query_id="elastic.foo"), DONE,
     ], run_id="q620-st-b")
-    assert r_b.row()["query_id"] == "elastic.foo" and r_b.row()["verb"] == "query"
+    assert r_b.row()["query_id"] == "elastic.foo"
+    assert r_b.row()["verb"] == "query"
     drafts_b = draft_synthesis.synthesize_drafts(
         _executed_leads(r_b.run_dir), catalog_dir=tmp_path / "cb", catalog=[])
     assert any(p.name == "foo.md" for p in drafts_b), \
@@ -822,7 +829,8 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
     assert rc == 0
     assert exec_md.is_file(), "the curator's created execution.md was rejected — dead-end"
     text = exec_md.read_text(encoding="utf-8")
-    assert "## Verbs" in text and "## Exit codes" in text, "not a valid execution.md"
+    assert "## Verbs" in text, "not a valid execution.md"
+    assert "## Exit codes" in text, "not a valid execution.md"
     log = subprocess.run(["git", "log", "--oneline", "-1"], cwd=repo,
                          capture_output=True, text=True, check=True).stdout
     assert "execution.md pitfalls" in log, "the created execution.md was not committed"

@@ -35,9 +35,11 @@ from defender._corpus import iter_query_templates
 from defender._paths import PATHS
 
 
-PLUMBING_TOKENS = frozenset(
-    {"run_dir", "position", "window", "start", "end", "limit"}
-)
+# `start`/`end`/`limit` are REAL declared params of the SIEM's query/alerts verbs (#620) — a
+# query's time window and page size are discriminating facts about the measurement, not plumbing.
+# Dropping them collapsed sibling structured fences that differ only in their window. Only the
+# genuine harness plumbing (a run dir, a positional index, a `window` template token) is dropped.
+PLUMBING_TOKENS = frozenset({"run_dir", "position", "window"})
 
 
 # ---------------------------------------------------------------------------

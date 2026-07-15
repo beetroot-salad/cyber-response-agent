@@ -29,8 +29,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 from defender import _corpus
 from defender._frontmatter import parse_frontmatter
 from defender.learning.leads import lead_neighbors as ln
@@ -141,9 +139,9 @@ def test_every_established_query_is_a_query():
 def test_draft_arg0_raw_templates_are_dropped():
     """demand: draft_arg0_raw_templates_are_dropped.
 
-    The 33 ``_draft/`` templates carrying ``bound params: {'arg0': …, 'raw': True}`` are DROPPED,
-    not migrated. The drop must leave lead_neighbors' catalog walk + IDF coherent — no import
-    error, no zero-corpus divide.
+    The 33 ``_draft/`` templates carrying the dead ``bound params`` marker (an ``arg0`` positional
+    plus ``raw: True``) are DROPPED, not migrated. The drop must leave lead_neighbors' catalog
+    walk + IDF coherent — no import error, no zero-corpus divide.
     """
     # No surviving template (draft or established) carries the dead arg0/raw bound-params marker.
     offenders = [
@@ -280,8 +278,8 @@ def test_lead_neighbors_scores_the_new_param_only_fence():
     # non-degenerate: the structured fence yields real discriminating tokens (verb + values),
     # not an empty set and not only plumbing.
     assert tokens_a - ln.PLUMBING_TOKENS, "structured param-only fence tokenized to only plumbing"
-    assert "get-host" in tokens_a and "web-1" in tokens_a, \
-        f"structured fence lost its verb/value tokens: {sorted(tokens_a)}"
+    assert "get-host" in tokens_a, f"structured fence lost its verb token: {sorted(tokens_a)}"
+    assert "web-1" in tokens_a, f"structured fence lost its value token: {sorted(tokens_a)}"
     # discrimination: two distinct measurements produce distinct token variants.
     assert tokens_a != tokens_b, "two distinct param-only measurements collapsed to one variant"
 
@@ -329,7 +327,9 @@ def test_pitfalls_keeps_exit_64_and_reshapes_examples():
 
     prompt = _read(_DEFENDER / "learning" / "leads" / "lead_pitfalls.md")
     # the "What a pitfall entry looks like" exemplars are reshaped off the CLI-flag surface.
-    assert "`index=windows`" not in prompt and "`index:windows`" not in prompt, \
+    assert "`index=windows`" not in prompt, \
+        "lead_pitfalls.md still exemplifies a CLI index-flag mistake instead of a param error"
+    assert "`index:windows`" not in prompt, \
         "lead_pitfalls.md still exemplifies a CLI index-flag mistake instead of a param error"
     assert "shell command" not in prompt, \
         "lead_pitfalls.md still exemplifies a shell-command mistake (nothing shells out)"
@@ -438,7 +438,8 @@ def _load_example(name: str):
             sys.path.insert(0, p)
     path = _EXAMPLES / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"_connect_example_{name}", path)
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -459,8 +460,9 @@ def test_connect_examples_compile_against_the_live_tree():
     example_cli = _load_example("example_cli")
 
     # the live registry shape.
-    assert isinstance(getattr(example_cli, "VERBS", None), dict) and example_cli.VERBS, \
-        "example_cli.py exposes no non-empty VERBS mapping"
+    assert isinstance(getattr(example_cli, "VERBS", None), dict), \
+        "example_cli.py exposes no VERBS mapping"
+    assert example_cli.VERBS, "example_cli.py exposes an empty VERBS mapping"
     assert "health-check" in example_cli.VERBS, "example_cli.py VERBS declares no health-check"
     src = inspect.getsource(example_cli)
     assert "VerbContext" in src, "example_cli.py does not reference VerbContext"
@@ -470,8 +472,10 @@ def test_connect_examples_compile_against_the_live_tree():
     hc = example_cli.VERBS["health-check"]
     hc_src = inspect.getsource(hc)
     assert re.search(r"\breturn\b", hc_src), "example_cli health-check does not return a value"
-    assert "print(" not in hc_src and "SystemExit" not in hc_src, \
-        "example_cli health-check still prints / raises SystemExit instead of returning a dict"
+    assert "print(" not in hc_src, \
+        "example_cli health-check still prints instead of returning a dict"
+    assert "SystemExit" not in hc_src, \
+        "example_cli health-check still raises SystemExit instead of returning a dict"
 
     # the dead argparse/shim shape is gone from every example module.
     for name in ("example_cli", "_adapter"):

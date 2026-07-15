@@ -1,6 +1,8 @@
 ---
 id: identity.user-profile
 status: established
+verb: get-user
+params: [user]
 ---
 
 ## Goal
@@ -19,9 +21,10 @@ Look up a user account's provisioning status and authentication methods in the i
 
 ## Query
 
-```
-# See defender/skills/identity/SKILL.md for CLI invocation shape.
-# Bound param: ${user}
+```query
+verb: get-user
+params:
+  user: ${user}
 ```
 
 ## Common pitfalls

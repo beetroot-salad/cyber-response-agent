@@ -66,9 +66,9 @@ home the right reader actually consults.
 ### The one load-bearing split: agent-fixable vs infra
 
 Excluding infra is the only distinction that *must* be structural, and
-the adapter exit codes already draw it — the shared adapter module owns
-the taxonomy (`examples/_adapter.py:34-40`, deployed as
-`_stub_transport.py`): `0` ok · `1` query rejected · `2` unreachable /
+the adapter exit codes already draw it — the shared exit taxonomy
+(`scripts/adapters/faults.py`, imported by every adapter's `VERBS`
+functions): `0` ok · `1` query rejected · `2` unreachable /
 misconfigured · `64` bad invocation. The circuit breaker already treats
 `{2,124}` as infra and tolerates `{1,64}` (`circuit_breaker.py`), so the
 bucket is just *the codes the breaker already forgives*.

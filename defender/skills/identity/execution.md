@@ -56,3 +56,9 @@ names for ops convenience.
 - `0` — success (including `authorized: false` as a legitimate answer)
 - `1` — query error (user not found, malformed arg)
 - `2` — connectivity / docker / upstream 5xx
+- `64` — a usage mistake in YOUR call: an unknown verb, or an
+  unknown/missing/mistyped param name (e.g. a quoted `"false"` where the
+  verb declares a boolean `enabled`). The one class you can fix yourself
+  — the rejection names the declared verb/param roster; re-issue with a
+  declared param. It never trips the circuit breaker, so a param typo is
+  not a data-source outage.

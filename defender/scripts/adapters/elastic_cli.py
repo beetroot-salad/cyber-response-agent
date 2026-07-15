@@ -37,7 +37,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender.runtime.verbs import VerbContext
+from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
 
@@ -324,6 +324,7 @@ def health_check(ctx: VerbContext) -> dict:
     return out
 
 
+@verb(engine="lucene", body_param="native_query")
 def query(
     ctx: VerbContext,
     *,
@@ -341,6 +342,7 @@ def query(
     )
 
 
+@verb(engine="lucene", body_param="native_query")
 def alerts(
     ctx: VerbContext,
     *,
@@ -357,6 +359,7 @@ def alerts(
     )
 
 
+@verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     """Run an ES|QL pipe (`FROM … | WHERE … | STATS …`) and return the result table.
 

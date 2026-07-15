@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 """Validate a connected system's onboarding scaffold against the connect
 contract — the mechanical half of `checklist.md`. This is NOT a
-connectivity probe: it checks the files `/connect` generated (adapter,
-shim, per-system skill, config, templates), not whether the live system
-is reachable.
+connectivity probe: it checks the files `/connect` generated (the adapter
+module + its `VERBS` registry, the per-system skill, config, templates),
+not whether the live system is reachable.
 
     python3 defender/skills/connect/validate_scaffold.py <system>
 
-Verifies the structural bar `/connect` aims for without needing the live
-system: the adapter and shared module are in place, the CLI honours the
-exit-code contract, the shim is registered, config.env carries no
-secrets, and the per-system skill has the right shape. Connectivity and
-"do the results look right?" are judgment checks the agent/maintainer
-still does by hand (see checklist.md).
+Since #611 an adapter is a Python module `scripts/adapters/<system>_cli.py`
+exposing a `VERBS` mapping of plain annotated functions — there is no CLI, no
+`--help`, no `bin/` shim, and no exit-code contract to probe. So this validates
+the REGISTRY: the module imports, `VERBS` is non-empty and declares a
+`health-check`, the per-system skill is in place, and every query template's
+`${placeholder}` is a declared param of its verb or a marked body substitution.
+
+Normalizes the spelling split in one invocation: the adapter file uses `_`
+(`change_mgmt_cli.py`) while the skill / corpus dirs use `-`
+(`skills/change-mgmt/`). `system` is passed hyphenated; the registry maps it to
+the underscore module, and the skill/corpus reads use the hyphen form directly.
 
 Exit 0 if nothing FAILed (WARN is allowed); exit 1 on any FAIL; exit 2 if
-the system can't be located at all.
+the arguments are malformed.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -36,15 +39,22 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
+from defender.runtime.verbs import (  # noqa: E402
+    ModuleVerbRegistry,
+    declared_params,
+    engine_of,
+)
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
 
-# config.env keys that must reference a secret by env-var *name*, never hold
-# the value inline.
+# config.env keys that must reference a secret by env-var *name*, never hold the value inline.
 _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)$", re.I)
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _HIGH_ENTROPY = re.compile(r"^[A-Za-z0-9+/=_-]{24,}$")
+
+_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
+_VERB_LINE_RE = re.compile(r"(?m)^\s*verb:\s*(\S+)\s*$")
 
 
 class Report:
@@ -69,71 +79,31 @@ def _defender_dir() -> Path:
     return Path(env) if env else Path(__file__).resolve().parents[2]
 
 
-def _venv_python(defender: Path) -> str:
-    candidate = defender / ".venv" / "bin" / "python3"
-    return str(candidate) if candidate.exists() else (sys.executable or "python3")
+def check_registry(report: Report, defender: Path, system: str):
+    """The adapter module imports and declares a non-empty `VERBS` with a `health-check`.
 
-
-def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=30, encoding="utf-8")
-
-
-def check_adapter(report: Report, defender: Path, system: str, python: str) -> Path | None:
-    cli = defender / "scripts" / "adapters" / f"{system}_cli.py"
-    if not cli.exists():
-        report.add(FAIL, f"adapter {cli.relative_to(defender)} is missing")
-        return None
-    report.add(PASS, f"adapter {cli.relative_to(defender)} exists")
-
-    # Reuse a shared module (the bundled _adapter.py, or whatever module the
-    # siblings import — e.g. _stub_transport.py) rather than re-implementing
-    # the parser/config/exit-codes/auth inline. Don't hard-require _adapter
-    # specifically: a populated tree may standardize on a different module.
-    src = cli.read_text(encoding="utf-8")
-    adapters = defender / "scripts" / "adapters"
-    present = {p.stem for p in adapters.glob("_*.py")}
-    referenced = {m for m in present
-                  if re.search(rf"(?:import|from)\s+\.?{re.escape(m)}\b", src)}
-    if referenced:
-        report.add(PASS, f"adapter reuses shared module(s): {', '.join(sorted(referenced))}")
-    elif re.search(r"(?:^import|from)\s+_\w+", src, re.M):
-        report.add(FAIL, "adapter imports a shared module that isn't present in scripts/adapters/")
-    else:
-        report.add(WARN, "adapter imports no shared module — it may be re-implementing "
-                         "the contract (parser/config/exit-codes/auth) inline")
-
-    help_run = _run([python, str(cli), "--help"])
-    if help_run.returncode == 0 and "health-check" in help_run.stdout:
-        report.add(PASS, "CLI --help runs and exposes a health-check subcommand")
-    else:
-        report.add(FAIL, "CLI --help failed or has no health-check subcommand")
-
-    usage = _run([python, str(cli), "--not-a-real-flag"])
-    report.add(PASS if usage.returncode == 64 else FAIL,
-               f"bad invocation exits 64 (got {usage.returncode})")
-    return cli
-
-
-def check_shim(report: Report, defender: Path, system: str) -> None:
-    shim = defender / "bin" / f"defender-{system}"
-    if not shim.exists():
-        report.add(FAIL, f"shim bin/defender-{system} is missing")
-        return
-    report.add(PASS if os.access(shim, os.X_OK) else FAIL,
-               f"shim bin/defender-{system} "
-               f"{'is executable' if os.access(shim, os.X_OK) else 'is not executable (chmod +x)'}")
+    The registry maps the hyphenated `system` to the underscore module file, so a single
+    invocation crosses the spelling split. Returns the verb mapping, or None on a hard FAIL —
+    a module that will not import is a broken adapter and exits 1, naming the module."""
+    cli = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}_cli.py"
+    registry = ModuleVerbRegistry(defender / "scripts" / "adapters")
     try:
-        seg_path = defender / "hooks" / "_cmd_segments.py"
-        spec = importlib.util.spec_from_file_location("_cmd_segments", seg_path)
-        module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-        non_adapter = set(module.NON_ADAPTER_SHIMS)
-        if f"defender-{system}" in non_adapter:
-            report.add(FAIL, f"defender-{system} is in NON_ADAPTER_SHIMS — it won't gate as an adapter")
-        else:
-            report.add(PASS, "shim auto-gates as a data-source adapter (not in NON_ADAPTER_SHIMS)")
-    except Exception as exc:  # noqa: BLE001 — verification is best-effort
-        report.add(WARN, f"could not verify NON_ADAPTER_SHIMS ({exc})")
+        verbs = registry.verbs(system)
+    except KeyError:
+        report.add(FAIL, f"adapter module {cli.name} is missing or its `system` is malformed")
+        return None
+    except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
+        report.add(FAIL, f"adapter module {cli.name} failed to import: {type(exc).__name__}: {exc}")
+        return None
+    if not verbs:
+        report.add(FAIL, f"adapter module {cli.name} declares no verbs (empty or missing VERBS)")
+        return None
+    report.add(PASS, f"adapter {cli.name} imports; VERBS declares {len(verbs)} verb(s)")
+    if "health-check" in verbs:
+        report.add(PASS, "VERBS declares a health-check verb")
+    else:
+        report.add(FAIL, f"VERBS declares no health-check verb (has {sorted(verbs)})")
+    return verbs
 
 
 def check_config(report: Report, defender: Path, system: str) -> None:
@@ -164,57 +134,91 @@ def check_config(report: Report, defender: Path, system: str) -> None:
 
 
 def check_skill(report: Report, defender: Path, system: str) -> None:
+    """The per-system skill (read by its HYPHEN name) declares `name: defender-<system>` and
+    points at its execution surface. `execution.md` is optional — a stub system may embed
+    `## Execution` inline in SKILL.md (docs/system-skill-shape.md sanctions it)."""
     skill = defender / "skills" / system / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
+        return
+    text, _reason = read_text_soft(skill)
+    front = parse_frontmatter_or_none(text) if text is not None else None
+    if front is not None and front.get("name") == f"defender-{system}":
+        report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
     else:
-        # The canonical grammar (#591), not a hand-rolled `text.split("---", 2)`. The split was
-        # LOOSER than `_frontmatter`: it fenced on a bare `---` prefix rather than `---\n`, and it
-        # then regex-matched `name:` over the raw YAML text, so a `name:` inside a quoted string or
-        # a nested mapping satisfied it. A scaffold linter that accepts documents the real parser
-        # rejects passes files the runtime will later fail on — which is the one thing it exists
-        # not to do. Soft read: unreadable bytes are a FAIL row, not a crash.
-        text, _reason = read_text_soft(skill)
-        front = parse_frontmatter_or_none(text) if text is not None else None
-        if front is not None and front.get("name") == f"defender-{system}":
-            report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
-        else:
-            report.add(FAIL, f"skills/{system}/SKILL.md frontmatter name is not 'defender-{system}'")
-        has_execution = text is not None and "## Execution" in text
-        report.add(PASS if has_execution else WARN,
-                   "SKILL.md has a ## Execution pointer" if has_execution
-                   else "SKILL.md has no ## Execution pointer to execution.md")
+        report.add(FAIL, f"skills/{system}/SKILL.md frontmatter name is not 'defender-{system}'")
 
     execution = defender / "skills" / system / "execution.md"
-    report.add(PASS if execution.exists() else FAIL,
-               f"skills/{system}/execution.md "
-               f"{'exists' if execution.exists() else 'is missing'}")
+    has_inline = text is not None and "## Execution" in text
+    if execution.exists():
+        report.add(PASS, f"skills/{system}/execution.md exists")
+    elif has_inline:
+        report.add(PASS, "SKILL.md embeds a ## Execution section inline (no separate execution.md)")
+    else:
+        report.add(WARN, "no execution.md and no inline ## Execution section")
 
 
-def check_templates(report: Report, defender: Path, system: str) -> None:
+def _template_verb(fm: dict, query_body: str) -> str | None:
+    """The verb a template dispatches: the frontmatter `verb:`, else a structured `verb:` line in
+    the ``## Query`` body, else the first token of the first non-comment body line (the bare form
+    a scaffold may seed before frontmatter is added)."""
+    if isinstance(fm, dict) and fm.get("verb"):
+        return str(fm["verb"])
+    m = _VERB_LINE_RE.search(query_body)
+    if m:
+        return m.group(1)
+    for line in query_body.splitlines():
+        s = line.strip()
+        if s and not s.startswith(("#", "```", "~~~")):
+            return s.split()[0]
+    return None
+
+
+def _body_substitutions(fm: dict) -> set[str]:
+    subs = fm.get("body_substitutions") if isinstance(fm, dict) else None
+    return {str(s) for s in subs} if isinstance(subs, (list, tuple)) else set()
+
+
+def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
+    """Every established template of `system` resolves to a declared verb and every `${x}` in its
+    ``## Query`` is a declared param of that verb or a marked body substitution — the same
+    invariant `test_placeholder_is_a_declared_param_or_marked_body_substitution` enforces, checked
+    against the LIVE registry (an engine verb's body placeholders are substitutions into its query
+    language; a param-only verb's must each name a declared param)."""
     qdir = defender / "skills" / "gather" / "queries" / system
-    files = sorted(p for p in qdir.glob("*.md") if p.is_file()) if qdir.is_dir() else []
-    if not files:
+    templates = [
+        t for t in iter_query_templates(qdir.parent)
+        if t.system == system and "_draft" not in t.path.parts
+    ]
+    if not templates:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
         return
-    # `iter_query_templates` is THE walk over this corpus (#585) — this was the third hand-rolled
-    # one, and folding it is what makes that claim true. It also tightens the check: the regex it
-    # replaces ran `^\s*id:` over the WHOLE file under re.M, so an `id:` line inside a ## Query
-    # body satisfied it; the walk reads real frontmatter, which cannot be faked from the body.
-    #
-    # The walk SKIPS a template it cannot parse (bad frontmatter, or no `id:` at all) — and that
-    # defect is precisely what this check exists to FAIL on. So the verdict is taken against the
-    # file listing, not against the walk's output: a file the walk dropped is bad, not absent.
-    walked = {
-        t.path: t.id
-        for t in iter_query_templates(qdir.parent)
-        if t.system == system and "_draft" not in t.path.parts
-    }
-    bad = [p.name for p in files if not walked.get(p, "").startswith(f"{system}.")]
-    if bad:
-        report.add(FAIL, f"templates missing 'id: {system}.<name>' frontmatter: {', '.join(bad)}")
+    verbs = verbs or {}
+    failures: list[str] = []
+    for t in templates:
+        fm = parse_frontmatter_or_none(t.path.read_text(encoding="utf-8")) or {}
+        verb_name = _template_verb(fm, t.query)
+        if verb_name is None:
+            failures.append(f"{t.path.name}: no verb (no `verb:` frontmatter and an empty ## Query)")
+            continue
+        if verb_name not in verbs:
+            failures.append(f"{t.path.name}: verb {verb_name!r} is not a declared verb of {system}")
+            continue
+        placeholders = set(_PLACEHOLDER_RE.findall(t.query))
+        if engine_of(verbs[verb_name]) != "none":
+            continue  # an engine verb: every body placeholder is a substitution into its language
+        allowed = set(declared_params(verbs[verb_name])) | _body_substitutions(fm)
+        undeclared = sorted(placeholders - allowed)
+        if undeclared:
+            failures.append(
+                f"{t.path.name}: ${{{undeclared[0]}}} is neither a declared param of {verb_name} "
+                f"nor a marked body_substitution"
+            )
+    if failures:
+        for f in failures:
+            report.add(FAIL, f"template placeholder invariant: {f}")
     else:
-        report.add(PASS, f"{len(files)} seed template(s) have valid id frontmatter")
+        report.add(PASS, f"{len(templates)} template(s) satisfy the placeholder<->param invariant")
 
 
 def main() -> None:
@@ -224,15 +228,13 @@ def main() -> None:
     system = sys.argv[1]
     defender = _defender_dir()
     os.environ.setdefault("DEFENDER_DIR", str(defender))
-    python = _venv_python(defender)
 
     print(f"validate_scaffold: {system}\n")
     report = Report()
-    check_adapter(report, defender, system, python)
-    check_shim(report, defender, system)
+    verbs = check_registry(report, defender, system)
     check_config(report, defender, system)
     check_skill(report, defender, system)
-    check_templates(report, defender, system)
+    check_templates(report, defender, system, verbs)
     report.render_and_exit()
 
 

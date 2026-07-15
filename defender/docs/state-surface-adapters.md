@@ -69,7 +69,8 @@ For the host-state adapter, the same primitive is the entire transport:
 Each adapter is `defender/scripts/adapters/{system}_cli.py`. Conventions
 that need to match `elastic_cli.py`:
 
-- `argparse` with one subcommand per query verb plus `health-check`.
+- A `VERBS` mapping keyed by verb name (plus `health-check`) — one plain
+  annotated function per verb, no argparse, invoked through the `query` tool.
 - Each command prints its result as JSON on stdout, unconditionally —
   the payload IS the output, with no wrapper envelope around it. The
   shape is the payload's own: `{index, total, returned, truncated,
@@ -81,9 +82,9 @@ that need to match `elastic_cli.py`:
   `gather_raw/{lead_id}/{seq}.json`.
 - Exit codes: `0` success, `1` query error (404, schema mismatch,
   bad arg), `2` connectivity/auth failure.
-- **Don't** Read the CLI source to discover flags — the SKILL.md +
-  `--help` must be authoritative (per the memory-recorded discipline
-  in the elastic SKILL).
+- **Don't** Read the CLI source to discover params — the SKILL.md +
+  the `VERBS` registry's annotations are the authoritative surface (per the
+  memory-recorded discipline in the elastic SKILL).
 
 Config at `defender/knowledge/environment/systems/{system}/config.env`
 declaring `{SYSTEM}_HOST=web-1`, `{SYSTEM}_URL_BASE=http://{system}:8080`,

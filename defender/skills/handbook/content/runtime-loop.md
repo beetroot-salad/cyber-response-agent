@@ -54,8 +54,9 @@ when it does, that's signal for the learning loop, not a blocked write.
 This is the load-bearing rule of the runtime loop:
 
 - **The only way to query a data source is a `Task` → gather dispatch.** The
-  main loop never runs the system CLIs (`scripts/adapters/*_cli.py`) itself,
-  and never redirects CLI output to a file it then reads — that's the same
+  main loop never calls the query tool (the `query(system=…, verb=…)`
+  dispatch backed by each system's `VERBS` registry) itself, and never
+  redirects a query payload to a file it then reads — that's the same
   violation, renamed, and it leaves the query out of the audit trail.
 - **Trust the return; don't re-derive from raw.** Gather's summary is the
   authoritative record. The main loop does not Read or Grep
