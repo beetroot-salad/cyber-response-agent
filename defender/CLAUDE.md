@@ -64,15 +64,16 @@ hooks). The gates:
     read-only viewers run from the main loop; data-source adapters and
     `gather_raw/` reads are denied there (the gather subagent is the
     data-access layer).
-  - **Adapter capture is now transparent** — the gather subagent runs a
-    standalone adapter call directly and `tools._capture_adapter` records it
-    (queries table + by-ref payload) in-process, so the old
-    `block_unwrapped_adapter_calls.py` wrapper-forcing hook is gone (no
-    `defender-record-query` wrapper to require). The sanctioned
-    `defender-<sys> … | defender-sql '<SQL>'` aggregation pipe is captured
-    the same way (`tools._capture_adapter_sql`): the adapter stage is recorded,
-    then its payload is aggregated through the sandboxed defender-sql. The
-    queries table is still a
+  - **Query capture is a capability of the typed `query` tool** — since #611 the
+    gather subagent calls the in-process `query` tool (`runtime/query_tool.py`)
+    with `system`/`verb`/`params`; there is no standalone adapter call on any bash
+    lane. The tool's capture capability records the queries-table row + by-ref
+    payload in-process — inseparable from the call, so a query that ran cannot
+    dodge its row — which retired the old `block_unwrapped_adapter_calls.py`
+    wrapper-forcing hook (no `defender-record-query` wrapper to require). The old
+    `defender-<sys> … | defender-sql '<SQL>'` adapter-in-a-pipe is gone; a reduce
+    is now a separate step over the captured payload
+    (`cat <payload> | defender-sql '<SQL>'`). The queries table is still a
     real integrity gate.
   - **invlang validation on `investigation.md` writes** — `permission/files.py`
     runs the structural validator (`skills/invlang/validate.py`'s

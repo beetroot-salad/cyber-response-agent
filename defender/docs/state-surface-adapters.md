@@ -96,43 +96,46 @@ elastic_cli.
 
 Implement the read-only verbs only — `/admin/*` endpoints are chaos-mode
 write surfaces, not investigation reads, and shouldn't be in the
-adapter.
+adapter. Each verb takes keyword-only params (shown in parentheses), not
+`--flags` or positionals:
 
-- **cmdb**: `get-host <name>`, `list-hosts [--role --criticality --owner]`,
-  `list-roles`.
-- **identity**: `can-access <user> <host>` (the load-bearing primitive —
-  agent asks "is `dev.dana` authorized on `db-1`?"), `get-user <name>`,
-  `list-authorized-hosts <user>`.
-- **change-mgmt**: `active-changes --host <h> --at <iso>` (timestamp
-  must be UTC ISO 8601 — discipline this in the SKILL's read_guidance),
-  `get-change <id>`.
-- **threat-intel**: `lookup <ip-or-domain>`. **Gap to call out
+- **cmdb**: `get-host` (`host`), `list-hosts` (optional `role`,
+  `criticality`, `owner`), `list-roles`.
+- **identity**: `can-access` (`user`, `host` — the load-bearing primitive:
+  agent asks "is `dev.dana` authorized on `db-1`?"), `get-user` (`user`),
+  `list-authorized-hosts` (`user`).
+- **change-mgmt**: `active-changes` (`host`, `at` — the timestamp must be UTC
+  ISO 8601; discipline this in the SKILL's read_guidance), `get-change` (`cr_id`).
+- **threat-intel**: `lookup` (an IP or domain). **Gap to call out
   loudly**: the stub returns synthetic `{verdict: "unknown", score: 0}`
   on miss — never 404. Agent must not treat `unknown` as
   refutation; it's the absence of a signal.
-- **ticket-server**: `list-tickets [--status --label --q]`,
-  `get-ticket <key>`. v1's `playground_ticket_cli.py` (in
+- **ticket-server**: `list-tickets` (optional `status`, `label`, `q`),
+  `get-ticket` (`key`). v1's `playground_ticket_cli.py` (in
   `soc-agent/scripts/tools/`) is a reference shape, not a drop-in —
   the v2 ticket-server is the same code but the adapter conventions
   should match v2 elastic_cli, not v1.
-- **host-state**: `proc-tree <host>`, `passwd <host>`, `authorized-keys
-  <host> [--user]`, `fim-checksum <host> <path>`, `package-list
-  <host>`. Each wraps a single `docker --context soc-playground exec
-  <host> <cmd>` and renders the relevant output. Per-verb timeout
-  budget; never `--it`.
+- **host-state**: `proc-tree` (`host`), `passwd` (`host`), `authorized-keys`
+  (`host`, optional `user`), `fim-checksum` (`host`, `path`), `package-list`
+  (`host`). Each wraps a single `docker --context soc-playground exec <host>
+  <cmd>` inside the verb; per-verb timeout budget; never `--it`.
 
 ## Permissions
 
-The in-process gate (`runtime/permission.py`) recognizes adapters by
-convention: a `defender-<system>` shim token, or a raw
-`scripts/adapters/<name>_cli.py` path (the `ADAPTER_CLI_RE` in
-`hooks/_cmd_segments.py`). A new adapter that follows the shim + `*_cli.py`
-naming auto-gates with no per-CLI permission entry — the gather subagent may
-run it standalone (captured transparently), and the main loop is clamped out.
+Since #611 a data-source adapter is not on any bash lane. The gather subagent
+calls the in-process typed `query` tool (`runtime/query_tool.py`), which
+dispatches `(system, verb, params)` against the verb registry
+(`runtime/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
+`scripts/adapters/*_cli.py`). That registry IS the allowlist — a system or verb
+not in it is rejected — so a new adapter auto-gates by dropping its
+`{system}_cli.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
+permission entry needed. The main loop is denied data-source access entirely
+(the gather subagent is the data-access layer); the per-agent grant model
+(`runtime/permission/`, #575) gates what remains on the read-only bash lanes.
 
-The adapter shells out to `docker --context soc-playground exec *` internally,
-but the agent only ever invokes the python CLI / `defender-*` shim directly, so
-that command never reaches the gate.
+The adapter may shell out to `docker --context soc-playground exec *` internally,
+but that runs inside the in-process verb — it is never a model-authored command
+reaching the gate.
 
 ## Audit
 

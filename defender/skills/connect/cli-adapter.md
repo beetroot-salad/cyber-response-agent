@@ -184,9 +184,12 @@ Secrets are read from **environment variables and nowhere else**. The verb
 receives the RUN's scrubbed env as `ctx.env`; the transport reads the secret
 from there by the variable *name* `config.env` declares. `config.env` holds
 non-secret config only — endpoints, timeouts, `AUTH_TYPE`, and the *names*
-of the env vars that hold secrets — never a secret value. Nothing in the
-adapter reads a secret from `config.env`, logs one, or returns one in a
-captured payload. This is the single most important property of the layer;
+of the env vars that hold secrets — never a secret value. Name a key that
+carries a secret's env-var name with an `_ENV` suffix
+(`API_TOKEN_ENV=MYSYS_API_TOKEN` — the *name* of the env var to read); a bare
+`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY` key is read as an inline secret and
+`validate_scaffold` FAILs it. Nothing in the adapter reads a secret from
+`config.env`, logs one, or returns one in a captured payload. This is the single most important property of the layer;
 keep it that way.
 
 For a scheme beyond a bearer token / basic auth (mTLS, SigV4, OAuth

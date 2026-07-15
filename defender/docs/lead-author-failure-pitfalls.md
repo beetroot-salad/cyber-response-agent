@@ -24,15 +24,18 @@ strongest fold signal. The whole feature is just making sure the loop
 `record_query` tags every non-zero exit as `payload_status="error"` with
 the stderr digest, and `extract()` keeps error rows. But the failures we
 most want — a malformed ES|QL pipe, `index:windows` instead of
-`index=windows`, a bad CLI flag — never reach the curator. Two filters
+`index=windows`, a mistyped param — never reach the curator. Two filters
 drop them first:
 
-- **Non-candidate verb → no draft.** A bad pipe runs as
-  `defender-elastic esql '<bad>'` → `query_id="elastic.esql"`; `esql` is
-  in `_NON_CANDIDATE_VERBS` (`lead_author.py:106`), so `synthesize_drafts`
-  skips it (`:195-204`) — no draft minted.
+- **Untagged verb → no draft.** A bad pipe runs as
+  `query(system="elastic", verb="esql", params={"query": "<bad>"})` with no
+  `query_id`, so the row's `query_id` collapses to `elastic.esql` — whose suffix
+  IS the recorded verb. `draft_synthesis._draft_candidate_segments` reads a
+  suffix-equals-verb id as an untagged call and `synthesize_drafts` skips it — no
+  draft minted (the coined-id rule that replaced the old `_NON_CANDIDATE_VERBS`
+  set).
 - **Unresolved query_id → WARN-and-drop.** With no template and no draft,
-  `build_handoff` drops the invocation (`lead_author.py:584-590`).
+  `build_handoff` drops the invocation.
 
 So an `error` invocation only survives when it rode an *already-cataloged*
 template. Fresh mistakes fall through — and minting `elastic.esql` from

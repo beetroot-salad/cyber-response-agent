@@ -205,7 +205,7 @@ def section_bodies(body: str) -> dict[str, str]:
     regex sweep for ``^## `` treats that line as the next section, which does two things at once:
     it TRUNCATES ``## Query`` at the comment, and it invents a section named after whatever
     followed. Both are silent. The truncated body is the one gather reads before it binds
-    ``--query-id``, and the ``(query_id, params)`` join keys on templates gather says it reused —
+    ``query_id``, and the ``(query_id, params)`` join keys on templates gather says it reused —
     so a half-read query corrupts the join rather than failing loudly.
 
     No template in the shipped corpus trips this today; the guard is here because the fold (#585)
