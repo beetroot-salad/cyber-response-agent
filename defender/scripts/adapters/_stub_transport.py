@@ -5,10 +5,23 @@ All five stubs are auth-less FastAPI services on the compose network. The
 defender reaches them by shelling out to `docker --context soc-playground
 exec <bastion> curl ...` — same transport elastic_cli.py uses for Kibana
 detection-rule installs. One transport here for all five keeps the
-adapters thin (just verb-to-endpoint mapping + output formatting).
+adapters thin (just verb-to-endpoint mapping).
 
 Host-state has a different shape (docker exec → command output, no HTTP)
 and uses host_state_cli.py's own transport, not this module.
+
+Two rules the whole family obeys since #611, when the adapters stopped being
+subprocesses and became in-process VERBS:
+
+  - **A transport RAISES, it never exits.** `SystemExit` is a `BaseException`, so it
+    unwinds straight out of `agent.iter()` and takes the run with it, writing no row
+    for the very failure the taxonomy exists to record. The fault classes in
+    `faults.py` carry the exit code AND the upstream diagnosis instead.
+  - **The tree and the env are PARAMETERS** (a `VerbContext`), never module constants
+    read at import. An import-time `DEFENDER_DIR` freezes to whatever env the driver
+    was started with, so a run anchored on a worktree or an eval's tmp tree would read
+    the MAIN checkout's `config.env`; and a child forked with no `env=` inherits the
+    driver's `os.environ`, provider keys included.
 
 This is the established shared module for the tree: `/connect` conforms a
 new adapter to it rather than installing its own seed. The house
@@ -20,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shlex
 import subprocess
 import sys
@@ -28,27 +40,47 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
+from defender.runtime.verbs import VerbContext
+from defender.scripts.adapters.faults import (
+    USAGE_EXIT_CODE,
+    ConfigFault,
+    TransportFault,
+    UpstreamFault,
+)
+
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
-# Reserved exit code for an agent-side CLI mistake (bad flag, unknown subcommand,
-# missing required arg). Distinct from transport's exit 2 so the circuit breaker
-# counts only genuine connectivity/auth failures, not the agent's typos — see
-# runtime/circuit_breaker.is_infra_failure. EX_USAGE from sysexits.h.
-USAGE_EXIT_CODE = 64
+DEFAULT_DOCKER_CONTEXT = "soc-playground"
+
+__all__ = [
+    "AdapterArgumentParser",
+    "DEFAULT_DOCKER_CONTEXT",
+    "REQUIRED_CONFIG_KEYS_TEMPLATE",
+    "USAGE_EXIT_CODE",
+    "docker_context",
+    "docker_exec_curl",
+    "docker_exec_raw",
+    "docker_inspect_raw",
+    "health_check",
+    "http_get",
+    "http_get_obj",
+    "http_post",
+    "load_config",
+    "split_status",
+]
 
 
 class AdapterArgumentParser(argparse.ArgumentParser):
     """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of
     argparse's default 2.
 
-    Every data-source adapter uses this so a bad flag / unknown subcommand / missing
-    arg the agent passed is *structurally* distinct from a connectivity/auth failure
-    (which adapters signal with exit 2). The circuit breaker then keys on the exit
-    code alone — no fragile stderr-phrase sniffing to tell the two apart. Subparsers
-    built via ``add_subparsers()`` inherit this class automatically
+    Only `ticket_cli` still has a CLI (three subprocess callers pin its exit codes, and
+    the benign judge's grant pins a MANDATORY ``--require-closed`` a params-dict cannot
+    express). It keeps this parser so a bad flag / unknown subcommand the agent passed is
+    *structurally* distinct from a connectivity failure (exit 2). The circuit breaker then
+    keys on the exit code alone — no fragile stderr-phrase sniffing to tell the two apart.
+    Subparsers built via ``add_subparsers()`` inherit this class automatically
     (``parser_class=type(self)``), so subcommand usage errors and explicit
     ``parser.error(...)`` calls exit 64 too.
     """
@@ -56,14 +88,26 @@ class AdapterArgumentParser(argparse.ArgumentParser):
     def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)
         self.print_usage(sys.stderr)
         self.exit(USAGE_EXIT_CODE, f"{self.prog}: error: {message}\n")
-# Single source of truth for the docker context across every adapter (elastic_cli
-# reads the same env var) — so overriding it points the whole stack, not half of
-# it, at a different environment.
-DOCKER_CONTEXT = os.environ.get("SOC_PLAYGROUND_DOCKER_CONTEXT", "soc-playground")
 
 
-def _config_path(system: str) -> Path:
-    return DEFENDER_DIR / "knowledge" / "environment" / "systems" / system / "config.env"
+def docker_context(ctx: VerbContext) -> str:
+    """The docker context every adapter's transport runs against, read from the RUN's env.
+
+    Single source of truth across the family, so overriding it points the whole stack —
+    not half of it — at a different environment. Read from `ctx.env` and not at import:
+    the module object outlives any one run.
+    """
+    return ctx.env.get("SOC_PLAYGROUND_DOCKER_CONTEXT", DEFAULT_DOCKER_CONTEXT)
+
+
+def _child_env(ctx: VerbContext) -> dict[str, str]:
+    """The environment a transport hands the child it forks: the RUN's SCRUBBED env, never
+    the driver's `os.environ` (which holds the provider API keys)."""
+    return dict(ctx.env)
+
+
+def _config_path(ctx: VerbContext, system: str) -> Path:
+    return ctx.defender_dir / "knowledge" / "environment" / "systems" / system / "config.env"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -77,46 +121,47 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
-def load_config(system: str, prefix: str) -> dict[str, str]:
-    """Load `defender/knowledge/environment/systems/{system}/config.env`.
+def load_config(ctx: VerbContext, system: str, prefix: str) -> dict[str, str]:
+    """Load `{ctx.defender_dir}/knowledge/environment/systems/{system}/config.env`.
 
-    The prefix namespaces the env-file keys (e.g. CMDB_URL_BASE,
-    IDENTITY_BASTION_HOST). Caller-friendly stripped keys come back as
-    URL_BASE / BASTION_HOST / TIMEOUT_SEC.
+    The tree comes from the RUN (`ctx.defender_dir`), not a module constant: a run anchored
+    on a worktree or an eval's tmp tree must read THAT tree's config, and an import-time
+    constant would hand every later run the first tree the process saw.
+
+    The prefix namespaces the env-file keys (e.g. CMDB_URL_BASE, IDENTITY_BASTION_HOST);
+    caller-friendly stripped keys come back as URL_BASE / BASTION_HOST / TIMEOUT_SEC. A
+    missing file or a missing key is a `ConfigFault` — infra (exit 2), because a system with
+    no config is definitionally down. (It used to be a bare `sys.exit("error: …")`, i.e.
+    exit 1: a dead system filed as an agent-fixable query error, which never tripped the
+    breaker.)
     """
-    path = _config_path(system)
+    path = _config_path(ctx, system)
     if not path.exists():
-        sys.exit(
-            f"error: config file not found: {path}\n"
-            f"hint: this file should ship with the defender-v2-env branch — "
-            f"if missing, restore from git."
+        raise ConfigFault(
+            f"config file not found: {path} — this file should ship with the "
+            f"defender-v2-env branch; if missing, restore from git."
         )
 
     raw = _parse_env_file(path)
     cfg: dict[str, str] = {}
     for key in REQUIRED_CONFIG_KEYS_TEMPLATE:
         prefixed = f"{prefix}_{key}"
-        # Env vars override the file for ops convenience (CI, per-run overrides).
-        val = os.environ.get(prefixed) or raw.get(prefixed)
+        # The RUN's env overrides the file for ops convenience (CI, per-run overrides).
+        val = ctx.env.get(prefixed) or raw.get(prefixed)
         if val:
             cfg[key] = val
 
     missing = [k for k in REQUIRED_CONFIG_KEYS_TEMPLATE if not cfg.get(k)]
     if missing:
-        sys.exit(
-            f"error: missing required config keys in {path}: "
+        raise ConfigFault(
+            f"missing required config keys in {path}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}"
         )
     return cfg
 
 
-class TransportError(Exception):
-    """The docker-exec transport itself failed (docker CLI missing, exec timed
-    out) — distinct from an HTTP-level error returned by a reachable service.
-    Callers map it to exit 2 (the connectivity/unreachable contract)."""
-
-
-def docker_exec_curl(
+def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state; the ctx is the 9th because the tree/env stopped being module constants
+    ctx: VerbContext,
     container: str,
     url: str,
     *,
@@ -127,11 +172,11 @@ def docker_exec_curl(
     insecure: bool = False,
     auth: str | None = None,
 ) -> tuple[int, str, str]:
-    """Run curl inside `container` over the soc-playground docker context.
+    """Run curl inside `container` over the run's docker context.
 
     Returns (returncode, stdout, stderr); stdout carries the response body
     followed by ``\\n<http_code>`` (recover with `split_status`). Raises
-    `TransportError` when the docker exec itself fails (CLI missing / timeout),
+    `TransportFault` when the docker exec itself fails (CLI missing / timeout),
     so a reachable-but-erroring service still returns its status + body.
 
     `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
@@ -148,25 +193,28 @@ def docker_exec_curl(
     # Write HTTP status on its own trailing line so we can recover it from stdout.
     args += ["-w", "\n%{http_code}", url]
 
+    context = docker_context(ctx)
     if auth:
         # Static flags live in the in-container shell so ${VAR} expands there;
         # everything dynamic is forwarded as argv after `--` (so a JSON body with
         # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
         inner = f'exec curl {" ".join(flags)} -u "{auth}" "$@"'
-        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", "-i", container,
+        cmd = ["docker", "--context", context, "exec", "-i", container,
                "sh", "-c", inner, "--", *args]
     else:
-        cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "curl", *flags, *args]
+        cmd = ["docker", "--context", context, "exec", container, "curl", *flags, *args]
     try:
         # utf-8 and LOSSY: the far side is vendor data (indexed log lines), so a stray
         # non-UTF-8 byte must cost one character, not raise a UnicodeDecodeError that sails
         # past the guards below (it is a ValueError) and out of the adapter.
+        # `timeout` is MANDATORY on every fork: the outer wall-clock budget died with the
+        # capture subprocess, so this inner timeout is the only real kill left.
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10,
-                              encoding="utf-8", errors="replace")
+                              encoding="utf-8", errors="replace", env=_child_env(ctx))
     except FileNotFoundError as e:
-        raise TransportError("docker CLI not found on PATH") from e
+        raise TransportFault("docker CLI not found on PATH") from e
     except subprocess.TimeoutExpired as e:
-        raise TransportError(
+        raise TransportFault(
             f"docker exec curl timed out after {timeout_sec + 10}s (target: {url})"
         ) from e
     return proc.returncode, proc.stdout, proc.stderr
@@ -186,169 +234,172 @@ def split_status(stdout: str) -> tuple[str, str]:
     return stdout[:sep], stdout[sep + 1:].strip()
 
 
-def http_get(config: dict[str, str], path: str, *, params: dict | None = None) -> dict | list:
+def http_get(
+    ctx: VerbContext, config: dict[str, str], path: str, *, params: dict | None = None
+) -> dict | list:
     """GET <URL_BASE><path>?<params>, return parsed JSON.
 
-    Exits 1 on HTTP error (4xx/5xx other than the explicit handlings noted
-    below), 2 on connectivity / docker / unreachable. 404 propagates as
-    an exit-1 with the upstream detail.
+    Raises `TransportFault` (infra) on docker/unreachable/5xx and `UpstreamFault` (a query
+    error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
     """
     qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
-    return _request(config, url, method="GET")
+    return _request(ctx, config, url, method="GET")
 
 
-def http_post(config: dict[str, str], path: str, body: dict) -> dict | list:
+def http_post(ctx: VerbContext, config: dict[str, str], path: str, body: dict) -> dict | list:
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    return _request(config, url, method="POST", body=body)
+    return _request(ctx, config, url, method="POST", body=body)
 
 
-def http_get_obj(config: dict[str, str], path: str, *, params: dict | None = None) -> dict[str, Any]:
+def http_get_obj(
+    ctx: VerbContext, config: dict[str, str], path: str, *, params: dict | None = None
+) -> dict[str, Any]:
     """`http_get` for endpoints whose contract is a JSON *object*. Narrows the
     `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing,
-    and fails fast (exit 1, the module's malformed-response code) if the upstream
-    ever returns a non-object where one is expected — instead of crashing later on
-    `list.get`. List endpoints keep raw `http_get` + their `isinstance(payload,
-    list)` guard. Per-endpoint response schemas are the next step — see #409."""
-    payload = http_get(config, path, params=params)
+    and fails fast if the upstream ever returns a non-object where one is expected —
+    instead of crashing later on `list.get`. List endpoints keep raw `http_get` + their
+    `isinstance(payload, list)` guard. Per-endpoint response schemas are the next step —
+    see #409."""
+    payload = http_get(ctx, config, path, params=params)
     if not isinstance(payload, dict):
-        sys.exit(f"error: expected a JSON object from {path}, got {type(payload).__name__}")
+        raise TransportFault(
+            f"expected a JSON object from {path}, got {type(payload).__name__}"
+        )
     return payload
 
 
-def _exit_on_transport_failure(bastion: str, rc: int, stdout: str, stderr: str) -> None:
-    """curl never produced output → transport-level failure. Exit 2 (the
-    connectivity/docker/unreachable code in every stub's exit contract) so the
-    gather exit-code protocol and the circuit breaker both see it as a down
-    system, not a query error. No-op when there was usable output."""
+def _raise_on_transport_failure(
+    ctx: VerbContext, bastion: str, rc: int, stdout: str, stderr: str
+) -> None:
+    """curl never produced output → transport-level failure. `TransportFault` (exit 2) so
+    the queries row and the circuit breaker both see a down system, not a query error.
+    No-op when there was usable output."""
     if not (rc != 0 and not stdout):
         return
     hint = stderr.strip() or "no stderr"
     if "No such container" in hint or "is not running" in hint:
-        print(
-            f"error: bastion container {bastion!r} unreachable: {hint}\n"
-            f"hint: confirm `docker --context {DOCKER_CONTEXT} ps` lists {bastion} as running.",
-            file=sys.stderr,
+        raise TransportFault(
+            f"bastion container {bastion!r} unreachable: {hint} — confirm "
+            f"`docker --context {docker_context(ctx)} ps` lists {bastion} as running."
         )
-        sys.exit(2)
-    print(f"error: docker exec failed (rc={rc}): {hint}", file=sys.stderr)
-    sys.exit(2)
+    raise TransportFault(f"docker exec failed (rc={rc}): {hint}")
 
 
 def _parse_status_code(stdout: str, stderr: str, url: str) -> tuple[str, int]:
-    """Split curl's body/status and parse the HTTP status to an int. Exits on a
-    malformed (no status) or non-numeric response. Returns (body_text, code)."""
+    """Split curl's body/status and parse the HTTP status to an int. A malformed (no status)
+    or non-numeric response is a `TransportFault`: curl never completed a request, so there
+    is no upstream verdict to file as a query error. Returns (body_text, code)."""
     body_text, status = split_status(stdout)
     if not status:
         # curl exited non-zero but emitted partial output — show what we got.
-        sys.exit(
-            f"error: malformed curl response from {url}\n"
-            f"stdout: {stdout!r}\nstderr: {stderr.strip()!r}"
+        raise TransportFault(
+            f"malformed curl response from {url}: "
+            f"stdout={stdout!r} stderr={stderr.strip()!r}"
         )
     try:
         code = int(status)
-    except ValueError:
-        sys.exit(f"error: non-numeric http status from curl: {status!r}")
+    except ValueError as e:
+        raise TransportFault(f"non-numeric http status from curl: {status!r}") from e
     return body_text, code
 
 
-def _exit_on_http_error(code: int, body_text: str, url: str) -> None:
-    """Map a >=400 HTTP status to the stub exit contract: 5xx → exit 2 (system
-    down), 4xx → exit 1 (query error, surface the upstream message). No-op on a
-    success code."""
+def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
+    """Map a >=400 HTTP status onto the fault taxonomy: 5xx → `TransportFault` (the system is
+    down), 4xx → `UpstreamFault` carrying the vendor's OWN `detail` verbatim. That detail is
+    the row's payload_digest and the sole input to the pitfalls-curation lane, so a generic
+    message here silently dries that lane up. No-op on a success code."""
     if code >= 500:
-        print(f"error: upstream {url} returned HTTP {code}: {body_text}", file=sys.stderr)
-        sys.exit(2)
+        raise TransportFault(f"upstream {url} returned HTTP {code}: {body_text}")
     if code >= 400:
-        # 4xx is a query error (bad arg, 404). Surface upstream message.
+        # 4xx is a query error (bad arg, 404): the agent's own to fix.
         try:
             payload = json.loads(body_text) if body_text else {}
         except json.JSONDecodeError:
             payload = {"detail": body_text}
         detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
-        print(f"error: HTTP {code} from {url}: {detail}", file=sys.stderr)
-        sys.exit(1)
+        raise UpstreamFault(f"HTTP {code} from {url}: {detail}")
 
 
-def _request(config: dict[str, str], url: str, *, method: str, body: dict | None = None) -> dict | list:
+def _request(
+    ctx: VerbContext, config: dict[str, str], url: str, *, method: str, body: dict | None = None
+) -> dict | list:
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
-    try:
-        rc, stdout, stderr = docker_exec_curl(bastion, url, method=method, body=body, timeout_sec=timeout)
-    except TransportError as e:
-        # docker CLI missing / exec timeout → connectivity failure (exit 2).
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(2)
+    rc, stdout, stderr = docker_exec_curl(
+        ctx, bastion, url, method=method, body=body, timeout_sec=timeout
+    )
 
-    _exit_on_transport_failure(bastion, rc, stdout, stderr)
+    _raise_on_transport_failure(ctx, bastion, rc, stdout, stderr)
     body_text, code = _parse_status_code(stdout, stderr, url)
-    _exit_on_http_error(code, body_text, url)
+    _raise_on_http_error(code, body_text, url)
 
     if not body_text:
         return {}
     try:
         return json.loads(body_text)
     except json.JSONDecodeError as e:
-        sys.exit(f"error: non-JSON response from {url}: {e}\nbody: {body_text!r}")
+        raise TransportFault(f"non-JSON response from {url}: {e} (body: {body_text!r})") from e
 
 
-def health_check(config: dict[str, str], system_label: str) -> None:
-    """Standard health-check: GET <URL_BASE>/health and print summary."""
-    payload = http_get_obj(config, "/health")
-    print("connected")
-    print(f"{system_label}: {payload.get('status', 'unknown')}")
-    for key in sorted(k for k in payload if k != "status"):
-        print(f"{key}: {payload[key]}")
+def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) -> dict[str, Any]:
+    """Standard health-check: GET <URL_BASE>/health and RETURN the payload.
+
+    Returns data, like every other verb — prose printed to stdout has no answer under
+    "a verb returns its payload", and the queries table would record an empty payload for
+    the one call whose whole point is to say whether the system is up."""
+    payload = http_get_obj(ctx, config, "/health")
+    return {"system": system_label, "connected": True, **payload}
 
 
 def docker_exec_raw(
+    ctx: VerbContext,
     bastion: str,
     argv: list[str],
     *,
     timeout_sec: int = 10,
 ) -> tuple[int, str, str]:
-    """Run `docker --context soc-playground exec <bastion> <argv...>`.
+    """Run `docker --context <ctx's context> exec <bastion> <argv...>`.
 
     Exposed for host_state_cli.py — same docker context as the HTTP
-    stubs, but the command isn't curl. Returns (rc, stdout, stderr).
+    stubs, but the command isn't curl. Returns (rc, stdout, stderr); raises
+    `TransportFault` when the exec itself never ran (CLI missing / timeout).
     """
-    cmd = ["docker", "--context", DOCKER_CONTEXT, "exec", bastion, *argv]
+    cmd = ["docker", "--context", docker_context(ctx), "exec", bastion, *argv]
     try:
         # utf-8 and LOSSY: this runs arbitrary host verbs (`ps`, `ls`, file reads) inside the
         # bastion, so its stdout carries filenames and process cmdlines — a strict decode would
-        # turn one odd byte in one filename into a UnicodeDecodeError that escapes both guards
-        # below (a ValueError is neither) and takes the host_state adapter down.
+        # turn one odd byte in one filename into a UnicodeDecodeError that escapes every guard
+        # downstream (a ValueError is neither a rc check nor a fault) and takes the run with it.
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=_child_env(ctx),
         )
-    except FileNotFoundError:
-        print("error: docker CLI not found on PATH", file=sys.stderr)
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print(
-            f"error: docker exec timed out after {timeout_sec + 5}s "
-            f"(bastion: {bastion}, argv: {shlex.join(argv)})",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    except FileNotFoundError as e:
+        raise TransportFault("docker CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise TransportFault(
+            f"docker exec timed out after {timeout_sec + 5}s "
+            f"(bastion: {bastion}, argv: {shlex.join(argv)})"
+        ) from e
     return proc.returncode, proc.stdout, proc.stderr
 
 
 def docker_inspect_raw(
+    ctx: VerbContext,
     target: str,
     *,
     fmt: str | None = None,
     timeout_sec: int = 10,
 ) -> tuple[int, str, str]:
-    """Run `docker --context soc-playground inspect [--format <fmt>] <target>`.
+    """Run `docker --context <ctx's context> inspect [--format <fmt>] <target>`.
 
     Daemon-level container/image inspection — distinct from docker_exec_raw,
     which runs a command *inside* a container. Exposed for host_state_cli.py's
     container-inspect verb (Falco alerts carry a runtime container id, not a
     host name). Returns (rc, stdout, stderr).
     """
-    cmd = ["docker", "--context", DOCKER_CONTEXT, "inspect"]
+    cmd = ["docker", "--context", docker_context(ctx), "inspect"]
     if fmt is not None:
         cmd += ["--format", fmt]
     cmd.append(target)
@@ -356,15 +407,12 @@ def docker_inspect_raw(
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
             encoding="utf-8", errors="replace",  # container labels/env are foreign bytes too
+            env=_child_env(ctx),
         )
-    except FileNotFoundError:
-        print("error: docker CLI not found on PATH", file=sys.stderr)
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print(
-            f"error: docker inspect timed out after {timeout_sec + 5}s "
-            f"(target: {target})",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    except FileNotFoundError as e:
+        raise TransportFault("docker CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise TransportFault(
+            f"docker inspect timed out after {timeout_sec + 5}s (target: {target})"
+        ) from e
     return proc.returncode, proc.stdout, proc.stderr

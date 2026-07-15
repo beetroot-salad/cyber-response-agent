@@ -174,8 +174,8 @@ def test_d0_descriptor_catalog_seam(tmp_path):
     adapters = tmp_path / "adapters"
     adapters.mkdir(parents=True)
     # two adapter-backed systems, one with a description, one without
-    (adapters / "alpha_cli.py").write_text("# adapter\n", encoding="utf-8")
-    (adapters / "beta_cli.py").write_text("# adapter\n", encoding="utf-8")
+    (adapters / "alpha_cli.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
+    (adapters / "beta_cli.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     _skill(skills, "alpha", b"---\nname: defender-alpha\ndescription: alpha desc\n---\nbody\n")
     _skill(skills, "beta", b"---\nname: defender-beta\n---\nbody\n")  # no description
 
@@ -187,7 +187,7 @@ def test_d0_descriptor_catalog_seam(tmp_path):
     # None when no line survives (no adapter yields a description)
     empty_adapters = tmp_path / "adapters2"
     empty_adapters.mkdir()
-    (empty_adapters / "beta_cli.py").write_text("# adapter\n", encoding="utf-8")
+    (empty_adapters / "beta_cli.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     hook.descriptor_catalog.cache_clear()
     assert hook.descriptor_catalog(skills_dir=skills, adapters_dir=empty_adapters) is None
 
@@ -369,8 +369,8 @@ def test_d_unfenced_skill_none(tmp_path):
     adapters.mkdir(parents=True)
     _skill(skills, "evil", b"intro prose no fence\n\n---\ndescription: BOGUS ATTACKER\n---\n\nmore\n")
     _skill(skills, "good", b"---\nname: defender-good\ndescription: real desc\n---\nbody\n")
-    (adapters / "evil_cli.py").write_text("# a\n", encoding="utf-8")
-    (adapters / "good_cli.py").write_text("# a\n", encoding="utf-8")
+    (adapters / "evil_cli.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
+    (adapters / "good_cli.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
 
     # negative: the bogus text reaches neither surface (RED today: read_description returns it)
     assert hook.read_description("evil", skills_dir=skills) is None
@@ -392,7 +392,7 @@ def test_d_fenced_skill_desc(tmp_path):
     adapters = tmp_path / "adapters"
     adapters.mkdir(parents=True)
     _skill(skills, "good", b"---\nname: defender-good\ndescription: real desc\n---\nbody\n")
-    (adapters / "good_cli.py").write_text("# a\n", encoding="utf-8")
+    (adapters / "good_cli.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     assert hook.read_description("good", skills_dir=skills) == "real desc"
     hook.descriptor_catalog.cache_clear()
     assert hook.descriptor_catalog(skills_dir=skills, adapters_dir=adapters) == "- `good`: real desc"

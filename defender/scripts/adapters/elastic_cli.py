@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Elastic Stack CLI — defender-side adapter.
+"""Elastic Stack adapter — the `elastic` VERBS registry.
 
 Two surfaces in one Elasticsearch instance:
 
@@ -10,45 +9,40 @@ Two surfaces in one Elasticsearch instance:
               (.internal.alerts-security.alerts-default-*) emitted by the
               custom rules in playground-v2/detection-rules/.
 
-The adapter exposes lucene-via-`query_string` as the pass-through syntax;
-KQL covers the same vocabulary for the common case.
+`query`/`alerts` take a lucene-via-`query_string` body (`native_query`); KQL covers the
+same vocabulary for the common case. `esql` takes an ES|QL pipe (`query`) and returns the
+server-side aggregation — the result rows ARE the answer.
 
-Usage:
-    elastic_cli.py health-check
-    elastic_cli.py query 'process.name:"sshd" AND message:*"Failed password"*' \\
-        --start 2026-05-23T18:00:00Z --end 2026-05-23T19:00:00Z --limit 20
-    elastic_cli.py alerts 'kibana.alert.rule.rule_id:"v2-sshd-failed-auth-burst"' --limit 50
+Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
+    health-check
+    query    native_query [start] [end] [limit] [index]
+    alerts   native_query [start] [end] [limit] [index]
+    esql     query
 
-Exit codes:
-    0 — success
-    1 — query error (bad syntax, unknown field, partial result)
-    2 — connection / auth / config failure
-    64 — usage error (bad flag / unknown subcommand)
+Faults (`faults.py`): ConfigFault/TransportFault = infra (2, incl. 401/403 and 5xx),
+UpstreamFault = query error (1) carrying Elasticsearch's OWN `reason` — the verification
+exception naming the column you misspelled is the entire input to the pitfalls lane.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import os
-import sys
 import urllib.parse
-from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
+# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
+# verb registry loads this module BY PATH (see cmdb_cli.py).
 import sys as _sys
 from pathlib import Path as _Path
+
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFENDER_DIR = Path(os.environ.get("DEFENDER_DIR", SCRIPT_DIR.parent.parent))
-CONFIG_PATH = (
-    DEFENDER_DIR / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
-)
+SYSTEM = "elastic"
+
 # Note: SSL verification is not configurable here — curl runs container-local
 # against the stack's self-signed cert and always passes `-k` (mirrors es.sh), so
 # ELASTIC_SSL_VERIFY / ELASTIC_CA_CERT are no longer read and are not required.
@@ -59,16 +53,8 @@ REQUIRED_CONFIG_KEYS = [
     "ELASTIC_ALERTS_INDEX",
 ]
 
-# The playground stack is reached over the soc-playground docker context using
-# the SAME shared transport as the identity/cmdb/host-state adapters
-# (`_stub_transport.docker_exec_curl`): we exec `curl` inside the target
-# container, where the service answers on its own localhost (ES :9200, Kibana
-# :5601) and supplies its own ELASTIC_PASSWORD. This removed the host-side SSH
-# tunnel and the V2_ELASTIC_PASSWORD the direct urllib path needed. Mirrors
-# infra/bin/es.sh. DOCKER_CONTEXT is the transport's single source of truth.
-DOCKER_CONTEXT = transport.DOCKER_CONTEXT
-ES_CONTAINER = os.environ.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch")
-KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
+DEFAULT_ES_CONTAINER = "elasticsearch"
+DEFAULT_KIBANA_CONTAINER = "kibana"
 
 # Non-overridable returned-doc cap. ES computes `hits.total` independently of
 # `size` (track_total_hits below), so we ship at most this many _source docs
@@ -76,7 +62,7 @@ KIBANA_CONTAINER = os.environ.get("SOC_PLAYGROUND_KIBANA_CONTAINER", "kibana")
 # therefore a small bounded SAMPLE the agent reads field-shape from; exact
 # magnitudes come from `total` (and from re-querying with a narrowing filter and
 # reading its `total`), never from pulling-and-counting. The cap is a mechanism,
-# not a default: a larger `--limit` is clamped to it (widening is futile by
+# not a default: a larger `limit` is clamped to it (widening is futile by
 # construction) — which is why an earlier small *default* backfired (the agent
 # just widened past it). A 500-doc pull of full _source was multiple MB that
 # gather re-jq'd turn after turn — the dominant cost and the >200K context crash.
@@ -90,60 +76,76 @@ REQUEST_TIMEOUT_SEC = 30
 # ---------------------------------------------------------------------------
 
 
-def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        sys.exit(
-            f"error: config file not found: {CONFIG_PATH}\n"
-            f"hint: this file should ship with the defender-v2-env branch — "
-            f"if missing, restore from git or the worktree may be in an unexpected state."
+def _config_path(ctx: VerbContext) -> _Path:
+    return ctx.defender_dir / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
+
+
+def load_config(ctx: VerbContext) -> dict[str, str]:
+    """Elastic's config, read from the RUN's tree (`ctx.defender_dir`).
+
+    Elastic keeps its own loader rather than `transport.load_config`: its keys are not the
+    URL_BASE/BASTION_HOST/TIMEOUT_SEC template the five stubs share. Everything else is the
+    same contract — the RUN's env overrides the file, and an absent file or a missing key is
+    a `ConfigFault` (infra, 2): a system with no config is definitionally down.
+    """
+    path = _config_path(ctx)
+    if not path.exists():
+        raise ConfigFault(
+            f"config file not found: {path} — this file should ship with the "
+            f"defender-v2-env branch; if missing, restore from git."
         )
 
     config: dict[str, str] = {}
-    for line in CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        if "=" in line:
-            key, _, val = line.partition("=")
-            config[key.strip()] = val.strip().strip('"').strip("'")
+        key, _, val = line.partition("=")
+        config[key.strip()] = val.strip().strip('"').strip("'")
 
-    # env overrides for ops convenience (CI, per-run overrides).
+    # The RUN's env overrides the file for ops convenience (CI, per-run overrides).
     for key in list(config) + REQUIRED_CONFIG_KEYS:
-        env_val = os.environ.get(key)
+        env_val = ctx.env.get(key)
         if env_val is not None:
             config[key] = env_val
 
     missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
     if missing:
-        sys.exit(
-            f"error: missing required config keys in {CONFIG_PATH}: {', '.join(missing)}"
+        raise ConfigFault(
+            f"missing required config keys in {path}: {', '.join(missing)}"
         )
     return config
 
 
-# Shared with the stub adapters: the docker-exec transport failed (CLI missing,
-# exec timeout). Callers map it to exit 2 via `_exit_unreachable`.
-TransportError = transport.TransportError
+# The playground stack is reached over the docker context using the SAME shared transport as
+# the identity/cmdb/host-state adapters (`_stub_transport.docker_exec_curl`): we exec `curl`
+# inside the target container, where the service answers on its own localhost (ES :9200,
+# Kibana :5601) and supplies its own ELASTIC_PASSWORD. This removed the host-side SSH tunnel
+# and the V2_ELASTIC_PASSWORD the direct urllib path needed. Mirrors infra/bin/es.sh.
 
 
-def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
-    """Exit (2) with a useful hint when ES/Kibana can't be reached.
+def _es_container(ctx: VerbContext) -> str:
+    return ctx.env.get("SOC_PLAYGROUND_ES_CONTAINER", DEFAULT_ES_CONTAINER)
 
-    Transport is the soc-playground docker context — a failure here means the
-    context/daemon is down or the target container isn't running, not a missing
-    SSH tunnel. Surface the check so it doesn't get rediagnosed every time.
+
+def _kibana_container(ctx: VerbContext) -> str:
+    return ctx.env.get("SOC_PLAYGROUND_KIBANA_CONTAINER", DEFAULT_KIBANA_CONTAINER)
+
+
+def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> TransportFault:
+    """The `TransportFault` (infra, 2) for an unreachable ES/Kibana, carrying the check.
+
+    Transport is the docker context — a failure here means the context/daemon is down or the
+    target container isn't running, not a missing SSH tunnel. Surface the check so it doesn't
+    get rediagnosed every time.
     """
-    msg = f"error: {target} unreachable: {exc}"
-    msg += (
-        f"\nhint: the playground stack is reached via "
-        f"`docker --context {DOCKER_CONTEXT} exec`; confirm it is up:"
-        f"\n      docker --context {DOCKER_CONTEXT} ps "
-        f"| grep -E '{ES_CONTAINER}|{KIBANA_CONTAINER}'"
+    context = transport.docker_context(ctx)
+    return TransportFault(
+        f"{target} unreachable: {exc} — the playground stack is reached via "
+        f"`docker --context {context} exec`; confirm it is up: "
+        f"docker --context {context} ps | grep -E "
+        f"'{_es_container(ctx)}|{_kibana_container(ctx)}'"
     )
-    # Exit 2 = connection/auth/config failure, per this module's exit-code
-    # contract (the direct-urllib path used to exit 1 here — a known mismatch).
-    print(msg, file=sys.stderr)
-    sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -151,30 +153,28 @@ def _exit_unreachable(target: str, url: str, exc: BaseException) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _container_for(url: str, config: dict) -> str:
+def _container_for(ctx: VerbContext, url: str, config: dict) -> str:
     """Which compose container to exec curl inside. ES and Kibana each answer on
     their own localhost port *within their own container* (matching es.sh), so
     route by which configured base URL this request targets."""
     kibana_base = (config.get("KIBANA_URL") or "").rstrip("/")
     if kibana_base and url.startswith(kibana_base):
-        return KIBANA_CONTAINER
-    return ES_CONTAINER
+        return _kibana_container(ctx)
+    return _es_container(ctx)
 
 
-def _http_json(method, url, config, headers=None, body=None, timeout=None):
+def _http_json(ctx, method, url, config, headers=None, body=None, timeout=None):
     """Issue an HTTP request to ES/Kibana by exec'ing curl inside the target
-    container over the soc-playground docker context (mirrors infra/bin/es.sh).
-    Returns (http_status:int, parsed_json:dict). Raises TransportError when the
-    docker exec itself fails (so a reachable-but-erroring service still returns
-    its status + body for the caller to handle)."""
-    container = _container_for(url, config)
+    container over the run's docker context (mirrors infra/bin/es.sh).
+    Returns (http_status:int, parsed_json:dict). Raises `TransportFault` when the docker
+    exec itself fails or curl never completed a request (so a reachable-but-erroring service
+    still returns its status + body for the caller to classify)."""
+    container = _container_for(ctx, url, config)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
     # `insecure=True`: container-local self-signed cert (matches es.sh). `auth`
-    # expands ${ELASTIC_PASSWORD} inside the container's own shell, never on this
-    # host. Raises TransportError on a docker-exec failure (CLI missing/timeout),
-    # which the callers map to exit 2 via _exit_unreachable.
+    # expands ${ELASTIC_PASSWORD} inside the container's own shell, never on this host.
     rc, stdout, stderr = transport.docker_exec_curl(
-        container, url, method=method, headers=headers, body=body,
+        ctx, container, url, method=method, headers=headers, body=body,
         timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}",
     )
     body_text, status_str = transport.split_status(stdout)
@@ -184,22 +184,38 @@ def _http_json(method, url, config, headers=None, body=None, timeout=None):
         # No HTTP status line ⇒ curl never completed a request ⇒ transport-level
         # failure (no such container, context down, TLS handshake refused, …).
         detail = stderr.strip() or f"docker exec rc={rc}, no output"
-        raise TransportError(detail) from e
+        raise _unreachable(ctx, "Elasticsearch", TransportFault(detail)) from e
     if status == 0:
         # curl reports HTTP 000 when it never received a response (connection
         # refused, DNS failure, TLS handshake rejected, --max-time before any
         # headers). It still writes "\n000" to stdout, so the int() parse above
         # SUCCEEDS — the most common ES-down case. Treat 0 as the transport
-        # failure it is, not a real HTTP status, so it routes to exit 2 (and the
-        # circuit breaker counts it) instead of being mis-scored as a query error.
+        # failure it is, not a real HTTP status, so it routes to infra (2) and the
+        # circuit breaker counts it instead of being mis-scored as a query error.
         detail = stderr.strip() or f"curl reported HTTP 000 (no response; rc={rc})"
-        raise TransportError(detail)
+        raise _unreachable(ctx, "Elasticsearch", TransportFault(detail))
 
     try:
         parsed = json.loads(body_text) if body_text else {}
     except json.JSONDecodeError:
         parsed = {"error": body_text[:500]}
     return status, parsed
+
+
+def _raise_on_es_error(status: int, resp: dict, what: str) -> None:
+    """The one place ES's status becomes a fault. 401/403 and 5xx are infra (the cluster is
+    unusable, and the breaker should count it); everything else >=400 is the agent's query,
+    and `detail` carries ES's OWN `reason` — the `verification_exception` naming the column
+    it misspelled is the only thing the pitfalls curator ever sees of this failure."""
+    if status == 200:
+        return
+    err = resp.get("error", resp)
+    msg = err.get("reason") if isinstance(err, dict) else str(err)
+    if status in (401, 403):
+        raise TransportFault(f"Elasticsearch auth failed (HTTP {status}): {msg}")
+    if status >= 500:
+        raise TransportFault(f"Elasticsearch server error (HTTP {status}): {msg}")
+    raise UpstreamFault(f"{what} failed (HTTP {status}): {msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +239,7 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit):
         must = [{"match_all": {}}]
 
     return {
-        # Hard cap, non-overridable: the agent may pass any --limit but never
+        # Hard cap, non-overridable: the agent may pass any `limit` but never
         # receives more than RETURNED_DOC_CAP docs. track_total_hits keeps the
         # envelope `total` exact regardless, so counts are unaffected.
         "size": min(limit, RETURNED_DOC_CAP),
@@ -233,32 +249,15 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit):
     }
 
 
-def search(config, index_pattern, query_string, time_start, time_end, time_field, limit):
+def _search(ctx, config, index_pattern, query_string, time_start, time_end, time_field, limit):
     body = _build_search_body(query_string, time_start, time_end, time_field, limit)
     url = (
         f"{config['ELASTICSEARCH_URL'].rstrip('/')}/"
         f"{urllib.parse.quote(index_pattern, safe='-*,.')}/_search"
         f"?ignore_unavailable=true"
     )
-    try:
-        status, resp = _http_json("POST", url, config, body=body)
-    except TransportError as e:
-        _exit_unreachable("Elasticsearch", url, e)
-
-    if status != 200:
-        err = resp.get("error", resp)
-        msg = err.get("reason") if isinstance(err, dict) else str(err)
-        if status in (401, 403):
-            print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
-            sys.exit(2)
-        if status >= 500:
-            # 5xx is the server being unavailable (cluster restarting, no shard,
-            # gateway) — an infra failure the breaker should count, not a query
-            # error. Mirrors _stub_transport._request's code>=500 → exit 2.
-            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
-            sys.exit(2)
-        print(f"error: Elasticsearch query failed (HTTP {status}): {msg}", file=sys.stderr)
-        sys.exit(1)
+    status, resp = _http_json(ctx, "POST", url, config, body=body)
+    _raise_on_es_error(status, resp, "Elasticsearch query")
 
     hits_block = resp.get("hits", {})
     total = hits_block.get("total", {})
@@ -269,221 +268,126 @@ def search(config, index_pattern, query_string, time_start, time_end, time_field
     return docs, total_hits, truncated
 
 
+def _search_verb(
+    ctx: VerbContext, *, index_key: str, native_query: str,
+    start: str | None, end: str | None, limit: int, index: str | None,
+) -> dict:
+    config = load_config(ctx)
+    resolved = index or config[index_key]
+    docs, total, truncated = _search(
+        ctx, config, resolved, native_query, start, end,
+        time_field="@timestamp", limit=limit,
+    )
+    return {
+        "index": resolved,
+        "total": total,
+        "returned": len(docs),
+        "truncated": truncated,
+        "hits": docs,
+    }
+
+
 # ---------------------------------------------------------------------------
-# Health check
+# The verbs
 # ---------------------------------------------------------------------------
 
 
-def health_check(config):
+def health_check(ctx: VerbContext) -> dict:
+    """ES cluster health + Kibana status, as DATA. An unreachable Kibana is reported in the
+    payload rather than raised: ES answering is what makes the system usable, and failing the
+    whole verb on Kibana would trip the breaker on a live source."""
+    config = load_config(ctx)
     es_url = config["ELASTICSEARCH_URL"].rstrip("/") + "/_cluster/health"
-    try:
-        status, body = _http_json("GET", es_url, config, timeout=10)
-    except TransportError as e:
-        _exit_unreachable("elasticsearch", es_url, e)
+    status, body = _http_json(ctx, "GET", es_url, config, timeout=10)
+    _raise_on_es_error(status, body, "Elasticsearch health")
 
-    if status != 200:
-        print(f"error: elasticsearch HTTP {status}: {body}", file=sys.stderr)
-        # auth (401/403) and server-unavailable (5xx) are infra → exit 2.
-        sys.exit(2 if status in (401, 403) or status >= 500 else 1)
-
-    print("connected")
-    print(f"elasticsearch: {body.get('status', 'unknown')}")
-    print(f"nodes: {body.get('number_of_nodes', '?')}")
+    out = {
+        "system": SYSTEM,
+        "connected": True,
+        "elasticsearch": body.get("status", "unknown"),
+        "nodes": body.get("number_of_nodes"),
+    }
 
     kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
     try:
         kb_status, kb_body = _http_json(
-            "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10
+            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10
         )
-    except TransportError as e:
-        print(f"kibana: unreachable ({e})")
-        return
+    except TransportFault as e:
+        out["kibana"] = f"unreachable ({e.detail})"
+        return out
 
     if kb_status == 200 and isinstance(kb_body, dict):
-        overall = kb_body.get("status", {}).get("overall", {}).get("level", "unknown")
-        print(f"kibana: {overall}")
+        out["kibana"] = kb_body.get("status", {}).get("overall", {}).get("level", "unknown")
     else:
-        print(f"kibana: HTTP {kb_status}")
+        out["kibana"] = f"HTTP {kb_status}"
+    return out
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description=(
-            "Elastic Stack CLI — search raw events (`query`) and detection-engine "
-            "signals (`alerts`) against the v2 playground Elasticsearch."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+def query(
+    ctx: VerbContext,
+    *,
+    native_query: str,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    index: str | None = None,
+) -> dict:
+    """Search raw event indices (default pattern from ELASTIC_EVENTS_INDEX) with a
+    lucene/KQL query. `limit` is clamped to RETURNED_DOC_CAP; read `total` for magnitudes."""
+    return _search_verb(
+        ctx, index_key="ELASTIC_EVENTS_INDEX", native_query=native_query,
+        start=start, end=end, limit=limit, index=index,
     )
-    sub = p.add_subparsers(dest="subcommand", required=True)
 
-    sub.add_parser("health-check", help="Verify ES + Kibana reachability and exit.")
 
-    def _add_common_flags(parser):
-        parser.add_argument("--start", help="Start time (ISO 8601 UTC).")
-        parser.add_argument("--end", help="End time (ISO 8601 UTC).")
-        parser.add_argument(
-            "--limit", type=int, default=DEFAULT_LIMIT,
-            help=(
-                f"Docs returned (default {DEFAULT_LIMIT}); hard-capped at "
-                f"{RETURNED_DOC_CAP} regardless of the value passed — widening is "
-                f"futile by construction. The envelope `total` is the exact count; "
-                f"read it for magnitudes instead of pulling more docs."
-            ),
-        )
-        parser.add_argument(
-            "--index", help="Override the default index pattern for this subcommand.",
-        )
-
-    q = sub.add_parser(
-        "query",
-        help="Search raw event indices (default pattern: logs-*).",
-        description=(
-            "Search raw event indices with a lucene/KQL query.\n\n"
-            "Examples:\n"
-            "  elastic_cli.py query 'process.name:\"sshd\" AND message:*\"Failed password\"*' \\\n"
-            "      --start 2026-05-23T18:00:00Z --limit 20\n"
-            "  elastic_cli.py query 'falco.rule:\"Adding ssh keys to authorized_keys\"' \\\n"
-            "      --index 'logs-falco.alerts-*'\n"
-            "  elastic_cli.py query '*' --index 'logs-system.syslog-*' --limit 5"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+def alerts(
+    ctx: VerbContext,
+    *,
+    native_query: str,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    index: str | None = None,
+) -> dict:
+    """Search detection-engine signals emitted by the v2 custom rules."""
+    return _search_verb(
+        ctx, index_key="ELASTIC_ALERTS_INDEX", native_query=native_query,
+        start=start, end=end, limit=limit, index=index,
     )
-    q.add_argument("native_query", help="Lucene / KQL query string.")
-    _add_common_flags(q)
-
-    a = sub.add_parser(
-        "alerts",
-        help="Search detection-engine signals (.internal.alerts-security.*).",
-        description=(
-            "Search detection-engine alerts emitted by the v2 custom rules.\n\n"
-            "Examples:\n"
-            "  elastic_cli.py alerts 'kibana.alert.rule.rule_id:\"v2-sshd-failed-auth-burst\"'\n"
-            "  elastic_cli.py alerts 'kibana.alert.severity:\"high\"' --limit 50"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    a.add_argument("native_query", help="Lucene / KQL query string against the alerts index.")
-    _add_common_flags(a)
-
-    e = sub.add_parser(
-        "esql",
-        help="Run an ES|QL pipe; server-side aggregation returned as a table.",
-        description=(
-            "Run an ES|QL query (`FROM ... | WHERE ... | STATS ...`) against the "
-            "playground Elasticsearch and return the result table.\n\n"
-            "The aggregation runs server-side — the result rows ARE the answer; do "
-            "not pull docs and reduce them yourself. The whole query (index, filter, "
-            "time window, aggregation) lives in the pipe; there are no "
-            "--index/--start/--end/--limit flags. Pass the whole pipe on ONE line "
-            "(the `|` separators stay inside the quotes); ES|QL caps returned rows at "
-            "1000 by default, so a wide `BY` is truncated unless you narrow it.\n\n"
-            "Examples (one line each):\n"
-            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE source.ip == \"172.18.0.14\" "
-            "AND host.name == \"db-1\" AND event.outcome IS NOT NULL | STATS "
-            "accepted = COUNT(*) WHERE event.outcome == \"success\", "
-            "failed = COUNT(*) WHERE event.outcome == \"failure\"'\n"
-            "  elastic_cli.py esql 'FROM logs-system.auth-* | WHERE user.name == \"dev.dana\" "
-            "| LIMIT 10'   # field-shape probe"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    e.add_argument("query", help="ES|QL query string (FROM ... | WHERE ... | STATS ...).")
-
-    return p
 
 
-def cmd_query(args, config):
-    index = args.index or config["ELASTIC_EVENTS_INDEX"]
-    docs, total, truncated = search(
-        config, index, args.native_query, args.start, args.end,
-        time_field="@timestamp", limit=args.limit,
-    )
-    print(json.dumps({
-        "index": index,
-        "total": total,
-        "returned": len(docs),
-        "truncated": truncated,
-        "hits": docs,
-    }, default=str))
+def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
+    """Run an ES|QL pipe (`FROM … | WHERE … | STATS …`) and return the result table.
 
-
-def cmd_alerts(args, config):
-    index = args.index or config["ELASTIC_ALERTS_INDEX"]
-    docs, total, truncated = search(
-        config, index, args.native_query, args.start, args.end,
-        time_field="@timestamp", limit=args.limit,
-    )
-    print(json.dumps({
-        "index": index,
-        "total": total,
-        "returned": len(docs),
-        "truncated": truncated,
-        "hits": docs,
-    }, default=str))
-
-
-def run_esql(config, query):
-    """Execute an ES|QL query via the `_query` endpoint. Returns
-    (columns, values) where columns is [{name,type},...] and values is the
-    columnar row list [[...],...]. Exit-code contract mirrors `search()`:
-    2 = unreachable/auth (5xx, 401/403), 1 = query error (a malformed pipe is a
-    400 the model fixes and re-runs)."""
+    The aggregation runs server-side — the result rows ARE the answer; do not pull docs and
+    reduce them yourself. The whole query (index, filter, time window, aggregation) lives in
+    the pipe, which is why this verb takes no start/end/limit/index. ES|QL caps returned rows
+    at 1000 by default, so a wide `BY` is truncated unless you narrow it.
+    """
+    config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    try:
-        status, resp = _http_json("POST", url, config, body={"query": query})
-    except TransportError as e:
-        _exit_unreachable("Elasticsearch", url, e)
+    status, resp = _http_json(ctx, "POST", url, config, body={"query": query})
+    _raise_on_es_error(status, resp, "ES|QL query")
 
-    if status != 200:
-        err = resp.get("error", resp)
-        msg = err.get("reason") if isinstance(err, dict) else str(err)
-        if status in (401, 403):
-            print(f"error: Elasticsearch auth failed (HTTP {status}): {msg}", file=sys.stderr)
-            sys.exit(2)
-        if status >= 500:
-            print(f"error: Elasticsearch server error (HTTP {status}): {msg}", file=sys.stderr)
-            sys.exit(2)
-        print(f"error: ES|QL query failed (HTTP {status}): {msg}", file=sys.stderr)
-        sys.exit(1)
-
-    return resp.get("columns", []), resp.get("values", [])
-
-
-def cmd_esql(args, config):
-    columns, values = run_esql(config, args.query)
+    columns = resp.get("columns", [])
+    values = resp.get("values", [])
     names = [c.get("name") for c in columns]
     # Named-dict rows so the agent reads the table directly; this is the answer,
     # not a doc sample. The key is `values` (not in record_query's record-key set),
     # so a small aggregation passes through whole instead of being doc-sampled.
     rows = [dict(zip(names, row, strict=False)) for row in values]
-    print(json.dumps({
-        "query": args.query,
+    return {
+        "query": query,
         "columns": columns,
         "row_count": len(rows),
         "values": rows,
-    }, default=str, indent=2))
+    }
 
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    config = load_config()
-    if args.subcommand == "health-check":
-        health_check(config)
-    elif args.subcommand == "query":
-        cmd_query(args, config)
-    elif args.subcommand == "alerts":
-        cmd_alerts(args, config)
-    elif args.subcommand == "esql":
-        cmd_esql(args, config)
-    else:
-        parser.error(f"unknown subcommand: {args.subcommand}")
-
-
-if __name__ == "__main__":
-    main()
+VERBS = {
+    "health-check": health_check,
+    "query": query,
+    "alerts": alerts,
+    "esql": esql,
+}

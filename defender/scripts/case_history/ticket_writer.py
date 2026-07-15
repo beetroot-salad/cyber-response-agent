@@ -15,8 +15,9 @@ the customer ticketing SoR stay decoupled even when they're the same server toda
 Discipline: a post-step must never break the run (matches `cross_check_tables` /
 `visualize`). Every failure — missing config, unreachable stub, HTTP error, missing
 report.md — is a WARN to stderr and a return, never a raise/exit. That's also why this
-uses the low-level `docker_exec_curl` + `split_status` rather than `http_post`, which
-`sys.exit`s on error (correct for a CLI adapter, fatal for an in-process post-step).
+uses the low-level `docker_exec_curl` + `split_status` rather than `http_get`/`http_post`,
+which raise an `AdapterFault` on error (correct for a captured verb, wrong for a post-step
+that must degrade).
 """
 from __future__ import annotations
 
@@ -29,12 +30,33 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender._run_paths import RunPaths
+from defender.run_common import run_env
+from defender.runtime.verbs import VerbContext
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport  # shared transport (adapter family)
+from defender.scripts.adapters.faults import TransportFault
 
 SYSTEM = "case-history"
 PREFIX = "CASE_HISTORY"
 _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
+
+
+def _verb_context() -> VerbContext:
+    """The post-step's own `VerbContext`: this runs in the DRIVER's process at post-step
+    time, outside any verb, so its tree and env are the process's own. (`run_dir` is
+    carriage the transport never reads — the tree and the env are what it resolves config
+    and forks children with.)
+
+    The env is `run_env`'s SCRUBBED copy, not `os.environ`: this runs in the driver, whose
+    environ holds the billable provider keys, and the transport hands `ctx.env` straight to
+    the `docker exec` child it forks. Passing the raw environ here would opt this one caller
+    out of the invariant `VerbContext.env` exists to carry.
+    """
+    defender_dir = Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
+    run_dir = Path.cwd()
+    return VerbContext(
+        defender_dir=defender_dir, run_dir=run_dir, env=run_env(defender_dir, run_dir)
+    )
 
 
 def _log(msg: str) -> None:
@@ -48,10 +70,10 @@ def _warn(msg: str) -> None:
 def _load_config() -> dict[str, str] | None:
     """Load `CASE_HISTORY_*` from the case-history system config, non-fatally.
 
-    Mirrors `transport.load_config` but returns None (a WARN) instead of `sys.exit`,
-    so a missing/incomplete config under `--update-ticket` degrades the post-step
-    rather than aborting the run."""
-    path = transport._config_path(SYSTEM)
+    Mirrors `transport.load_config` but returns None (a WARN) instead of raising a
+    `ConfigFault`, so a missing/incomplete config under `--update-ticket` degrades the
+    post-step rather than aborting the run."""
+    path = transport._config_path(_verb_context(), SYSTEM)
     if not path.exists():
         _warn(f"config not found: {path}; skipping ticket write")
         return None
@@ -88,10 +110,10 @@ def _request(
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     try:
         rc, stdout, stderr = transport.docker_exec_curl(
-            bastion, url, method=method, body=body, timeout_sec=timeout
+            _verb_context(), bastion, url, method=method, body=body, timeout_sec=timeout
         )
-    except transport.TransportError as e:
-        return None, f"transport error: {e}"
+    except TransportFault as e:
+        return None, f"transport error: {e.detail}"
     body_text, status = transport.split_status(stdout)
     if not status:
         return None, f"no/malformed response (rc={rc}, stderr={stderr.strip()!r})"

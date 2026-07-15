@@ -88,6 +88,16 @@ class ToolSet:
     # program token, not the operand it then opens. Gather's discovery of the catalog was dead on
     # every bash route it had left, and this is the replacement.
     template_search: bool = False
+    # Gather's typed data-source access (#611) — the tool that replaced the bash lane's adapter
+    # route. PRESENCE stays here and not in a call-site ``capabilities=`` argument, for two
+    # reasons that both bite: a capability-owned toolset lands OUTSIDE ``agent._function_toolset``,
+    # where every #538 tool-freeness assertion looks (so "registers NOTHING" would stay green while
+    # the invariant it encodes was false), and ``capabilities=`` is a build-site param, so "which
+    # agent may reach a data source" would migrate out of policy-as-data into an argument
+    # ``compile_policy`` and ``defender-policy explain`` cannot see. Declaring the bit is ALSO what
+    # constructs the capture capability (``driver.build_agent_core``): the tool and its queries-table
+    # row cannot be separated, which is what keeps that table an integrity gate rather than a hint.
+    query: bool = False
 
 
 @dataclass(frozen=True)

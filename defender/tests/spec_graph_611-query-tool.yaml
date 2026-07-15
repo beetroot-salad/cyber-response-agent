@@ -1,0 +1,572 @@
+# Spec-coverage graph — #611 slice 1: the query tool, the VERBS registry, capture-as-capability.
+# Slice 1 FREEZES the two-table row contract; consumers migrate in slice 2 (see handoff).
+base: f6fbd06fd3a8dec181716e8d62ec294399adf822
+issue: 611
+
+axes: [lead_id, seq, system, verb, query_id, defender_dir]
+
+# ===========================================================================
+# DEMANDS — the spec proper.
+# ===========================================================================
+demands:
+
+  # --- #0 THE RETURN CONTRACT (fork F1, resolved by the human) --------------
+  - id: query_returns_wrapped_truncated_view_and_payload_note
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A successful query() returns to the model an exit-code line, the truncated payload view SALT-WRAPPED as untrusted, and the absolute `[record_query] raw payload: <path>` note — not a bare payload_ref."
+    binds: ["query_tool", "interacts(query_tool->gather_raw)", "interacts(query_tool->model_context)"]
+    rejected:
+      - {nl: "return a bare payload_ref (the issue's literal `-> payload_ref` signature): gather's SKILL filters on the note line."}
+      - {nl: "return the view unwrapped, matching today's bare adapter output: rejected by the human at step 7 in favour of wrapping."}
+
+  - id: query_return_wrap_uses_the_run_salt
+    kind: shape
+    form: test
+    outcome:
+      nl: "The untrusted wrap around the query payload uses deps.salt — the per-run salt — never a freshly minted one; a fresh salt makes the injection defense fail open because the model can then forge the closing tag."
+    binds: ["interacts(query_tool->model_context).payload", "salt.domain"]
+
+  - id: query_payload_is_not_double_wrapped_on_read_back
+    kind: negative
+    form: test
+    outcome:
+      nl: "Reading the same payload back with read_file (which salt-wraps gather_raw/ via is_untrusted_read) yields exactly one wrap, not a wrap nested inside the wrap the tool already applied."
+    binds: ["interacts(query_tool->model_context).payload", "gather_raw.access[read-tool]"]
+
+  - id: query_return_wrap_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The payload's own bytes are still fully recoverable through the sanctioned path: the file at gather_raw/{lead}/{seq}.json holds the unwrapped payload, and defender-sql over it aggregates the real rows."
+    binds: ["gather_raw", "interacts(query_tool->model_context).payload"]
+
+  # --- The registry ---------------------------------------------------------
+  - id: verbs_registry_declares_surface
+    kind: seam
+    form: test
+    outcome:
+      nl: "Each adapter module exports a VERBS mapping from verb name to a callable whose annotated signature declares that verb's params; the query tool's validator reads exactly that mapping."
+    binds: ["verbs_registry"]
+
+  - id: unknown_system_verb_param_rejected
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "query() with an unknown system, an unknown verb, an unknown param key, or a missing required param is rejected and never reaches a transport."
+    binds: ["verbs_registry.domain", "interacts(query_tool->transport)"]
+
+  - id: registry_validation_failure_writes_its_row_before_raising
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A registry validation failure (unknown verb / unknown param / missing required param, checked by our own code inside wrap_tool_execute) writes its queries row (exit_code=64, error_class=agent-fixable, payload_status=error) BEFORE raising ModelRetry — ModelRetry bypasses on_tool_execute_error and after_tool_execute, so a write that follows the raise never happens."
+    binds: ["executed_queries", "capture_capability"]
+
+  - id: arg_shape_validation_error_still_writes_a_64_row
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A malformed tool call (verb as an int, system omitted, unparseable args) fails in pydantic-ai's VALIDATE hook family, which runs BEFORE the EXECUTE family — capture therefore also installs wrap_tool_validate, so the row (exit_code=64, agent-fixable, payload_status=error) is still written."
+    binds: ["executed_queries", "capture_capability"]
+    rejected:
+      - {nl: "declare arg-shape failures out of the table: cheaper, but it silently halves the exit-64 class the pitfalls-curation lane learns from."}
+
+  - id: empty_verbs_declaration_fails_closed_at_the_tool
+    kind: negative
+    form: test
+    outcome:
+      nl: "A system whose module declares no VERBS is unreachable through query(): an empty declaration must not read as 'no filter'. (This tree already fails OPEN twice in this exact shape — adapter_shims() returning the empty set makes the shim regex None, and descriptor_catalog's `or None` degrades an empty roster to no-catalog.)"
+    binds: ["verbs_registry.domain.distinguished[empty]"]
+
+  - id: empty_verbs_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The same system with a non-empty VERBS declaration is reachable through query() and returns its payload — the control proving the fail-closed check can observe a difference."
+    binds: ["verbs_registry.domain.distinguished[empty]"]
+
+  - id: descriptor_catalog_advertises_only_declared_systems
+    kind: parity
+    form: test
+    outcome:
+      nl: "Fail-closed holds at the PROMPT as well as at the tool: a *_cli.py present on disk whose module declares no VERBS is ABSENT from the injected descriptor catalog, which today derives its roster by globbing filenames and never imports the module."
+    binds: ["descriptor_catalog", "verbs_registry.domain.distinguished[empty]"]
+
+  - id: descriptor_catalog_does_not_freeze_the_tree
+    kind: behavior
+    form: test
+    outcome:
+      nl: "Two catalogs built for two trees in one process (the learning loop's worktree-drain shape) each resolve their own tree: building the catalog for tree A must not make a later verb call under tree B read A's config.env. Guards the @cache memo on descriptor_catalog against the import-time DEFENDER_DIR constants."
+    binds: ["descriptor_catalog", "defender_dir.domain"]
+
+  - id: no_verb_names_a_program_or_command
+    kind: negative
+    form: test
+    outcome:
+      nl: "No verb signature declares a param that is a program, a command, or a path in the driver's namespace; host-state's fim-checksum path (a path on a playground target host, reached via docker exec) is the declared exception."
+    binds: ["verbs_registry.domain"]
+
+  # --- query_id -------------------------------------------------------------
+  - id: query_id_fallback_chain
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "query_id falls back model-supplied -> {system}.{verb} -> {system}.ad-hoc. deps.query_id (never assigned anywhere) is deleted, not preserved."
+    binds: ["query_id.domain", "executed_queries.payload"]
+
+  - id: query_id_traversal_guard_survives
+    kind: negative
+    form: test
+    outcome:
+      nl: "A query_id containing '/', '\\', '..' or NUL is rejected — it becomes a {system}/_draft/{verb}.md path segment in the offline lead-author, and it is now model-authored input arriving at a NEW boundary."
+    binds: ["query_id.domain.distinguished[traversal]"]
+
+  - id: query_id_traversal_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A normally coined {system}.{kebab} query_id is accepted and recorded verbatim in the row."
+    binds: ["query_id.domain.distinguished[traversal]"]
+
+  # --- Capture as a capability (the mechanism) ------------------------------
+  - id: capture_runs_in_wrap_tool_execute
+    kind: seam
+    form: test
+    outcome:
+      nl: "Capture is implemented in wrap_tool_execute — the only execute-family hook that observes the pre-call, both outcomes, and the exception, and the only one that can skip handler() and return a value."
+    binds: ["capture_capability"]
+    rejected:
+      - {nl: "after_tool_execute: skipped when the tool raises (on_tool_execute_error re-raises) and bypassed entirely by ModelRetry, so every failed query would write no row and the circuit breaker would become dead code."}
+
+  - id: failing_verb_still_writes_its_row
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A verb that raises still writes its queries row (payload_status=error, the mapped exit_code and error_class) and still records the circuit-breaker outcome."
+    binds: ["executed_queries", "circuit_breaker"]
+
+  - id: unmapped_fault_still_writes_a_row
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A verb raising a fault with no mapping (a bare RuntimeError) still writes a row under a default exit code — the catch-all is what stops an unmapped fault from DELETING the record the taxonomy exists for."
+    binds: ["executed_queries"]
+
+  - id: systemexit_does_not_unwind_the_run
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A verb or shared transport that raises SystemExit does not unwind out of agent.iter(): SystemExit is a BaseException, so pydantic-ai's `except Exception` does not catch it and asyncio.to_thread re-raises it to the awaiter. The capture seam catches it, writes a row, and the run continues."
+    binds: ["executed_queries", "capture_capability"]
+
+  - id: capture_catch_all_re_raises_the_control_flow_exceptions
+    kind: negative
+    form: test
+    outcome:
+      nl: "The capture seam's catch-all must NOT swallow RunAborted (the circuit breaker's run-wide kill switch), ModelRetry, or pydantic-ai's control-flow exceptions (SkipToolExecution, CallDeferred, ApprovalRequired, ToolRetryError) — all of which are plain Exception subclasses, so a broad `except Exception`/`except BaseException` silently disables the kill switch."
+    binds: ["capture_capability", "circuit_breaker"]
+
+  - id: run_aborted_still_kills_the_run_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "With the carve-out in place, reaching RUN_FAIL_KILL_LIMIT still raises RunAborted out of the run — the control proving the catch-all did not swallow it."
+    binds: ["circuit_breaker"]
+
+  - id: breaker_pre_call_trip_returns_without_executing
+    kind: behavior
+    form: test
+    outcome:
+      nl: "When the breaker is tripped for a system, query() returns the down-message as the tool result WITHOUT invoking the verb and WITHOUT raising ModelRetry (a tripped system never recovers, so a retry would burn the budget into an UnexpectedModelBehavior crash). Only wrap_tool_execute can express this: before_tool_execute may only return args or raise."
+    binds: ["circuit_breaker", "interacts(query_tool->transport)"]
+
+  - id: capture_fires_only_for_the_query_tool
+    kind: negative
+    form: test
+    outcome:
+      nl: "A gather run that calls bash / read_file / template_search writes NO queries row and has no result swapped: an AbstractCapability hook method otherwise fires for EVERY tool (the tools=[...] filter exists only on the Hooks decorator API)."
+    binds: ["capture_capability"]
+
+  - id: tool_and_capture_are_inseparable
+    kind: seam
+    form: test
+    outcome:
+      nl: "Declaring the query tool in an agent's ToolSet is what constructs the capture capability; an agent cannot be built with the tool and without capture."
+    binds: ["capture_capability", "toolset"]
+
+  - id: query_tool_lands_in_the_function_toolset
+    kind: parity
+    form: test
+    outcome:
+      nl: "The query tool is a plain agent tool, visible in agent._function_toolset.tools — a capability-OWNED toolset lands in _cap_toolsets instead, which would leave #538's 'registers NOTHING' tool-freeness assertions green while the invariant they encode was false."
+    binds: ["toolset"]
+
+  - id: which_agent_may_query_stays_policy_as_data
+    kind: parity
+    form: test
+    outcome:
+      nl: "MAIN_DEF registers no query tool and GATHER_DEF does — 'which agent may reach a data source' stays in the AgentDefinition, not in a call-site capabilities= argument invisible to compile_policy and `defender-policy explain`."
+    binds: ["toolset", "main_bash_policy"]
+
+  # --- Concurrency (newly admitted by this change) --------------------------
+  - id: concurrent_queries_do_not_collide_on_seq
+    kind: uniqueness
+    form: test
+    outcome:
+      nl: "Two query() calls in one model turn write distinct gather_raw/{lead}/{seq}.json paths and distinct (lead_id, seq) rows — no payload is overwritten. pydantic-ai's default parallelism is 'parallel' and sync tool fns are thread-offloaded; today's atomicity is an accident of the bash tool blocking the event loop, and that accident is gone."
+    binds: ["gather_raw.identity", "executed_queries.identity"]
+
+  - id: seq_collision_would_misdirect_the_judge
+    kind: negative
+    form: test
+    outcome:
+      nl: "The (lead_id, seq) key is unique across a concurrent run — a duplicate makes judge/compare._payload_paths (which falls back to gather_raw/{lead}/0.json when a row carries no payload path) hand the judge ANOTHER query's payload. The harm of the race lands two subsystems away from the writer."
+    binds: ["executed_queries.identity", "gather_raw.identity"]
+
+  # --- The process-boundary jobs (re-established in-process) ----------------
+  - id: transports_raise_never_exit
+    kind: negative
+    form: test
+    outcome:
+      nl: "No transport calls sys.exit. Fifteen of them do today, INSIDE the shared module (_stub_transport), so a per-adapter mapping table structurally cannot reach them — and ticket_cli serves both the CLI and the VERBS surface from one implementation."
+    binds: ["transport", "interacts(query_tool->transport)"]
+
+  - id: hung_verb_records_infra_not_a_synthesized_timeout
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A hung verb surfaces through the transport's own inner timeout as exit_code=2 / error_class=infra, and the breaker advances. exit 124 is never synthesized again: asyncio.wait_for cancels the await, not the thread, so a row claiming a timeout we did not enforce would be a lie about a process still running."
+    binds: ["adapter_timeout.domain", "executed_queries", "circuit_breaker"]
+    rejected:
+      - {nl: "synthesize 124 at the seam via wait_for: the thread survives, keeps the transport, and may still write — the row would report a kill that did not happen."}
+
+  - id: every_transport_decodes_lossily
+    kind: parity
+    form: test
+    outcome:
+      nl: "A non-UTF-8 byte in ANY transport's output costs one replacement character, not the stage. The capture seam's errors='replace' disappears with the subprocess, so the guarantee now rests on every transport — and host_state_cli's health-check subprocess is a STRICT decode today, where a UnicodeDecodeError is a ValueError that sails past every guard."
+    binds: ["interacts(query_tool->transport).response", "gather_raw"]
+
+  - id: failure_digest_carries_the_vendor_diagnosis
+    kind: shape
+    form: test
+    outcome:
+      nl: "On failure, payload_digest is `exit=N; <the upstream error body>` — an HTTP 4xx still carries Elasticsearch's own `detail` text, not a generic str(e). The pitfalls curator is instructed to SKIP any failure whose digest names no concrete mistake, so a generic exception message dries that lane up silently."
+    binds: ["executed_queries.payload_digest"]
+
+  - id: missing_config_is_infra_not_agent_fixable
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "A missing or malformed config.env classifies as error_class=infra (exit 2) and advances the breaker. Today the shared transport's bare sys.exit('error: config file not found') exits 1, so a definitionally-down system is filed as an agent-fixable query error and never trips the breaker."
+    binds: ["executed_queries.error_class", "circuit_breaker"]
+    rejected:
+      - {nl: "preserve exit 1 for parity: parity here preserves a MISFILING, and the A/B already concedes params/verb/digest churn."}
+
+  - id: empty_verb_return_is_payload_status_empty
+    kind: domain-outcome
+    form: test
+    outcome:
+      nl: "A verb returning {} or [] yields payload_status='empty': the seam tests the RETURNED OBJECT for emptiness before serializing, because json.dumps({}) == '{}' is non-blank and would read as 'ok', silently killing the zero-results signal the lead-author treats as a strong fold signal."
+    binds: ["executed_queries.payload_status.domain.distinguished[empty]"]
+
+  - id: provider_key_absent_from_transport_children
+    kind: negative
+    form: test
+    outcome:
+      nl: "No subprocess a transport forks carries a provider API key in its environment. The scrub rides on _bash_env today; in-process the transports pass no env= and would inherit the driver's os.environ."
+    binds: ["interacts(transport->subprocess_child)"]
+
+  - id: provider_key_scrub_positive_control
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The same transport child DOES receive the non-secret env it needs (DEFENDER_DIR, PATH) — the control proving the scrub is selective and the observation channel sees a populated env."
+    binds: ["interacts(transport->subprocess_child)"]
+
+  - id: verb_resolves_config_from_deps_tree
+    kind: behavior
+    form: test
+    outcome:
+      nl: "A verb resolves its config from the run's defender_dir (deps), not an import-time module constant: a run against a worktree or eval tmp tree reads THAT tree's knowledge/environment/systems/{system}/config.env."
+    binds: ["defender_dir.domain", "interacts(transport->config_env)"]
+
+  # --- The frozen row contract (the seam slice 2 cites) ---------------------
+  - id: row_contract_frozen
+    kind: shape
+    form: test
+    outcome:
+      nl: "The queries row carries lead_id, seq, system, verb, query_id, params, raw_command, payload_path, exit_code, error_class, payload_status, payload_digest — params keyed by the registry's real param names (not arg0/arg1), verb holding the tool's real verb (the column has zero production readers today and finally becomes honest), raw_command a derived audit string."
+    binds: ["executed_queries.payload"]
+
+  - id: payload_lands_by_ref
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The verb's return value is serialized and written to gather_raw/{lead_id}/{seq}.json, and payload_path in the row is the run-dir-relative path to it."
+    binds: ["interacts(query_tool->gather_raw)", "executed_queries.payload"]
+
+  - id: stage_tables_still_round_trips
+    kind: survival
+    form: test
+    outcome:
+      nl: "lead_repository.stage_tables (copy2 + copytree) — the SECOND writer of both sinks, driven by core/persist and evals/_pipeline — still round-trips a run dir under the new row shape: the replay contract is over the FILES, not the writer."
+    binds: ["executed_queries", "gather_raw"]
+
+  # --- The bash lane loses the adapter route -------------------------------
+  - id: adapters_unreachable_from_gather_bash
+    kind: negative
+    form: test
+    outcome:
+      nl: "No adapter shim or *_cli.py path is runnable from gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and _decide_adapter denies unconditionally."
+    binds: ["gather_bash_policy.access[bash]"]
+
+  - id: deny_reason_names_no_deleted_route
+    kind: behavior
+    form: test
+    outcome:
+      nl: "The deny reason an adapter-shaped bash command receives points at the query tool and does NOT tell gather it 'may only run a data-source adapter standalone' — a reason naming a route that no longer exists teaches a dead command, which this codebase treats as an enforced invariant, not a cosmetic string."
+    binds: ["gather_bash_policy.access[bash]"]
+
+  - id: gather_bash_keeps_local_computation
+    kind: behavior
+    form: test
+    outcome:
+      nl: "`cat <ABSOLUTE gather_raw payload> | defender-sql '<SQL>'` is still ALLOW for gather, so the split pipe (tool-then-bash) works. The RELATIVE spelling still denies — which is why the payload note must stay absolute."
+    binds: ["gather_bash_policy.access[bash]"]
+
+  - id: main_cannot_reach_a_payload_by_any_surface
+    kind: negative
+    form: test
+    outcome:
+      nl: "The main loop cannot read a gather_raw payload by ANY surface — including a bash command carrying a `# record_query` comment. Main's clamp is positive enumeration (it has no gather_raw path shape at all); the substring exemption in block_main_loop_raw_access lives in a hook whose main() is never called, so pinning its deletion would test dead code."
+    binds: ["main_bash_policy.access[bash]", "gather_raw.access[read-tool]"]
+
+  - id: shim_flags_and_non_adapter_shims_are_removed_together
+    kind: negative
+    form: test
+    outcome:
+      nl: "defender-record-query leaves NON_ADAPTER_SHIMS *and* grant._SHIM_FLAGS together: a shim left in NON_ADAPTER_SHIMS but dropped from _SHIM_FLAGS gets a free-text-only shape from _shim_shape, silently WIDENING what it may be handed."
+    binds: ["gather_bash_policy.access[bash]"]
+
+  # --- Survival --------------------------------------------------------------
+  - id: record_query_module_survives_its_cli
+    kind: survival
+    form: test
+    outcome:
+      nl: "record_query.py survives the deletion of main()/parse_params/_derive_verb: runtime/tools.py imports derive_system AND _passthrough_max_bytes from it, and the latter is the character cap for the read_file tool — unrelated to adapters, and pinned by test_read_file_bounded."
+    binds: ["record_query_module"]
+
+  - id: ticket_cli_dual_surface_survives
+    kind: survival
+    form: test
+    outcome:
+      nl: "ticket_cli keeps its argparse CLI over the same implementation as its VERBS entry: learning/tickets/ticket_seeds and author/verify_forward/forward (both subprocess callers) and the benign judge's pinned `--require-closed` bash grant all still work. A params-dict cannot express a MANDATORY flag, and that mandate is the judge's entire answer-key defense."
+    binds: ["ticket_cli"]
+
+  - id: e2e_replay_harness_has_an_injected_verb_seam
+    kind: seam
+    form: test
+    outcome:
+      nl: "The e2e replay harness fakes the registry/transport through an INJECTED seam (like its make_model seam), not by monkeypatching — its current seam stubs record_query's `subprocess` module attribute, which a registry does not have. The exit-2 circuit-breaker fixture still reproduces."
+    binds: ["e2e_harness"]
+
+  - id: replay_actor_still_loads_the_staged_tables
+    kind: survival
+    form: test
+    outcome:
+      nl: "learning/ops/replay_actor — which re-execs lead_repository and run as a subprocess, relocating the tree anchor onto whatever tree it lands in — still loads a staged run dir under the new row shape: it requires gather_raw/ or executed_queries.jsonl, and reads params/query_id through lead_repository, not by re-parsing."
+    binds: ["replay_actor", "executed_queries", "gather_raw"]
+
+  # --- Waivers (examined noes, step 7) -------------------------------------
+  - id: waive_oracle_sample_lane
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "The oracle's redact_exemplar/unredacted_exemplar lane looks for a `### Raw Sample Events` markdown header that today's bare-JSON payloads do not carry — it already returns the placeholder for every production lead. It is NOT repaired in this slice, and payload parity is NOT validated through it. Repairing it is a separate, un-designed decision that must not ride in on this slice."
+    binds: ["gather_raw"]
+
+  - id: waive_adapter_module_rename
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "The adapter modules keep the *_cli.py filename even though they are no longer CLIs. The suffix is load-bearing in four independent places — descriptor_catalog's glob, ADAPTER_CLI_RE (defined twice), jscpd's --ignore under a hard --threshold 3, and lint_duplicate_helpers.EXCLUDED_SUFFIXES — so renaming turns seven near-identical registries into a CI-red duplication finding. Honest naming is a follow-up."
+    binds: ["verbs_registry"]
+
+  - id: waive_stale_ref_baseline
+    kind: behavior
+    form: waiver
+    outcome:
+      nl: "The deleted identifiers (parse_params, _decide_adapter, NON_ADAPTER_SHIMS, STRUCTURAL_SHAPE, CAPTURE_ADAPTER*, …) have surviving hits in docs and in the FROZEN spec_graph_575-grant-gate.yaml, which lint_stale_refs will flag. They are baselined with the precedent rationale already in the tree for spec_graph_551: 'the names are dead, the document is not.' spec_graph_538.yaml:42 pins 'the adapter-capture narrow at tools.py:195 stays live' — a frozen spec this slice FALSIFIES; it is annotated, not silently broken."
+    binds: ["ci_gates"]
+
+# ===========================================================================
+# STRUCTURE — provenance: code (grounding brief) | design (demand-implied)
+# ===========================================================================
+structure:
+  actors:
+    - {id: gather_dispatch,   frame: leg,         provenance: code}   # runtime/tools_gather.py
+    - {id: run_investigation, frame: composition, provenance: code}   # run.py -> driver
+    - {id: query_tool,        frame: leg,         provenance: design}
+    - {id: capture_capability,frame: leg,         provenance: design}
+    - {id: learning_loop,     frame: composition, provenance: code}   # drains in git worktrees
+    - {id: evals_pipeline,    frame: composition, provenance: code}   # re-execs onto another tree
+    - {id: e2e_harness,       frame: composition, provenance: code}
+    - {id: stage_tables,      frame: composition, provenance: code}   # 2nd writer of both sinks
+    - {id: replay_actor,      frame: composition, provenance: code}   # re-execs lead_repository+run onto whatever tree it lands in
+
+  boundaries:
+    - id: gather_raw
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lead_id, seq]
+          evidence: {nl: "record_query.capture:438-445 writes RunPaths(run_dir).gather_raw/{lead}/{seq}.json; seq from _next_seq:333-356, which COUNTS ROWS in executed_queries.jsonl for that lead (not files on disk)."}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            read-tool: {trust: attacker-influenced, constraints: [confine, salt-wrap]}   # is_untrusted_read
+            bash:      {trust: attacker-influenced, constraints: [confine]}              # cat, gather-only shape
+
+    - id: executed_queries
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lead_id, seq]
+          evidence: {nl: "append_jsonl at record_query.capture:464; the (lead_id, seq) pair is the row key lead_repository joins on."}
+          sharing: serialized-append
+        payload:
+          parts:
+            - {role: row, source: template:QUERIES_ROW,
+               slots: {lead_id: lead_id, seq: seq, system: system, verb: verb, query_id: query_id}}
+          invariants: [all-slots-bound]
+          nl: "the twelve-key queries-table row; frozen by this slice and cited by slice 2"
+
+    - id: verbs_registry
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the declared (system, verb) roster and each verb's param signature"}
+          distinguished: [empty]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: circuit_breaker
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "exit codes; INFRA_EXIT_CODES={2,124} trip, 1 and 64 do not"}
+          default: 0
+          distinguished: [0, 1, 2, 64, 124]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: adapter_timeout
+      provenance: code
+      facets:
+        domain: {type: int, refinement: {nl: "DEFENDER_ADAPTER_TIMEOUT_SEC, read at MODULE IMPORT"},
+                 default: 120, distinguished: [120], falsy_valid: false, documented_alternatives: []}
+
+    - id: defender_dir
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "the run's tree; a worktree/tmp tree in the drains and evals"},
+                 default: unknown, distinguished: [], falsy_valid: false, documented_alternatives: []}
+
+    - id: salt
+      provenance: code
+      facets:
+        domain: {type: str, refinement: {nl: "the PER-RUN salt (deps.salt); a fresh salt per call fails the injection defense open"},
+                 default: unknown, distinguished: [], falsy_valid: false, documented_alternatives: []}
+
+    - id: transport
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            subprocess: {trust: attacker-influenced, constraints: unknown}   # docker exec / curl
+
+    - {id: gather_bash_policy, provenance: code,
+       facets: {access: {constraints_by_via: {bash: {trust: attacker-influenced, constraints: [denylist, confine]}}}}}
+    - {id: main_bash_policy,   provenance: code,
+       facets: {access: {constraints_by_via: {bash: {trust: attacker-influenced, constraints: [denylist, confine]}}}}}
+    - {id: descriptor_catalog, provenance: code, facets: {}}
+    - {id: toolset,            provenance: code, facets: {}}
+    - {id: record_query_module,provenance: code, facets: {}}
+    - {id: ticket_cli,         provenance: code, facets: {}}
+    - {id: ci_gates,           provenance: code, facets: {}}
+    - {id: model_context,      provenance: design, facets: {}}
+    - {id: config_env,         provenance: code, facets: {}}
+    - {id: subprocess_child,   provenance: code, facets: {}}
+
+  interacts:
+    - {from: query_tool,        to: transport,        mode: invoke, via: api, provenance: design, sends: payload}
+    - {from: query_tool,        to: gather_raw,       mode: write,  via: fs,  provenance: design, interpolates: [lead_id, seq]}
+    - {from: query_tool,        to: executed_queries, mode: write,  via: fs,  provenance: design, interpolates: [lead_id, seq]}
+    - {from: query_tool,        to: model_context,    mode: write,  via: llm, provenance: design, sends: payload}
+    - {from: capture_capability,to: circuit_breaker,  mode: invoke, via: api, provenance: design}
+    - {from: transport,         to: subprocess_child, mode: invoke, via: subprocess, provenance: code}
+    - {from: transport,         to: config_env,       mode: read,   via: fs,  provenance: code}
+    - {from: stage_tables,      to: gather_raw,       mode: write,  via: fs,  provenance: code, interpolates: [lead_id, seq]}
+    - {from: stage_tables,      to: executed_queries, mode: write,  via: fs,  provenance: code}
+    - {from: gather_dispatch,   to: gather_raw,       mode: read,   via: read-tool, provenance: code}
+    - {from: e2e_harness,       to: transport,        mode: invoke, via: api, provenance: code}
+    - {from: replay_actor,      to: executed_queries, mode: read,   via: fs,  provenance: code}
+    - {from: replay_actor,      to: gather_raw,       mode: read,   via: fs,  provenance: code}
+
+  drives:
+    - {from: run_investigation, to: gather_dispatch, provenance: code, multiplicity: serial}
+    - {from: gather_dispatch,   to: query_tool,      provenance: design, multiplicity: concurrent}
+    - {from: learning_loop,     to: gather_dispatch, provenance: code, multiplicity: serial}
+    - {from: evals_pipeline,    to: gather_dispatch, provenance: code, multiplicity: serial}
+    - {from: e2e_harness,       to: gather_dispatch, provenance: code, multiplicity: serial}
+
+# ===========================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true,  note: "defender_dir.domain.default = unknown (the tree is per-run, resolved from deps); recorded, not silently nulled. All other invariant fields claimed."}
+    - {rule: R1, fired: true,  discharged_by: [query_returns_wrapped_truncated_view_and_payload_note, query_return_wrap_uses_the_run_salt, row_contract_frozen, failure_digest_carries_the_vendor_diagnosis],
+       note: "interacts(query_tool->model_context).payload and ->executed_queries.payload are outbound payloads: shape demands minted for both."}
+    - {rule: R2, fired: true,  discharged_by: [concurrent_queries_do_not_collide_on_seq, seq_collision_would_misdirect_the_judge, stage_tables_still_round_trips],
+       note: "TWO writers interpolate (lead_id, seq) into gather_raw — query_tool and stage_tables — and drives(gather_dispatch->query_tool) is multiplicity: concurrent. This is the rule that computes the seq race; it fired from the graph, not from anyone's memory."}
+    - {rule: R3, fired: true,  discharged_by: [gather_bash_keeps_local_computation, main_cannot_reach_a_payload_by_any_surface, query_payload_is_not_double_wrapped_on_read_back],
+       note: "gather_raw is reachable via read-tool AND bash; the parity obligation is that the confine + wrap hold on every via."}
+    - {rule: R4, fired: true,  discharged_by: [empty_verb_return_is_payload_status_empty, missing_config_is_infra_not_agent_fixable, hung_verb_records_infra_not_a_synthesized_timeout, empty_verbs_declaration_fails_closed_at_the_tool],
+       note: "circuit_breaker.domain.distinguished = [0,1,2,64,124] — each exercised; verbs_registry.domain.distinguished[empty] exercised with a positive control."}
+    - {rule: R5, fired: true,  discharged_by: [record_query_module_survives_its_cli, ticket_cli_dual_surface_survives, e2e_replay_harness_has_an_injected_verb_seam, stage_tables_still_round_trips, shim_flags_and_non_adapter_shims_are_removed_together],
+       note: "REMOVALS with live consumers: parse_params/_derive_verb/main() (record_query survives for derive_system + _passthrough_max_bytes); the shims (adapter_shims() reads bin/ at call time); CAPTURE_ADAPTER* grants; the e2e harness's record_query.subprocess seam."}
+
+# ===========================================================================
+claims_ledger:
+  probed:
+    - {claim: reachability, nl: "gather can run an adapter standalone and the adapter|defender-sql pipe TODAY",
+       probe: "drove the real decide_bash with compile_policy(GATHER_DEF)", observed: "ALLOW, routes adapter_argv / sql_pipe"}
+    - {claim: reachability, nl: "the split pipe survives with no grant work",
+       probe: "same", observed: "cat <ABS payload> | defender-sql -> ALLOW; the RELATIVE spelling -> DENY, with a reason naming the adapter route this slice deletes"}
+    - {claim: reachability, nl: "main cannot read a payload", probe: "same", observed: "DENY"}
+    - {claim: primitive, nl: "RunAborted and ModelRetry are plain Exception subclasses, so a broad catch swallows the run-wide kill switch",
+       probe: "imported both, printed __mro__", observed: "RunAborted -> Exception -> BaseException; ModelRetry likewise. CONFIRMED — the carve-out demand exists because of this."}
+    - {claim: reachability, nl: "the record_query substring exemption in block_main_loop_raw_access is a read-gate bypass (ISSUE'S CLAIM)",
+       probe: "grepped every production import of that module + looked for run-settings.json",
+       observed: "REFUTED. run-settings.json does not exist in the tree; production imports only RAW_DENY_REASON/RAW_MARKER/ADAPTER_DENY_REASON. main() is never called. Main's clamp is positive enumeration."}
+    - {claim: reachability, nl: "adapter bash output is salt-wrapped as untrusted today (ISSUE'S CLAIM)",
+       probe: "same sweep; traced every _wrap call site",
+       observed: "REFUTED. tag_tool_results._bash_is_untrusted is in the same unwired hook. The live wraps are read_file of gather_raw (tools.py:395) and gather's summary return (tools_gather.py:623). Adapter payloads enter gather BARE."}
+    - {claim: census, nl: "record_query.capture is the SOLE writer of both sinks (BRIEF'S CLAIM)",
+       probe: "swept for copy/copytree/write into the sinks",
+       observed: "REFUTED. lead_repository.stage_tables (copy2 + copytree) is a second writer, driven by core/persist and evals/_pipeline; evals/harness_lead copytrees a whole run dir."}
+    - {claim: behavior, nl: "pydantic-ai: after_tool_execute is skipped when the tool raises, and ModelRetry bypasses both hooks",
+       probe: "read tool_manager.py:294-354 in the installed package", observed: "CONFIRMED — this is why capture is wrap_tool_execute."}
+    - {claim: behavior, nl: "a capability-provided toolset does not land in agent._function_toolset.tools",
+       probe: "read agent/__init__.py:537-539, 2688-2701", observed: "CONFIRMED — it lands in _cap_toolsets; #538's assertions inspect _function_toolset."}
+    - {claim: behavior, nl: "the verb column holds the query_id suffix, not the subcommand, and has zero production readers",
+       probe: "read record_query.py:453; grepped every .verb read", observed: "CONFIRMED — lead_repository parses it into QueryRow.verb and nothing downstream reads it."}
+  deferred:
+    - {claim: behavior, nl: "the in-process seam's wall-clock behaviour under a genuinely hung transport (thread leak, not cancellation)",
+       note: "only the written implementation can settle this; write-code-from-spec must probe it."}
+    - {claim: behavior, nl: "whether importing every adapter to build the descriptor roster is acceptable under the @cache memo, or whether the roster needs a declaration read that does not execute the module's env constants",
+       note: "deferred to implementation; the demand pins the observable (two trees in one process), not the mechanism."}

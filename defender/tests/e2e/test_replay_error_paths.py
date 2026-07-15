@@ -20,7 +20,7 @@ import pytest
 
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
-    FailingAdapterSubprocess,
+    FakeVerbs,
     NeverEndsModel,
     ReplayFn,
     Turn,
@@ -28,10 +28,26 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.runtime import circuit_breaker, driver
-from defender.scripts.gather_tools import record_query
+from defender.scripts.adapters.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
 pytestmark = pytest.mark.e2e
+
+
+# The failing-registry seam (#611). It replaces the harness's old
+# `FailingAdapterSubprocess` — a stub of `record_query`'s `subprocess` MODULE, which a verb
+# registry does not have. A fake verb injects the fault and nothing else: the exit code (2),
+# the error class (infra) and the breaker outcome are all production code's work, which is
+# what makes the assertions below assertions about the breaker rather than about the fake.
+def _down(*systems: str) -> FakeVerbs:
+    def probe(ctx, *, q: str = "probe") -> list[dict]:
+        raise TransportFault("connection refused")
+
+    return FakeVerbs({s: {"probe": probe} for s in systems})
+
+
+def _q(system: str) -> Turn:
+    return Turn(tool_calls=[("query", {"system": system, "verb": "probe", "params": {}})])
 
 
 def test_request_limit_writes_partial_trace(tmp_path):
@@ -55,19 +71,21 @@ def test_request_limit_writes_partial_trace(tmp_path):
     assert (run_dir / "llm_requests.jsonl").is_file()
 
 
-def test_circuit_breaker_kill_switch_aborts_run(tmp_path, monkeypatch):
+def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     """Driver terminal path #2 — the run-wide circuit breaker. A nested gather
     keeps hitting connectivity failures (adapter exit 2) across distinct systems;
     the RUN_FAIL_KILL_LIMIT-th raises RunAborted from circuit_breaker, deep inside
     the nested gather's capture path. It must propagate up through the gather
     subagent AND the main agent.iter loop to the driver, which catches it and
     writes the partial trace — same contract as the request-limit path. (No unit
-    test spans this chain; the breaker unit test stops at record_outcome.)"""
+    test spans this chain; the breaker unit test stops at record_outcome.)
+
+    Since #611 the capture path is the `query` tool's capability, and `RunAborted` has to
+    survive its catch-all: the broad `except BaseException` that stops a transport fault from
+    unwinding the run is exactly what would swallow the kill switch, because `RunAborted` is a
+    plain `Exception` subclass. This test is what says it does not."""
     run_id, salt = "kill-switch", "0011223344550000"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
-    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary: adapter subprocess IO
-        record_query, "subprocess", FailingAdapterSubprocess,
-    )
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -75,17 +93,15 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path, monkeypatch):
             "goal": "probe every source", "what_to_summarize": ["x"]})]),
         Turn(text="should not be reached — gather aborts the run first"),
     ])
-    # Five adapter calls to five DISTINCT systems: each is a system's FIRST failure
-    # (so none trips the per-system breaker at 2), but the run total reaches
-    # RUN_FAIL_KILL_LIMIT on the fifth → RunAborted.
+    # Five queries to five DISTINCT systems: each is a system's FIRST failure (so none trips
+    # the per-system breaker at 2), but the run total reaches RUN_FAIL_KILL_LIMIT on the fifth
+    # → RunAborted.
     systems = ("elastic", "identity", "cmdb", "ticket", "host-state")
     assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT  # the test is pinned to the limit
-    gather = ReplayFn(
-        [Turn(tool_calls=[("bash", {"command": f"defender-{s} query probe"})]) for s in systems]
-        + [Turn(text="never reached")]
-    )
+    gather = ReplayFn([_q(s) for s in systems] + [Turn(text="never reached")])
 
-    result = drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather)
+    result = drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather,
+                   verbs=_down(*systems))
 
     # The run did not crash: the driver caught RunAborted and returned cleanly with
     # no output, exactly like the request-limit terminator.
@@ -134,7 +150,7 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     assert validate_companion(produced, None) == []
 
 
-def test_tripped_system_dispatch_returns_down_message(tmp_path, monkeypatch):
+def test_tripped_system_dispatch_returns_down_message(tmp_path):
     """Circuit-breaker dispatch + in-gather adapter gates, end-to-end. One gather
     run fails `elastic` twice (tripping its per-system breaker) and is then denied
     a third `elastic` call IN-GATHER (the _tripped_message gate — a down-message
@@ -143,9 +159,6 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path, monkeypatch):
     main loop gets the transparent 'system down' summary instead."""
     run_id, salt = "tripped", "55aa55aa55aa55aa"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
-    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary: adapter subprocess IO
-        record_query, "subprocess", FailingAdapterSubprocess,
-    )
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -155,12 +168,12 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path, monkeypatch):
         Turn(text="done"),
     ])
     gather = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": "defender-elastic query a"})]),  # fail 1
-        Turn(tool_calls=[("bash", {"command": "defender-elastic query b"})]),  # fail 2 → trips
-        Turn(tool_calls=[("bash", {"command": "defender-elastic query c"})]),  # gated in-gather
+        _q("elastic"),                       # fail 1
+        _q("elastic"),                       # fail 2 → trips
+        _q("elastic"),                       # gated in-gather (pre-call trip, no row)
         Turn(text="gather l-001 incomplete"),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather)
+    drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather, verbs=_down("elastic"))
 
     # Main dispatched twice then ended; gather ran ONLY for l-001 (4 turns). The
     # l-002 dispatch did NOT respawn the nested agent — the dispatch gate caught it.
@@ -170,7 +183,8 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path, monkeypatch):
     # it did not advance the counter).
     cb = json.loads((run_dir / "circuit_breaker.json").read_text())
     assert cb["systems"]["elastic"]["failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
-    # Only the two pre-trip calls were captured; the 3rd (in-gather gate) was not.
+    # Only the two pre-trip calls were captured; the 3rd (the pre-call trip inside
+    # wrap_tool_execute) returned the down-message WITHOUT executing, so it wrote no row.
     qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     # Both leads were CLAIMED (the dispatch gate fires AFTER the claim), so l-002

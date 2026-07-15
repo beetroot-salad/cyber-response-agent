@@ -42,6 +42,7 @@ from .tools import (
     register_gather_tool,
     register_tools,
 )
+from .verbs import ModuleVerbRegistry
 
 from defender._env import env_bool
 from defender._run_paths import RunPaths
@@ -180,6 +181,7 @@ def build_agent_core(
     agent_id: str,
     extra_capabilities: Sequence[Any] = (),
     make_model: MakeModel = providers.build_for_effort,
+    verbs: Any = None,
 ) -> Agent[Any, str]:
     """Construct one agent + register EXACTLY its `AgentDefinition`'s toolset — the
     single build site.
@@ -193,17 +195,27 @@ def build_agent_core(
     registers NOTHING). Layered per-caller extras (MAIN's `gather` dispatch tool) stay at
     the call site — they are not construction. No defensive catch: a `make_model` fault
     (unroutable name / missing key / bad effort) surfaces at the build, not as a
-    half-built agent that 401s mid-run."""
+    half-built agent that 401s mid-run.
+
+    `verbs` is the data-source verb registry (#611), threaded from `run_investigation` like
+    `make_model`. Declaring `ToolSet(query=True)` is what CONSTRUCTS the capture capability here
+    — that is the whole inseparability property: an agent cannot be built holding the `query`
+    tool and not writing its queries row, because there is no seam between them to unpick."""
     built = make_model(defn.model(), defn.effort)
+    capabilities: list[Any] = [_make_hooks(logger, agent_id), *extra_capabilities]
+    if defn.tools.query:
+        from .query_tool import QueryCapture
+
+        capabilities.append(QueryCapture(verbs))
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,
         instructions=instructions,
-        capabilities=[_make_hooks(logger, agent_id), *extra_capabilities],
+        capabilities=capabilities,
         model_settings=built.settings,
         retries=DEFAULT_TOOL_RETRIES,
     )
-    register_tools(agent, defn.tools)
+    register_tools(agent, defn.tools, verbs)
     return agent
 
 
@@ -226,23 +238,23 @@ _CORPUS_DIRS = ("lessons", "skills", "examples")
 
 
 def _main_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
-    """MAIN's bash lane: the reader grants WITHOUT the gather_raw shape and WITHOUT the adapter
-    routes. Main's denial of the raw payload channel is the ABSENCE of that address from its
-    grant list — not a clamp on a wider grant, which is what the deleted `RAW_MARKER in cmd`
-    substring scan was (it also denied `… | grep gather_raw`, where the marker is a search
-    pattern and no such file is ever opened)."""
-    return _common.reader_grants(
-        roots.run_dir, roots.defender_dir, raw=False, adapters=False,
-    )
+    """MAIN's bash lane: the reader grants WITHOUT the gather_raw shape. Main's denial of the raw
+    payload channel is the ABSENCE of that address from its grant list — not a clamp on a wider
+    grant, which is what the deleted `RAW_MARKER in cmd` substring scan was (it also denied
+    `… | grep gather_raw`, where the marker is a search pattern and no such file is ever
+    opened)."""
+    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=False)
 
 
 def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
     """GATHER's bash lane: the reader grants PLUS the machine-tight `gather_raw/{lead}/{seq}.json`
-    shape (it owns the payloads it captures) and the two structurally-routed adapter grants (a
-    standalone call, captured transparently; and the sanctioned `adapter | defender-sql` pipe)."""
-    return _common.reader_grants(
-        roots.run_dir, roots.defender_dir, raw=True, adapters=True,
-    )
+    shape (it owns the payloads its queries capture).
+
+    There are no adapter grants any more (#611): a data source is reached through the `query`
+    tool, and gather's bash lane keeps only local computation. The sanctioned aggregation pipe
+    survives split in two — `query(...)`, then `cat <ABSOLUTE payload path> | defender-sql
+    '<SQL>'`, which this very shape is what admits."""
+    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=True)
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
@@ -269,7 +281,9 @@ MAIN_DEF = AgentDefinition(
     deny_reason=permission.FALLTHROUGH_DENY_REASON,
 )
 
-# GATHER — the data-access subagent: the reader lane + its own gather_raw + the adapter routes,
+# GATHER — the data-access subagent: the reader lane + its own gather_raw + the typed `query`
+# tool (#611 — the adapter routes off its bash lane are gone; a data source is reached through
+# the registry, never through a program the model names),
 # read-only (no writers). Runs its own cheaper `gather_model()`, reasoning off. `template_search`
 # is its query-catalog discovery route (#585): every bash route it had into that corpus is dead
 # (`find` was never granted, `grep -r` denies since #581, a glob reaches grep as a literal filename
@@ -279,7 +293,7 @@ GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
-    tools=ToolSet(read=True, bash=True, template_search=True),
+    tools=ToolSet(read=True, bash=True, template_search=True, query=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_gather_bash_shapes,),
     deps_cls=GatherDeps,
@@ -294,6 +308,7 @@ def _gather_instructions(defender_dir: Path) -> str:
 def build_gather_agent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     make_model: MakeModel = providers.build_for_effort,
+    verbs: Any = None,
 ) -> Agent[GatherDeps, str]:
     """The single-agent gather (#340) — the production gather for the PydanticAI
     engine. One agent runs find→execute(one server-side ES|QL aggregation)→verify and
@@ -315,6 +330,7 @@ def build_gather_agent(
         logger=logger,
         agent_id=agent_id,
         make_model=make_model,
+        verbs=verbs,
     )
 
 
@@ -432,7 +448,7 @@ def _main_extra_capabilities() -> list[ProcessHistory[Any]]:
 def build_agent(
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
-    *, main_model: str | None = None,
+    *, main_model: str | None = None, verbs: Any = None,
 ) -> Agent[AgentDeps, str]:
     """The MAIN loop agent — built through the single `build_agent_core` site from
     `MAIN_DEF` (the reader lane + file writers + MAIN's compaction capability), then the
@@ -460,7 +476,7 @@ def build_agent(
     # superseded by this before it ever merged.
     register_gather_tool(
         agent,
-        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id, make_model),
+        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id, make_model, verbs),
         GATHER_REQUEST_LIMIT,
     )
     return agent
@@ -484,12 +500,24 @@ async def run_investigation(
     salt: str,
     model_name: str | None = None,
     make_model: MakeModel | None = None,
+    verbs: Any = None,
 ) -> dict:
-    """Run one investigation end-to-end; emit the trace; return a small summary."""
+    """Run one investigation end-to-end; emit the trace; return a small summary.
+
+    `verbs` is the data-source registry the gather subagent's `query` tool dispatches against
+    (#611) — the SECOND injection seam below the model, alongside `make_model`. Production
+    resolves the real `ModuleVerbRegistry` off the RUN's `defender_dir`, which is the whole
+    point: the tree is a per-run value (a worktree in a learning drain, an eval's tmp tree), so
+    a verb reads THAT tree's `config.env`, not the one the driver happened to import under."""
     model_name = resolve_main_model(model_name)
     make_model = make_model or providers.build_for_effort
+    # The registry is derived from a PARAMETER (the run's tree), so it cannot be a signature
+    # default — this is the endorsed "single DI/test seam that owns its default" shape, the same
+    # one `make_model` uses on the line above.
+    adapters = defender_dir / "scripts" / "adapters"
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    agent = build_agent(defender_dir, logger, make_model, main_model=model_name)
+    agent = build_agent(defender_dir, logger, make_model, main_model=model_name, verbs=verbs)
     # MAIN deps via the single bind() seam (#545): compile_policy reproduces the authored
     # main policy field-for-field AND adds the read↔bash filename filter (read_shapes), and
     # the run's PERSISTED salt is carried in (never a fresh uuid4) so the deps' tool-output

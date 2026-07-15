@@ -467,28 +467,43 @@ def test_judge_cat_comparison_dir_via_read_roots_allowed(tmp_path):
 #    wiring + that decide_read is unaffected by the confine field.
 # ============================================================================
 
-def test_gather_multiline_esql_denies_with_the_lexing_reason_not_the_adapter_one(tmp_path):
+def test_gather_multiline_command_denies_with_the_lexing_reason_not_a_policy_one(tmp_path):
     """The case that motivates a dedicated reason, and it is NOT the judge's.
 
-    ES|QL is line-oriented and the query templates render it as multi-line blocks, so
-    gather must flatten it into one shell argument on every call. When it doesn't, the
-    command is a perfectly legal standalone adapter invocation whose only defect is a
-    newline inside its quoted query. Before the split-out reason, the gate answered with
-    `GATHER_FALLTHROUGH_DENY_REASON` — "gather may only run a data-source adapter as a
-    standalone command" — i.e. it blamed adapter policy for a tokenizer failure, telling
-    the model the exact opposite of what it needed to know."""
+    SQL/ES|QL is line-oriented and the query templates render it as multi-line blocks, so gather
+    must flatten it into one shell argument on every call. When it doesn't, the command may be an
+    otherwise-allowed invocation whose only defect is a newline inside its quoted query — and a
+    POLICY reason ("reach a data source with the `query` tool", "adapters are not runnable from
+    bash") would blame policy for a tokenizer failure, telling the model the exact opposite of what
+    it needed to know. So a lexing failure must be diagnosed BEFORE any classification of the
+    command's shape.
+
+    #611: the motivating command used to be a standalone `defender-elastic esql …` (which was
+    allowed when flat). That form is now unreachable from bash, so the probe is gather's surviving
+    multi-line-prone command — a `cat <payload> | defender-sql '<SQL>'` aggregation — plus an
+    adapter-shaped multi-liner, which must ALSO lex-deny rather than get the adapter reason (the
+    over-tightening this test exists to catch would now hand back `ADAPTER_RETIRED_REASON`)."""
     run = tmp_path / "run"
     dfn = _DEFENDER
     pol = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
-    multi = 'defender-elastic esql \'FROM logs-*\n| WHERE host == "db-1"\n| STATS n = count(*)\''
-    flat = 'defender-elastic esql \'FROM logs-* | WHERE host == "db-1" | STATS n = count(*)\''
+    raw = f"{run}/gather_raw/l-001/0.json"
+    multi = f"cat {raw} | defender-sql 'SELECT host,\ncount(*)\nFROM data GROUP BY host'"
+    flat = f"cat {raw} | defender-sql 'SELECT host, count(*) FROM data GROUP BY host'"
 
     denied = permission.decide_bash(multi, policy=pol, run_dir=run, defender_dir=dfn)
     assert not denied.allow
     assert denied.reason == permission.UNTOKENIZABLE_REASON
-    assert denied.reason != pol.deny_reason  # not the misleading adapter-policy text
-    # the same query on one line is a normal, allowed standalone adapter call
+    assert denied.reason != pol.deny_reason  # not the misleading policy text
+    # the same query on one line is a normal, allowed aggregation
     assert permission.decide_bash(flat, policy=pol, run_dir=run, defender_dir=dfn).allow
+
+    # an ADAPTER-shaped multi-liner lexes-denies too: the lex verdict precedes classification, so
+    # the model is not told "use the `query` tool" when its command never tokenized at all.
+    adapter_multi = 'defender-elastic esql \'FROM logs-*\n| WHERE host == "db-1"\''
+    d = permission.decide_bash(adapter_multi, policy=pol, run_dir=run, defender_dir=dfn)
+    assert not d.allow
+    assert d.reason == permission.UNTOKENIZABLE_REASON
+    assert d.reason != permission.ADAPTER_RETIRED_REASON
 
 
 def test_main_cat_scope_is_the_read_surface(tmp_path):
@@ -510,10 +525,14 @@ def test_main_cat_scope_is_the_read_surface(tmp_path):
 
 
 def test_gather_stream_plumbing_anchored(tmp_path):
-    """GATHER's compute lane still works over IN-SCOPE payloads — cat {run}/… | defender-sql, the
-    standalone adapter, cat {run}/… | jq — but jq is stdin-only and an out-of-scope /tmp operand is
-    denied (the bypass #535 closed, now enforced against the RESOLVED path). Note the payload path
-    must match the machine-tight gather_raw shape (`gather_raw/l-<digits>/<seq>.json`)."""
+    """GATHER's compute lane still works over IN-SCOPE payloads — cat {run}/… | defender-sql,
+    cat {run}/… | jq — but jq is stdin-only and an out-of-scope /tmp operand is denied (the bypass
+    #535 closed, now enforced against the RESOLVED path). Note the payload path must match the
+    machine-tight gather_raw shape (`gather_raw/l-<digits>/<seq>.json`).
+
+    #611: the standalone adapter left this lane (it is the `query` tool's job now), so the plumbing
+    pinned here is what REMAINS — local computation over a payload already on disk — and the adapter
+    is asserted DENIED, which is the same anchoring statement with the verdict flipped."""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
@@ -524,7 +543,7 @@ def test_gather_stream_plumbing_anchored(tmp_path):
 
     raw = f"{run}/gather_raw/l-001/0.json"
     assert bash(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'").allow
-    assert bash("defender-elastic query 'x'").allow
+    assert not bash("defender-elastic query 'x'").allow   # #611: no adapter on any bash lane
     assert bash(f"cat {raw} | jq '.hits|length'").allow
     assert not bash("jq '.hits|length' /tmp/p.json").allow
     assert not bash(f"cat {run}/gather_raw/evil.json").allow   # in-root, but not the raw shape

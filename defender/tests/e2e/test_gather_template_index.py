@@ -44,7 +44,7 @@ def _draft_ids() -> set[str]:
     return {r.id for r in iter_query_templates(_CATALOG) if r.status == "draft"}
 
 
-def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path, monkeypatch):
+def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     """d3 + d4 + d17, through the real driver against the REAL repo corpus.
 
     The dispatch prompt the gather subagent receives must carry every ESTABLISHED template id
@@ -53,9 +53,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path, mon
     records that binding — which is the whole point of the change (a bound id is a catalog reuse;
     a coined id is a miss).
     """
-    from defender.scripts.gather_tools import record_query
-
-    from defender.tests.e2e._replay_harness import FakeAdapterSubprocess
+    from defender.tests.e2e._replay_harness import FakeVerbs
 
     run_id, salt = "tmpl-index", "1122334455667788"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
@@ -69,18 +67,21 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path, mon
         Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
         Turn(text="Investigation complete."),
     ])
-    # Gather binds a template it could only have learned from the index, and tags its id.
+    # Gather binds a template it could only have learned from the index, and tags its id via the
+    # `query` tool's `query_id` param (#611 — no more `--query-id` pseudo-flag on a bash adapter).
+    def esql(ctx, *, query: str) -> list[dict]:
+        return [{"@timestamp": "2026-01-01T00:00:00Z", "event.action": "sshd-auth"}]
+
     gather_replay = ReplayFn([
-        Turn(tool_calls=[("bash", {
-            "command": "defender-elastic esql 'FROM logs-system.auth-* | LIMIT 1' "
-                       "--query-id elastic.sshd-auth-history"})]),
+        Turn(tool_calls=[("query", {
+            "system": "elastic", "verb": "esql",
+            "params": {"query": "FROM logs-system.auth-* | LIMIT 1"},
+            "query_id": "elastic.sshd-auth-history"})]),
         Turn(text="Summary: 1 sshd auth event."),
     ])
-    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary: adapter subprocess IO
-        record_query, "subprocess", FakeAdapterSubprocess,
-    )
 
-    drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay)
+    drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay,
+          verbs=FakeVerbs({"elastic": {"esql": esql}}))
 
     dispatch = gather_replay.seen[0]
 

@@ -86,23 +86,27 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### CLI
 
-```bash
-defender-change-mgmt health-check
-defender-change-mgmt active-changes --host <h> --at <iso>
-defender-change-mgmt get-change <cr_id>
-defender-change-mgmt list-changes [--status X] [--host h] [--active-at iso] [--limit N]
+```
+query(system="change-mgmt", verb="health-check",   params={})
+query(system="change-mgmt", verb="active-changes", params={"host": "<h>", "at": "<iso>"})
+query(system="change-mgmt", verb="get-change",     params={"cr_id": "<cr_id>"})
+query(system="change-mgmt", verb="list-changes",   params={"status": "X", "host": "h", "active_at": "<iso>"})
 ```
 
-**Do not Read `change_mgmt_cli.py` source to discover flags.** This
-SKILL plus `defender-change-mgmt {subcommand} --help` is the
-authoritative surface.
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types. `active-changes` requires both
+`host` and `at`; every `list-changes` param is an optional filter.
 
-**`--at` and `--active-at` must be UTC ISO 8601** (e.g.
-`2026-04-24T12:00:00Z`). The CLI validates the shape and rejects
+**Do not Read `change_mgmt_cli.py` source to discover params.** This SKILL plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
+
+**`at` and `active_at` must be UTC ISO 8601** (e.g.
+`2026-04-24T12:00:00Z`). The verb validates the shape and rejects
 local-time / date-only forms before dispatching — a silent timezone
 mismatch is harder to diagnose than a refusal.
 
-Each subcommand emits the upstream JSON response unchanged.
+Each verb returns the upstream JSON response unchanged.
 
 ### Connectivity
 

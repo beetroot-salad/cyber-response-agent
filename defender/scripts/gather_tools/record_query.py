@@ -1,74 +1,45 @@
 #!/usr/bin/env python3
-"""Gather capture wrapper — deterministic record of an executed query.
+"""The queries table's PAYLOAD-SHAPING half — what a captured payload looks like on disk, in
+the row, and in the model's context.
 
-The gather subagent invokes this (via the ``defender-record-query`` shim)
-instead of redirecting a system-CLI's stdout itself. Only two flags carry
-information the wrapper can't recover on its own:
+This module used to be a WRAPPER: a `defender-record-query` CLI the gather subagent piped its
+adapter call through, which ran the inner command as a subprocess, captured its stdout, and
+appended the queries row. #611 took the subprocess away — a data-source call is a typed `query`
+tool now, and the row + by-ref payload are written by its capture capability
+(`runtime/query_tool.py`), in-process. So `main()`, `parse_params` (which flattened every
+positional into a meaningless `arg0`/`arg1`), `_derive_verb`, and `capture()` itself are gone
+with the argv they parsed.
 
-    defender-record-query --lead {L} --query-id cmdb.host-lookup -- \
-        defender-cmdb host-lookup web-1
+What survives is everything that was never about the process boundary:
 
-Both the wrapper and the inner command are invoked through their stable
-``defender-*`` shims (``defender/bin/``), not a path/module form — see
-``defender/bin/README.md`` and ``defender/skills/gather/SKILL.md`` §3.
+  - `_next_seq` — the per-lead sequence, counted from ROWS (not files on disk), so a query whose
+    payload write failed still advances it and the next query cannot collide on `(lead_id, seq)`.
+  - `build_truncated_view` / `_is_event_payload` / `_envelope_total` / `payload_digest` — the
+    in-context VIEW of a payload: a field-shape sample plus a pointer to the file, never the dump.
+  - `_passthrough_max_bytes` — the char ceiling, shared with the `read_file` tool (`tools.py`
+    imports it as `_read_char_cap`), so an on-disk read can never defeat the passthrough cap.
+    Nothing to do with adapters; it is why this module could not simply be deleted.
 
-The other two flags default themselves, so the subagent doesn't echo
-boilerplate:
-
-  * ``--run-dir`` defaults to ``$DEFENDER_RUN_DIR`` (exported by run.py;
-    one run per process). Pass it explicitly only outside a run.
-  * ``--system`` is derived from the inner adapter invocation — the
-    ``defender-<system>`` shim token (or a ``<system>_cli.py`` path).
-    Pass it explicitly to override an undetectable case.
-
-``--lead`` stays explicit: the subagent already holds its ``:L`` row id
-from the dispatch, and there is no portable in-process channel to recover
-it here. ``--query-id`` stays explicit: it is the agent's semantic binding
-of this query to a catalog template (``{system}.{template}``, or
-``ad-hoc``), not a mechanical function of the argv.
-
-It runs the inner command, captures stdout to a canonical per-lead path,
-and appends an executed-query record (the queries table) to
-``{run_dir}/executed_queries.jsonl``. The inner command's stdout/stderr/exit
-code pass straight through, so the subagent still sees the result for its
-reasoning, and the wrapper reports the raw payload path it wrote on stderr.
-
-It retires the two brittle model-authored steps it replaces: the redirect
-to a model-chosen ``gather_raw/{lead_id}.json`` (Bug #1: filename drift →
-silent drop) and the post-hoc, free-floating ``queries[]`` sidecar id
-(Bug #2: mislabel → catalog miss). ``system``/``query_id`` are recorded
-*at execution time*, bound to the actual command and its captured payload,
-rather than reconstructed from a fragile per-CLI argv grammar — so the
-wrapper stays portable across whatever system CLIs are onboarded, with no
-hardcoded system/verb roster.
-
-The per-lead group id ``L`` comes from the dispatch (the ``:L`` invlang row
-id, e.g. ``l-001``; see ``hooks/record_lead.py``); it is the address
-namespace for this lead's payloads and the queries-table FK (``lead_id``).
-
-Exit code: the inner command's exit code (or 2 on wrapper usage error).
+The per-lead group id `L` comes from the dispatch (the `:L` invlang row id, e.g. `l-001`; see
+`hooks/record_lead.py`); it is the address namespace for this lead's payloads and the
+queries-table FK (`lead_id`).
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import re
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` imports resolve whether this
-# file is imported in-process (tools._capture_adapter) or run as the standalone CLI.
+# Put the workspace root on sys.path so `defender.*` imports resolve whether this file is
+# imported in-process or read directly.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._env import env_int
-from defender._io import append_jsonl, read_jsonl_rows
+from defender._io import read_jsonl_rows
 from defender._run_paths import RunPaths
-from defender.runtime.circuit_breaker import error_class_for_exit
 
 # A lead_id is the `:L` invlang row id used verbatim as the queries-table FK
 # and a gather_raw/ path segment. Grammar mirrors hooks/record_lead.py and the
@@ -81,8 +52,8 @@ LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 # in block_main_loop_raw_access.ADAPTER_CLI_RE / hooks/_cmd_segments.ADAPTER_CLI_RE.
 _CLI_RE = re.compile(r"(?:^|/)(\w+)_cli\.py$")
 # Non-adapter `defender-*` shims — never a lead system. Mirrors
-# hooks/_cmd_segments.NON_ADAPTER_SHIMS.
-_NON_ADAPTER = frozenset({"record-query", "invlang"})
+# hooks/_cmd_segments.NON_ADAPTER_SHIMS. `record-query` left with its shim (#611).
+_NON_ADAPTER = frozenset({"invlang"})
 
 # Size safety: a query that over-returns (server-side filter didn't bind,
 # broad window, high-cardinality index) would otherwise dump its whole
@@ -100,59 +71,6 @@ def _passthrough_max_bytes() -> int:
 PASSTHROUGH_SAMPLE_COUNT = 3
 _SAMPLE_MAX_CHARS = 600
 _RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
-
-
-def _args_after_script(inner: list[str]) -> list[str]:
-    """The argv after the CLI script/shim token (the first token ending in
-    ``.py`` or starting with ``defender-``), or the whole argv when none is
-    found. The leading element of the result, if not a flag, is the adapter
-    subcommand (verb) — both ``parse_params`` and ``_derive_verb`` split on it."""
-    script_idx = next(
-        (i for i, t in enumerate(inner)
-         if t.endswith(".py") or t.startswith("defender-")), None
-    )
-    return inner[script_idx + 1 :] if script_idx is not None else list(inner)
-
-
-def parse_params(inner: list[str]) -> dict:
-    """Extract bound params from an inner CLI argv, generically.
-
-    Pure — no IO, no per-system tables. Locates the CLI script (first
-    token ending in ``.py`` or a ``defender-`` invocation shim), drops the
-    leading subcommand token (the
-    verb, already captured in ``query_id``), then folds the remainder:
-    ``--flag value`` / ``-f value`` pairs become named entries, bare
-    ``--flag`` (followed by another flag or end-of-args) become ``True``,
-    and positionals become ``arg0``/``arg1``/… in order.
-
-    Param *names* for positionals are intentionally generic — the
-    durable join key is ``(query_id, params)``, and positional order is
-    stable per template, so ``arg0`` is sufficient and portable. The
-    verbatim command is preserved separately as ``raw_command``.
-    """
-    rest = _args_after_script(inner)
-    # Drop the leading subcommand token (the verb); it is already in query_id.
-    if rest and not rest[0].startswith("-"):
-        rest = rest[1:]
-
-    params: dict[str, object] = {}
-    pos = 0
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok.startswith("-"):
-            flag = tok.lstrip("-")
-            if i + 1 < len(rest) and not rest[i + 1].startswith("-"):
-                params[flag] = rest[i + 1]
-                i += 2
-            else:
-                params[flag] = True
-                i += 1
-        else:
-            params[f"arg{pos}"] = tok
-            pos += 1
-            i += 1
-    return params
 
 
 def derive_system(inner: list[str]) -> str | None:
@@ -187,16 +105,6 @@ def derive_system(inner: list[str]) -> str | None:
             if name not in _NON_ADAPTER:
                 return name
     return None
-
-
-def payload_status(exit_code: int, stdout: str) -> str:
-    """Coarse structural status. The empty-vs-suspect-empty validity check
-    stays with the model (gather SKILL §3.5); this is the structural floor."""
-    if exit_code != 0:
-        return "error"
-    if not stdout.strip():
-        return "empty"
-    return "ok"
 
 
 def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
@@ -356,183 +264,3 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     )
 
 
-def _derive_verb(inner: list[str]) -> str | None:
-    """The adapter subcommand token (after the shim/script path), or None for a
-    flags-only invocation. Mirrors parse_params' leading-subcommand drop."""
-    rest = _args_after_script(inner)
-    if rest and not rest[0].startswith("-"):
-        return rest[0]
-    return None
-
-
-_ADAPTER_TIMEOUT_S = env_int("DEFENDER_ADAPTER_TIMEOUT_SEC", 120)
-
-
-def capture(
-    run_dir: Path,
-    lead: str,
-    inner: list[str],
-    *,
-    query_id: str | None = None,
-    system: str | None = None,
-    env: dict | None = None,
-    timeout: int = _ADAPTER_TIMEOUT_S,
-) -> tuple[str, str, dict]:
-    """Run an adapter command and record it to the queries table + payload.
-
-    The harness capability behind gather's data-source access (and the body of
-    the legacy ``defender-record-query`` CLI): subprocess-run ``inner``, persist
-    its stdout to ``gather_raw/{lead}/{seq}.json``, and append the executed-query
-    row to ``executed_queries.jsonl``. Returns ``(passthrough_view, stderr,
-    record)`` — the (possibly size-capped) stdout view for the caller to surface,
-    the raw stderr, and the recorded row.
-
-    ``query_id`` defaults to ``{system}.{verb}`` (derived from the command) when
-    the caller doesn't bind a catalog template id — the in-process gather path
-    has no model-supplied id. Raises ``ValueError`` on an undetectable system or
-    a malformed lead id (the structural preconditions the CLI checked inline).
-    """
-    system = system or derive_system(inner)
-    if not system:
-        raise ValueError(
-            "system could not be derived from the adapter command "
-            "(expected a defender-<system> shim or <system>_cli.py path); "
-            "pass --system to override"
-        )
-    # Validate the FK before it becomes a path segment: an unvalidated lead
-    # (traversal / absolute) would escape gather_raw/ and break the join.
-    if not LEAD_ID_RE.match(lead):
-        raise ValueError(f"invalid lead id {lead!r} (expected an `l-` row id)")
-    # A model-supplied `query_id` becomes a `{system}/_draft/{verb}.md` path
-    # segment in the offline lead-author (lead_author.synthesize_drafts); a
-    # separator or parent-ref would escape the catalog dir (arbitrary `.md`
-    # write). Reject traversal shapes at the boundary — same discipline as the
-    # `lead` guard above. Narrow (separators / `..` / NUL) so a normally coined
-    # `{system}.{kebab}` id is never rejected; the auto-derived default below is
-    # already safe.
-    if query_id is not None and any(t in query_id for t in ("/", "\\", "..", "\x00")):
-        raise ValueError(
-            f"invalid query id {query_id!r} (path-traversal characters not allowed)"
-        )
-    if query_id is None:
-        verb = _derive_verb(inner)
-        query_id = f"{system}.{verb}" if verb else f"{system}.ad-hoc"
-
-    try:
-        # Pinned utf-8 and LOSSY. This pipe is the ingestion boundary: the adapter's stdout is
-        # vendor telemetry — indexed log lines, process cmdlines, filenames — i.e. the likeliest
-        # source of a non-UTF-8 byte in the whole system. A strict decode raises
-        # UnicodeDecodeError inside `run()`, which is a ValueError, so it sails past the
-        # TimeoutExpired guard below, out of `capture()`, out of the gather tool (`capture` runs
-        # IN-PROCESS via tools_gather._capture_query) and kills the stage. One mangled byte must
-        # cost one character, not the lead and not the run.
-        proc = subprocess.run(
-            inner, capture_output=True, text=True, env=env, timeout=timeout,
-            encoding="utf-8", errors="replace",
-        )
-        rc, out, err = proc.returncode, proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired:
-        # A hung adapter must not hang the investigation — record it as an error.
-        rc, out, err = 124, "", f"adapter timed out after {timeout}s"
-
-    lead_dir = RunPaths(run_dir).gather_raw / lead
-    seq = _next_seq(run_dir, lead)
-    payload_path = lead_dir / f"{seq}.json"
-    payload_rel = None
-    try:
-        lead_dir.mkdir(parents=True, exist_ok=True)
-        payload_path.write_text(out, encoding="utf-8")
-        payload_rel = str(payload_path.relative_to(run_dir))
-    except OSError as e:
-        print(f"record_query: could not write payload: {e}", file=sys.stderr)
-
-    record = {
-        "lead_id": lead,
-        "seq": seq,
-        "system": system,
-        "verb": query_id.split(".", 1)[1] if "." in query_id else query_id,
-        "query_id": query_id,
-        "params": parse_params(inner),
-        "raw_command": shlex.join(inner),
-        "payload_path": payload_rel,
-        "exit_code": rc,
-        "error_class": error_class_for_exit(rc),
-        "payload_status": payload_status(rc, out),
-        "payload_digest": payload_digest(out, err, rc),
-    }
-    try:
-        append_jsonl(RunPaths(run_dir).executed_queries, [record])
-    except OSError as e:
-        print(f"record_query: could not append record: {e}", file=sys.stderr)
-
-    # In-context view = field shape, not the full dump. A record-list payload
-    # (events/hits/results/…) is ALWAYS reduced to a count + a few sample records
-    # + a disk pointer, regardless of size: the agent writes its filters from the
-    # shape and computes values over the persisted file (gather SKILL §4), never
-    # by eyeballing the passthrough — and the reduced view stops the raw dump from
-    # re-entering the subagent's context on every subsequent request. A non-list
-    # payload (a single object/scalar — an identity profile, a host lookup) IS the
-    # answer and is small, so it passes through whole, capped only if it somehow
-    # exceeds the byte ceiling. The full payload is always on disk at payload_path.
-    if rc == 0 and (_is_event_payload(out) or len(out) > _passthrough_max_bytes()):
-        passthrough = build_truncated_view(out, payload_rel, run_dir)
-    else:
-        passthrough = out
-    return passthrough, err, record
-
-
-def _split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
-    if "--" not in argv:
-        return argv, []
-    idx = argv.index("--")
-    return argv[:idx], argv[idx + 1 :]
-
-
-def main(argv: list[str]) -> int:
-    wrapper_argv, inner = _split_argv(argv)
-    parser = argparse.ArgumentParser(prog="record_query.py")
-    # --run-dir defaults to $DEFENDER_RUN_DIR; --system is derived from the inner
-    # adapter command. Only --lead (the subagent's :L row id) and --query-id (the
-    # agent's catalog binding) carry information the wrapper can't recover.
-    parser.add_argument("--run-dir")
-    parser.add_argument("--lead", required=True)
-    parser.add_argument("--system")
-    parser.add_argument("--query-id", required=True)
-    try:
-        ns = parser.parse_args(wrapper_argv)
-    except SystemExit:
-        return 2
-    if not inner:
-        print("record_query.py: nothing after `--` to execute", file=sys.stderr)
-        return 2
-
-    run_dir_arg = ns.run_dir or os.environ.get("DEFENDER_RUN_DIR")
-    if not run_dir_arg:
-        print(
-            "record_query.py: --run-dir not given and DEFENDER_RUN_DIR is unset",
-            file=sys.stderr,
-        )
-        return 2
-
-    try:
-        passthrough, stderr, record = capture(
-            Path(run_dir_arg), ns.lead, inner, query_id=ns.query_id, system=ns.system
-        )
-    except ValueError as e:
-        print(f"record_query.py: {e}", file=sys.stderr)
-        return 2
-
-    sys.stdout.write(passthrough)
-    sys.stderr.write(stderr)
-    if record["payload_path"]:
-        # Report the payload path ABSOLUTE: the bash/read tools resolve relative to the
-        # repo root (not run_dir), and the #535 reader anchor only admits absolute
-        # in-root operands — so the relative table FK would be un-`cat`-able. Mirrors the
-        # in-process capture note (tools_gather._payload_note).
-        abs_payload = Path(run_dir_arg) / record["payload_path"]
-        print(f"[record_query] raw payload: {abs_payload}", file=sys.stderr)
-    return record["exit_code"]
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))

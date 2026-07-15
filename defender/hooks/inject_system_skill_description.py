@@ -44,6 +44,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
@@ -102,22 +103,39 @@ def descriptor_catalog(
     skills_dir: Path = SKILLS_DIR, adapters_dir: Path = ADAPTERS_DIR
 ) -> str | None:
     """The progressive-disclosure index for the gather subagent: every data-source
-    system + its one-line SKILL `description:`. Scoped to systems that have an
-    adapter CLI (`scripts/adapters/<system>_cli.py`) — the things gather can actually
-    query — so meta-skills (gather/invlang/handbook/advisory) are excluded with no
-    hardcoded roster. Gather scans this to confirm its target, then Reads that
-    system's full SKILL.md + execution.md on demand (the skills model — descriptors
+    system + its one-line SKILL `description:`. Gather scans this to confirm its target,
+    then Reads that system's full SKILL.md on demand (the skills model — descriptors
     injected, bodies loaded on decision). Static per tree; memoized — the cache keys on
     the directory arguments, so two trees in one process (a worktree run, an eval's tmp
     tree) each get their own catalog instead of the first caller's. Callers thread the
-    run's tree: see ``tools_gather._run_gather`` (#551/#591)."""
-    suffix = "_cli.py"
-    systems = sorted(
-        p.name[: -len(suffix)].replace("_", "-")
-        for p in adapters_dir.glob("*" + suffix)
-    )
+    run's tree: see ``tools_gather._run_gather`` (#551/#591).
+
+    Scoped to systems that DECLARE VERBS (#611), not to the `*_cli.py` files on disk. That is
+    the difference between failing closed and merely looking like it: the roster used to be a
+    filename GLOB that never imported the module, so a system whose module declared nothing was
+    unreachable at the tool and still ADVERTISED at the prompt — gather would be told the system
+    exists, spend a turn reaching for it, and be refused. Fail-closed has to hold on both
+    surfaces or it holds on neither.
+
+    The registry resolves each module per TREE (`verbs.ModuleVerbRegistry` keys on the resolved
+    path, not the module name), so importing an adapter to read its roster here cannot freeze the
+    first tree it saw into the second tree's run.
+
+    Reading the roster now IMPORTS each adapter, which the filename glob never did — so one
+    `*_cli.py` that will not import (a newly onboarded system with a typo, a missing dep) would
+    take down catalog construction for EVERY system, and with it every gather dispatch and the
+    whole run. A system that cannot be loaded cannot be advertised; it drops out of the catalog
+    alone. The tool agrees (`query_tool` files the same failure as infra against that ONE
+    system), so the two surfaces stay honest with each other: unreachable, not unfiltered."""
+    registry = ModuleVerbRegistry(adapters_dir)
     lines = []
-    for system in systems:
+    for system in registry.systems():
+        try:
+            verbs = registry.verbs(system)
+        except Exception:  # noqa: BLE001 — a system that will not load is unreachable, not fatal
+            continue
+        if not verbs:
+            continue
         desc = read_description(system, skills_dir)
         if desc:
             lines.append(f"- `{system}`: {desc}")
@@ -131,8 +149,8 @@ def build_augmented_prompt(original: str, system: str, description: str) -> str:
         f"it's the right target. Use it to confirm your lead actually wants\n"
         f"this system. If it does, **Read the full**\n"
         f"`defender/skills/{system}/SKILL.md` before running anything — the\n"
-        f"body carries CLI conventions, field vocabularies, and load-bearing\n"
-        f"rules that the description does not.\n\n"
+        f"body carries the system's verb/param surface, field vocabularies, and\n"
+        f"load-bearing rules that the description does not.\n\n"
     )
     return f"{original}{header}{description}\n"
 

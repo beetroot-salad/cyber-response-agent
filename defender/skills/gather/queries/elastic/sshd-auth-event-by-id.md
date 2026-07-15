@@ -30,7 +30,7 @@ Index: `logs-system.auth-*`
 
 ## Common pitfalls
 
-- **Use `defender-elastic query`, NOT `esql`.** This is a raw single-document
+- **Use the `query` verb, NOT `esql`.** This is a raw single-document
   fetch (you want the full `_source`), not an aggregation. For counts/distributions
   of auth events use `sshd-auth-history` (ES|QL) instead.
 - **Structured ECS fields may be populated.** For `Invalid user` events (observed in Filebeat 9.3.3), `user.name`, `source.ip`, and `system.auth.ssh.event` are all populated via ECS normalization — check structured fields first. For other event types (e.g., `Accepted password`, `Failed password`), `source.ip` may be absent; fall back to `message` substring extraction in that case.

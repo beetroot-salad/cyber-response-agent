@@ -22,11 +22,11 @@ Fetch one or more Elasticsearch documents by exact document ID (`_id`) from a kn
 _id: "${id}"
 ```
 
-For multiple IDs: `_id: ("${id1}" OR "${id2}")`. Scope to the specific data stream from alert metadata via `--index` when available.
+For multiple IDs: `_id: ("${id1}" OR "${id2}")`. Scope to the specific data stream from alert metadata via the `index` param when available.
 
 ## Common pitfalls
 
-- **Use `defender-elastic query`, NOT `esql`.** This is a raw-document fetch — you
+- **Use the `query` verb, NOT `esql`.** This is a raw-document fetch — you
   want the complete `_source` of a specific record, not a server-side aggregation.
   The KQL `query` verb returns the doc; `esql` is for counts/distributions.
 - **`_id:` prefix required**: The document-level filter is `_id:`, not a regular field match. Passing the ID as a bare term against a non-existent field like `document.id` returns all documents. Always use the `_id:` KQL syntax.

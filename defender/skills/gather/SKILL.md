@@ -20,7 +20,7 @@ A fenced YAML block carries:
 - `defender_dir` — repo root; anchor `Read`/`Bash` to `{defender_dir}/...`.
 - `run_dir` — the run's working dir; `alert.json` is at `{run_dir}/alert.json`.
 - `lead_id` — the `l-NNN` id; the harness uses it as the queries-table FK. You
-  never pass it to the adapter — just run your query.
+  never pass it to the `query` tool — just run your query.
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
   at `{defender_dir}/skills/gather/queries/{system}/`.
 - `goal` — one-sentence measurement contract.
@@ -33,7 +33,7 @@ A fenced YAML block carries:
 Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
 `{system}`. If `{system}` is the SIEM, the query language is **ES|QL** against the
 `logs-*` data streams; read `{defender_dir}/skills/{system}/execution.md` only if
-you need the index list or CLI flags.
+you need the index list or the system's verb/param details.
 
 ### 2. FIND a template, or coin a query
 
@@ -48,10 +48,10 @@ full body, every section (case-insensitively, and including the uncurated `_draf
 index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
 `listening port`).
 
-**Read the template body with `read_file` before you tag `--query-id` with its id.** The index
+**Read the template body with `read_file` before you pass its id as `query_id`.** The index
 gives you the id, the Goal and the path — not the query — so an id you take from the index is an
-id you have not yet opened. Adapt the `## Query` body you actually read. A tagged id is recorded
-as a *reuse* of that template, so tagging one you never read files a query you coined under a
+id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
+as a *reuse* of that template, so naming one you never read files a query you coined under a
 query you did not run, and silently corrupts the `(query_id, params)` join the offline
 lead-author builds the catalog from.
 
@@ -59,7 +59,7 @@ No template fits → **don't author one**; coin a descriptive id
 (`sshd-auth-failures-by-srcip`, not `query1`) and write the query yourself. Before
 coining, if `{defender_dir}/skills/{system}/execution.md` exists, Read its
 `## Common pitfalls` section — prior coined-query mistakes on this system (bad index
-syntax, malformed pipes, wrong flags) are recorded there; don't repeat them. The
+syntax, malformed pipes, wrong params) are recorded there; don't repeat them. The
 offline lead-author curates
 the catalog from the execution record — you never write to it. A lead may need more
 than one query (foreground + baseline, two systems compared); run each.
@@ -68,31 +68,41 @@ than one query (foreground + baseline, two systems compared); run each.
 
 Write/adjust ONE aggregating query that computes the answer server-side, narrowed
 to the lead (drop the predicates and group-by keys the lead doesn't ask for).
-Run the adapter standalone via `Bash` — **never pipe, chain (`&&`/`;`), or
-redirect it**:
+Run it with the **`query` tool** — the only route to a data source. There is no
+adapter command, no shim, and no `--help`; **Bash cannot reach a system of record
+at all**, and an adapter-shaped command is denied.
 
-```bash
-defender-<system> esql '<ES|QL query>' --query-id <id>
+```
+query(system="<system>", verb="esql", params={"query": "<ES|QL query>"}, query_id="<id>")
 ```
 
-- **Put the whole ES|QL query on ONE line inside the quotes.** The catalog
-  templates print the pipe across several lines for readability — flatten it
-  before you run it: the `|` stage separators stay *inside* the quoted string, but
-  a literal newline in the quoted argument is read as a shell command boundary and
-  the call is **rejected** (`gather may only run a data-source adapter …`). One
-  line, single-quoted, no trailing `\` continuations.
+- **`verb` + `params` come from the systems catalog in your dispatch prompt.** A verb
+  declares exactly the params it takes, bound **by name** — there are no flags and no
+  positional args. Pass an unknown param, omit a required one, or send the wrong *type*
+  and the call is rejected (exit 64) with the declared list; it never reaches the system.
+  **Types are literal:** a number is a number (`"limit": 20`, never `"20"`), a boolean is
+  `true`/`false` (never `"false"` — a quoted one is rejected, and would have meant the
+  opposite).
+- **The SIEM's aggregation verb is `esql`, and its one param is `query`** — the whole pipe
+  (index, filter, time window, aggregation) goes in that string. Nothing shells out, so
+  there is no quoting, escaping, or line-continuation rule to get wrong: the pipe is a JSON
+  string, `|` stage separators and all.
+- **Set `query_id` on every call** — the `id:` of the template you bound in step 2 (e.g.
+  `{system}.sshd-auth-history`), or a coined `{system}.<descriptive-kebab>` when none fit.
+  It is how the offline lead-author tracks which template answered which lead, so set it per
+  query (one lead may run several with different bindings). Omit it and the call still runs,
+  recorded under a generic `{system}.{verb}`.
+- **The harness captures the query and its result automatically** — the queries table plus
+  the full payload on disk. You do not wrap the call, name a file, or record anything. You
+  get a field-shape view of the payload back, plus the absolute path to the whole of it.
+- **Need to reduce a payload afterwards?** That is the one thing Bash is still for, and it
+  is a *second* step over the file the query already wrote — never a pipe out of the query:
 
-- **Tag every call with `--query-id`** — the `id:` of the template you bound in
-  step 2 (e.g. `{system}.sshd-auth-history`), or a coined `{system}.<descriptive-kebab>`
-  when none fit. The harness strips this flag (the adapter never sees it) and
-  records it as the query's catalog binding — it's how the offline lead-author
-  tracks which template answered which lead, so set it per query (one lead may run
-  several with different bindings). Omitting it still works but records a generic id.
-- **This shim form is the only sanctioned invocation** — never the path form,
-  `python -m`, or an env-prefixed variant. Vary the *query*, never the tooling.
-  The harness recognizes the adapter call and captures the executed query + its
-  result automatically (queries table + by-ref payload) — you do not wrap it,
-  name files, or record anything.
+  ```bash
+  cat <ABSOLUTE payload path from the tool's return> | defender-sql '<SQL>'
+  ```
+
+  Reach for it only when the aggregation genuinely could not be expressed in the query.
 - The aggregation result — the `{columns, row_count, values}` table — **is your
   summary**: computed over the full match server-side (the `COUNT`/`SUM`/`MIN`/`MAX`
   scalars are exact), small — report those values. (A `row_count` of exactly 1000
@@ -118,7 +128,7 @@ coin a "bridge" query that pretends the correlation is one measurement.
 ### 4. VERIFY — live, stage-on-suspicion
 
 The result is your evidence; an unchecked zero or a null column poisons the
-defender's ANALYZE. Check the adapter's **exit code first**, then the content:
+defender's ANALYZE. Check the query's **exit code first**, then the content:
 
 - **exit 0, result sane** — `STATS` columns resolved to real values, volume
   plausible, `row_count` < 1000 → summarize.

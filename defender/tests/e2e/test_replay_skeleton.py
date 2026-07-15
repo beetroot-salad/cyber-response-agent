@@ -23,7 +23,7 @@ from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,
     DenyProbe,
-    FakeAdapterSubprocess,
+    FakeVerbs,
     ReplayFn,
     Turn,
     drive,
@@ -34,7 +34,6 @@ from defender.tests.e2e._replay_harness import (
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
-from defender.scripts.gather_tools import record_query
 from defender.skills.invlang.validate import validate_companion
 
 pytestmark = pytest.mark.e2e
@@ -153,10 +152,15 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr", "escape_name"), [
     # D1 — the breach: the main loop must NOT run a data-source adapter directly
-    # (that's the exfil lane; the gather subagent is the only data-access role).
+    # (that's the exfil lane; the gather subagent is the only data-access role). Since #611
+    # NO role runs an adapter from bash — the reason names the `query` tool that replaced it.
+    # The reason substring must not appear in the PROMPT: it is matched against the whole
+    # flattened message history, and the orientation pack says "query" a dozen times. A bare
+    # "query" here passes even when the adapter is ALLOWED for main — i.e. it stops testing
+    # the breach. Pin the deny's own words.
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo"},
-     "data-source CLIs directly", None),
+     "not runnable from bash", None),
     # D6 — a write escaping the run dir must be refused. Main's write_allow is its
     # run-dir subtree only (the flat deny-by-default write allowlist), so a path outside
     # it is not in the agent's declared paths.
@@ -203,31 +207,49 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
         assert not (run_dir.parent / escape_name).exists()
 
 
-def test_role_flip_adapter_is_role_dependent():
-    """The crown-jewel contrast, asserted directly: the SAME adapter command is
-    DENIED from the main loop (wired-and-bounced by test_main_loop_deny_bounces
-    above) but ALLOWED for the gather subagent. Full GATHER-role e2e wiring is the
-    nested-gather replay; this pins the role-dependence the driver must thread."""
+def test_role_flip_data_access_is_role_dependent():
+    """The crown-jewel contrast, asserted directly: data-source access is ROLE-DEPENDENT —
+    gather may reach a system, main may not.
+
+    #611 moved WHERE that role-dependence lives. It used to be the bash lane (main denied the
+    adapter command, gather ran it captured); now NO role runs an adapter from bash — the reader
+    lane denies the command for BOTH roles — and the role distinction is the typed `query` tool:
+    it is declared on GATHER_DEF and not on MAIN_DEF, so 'which agent may reach a data source'
+    stays policy-as-data on the AgentDefinition (visible to compile_policy / `defender-policy
+    explain`), exactly where the deleted capability bit used to be audited."""
     cmd = "defender-elastic query foo"
-    # compile_policy_for is per-run since #535; the adapter deny/allow is role-driven, not root-driven,
-    # so synthetic absolute roots suffice for this contrast.
     run, dfn = Path("/run"), Path("/dfn")
+    # The bash adapter route is gone for EVERYONE — same command, both roles deny.
     assert not permission.decide_bash(
         cmd, policy=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)).allow
-    assert permission.decide_bash(
+    assert not permission.decide_bash(
         cmd, policy=compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)).allow
+    # The role-dependence now lives in the tool set: gather holds `query`, main does not.
+    assert GATHER_DEF.tools.query is True
+    assert MAIN_DEF.tools.query is False
 
 
 # --- nested-gather replay: drives the two-table capture path ---------------
 # Unlike test_replay_full_run_ab3 (gather faked at its boundary), this runs a
 # REAL nested gather subagent so the capture path executes end-to-end:
 # _run_gather -> record_lead.claim_lead (leads table) -> the gather agent's
-# adapter bash -> decide_bash(GATHER) -> _capture_adapter -> record_query.capture
-# (queries table + gather_raw payload). The only fake below the model is the
-# adapter SUBPROCESS — FakeAdapterSubprocess returns a canned payload, so the run
-# stays hermetic while the real capture/record code runs.
+# `query` tool -> the QueryCapture capability (queries table + gather_raw payload).
+# The only fake below the model is the verb REGISTRY, injected through `drive(verbs=…)`
+# (#611): the fake verb returns a canned payload and records nothing else, so the run
+# stays hermetic while every row, path and status is real capture code's work.
 
-def test_nested_gather_capture(tmp_path, monkeypatch):
+_PAYLOAD = [{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana",
+             "event.action": "ssh_login"}]
+
+
+def _elastic_verbs() -> FakeVerbs:
+    def query(ctx, *, native_query: str) -> list[dict]:
+        return _PAYLOAD
+
+    return FakeVerbs({"elastic": {"query": query}})
+
+
+def test_nested_gather_capture(tmp_path):
     run_id, salt = "nested-gather", "1122334455667788"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
 
@@ -242,21 +264,18 @@ def test_nested_gather_capture(tmp_path, monkeypatch):
         Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
         Turn(text="Investigation complete."),
     ])
-    # The nested gather agent: run one standalone adapter query (captured), then
-    # return a measurements summary.
+    # The nested gather agent: run one `query` (captured), then return a measurements summary.
     gather_replay = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": "defender-elastic query sshd-auth-history"})]),
+        Turn(tool_calls=[("query", {
+            "system": "elastic", "verb": "query",
+            "params": {"native_query": "FROM logs-auth | WHERE user.name == \"dev.dana\""},
+            "query_id": "elastic.sshd-auth-history",
+        })]),
         Turn(text="Summary: 1 sshd auth event for dev.dana."),
     ])
 
-    # Stub ONLY the adapter subprocess inside record_query (isolated to that module)
-    # so the real capture/record code runs while staying hermetic — the adapter's
-    # external-process IO has no in-process seam.
-    monkeypatch.setattr(  # lint-monkeypatch: ok — boundary: adapter subprocess IO
-        record_query, "subprocess", FakeAdapterSubprocess,
-    )
-
-    drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay)
+    drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay,
+          verbs=_elastic_verbs())
 
     # Both loops ran (main dispatched, nested gather executed its query + summary).
     assert main_replay.calls == 3

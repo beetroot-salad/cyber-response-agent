@@ -762,69 +762,78 @@ def test_e4_actor_script_and_lead_author_rm_survive(env):
 # §F — Routing, Decision, and layering                                         #
 # ===========================================================================  #
 
-def test_f1_bash_decision_still_carries_the_dispatch_payload(env):
-    """f1 (demand #0): `BashDecision` still carries `pipelines` (the #456 single parse
-    `bash_exec.run_parsed` consumes), `adapter_argv: list[str]`, and `sql_pipe: (adapter_argv,
-    sql_argv)` — all three read by `tools.py:280-296` → `_derive_system` → the circuit breaker.
-    `Grant.route` is what TAGS the reader-lane grants; it replaces the per-agent capability bits,
-    it does not replace the decision payload."""
+def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
+    """f1 (demand #0): `BashDecision` carries `pipelines` (the #456 single parse
+    `bash_exec.run_parsed` consumes) and `grants` (the claiming grants). Since #611 it carries NO
+    adapter routing payload — `adapter_argv` / `sql_pipe` are gone with the capture-from-bash layer
+    that read them, and `Route` has ONE member (`PLAIN`), so no grant on any lane carries an adapter
+    route. `Grant.route` still TAGS reader-lane grants; there is simply one tag left."""
     d = _bash(env, f"cat {env.run}/investigation.md", "main")
     assert d.allow
     assert d.pipelines
-    assert d.adapter_argv is None
-    assert d.sql_pipe is None
+    assert not hasattr(d, "adapter_argv")
+    assert not hasattr(d, "sql_pipe")
+    # the adapter is unreachable from gather's bash lane; it denies for the query-tool reason
     a = _bash(env, "defender-elastic query 'x'", "gather")
-    assert a.allow
-    assert a.adapter_argv == ["defender-elastic", "query", "x"]
-    routes = {g.route for g in env.gather.bash_allow}
-    assert Route.CAPTURE_ADAPTER in routes
-    assert Route.CAPTURE_ADAPTER_SQL in routes
+    assert not a.allow
+    assert a.reason == permission.ADAPTER_RETIRED_REASON
+    # every grant on every lane is PLAIN — the capture routes were the capability, and it moved
+    assert {g.route for g in env.gather.bash_allow} == {Route.PLAIN}
+    assert list(Route) == [Route.PLAIN]
     assert _cat_grant(env.gather).route is Route.PLAIN
 
 
 def test_f2_reader_lane_claims_before_adapter_classification(env):
-    """f2: adapter classification stays STRUCTURAL and runs AFTER the reader lane returns None
-    (`bash.py:404-411`) — the ORDER, not just the verdict (`test_permission.py:652` pins it today).
-    An adapter-SHAPED command that a grant claims is decided by the grant: the judge's ticket read is
-    `python3 <cli> …` (adapter-shaped), and the judge has no adapter capability — yet it ALLOWs, with
-    no adapter payload. Reverse the order and the judge loses its case-history read outright."""
+    """f2: adapter classification stays STRUCTURAL and runs AFTER the reader lane returns None —
+    the ORDER, not just the verdict. An adapter-SHAPED command that a grant claims is decided by the
+    grant: the judge's ticket read is `python3 <cli> …` (adapter-shaped), and the judge has no
+    adapter capability — yet it ALLOWs, and is NOT diverted to the adapter deny. Reverse the order
+    and the judge loses its case-history read outright."""
     py, cli = _ticket_cli(env)
     pol = _judge(env, ticket_cli=(py, cli))
     d = _bash(env, f"{py} {cli} list-tickets --require-closed", pol)
     assert d.allow
-    # claimed by the grant, not routed
-    assert d.adapter_argv is None
-    assert d.sql_pipe is None
+    # claimed by the grant, so it did NOT fall through to the adapter deny
+    assert d.reason != permission.ADAPTER_RETIRED_REASON
+    assert not hasattr(d, "adapter_argv")
+    assert not hasattr(d, "sql_pipe")
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
-    ("defender-elastic query foo", "data-source CLIs directly"),
+    ("defender-elastic query foo", "not runnable from bash"),
     ("curl http://example.invalid/x", "only the defender-* shims"),
 ])
 def test_f3_adapter_deny_reasons_survive(env, cmd, reason_substr):
     """f3 (parametrized): the two SPECIFIC deny reasons survive the rebuild — the e2e deny-tail
-    asserts them as SUBSTRINGS (`test_replay_skeleton.py`), and they are prompt surface: they tell
-    the main loop to dispatch gather instead. A generic fall-through reason here is an e2e break AND
-    a worse agent."""
+    asserts them as SUBSTRINGS (`test_replay_skeleton.py`), and they are prompt surface. Since #611
+    the adapter reason points at the `query` TOOL (the surface that DOES work), not at "dispatch
+    gather / run a standalone adapter" — a reason naming a dead route teaches a dead command. The
+    curl case still gets the generic fall-through naming the shims. A generic reason for the adapter
+    case is an e2e break AND a worse agent."""
     d = _bash(env, cmd, "main")
     assert not d.allow
     assert reason_substr in (d.reason or "")
 
 
-def test_f4_sanctioned_adapter_sql_pipe_splits_and_nothing_else(env):
-    """f4: the ONE sanctioned pipe — `defender-elastic query X | defender-sql '<SQL>'` — ALLOWs for
-    gather with a correct 2-stage split on `.sql_pipe` (the route the capture layer keys on), while
-    `defender-elastic query X | head` DENIES: a live adapter's output may only flow into the
-    sandboxed aggregator, never into an arbitrary reader stage."""
-    cmd = "defender-elastic query 'x' | defender-sql 'SELECT count(*) FROM data'"
-    d = _bash(env, cmd, "gather")
-    assert d.allow
-    assert d.sql_pipe is not None
-    adapter_av, sql_av = d.sql_pipe
-    assert adapter_av == ["defender-elastic", "query", "x"]
-    assert sql_av[0] == "defender-sql"
+def test_f4_adapter_sql_pipe_is_now_tool_then_bash_and_nothing_else(env):
+    """f4 FLIP: the sanctioned `defender-elastic query X | defender-sql '<SQL>'` capture+aggregate
+    pipe is GONE (#611). Its adapter stage is unreachable from bash — the whole pipe DENIES for
+    gather with the query-tool reason — because a data source is reached through the `query` tool.
+    What survives is the aggregation HALF as a separate bash step over a payload already on disk:
+    `cat <ABSOLUTE payload> | defender-sql '<SQL>'` ALLOWs. `… | head` still denies (an arbitrary
+    reader stage is not `defender-sql`), and main reaches no payload."""
+    old = "defender-elastic query 'x' | defender-sql 'SELECT count(*) FROM data'"
+    d = _bash(env, old, "gather")
+    assert not d.allow
+    assert d.reason == permission.ADAPTER_RETIRED_REASON
+    # the surviving aggregation step, over an in-scope payload
+    new = f"cat {env.run}/gather_raw/l-001/0.json | defender-sql 'SELECT count(*) FROM data'"
+    assert _bash(env, new, "gather").allow
+    # `adapter | head` — the old "output only into defender-sql, never an arbitrary reader" case —
+    # denies for the adapter reason now (the adapter stage is unreachable, whatever is downstream).
     assert not _bash(env, "defender-elastic query 'x' | head -5", "gather").allow
-    assert not _bash(env, cmd, "main").allow
+    assert not _bash(env, old, "main").allow
+    assert not _bash(env, new, "main").allow
 
 
 def test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent(env):
@@ -870,6 +879,10 @@ _NON_PROGRAM_WORDS = frozenset({
     "defender", "lessons", "skills", "examples", "docs", "read", "write", "edit", "file",
     "only", "the", "and", "or", "with", "shims", "viewers", "tool", "tools", "bash", "run",
     "stdin", "pipe", "path", "paths", "dir", "md", "json", "sql", "yaml",
+    # #611: `query` is the name of the TOOL the adapter/gather deny reasons point at, not a bash
+    # program — naming it is the CORRECT prompt surface (the whole point of #611), the mirror of
+    # "read"/"write"/"tool" above. It is deliberately NOT runnable from any bash lane.
+    "query",
 })
 _PROGRAMISH = re.compile(r"(?<![\w/.-])([a-z][a-z0-9-]{1,15}(?:/[a-z][a-z0-9-]{1,15})+)(?![\w/.-])")
 _BACKTICKED = re.compile(r"`([a-z][a-z0-9-]{1,15})`")

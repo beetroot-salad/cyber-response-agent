@@ -26,13 +26,10 @@ from pathlib import Path
 
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime.permission.grant import (
-    ADAPTER,
     SEG,
     PathShapes,
     STDIN_VIEWERS,
-    STRUCTURAL_SHAPE,
     Grant,
-    Route,
     program_shape,
     under,
 )
@@ -78,34 +75,29 @@ def read_shapes(
     return PathShapes(shapes)
 
 
-def reader_grants(
-    run_dir: Path, defender_dir: Path, *, raw: bool, adapters: bool
-) -> tuple[Grant, ...]:
+def reader_grants(run_dir: Path, defender_dir: Path, *, raw: bool) -> tuple[Grant, ...]:
     """The main/gather bash lane: `cat` (the sole opener, scoped to `read_shapes`), the five
-    stdin-only viewers, the non-adapter `defender-*` shims + the inert `echo`/`true`, and — for
-    gather — the two structurally-routed adapter grants.
+    stdin-only viewers, and the non-adapter `defender-*` shims + the inert `echo`/`true`.
+
+    There is no `adapters` parameter any more (#611). The two structurally-routed adapter grants
+    are gone with the route they carried: a data source is reached through the `query` tool, and
+    gather's bash lane keeps only the local-computation half. That lane has no other
+    network-capable program (`python3` is never granted to gather), so deleting the adapter route
+    IS "take the network off bash" — the capability and the grant died together, which is the
+    property that makes it auditable rather than merely absent.
 
     Every program's SHAPE comes from the one `grant.program_shape` table, so main, gather, the
     judge and the curators cannot drift into disagreeing about what `grep` may do — which they
     did: #579 had to be fixed twice, and the second copy was missed."""
     scope = read_shapes(run_dir, defender_dir, raw=raw)
-    grants = [
+    return (
         Grant(program="cat", pattern=program_shape("cat"), scope=scope),
         *(Grant(program=v, pattern=program_shape(v)) for v in STDIN_VIEWERS),
         *(
             Grant(program=s, pattern=program_shape(s))
             for s in sorted(set(NON_ADAPTER_SHIMS) | set(_INERT))
         ),
-    ]
-    if adapters:
-        # The adapter capability IS these grants: `command_shape` classifies the command
-        # structurally and `bash._decide_adapter` looks its route up HERE, so a capability
-        # without a grant cannot exist — and a route without a grant could not be audited.
-        grants += [
-            Grant(program=ADAPTER, pattern=STRUCTURAL_SHAPE, route=Route.CAPTURE_ADAPTER),
-            Grant(program=ADAPTER, pattern=STRUCTURAL_SHAPE, route=Route.CAPTURE_ADAPTER_SQL),
-        ]
-    return tuple(grants)
+    )
 
 
 __all__ = ["read_shapes", "reader_grants"]

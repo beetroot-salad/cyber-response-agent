@@ -316,31 +316,39 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
     assert "survived=True" in proc.stdout
 
 
-def test_a_vendor_byte_on_the_adapter_pipe_is_replaced_not_raised(tmp_path):
-    """The gather ingestion boundary. `record_query.capture` runs the adapter IN-PROCESS (via
-    `tools_gather._capture_query`), and the adapter's stdout is vendor telemetry — indexed log
-    lines, process cmdlines, filenames — i.e. the likeliest non-UTF-8 byte in the whole system.
+def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
+    """The gather ingestion boundary, re-pointed at the TRANSPORT (#611). The capture subprocess
+    that used to own the lossy decode (`record_query.capture`) is gone — a data source is reached
+    through the `query` tool, and each transport runs its OWN subprocess (`_stub_transport`), whose
+    stdout is vendor telemetry: indexed log lines, process cmdlines, filenames — the likeliest
+    non-UTF-8 byte in the whole system.
 
     A `subprocess.run(..., text=True, encoding="utf-8")` decodes STRICTLY, so one such byte raises
-    `UnicodeDecodeError` inside `run()`. It is a `ValueError`: it sails past the `TimeoutExpired`
-    guard, out of `capture()`, out of the gather tool, and kills the stage — the same escape as
-    #589, one pipe over. One bad byte must cost one character, not the lead and not the run."""
-    from defender.scripts.gather_tools import record_query
+    `UnicodeDecodeError` inside `run()`. It is a `ValueError`: it would sail past the transport's
+    `TransportFault`/`TimeoutExpired` guards, out of the verb, and kill the run — the same escape
+    as #589, one layer over. Every transport subprocess must decode LOSSILY (the structural pin is
+    `test_query_tool_611.py::test_every_transport_decodes_lossily`); here we drive the REAL
+    `docker_exec_raw` transport against a fake `docker` that emits a raw 0xe9 byte and confirm one
+    bad byte costs one character, not the run. One pipe up from where record_query used to."""
+    from defender.scripts.adapters import _stub_transport as transport
+    from defender.runtime.verbs import VerbContext
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    emit_bad_bytes = [
-        sys.executable, "-c",
-        r'import sys; sys.stdout.buffer.write(b"{\"host\": \"caf\xe9-01\"}")',
-    ]
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    # A stand-in `docker` whose "exec" output carries a raw non-UTF-8 byte (0xe9, latin-1 'é').
+    docker.write_text("#!/bin/sh\nprintf '{\"host\": \"caf\\351-01\"}'\n")
+    docker.chmod(0o755)
 
-    passthrough, _stderr, record = record_query.capture(  # must not raise
-        run_dir, "l-001", emit_bad_bytes, system="elastic",
-    )
+    env = {
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        "SOC_PLAYGROUND_DOCKER_CONTEXT": "test-ctx",
+    }
+    ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env)
 
-    assert record["exit_code"] == 0, "the adapter itself failed — wrong thing under test"
-    assert "�" in passthrough, "the undecodable byte was not replaced"
-    assert "caf" in passthrough, "the payload before the bad byte was lost"
-    assert "-01" in passthrough, "the payload after the bad byte was lost"
-    payload = (run_dir / record["payload_path"]).read_text(encoding="utf-8")
-    assert "�" in payload, "the by-ref payload defender-sql reads back was not written"
+    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])  # must not raise
+
+    assert rc == 0, "the fake docker exec failed — wrong thing under test"
+    assert "�" in stdout, "the undecodable byte was not replaced"
+    assert "caf" in stdout, "the payload before the bad byte was lost"
+    assert "-01" in stdout, "the payload after the bad byte was lost"

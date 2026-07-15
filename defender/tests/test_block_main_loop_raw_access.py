@@ -233,6 +233,17 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
 # the clamp must recognise the adapter shim names too.
 
 def test_denies_main_running_adapter_shim(monkeypatch, capsys):
+    # #611: the `defender-<system>` adapter shims were DELETED from defender/bin (a data source is
+    # reached through the `query` tool now), so the LIVE roster carries no adapter to recognize —
+    # this hook's shim-token clamp correctly fails OPEN on an empty roster, and the real main-loop
+    # adapter deny moved to the permission gate (test_permission.py::test_main_loop_denies). The
+    # roster-driven regex MECHANISM this test protects still holds: given a roster that DOES carry
+    # an adapter shim, the clamp fires. Sourced from the shared _cmd_segments taxonomy, so the
+    # mechanism is exercised the same way test_newly_onboarded_adapter_auto_gates does.
+    from defender.hooks import _cmd_segments
+    monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
+        "defender-invlang", "defender-elastic",  # a synthetic roster carrying one adapter
+    })
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
@@ -264,8 +275,14 @@ def test_newly_onboarded_adapter_auto_gates_in_main_loop(monkeypatch, capsys):
 
 
 def test_denies_main_adapter_shim_inside_bash_c(monkeypatch):
-    """The shim name is visible in the `bash -c` payload string, so the clamp
-    still fires on the wrapped form."""
+    """The shim name is visible in the `bash -c` payload string, so the clamp still fires on the
+    wrapped form — mechanism unchanged. #611 deleted the real adapter shims from bin/, so the
+    roster is monkeypatched to carry one (as above); the production main-loop adapter deny is the
+    permission gate's."""
+    from defender.hooks import _cmd_segments
+    monkeypatch.setattr(_cmd_segments, "all_defender_shims", lambda: {
+        "defender-invlang", "defender-host-state",
+    })
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",

@@ -4,26 +4,32 @@ Read this file when gather is dispatched against `system: identity`.
 Defender does not read this file; it sees only `SKILL.md`'s visibility
 surface.
 
-## CLI
+## Verbs
 
-```bash
-defender-identity health-check
-defender-identity can-access <user> <host>
-defender-identity get-user <user>
-defender-identity list-authorized-hosts <user>
-defender-identity list-users [--role X] [--enabled true|false] [--limit N]
-defender-identity list-roles
+Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
+Params bind **by name**, with literal JSON types: `enabled` is a real boolean
+(`true`/`false`), and a quoted `"false"` is rejected — it would have meant the
+opposite.
+
+```
+query(system="identity", verb="health-check",          params={})
+query(system="identity", verb="can-access",            params={"user": "<user>", "host": "<host>"})
+query(system="identity", verb="get-user",              params={"user": "<user>"})
+query(system="identity", verb="list-authorized-hosts", params={"user": "<user>"})
+query(system="identity", verb="list-users",            params={"role": "X", "enabled": true})
+query(system="identity", verb="list-roles",            params={})
 ```
 
-**Do not Read `identity_cli.py` source to discover flags.** This file
-plus `defender-identity {subcommand} --help` is the authoritative
-surface. If a flag you need isn't here or in `--help`, treat it as
-unsupported and escalate.
+`can-access` requires both `user` and `host`; `list-users`' two params are
+optional filters.
 
-Each subcommand emits the upstream JSON response unchanged (the FastAPI
-response body). That payload IS the output (there is no separate
-formatted-text mode); gather captures it under
-`gather_raw/{lead_id}/{seq}.json`.
+**Do not Read `identity_cli.py` source to discover params.** This file plus the
+systems catalog in your dispatch prompt is the authoritative surface, and a call
+with an unknown/missing/mistyped param is rejected with the declared list anyway.
+
+Each verb returns the upstream JSON response unchanged (the FastAPI
+response body). That payload IS the output; the harness captures it
+under `gather_raw/{lead_id}/{seq}.json`.
 
 ## Connectivity
 

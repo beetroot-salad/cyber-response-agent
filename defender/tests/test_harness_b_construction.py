@@ -52,6 +52,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import driver, observe, providers  # noqa: E402
+from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     ToolSet,
@@ -282,7 +283,8 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     read-only surface ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent
     must not dispatch itself).
 
-    #585 adds `template_search` to that surface: gather's query-template discovery is dead on the
+    #611 adds `query` (the typed data-source tool) to that surface and #585 added `template_search`:
+    gather's query-template discovery is dead on the
     bash lane (`find` was never there, `grep -r` denies since #581, a glob reaches grep as a
     literal filename, and #575 removes `ls`), so the grep comes back as a gated tool with a
     harness-owned root. This is the ONE test that pins gather's REAL registered surface — the
@@ -295,8 +297,10 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
-        agent = driver.build_gather_agent(_DEFENDER, logger, "gather:l-001", make_model=fake)
-    assert list(agent._function_toolset.tools) == ["bash", "read_file", "template_search"]
+        agent = driver.build_gather_agent(
+            _DEFENDER, logger, "gather:l-001", make_model=fake, verbs=FakeVerbs({}),
+        )
+    assert list(agent._function_toolset.tools) == ["bash", "read_file", "template_search", "query"]
     assert "gather" not in agent._function_toolset.tools    # no self-dispatch
     assert "write_file" not in agent._function_toolset.tools
 

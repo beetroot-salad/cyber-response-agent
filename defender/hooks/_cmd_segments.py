@@ -53,9 +53,15 @@ def is_main_session(hook_data: dict) -> bool:
 # `defender-sql` aggregates a payload piped into it on stdin (the tier-2
 # fallback for a source with no native aggregation); it queries no source and
 # is self-sandboxed (no file/network access), so it is a non-adapter too.
+# `defender-record-query` left with the wrapper it fronted (#611): capture is a tool capability
+# now, not a shim the model wraps a command in. Pulling it from this set does NOT "leave a grant
+# for a missing program" — under the binary split below it RECLASSIFIES the token as a
+# data-source adapter, and it drops out of `grant.PROGRAMS` and `reader_grants` with the shim.
+# Benign, but it is worth saying what actually happens. A shim must leave THIS set and
+# `grant._SHIM_FLAGS` together: one left here but dropped there degrades to a free-text-only
+# shape, which silently WIDENS what it may be handed.
 NON_ADAPTER_SHIMS = frozenset(
-    {"defender-invlang", "defender-record-query",
-     "defender-lessons", "defender-sql"}
+    {"defender-invlang", "defender-lessons", "defender-sql"}
 )
 
 # OPERATOR tools: a `defender-*` binary that is neither an adapter NOR a shim any agent may
