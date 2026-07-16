@@ -35,7 +35,9 @@ prose is the docstring of the test it names via `discharged_by`; a `form: clause
 keeps an `outcome`. The check scans whichever holds the prose — the pointed-to test's docstring
 (found among the `*.py` beside the graph), or the `outcome` — for each `<concept>=<threaded-value>`
 where the concept is modelled elsewhere in the graph but absent from that demand's `binds`. A
-`discharged_by` that names no test is a dangling pointer, also flagged. The canonical catch: a demand
+`discharged_by` that names no test is a dangling pointer, also flagged — as is one pointing at a
+test with no docstring (the prose is required to live there); `shuffle-premises` copies
+(`*.copyN.py`) are excluded from the scan. The canonical catch: a demand
 whose prose read "…threads `salt=deps.salt`…" bound only the anchor tree — the exact under-binding
 that left a prompt-injection defence unguarded, with every test green. Waive a conscious incidental
 mention under a top-level `binds_waivers:` map; prefer *binding* the concept so the test is forced to

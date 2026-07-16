@@ -1,6 +1,6 @@
 ---
 name: discuss-issue
-description: "Explain a GitHub issue in plain terms, check it against the current codebase, and surface the open questions that need answering before anyone designs or implements. Use when a bare issue report needs to be understood and grounded in the real code."
+description: "Explain a GitHub issue in plain terms, check it against the current codebase, and surface the one or two decisions that actually gate a design — then, when the issue heads to implementation, close by posting the typed intent+design doc that write-tests consumes. Use when a bare issue report needs to be understood and grounded in the real code before anyone designs on it."
 argument-hint: "[issue number]"
 effort: medium
 ---

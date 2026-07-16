@@ -13,7 +13,7 @@ You reach here as the discussion settles — but first check *which way* it sett
 Every sentence rests on something already being true of the system. Ask of each: **what must already hold for this to make sense?** Per-sentence — noticing is recall, and recall failing is how known traps ship. Then settle each assumption with the one instrument that can, and record it:
 
 - **referential** — the named symbol / path / flag exists as described; code structure (who calls what, which branch exists). Probe: read, import, or stat it, cited `file:line` — for who-defines a symbol, **symbol-refs** `--defs` resolves it across imports.
-- **behavioral** — what existing code or a dependency does on an input: the bug story, a default, an exception taxonomy. Probe: a throwaway run — never priors, never docs alone.
+- **behavior** — what existing code or a dependency does on an input: the bug story, a default, an exception taxonomy. Probe: a throwaway run — never priors, never docs alone.
 - **census** — "these are all the writers / callers / occurrences." Probe: the search, recorded so it replays — the full hit list, or counts plus the members the doc acts on; when the census is over a *symbol*, **symbol-refs** resolves the reference set past grep's lexical floor.
 - **reachability** — "X cannot reach Y", "this value is constrained." Probe: try to break it. A survivor is *unrefuted*, never confirmed.
 

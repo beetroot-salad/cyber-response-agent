@@ -22,7 +22,7 @@ types read `Unknown`, with no error. This script therefore (a) writes a temporar
 pyrefly.toml at configDir (removed on exit; never clobbers a committed one) and (b) hard-fails
 with exit 3 if resolution looks collapsed — so a census can never read empty-as-complete.
 """
-import json, os, re, shutil, subprocess, sys, threading, queue, time, atexit
+import json, os, re, shutil, subprocess, sys, threading, queue, time, atexit, urllib.parse
 
 
 def die(msg, code=2):
@@ -95,8 +95,11 @@ lsp_line, lsp_char = line1 - 1, m.start()
 # ---- pyrefly launcher (prefer installed, else uvx) -----------------------
 pyrefly_cmd = ["pyrefly"] if shutil.which("pyrefly") else ["uvx", "pyrefly@latest"]
 
-proc = subprocess.Popen(pyrefly_cmd + ["lsp"],
-    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+try:
+    proc = subprocess.Popen(pyrefly_cmd + ["lsp"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+except FileNotFoundError:
+    die("neither pyrefly nor uvx is installed — install pyrefly, or uv (for uvx)", 4)
 
 # ---- minimal LSP client --------------------------------------------------
 inbox = queue.Queue()
@@ -194,6 +197,7 @@ proc.terminate()
 
 # ---- shape results -------------------------------------------------------
 def rel(uri):
+    uri = urllib.parse.unquote(uri)  # servers may percent-encode (spaces etc.)
     return uri.replace("file://" + repo + "/", "").replace("file://", "")
 byfile = {}
 for loc in raw:
@@ -217,9 +221,12 @@ except subprocess.CalledProcessError:
 floor = len(grep_files)
 
 # ---- silent-failure guard ------------------------------------------------
+# defs mode has no shape-based tell: pointing at the definition line itself legitimately
+# returns this very file, so a same-file result is not suspicious on its own. The hover
+# probe carries that mode — a stalled resolution reads `Unknown` there (the documented
+# failure signature), and `not resolved` already trips the guard.
 collapsed = (not want_defs) and len(byfile) <= 1 and floor >= 3
-def_stalled = want_defs and all(f == rel(target_uri) for f in byfile) and floor >= 3
-guard_tripped = (not resolved) or collapsed or def_stalled
+guard_tripped = (not resolved) or collapsed
 
 # ---- output --------------------------------------------------------------
 if want_json:

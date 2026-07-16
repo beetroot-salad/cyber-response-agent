@@ -26,7 +26,8 @@ code-name→graph-name alias, and if that graph concept is *modelled elsewhere i
 (it is the root of some `binds` entry) but is NOT in THIS demand's `binds`, flag it: the
 demand threads a first-class concept it doesn't cover. A `form: test` demand whose
 `discharged_by` names no test in the suite dir is a dangling pointer — also flagged, since a
-pointer to nothing scans nothing.
+pointer to nothing scans nothing; a pointer to a test with an EMPTY docstring is flagged for
+the same reason (the demand's prose is required to live there — SKILL.md step 8).
 
 Grounding: the graph's own vocabulary is the oracle — a concept is "modelled" iff some
 demand binds it. We only flag threading of a concept the graph already treats as real, so
@@ -45,6 +46,7 @@ concept under a top-level `binds_waivers:` map in the graph.
 from __future__ import annotations
 
 import ast
+import functools
 import re
 import sys
 from pathlib import Path
@@ -67,10 +69,11 @@ def _concept_root(bind: str) -> str:
 
 
 def _load(path: Path) -> dict:
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 
+@functools.lru_cache(maxsize=None)  # several graphs share a suite dir; parse it once
 def _test_docstrings(test_dir: Path) -> dict[str, str]:
     """Map test-function name → its docstring, over the `*.py` files beside the graph.
 
@@ -79,12 +82,16 @@ def _test_docstrings(test_dir: Path) -> dict[str, str]:
     relocated home of the demand's prose — what this check scans in place of `outcome`. First
     definition of a name wins (test names are unique across a suite); an unparseable or
     unreadable file is skipped, not fatal — a broken suite is step-9's null-stub gate to catch,
-    not this one's.
+    not this one's. `shuffle-premises` copies (`*.copyN.py`) are excluded: they carry the same
+    test names with premise-only docstrings, sort before the real file, and would silently
+    shadow the prose this check exists to scan.
     """
     docs: dict[str, str] = {}
     for py in sorted(test_dir.glob("*.py")):
+        if re.search(r"\.copy\d+\.py$", py.name):
+            continue
         try:
-            tree = ast.parse(py.read_text(), filename=str(py))
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         except (SyntaxError, OSError, ValueError):  # ValueError covers UnicodeDecodeError
             continue
         for node in ast.walk(tree):
@@ -130,14 +137,22 @@ def check(path: Path, cfg: dict) -> list[str]:
         outcome_nl = (d.get("outcome", {}) or {}).get("nl", "") or ""
         test_name = d.get("discharged_by")
         if test_name:
+            suite_dir = path.resolve().parent.name
             if test_name not in docstrings:
                 findings.append(
                     f"{path.name}:{did}: `discharged_by: {test_name}` names no test function in "
-                    f"{path.parent.name}/ — the pointer dangles, so its prose is unscannable "
+                    f"{suite_dir}/ — the pointer dangles, so its prose is unscannable "
                     f"(write the test, or fix the name)."
                 )
                 continue
             prose = docstrings[test_name]
+            if not prose.strip():
+                findings.append(
+                    f"{path.name}:{did}: `discharged_by: {test_name}` points at a test with no "
+                    f"docstring — the demand's prose is missing, so there is nothing to check "
+                    f"against `binds` (step 8 puts the outcome sentence in that docstring)."
+                )
+                continue
         elif outcome_nl:
             prose = outcome_nl  # clause/waiver, or a legacy form:test demand inlining its outcome
         elif d.get("form", "test") == "test":
