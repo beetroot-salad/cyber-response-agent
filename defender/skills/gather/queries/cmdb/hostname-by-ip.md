@@ -1,6 +1,8 @@
 ---
 id: cmdb.hostname-by-ip
 status: established
+verb: get-host
+params: [host]
 ---
 
 ## Goal
@@ -16,10 +18,11 @@ Look up a CMDB inventory record by IP address. Use to determine whether an obser
 
 ## Query
 
-```
-# CMDB is keyed by hostname and stores no IP field — there is no by-IP lookup.
-# Resolve ${ip} → hostname first via elastic.ip-to-host-search, then bind it here:
-get-host ${host}
+```query
+# CMDB is keyed by hostname; resolve the IP to a hostname via elastic.ip-to-host-search first.
+verb: get-host
+params:
+  host: ${host}
 ```
 
 ## Common pitfalls

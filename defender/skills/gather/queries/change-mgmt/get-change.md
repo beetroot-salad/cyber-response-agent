@@ -1,6 +1,8 @@
 ---
 id: change-mgmt.get-change
 status: established
+verb: get-change
+params: [cr_id]
 ---
 
 ## Goal
@@ -18,8 +20,10 @@ Fetches full details of a specific change request by CR ID. Use after identifyin
 
 ## Query
 
-```
-get-change ${cr_id}
+```query
+verb: get-change
+params:
+  cr_id: ${cr_id}
 ```
 
 ## Common pitfalls

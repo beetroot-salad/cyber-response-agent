@@ -1,6 +1,6 @@
 ---
 name: connect
-description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-CLI integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation.
+description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-adapter integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation.
 ---
 
 # Connect a system of record
@@ -17,12 +17,13 @@ hierarchy:
 
 - **MCP** — a maintained server the maintainer has (or will) configure.
   Light: no code to write. See `mcp.md`.
-- **Generated CLI adapter** — a small Python CLI you write. Heavier, but
+- **Generated adapter** — a small Python module you write: a `VERBS`
+  registry the runtime imports in-process (no CLI, no shim). Heavier, but
   it gives output control, the query-capture path, and consistency across
   adapters. See `cli-adapter.md`.
 
-The interview decides which. Writing a CLI is more work than pointing at
-an MCP server, but neither is the "real" way to connect — surface the
+The interview decides which. Writing an adapter is more work than pointing
+at an MCP server, but neither is the "real" way to connect — surface the
 trade-off honestly and let the maintainer choose (`decisions.md` has the
 one defender-specific tilt).
 
@@ -50,7 +51,8 @@ Read the doc you need; don't duplicate it into what you scaffold.
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
 - `defender/skills/gather/queries/SCHEMA.md` — the query-template format.
-- `defender/bin/README.md` — the shim contract.
+- `defender/scripts/adapters/faults.py` + `defender/runtime/verbs.py` — the
+  fault taxonomy and the `VerbContext` / `VERBS` contract an adapter implements.
 - `defender/skills/handbook/` — runtime loop and run-dir reference, on demand.
 
 ## Workflow
@@ -61,11 +63,12 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ### 1. Orient
 
 ```bash
-ls defender/scripts/adapters/ defender/bin/ defender/skills/
+ls defender/scripts/adapters/ defender/skills/
 ```
 
-If the system already has an adapter, shim, and `skills/{system}/` dir,
-stop and ask: replace it, or did they mean a different system? A re-run
+If the system already has a `{system}_cli.py` adapter and a
+`skills/{system}/` dir, stop and ask: replace it, or did they mean a
+different system? A re-run
 on an existing system is a deliberate update — branch
 `connect/{system}-update` first so the diff stays clean. If this is a
 fresh deployment, expect these to be empty; that's normal.
@@ -116,10 +119,13 @@ greenfield tree there's nothing cached yet, so ask all four.
 Pick the path with the maintainer and follow its doc end-to-end:
 
 - **MCP** → `mcp.md`.
-- **CLI adapter** → `cli-adapter.md` (it installs the shared `_adapter.py`,
-  writes `scripts/adapters/{system}_cli.py`, registers the `bin/` shim, runs
-  the Haiku alignment loop, and **pauses at a human review checkpoint**
-  before the live test — generated code is read by a human before it runs).
+- **Generated adapter** → `cli-adapter.md` (it writes
+  `scripts/adapters/{system}_cli.py` — a `VERBS` mapping of
+  `VerbContext`-taking functions that raise `faults` — on the shared
+  transport module, runs the Haiku alignment loop, and **pauses at a human
+  review checkpoint** before the live test — generated code is read by a
+  human before it runs). Dropping the module under `scripts/adapters/` is
+  the whole registration; there is no shim.
 
 Come back here for the common steps below once the integration exists.
 
@@ -143,8 +149,9 @@ everything here grows post-merge.
   rather than an error). A declared gap separates "we didn't ask" from
   "we can't ask."
 - **`execution.md`** — the **Execution surface**, read only by gather at
-  dispatch. For a CLI: the invocation pattern, flags, query syntax, exit
-  codes. For MCP: the server and tool names (see `mcp.md`). Credential and
+  dispatch. For a generated adapter: the verb roster, each verb's declared
+  params, query syntax, and exit codes (including 64 for a param mistake).
+  For MCP: the server and tool names (see `mcp.md`). Credential and
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.
 
@@ -162,12 +169,12 @@ runs.
 
 ### 5. Test
 
-For the CLI path, the human review checkpoint in `cli-adapter.md` must be
-cleared first — running the adapter here executes generated code against
-the live system.
+For the generated-adapter path, the human review checkpoint in
+`cli-adapter.md` must be cleared first — running the adapter here executes
+generated code against the live system.
 
-- **Health check.** Confirm the system is reachable and authed (CLI: run
-  the adapter's `health-check`; MCP: call the status tool). A red health
+- **Health check.** Confirm the system is reachable and authed (adapter:
+  invoke the `health-check` verb; MCP: call the status tool). A red health
   check stops you here — diagnose (refused/DNS → network; 401 →
   credentials; timeout → endpoint; cert → SSL) and fix.
 - **Sample query.** Run the simplest real query/lookup and show the
@@ -178,14 +185,15 @@ the live system.
 
 ### 6. Validate and commit
 
-For a **CLI** integration, run the scaffold validator and fix every FAIL:
+For a **generated-adapter** integration, run the scaffold validator and fix
+every FAIL:
 
 ```bash
 python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
-Skip it on the **MCP** path — it checks the adapter and shim files an MCP
-system doesn't have, so it would FAIL on things that aren't yours to fix.
+Skip it on the **MCP** path — it checks the adapter module an MCP system
+doesn't have, so it would FAIL on things that aren't yours to fix.
 Either way, walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items
 the script can't check. Then, in a git repo (the normal
 case), branch and stage — if the tree isn't under version control, skip
@@ -193,7 +201,7 @@ the branch and just leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
-git add defender/scripts/adapters/ defender/bin/defender-{system} \
+git add defender/scripts/adapters/{system}_cli.py \
         defender/skills/{system}/ \
         defender/knowledge/environment/systems/{system}/config.env \
         defender/skills/gather/queries/{system}/
@@ -213,9 +221,10 @@ Then stop. `/ship` can open the PR.
 
 - **Never handle credential values.** Tokens, passwords, API keys, pasted
   auth-bearing cURL — all forbidden. If offered one, stop and redirect it
-  to an env var. Credentials resolve through one audited path
-  (`_adapter.resolve_auth`); the skill never sees a value.
-- **Stay in your lane.** Write only the adapter, its shim,
+  to an env var. Secrets live only in env vars; `config.env` holds the
+  *names*, and the transport reads the value from the run's scrubbed
+  `ctx.env` — the skill never sees a value.
+- **Stay in your lane.** Write only the `{system}_cli.py` adapter,
   `skills/{system}/`, that system's `config.env`, and its seed templates
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
@@ -232,7 +241,7 @@ Then stop. `/ship` can open the PR.
 - **One system per invocation.** Note any others and suggest re-running.
 - **Generate fresh; don't ship a vendor template library, and don't
   pre-build the query catalog.**
-- **The CLI conforms to the gather subagent**, not the reverse (see
+- **The adapter conforms to the gather subagent**, not the reverse (see
   `cli-adapter.md`).
 
 When a request legitimately falls outside the defaults — a homegrown

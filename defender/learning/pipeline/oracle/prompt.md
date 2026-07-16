@@ -94,19 +94,20 @@ what_to_summarize:
 - source host and account of each successful RDP (type 10) logon to FINANCE-DB
 
 queries:
-  - id: sentinel.rdp-logons-window
-    params: {kql: 'SecurityEvent | where Computer == "FINANCE-DB" and EventID == 4624 and LogonType == 10', start: "...", end: "..."}
+  - id: siem.rdp-logons-window
+    verb: query
+    params: {native_query: 'event.code:4624 and winlog.event_data.LogonType:10 and host.name:"FINANCE-DB"', start: "...", end: "...", index: "logs-windows.security-*"}
 
-Sample event: { "TimeGenerated": "<TimeGenerated>", "Computer": "<Computer>", "EventID": 0, "LogonType": 0, "Account": "<Account>", "IpAddress": "<IpAddress>", "TargetLogonId": "<TargetLogonId>" }
+Sample event: { "@timestamp": "<@timestamp>", "host.name": "<host.name>", "event.code": "<event.code>", "winlog.event_data.LogonType": "<LogonType>", "winlog.event_data.TargetUserName": "<TargetUserName>", "winlog.event_data.IpAddress": "<IpAddress>", "winlog.event_data.TargetLogonId": "<TargetLogonId>" }
 
 Correct output (the entire response):
 events:
-  - TimeGenerated: "<initial-access>"
-    Computer: "FINANCE-DB"
-    EventID: 4624
-    LogonType: 10
-    Account: "CORP\\svc-deploy"
-    IpAddress: "10.20.0.5"
-    TargetLogonId: "<logon-id>"
+  - "@timestamp": "<initial-access>"
+    "host.name": "FINANCE-DB"
+    "event.code": 4624
+    "winlog.event_data.LogonType": 10
+    "winlog.event_data.TargetUserName": "CORP\\svc-deploy"
+    "winlog.event_data.IpAddress": "10.20.0.5"
+    "winlog.event_data.TargetLogonId": "<logon-id>"
 
-(One event. The story gives no clock time, so its timestamp is the anchored placeholder `<initial-access>`, not a guessed time and not a window bound. `10.20.0.5` differs from svc-deploy's baseline origin `10.20.0.2` — a field this query carries — so it is a distinguishable `+` event; had it come from `10.20.0.2` with every field baseline-identical, the answer would instead be one `- <standard environment noise>`. `TargetLogonId` unknown -> placeholder; shape matches the sample.)
+(One event, from a SIEM `query` verb whose `native_query` param carries the Lucene/KQL filter. The story gives no clock time, so its timestamp is the anchored placeholder `<initial-access>`, not a guessed time and not a window bound. `10.20.0.5` differs from svc-deploy's baseline origin `10.20.0.2` — a field this query carries (`winlog.event_data.IpAddress`) — so it is a distinguishable `+` event; had it come from `10.20.0.2` with every field baseline-identical, the answer would instead be one `- <standard environment noise>`. `TargetLogonId` unknown -> placeholder; shape matches the sample.)

@@ -31,8 +31,8 @@ payload IS the output; the harness captures it under
 Feeding a runtime identifier — container id, docker container name —
 404s. If a lead needs the inventory record for a runtime entity, run
 the resolution lead first (`list-hosts` plus inventory-side fields, or
-the identity stub's `list-authorized-hosts <user>` if the principal is
-a user), then bind the resolved name into `get-host`.
+the identity stub's `list-authorized-hosts` verb, keyed on `user`, if the
+principal is a user), then bind the resolved name into `get-host`.
 
 ## Connectivity
 
@@ -50,3 +50,9 @@ be overridden by environment variables of the same names.
 - `0` — success
 - `1` — query error (host not found, malformed arg)
 - `2` — connectivity / docker / upstream 5xx
+- `64` — a usage mistake in YOUR call: an unknown verb, or an
+  unknown/missing/mistyped param name (e.g. `name` where the verb
+  declares `host`). The one class you can fix yourself — the rejection
+  names the declared verb/param roster; re-issue with a declared param.
+  It never trips the circuit breaker, so a param typo is not a
+  data-source outage.

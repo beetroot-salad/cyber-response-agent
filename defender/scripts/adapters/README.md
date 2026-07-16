@@ -20,12 +20,13 @@ answers; the connect interview confirms them rather than re-deriving them per
 system. One shared module for the tree — extend it in place, never fork a
 second one.
 
-- **Shared module — `_stub_transport.py`.** Every adapter imports it for the
-  argument parser (`AdapterArgumentParser`, usage errors → exit 64),
-  `load_config(system, prefix)`, and the transport helpers
+- **Shared module — `_stub_transport.py`.** Every adapter imports it for
+  `load_config(system, prefix)` and the transport helpers
   (`docker_exec_curl`, `http_get`/`http_post`, `health_check`,
-  `split_status`). New verbs live in the adapter — each emits its JSON
-  payload (`print(json.dumps(payload))`), no human pretty-print; the contract
+  `split_status`). New verbs are plain annotated functions registered in the
+  adapter's `VERBS` mapping, keyed by verb name — each *returns* its JSON
+  payload as a dict (the query tool renders it), never prints; usage errors
+  come from the `faults.py` taxonomy (bad params → exit 64). The contract
   lives here.
 - **Transport — `docker --context soc-playground exec <bastion> curl …`.**
   The systems are services on the playground compose network, reached by

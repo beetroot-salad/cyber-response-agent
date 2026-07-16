@@ -1,6 +1,8 @@
 ---
 id: host-state.user-account
 status: established
+verb: passwd
+params: [host]
 ---
 
 ## Goal
@@ -20,9 +22,10 @@ Retrieve the local user account list on a specific host (passwd database). Use t
 
 ## Query
 
-```
-# See defender/skills/host-state/SKILL.md for CLI invocation shape.
-# Bound param: ${host}
+```query
+verb: passwd
+params:
+  host: ${host}
 ```
 
 ## Common pitfalls

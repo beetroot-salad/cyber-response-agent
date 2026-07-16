@@ -1,6 +1,8 @@
 ---
 id: change-mgmt.active-changes
 status: established
+verb: active-changes
+params: [host, at]
 ---
 
 ## Goal
@@ -17,8 +19,11 @@ Lists change requests whose change window is active at a specific point in time 
 
 ## Query
 
-```
-active-changes --host ${host} --at ${at}
+```query
+verb: active-changes
+params:
+  host: ${host}
+  at: ${at}
 ```
 
 ## Common pitfalls

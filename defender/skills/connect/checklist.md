@@ -9,19 +9,18 @@ python3 defender/skills/connect/validate_scaffold.py {system}
 and fix every FAIL before going further. It verifies the structural
 contract a script can check:
 
-- adapter at `scripts/adapters/{system}_cli.py`, with the shared
-  `_adapter.py` installed;
-- the CLI `--help` runs and exposes `health-check`, and a bad invocation
-  exits `64`;
-- the `bin/defender-{system}` shim exists, is executable, and auto-gates
-  as an adapter (not in `NON_ADAPTER_SHIMS`);
+- adapter module at `scripts/adapters/{system}_cli.py`, importable and
+  exposing a non-empty `VERBS` mapping;
+- `VERBS` includes `health-check`, and every verb is a `VerbContext`-taking
+  function whose model-supplied params are keyword-only;
 - `config.env` carries no inline secrets;
 - `skills/{system}/SKILL.md` has `name: defender-{system}` and a
   `## Execution` pointer, and `execution.md` exists;
 - any seed templates have valid `id: {system}.<name>` frontmatter.
 
-(For the MCP path there is no adapter/shim to check — `validate_scaffold.py`
-is CLI-specific. Run the judgment list below either way.)
+(For the MCP path there is no adapter module to check —
+`validate_scaffold.py` is adapter-specific. Run the judgment list below
+either way.)
 
 This file covers the rest — the calls a script can't make.
 
@@ -32,10 +31,10 @@ This file covers the rest — the calls a script can't make.
 - [ ] **`gaps` are honest.** `SKILL.md` declares what the system *cannot*
       answer here, including silent-failure shapes — enough that a reader
       who'd never touched this system wouldn't fall in blind.
-- [ ] **The CLI conforms to the client.** The Haiku alignment loop was
-      run (`cli-adapter.md`): cosmetic divergences became CLI changes, and
-      only irreducible vendor constraints were documented. You are not
-      teaching Haiku your aesthetics.
+- [ ] **The adapter conforms to the client.** The Haiku alignment loop was
+      run (`cli-adapter.md`): cosmetic divergences became verb/param
+      changes, and only irreducible vendor constraints were documented. You
+      are not teaching Haiku your aesthetics.
 - [ ] **Native query passes through unmodified** (or the source keys on an
       identifier) — no translation, no field renaming.
 - [ ] **Aggregation happens in the source where it can.** If the source
@@ -55,8 +54,8 @@ This file covers the rest — the calls a script can't make.
 - [ ] **One system.** If others came up in the interview, they were noted
       for a separate re-run, not folded in here.
 - [ ] **Divergences surfaced.** Any legitimate departure from the default
-      flow (odd upstream, unusual access topology, a vendor auth scheme
-      `_adapter.py` doesn't cover) is called out in the summary for human
+      flow (odd upstream, unusual access topology, a vendor auth scheme the
+      shared transport doesn't cover) is called out in the summary for human
       review — not silently patched, not blocked.
 - [ ] **Human review checkpoint cleared (CLI path).** The maintainer read
       the generated adapter and approved it *before* it ran against the
@@ -73,8 +72,8 @@ find and route to the system. Ask:
 - [ ] Does `SKILL.md` let the defender decide *when* to route here
       (`when_to_use` / `gaps`) without reading anything credentialed?
 - [ ] Does `execution.md` let the gather subagent dispatch without reading
-      the CLI source?
-- [ ] Do the seed templates plus `--help` give a fresh-context Haiku
+      the adapter source?
+- [ ] Do the seed templates plus the verb roster give a fresh-context Haiku
       enough to compose a valid first query?
 - [ ] Is anything missing that the offline lead-author would need to start
       extracting templates from a real run?

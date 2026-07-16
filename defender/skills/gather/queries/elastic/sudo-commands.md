@@ -1,7 +1,9 @@
 ---
 id: elastic.sudo-commands
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [end, host, start]
 ---
 
 ## Goal

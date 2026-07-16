@@ -177,11 +177,17 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
             raw_ref = None
         params = rec.get("params")
         exit_code = _as_int(rec.get("exit_code", 0))
-        # Prefer the recorded class; a legacy row written before the field existed
-        # has no `error_class` key, so back-fill it from the retained exit code via
-        # the one shared derivation (record_query stamps the same value live).
-        raw_ec = rec.get("error_class")
-        error_class = str(raw_ec) if raw_ec else error_class_for_exit(exit_code)
+        # Distinguish a PRESENT `error_class` (the #617 writer ALWAYS stamps it — `null` on
+        # success) from an ABSENT key (a legacy row written before the field existed). Presence,
+        # not truthiness: a present `null` on a non-zero exit is a real value the writer chose and
+        # must be preserved as None, where `str(raw_ec) if raw_ec else …` would wrongly overwrite
+        # it from the exit code. Only the truly-absent key back-fills, via the one shared
+        # derivation record_query stamps live.
+        if "error_class" in rec:
+            raw_ec = rec.get("error_class")
+            error_class = str(raw_ec) if raw_ec is not None else None
+        else:
+            error_class = error_class_for_exit(exit_code)
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
@@ -346,6 +352,10 @@ def render_joined_yaml(run_dir: Path) -> str:
             "queries": [
                 {
                     "query_id": q.query_id,
+                    # The judge's ground truth carries `verb` alongside the model-coined
+                    # `query_id`: query_id is spoofable, verb is the real executed fact that
+                    # distinguishes the SIEM's events verb from its signals/alerts verb (#620).
+                    "verb": q.verb,
                     "params": q.params,
                     "payload_status": q.payload_status,
                     "payload_digest": q.payload_digest,

@@ -1,6 +1,9 @@
 ---
 id: host-state.container-identity-and-uid
 status: established
+verb: container-inspect
+params: [container_id]
+body_substitutions: [passwd_payload, uid]
 ---
 
 ## Goal
@@ -26,7 +29,7 @@ query(system="host-state", verb="container-inspect", params={"container_id": "${
 query(system="host-state", verb="passwd", params={"host": "${container_id}"})
 ```
 ```bash
-cat ${passwd_payload} | jq -r --arg uid "${uid}" '.entries[] | select(split(":")[2] == $uid)'
+cat ${passwd_payload} | jq -r '.entries[] | select(split(":")[2] == "${uid}")'
 ```
 ```
 # Query 3: Process tree on the container

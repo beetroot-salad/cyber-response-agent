@@ -54,6 +54,7 @@ from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
+from defender.runtime.verbs import engine_for
 
 # Three cohesive leaf modules carry the draft-synthesis, lead-extraction, and
 # scope-gate-path-classifier groups; this driver re-exports the symbols they own so
@@ -78,13 +79,10 @@ from defender.learning.leads.path_validation import (  # noqa: F401  (re-exporte
     _under_draft,
 )
 from defender.learning.leads.draft_synthesis import (  # noqa: F401  (re-exported)
-    _ESQL_SYSTEMS,
-    _NON_CANDIDATE_VERBS,
     _SAFE_ID_SEGMENT,
     _draft_candidate_segments,
     _draft_skeleton,
     _executed_query,
-    _is_esql,
     synthesize_drafts,
 )
 from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exported)
@@ -207,11 +205,20 @@ def build_handoff(
         )
         invocations: list[dict] = []
         for lead in invocations_raw:
-            try:
-                rendered_query = lead_render.render_query(tpl.path, lead.params)
-            except OSError as e:
-                _log(f"WARN render_query failed for {tpl.path}: {e}")
-                rendered_query = ""
+            # An ENGINE verb's whole query is a native-language body in one declared param, NOT a
+            # `${placeholder}` binding into the template skeleton — so `render_query` would return
+            # the static skeleton with its inner `${host}`/`${start}` unbound and misrepresent
+            # what ran (fork F-F). The body that ACTUALLY ran is the canonical record; use it. A
+            # param-only verb still renders through the template (its named params bind the
+            # placeholders), exactly as before.
+            if engine_for(lead.system, lead.verb) != "none":
+                rendered_query = _executed_query(lead)
+            else:
+                try:
+                    rendered_query = lead_render.render_query(tpl.path, lead.params)
+                except OSError as e:
+                    _log(f"WARN render_query failed for {tpl.path}: {e}")
+                    rendered_query = ""
             invocations.append(
                 {
                     "lead_id": lead.lead_id,

@@ -1,6 +1,8 @@
 ---
 id: identity.access-check
 status: established
+verb: can-access
+params: [user, host]
 ---
 
 ## Goal
@@ -20,9 +22,11 @@ Check whether a specific user account holds an active access grant for a specifi
 
 ## Query
 
-```
-# See defender/skills/identity/SKILL.md for CLI invocation shape.
-# Bound params: ${user} ${host}
+```query
+verb: can-access
+params:
+  user: ${user}
+  host: ${host}
 ```
 
 ## Common pitfalls

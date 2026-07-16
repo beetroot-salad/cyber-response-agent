@@ -1,9 +1,9 @@
 ---
 id: elastic.doc-fetch-by-id
 status: established
-filter_keys:
-  predicates:
-    - {event_attr: event_id, op: eq, param: id}
+verb: query
+params: [index]
+body_substitutions: [id, id1, id2]
 ---
 
 ## Goal

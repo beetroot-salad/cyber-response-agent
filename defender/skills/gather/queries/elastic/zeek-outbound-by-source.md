@@ -1,7 +1,9 @@
 ---
 id: elastic.zeek-outbound-by-source
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [end, source_ip, start]
 ---
 
 ## Goal

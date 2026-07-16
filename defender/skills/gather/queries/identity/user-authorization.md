@@ -1,6 +1,8 @@
 ---
 id: identity.user-authorization
 status: established
+verb: get-user
+params: [user]
 ---
 
 ## Goal
@@ -17,11 +19,11 @@ Retrieve a user's authorization profile from the identity stub — enabled statu
 
 ## Query
 
+```query
+verb: get-user
+params:
+  user: ${user}
 ```
-${user}
-```
-
-The system CLI accepts a username and returns the full user record via `get-user`.
 
 ## Common pitfalls
 

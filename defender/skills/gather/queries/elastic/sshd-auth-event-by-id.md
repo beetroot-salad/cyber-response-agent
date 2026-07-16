@@ -1,10 +1,9 @@
 ---
 id: elastic.sshd-auth-event-by-id
 status: established
-filter_keys:
-  index: logs-system.auth-*
-  predicates:
-    - {event_attr: event_id, op: eq, param: event_id}
+verb: query
+params: [index]
+body_substitutions: [event_id]
 ---
 
 ## Goal
@@ -36,5 +35,5 @@ Index: `logs-system.auth-*`
 - **Structured ECS fields may be populated.** For `Invalid user` events (observed in Filebeat 9.3.3), `user.name`, `source.ip`, and `system.auth.ssh.event` are all populated via ECS normalization — check structured fields first. For other event types (e.g., `Accepted password`, `Failed password`), `source.ip` may be absent; fall back to `message` substring extraction in that case.
 - **`_id` vs. field value.** The `event_id` parameter is the Elasticsearch document ID (`_id`), not a value inside the `message` field. Retrieve via direct `_id` lookup, not a field query.
 - **Index scope.** Auth-log events live in `logs-system.auth-*`; Falco events in `logs-falco.alerts-*`. Do not substitute indexes.
-- **Sweep pair for multi-hop pivots.** When a lead resolves multiple ancestor sessions in one hop (e.g., a workstation-tier event and a prod-tier event), either dispatch this template once per `_id` and reconcile results in the gather summary, or batch both IDs in a single dispatch using `arg0` with the OR syntax: `_id: ("id1" OR "id2")`; both documents are returned in one shot.
-- **`event_id` is a query-body substitution, not a CLI flag.** Pass `event_id` as a query param for substitution into `_id: "${event_id}"`. Passing it as `--event-id` to the CLI returns exit=2 with "error: unrecognized arguments: --event-id".
+- **Sweep pair for multi-hop pivots.** When a lead resolves multiple ancestor sessions in one hop (e.g., a workstation-tier event and a prod-tier event), dispatch this template once per `_id` and reconcile the results in the gather summary, or batch both IDs in one `native_query` body using the OR syntax: `_id: ("id1" OR "id2")`; both documents are returned in one shot.
+- **`event_id` is a query-body substitution into the `native_query`.** It is interpolated into `_id: "${event_id}"`; it is not a verb param of its own. A mistyped or unknown param name is rejected as a usage error (exit 64), naming the param.

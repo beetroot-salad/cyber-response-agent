@@ -78,6 +78,82 @@ class VerbContext:
 Verb = Callable[..., Any]
 
 
+# --- the verb ENGINE declaration (#620) -------------------------------------
+#
+# A verb's body is EITHER a query LANGUAGE (an ES|QL pipe, a Lucene/KQL string — the whole query
+# lives in ONE param) OR a set of scalar params (the majority). Which it is, and which param
+# carries the language body, is a property of the VERB, not the system: the SIEM's `esql` speaks
+# ES|QL in `query`, its `query`/`alerts` speak Lucene in `native_query`, and every other verb is
+# param-only. The pre-#620 consumer keyed this on the SYSTEM (`_is_esql`), which could not tell
+# the SIEM's `query` (Lucene) from its `esql` (ES|QL) — the exact bug this declaration ends.
+#
+# The declaration has two faces, and they are TWINS that must agree:
+#   * `@verb(engine=…, body_param=…)` STAMPS the live registry function; `engine_of` /
+#     `body_param_of` read it back. This is the in-process path (the query tool, the validator).
+#   * `_ENGINE_DECL` is the OFFLINE twin, keyed on the recorded `(system, verb)` strings, read by
+#     the frozen-row consumers (`draft_synthesis`, `lead_extraction`) via `engine_for` /
+#     `body_param_for`. They resolve a persisted row's engine WITHOUT importing an adapter module:
+#     importing a per-tree adapter to read a decorator attribute would re-open the #551 freeze one
+#     layer up (the reader would bind whichever tree imported the module first). An offline reader
+#     therefore cannot go through the stamped function — it has no function, only the row's strings.
+
+_ENGINE_ATTR = "__verb_engine__"
+_BODY_PARAM_ATTR = "__verb_body_param__"
+
+#: (system, verb) -> (engine, body_param) for every verb whose body is a query language. Absent
+#: => engine "none", the param-only majority. The @verb decorations on the adapters carry the same
+#: facts for the live path; keep the two in step when a verb's engine changes.
+_ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
+    ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
+    ("elastic", "query"): ("lucene", "native_query"),   # lint-shippable: ok — real queries-table `system` value
+    ("elastic", "alerts"): ("lucene", "native_query"),  # lint-shippable: ok — real queries-table `system` value
+}
+
+
+def verb(*, engine: str = "none", body_param: str | None = None) -> Callable[[Verb], Verb]:
+    """Declare a verb's ENGINE and native-query-body param — a per-VERB property, not per-system.
+
+    A verb whose body is a query language carries `engine=` + `body_param=` (the SIEM's esql →
+    `esql`/`query`; query/alerts → `lucene`/`native_query`); a param-only verb carries neither and
+    reads as engine `"none"`. The decorator only STAMPS two attributes and returns the function
+    UNCHANGED, so `declared_params` / `validate_params` keep reading the signature — the marker
+    never blinds the validator to the body param (it is an attribute, not an annotation, so there
+    is nothing for `_resolved_hints` to strip the way an `Annotated[str, QueryBody]` would be).
+    """
+
+    def decorate(fn: Verb) -> Verb:
+        setattr(fn, _ENGINE_ATTR, engine)
+        setattr(fn, _BODY_PARAM_ATTR, body_param)
+        return fn
+
+    return decorate
+
+
+def engine_of(fn: Verb) -> str:
+    """The verb's declared engine, or `"none"` for an undecorated (param-only) verb."""
+    return getattr(fn, _ENGINE_ATTR, "none")
+
+
+def body_param_of(fn: Verb) -> str | None:
+    """The keyword-only param carrying the verb's native query body, or None (param-only)."""
+    return getattr(fn, _BODY_PARAM_ATTR, None)
+
+
+def engine_for(system: str, verb_name: str) -> str:
+    """The engine a frozen row's `(system, verb)` speaks, resolved OFFLINE (no adapter import) —
+    `"none"` for the param-only majority. Keyed per-VERB: the SIEM's `query` is `lucene` while its
+    `esql` is `esql`, the distinction the old system-keyed `_is_esql` could not draw."""
+    decl = _ENGINE_DECL.get((system, verb_name))
+    return decl[0] if decl else "none"
+
+
+def body_param_for(system: str, verb_name: str) -> str | None:
+    """The keyword-only param carrying `(system, verb)`'s native query body, resolved offline —
+    None for a param-only verb."""
+    decl = _ENGINE_DECL.get((system, verb_name))
+    return decl[1] if decl else None
+
+
 def declared_params(fn: Verb) -> dict[str, inspect.Parameter]:
     """A verb's param surface: the KEYWORD-ONLY params of its annotated signature.
 
@@ -271,6 +347,11 @@ __all__ = [
     "ModuleVerbRegistry",
     "Verb",
     "VerbContext",
+    "body_param_for",
+    "body_param_of",
     "declared_params",
+    "engine_for",
+    "engine_of",
     "validate_params",
+    "verb",
 ]

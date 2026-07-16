@@ -31,9 +31,13 @@ A fenced YAML block carries:
 ### 1. ORIENT
 
 Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
-`{system}`. If `{system}` is the SIEM, the query language is **ES|QL** against the
-`logs-*` data streams; read `{defender_dir}/skills/{system}/execution.md` only if
-you need the index list or the system's verb/param details.
+`{system}`. Each system exposes its own verbs: the SIEM aggregates
+through the `esql` verb (an ES|QL pipe against the `logs-*` data streams) and
+filters through `query`/`alerts`; other systems have their own verbs (e.g.
+cmdb `get-host`, identity `can-access`), each binding named params — so
+ES|QL is the SIEM's language, not the universal query shape. Read
+`{defender_dir}/skills/{system}/execution.md` only if you need the index list
+or the system's verb/param details.
 
 ### 2. FIND a template, or coin a query
 
@@ -73,7 +77,15 @@ adapter command, no shim, and no `--help`; **Bash cannot reach a system of recor
 at all**, and an adapter-shaped command is denied.
 
 ```
-query(system="<system>", verb="esql", params={"query": "<ES|QL query>"}, query_id="<id>")
+query(system="<system>", verb="<verb>", params={<the params the verb declares, bound by name>}, query_id="<id>")
+```
+
+The verb and its params are system-specific — for the SIEM's aggregation, the verb
+is `esql` and its one param is `query` (an ES|QL pipe); other systems bind named
+scalar params. The call shape is the same for every system:
+
+```
+query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
 ```
 
 - **`verb` + `params` come from the systems catalog in your dispatch prompt.** A verb

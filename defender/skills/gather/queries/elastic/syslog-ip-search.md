@@ -1,7 +1,9 @@
 ---
 id: elastic.syslog-ip-search
 status: established
-engine: esql
+verb: esql
+params: []
+body_substitutions: [end, start, token]
 ---
 
 ## Goal

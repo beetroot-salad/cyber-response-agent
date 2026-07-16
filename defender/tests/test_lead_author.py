@@ -32,7 +32,7 @@ def _executed_lead(**kw):
     unless a test opts into a failure via ``error_class=`` / ``query_id=``."""
     base = dict(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id="elastic.esql", system="elastic", params={}, raw_command="cli",
+        query_id="elastic.esql", system="elastic", verb="esql", params={}, raw_command="cli",
         goal_text="", what_to_summarize=(), raw_ref=None,
         payload_status="ok", payload_digest="", error_class=None,
     )
@@ -53,18 +53,23 @@ def _write_lead_meta(run_dir: Path, lead_id: str, goal: str, wts=()) -> None:
     )
 
 
-def _write_query(
+def _write_query(  # noqa: PLR0913 — a queries-row builder mirrors the table's columns
     run_dir: Path,
     lead_id: str,
     seq: int,
     query_id: str,
     params: dict | None = None,
     *,
+    verb: str | None = None,
     payload: str | None = "{}",
     payload_status: str = "ok",
     payload_digest: str = "ok digest",
 ) -> None:
-    """Append one queries-table row + (optionally) its by-ref payload."""
+    """Append one queries-table row + (optionally) its by-ref payload.
+
+    ``verb`` is the honest registry verb the row freezes (#620); it defaults to the query_id
+    suffix (the untagged shape) — pass it explicitly to exercise an engine verb or a coined id
+    whose suffix is not the verb."""
     raw = run_dir / "gather_raw"
     raw.mkdir(exist_ok=True)
     rel = None
@@ -77,7 +82,7 @@ def _write_query(
         "lead_id": lead_id,
         "seq": seq,
         "system": query_id.split(".", 1)[0] if "." in query_id else query_id,
-        "verb": query_id.split(".", 1)[-1],
+        "verb": verb if verb is not None else query_id.split(".", 1)[-1],
         "query_id": query_id,
         "params": params or {},
         "raw_command": "cli",
@@ -245,12 +250,12 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
 
 
 def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path):
-    """For an ES|QL invocation the bindings live inside arg0, not as named
-    params — so the handoff carries the literal pipe as `executed_query`
-    (the canonical record), not a `${param}` re-render that drops the values."""
+    """For an ES|QL invocation the whole query is the verbatim `query` body param — so the
+    handoff carries the literal pipe as `executed_query` (the canonical record), not a
+    `${param}` re-render that drops the values."""
     pipe = 'FROM logs-system.auth-* | WHERE host.name == "db-1" | STATS c = COUNT(*)'
     _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"arg0": pipe})
+    _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"query": pipe}, verb="esql")
     _, leads = lead_author.extract(run_dir)
     inv = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
@@ -930,7 +935,7 @@ def test_collect_and_synthesize_partition_disjointly(tmp_path: Path, catalog: Pa
     ]
     by_id = {t.id for t in lead_author.lead_neighbors.load_catalog(catalog)}
     drafted = {ld.query_id for ld in leads
-               if lead_author._draft_candidate_segments(ld.query_id, by_id) is not None}
+               if lead_author._draft_candidate_segments(ld.query_id, ld.verb, by_id) is not None}
     collected = {r["query_id"]
                  for r in lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)}
     assert drafted == {"elastic.new-thing"}
@@ -991,7 +996,8 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     run_dir = tmp_path / "run-mint"
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe a brand-new verb")
-    _write_query(run_dir, "l-001", 0, "wazuh.brandnew", payload_status="ok")
+    # A coined id (suffix != recorded verb) so it drafts — an untagged {system}.{verb} would not.
+    _write_query(run_dir, "l-001", 0, "wazuh.brandnew", verb="lookup", payload_status="ok")
 
     assert lead_author.run(run_dir, deps=deps) == 0
     # synthesize minted the draft on disk this tick...

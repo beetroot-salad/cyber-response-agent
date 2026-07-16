@@ -104,7 +104,7 @@ def workspace_map(run_dir: Path) -> str:
     clis = _list_dir(adapters_dir, suffix="_cli.py")
     if clis:
         for name in clis:
-            lines.append(f"- {name}  (run with `--help`; do not Read the source)")
+            lines.append(f"- {name}  (a VERBS registry dispatched via the query tool; do not Read the source)")
     else:
         lines.append("- (none yet — v2 adapters TBD)")
     lines.append("")
