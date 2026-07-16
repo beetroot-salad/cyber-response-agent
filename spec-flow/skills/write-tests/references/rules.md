@@ -17,7 +17,7 @@ The types are **routes, not partitions**: one element can be both. A design hole
 
 ## Delta grammar
 
-Change kinds are finite: `{add, remove, modify} × {actor, boundary, facet, edge, property}`. Each cell fires a rule or is a documented no-op — blind spots are enumerated, not silent.
+Change kinds are finite: `{add, remove, modify} × {actor, boundary, facet, edge, property}`. This table is the **guide-word grid** (HAZOP): each cell is a deviation operator walked over the structure, and it either fires a rule or is a documented no-op — blind spots are enumerated, not silent.
 
 | | add | remove | modify |
 |---|---|---|---|
