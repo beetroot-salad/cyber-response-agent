@@ -32,7 +32,7 @@ The angles below are scaffolding for finding those one or two things — prompts
 - **Root cause** — is the reported symptom the real problem, or a downstream effect of a deeper cause that's the better fix?
 - **The hard part** — the constraint in tension, the invariant easy to break. Usually where the real forks live.
 - **Scope** — what's in, what's an explicit non-goal, whether two problems wear one issue.
-- **The same pattern elsewhere** — the sites the issue names are a sample, not a census; once the mechanism is clear, derive the other occurrences with a tool at the issue's altitude (its motivation and mechanism, never its file list) and give each an in-or-out verdict. One the issue missed is a finding; an exclusion is a decision worth recording.
+- **The same pattern elsewhere** — the sites the issue names are a sample, not a census; once the mechanism is clear, derive the other occurrences with a tool at the issue's altitude (its motivation and mechanism, never its file list) and give each an in-or-out verdict. When "the same" is a *symbol* — a function, class, constant — the **symbol-refs** skill resolves who references it past grep's lexical false positives. One the issue missed is a finding; an exclusion is a decision worth recording.
 
 ## Closing with a design doc
 

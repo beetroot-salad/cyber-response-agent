@@ -34,6 +34,7 @@ to guess.
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
 | `/spec-flow:handoff` | Writes the terse note that lets a cold session resume the work. |
 | `/spec-flow:init` | Writes the project profile. Run once per repo. |
+| `/spec-flow:symbol-refs` | Resolves a Python symbol's cross-file references / definitions via Pyrefly — the resolved sibling of grep and the Explore agent. Used by `discuss-issue`'s census; useful on its own. |
 
 Each stage is a **cold start**: a fresh session that never saw the previous one. GitHub is the only
 channel between them — the issue, its comments, the branch, the PR. That constraint is what makes
