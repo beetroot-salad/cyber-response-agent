@@ -15,7 +15,7 @@ Load the issue first. If a number was passed: `gh issue view <n> --comments` (em
 
 Check the issue against the code it describes *before* discussing anything on top of it; a discussion built on a false premise is wasted.
 
-- **Accurate.** Issues assert "X works like Y" from stale memory. Read the named files and confirm, citing `file:line`; hand broad reading to an Explore subagent, but settle anything enumerable or executable with a tool run, not the reader's impression. An issue premised on in-flight work (an open PR, a stacked branch) is checked against *that* tree, and you say which — "refuting" a correct issue by reading the wrong base is the failure mode.
+- **Accurate.** Issues assert "X works like Y" from stale memory. Read the named files and confirm, citing `file:line`; hand broad reading to an Explore subagent, but settle anything enumerable or executable with a tool run, not the reader's impression. An issue premised on in-flight work (an open PR, a stacked branch) is checked against *that* tree, and you say which — "refuting" a correct issue by reading the wrong base is the failure mode. The mirror case: an issue filed from a review can have been true when filed and fixed by a later merge, so check the named files' history back to the filing point, not just their current state — "already resolved by #NNN" is a finding, not a baseless report.
 - **Complete.** Does it carry enough to act on — the motivation, a done criterion, the dependencies? Name what's missing.
 
 If the issue's picture is wrong, correcting it is the first finding — fix the premise before going further.

@@ -1,6 +1,6 @@
 # Closing with the design doc
 
-The discussion has settled and the issue is heading to implementation. Compile what was decided into **one issue comment** — the intent+design doc write-tests consumes. The value is conservation: the typing survives into the spec stage, and a flat prose summary loses exactly what the downstream checks stand on. Scale it to the issue — a one-line fix earns a short doc.
+You reach here as the discussion settles — but first check *which way* it settled. An issue that is won't-fix, or already resolved by a later merge, ends in a short **disposition** in chat — what you found, why no implementation follows — not the doc below; forcing an implementation doc onto an issue that shouldn't be implemented is its own failure. Only when the issue is genuinely heading to implementation do you compile what was decided into **one issue comment** — the intent+design doc write-tests consumes. The value is conservation: the typing survives into the spec stage, and a flat prose summary loses exactly what the downstream checks stand on. Scale it to the issue — a one-line fix earns a short doc.
 
 ## The doc — intent, design, claims
 
@@ -17,7 +17,7 @@ Every sentence rests on something already being true of the system. Ask of each:
 - **census** — "these are all the writers / callers / occurrences." Probe: the search, recorded so it replays — the full hit list, or counts plus the members the doc acts on.
 - **reachability** — "X cannot reach Y", "this value is constrained." Probe: try to break it. A survivor is *unrefuted*, never confirmed.
 
-Record the results in a fenced-YAML `claims:` block in the comment — entries `{id, kind, claim, probe, observed, verdict}`, the shape write-tests' ledger inherits verbatim. A refuted assumption is frequently the discussion's single most valuable finding: fix the doc before it posts, and say what changed.
+Record the results in a fenced-YAML `claims:` block in the comment — entries `{id, kind, claim, probe, observed, verdict}`, `verdict` one of `holds | refuted | unrefuted | unprobed | deferred` (reachability's ceiling is `unrefuted`, never a coined "confirmed") — the shape write-tests' ledger inherits verbatim. A refuted assumption is frequently the discussion's single most valuable finding: fix the doc before it posts, and say what changed.
 
 ## The review — a cold read before it posts
 
