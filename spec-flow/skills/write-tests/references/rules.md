@@ -43,33 +43,33 @@ Each rule: **trigger** (a predicate over formal slots) → **obligation** (the d
 
 - **Trigger:** an edge with `sends` to a payload-facet boundary, and no executable `kind: shape` demand binds `interacts(...).payload`.
 - **Obligation:** a shape demand. Derivable assertions, from the facet: the fake records the inbound payload; `roles-disjoint-sources` — no two parts share a source (the same template must not arrive under two roles); `all-slots-bound` — no part contains an unsubstituted `{...}` token.
-- **Canonical:** #534 dual prompt — the full template passed as both the raw system prompt (literal `{story}`/`{lesson}` braces) and, rendered, as the user turn; the suite drove a `FunctionModel` that ignored `messages` and was structurally blind to it.
+- **Canonical:** a dual-prompt escape — the full template passed as both the raw system prompt (literal `{slot}` braces) and, rendered, as the user turn; the suite drove a model stub that ignored `messages` and was structurally blind to it.
 
 ### R2 — shared sink
 
 - **Trigger:** an identity-facet boundary written by ≥2 writers (existing ∪ delta), **or by one writer driven over multiple invocations** (a fan, a batch, a retry — key coverage is over writer *invocations*, not writer edges), or gaining a new `drives` edge over its writers, or a `drives.multiplicity` / `interpolates` / `key_axes` change.
 - **Obligation:** two parts. (a) *Key coverage:* every writer's `interpolates` covers every axis its invocation set varies on — checked against `derivations`: a value with `injective: false` does **not** cover its axis. (b) *A uniqueness demand* driving the writers into one root, **bound at the composition frame** (the actor that fans the writers), never the leg — a single-leg test cannot see a cross-leg collision. Form selection keys on `sharing` first: `unique-key` → by multiplicity (`serial` → drive the writers in turn — deterministic, the second `w`-open truncates the first — with a positive control that both writes landed as distinct real content; `concurrent` → a genuine interleaving); `serialized-append` → the demand is atomic/serialized append (no torn line, no lost update) under a genuine interleaving, whatever the declared multiplicity.
-- **Canonical:** #527 per-lead trace names colliding across the two direction legs (the spec's own docstring scoped distinctness to per-lead within one invocation); #534 `{error_prefix}.{lesson_stem}` — same mechanism, different surface form. The typed predicate catches both; similarity-to-the-first-instance would not.
+- **Canonical:** per-key output names colliding across two legs of one fan-out (the spec's own docstring scoped distinctness to within a single invocation); a `{prefix}.{stem}` filename collision is the same mechanism in a different surface form. The typed predicate catches both; similarity-to-the-first-instance would not.
 - **Sharper when read:** if the identity boundary is also **read** (a cache, a lookup), an under-covering key is a read-path bug, not just a lost write — the reader returns *another key's content* (same-stem files from two intake dirs serving each other's cached summary is a correctness and disclosure bug; note this fires on one writer driven over both dirs — the invocation clause above). Same trigger; write the witness in read terms and the uniqueness demand asserts no cross-read.
 
 ### R3 — cross-via parity
 
 - **Trigger:** an access-facet boundary with ≥2 vias, or a via added to a boundary an existing via reaches. If a via's `constraints` is `unknown`, R0 fires first — decide the policy, then pin it.
 - **Obligation:** one parity demand per (constraint × via) cell, bound at `<boundary>.access[<via>]` so discharge is per-cell, never facet-wide: every constraint the established via enforces (denylist, clamp, confine, …), the new via enforces too — asserted over **all** vias, since a constraint pinned on one surface and silently absent on its sibling is the canonical fail-open.
-- **Canonical:** #517 jq path-gate — the bash lane admitted bundled flags and lacked denylist parity with the read tool; each surface read alone looked correct.
+- **Canonical:** a path-gate whose bash lane admitted bundled flags and lacked denylist parity with the read-tool lane; each surface read alone looked correct.
 
 ### R4 — domain coverage
 
 - **Trigger:** a `read` edge to a domain-facet boundary, or a domain facet gaining members/alternatives.
 - **Obligation:** an executable demand per `distinguished` member — above all the falsy member when `falsy_valid` (an `x or DEFAULT` coercion silently swallows it) — and per `documented_alternatives` entry, bound at `<boundary>.domain.alternatives[<v>]` so discharge is per-entry. Entries whose `crosses_validation` is `true` come first; `unknown` there is an R0 hole (grounding establishes the crossing — schema.md). Pin the crossing either way: the advertised combination works, or it fails loud and legibly.
-- **Canonical:** #534 `wall_clock_timeout or SUBAGENT_TIMEOUT` turning a valid 0 into the default; #527 `ORACLE_EFFORT="none"` fatal under the documented `claude-*` A/B override — the spec tested only the shipped default column.
+- **Canonical:** an `x or DEFAULT` timeout coercion turning a valid `0` into the default; a documented `"none"` effort override fatal under an advertised A/B mode — the spec tested only the shipped default column.
 
 ### R5 — subtraction and conservation
 
 - **Trigger:** a removed element — actor, boundary, edge, a `mode: remove` edge, or a facet (a dropped contract) — whose dependents are live: for actors, boundaries, and edges, live in-edges; for a facet, its boundary's live in-edges.
 - **Obligation:** a survival demand per dependent — the workflow that ran through the removed element completes via its substitute; if the substitute structurally cannot discharge it (the replacement takes one file where the original fanned N), that is a design hole, not a test to write.
 - **Judgment extension — not slot-computable, and flagged as such:** when the delta *tightens* a constraint or flips a default rather than removing anything, ask whether a security-critical caller is left constructible in the newly-unsafe state; if so, mint a safe-by-construction demand — the critical caller *cannot be built* unsafe; assert the constructor raises, not merely that it behaves when configured right. This half rests on the author asking the question, not on a trigger — record in `gate.evaluated` that it was considered.
-- **Canonical:** #517 — the suite tested only the new restriction and silently regressed the workflows the old surface quietly served.
+- **Canonical:** a tightened access surface whose suite tested only the new restriction and silently regressed the workflows the old surface quietly served.
 
 ## Probed claims — the ledger
 
@@ -108,6 +108,8 @@ schema_version: 1
 design: <issue # or doc path>
 base: <SHA the spec branch forked from — write-code-from-spec's gate diffs against it>
 demands:   [...]      # the resolved demand list, waivers included — the spec proper
+                      # a form:test demand is a pointer {id,kind,form,binds,discharged_by}; its prose
+                      # lives in the named test (check_binds scans that docstring). clause/waiver carry `outcome`.
 structure: {axes: [...], actors: [...], boundaries: [...], interacts: [...], drives: [...]}
 claims:              # every load-bearing statement about existing reality, probed not asserted
   - {id: <slug>, kind: referential | census | behavior | reachability | discharge | primitive,
@@ -117,7 +119,7 @@ claims:              # every load-bearing statement about existing reality, prob
                      # entries inherited from the discuss doc keep their ids; source: discuss is optional
 gate:
   evaluated: [{rule: R0..R5, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
-  obligations: [{rule: R2, element: <address>, witness: "<one sentence>", discharged_by: <demand id>}]
+  obligations: [{rule: R2, element: <address>, witness: "<one sentence>", discharged_by: <demand id>}]  # obligation→demand (a demand's own discharged_by is demand→test)
   holes:       [{rule: R0, element: <address>, resolution: "<the human's decision>", resolved_to: <demand id>}]
                         # resolved_to: present when the resolution spawned a demand
   pre_discharged: [{rule: R4, element: <address>, by: <demand id>, edge: <interacts/drives address>}]
@@ -128,9 +130,9 @@ handoff:
   deviations: ["<degraded strong author | collapsed step 4 | manual slot check | reduced small-delta mode>", ...]
 ```
 
-Downstream consumers: the human reviews it with the tests; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work (#537).
+Downstream consumers: the human reviews it with the tests; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work.
 
-Formal-slot validation (kinds, forms, modes, vias, invariant vocabularies) is currently a hand check against schema.md — a `spec_graph` linter is deliberate future work tracked in #537. Until it exists, the step-9 gate records the manual check in `handoff.deviations`.
+Formal-slot validation (kinds, forms, modes, vias, invariant vocabularies) is currently a hand check against schema.md — a `spec_graph` linter is deliberate future work. Until it exists, the step-9 gate records the manual check in `handoff.deviations`.
 
 ## Maintenance
 
