@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""shuffle-premises — write N copies of a premise-only test file, each with the test
+functions in a different, seeded random order.
+
+This is step 4(b) of write-tests. The two-tier procedure hands each of ~5 identical
+answerers one copy of the same premise set and compares their assertions per premise;
+the ONLY thing standing between that and false consensus is that the premises sit in a
+different order in each copy — otherwise a shared position primes a shared answer, and the
+"agreement" the step measures is a positional artifact, not a reading.
+
+An LLM is the wrong tool for exactly this step: models do not randomize. Asked to "shuffle",
+they emit correlated or identity orders, or claim to shuffle without doing it — silently
+restoring the anchoring the copies exist to remove. So the shuffle is a deterministic script.
+
+WHAT IT PRESERVES. Only the *order* of top-level `test_*` functions changes. Every function's
+source is moved verbatim (docstring, decorators, comments, blank lines); names are identical
+across copies, so step 4(d) lines up the answers per premise by name. Module preamble (imports,
+module docstring) and any non-test top-level code stay in place — a test slot is refilled with
+a (possibly different) test block, nothing else moves. A comment travels with the premise it
+annotates: one inside or after a function's body stays with that function, and a column-0
+comment run sitting directly above a `def` (no blank line between) moves with the def BELOW it
+— that is where a leading `# fork:` marker lives, and losing it to the wrong premise would
+silently misroute a fork.
+
+SEEDING. Each copy is a seeded permutation (`--seed`, default 0), so a rerun reproduces the
+same orders — the seed is the provenance you record. Orders prefer to be distinct across copies
+first, non-identity second (with 2 premises the two conflict, and repeating one order across
+every copy would restore the exact shared-position artifact the copies exist to remove); the
+per-copy order prints to stdout (and `--json`) for the run record, but is NOT written into the
+copies (that would hand the answerer the very ordering signal we are destroying).
+
+Usage:
+    shuffle-premises <premise_file.py> [--copies N] [--seed S] [--outdir DIR] [--json]
+
+Writes `<stem>.copy1<ext> ... <stem>.copyN<ext>` into a fresh temp directory (or into
+--outdir). The copies must NOT land beside the suite: they match pytest's `test_*.py` glob,
+and a lingering copy shadows the real tests' docstrings in check_binds's scan — delete them
+once step 4(d) has compared the answers. The plugin ships this on the Bash PATH; call it as
+`shuffle-premises`, never by path (`$CLAUDE_PLUGIN_ROOT` does not expand in SKILL.md prose).
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import random
+import sys
+import tempfile
+from pathlib import Path
+
+
+def _toplevel_start(node: ast.stmt) -> int:
+    """1-indexed first line of a top-level node, decorators included."""
+    decos = getattr(node, "decorator_list", []) or []
+    return min([node.lineno, *(d.lineno for d in decos)])
+
+
+def _is_test(node: ast.stmt) -> bool:
+    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+
+
+def _partition(lines: list[str], tree: ast.Module) -> tuple[list[str], list[tuple[ast.stmt, list[str]]]]:
+    """Split the file into (preamble, [(node, source_lines), ...]) over top-level nodes.
+
+    Each node's chunk runs from its own start to the next node's start, so body/trailing
+    comments and blank lines travel with the node above them — a `# fork:` line after a
+    premise's docstring stays with that premise when it moves. The one exception is a
+    column-0 comment run directly abutting the NEXT node (no blank line between): that is
+    a leading comment of the node below — a `# fork:` above a def — and it is moved to the
+    head of that node's chunk so it travels with the premise it annotates.
+    """
+    nodes = sorted(tree.body, key=_toplevel_start)
+    if not nodes:
+        return lines, []
+    starts = [_toplevel_start(n) - 1 for n in nodes]  # 0-indexed
+    preamble = lines[: starts[0]]
+    chunks: list[tuple[ast.stmt, list[str]]] = []
+    for i, node in enumerate(nodes):
+        end = starts[i + 1] if i + 1 < len(nodes) else len(lines)
+        chunks.append((node, lines[starts[i] : end]))
+
+    blocks = [preamble] + [chunk for _, chunk in chunks]
+    for prev, nxt in zip(blocks, blocks[1:]):
+        k = 0
+        while (k < len(prev) and prev[-(k + 1)].startswith("#")
+               and not (prev is preamble and k + 1 == len(prev) and prev[0].startswith("#!"))):
+            k += 1
+        if k:
+            nxt[0:0] = prev[-k:]
+            del prev[-k:]
+    return preamble, chunks
+
+
+def _permutation(rng: random.Random, n: int, avoid: set[tuple[int, ...]]) -> list[int]:
+    """A permutation of range(n), preferring unseen+non-identity, then unseen, then non-identity.
+
+    Distinct-across-copies outranks avoiding the source order: with n == 2 the two conflict
+    (identity and one swap are the whole space), and forcing != identity would hand every
+    copy the SAME order — the shared-position artifact the copies exist to remove.
+    """
+    identity = list(range(n))
+    candidates: list[list[int]] = []
+    for _ in range(256):
+        p = identity[:]
+        rng.shuffle(p)
+        candidates.append(p)
+    for keep in (
+        lambda p: tuple(p) not in avoid and p != identity,
+        lambda p: tuple(p) not in avoid,
+        lambda p: p != identity,
+    ):
+        for p in candidates:
+            if keep(p):
+                return p
+    return identity
+
+
+def shuffle(path: Path, copies: int, seed: str, outdir: Path) -> list[dict]:
+    src = path.read_text(encoding="utf-8")  # universal newlines: CRLF is normalized to \n here
+    tree = ast.parse(src, filename=str(path))
+    lines = src.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"  # a chunk ending at a newline-less EOF would concatenate into its successor when moved
+    preamble, chunks = _partition(lines, tree)
+
+    test_slots = [i for i, (node, _) in enumerate(chunks) if _is_test(node)]
+    names = [chunks[i][0].name for i in test_slots]
+    n = len(test_slots)
+    if n == 0:
+        sys.exit(f"shuffle-premises: no top-level `test_*` functions in {path.name} — nothing to shuffle.")
+    if n == 1:
+        sys.exit(f"shuffle-premises: only 1 premise in {path.name} — nothing to randomize (need >= 2).")
+
+    seen: set[tuple[int, ...]] = set()
+    manifest: list[dict] = []
+    for c in range(1, copies + 1):
+        rng = random.Random(f"{seed}:{c}")
+        perm = _permutation(rng, n, seen)
+        seen.add(tuple(perm))
+
+        reordered = [chunk for _, chunk in chunks]
+        for slot, j in zip(test_slots, perm):
+            reordered[slot] = chunks[test_slots[j]][1]
+
+        header = [
+            f"# shuffle-premises: copy {c} of {copies}, seed={seed!r} — premises in randomized order.\n",
+            "# The order is deliberate noise (anti-anchoring); do not infer meaning from it.\n",
+        ]
+        body = preamble[:]
+        if body and body[0].startswith("#!"):  # keep a shebang first
+            body = body[:1] + header + body[1:]
+        else:
+            body = header + body
+        out_text = "".join(body) + "".join(x for chunk in reordered for x in chunk)
+
+        out_path = outdir / f"{path.stem}.copy{c}{path.suffix}"
+        out_path.write_text(out_text, encoding="utf-8")
+        manifest.append({"copy": c, "file": str(out_path), "order": [names[j] for j in perm]})
+    return manifest
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="shuffle-premises", description=__doc__)
+    ap.add_argument("premise_file", type=Path)
+    ap.add_argument("--copies", type=int, default=5, help="number of shuffled copies (default 5)")
+    ap.add_argument("--seed", default="0", help="seed for reproducible orders (default 0)")
+    ap.add_argument("--outdir", type=Path, default=None,
+                    help="output dir (default: a fresh temp dir — never beside the suite, where "
+                         "copies shadow the real docstrings in check_binds and pytest collects them)")
+    ap.add_argument("--json", action="store_true", help="emit the manifest as JSON")
+    args = ap.parse_args(argv)
+
+    if args.copies < 1:
+        ap.error("--copies must be >= 1")
+    path: Path = args.premise_file
+    if not path.is_file():
+        ap.error(f"no such file: {path}")
+    outdir: Path = args.outdir or Path(tempfile.mkdtemp(prefix=f"{path.stem}-copies-"))
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        manifest = shuffle(path, args.copies, args.seed, outdir)
+    except SyntaxError as e:
+        sys.exit(f"shuffle-premises: {path.name} does not parse ({e}) — a premise file must be valid Python.")
+
+    if args.json:
+        print(json.dumps({"source": str(path), "seed": args.seed, "copies": manifest}, indent=2))
+    else:
+        print(f"shuffle-premises: {len(manifest)} copies of {path.name} ({len(manifest[0]['order'])} premises), seed={args.seed!r}")
+        for m in manifest:
+            print(f"  {Path(m['file']).name}: {', '.join(m['order'])}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

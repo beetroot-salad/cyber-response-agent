@@ -1,7 +1,7 @@
 # spec_graph — mechanical granularity checks for write-tests spec graphs
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a lossy projection
-of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R5 computing
+of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R6 computing
 blind-spot shapes over the bindings. The gate rules are only as good as the partition, the axes,
 and the binding-edges they're handed — so a graph **coarser than reality** passes green while real
 bugs escape.
@@ -22,20 +22,26 @@ expand inside SKILL.md prose, and a repo-relative venv path breaks inside a git 
 
 ## check_binds.py — prose ⊄ binds (assertion-weakness / dropped-invariant class)
 
-The gate rules reason over `binds` (edges), not the natural-language `outcome`. A value named in a
-demand's prose but not wired into its `binds` is invisible to the rules, so the realized test can
-silently drop the assertion.
+The gate rules reason over `binds` (edges), not the prose. A value named in a demand's prose but not
+wired into its `binds` is invisible to the rules, so the realized test can silently drop the
+assertion.
 
 ```
 spec-graph binds [graph.yaml ...] [--config <path>]
 ```
 
-Flags each `<concept>=<threaded-value>` in a demand's prose where the concept is modelled elsewhere
-in the graph but absent from that demand's `binds`. The canonical catch: a demand whose outcome read
-"…threads `salt=deps.salt`…" bound only the anchor tree — the exact under-binding that left a
-prompt-injection defence unguarded, with every test green. Waive a conscious incidental mention
-under a top-level `binds_waivers:` map; prefer *binding* the concept so the test is forced to assert
-it.
+Where the prose lives depends on form: a `form: test` demand is a pointer with no `outcome`, so its
+prose is the docstring of the test it names via `discharged_by`; a `form: clause`/`waiver` demand
+keeps an `outcome`. The check scans whichever holds the prose — the pointed-to test's docstring
+(found among the `*.py` beside the graph), or the `outcome` — for each `<concept>=<threaded-value>`
+where the concept is modelled elsewhere in the graph but absent from that demand's `binds`. A
+`discharged_by` that names no test is a dangling pointer, also flagged — as is one pointing at a
+test with no docstring (the prose is required to live there); `shuffle-premises` copies
+(`*.copyN.py`) are excluded from the scan. The canonical catch: a demand
+whose prose read "…threads `salt=deps.salt`…" bound only the anchor tree — the exact under-binding
+that left a prompt-injection defence unguarded, with every test green. Waive a conscious incidental
+mention under a top-level `binds_waivers:` map; prefer *binding* the concept so the test is forced to
+assert it.
 
 ## check_actors.py — execution-context census (missing-consumer / missing-axis class)
 

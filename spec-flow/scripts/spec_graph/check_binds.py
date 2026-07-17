@@ -2,25 +2,38 @@
 """spec-graph check #1 — prose-token ⊄ binds (the F7 class).
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a list of
-*demands*, each with a natural-language `outcome` and a `binds` list naming the graph
-elements it covers. The gate rules R0–R5 reason over `binds` (the edges), NOT the prose — so
-a value named in a demand's prose but not wired into its `binds` is INVISIBLE to the rules,
-and the realized test silently drops the assertion.
+*demands*, each with a `binds` list naming the graph elements it covers. The gate rules
+R0–R6 reason over `binds` (the edges), NOT the prose — so a value named in a demand's prose
+but not wired into its `binds` is INVISIBLE to the rules, and the realized test silently
+drops the assertion.
 
-The canonical escape (the project this check was forged in): a demand whose outcome read
+Where the prose lives depends on form. A `form: test` demand is a POINTER: it carries no
+`outcome`, and its observable-outcome prose lives in the docstring of the test it names via
+`discharged_by` (the test IS the demand's executable form). A `form: clause` or
+`form: waiver` demand has no test, so it keeps an `outcome: {nl}`. This check scans whichever
+holds the prose — the pointed-to test's docstring, or the `outcome`. (A legacy `form: test`
+demand that still inlines an `outcome` and names no test is scanned via that `outcome`.)
+
+The canonical escape (the class this check was forged on): a demand whose prose read
 "…threads `salt=deps.salt`…" bound only the anchor tree — so nothing forced the test to
 assert the salt, and a refactor that dropped it would have failed a prompt-injection defence
 OPEN with every test still green.
 
-THE CHECK (deterministic, no LLM): for each demand, find every `<concept>=<value>` kwarg
-in the prose where the value is a threaded name/attribute (not `None`/a literal). Map the
-concept through the code-name→graph-name alias, and if that graph concept is *modelled
-elsewhere in the graph* (it is the root of some `binds` entry) but is NOT in THIS demand's
-`binds`, flag it: the demand threads a first-class concept it doesn't cover.
+THE CHECK (deterministic, no LLM): for each demand, take its prose (the pointed-to test's
+docstring, or `outcome.nl`) and find every `<concept>=<value>` kwarg where the value is a
+threaded name/attribute (not `None`/a literal). Map the concept through the
+code-name→graph-name alias, and if that graph concept is *modelled elsewhere in the graph*
+(it is the root of some `binds` entry) but is NOT in THIS demand's `binds`, flag it: the
+demand threads a first-class concept it doesn't cover. A `form: test` demand whose
+`discharged_by` names no test in the suite dir is a dangling pointer — also flagged, since a
+pointer to nothing scans nothing; a pointer to a test with an EMPTY docstring is flagged for
+the same reason (the demand's prose is required to live there — SKILL.md step 8).
 
 Grounding: the graph's own vocabulary is the oracle — a concept is "modelled" iff some
 demand binds it. We only flag threading of a concept the graph already treats as real, so
-an incidental mention of an unmodelled local never trips it.
+an incidental mention of an unmodelled local never trips it. The docstring is scanned, not
+the test body: the body threads every entry-point argument, but the docstring carries only
+the concepts the demand's contract is about — the same prose the pre-pointer `outcome` held.
 
 Usage:
     spec-graph binds [graph.yaml ...] [--config <path>]
@@ -32,6 +45,8 @@ concept under a top-level `binds_waivers:` map in the graph.
 """
 from __future__ import annotations
 
+import ast
+import functools
 import re
 import sys
 from pathlib import Path
@@ -54,8 +69,35 @@ def _concept_root(bind: str) -> str:
 
 
 def _load(path: Path) -> dict:
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
+
+
+@functools.lru_cache(maxsize=None)  # several graphs share a suite dir; parse it once
+def _test_docstrings(test_dir: Path) -> dict[str, str]:
+    """Map test-function name → its docstring, over the `*.py` files beside the graph.
+
+    The artifact rule commits the suite in the same directory as `spec_graph_*.yaml`, so a
+    `form: test` demand's `discharged_by` names a function defined here. That docstring is the
+    relocated home of the demand's prose — what this check scans in place of `outcome`. First
+    definition of a name wins (test names are unique across a suite); an unparseable or
+    unreadable file is skipped, not fatal — a broken suite is step-9's null-stub gate to catch,
+    not this one's. `shuffle-premises` copies (`*.copyN.py`) are excluded: they carry the same
+    test names with premise-only docstrings, sort before the real file, and would silently
+    shadow the prose this check exists to scan.
+    """
+    docs: dict[str, str] = {}
+    for py in sorted(test_dir.glob("*.py")):
+        if re.search(r"\.copy\d+\.py$", py.name):
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (SyntaxError, OSError, ValueError):  # ValueError covers UnicodeDecodeError
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                docs.setdefault(node.name, ast.get_docstring(node) or "")
+    return docs
 
 
 def check(path: Path, cfg: dict) -> list[str]:
@@ -85,10 +127,42 @@ def check(path: Path, cfg: dict) -> list[str]:
         for b in d.get("binds", []) or []:
             modelled.add(_concept_root(b))
 
+    # A form:test demand carries its prose in the docstring of the test it names
+    # (`discharged_by`); clause/waiver keep `outcome.nl`. Scan whichever holds the prose.
+    docstrings = _test_docstrings(path.parent)
+
     findings: list[str] = []
     for d in demands:
         did = d.get("id", "<no-id>")
-        prose = (d.get("outcome", {}) or {}).get("nl", "") or ""
+        outcome_nl = (d.get("outcome", {}) or {}).get("nl", "") or ""
+        test_name = d.get("discharged_by")
+        if test_name:
+            suite_dir = path.resolve().parent.name
+            if test_name not in docstrings:
+                findings.append(
+                    f"{path.name}:{did}: `discharged_by: {test_name}` names no test function in "
+                    f"{suite_dir}/ — the pointer dangles, so its prose is unscannable "
+                    f"(write the test, or fix the name)."
+                )
+                continue
+            prose = docstrings[test_name]
+            if not prose.strip():
+                findings.append(
+                    f"{path.name}:{did}: `discharged_by: {test_name}` points at a test with no "
+                    f"docstring — the demand's prose is missing, so there is nothing to check "
+                    f"against `binds` (step 8 puts the outcome sentence in that docstring)."
+                )
+                continue
+        elif outcome_nl:
+            prose = outcome_nl  # clause/waiver, or a legacy form:test demand inlining its outcome
+        elif d.get("form", "test") == "test":
+            findings.append(
+                f"{path.name}:{did}: form:test demand carries neither `discharged_by` nor "
+                f"`outcome` — no prose to check for prose⊄binds (add the `discharged_by` pointer)."
+            )
+            continue
+        else:
+            continue  # a clause/waiver with no prose has nothing to scan
         bind_roots = {_concept_root(b) for b in (d.get("binds", []) or [])}
         waived = set(waivers.get(did, []) or [])
         seen: set[str] = set()

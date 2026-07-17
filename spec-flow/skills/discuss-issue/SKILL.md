@@ -1,46 +1,39 @@
 ---
 name: discuss-issue
-description: "Explain a GitHub issue in plain terms, check it against the current codebase, and surface the open questions that need answering before anyone designs or implements. Use when a bare issue report needs to be understood and grounded in the real code."
+description: "Explain a GitHub issue in plain terms, check it against the current codebase, and surface the one or two decisions that actually gate a design — then, when the issue heads to implementation, close by posting the typed intent+design doc that write-tests consumes. Use when a bare issue report needs to be understood and grounded in the real code before anyone designs on it."
 argument-hint: "[issue number]"
 effort: medium
 ---
 
 # Discuss issue
 
-Take a bare issue and do three things, in chat: **explain** it in plain terms, **check** it against the current codebase, and **surface** the open questions. The goal is a shared, grounded understanding of the problem — not a finished design.
+Understand a bare issue and pin down the one or two things that actually have to be decided before anyone designs on it — in chat, not against a template. The job is to save downstream churn: catch a false premise before it becomes a design, and settle the fork a design would otherwise thrash on. The thinking is yours; this skill is about where to point it.
 
-Start by loading the issue. If an issue number was passed, load that: `gh issue view <n> --comments`. Otherwise take it from the conversation, or work from the file path or pasted text you were given. Read the comments — some of this may already be settled, so don't rehash it.
+Load the issue first. If a number was passed: `gh issue view <n> --comments` (empty output is a failed read, not an empty issue — retry with `--json title,body,comments`). Otherwise take it from the conversation, or the file path or pasted text you were given. Read the comments — some of this may already be settled.
 
-The three moves below aren't a rigid sequence or a template for the output. Think through all of them; write up what's load-bearing.
+## Precondition — is the issue accurate and complete?
 
-## Explain it in plain terms
+Check the issue against the code it describes *before* discussing anything on top of it; a discussion built on a false premise is wasted.
 
-Say what the problem actually is, where in the code it lives, and why it surfaces — plainly, the way you'd explain it to a colleague who knows the system but hasn't seen this issue. Spend the words on *this* problem and its mechanism, not on what the system is. Define any project-specific term you lean on.
+- **Accurate.** Issues assert "X works like Y" from stale memory. Read the named files and confirm, citing `file:line`; hand broad reading to an Explore subagent, but settle anything enumerable or executable with a tool run, not the reader's impression. An issue premised on in-flight work (an open PR, a stacked branch) is checked against *that* tree, and you say which — "refuting" a correct issue by reading the wrong base is the failure mode. The mirror case: an issue filed from a review can have been true when filed and fixed by a later merge, so check the named files' history back to the filing point, not just their current state — "already resolved by #NNN" is a finding, not a baseless report.
+- **Complete.** Does it carry enough to act on — the motivation, a done criterion, the dependencies? Name what's missing.
 
-If you can't explain the mechanism without hand-waving, you don't understand it yet — go read the code until you can.
+If the issue's picture is wrong, correcting it is the first finding — fix the premise before going further.
 
-## Check it against the codebase
+## What is this really about?
 
-The issue is a starting point, not a source of truth. Read the code it touches and confirm the report holds up:
-- Verify the factual claims. Issues routinely assert "X works like Y" from stale memory; grep and read the named files, and flag anything that conflicts with current code, citing `file:line`. When the surface is broad, hand the verification to an Explore subagent.
-- Note where the issue is out of step with how the code actually works now, and correct the picture.
+Explain the problem plainly — what it is, where it lives, why it surfaces — the way you'd tell a colleague who knows the system but not this issue. If you can't explain the mechanism without hand-waving, read the code until you can.
 
-A discussion built on a false premise is wasted — this is what keeps it honest.
+Then **narrow**. An issue usually turns on one or two things that genuinely have to be nailed down; once those are settled the rest follows. Find them and lead with them — don't hand back five decisions as if they carried equal weight. For each, say what's unclear and your read on it; skip whatever the codebase or an existing convention already answers.
 
-## Surface the open questions
+The angles below are scaffolding for finding those one or two things — prompts, not a checklist:
 
-Name what genuinely has to be decided before anyone can act: the ambiguities, the missing pieces, the forks where more than one fix is plausible. For each, say what's unclear and, where you have one, your read on it. Skip the questions the codebase or an existing convention already answers — state the answer and move on.
+- **Worth doing?** — real and worth solving now, or is "won't fix" / "not yet" the honest answer?
+- **Root cause** — is the reported symptom the real problem, or a downstream effect of a deeper cause that's the better fix?
+- **The hard part** — the constraint in tension, the invariant easy to break. Usually where the real forks live.
+- **Scope** — what's in, what's an explicit non-goal, whether two problems wear one issue.
+- **The same pattern elsewhere** — the sites the issue names are a sample, not a census; once the mechanism is clear, derive the other occurrences with a tool at the issue's altitude (its motivation and mechanism, never its file list) and give each an in-or-out verdict. When "the same" is a *symbol* — a function, class, constant — the **symbol-refs** skill resolves who references it past grep's lexical false positives. One the issue missed is a finding; an exclusion is a decision worth recording.
 
-A few angles often turn up something worth discussing. Pull on the ones that apply and ignore the rest — they're prompts, not a checklist:
-- **Worth doing?** — is the problem real and worth solving now, or is "won't fix" / "not yet" the honest answer?
-- **Root cause** — is the reported symptom the real problem, or a downstream effect of a deeper cause that's the better thing to fix?
-- **The hard part** — what makes this non-trivial? The constraint in tension, the invariant that's easy to break, the case that resists a clean fix. This is usually where the real forks live.
-- **Scope** — what's in, what's an explicit non-goal, and whether two problems are wearing one issue.
-- **The same pattern elsewhere** — once the mechanism is clear, look for its other occurrences before the scope freezes: the sites an issue names are where the author happened to look — a sample, not a census. Define "the same" at the issue's own altitude: an issue about folding duplicated parsers into one helper is asking about duplications that helper could plausibly absorb, not duplication in general; an issue about one call mishandling an input class is asking about every call with the same exposure, not every call by that name. Derive the occurrences from the code with a tool, and give each an explicit in-or-out verdict — one the issue missed is a finding, an exclusion is a decision worth recording, and one that looks already handled is a claim to check against the issue's own bar, not a reason to leave it out.
-- **Completeness** — what else is missing to act on it: the motivation, the done criteria, the dependencies or prior art.
+## Closing with a design doc
 
-Keep it to the questions that matter. The point is to illuminate what's still open, not to resolve everything or design past it.
-
----
-
-Then talk it through with the user if they want — no fixed template, no required artifact. If the discussion settles into something worth keeping, offer to fold it back into the issue or a short note. The occurrence census especially belongs in the issue: the spec and the implementation downstream build on the recorded verdicts, not on whoever re-derives the pattern next.
+Talk it through with the user; nothing here forces an artifact, and a discussion that ends in "won't fix" ends in chat. When the issue is heading to implementation, close by compiling what was settled into the intent+design doc write-tests consumes. **references/design-doc.md** carries that step — the doc's typed sections, the claims sweep that verifies it, and the cold review that checks it before it posts. Read it then; scale the ceremony to the issue.

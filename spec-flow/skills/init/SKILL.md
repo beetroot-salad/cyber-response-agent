@@ -16,11 +16,12 @@ Derive it from the repo, not from the user. Ask only what the repo genuinely can
 - **The injection idioms.** How fakes are meant to enter the code under test — a `deps` parameter, a constructor argument, a fixture — and what the project's CI *forbids* (a lint that ratchets monkey-patching, for instance). If a lint enforces it, name the lint.
 - **The traps.** The things that make a green local run a lie: a venv that resolves to the wrong tree from a worktree, an env var the suite needs, a service that must be up. These are what `gate.notes` is for.
 - **The spec_graph targets.** Which source trees an execution-context census should scan (`codeRoots` — the project's own source, not vendored deps or tests) and any entrypoint stems that aren't obvious (`entrypointStems`). Leave `contextAliases` / `conceptAliases` **empty** — the graph is supposed to name things what the code names them (schema.md, "Coin ids from the code's name"), and an alias is an escape hatch for the cases where it can't, not a field to populate. Nothing here names an interpreter — the `spec-graph` command discovers its own.
+- **The code graph (Python only).** `symbol-refs` resolves who-references / where-defined via pyrefly, and pyrefly *silently* under-resolves unless its import root is on the search path — so this field is derived, not guessed. Give it `codeGraph`: `configDir`, the directory pyrefly should root at (where a `pyproject.toml` lives, or the package dir), and `searchPath`, the import roots **relative to configDir**. Derive `searchPath` from however the project already puts its package on `sys.path`: pytest's `pythonpath`, mypy's `mypy_path` / `explicit_package_bases`, a `src/` layout, an editable install. The case that bites is a **namespace package** (no `__init__.py`, `pyproject.toml` below the import root) — it needs the parent (`..`) added, mirroring pytest's `pythonpath=['..']`. A package at the repo root is just `configDir: "."`, `searchPath: ["."]`. Omit `codeGraph` entirely for a non-Python repo.
 - **The danger lens.** What kind of hostile reality this system faces — attacker-influenced input, resource exhaustion, concurrency. `write-tests` spends one of four enumeration lenses on it. This one you may have to ask about; the code often shows it (an auth boundary, a parser fed by the network, a job queue).
 
 ## Write it, then prove it
 
-Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** — the test command, the checks, and `spec-graph binds` / `spec-graph actors` against any existing graph. A profile that has never been executed is a guess: a path that doesn't resolve, a venv that isn't there from a worktree, a command that needs an env var you didn't know about. Fix what fails, and report anything you had to leave uncertain.
+Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** — the test command, the checks, `spec-graph binds` / `spec-graph actors` against any existing graph, and, if you wrote `codeGraph`, `pyrefly-refs <file>:<line> <symbol>` on a symbol you know is used across several files. A profile that has never been executed is a guess: a path that doesn't resolve, a venv that isn't there from a worktree, a command that needs an env var you didn't know about, a `searchPath` that trips the resolution guard (which is exactly the silent under-resolution `codeGraph` exists to prevent). Fix what fails, and report anything you had to leave uncertain.
 
 ```json
 {
@@ -44,6 +45,11 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** �
     "contextAliases": {},
     "conceptAliases": {}
   },
+  "codeGraph": {
+    "tool": "pyrefly",
+    "configDir": "<dir pyrefly roots at — where pyproject.toml lives, or the package dir>",
+    "searchPath": ["<import roots relative to configDir>"]
+  },
   "conventions": {
     "defaultBranch": "main",
     "dangerLens": "<the standing fourth enumeration lens, and why>"
@@ -51,4 +57,4 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** �
 }
 ```
 
-`specGraph` is consumed by the checkers as data (the plugin's own `scripts/spec_graph/_config.py`); every other field is read by a skill as prose, so write it to be *read* — a sentence that tells the next agent what to do beats a value it has to interpret.
+`specGraph` and `codeGraph` are consumed as **data** — `specGraph` by the checkers (the plugin's own `scripts/spec_graph/_config.py`), `codeGraph` by the `pyrefly-refs` helper; every other field is read by a skill as prose, so write it to be *read* — a sentence that tells the next agent what to do beats a value it has to interpret.

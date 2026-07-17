@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""pyrefly-refs — resolved cross-file symbol references/definitions via Pyrefly's LSP.
+
+Sibling to the Explore agent: Explore locates code lexically and reads it narratively;
+this *resolves* it. grep is the lexical floor — every real reference contains the name,
+but grep also matches comments, strings, and unrelated same-name symbols. Pyrefly links
+each importer to the actual definition and filters those out, so "who references X" and
+"where is X defined" become resolved answers, not approximations.
+
+Usage:
+    pyrefly-refs <file>:<line> <symbol> [--defs] [--json]
+
+    <file>:<line>   a line where <symbol> appears — its definition OR any usage (1-based line)
+    <symbol>        the identifier to resolve
+    --defs          go to the definition(s) of the symbol instead of finding references
+    --json          machine-readable output
+
+Config comes from <repo>/.claude/spec-flow.json -> codeGraph.{configDir, searchPath}.
+Pyrefly SILENTLY under-resolves without a search-path on namespace-package layouts (no
+__init__.py, pyproject below the import root): it returns the declaration only and hover
+types read `Unknown`, with no error. This script therefore (a) writes a temporary
+pyrefly.toml at configDir (removed on exit; never clobbers a committed one) and (b) hard-fails
+with exit 3 if resolution looks collapsed — so a census can never read empty-as-complete.
+"""
+import json, os, re, shutil, subprocess, sys, threading, queue, time, atexit, urllib.parse
+
+
+def die(msg, code=2):
+    sys.stderr.write("pyrefly-refs: " + msg + "\n")
+    sys.exit(code)
+
+
+# ---- args ---------------------------------------------------------------
+args = sys.argv[1:]
+want_defs = "--defs" in args
+want_json = "--json" in args
+pos = [a for a in args if not a.startswith("--")]
+if len(pos) != 2 or ":" not in pos[0]:
+    die("usage: pyrefly-refs <file>:<line> <symbol> [--defs] [--json]")
+file_arg, symbol = pos
+target_file, _, line_s = file_arg.rpartition(":")
+try:
+    line1 = int(line_s)
+except ValueError:
+    die("could not parse <file>:<line> from %r" % file_arg)
+target_file = os.path.abspath(target_file)
+if not os.path.exists(target_file):
+    die("no such file: " + target_file)
+
+# ---- locate repo root + config ------------------------------------------
+try:
+    repo = subprocess.check_output(
+        ["git", "-C", os.path.dirname(target_file), "rev-parse", "--show-toplevel"],
+        text=True).strip()
+except Exception:
+    die("not inside a git repo (need it to find .claude/spec-flow.json)")
+
+profile_path = os.path.join(repo, ".claude", "spec-flow.json")
+try:
+    profile = json.load(open(profile_path, encoding="utf-8"))
+except FileNotFoundError:
+    die("no .claude/spec-flow.json — run /spec-flow:init first")
+cg = profile.get("codeGraph") or {}
+config_dir = cg.get("configDir")
+search_path = cg.get("searchPath")
+if not config_dir or not search_path:
+    die("spec-flow.json has no codeGraph.configDir / codeGraph.searchPath — "
+        "add e.g. \"codeGraph\": {\"configDir\": \"defender\", \"searchPath\": [\"..\", \".\"]}")
+
+# ---- ensure pyrefly search-path config (temp, cleaned up) ----------------
+cfg_path = os.path.join(repo, config_dir, "pyrefly.toml")
+wrote_cfg = False
+if not os.path.exists(cfg_path):
+    body = "search-path = [%s]\n" % ", ".join('"%s"' % p for p in search_path)
+    open(cfg_path, "w", encoding="utf-8").write(body)
+    wrote_cfg = True
+
+    def _cleanup():
+        try:
+            if wrote_cfg:
+                os.remove(cfg_path)
+        except OSError:
+            pass
+    atexit.register(_cleanup)
+
+# ---- find the symbol's column on the line --------------------------------
+lines = open(target_file, encoding="utf-8").read().splitlines()
+if not (1 <= line1 <= len(lines)):
+    die("line %d out of range for %s" % (line1, target_file))
+m = re.search(r"\b" + re.escape(symbol) + r"\b", lines[line1 - 1])
+if not m:
+    die("symbol %r not found on %s:%d" % (symbol, target_file, line1))
+lsp_line, lsp_char = line1 - 1, m.start()
+
+# ---- pyrefly launcher (prefer installed, else uvx) -----------------------
+pyrefly_cmd = ["pyrefly"] if shutil.which("pyrefly") else ["uvx", "pyrefly@latest"]
+
+try:
+    proc = subprocess.Popen(pyrefly_cmd + ["lsp"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+except FileNotFoundError:
+    die("neither pyrefly nor uvx is installed — install pyrefly, or uv (for uvx)", 4)
+
+# ---- minimal LSP client --------------------------------------------------
+inbox = queue.Queue()
+def _reader():
+    f = proc.stdout
+    while True:
+        h = b""
+        while b"\r\n\r\n" not in h:
+            c = f.read(1)
+            if not c:
+                return
+            h += c
+        n = next((int(x.split(b":", 1)[1]) for x in h.split(b"\r\n")
+                  if x.lower().startswith(b"content-length:")), 0)
+        try:
+            inbox.put(json.loads(f.read(n)))
+        except Exception:
+            pass
+threading.Thread(target=_reader, daemon=True).start()
+
+_id = 0
+def _send(o):
+    d = json.dumps(o).encode()
+    proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(d) + d)
+    proc.stdin.flush()
+def request(method, params):
+    global _id
+    _id += 1
+    _send({"jsonrpc": "2.0", "id": _id, "method": method, "params": params})
+    return _id
+def notify(method, params):
+    _send({"jsonrpc": "2.0", "method": method, "params": params})
+def await_id(tid, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            msg = inbox.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        if "id" in msg and "method" in msg:            # server->client request
+            p = msg.get("params") or {}
+            res = ([None] * max(len(p.get("items", []) or [1]), 1)
+                   if msg["method"] == "workspace/configuration" else None)
+            _send({"jsonrpc": "2.0", "id": msg["id"], "result": res})
+            continue
+        if msg.get("id") == tid:
+            return msg
+    return None
+
+root_uri = "file://" + repo
+target_uri = "file://" + target_file
+if not await_id(request("initialize", {
+        "processId": None, "rootUri": root_uri,
+        "workspaceFolders": [{"uri": root_uri, "name": "ws"}], "capabilities": {}}), 60):
+    die("pyrefly LSP did not initialize (is pyrefly installed / uvx online?)", 4)
+notify("initialized", {})
+notify("textDocument/didOpen", {"textDocument": {
+    "uri": target_uri, "languageId": "python", "version": 1,
+    "text": open(target_file, encoding="utf-8").read()}})
+time.sleep(2)
+
+position = {"line": lsp_line, "character": lsp_char}
+
+# resolution probe (the silent-failure guard) -----------------------------
+hov = await_id(request("textDocument/hover", {
+    "textDocument": {"uri": target_uri}, "position": position}), 25)
+hover_val = (((hov or {}).get("result") or {}).get("contents") or {})
+hover_txt = hover_val.get("value", "") if isinstance(hover_val, dict) else str(hover_val)
+resolved = ("def " in hover_txt or "class " in hover_txt or "(function)" in hover_txt
+            or (bool(hover_txt) and "Unknown" not in hover_txt))
+
+# the actual query --------------------------------------------------------
+if want_defs:
+    r = await_id(request("textDocument/definition", {
+        "textDocument": {"uri": target_uri}, "position": position}), 30)
+    raw = (r or {}).get("result") or []
+    raw = raw if isinstance(raw, list) else [raw]
+else:
+    locs = []
+    for _ in range(6):
+        r = await_id(request("textDocument/references", {
+            "textDocument": {"uri": target_uri}, "position": position,
+            "context": {"includeDeclaration": True}}), 30)
+        locs = (r or {}).get("result") or []
+        if len(locs) > 1:
+            break
+        time.sleep(3)
+    raw = locs
+
+try:
+    request("shutdown", None); time.sleep(0.2); notify("exit", {})
+except Exception:
+    pass
+proc.terminate()
+
+# ---- shape results -------------------------------------------------------
+def rel(uri):
+    uri = urllib.parse.unquote(uri)  # servers may percent-encode (spaces etc.)
+    return uri.replace("file://" + repo + "/", "").replace("file://", "")
+byfile = {}
+for loc in raw:
+    if not isinstance(loc, dict):
+        continue
+    f = rel(loc.get("uri", ""))
+    ln = (loc.get("range") or {}).get("start", {}).get("line")
+    if ln is not None:
+        byfile.setdefault(f, []).append(ln + 1)
+byfile = {f: sorted(set(v)) for f, v in byfile.items()}
+n_refs = sum(len(v) for v in byfile.values())
+
+# grep floor (a lexical superset of the true reference files) --------------
+try:
+    grep_files = subprocess.check_output(
+        ["grep", "-rlw", "--include=*.py", "--exclude-dir=.venv",
+         "--exclude-dir=.git", "--exclude-dir=node_modules", symbol, repo],
+        text=True).splitlines()
+except subprocess.CalledProcessError:
+    grep_files = []
+floor = len(grep_files)
+
+# ---- silent-failure guard ------------------------------------------------
+# defs mode has no shape-based tell: pointing at the definition line itself legitimately
+# returns this very file, so a same-file result is not suspicious on its own. The hover
+# probe carries that mode — a stalled resolution reads `Unknown` there (the documented
+# failure signature), and `not resolved` already trips the guard.
+collapsed = (not want_defs) and len(byfile) <= 1 and floor >= 3
+guard_tripped = (not resolved) or collapsed
+
+# ---- output --------------------------------------------------------------
+if want_json:
+    print(json.dumps({"symbol": symbol, "mode": "definition" if want_defs else "references",
+                      "resolved": byfile, "count": n_refs, "files": len(byfile),
+                      "grep_floor_files": floor, "resolution_ok": resolved,
+                      "guard_tripped": guard_tripped}, indent=2))
+else:
+    head = ("%s defined at:" % symbol if want_defs
+            else "%s — %d references in %d files (resolved):" % (symbol, n_refs, len(byfile)))
+    print(head)
+    for f in sorted(byfile):
+        print("  %s:%s" % (f, ",".join(map(str, byfile[f]))))
+    if not want_defs:
+        print("[grep floor: %d files contain the name; pyrefly resolved %d]" % (floor, len(byfile)))
+
+if guard_tripped:
+    sys.stderr.write(
+        "\npyrefly-refs: RESOLUTION GUARD TRIPPED — the result is likely a silent "
+        "under-resolution, not the truth.\n"
+        "  hover resolved: %s%s\n"
+        "  Check codeGraph.searchPath in .claude/spec-flow.json (pyrefly needs the import "
+        "root on its search path).\n" % (
+            resolved,
+            "" if resolved else "  (hover: %r)" % (hover_txt[:80] or "empty")))
+    sys.exit(3)
