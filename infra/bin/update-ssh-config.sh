@@ -2,8 +2,15 @@
 # Sync /workspace/.ssh/config's soc-playground HostName with the current Terraform-known IP,
 # and purge the stale host key so the next SSH accepts the new one.
 #
-#   update-ssh-config.sh            # point the alias at the current server (after `terraform apply`)
+#   update-ssh-config.sh            # point the alias at the Terraform-known server (after `apply`)
+#   update-ssh-config.sh <ip>       # point the alias at an explicit IP (no Terraform state needed)
 #   update-ssh-config.sh --clear    # point the alias at nothing (after the server is destroyed)
+#
+# The <ip> form exists because local Terraform state is usually absent here (fresh containers
+# lose it, and the server is often created straight from a lever-down snapshot with `hcloud
+# server create`). Without it the no-arg form is the only way to set the alias, and it exits 1
+# in exactly the case you most need it. Get the IP with:
+#   hcloud server list -o columns=name,ipv4
 #
 # --clear exists because a destroyed server's IP returns to Hetzner's pool and is reassigned
 # to someone else's machine. An alias left pointing at it is aimed at a stranger, and the
@@ -19,26 +26,31 @@ SENTINEL="soc-playground.invalid"
 CONFIG=/workspace/.ssh/config
 
 MODE="set"
-if [ "${1:-}" = "--clear" ]; then
-    MODE="clear"
-elif [ -n "${1:-}" ]; then
-    echo "Usage: $(basename "$0") [--clear]" >&2
-    exit 64
-fi
+EXPLICIT_HOST=""
+case "${1:-}" in
+    --clear) MODE="clear" ;;
+    "")      ;;
+    -*)      echo "Usage: $(basename "$0") [<ip> | --clear]" >&2; exit 64 ;;
+    *)       EXPLICIT_HOST="$1" ;;
+esac
 
 if [ ! -f "${CONFIG}" ]; then
     echo "${CONFIG} not found. Create it first." >&2
     exit 1
 fi
 
-if [ "${MODE}" = "set" ]; then
+if [ "${MODE}" = "clear" ]; then
+    NEW_HOST="${SENTINEL}"
+elif [ -n "${EXPLICIT_HOST}" ]; then
+    NEW_HOST="${EXPLICIT_HOST}"
+else
     NEW_HOST=$(terraform output -raw ipv4 2>/dev/null || true)
     if [ -z "${NEW_HOST}" ]; then
-        echo "No ipv4 output — is the server provisioned?" >&2
+        echo "No ipv4 output and no <ip> given — is the server provisioned?" >&2
+        echo "  With no Terraform state (the usual case), pass the IP explicitly:" >&2
+        echo "    $(basename "$0") \"\$(hcloud server list -o noheader -o columns=ipv4)\"" >&2
         exit 1
     fi
-else
-    NEW_HOST="${SENTINEL}"
 fi
 
 # Rewrite HostName within the 'Host soc-playground' stanza only, and report both the value
