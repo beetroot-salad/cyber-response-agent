@@ -7,7 +7,7 @@ effort: medium
 
 # Write code from spec
 
-The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `review`. Inputs: the issue or design doc, the approved spec — the tests plus `spec_graph_*.yaml`, committed on the branch by write-tests — and the **project profile** (`.claude/spec-flow.json`), which carries what this skill does not hardcode: the gate commands to run before shipping, the project's traps, and how to invoke the spec_graph checks. Read the profile first; if it is missing, run `/spec-flow:init`.
+The pre-written tests are the spec. This phase writes the real code that makes them pass and ships it green. Run it after `write-tests` and the human's approval of the spec, and before `finalize`. Inputs: the issue or design doc, the approved spec — the tests plus `spec_graph_*.yaml`, committed on the branch by write-tests — and the **project profile** (`.claude/spec-flow.json`), which carries what this skill does not hardcode: the gate commands to run before shipping, the project's traps, and how to invoke the spec_graph checks. Read the profile first; if it is missing, run `/spec-flow:init`.
 
 One rule sits above the rest and makes this phase the mirror of write-tests: **you make the code match the tests, never the tests match the code.** The suite is the contract the human approved. If a test looks wrong, that is a spec question, not a green-the-build task — surface it (§2), don't quietly edit it. A suite you weakened to pass is no longer a spec.
 
@@ -66,5 +66,5 @@ On red, one round is: `gh pr checks` to see which check failed → `gh run view 
 
 ## 5. Exit
 
-- **Succeeded** — the PR is green. Hand off to `review`.
+- **Succeeded** — the PR is green. Hand off to `finalize`.
 - **Failed to a human** — the bound tripped, or the honest fix is a spec change you can't make here. Say what's red, why you stopped, and leave the PR number and branch intact so `claude --resume` picks up the exact state. Failing out cleanly is a designed outcome, not a defect — the human supplies the judgment the loop couldn't.

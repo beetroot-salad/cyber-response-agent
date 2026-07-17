@@ -11,7 +11,7 @@ follows intent" — which is not what it means when the tests were written after
 agent, from the same assumptions.
 
 ```
-issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ review ──▶ merge
+issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ finalize ──▶ merge
                                   │                                     │
                               human gate:                          human gate:
                              approve the spec                     approve the merge
@@ -30,7 +30,7 @@ to guess.
 | `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions — and when work heads to implementation, closes by posting the intent+design doc: typed obligations and mechanisms, with probed claims about existing reality. |
 | `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests-only diff** and a handoff note. |
 | `/spec-flow:write-code-from-spec` | Reads the committed spec, writes real code until it passes, ships a PR, watches CI, repairs to green. Never edits a test to make it pass. |
-| `/spec-flow:review` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, re-greens the PR. |
+| `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
 | `/spec-flow:handoff` | Writes the terse note that lets a cold session resume the work. |
 | `/spec-flow:init` | Writes the project profile. Run once per repo. |
@@ -43,10 +43,10 @@ the pipeline resumable and inspectable, and it is why `write-tests` ends by post
 ### The one rule about who reads what
 
 `write-tests` writes its handoff note **for the implementer**. `write-code-from-spec` reads it.
-**`review` deliberately does not.**
+**`finalize` deliberately does not.**
 
 A reviewer who has read the rationale behind every decision will confirm those decisions — the
-argument is right there, already made, and agreeing is cheap. The review's entire value is that it
+argument is right there, already made, and agreeing is cheap. `finalize`'s entire value is that it
 is the one reader who hasn't been told what to think. It reads the code, the diff, and the tests;
 it does not go looking for the design's defence of a choice it finds questionable. (It *does* read
 the prior **review** trail — follow-up issues, earlier PR comments — which is review output, not
