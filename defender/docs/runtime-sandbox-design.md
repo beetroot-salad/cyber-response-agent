@@ -541,26 +541,43 @@ stateless.
   ro bind, rw bind, `--host-uds=open`, `--network=none` loopback netstack — exit
   0; the non-privileged devcontainer stays a no-go (both privilege doors shut).
   Evidence: `docs/decisions/runsc-spawner-host-go-no-go.md`. **runsc is deployable.**
-- **Which spawner path? — OPEN, and it is a security fork, not a packaging
-  detail.** "*privileged-container-on-VPS* **or** root-on-host" are not
-  interchangeable, and #548 only proved the first:
-  - **Proven (nested):** `runsc run` *inside* a `--privileged` container. The
-    Sentry then lives in a container with host devices, `CAP_SYS_ADMIN` in the
-    bounding set, and largely unmasked `/proc`. Also needed `--ignore-cgroups`.
-  - **Intended (daemon):** `docker run --runtime=runsc` against the host daemon —
-    dockerd spawns the Sentry as a host process and no privileged container exists.
-    This is the real `ContainerRunner` integration and **nobody has run it.**
+- **Which spawner path? — RESOLVED (2026-07-17): the daemon path, and it is a
+  security fork, not a packaging detail.** "*privileged-container-on-VPS* **or**
+  root-on-host" are not interchangeable, and #548 only proved the first. Both are
+  now tested:
+  - **Nested (#548):** `runsc run` *inside* a `--privileged` container. The Sentry
+    then lives in a container with host devices, `CAP_SYS_ADMIN` in the bounding
+    set, and largely unmasked `/proc`. Also needed `--ignore-cgroups`. **Do not
+    build on this.**
+  - **Daemon (the one to build):** `docker run --runtime=runsc` against the host
+    daemon. **Observed working** — all four knobs, no privileged container, and
+    `--ignore-cgroups` unnecessary (it was a nested artifact all along).
 
   The distinction matters because **gVisor's security model has two layers**, and
   this document only ever described one. Layer one is the Sentry servicing guest
   syscalls. Layer two is that the *Sentry itself* is confined by a host seccomp-bpf
   filter plus namespaces, so that a Sentry compromise is still not host access —
   that layer is what makes "the Sentry has bugs" survivable rather than fatal.
-  A privileged outer container does not disable it (the Sentry applies its own
-  filter), but it makes the far side of that filter far richer. So prove the daemon
-  path before treating privilege as settled, and **strike "the privilege is spent
-  once"** — privilege is not spent, it persists for the container's lifetime, and
-  the Sentry runs inside it.
+  On the daemon path layer two is now **observed, not assumed**: the Sentry is
+  parented by `containerd-shim` under PID 1 with `Seccomp: 2`, `NoNewPrivs: 1`, and
+  `CapEff` = six caps with **no `CAP_SYS_ADMIN`**. Evidence:
+  `docs/decisions/runsc-spawner-host-go-no-go.md`.
+
+  Also **strike "the privilege is spent once"** — privilege is not spent. On the
+  nested path it persists for the container's lifetime with the Sentry inside it.
+  It is the *daemon* path that makes the "privilege stays on the trusted side"
+  claim true: dockerd spends it to build the box, and the Sentry facing
+  model-written bash gets six caps and a seccomp filter.
+- **Does the real workload survive the box? — OPEN, and now the biggest unknown.**
+  Every probe so far used a stock `alpine` rootfs; gather's actual bash has never
+  run inside one. Specifically unchecked: the bash gate's flag grammars were tuned
+  against **the runtime container's GNU binaries** (the dev box ships ugrep), so a
+  different rootfs shifts that alignment *silently*; whether anything on the bash
+  lane needs to write under a read-only `defender_dir` (`__pycache__` when
+  `defender-sql` runs from it); and whether our real mount list exposes something a
+  stock-image probe wouldn't surface. This is a compatibility question, not a
+  security one — but it is the one that can invalidate the design rather than
+  relocate it.
 - **Fail-closed on capability.** The startup check must *attempt* a runsc probe
   (not just detect the binary) and refuse to process untrusted input unsandboxed
   on failure — only `DEFENDER_ALLOW_UNSANDBOXED=1` opts out, loudly.
