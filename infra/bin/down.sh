@@ -56,6 +56,13 @@ echo "==> Snapshot created: ID ${SNAPSHOT_ID}"
 echo "==> Destroying server (firewall + SSH keys stay)..."
 terraform destroy -target=hcloud_server.main -auto-approve
 
+# The IP is Hetzner's again the moment the server dies, and it gets reassigned. Leaving the
+# alias pointed at it aims `ssh soc-playground` / `docker --context soc-playground` at whoever
+# gets it next, and `StrictHostKeyChecking accept-new` will connect without asking once the
+# known_hosts entry no longer clashes. Blank it as part of teardown, not as an afterthought.
+echo "==> Clearing the SSH alias (the IP is no longer ours)"
+bin/update-ssh-config.sh --clear || echo "   (ssh-config clear failed — run bin/update-ssh-config.sh --clear by hand)"
+
 echo ""
 echo "Levered down."
 echo "  Snapshot:  ${SNAPSHOT_ID}"

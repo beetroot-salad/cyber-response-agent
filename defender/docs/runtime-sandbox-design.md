@@ -12,6 +12,17 @@
 > the per-run egress allowlist is **retained as history, not as the plan**. What
 > still holds: the gVisor isolate, the filesystem mount discipline,
 > `--network=none`, the isolation-strength knob, and both honest limits.
+>
+> **⚠️ SECOND CORRECTION — the box wraps the bash lane, not the driver.** Every
+> "spawn the isolate, run the driver inside it" below (see §The run.py lifecycle
+> seam) predates #571 moving the brain host-side and is **wrong**. Once the driver
+> is the trusted brain and #611 has taken the adapters off the bash lane, the only
+> untrusted code execution left in the system is **model-written bash** — so that
+> is what goes in the box. The driver never enters it. This makes #540 materially
+> smaller than this document implies: a per-run box, two binds, `--network=none`,
+> and an exec per bash call. It also removes the reason to invent a credential
+> plane: the box is safe because it holds nothing, not because the driver was
+> disarmed first. Risk register: [`threat-model.md`](../../docs/decisions/threat-model.md).
 
 **Status:** design — not yet implemented. **Decision:** run each defender
 investigation inside a per-alert **gVisor (runsc) isolate** whose only route
@@ -431,6 +442,12 @@ default-deny, secrets-by-reference.
 
 ## The run.py lifecycle seam
 
+> **Superseded — see the second correction in the banner.** The numbered lifecycle
+> below puts the *driver* in the box and spawns a broker beside it. Both are dead:
+> there is no broker, and the driver is the trusted brain. Kept as history because
+> the *ordering* (materialize `run_dir` → build the box → reap → scrub) survives.
+> The current lifecycle is the one under "What it is now".
+
 The seam is `run.py:29-30` (venv re-exec) → after credential/env setup
 (`run.py:77-100`) and before `asyncio.run(driver.run_investigation)`
 (`run.py:153`):
@@ -447,6 +464,30 @@ The seam is `run.py:29-30` (venv re-exec) → after credential/env setup
    symlinks/hardlinks, fail loud) before any host-side consumer opens it**;
    artifacts are already on the host, and run.py continues to cross-check
    tables / enqueue learning / visualize unchanged.
+
+### What it is now
+
+Two things per run, and the driver is not one of the boxed ones. `run.py` is
+already one process per run (`main(sys.argv[1:])` → `sys.exit`), so the brain is
+ephemeral by construction — there is no long-lived pooled driver to contain, and
+nothing is shared across runs.
+
+1. **Startup (host, trusted):** materialize `run_dir`; build the per-run box.
+2. **The box lives for the run:** `run_dir` rw bind, `defender_dir` ro bind, `/tmp`
+   tmpfs, `--network=none`, no secrets in env, nothing else mounted. **No socket is
+   mounted inward** — the channel is inbound-only.
+3. **The driver stays host-side** with the keys and the network, running the LLM
+   loop and dispatching `query(...)` in-process (#611). Its two moves remain
+   dispatch-a-typed-tool and ship-bash-inward; it **execs into the box per bash
+   call**, so cwd and `/tmp` persist across calls and the ~0.1 s startup amortizes
+   once per run rather than per call.
+4. **Reap + scrub:** unchanged from above.
+
+The driver keeping the provider key is deliberate, not an oversight — #550 removes
+it by `base_url` origination and is **independent of this issue**, not a
+prerequisite. What that key buys an attacker who lands RCE *in the driver* is
+class 2 in [`threat-model.md`](../../docs/decisions/threat-model.md); its control is
+dependency hygiene, not a box.
 
 The learning-loop entrypoint (`learning/loop.py`) that re-enters the runtime wraps
 the same way.
@@ -492,17 +533,34 @@ stateless.
 
 ## Open questions / phasing
 
-- **Where does runsc get its privilege? — RESOLVED (#548, GO).** Default
-  `runsc run` wants root; *rootless* runsc needs the same unprivileged userns
-  that EPERM'd; inside the devcontainer an outer `--privileged` is typically
+- **Where does runsc get its privilege? — PARTLY resolved (#548, GO on one path).**
+  Default `runsc run` wants root; *rootless* runsc needs the same unprivileged
+  userns that EPERM'd; inside the devcontainer an outer `--privileged` is typically
   required. **Observed 2026-07-09:** a `--privileged` container on the playground
   VPS runs `runsc release-20260706.0` (systrap, no KVM) with all four knobs —
   ro bind, rw bind, `--host-uds=open`, `--network=none` loopback netstack — exit
   0; the non-privileged devcontainer stays a no-go (both privilege doors shut).
-  So the v1 spawner host is *privileged-container-on-VPS* (or root-on-host), with
-  the privilege spent once by the trusted spawner and none reaching the guest.
-  Evidence + caveats: `docs/decisions/runsc-spawner-host-go-no-go.md`. The design
-  is now proven deployable, not just chosen.
+  Evidence: `docs/decisions/runsc-spawner-host-go-no-go.md`. **runsc is deployable.**
+- **Which spawner path? — OPEN, and it is a security fork, not a packaging
+  detail.** "*privileged-container-on-VPS* **or** root-on-host" are not
+  interchangeable, and #548 only proved the first:
+  - **Proven (nested):** `runsc run` *inside* a `--privileged` container. The
+    Sentry then lives in a container with host devices, `CAP_SYS_ADMIN` in the
+    bounding set, and largely unmasked `/proc`. Also needed `--ignore-cgroups`.
+  - **Intended (daemon):** `docker run --runtime=runsc` against the host daemon —
+    dockerd spawns the Sentry as a host process and no privileged container exists.
+    This is the real `ContainerRunner` integration and **nobody has run it.**
+
+  The distinction matters because **gVisor's security model has two layers**, and
+  this document only ever described one. Layer one is the Sentry servicing guest
+  syscalls. Layer two is that the *Sentry itself* is confined by a host seccomp-bpf
+  filter plus namespaces, so that a Sentry compromise is still not host access —
+  that layer is what makes "the Sentry has bugs" survivable rather than fatal.
+  A privileged outer container does not disable it (the Sentry applies its own
+  filter), but it makes the far side of that filter far richer. So prove the daemon
+  path before treating privilege as settled, and **strike "the privilege is spent
+  once"** — privilege is not spent, it persists for the container's lifetime, and
+  the Sentry runs inside it.
 - **Fail-closed on capability.** The startup check must *attempt* a runsc probe
   (not just detect the binary) and refuse to process untrusted input unsandboxed
   on failure — only `DEFENDER_ALLOW_UNSANDBOXED=1` opts out, loudly.

@@ -67,11 +67,26 @@ runsc --host-uds=open --network=none --platform=systrap --ignore-cgroups \
 
 ## Caveats (carry into the build)
 
-- **Privilege stays on the trusted side.** The outer container needs
-  `--privileged`; the guest ran uid 0 with a **reduced cap set** (`chown,
-  dac_override, dac_read_search, fowner, fsetid, sys_ptrace` — from the boot
-  log), never `CAP_SYS_ADMIN`. So the spawner (run.py / worker / broker) spends
-  the privilege once to build the box; the model-driven code inside gets none.
+- **Privilege stays on the trusted side — but it is not "spent".** The outer
+  container needs `--privileged`; the guest ran uid 0 with a **reduced cap set**
+  (`chown, dac_override, dac_read_search, fowner, fsetid, sys_ptrace` — from the
+  boot log), never `CAP_SYS_ADMIN`. The model-driven code inside gets none of it.
+  **Amended 2026-07-17:** the original wording ("the spawner spends the privilege
+  once to build the box") is wrong and was load-bearing. Privilege is not spent —
+  the `--privileged` container persists for its lifetime, and **the Sentry runs
+  inside it**. That matters because gVisor's security model has two layers: the
+  Sentry services guest syscalls (layer one), *and the Sentry itself is confined
+  by a host seccomp-bpf filter plus namespaces* (layer two), which is what makes a
+  Sentry compromise survivable rather than fatal. A privileged outer container does
+  not disable layer two — the Sentry applies its own filter — but it makes the far
+  side of that filter much richer: host devices, `CAP_SYS_ADMIN` in the bounding
+  set, largely unmasked `/proc` and `/sys`.
+- **The proven path is not the intended path.** This spike proved *nested* runsc
+  inside a privileged container. The design's `ContainerRunner` assumes
+  `docker run --runtime=runsc` against the host daemon, where dockerd spawns the
+  Sentry as a host process and **no privileged container is in the picture**. That
+  path is unproven. Do not read this GO as clearing it — see the next caveat, which
+  already hints at it via `--ignore-cgroups`.
 - **`--ignore-cgroups`** was needed to sidestep cgroup friction in the *nested*
   container. Likely unnecessary when the spawner is root directly on the host —
   confirm when testing the prod-faithful `docker run --runtime=runsc` daemon
