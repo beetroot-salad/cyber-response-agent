@@ -131,14 +131,24 @@ builds the box, and the Sentry that faces model-written bash runs seccomp-filter
 with six capabilities and no `CAP_SYS_ADMIN`. That is the claim the nested path
 could not make, and it is why the daemon path is not a packaging preference.
 
-**Still unproven, and the bigger risk: compatibility.** Everything above uses a
-stock `alpine` rootfs. Nobody has run *gather's actual bash* inside the box. The
-sharp edge is that the bash gate's flag grammars were tuned against the runtime
-container's GNU binaries specifically (the dev box ships ugrep) — a box with a
-different rootfs shifts that alignment **silently**. Also unchecked: whether
-anything on the bash lane needs to write under a read-only `defender_dir`
-(`__pycache__` when `defender-sql` runs from it), and whether our real mount list
-exposes anything the `alpine` probe wouldn't reveal.
+**Compatibility — PARTLY TESTED (2026-07-17), the residual is narrow.** The spikes
+above used a stock `alpine` rootfs; the binary-compat surface has since been run
+against the *pinned* rootfs `python:3.11-slim` with the box's mount discipline:
+
+- **Flag-grammar alignment is clean.** `python:3.11-slim` ships GNU grep 3.11 +
+  coreutils 9.7 — the exact binaries `gnu_flags.py` was pinned against — so the
+  "silent drift" risk does *not* bite for this image; it bites only if the rootfs is
+  swapped to busybox/alpine (re-pinning `gnu_flags` catches that).
+- **`jq` is absent from the base image → bake it into the rootfs at build time**
+  (the box is `--network=none`; runtime `apt` is impossible — confirmed). Put the
+  `.venv` on `PATH` for `defender-sql` / the `defender-*` shims. Loud failures.
+- **`__pycache__` under a read-only `defender_dir` is a non-issue** — CPython
+  imports fine and silently skips the `.pyc` write on EROFS.
+- **The guest runs as uid 0 with `dac_override`** — inside the box, permission bits
+  and uid confine nothing; the mount list is the only boundary.
+
+Still wanting the real box (not blocking): `defender-sql` end-to-end from a ro-bound
+`.venv`, and whether the real mount list exposes anything the `alpine` probe missed.
 - **`--ignore-cgroups`** was needed to sidestep cgroup friction in the *nested*
   container. Likely unnecessary when the spawner is root directly on the host —
   confirm when testing the prod-faithful `docker run --runtime=runsc` daemon
