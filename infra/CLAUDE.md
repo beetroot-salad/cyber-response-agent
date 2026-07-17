@@ -61,7 +61,16 @@ bin/down.sh
 ```
 - Creates a Hetzner snapshot labeled `project=soc-playground,role=lever-down`
 - Runs `terraform destroy -target=hcloud_server.main` (keeps firewall + SSH keys — both free)
+- Calls `update-ssh-config.sh --clear` so the alias stops pointing at an IP that is no longer ours
 - Billing stops immediately; snapshot storage ~€0.01/GB/mo
+
+**If you tear down by hand** (`down.sh` exits 1 when the server isn't in Terraform state — the
+common case with local state, so the manual equivalent is `hcloud server create-image` with the
+`role=lever-down` labels + `hcloud server delete`), run the alias clear yourself:
+
+```bash
+bin/update-ssh-config.sh --clear
+```
 
 ### Lever up
 
@@ -84,7 +93,8 @@ bin/update-ssh-config.sh
 ### Fully tear down
 
 ```bash
-terraform destroy        # removes server + firewall + SSH keys
+terraform destroy                    # removes server + firewall + SSH keys
+bin/update-ssh-config.sh --clear     # stop the alias pointing at a released IP
 # Snapshots are NOT auto-deleted — inspect with: hcloud image list -l project=soc-playground
 ```
 
@@ -94,6 +104,7 @@ terraform destroy        # removes server + firewall + SSH keys
 - **No budget hard-cap.** Hetzner has per-resource monthly price caps (CCX33 ≤ €74/mo) but no AWS-Budgets-style auto-destroy. For a hard ceiling, prepay credit via Console → Billing.
 - **Changing `ssh_keys` or `user_data` forces server recreation** — these are create-time-only attributes on `hcloud_server`. Server state is lost; snapshot first if it matters.
 - **IP may change across destroy/recreate.** Run `bin/update-ssh-config.sh` after apply. Floating IP (€4/mo) would stabilize addressing; not worth it at playground scale.
+- **A released IP belongs to someone else within days.** Destroying the server returns its IP to Hetzner's pool, and the stanza's `StrictHostKeyChecking accept-new` means `ssh soc-playground` / `docker --context soc-playground` will silently connect to whoever holds it next — as soon as `known_hosts` has no clashing entry. Observed 2026-07-17: after the 2026-07-13 lever-down the alias still pointed at `178.105.170.226`, which answered with a different host key. Only the stale entry stopped the connection. Teardown now runs `update-ssh-config.sh --clear`, which parks the alias on `soc-playground.invalid` (RFC 2606 — can never resolve, so it fails closed) and is rewritten normally by the next lever-up.
 - **cloud-init re-runs on lever-up.** Hetzner assigns a new instance-id to the restored server, so cloud-init treats per-instance modules (`runcmd`) as unseen and re-runs them. Harmless because our bootstrap is idempotent (apt install no-ops, ack file rewrites), but adds ~30s to lever-up. To suppress, remove `user_data` from `server.tf` after the first apply — tradeoff: any future reprovision needs to restore it.
 - **`/etc/hosts` regeneration on lever-up.** Cloud-init's `manage_etc_hosts` module rewrites `/etc/hosts` from a template on every boot. Any entries we append manually get clobbered on the next lever-up. Fix in `cloud-init/bootstrap.yaml`: `manage_etc_hosts: false` + idempotent `runcmd` append of our Docker-service-name entries (`elasticsearch`, `fleet-server` → `127.0.0.1`).
 - **Firewall source IP.** `ssh_source_cidrs` in `terraform.tfvars` is a `/32` by default. If your public IP changes, update tfvars and `terraform apply` — the API accepts your token from anywhere, so you're never actually locked out.

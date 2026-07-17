@@ -81,6 +81,24 @@ a tool from a fixed table, or (b) ship model-written code into the isolate. It
 never executes attacker-chosen code itself. It is trusted with the key not because
 it is uninfluenced, but because its response to influence is enumerable.
 
+**The caveat that makes this a hygiene claim, not a structural one** (added
+2026-07-17). The paragraph above assumes **influence is the only threat**. It is
+not. An RCE does not *influence* the action space — it *deletes* it. An RCE'd
+driver does not consult the tool table; it reads `os.environ`, builds its own argv,
+and opens its own socket. Enumerability is a property of code still running as
+written, so the honest claim is: *the driver's action space is enumerable **so long
+as every parser between attacker text and the tool table is sound**.* That is a
+dependency-hygiene claim wearing a structural claim's clothes, and structural
+claims survive a CVE while hygiene claims do not.
+
+The exposure is the transitive tree — pydantic-ai, pydantic-core, httpx, the
+HTTP/JSON path — not our own code, which is clean of the classic sins (no unsafe
+`yaml.load`, no pickle, no template engine over attacker text, no `eval`/`exec` on
+it). Note the shape of the mitigation: a box around the driver would reduce blast
+radius but **not probability**, and would not protect the key, which the driver
+holds by construction. What moves probability is auditing the tree. This is class 2
+in [`threat-model.md`](threat-model.md), where it is recorded as **unowned**.
+
 ## The rule that makes it hold: the tool surface is not a shell
 
 The failure mode that would undo all of this is an RPC/tool verb that accepts a
