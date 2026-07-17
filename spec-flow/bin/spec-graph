@@ -15,6 +15,7 @@
 #
 # Usage:  spec-graph binds  [graph.yaml ...]            [--config <path>]
 #         spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
+#         spec-graph claims [graph.yaml ...]            [--config <path>]
 #
 # Override the interpreter with SPEC_GRAPH_PYTHON=<path> if discovery picks wrong.
 
@@ -33,8 +34,9 @@ scripts=$(cd "$(dirname "$self")/../scripts/spec_graph" && pwd)
 case "${1:-}" in
   binds) script=$scripts/check_binds.py ;;
   actors) script=$scripts/check_actors.py ;;
+  claims) script=$scripts/check_claims.py ;;
   *)
-    echo "usage: spec-graph {binds|actors} [graph.yaml ...] [--base <ref>] [--config <path>]" >&2
+    echo "usage: spec-graph {binds|actors|claims} [graph.yaml ...] [--base <ref>] [--config <path>]" >&2
     exit 2
     ;;
 esac

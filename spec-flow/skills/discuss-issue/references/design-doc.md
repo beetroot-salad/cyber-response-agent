@@ -13,7 +13,7 @@ You reach here as the discussion settles — but first check *which way* it sett
 Every sentence rests on something already being true of the system. Ask of each: **what must already hold for this to make sense?** Per-sentence — noticing is recall, and recall failing is how known traps ship. Then settle each assumption with the one instrument that can, and record it:
 
 - **referential** — the named symbol / path / flag exists as described; code structure (who calls what, which branch exists). Probe: read, import, or stat it, cited `file:line` — for who-defines a symbol, **symbol-refs** `--defs` resolves it across imports.
-- **behavior** — what existing code or a dependency does on an input: the bug story, a default, an exception taxonomy. Probe: a throwaway run over the input types the boundary really admits (`probe_kind: executed`) — never priors, never docs alone, and never a read of the code, which holds at parse level over exactly the input the bug needs to see.
+- **behavior** — what existing code or a dependency does on an input: the bug story, a default, an exception taxonomy. Probe: a throwaway run over the input types the boundary admits (`probe_kind: executed`) — never priors, never docs alone, never a read.
 - **census** — "these are all the writers / callers / occurrences." Probe: the search, recorded so it replays — the full hit list, or counts plus the members the doc acts on; when the census is over a *symbol*, **symbol-refs** resolves the reference set past grep's lexical floor.
 - **reachability** — "X cannot reach Y", "this value is constrained." Probe: try to break it. A survivor is *unrefuted*, never confirmed.
 
@@ -26,7 +26,7 @@ When the design carries a real fork or a fired deep-dive, hand the compiled doc 
 - **Conservation** — every obligation has a mechanism that actually discharges it, in full. An obligation with no mechanism, or one only partly covered (the stateless-token design that can't honor "revoke, effective now"), is a finding.
 - **Invented scope** — every mechanism serves a stated obligation. One that serves none is an unstated premise; surface it rather than let it ride.
 - **Narrowing** — a surface-general obligation discharged only on an enumerated subset. Name the surface the enumeration dropped.
-- **Claims** — every is-claim the design leans on carries a probe whose `probe_kind` matches its kind, in the `claims:` block, not prose: a `behavior` claim recorded `probe_kind: read` is "I inspected it and it looked right" wearing a probe's costume — a finding, like a load-bearing claim left `unprobed`.
+- **Claims** — every is-claim carries a probe whose `probe_kind` matches its kind, in the `claims:` block: a `behavior` claim recorded `probe_kind: read` is a finding, like one left `unprobed`.
 - **Firing** — the security/scale dive fired where the change warrants it, and a skipped dive is a recorded no, not a silence.
 
 Reconcile each finding, don't apply it blind — the cold reader can't tell a deliberate exclusion from a narrowing bug, and will flag both. Either it's a real gap and you fix the design, or it's a decision the doc left implicit and you record it as an explicit non-obligation — that recording *is* the fix, and it hands back the context the reviewer was denied. Re-sweep anything a fix touched, then post. A clean review is worth one line in the doc.
