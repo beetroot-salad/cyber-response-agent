@@ -71,6 +71,12 @@ Each rule: **trigger** (a predicate over formal slots) → **obligation** (the d
 - **Judgment extension — not slot-computable, and flagged as such:** when the delta *tightens* a constraint or flips a default rather than removing anything, ask whether a security-critical caller is left constructible in the newly-unsafe state; if so, mint a safe-by-construction demand — the critical caller *cannot be built* unsafe; assert the constructor raises, not merely that it behaves when configured right. This half rests on the author asking the question, not on a trigger — record in `gate.evaluated` that it was considered.
 - **Canonical:** a tightened access surface whose suite tested only the new restriction and silently regressed the workflows the old surface quietly served.
 
+### R6 — rendered-sink trust walk
+
+- **Trigger:** an edge whose payload is rendered or parsed text — a prompt splice, a generated heading or key, a line protocol, a table row — gaining a value from the delta, or a delta value reaching an existing such sink.
+- **Obligation:** walk every value that reaches the rendered output — the **frame** (headings, keys, separators, the template itself) as well as the payload slots — and label each with its **chooser** (who selects this value: the author, a config, a model, an attacker-influenced file or name) and its **sanitizer** (what transformation stands between the chooser and the sink). Every slot whose chooser is model- or attacker-influenced and whose sanitizer column is empty is an obligation: a hostile-value demand at the render site, or a `reachability` break-attempt probe on the *source* — what characters does the gate, the filesystem, the schema actually admit? "It's just a filename / an id / a key" is the chooser question unasked, not answered. Sanitizing the values while rendering the frame raw discharges nothing — the frame slots are the recurring escape.
+- **Canonical:** a manifest rendering `## {path.stem}` raw while only frontmatter *values* pass `yaml.safe_dump` — the write gate's `[^\x00]*` admits newlines, so a gate-approved filename forges a sibling section for a lesson the corpus does not contain. Three consecutive spec runs probed the value channel and never asked who chooses the stem.
+
 ## Probed claims — the ledger
 
 The rules compute the right *questions*; the ledger keeps their *answers* honest. Every statement the spec rests on about reality-as-it-is is a falsifiable prediction, recorded with the probe that tests it and what the probe observed — because the escapes that ship past a green suite are dominated by plausible prose answers one probe would have refuted. Claims enter three ways, none of them "the author noticed": **inherited** from discuss-issue's sweep (the doc's `claims:` block, carried over verbatim — optionally marked `source: discuss`), **raised at extraction and grounding** (steps 1–2), and **demanded by a consumer** — a spend-point's rationale or a fake's fault content that needs a claim to cite. Six kinds, keyed by what the probe is:
@@ -80,24 +86,31 @@ The rules compute the right *questions*; the ledger keeps their *answers* honest
 - **behavior** — a claim about what existing code does (a design's bug story, a stated default, "already handles Y"). Probe: run it and watch.
 - **reachability** — who or what can reach a surface, and whether a value or state is constructible ("main cannot read that dir", "the stem is filesystem-constrained"). Probe: a **break-attempt** — try to construct the forbidden value, drive the sealed seam — paired with a positive control showing the channel works at all. The verdict is only ever `unrefuted`, never confirmed: refutation is mechanical (one counterexample), confirmation is a universal over program behavior — a design that needs the universal *confirmed* routes to a safe-by-construction demand instead.
 - **discharge** — a pre-discharge credit or a waiver's rationale. Probe: whatever the rationale rests on (and pre-discharge binds the same *edge*, not merely the same boundary).
-- **primitive** — an I/O primitive's contract (its exception taxonomy, its normalization, its defaults). Probe: execute the primitive, in the runtime container when the binary matters.
+- **primitive** — an I/O primitive's contract (its exception taxonomy, its normalization, its defaults). Probe: execute the primitive, in the runtime container when the binary matters. Probe (and later fixture) values must sample the **types the boundary actually admits**, not pre-normalized stand-ins: a quoted timestamp in a YAML fixture parses to `str` and proves nothing about `safe_dump`-of-`datetime`, which the unquoted form the real corpus admits would produce — a fixture that can only hand the primitive the easy type is the taxonomy assumption in disguise.
 
-Four guards make the ledger bite:
+Five guards make the ledger bite:
 
 - **A probe does not discharge a test obligation.** A claim can inform a waiver or correct the design, but an obligation still closes only via an executable demand or a recorded waiver. A probed tolerance that no test pins ships untested — the ledger's own failure mode, and the thing a later change silently breaks.
 - **A trust-resolving claim is the first thing to probe.** When a rule's `fired: false`, a hole's resolution, or a waiver turns on "it's unreachable / constrained / already gated / cannot be built unsafe", that claim is where a blind spot hardens into green. Reachability and safety are `reachability`-kind claims with *executed* probes, never prose — "the OS/gate/filesystem constrains it" is a probe target, not an answer.
 - **A spend-point closes only by citation.** Every `fired: false`, waiver rationale, pre-discharge credit, and `binds_waivers`/`actor_waivers` entry names the claim id(s) it rests on, of the matching kind. An uncited rationale is `asserted` — a finding, not a pass.
 - **A fake's fault content cites its claim.** The exception class or malformed shape a fake raises is probe-derived data (SKILL.md step 8), never authored belief — a guard and a test built from the same imagined taxonomy are the same wrong prior, green together.
+- **The ledger ships in the artifact.** Claims live in the spec_graph's `claims:` block — the committed, reviewable one — not in a working file. A citation pointing at a side file the diff doesn't carry is indistinguishable from an uncited rationale to everyone downstream: the cold reviewer, write-code-from-spec, and the future session re-checking a claim the base has moved under.
 
 A claim only the not-yet-written implementation can settle is `verdict: deferred` and transfers to write-code-from-spec, which probes it when there is code to probe.
 
-## Suite verification — the null stub and conservation
+## Suite verification — the null stub, conservation, and the reconciliation edge
 
-Two step-9 checks prove properties of the *suite itself* that no per-test rule can.
+Step-9 checks that prove properties of the *suite itself* that no per-test rule can. The first two interrogate the suite against the target and the doc; the last three interrogate it against **the run's own record** — measured escapes concentrate not in the tiers that gather facts but on the edges where a gathered fact must become a demand, an assertion, or a recorded no.
 
 **Null-stub discrimination.** Write a throwaway implementation of the target that satisfies the imports and does nothing — functions return `None` or empty containers, writes never happen — and run the suite against it once. Every test must fail, **each on its own demand-specific assertion**: an import error or a shared fixture crash proves only that the file is broken, not that the test discriminates. A test that stays green binds nothing (the classic: a bare negative over empty output); a test that fails for someone else's reason is riding a sibling's assertion. Repair the test, delete the stub — it is never committed, and committing it would hand write-code-from-spec a skeleton to grow instead of a contract to meet.
 
 **Conservation.** The suite is a hypothesis about the intent doc; this check tests the hypothesis instead of declaring it. Generate pointed questions from **both sides** — one per intent obligation, asked in the obligation's own surface-general terms ("can an input vanish with no visible trace?"), and one per test ("which obligation needs this?") — and have a reader who has **never seen the intent doc** answer them from the tests alone; an anchored reader confirms instead of measures. Diff the answers against the doc. Three verdicts route: an obligation the tests can't answer is **undischarged intent**; a test no obligation explains is **invented scope or a silently-resolved fork**; "unanswerable" is a first-class verdict, not a reader failure. Both findings route back through step 7 — never straight into the diff. One open-ended cold read (state the intent the suite implies, then diff against the doc) backstops the questions neither side generated; question-generation coverage is this check's known bound.
+
+**Premise-disposition conservation.** Mechanical: every step-4 premise resolves to a demand's test, a step-7 fork/waiver record, or a `handoff.drops` entry with its reason — reconcile the counts. Conservation (above) audits the demands→tests edge; this audits the answered-premise→demand edge one step upstream, where a consensus answer can vanish without any downstream check noticing. The canonical loss: an ordering premise that reached full-answerer consensus with the correct expected value and simply never became a demand — green suite, silent hole.
+
+**Refuted-claims cross-check.** Mechanical: scan every test's expected-side literals against the refuted and stale-marked claims. A test asserting content a refutation corrects has pinned the probed bug green — the suite and its own ledger disagree, and the minimal repair under "never weaken a test" preserves the bug. Repair the test to pin the correction (red against HEAD is a spec's expected state); never resolve the contradiction by dropping the refutation. The null stub cannot catch this (the assertion is true against today's code) and conservation cannot either (it maps demands to tests, not assertions to claims).
+
+**The cold reconciler.** A fresh agent on a frontier model (Opus) — not the orchestrator, not the step-8 author — reads the run's artifact trail (brief, ledger, dispositions, gate record) against the committed diff and asks: does the spec conserve everything the run learned? Its charge is the judgment-shaped residue the mechanical checks can't enumerate: **composition** — two facts probed separately whose intersection no demand binds — and **altitude** — a demand pinned at a different grain than its premise asked. It deliberately reads hot (the mirror of the review stage's cold read); its findings route back through step 7.
 
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
@@ -118,7 +131,7 @@ claims:              # every load-bearing statement about existing reality, prob
                      # unrefuted: reachability's ceiling — a survived break-attempt, never "confirmed"
                      # entries inherited from the discuss doc keep their ids; source: discuss is optional
 gate:
-  evaluated: [{rule: R0..R5, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
+  evaluated: [{rule: R0..R6, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
   obligations: [{rule: R2, element: <address>, witness: "<one sentence>", discharged_by: <demand id>}]  # obligation→demand (a demand's own discharged_by is demand→test)
   holes:       [{rule: R0, element: <address>, resolution: "<the human's decision>", resolved_to: <demand id>}]
                         # resolved_to: present when the resolution spawned a demand
@@ -127,6 +140,8 @@ handoff:
   forks:      ["<the fork and how it was resolved>", ...]
   refuted:    ["<a design claim the ledger refuted, and the correction>", ...]
   deferred:   ["<a claim only the implementation can settle — write-code-from-spec's probe>", ...]
+  drops:      ["<premise name — why no demand was minted>", ...]   # every answered premise not in the suite/forks lands here (step-9 count)
+  nullstub_passes: ["<test name — structure | reuse | parity>", ...]  # each recorded legitimate null-stub pass
   deviations: ["<degraded strong author | collapsed step 4 | manual slot check | reduced small-delta mode>", ...]
 ```
 

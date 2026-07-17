@@ -3,7 +3,7 @@
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a list of
 *demands*, each with a `binds` list naming the graph elements it covers. The gate rules
-R0–R5 reason over `binds` (the edges), NOT the prose — so a value named in a demand's prose
+R0–R6 reason over `binds` (the edges), NOT the prose — so a value named in a demand's prose
 but not wired into its `binds` is INVISIBLE to the rules, and the realized test silently
 drops the assertion.
 

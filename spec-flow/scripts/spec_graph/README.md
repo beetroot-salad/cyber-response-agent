@@ -1,7 +1,7 @@
 # spec_graph — mechanical granularity checks for write-tests spec graphs
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a lossy projection
-of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R5 computing
+of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R6 computing
 blind-spot shapes over the bindings. The gate rules are only as good as the partition, the axes,
 and the binding-edges they're handed — so a graph **coarser than reality** passes green while real
 bugs escape.
