@@ -110,6 +110,24 @@ the provider key, which the brain holds by construction; only taking the key out
 the driver (#550) changes the *class* of the loss, from "the org's key, valid
 indefinitely" to "one investigation plus a short-lived token."
 
+**Three loci, three treatments (added 2026-07-17).** Class 2 is not one place.
+(1) *In the driver* — the big surface (pydantic-ai/core, httpx); real defense is
+OS-confining the driver, but it protects neither the key nor the network the driver
+holds by construction, so it is deferred to **platformization** and gated on #550.
+(2) *In the box* — a small surface (jq, coreutils, `defender-sql`'s python); this is
+the one class-2 locus a box actually hardens (probability, not just blast radius),
+and it is what runsc's userspace kernel is *for*. (3) *In the host-side consumers* —
+the renderer and learning loop parse attacker bytes (`report.md`, `gather_raw`) and
+need only `run_dir`; **OS-confining them is cheap and in scope for #540**, and does
+double duty: it contains a renderer RCE *and* closes the planted-symlink read. That
+read is a class-2 amplification of the `run_dir` artifact exit — sanctioned bash
+cannot create a symlink (no `ln`; the write surfaces make regular files), so
+following one is reachable only after an in-box RCE, and the fix is a reader-side
+`RESOLVE_NO_SYMLINKS` / reap scrub, **not** creation-prevention (which runsc cannot
+enforce anyway). **In-process read/write gating does not survive an RCE** — the
+exploit calls `open()` directly — so "box the reads/writes" only means anything at
+the OS level.
+
 **Class 3 — capability misuse (honest limit).** The credential cannot be *stolen*;
 the capability can still be *used*. A hijacked model calls `query(...)` with
 attacker-chosen ES|QL and no exploit is required. No sandbox touches this. The only

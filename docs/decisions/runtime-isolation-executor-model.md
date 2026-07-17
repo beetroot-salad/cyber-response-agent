@@ -166,7 +166,13 @@ string that straddles the boundary.
 - **gVisor vs. namespaces stays a knob.** `runc`/bwrap gives FS+PID+net
   confinement on a shared kernel; runsc puts a userspace kernel between
   model-written code and the host. Nothing else in the design depends on the
-  choice, so shipping on `runc` and upgrading later moves nothing.
+  choice, so shipping on `runc` and upgrading later moves nothing. **Resolved
+  2026-07-17: v1 is not gated on runsc.** The read/write boundary (this doc's
+  point — classes 1 and 8) is the mount list + `--network=none`, which `runc`
+  provides on any Docker host; runsc's added value is class 2 (an in-box RCE
+  reaching the host kernel), which is the *default target*, not the v1 gate. So the
+  runtime is runc-capable / runsc-default / microVM-optional, and the deployment
+  ships on whatever the host supports rather than waiting on a privileged runsc host.
 
 ## What this does NOT fix (unchanged, and not sandbox problems)
 

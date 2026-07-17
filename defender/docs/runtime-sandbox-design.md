@@ -227,6 +227,29 @@ the isolate exits and *before any host-side consumer opens `run_dir`*, run.py
 refuses symlinks and hardlinks anywhere under it (fail the run loudly, don't
 sanitize silently). Keep the parse/render-only invariant on top.
 
+**Updated 2026-07-17 — the threat class, the control, and the owner.** This residual
+is **class 2, not class 1**. Through the sanctioned bash lane a symlink is
+*unexpressible* — the grant list has no `ln`, and `write_file` / the `query` tool
+create regular files, never call `symlink()` — so a merely-injected model cannot
+plant one; it takes an in-box RCE (a jq/parser bug, an executor escape) to reach
+`symlink()`. Creation-prevention is therefore not the boundary: the grant list
+already covers class 1, and **runsc ignores the OCI seccomp profile**, so there is
+no structural `symlink`-deny on the default runtime. The control is **reader-side**,
+and the two identities are the point — the box *writes* the string (confined; its
+own kernel resolves the target to ENOENT), a trusted host consumer *derefs* it with
+the authority to read the secret. The scrub above is the cheap form (`lstat` per
+entry, run *after* teardown when the tree is frozen → TOCTOU-free); the structural
+form opens every artifact under `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)`.
+**Ownership:** #547 (the scrub) was closed NOT_PLANNED, so this is currently
+unowned — **#540 re-owns it**. Confining the host-side consumers (renderer,
+learning loop) — which need only `run_dir` and hold no key — both closes this and
+contains a class-2 RCE in the renderer, and is in scope for #540; **driver
+isolation is a separate, larger piece deferred to platformization and gated on
+#550** (a box can protect neither the key nor the network the driver holds by
+construction). Note in-process read/write gating does *not* survive an RCE (the
+exploit calls `open()` directly), so "box the reads/writes" only means anything at
+the OS level.
+
 ## Network isolation
 
 **Default: no network.** The isolate runs with runsc `--network=none`: the
@@ -506,6 +529,20 @@ One knob-specific asymmetry: the OCI `linux.seccomp` profile (e.g. denying
 `socket(AF_INET)`) applies on `runc` but is ignored by runsc — there, the absent
 network is the enforcement.
 
+**v1 is not gated on runsc (resolved 2026-07-17).** #540's boundary claim —
+classes 1 and 8 in [`threat-model.md`](../../docs/decisions/threat-model.md),
+*which paths are visible* and *no direct egress* — is delivered by the mount list +
+`--network=none`, and **`runc` provides both on any Docker host**. runsc's *added*
+value is exactly class 2: a parser-bug RCE *inside the box* (jq, coreutils,
+`defender-sql`'s python) reaching the host kernel — a modest surface, since #611
+left only local-computation bash in the box. So the runtime is genuinely
+**runc-capable / runsc-default / microVM-optional**, and the deployment does not
+have to wait on a privileged runsc host to make the read/write boundary real: ship
+on the runtime the host supports, default to runsc where the daemon path (proven
+2026-07-17) is available, and the upgrade moves nothing else. The earlier "blocked
+on levering the VPS back up" framing conflated the boundary (runc-sufficient) with
+the class-2 hardening (runsc).
+
 "Scale to many alerts → many isolates" is then a scheduler problem (k8s Job /
 Nomad / warm pool — or OpenSandbox, §Build/buy); the per-alert lifecycle is
 stateless.
@@ -568,16 +605,25 @@ stateless.
   It is the *daemon* path that makes the "privilege stays on the trusted side"
   claim true: dockerd spends it to build the box, and the Sentry facing
   model-written bash gets six caps and a seccomp filter.
-- **Does the real workload survive the box? — OPEN, and now the biggest unknown.**
-  Every probe so far used a stock `alpine` rootfs; gather's actual bash has never
-  run inside one. Specifically unchecked: the bash gate's flag grammars were tuned
-  against **the runtime container's GNU binaries** (the dev box ships ugrep), so a
-  different rootfs shifts that alignment *silently*; whether anything on the bash
-  lane needs to write under a read-only `defender_dir` (`__pycache__` when
-  `defender-sql` runs from it); and whether our real mount list exposes something a
-  stock-image probe wouldn't surface. This is a compatibility question, not a
-  security one — but it is the one that can invalidate the design rather than
-  relocate it.
+- **Does the real workload survive the box? — PARTLY TESTED (2026-07-17), no longer
+  the biggest unknown.** The rootfs is pinned to `python:3.11-slim`, so the
+  binary-compat surface was run against that image with the box's mount discipline:
+  - **The flag-grammar alignment is clean.** `python:3.11-slim` ships GNU grep 3.11
+    + coreutils 9.7 — the exact binaries `gnu_flags.py` was pinned against — so the
+    "silent drift" risk does *not* bite for this image. It bites only if the rootfs
+    is swapped to busybox/alpine, which re-pinning `gnu_flags` catches.
+  - **`jq` is absent from the base image and must be baked into the rootfs at build
+    time** (the box is `--network=none`; it cannot `apt` at runtime — confirmed).
+    The `.venv` must be on `PATH` for `defender-sql` / the `defender-*` shims. Both
+    are build-time requirements whose failures are loud (`command not found`).
+  - **`__pycache__` under a read-only `defender_dir` is a non-issue** — CPython
+    imports fine and silently skips the `.pyc` write on EROFS.
+  - **The guest runs as uid 0 with `dac_override`**, so inside the box permission
+    bits and uid confine *nothing* — the mount list is the only boundary; no in-box
+    logic may lean on chmod/uid.
+
+  Still wanting the real box (not blocking): `defender-sql` end-to-end from a
+  ro-bound `.venv`.
 - **Fail-closed on capability.** The startup check must *attempt* a runsc probe
   (not just detect the binary) and refuse to process untrusted input unsandboxed
   on failure — only `DEFENDER_ALLOW_UNSANDBOXED=1` opts out, loudly.
