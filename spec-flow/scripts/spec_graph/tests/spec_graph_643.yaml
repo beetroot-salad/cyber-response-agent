@@ -1,0 +1,318 @@
+schema_version: 1
+design: "issue #643 — check_actors import arm under-fires (1-hop + first-token-only). Typed doc: #643 issuecomment-5010645958."
+base: b24af0c8   # main HEAD the spec forks from; write-code-from-spec diffs against it
+
+# ============================================================================
+# DRAFT (post step-5 materialize). structure + claims grounded. demands are the
+# CONSENSUS set from step-4; fork-contingent demands (P17/P18 grain, P28/P29
+# universe) added after step-7. gate filled by the step-6 leaf. handoff at step-10.
+# Every form:test demand is a POINTER — prose lives in the discharged_by test's
+# docstring (authored step 8). Negatives carry their paired positive control.
+# ============================================================================
+
+# ── Demands — the spec proper (CONSENSUS; fork-contingent ones pending step 7) ─
+demands:
+  # #0 — output/exit contract (INHERITED, unchanged; re-pinned as the canonical case)
+  - {id: returns_findings_and_exit_contract, kind: behavior, form: test,
+     discharged_by: test_findings_list_and_exit_code_contract,
+     binds: ["actors_gate", "interacts(actors_gate->import_reach)"]}
+
+  # O1 — direct named-import resolution (the headline false negative)
+  - {id: direct_from_import_submodule, kind: domain-outcome, form: test,
+     discharged_by: test_from_pkg_import_changed_submodule_is_flagged,
+     binds: ["import_reach.domain.distinguished[from_submodule]"]}
+  - {id: fully_qualified_import_positive_control, kind: behavior, form: test,
+     discharged_by: test_fully_qualified_import_of_changed_module_is_flagged,
+     binds: ["interacts(actors_gate->import_reach)"]}   # positive control (works today) for stdlib/symbol negatives
+
+  # O3 — relative & multi-name forms
+  - {id: relative_import_resolves, kind: domain-outcome, form: test,
+     discharged_by: test_relative_import_to_changed_module_is_flagged,
+     binds: ["import_reach.domain.distinguished[relative]"]}   # single- and multi-dot parametrized in the test
+  - {id: multiname_import_credits_each, kind: domain-outcome, form: test,
+     discharged_by: test_multiname_import_credits_each_changed_name,
+     binds: ["import_reach.domain.distinguished[multi_name]"]}   # both-changed AND only-trailing-changed
+  - {id: parenthesized_import_resolves, kind: behavior, form: test,
+     discharged_by: test_parenthesized_multiline_import_is_flagged,
+     binds: ["interacts(actors_gate->import_reach)"]}
+
+  # O2 — transitive
+  - {id: transitive_reach_flagged, kind: domain-outcome, form: test,
+     discharged_by: test_transitive_reach_to_changed_module_is_flagged,
+     binds: ["import_reach.domain.distinguished[transitive]"]}   # canonical run.py→driver→compaction; hop3+ parametrized
+  - {id: transitive_names_reached_leaf, kind: behavior, form: test,
+     discharged_by: test_transitive_finding_names_the_reached_changed_module,
+     binds: ["import_reach.domain.distinguished[transitive]", "interacts(actors_gate->import_reach)"]}
+  - {id: transitive_changed_fires_unchanged_silent, kind: behavior, form: test,
+     discharged_by: test_transitive_changed_sibling_fires_unchanged_stays_silent,
+     binds: ["import_reach.domain.distinguished[transitive]", "git_diff"]}   # composition N2 ∧ O2
+
+  # N5 — termination
+  - {id: import_cycle_terminates, kind: behavior, form: test,
+     discharged_by: test_import_cycle_terminates_and_still_flags,
+     binds: ["import_reach.domain.distinguished[transitive]"]}   # 2-node ↔, 3-node ring, self-import parametrized
+
+  # N3 — false-positive freedom (NEGATIVES, each with a paired positive control on interacts(actors_gate->import_reach))
+  - {id: imported_symbol_without_file_invents_no_driver, kind: negative, form: test,
+     discharged_by: test_from_pkg_import_symbol_with_no_file_invents_no_driver,
+     binds: ["interacts(actors_gate->import_reach)"]}   # control: direct_from_import_submodule (real .py → fires)
+  - {id: stdlib_import_is_not_a_driver, kind: negative, form: test,
+     discharged_by: test_stdlib_or_thirdparty_import_is_never_a_driver,
+     binds: ["interacts(actors_gate->import_reach)"]}   # control: fully_qualified_import_positive_control
+  - {id: package_head_collision_no_false_reach, kind: negative, form: test,
+     discharged_by: test_pkg_head_stem_collision_yields_no_false_reach,
+     binds: ["interacts(actors_gate->import_reach)"]}   # `from a.runtime import driver` + unrelated runtime.py changed → no reach; control: driver.py changed → fires
+
+  # N4 — suppression keyed on the ENTRYPOINT stem (not the reached module)
+  - {id: modelled_entrypoint_suppressed, kind: behavior, form: test,
+     discharged_by: test_modelled_driver_stays_suppressed_after_fix,
+     binds: ["graph_model"]}   # incl. the contextAlias path; control: unmodelled → fires
+  - {id: suppression_keyed_on_entrypoint_not_reached, kind: behavior, form: test,
+     discharged_by: test_suppression_keyed_on_entrypoint_not_reached_module,
+     binds: ["graph_model", "interacts(actors_gate->import_reach)"]}
+
+  # N1 — subprocess arm survives the import-arm fix
+  - {id: subprocess_arm_unaffected, kind: survival, form: test,
+     discharged_by: test_subprocess_arm_still_fires_ungated_by_changed,
+     binds: ["subprocess_reach"]}
+
+  # controls — the clean-exit and /tests/-exclusion boundaries
+  - {id: no_in_scope_reach_exits_clean, kind: behavior, form: test,
+     discharged_by: test_diff_with_no_in_scope_reach_exits_zero,
+     binds: ["git_diff", "interacts(actors_gate->import_reach)"]}
+  - {id: tests_path_changed_excluded, kind: behavior, form: test,
+     discharged_by: test_changed_module_under_tests_path_is_excluded,
+     binds: ["git_diff"]}
+
+  # ── step-7 resolved demands ──
+  # Q2 PATH-granular — collision-freedom (RED against HEAD's stem-granular comparison)
+  - {id: cross_package_stem_no_cross_reach, kind: negative, form: test,
+     discharged_by: test_cross_package_same_stem_no_false_reach,
+     binds: ["interacts(actors_gate->import_reach)"]}   # pkg_b/driver.py changed→fires (control); pkg_a/driver.py changed while entrypoint imports pkg_b/driver → silent
+  - {id: imported_symbol_stem_collision_no_reach, kind: negative, form: test,
+     discharged_by: test_symbol_import_with_unrelated_same_stem_change_no_reach,
+     binds: ["interacts(actors_gate->import_reach)"]}   # `from pkg import summarize`(a fn, no pkg/summarize.py) + unrelated other/summarize.py changed → no reach
+  # Q3 codeRoots-bounded universe — accepted gap, paired with an in-roots positive control
+  - {id: reach_universe_bounded_to_coderoots, kind: behavior, form: test,
+     discharged_by: test_reach_only_through_outside_coderoots_is_accepted_gap,
+     binds: ["source_census", "interacts(actors_gate->import_reach)"]}   # outside-codeRoots-only reach→silent; same module moved in-roots→fires (control)
+  # Q4 pin BOTH reasons — a co-firing finding carries both hazards (RED against HEAD's if/else masking)
+  - {id: co_firing_finding_carries_both_hazards, kind: behavior, form: test,
+     discharged_by: test_co_firing_finding_reports_both_import_and_subprocess,
+     binds: ["subprocess_reach", "interacts(actors_gate->import_reach)"]}
+
+  # ── step-9 cold-reconciler composition completions — pin the human's decisions at TRANSITIVE grain ──
+  # F1: PATH-granular collision-freedom (Q2) ∧ transitivity — a same-stem module reached transitively
+  - {id: cross_package_collision_no_false_reach_transitive, kind: negative, form: test,
+     discharged_by: test_cross_package_same_stem_no_false_reach_transitive,
+     binds: ["interacts(actors_gate->import_reach)", "import_reach.domain.distinguished[transitive]"]}
+  # F2: co-fire (Q4) ∧ transitive import reach
+  - {id: co_firing_with_transitive_import_reach, kind: behavior, form: test,
+     discharged_by: test_co_firing_finding_with_transitive_import_and_subprocess,
+     binds: ["subprocess_reach", "import_reach.domain.distinguished[transitive]"]}
+  # F3: suppression keyed on entrypoint (N4) ∧ a modelled INTERMEDIATE mid-chain
+  - {id: suppression_keyed_on_entrypoint_transitive, kind: behavior, form: test,
+     discharged_by: test_modelled_intermediate_does_not_suppress_unmodelled_entrypoint,
+     binds: ["graph_model", "import_reach.domain.distinguished[transitive]"]}
+  # F4: whole-repo diff anchoring survives a subdir CWD (Q2 rewrites _changed_stems → the anchoring re-enters the seam)
+  - {id: whole_repo_diff_anchored_from_subdir, kind: behavior, form: test,
+     discharged_by: test_whole_repo_diff_anchoring_survives_subdir_cwd,
+     binds: ["git_diff"]}
+
+# ── Structure — check_actors' import-arm neighborhood ───────────────────────
+structure:
+  axes: []   # no writes / interpolation → no identity axes. Import FORMS are domain.distinguished members below.
+
+  actors:
+    - {id: actors_gate, frame: leg, provenance: code}   # check_actors.main/check — the `spec-graph actors` gate entry; the pytest harness drives this same entry. No fan-out.
+
+  boundaries:
+    - id: git_diff
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the changed set: `git diff --name-only base...HEAD -- *.py` at repo_root, stems, minus any path containing /tests/"}
+          default: "main"
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+    - id: source_census
+      provenance: code
+      facets:
+        domain:
+          type: list
+          refinement: {nl: "files under codeRoots (defender/runtime,learning,evals,run.py) minus _PRUNE and any 'tests' dir; an entrypoint has __main__ | /evals/ in path | 'harness' in stem | stem in entrypointStems (loop,run)"}
+          default: []
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+    # THE CHANGED SEAM — the entrypoint-text reader becoming import-graph reachability.
+    - id: import_reach
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the changed project modules an entrypoint drives via imports — resolved per-form on the filesystem and closed over transitively, bounded to project modules"}
+          default: null
+          distinguished: [from_submodule, relative, multi_name, transitive]   # the members the current arm misses
+          falsy_valid: false
+          documented_alternatives: []
+    - id: graph_model
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "a driver is suppressed iff \\b<entrypoint-stem>\\b or its contextAlias appears in graph text, or entrypoint-stem ∈ actor_waivers — keyed on the ENTRYPOINT, not the reached module"}
+          default: null
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+    - id: subprocess_reach
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the .py stems a file names as subprocess targets (the F2 re-exec arm); NOT gated on `changed`; unaffected by this change"}
+          default: null
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+  interacts:
+    - {from: actors_gate, to: git_diff,         mode: read, via: subprocess, provenance: code}
+    - {from: actors_gate, to: source_census,    mode: read, via: fs,         provenance: code}
+    - {from: actors_gate, to: import_reach,     mode: read, via: fs,         provenance: design}   # the changed edge
+    - {from: actors_gate, to: graph_model,      mode: read, via: fs,         provenance: code}
+    - {from: actors_gate, to: subprocess_reach, mode: read, via: fs,         provenance: code}
+  drives: []
+
+# ── Probed claims — the ledger (grounded live at base b24af0c8) ──────────────
+claims:
+  - {id: a1-first-token, kind: behavior, probe_kind: executed,
+     claim: "_imported_stems('from defender.runtime import driver') == {'runtime'} — captures the pkg head, not the imported submodule driver.",
+     probe: "sys.path.insert(0,<spec_graph dir>); import check_actors; check_actors._imported_stems('from defender.runtime import driver').",
+     observed: "{'runtime'}. 'driver' absent.", verdict: holds}
+  - {id: a4-relative-empty, kind: behavior, probe_kind: executed,
+     claim: "_imported_stems('from . import compaction') == {''} — a relative import yields the empty string; the submodule is invisible.",
+     probe: "check_actors._imported_stems('from . import compaction').", observed: "{''}.", verdict: holds}
+  - {id: a7-multiname-dropped, kind: behavior, probe_kind: executed,
+     claim: "_imported_stems('from defender.runtime import driver, compaction') == {'runtime'} — both imported names dropped; parenthesized 'from x import (a,b,)' -> {'x'}.",
+     probe: "check_actors._imported_stems on the multi-name and parenthesized forms.", observed: "{'runtime'}; parenthesized -> {'x'}.", verdict: holds}
+  - {id: b2-runpy-blind, kind: behavior, probe_kind: executed,
+     claim: "_imported_stems(defender/run.py text) contains 'runtime' but NOT 'driver'/'compaction'/'providers' — run.py's direct `from defender.runtime import driver` (line 44) is invisible.",
+     probe: "check_actors._imported_stems(open('defender/run.py').read()); membership tests.",
+     observed: "'runtime' in set; 'driver' False; 'compaction' False; 'providers' False.", verdict: holds}
+  - {id: b3-chain-real, kind: referential, probe_kind: read,
+     claim: "the transitive chain is real: run.py:44 `from defender.runtime import driver`; driver.py:29 `from . import compaction`.",
+     probe: "read defender/run.py:44 and defender/runtime/driver.py:29.", observed: "both lines present verbatim.", verdict: holds}
+  - {id: b6-blast-radius, kind: census, probe_kind: search,
+     claim: "run.py transitively reaches 69 codeRoot modules the 1-hop import arm cannot see (it sees only stem 'runtime').",
+     probe: "fs-BFS over project import edges from run.py, intersect with _config.source_files; count.",
+     observed: "69 reachable codeRoot modules; driver@d1, compaction@d2, bash_exec@d3, etc.", verdict: holds}
+  - {id: b8-twelve-instances, kind: census, probe_kind: search,
+     claim: "12 real first-token-bug instances exist across the 23 entrypoints — a `from pkg import mod` where mod.py is a real module the arm misses.",
+     probe: "scan each entrypoint's imports for `from A.B import C` where <root>/A/B/C.py exists but C not in _imported_stems output.",
+     observed: "12 sites incl run.py:44→driver; loop/judge/oracle→lead_repository; build→serialize; lessons/run→curator_engine; lead_author→lead_neighbors/lead_render; +others.", verdict: holds}
+  - {id: c1-no-injection-seam, kind: primitive, probe_kind: executed,
+     claim: "check(graph_path, base, cfg) has NO repo_root/changed-set injection seam — it computes them internally via the module-level @functools.cache repo_root() at CWD.",
+     probe: "read check + _changed_stems + _config.repo_root; confirm signature/internal calls; hasattr(repo_root,'cache_clear').",
+     observed: "check takes (graph_path,base,cfg); calls _changed_stems(base)->_sh(cwd=repo_root()) and source_files(cfg)->repo_root(); repo_root @cache.", verdict: holds}
+  - {id: c3-fixture-harness-works, kind: behavior, probe_kind: executed,
+     claim: "the real `spec-graph actors <graph> --base <ref>` driven with cwd=<throwaway git repo> reproduces both misses end-to-end and toggles findings with whether the graph models the driver.",
+     probe: "built fixture git repo (config+entrypoint+base commit+change commit+graph); ran real wrapper cwd=fixture; also in-process check() after os.chdir + repo_root.cache_clear().",
+     observed: "unmodelled -> UNMODELLED, exit 1, finding names only the fully-qualified stem; from-submodule + transitive stems ABSENT. modelled -> 0, exit 0. In-process identical.", verdict: holds}
+  - {id: reach-string-if-else, kind: referential, probe_kind: read,
+     claim: "check_actors.py:138-143 renders the reach as `f'...import of changed {sorted(imports_changed)}' if imports_changed else f're-executes {sorted(subprocs)} ...'` — a source-structure fact: the import branch wins the if/else when both arms are non-empty (so the co-fire masks the subprocess wording; finding still exits 1).",
+     probe: "read check_actors.py:138-143.", observed: "if/else keyed on imports_changed; import branch first; subprocs detail is in the else branch only.", verdict: holds}
+  - {id: suppression-keyed-entrypoint, kind: referential, probe_kind: read,
+     claim: "check_actors.py:122-129 keys modelled/alias/waiver suppression on `stem = f.stem` (the ENTRYPOINT under inspection) + its contextAlias — never the reached module stem.",
+     probe: "read check_actors.py:122-129 (stem=f.stem; aliases.get(stem); re.search(stem|actor)).", observed: "suppression uses the entrypoint's own stem + its contextAlias; the reached module never enters the graph lookup.", verdict: holds}
+  - {id: stem-granular, kind: behavior, probe_kind: executed,
+     claim: "the whole comparison is stem-granular: _changed_stems returns Path(f).stem and imports_changed = _imported_stems(text) & changed — so two same-named modules in different packages collide.",
+     probe: "read _changed_stems + the intersection; executed _imported_stems returns bare stems.",
+     observed: "_changed_stems -> {Path(f).stem}; intersection is set-of-stems; cross-package driver.py/driver.py collapse to one stem.", verdict: holds}
+  - {id: d1-ci-home-hole, kind: referential, probe_kind: read,
+     claim: "CI's test job runs only defender/tests/ + defender/learning/; a test under spec-flow/scripts/**/tests/ is NOT collected by CI. Repo-wide ruff E,F DOES scan spec-flow/scripts/. No pytest config exists under spec-flow.",
+     probe: "read .github/workflows/ci.yml test job; ruff check . --show-files; find spec-flow for pytest configs.",
+     observed: "test job: working-directory defender, `uv run pytest tests/ learning/`. ruff `.` lists spec-flow/scripts/*.py. No spec-flow pytest config.", verdict: holds}
+  - {id: d5d6-lint-scope, kind: referential, probe_kind: read,
+     claim: "lint_monkeypatch and lint_raw_git_subprocess are defender-scoped; a spec-flow test is unscanned by both; even under defender the raw-git-fixture pattern is exempt and monkeypatch.chdir is allowed (only .setattr ratcheted).",
+     probe: "read scripts/lint/lint_monkeypatch.py + lint_raw_git_subprocess.py SCOPE/exempt logic.",
+     observed: "both SCOPE=REPO_ROOT/'defender'; monkeypatch matcher requires attr=='setattr'; raw-git linter exempts the test category.", verdict: holds}
+  - {id: e1-self-degenerate, kind: behavior, probe_kind: executed,
+     claim: "`spec-graph actors` cannot gate THIS tooling spec: it censuses defender codeRoots, but #643 changes check_actors.py OUTSIDE them, so no import-arm finding can attach to the change. Worse than vacuous — the un-`changed`-gated SUBPROCESS arm fires on pre-existing defender standing hazards unrelated to #643.",
+     probe: "ran the REAL `spec-graph actors spec_graph_643.yaml --base main` over the actual repo (step-9); also the earlier isolated fixture (only the tool file + a /tests/ file changed).",
+     observed: "real repo: EXIT 1 with 2 findings — replay_actor.py (re-execs lead_repository,run) and harness_lead.py (re-execs lead_author), both standing subprocess hazards modelled/waived in defender's OWN specs (#575), NOT #643 concerns. Isolated fixture (no defender entrypoints present): exit 0. So the isolated-fixture 'vacuous pass' does NOT hold over the real repo; the gate is inapplicable to a tooling spec and must NOT be gamed by waiving unrelated contexts into this artifact.",
+     verdict: holds}
+  - {id: c6-wrapper-resolves-main, kind: referential, probe_kind: read,
+     claim: "the on-PATH spec-graph wrapper resolves its script to /workspace (main checkout), byte-identical to the worktree today; a test exercising the WORKTREE's code must invoke the worktree script path directly, not the PATH wrapper.",
+     probe: "which spec-graph; read the wrapper's script-path computation; diff main vs worktree check_actors.py.",
+     observed: "which -> /workspace/spec-flow/bin/spec-graph; wrapper computes scripts dir relative to itself; diff IDENTICAL; config+repo_root come from CWD.", verdict: holds}
+  - {id: r6-render-operator-trust, kind: reachability, probe_kind: executed,
+     claim: "no injection-capable value reaches the rendered finding sink: _imported_stems emits only \\w-safe stems (regex [\\w.]+), so every rendered reach value is a valid identifier; a maliciously-named changed file (stem with newline/brackets) is in `changed` but can NEVER enter `imports_changed` because no import statement can name it; the sink is a stdout diagnostic, not a parsed artifact. Licenses the R6 operator-trust close under the codeRoots-bounded (Q3) universe.",
+     probe: "break-attempt (executed): fed adversarial import text to _imported_stems (all emitted stems match ^\\w+$; failures=[]); built Path('evil\\n[FAKE finding].py').stem and confirmed _imported_stems over a line containing that name emits {'x'}, never the weird stem; read main() — findings print() to stdout.",
+     observed: "emitted stems failing ^\\w+$ = []; the weird stem is never emitted by _imported_stems; sink = print() to stdout.",
+     verdict: unrefuted}
+  # DEFERRED — only the not-yet-written implementation can settle these:
+  - {id: namespace-pkg-resolution, kind: behavior, probe_kind: executed,
+     claim: "the resolver must map a dotted import to repo_root/<parts>.py directly (defender is a namespace package, no __init__.py) — a resolver that walks __init__.py package markers fails to resolve defender.runtime.driver.",
+     probe: "deferred — no resolver exists yet; write-code-from-spec probes the chosen mapping. Grounding basis: codeGraph.notes 'defender is a namespace package (no defender/__init__.py)'.",
+     observed: "n/a", verdict: deferred}
+
+# ── Gate — R0-R6 over the join, every rule recorded ─────────────────────────
+gate:
+  evaluated:
+    - {rule: R0, fired: false}   # all binds resolve; no unknown invariant; axes:[] is a valid no-op; bidirectional reconciliation clean
+    - {rule: R1, fired: false}   # no payload facet, no `sends` — the flow is a set-intersection of stems read from text
+    - {rule: R2, fired: false}   # no identity facet, no write edge, no drives/fan-out — no shared sink
+    - {rule: R3, fired: false}   # import_reach vs subprocess_reach are SEPARATE boundaries (changed-gated vs not), not two vias of one; rests_on reach-string-if-else
+    - {rule: R4, fired: true}    # read edge to a domain-facet boundary that gained 4 distinguished members — each pre-discharged
+    - {rule: R5, fired: false}   # nothing removed; the change STRENGTHENS detection (b8/b6); judgment extension CONSIDERED, N/A (no constraint tightened into a newly-unsafe state); rests_on b8-twelve-instances
+    - {rule: R6, fired: true}    # the finding renders delta-sourced module stems into stdout — closed by the operator-trust waiver (Q3), grounded by r6-render-operator-trust
+  obligations: []   # R4's four members are each pre-discharged by a pre-existing form:test demand
+  holes:
+    - {rule: R0, element: "import_reach.domain (stem grain)",
+       resolution: "RESOLVED (human Q2): PATH-granular — pin cross-package collision-freedom.", resolved_to: cross_package_stem_no_cross_reach}
+    - {rule: R5, element: "interacts(actors_gate->import_reach) reach-string masking (subprocess_reach conservation)",
+       resolution: "RESOLVED (human Q4): PIN both hazards in a co-firing finding — overrode the spec author's waive recommendation.", resolved_to: co_firing_finding_carries_both_hazards}
+    - {rule: R6, element: "interacts(actors_gate->import_reach) rendered-stem chooser-trust",
+       resolution: "RESOLVED (human Q3 codeRoots-bounded → operator-trust): rendered reach values are import-derived \\w-safe identifiers; a weird changed stem can never be imported; sink is a stdout diagnostic. Closed by break-attempt reachability claim r6-render-operator-trust, not prose."}
+    - {rule: R0, element: "resolver universe",
+       resolution: "RESOLVED (human Q3): codeRoots-bounded; outside-codeRoots-only reach is an accepted gap.", resolved_to: reach_universe_bounded_to_coderoots}
+  pre_discharged:
+    - {rule: R4, element: "import_reach.domain.distinguished[from_submodule]", by: direct_from_import_submodule, edge: "interacts(actors_gate->import_reach)"}
+    - {rule: R4, element: "import_reach.domain.distinguished[relative]",       by: relative_import_resolves,      edge: "interacts(actors_gate->import_reach)"}
+    - {rule: R4, element: "import_reach.domain.distinguished[multi_name]",     by: multiname_import_credits_each, edge: "interacts(actors_gate->import_reach)"}
+    - {rule: R4, element: "import_reach.domain.distinguished[transitive]",     by: transitive_reach_flagged,      edge: "interacts(actors_gate->import_reach)"}
+
+# ── Handoff ─────────────────────────────────────────────────────────────────
+handoff:
+  forks:
+    - "Q1 test-home → RESOLVED: spec-flow/scripts/spec_graph/tests/ (natural home beside the tool). REQUIRED FOLLOW-UP for write-code-from-spec: CI does NOT collect spec-flow tests today — add a pytest step for spec-flow/ or the suite never gates in CI. Rejected: defender/tests/ (CI-gated now, but odd cross-tree locality)."
+    - "Q2 grain → RESOLVED: PATH-granular — pin cross-package collision-freedom (cross_package_stem_no_cross_reach, imported_symbol_stem_collision_no_reach). Expands scope beyond the literal 'under-fires'. Rejected: stem-granular false-negatives-only."
+    - "Q3 universe → RESOLVED: codeRoots-bounded — outside-codeRoots-only reach is an accepted gap (reach_universe_bounded_to_coderoots). Also makes the rendered finding operator-trust (R6 waiver, claim r6-render-operator-trust). Rejected: repo-wide."
+    - "Q4 both-arms text → RESOLVED: PIN BOTH — a co-firing finding carries both the import reach and the subprocess re-exec hazard (co_firing_finding_carries_both_hazards). OVERRODE the spec author's waive recommendation; expands the fix into the finding-rendering if/else at check_actors.py:138-143."
+  refuted: []   # the issue's bug story was CONFIRMED by probes (a1-first-token, a4-relative-empty, b2-runpy-blind), not refuted
+  deferred:
+    - "namespace-pkg-resolution: the resolver must map dotted imports to repo_root/<parts>.py directly (defender has no __init__.py). write-code-from-spec probes the chosen mapping; the behavioral fixtures use namespace-package layout (no __init__.py) so they exercise the real condition."
+    - "post-fix render safety: if the fix renders full module PATHS (not stems), confirm no operator-path injection — low risk, operator-trust; r6-render-operator-trust covers the stem case at base."
+  drops:
+    - "star-import `from pkg import *` — accepted gap (names nothing to resolve; same class as __init__.py collapse)."
+    - "P31 subdir-cwd whole-repo anchoring — INITIALLY dropped, then PROMOTED to a demand (whole_repo_diff_anchored_from_subdir) per cold-reconciler F4: the Q2 PATH-granular decision most likely rewrites _changed_stems (stem→path), so its `_sh(cwd=repo_root())` anchoring re-enters the changed seam and must be pinned."
+  coverage_gaps:   # conservation blind-reader flagged broader coverage a maximal suite might add — NOT undischarged demands, recorded honestly for the reviewer
+    - "aliased imports (`from pkg import mod as m`) — untested; near-duplicate of the from-import resolution (the `as` alias rebinds locally, does not change which file is resolved)."
+    - "dynamic/programmatic imports (`importlib.import_module`, `__import__`) — out of scope for a STATIC import-text scan; both HEAD and the fix are blind to them (a conservative under-fire)."
+    - "conditional/guarded imports (inside if/try/TYPE_CHECKING) — already matched by the `^\\s*(?:from|import)` line-anchored scan (the arm is a static text read; runtime conditionality is invisible to it), so no distinct behavior."
+    - "multiple/overlapping codeRoots — every fixture uses a single root `app/`; the real defender has 4. Resolution maps dotted-path→file regardless of which root holds it, so low marginal risk, but untested."
+    - "finding dedup/order across multiple entrypoints or paths reaching one changed module — defaulted to one-finding-per-entrypoint / order-not-pinned; not exercised."
+  nullstub_passes: []   # every test drives a firing (positive-control) assertion, so each fails against a no-op stub — no legitimate null-stub pass
+  deviations:
+    - "REDUCED small-delta mode: 2 enumeration lenses + strong author (not 4); step-4 collapsed (orchestrator synthesized + self-answered the premises, forks routed to step 7 — self-answered outcomes measure no ambiguity); extraction collapsed into the derived intent+design doc (the orchestrator authored the doc, so a separate extraction leaf would only mirror it). Graph kept to the touched neighborhood."
+    - "Input was a BARE issue, not a discuss-issue typed doc; the intent+design doc was derived and posted to #643 (issuecomment-5010645958) before the run, per user approval."
+    - "check_actors SELF-APPLICATION is INAPPLICABLE to this tooling spec (claim e1-self-degenerate): `spec-graph actors spec_graph_643.yaml --base main` EXITS 1 with 2 findings — replay_actor.py + harness_lead.py — that are pre-existing DEFENDER subprocess standing-hazards (the arm is not `changed`-gated), unrelated to #643, and already modelled/waived in defender's own specs (#575). The gate censuses defender codeRoots but #643 changes the tooling outside them, so no import-arm finding can attach to the change. The exit-1 is NOT a #643 defect and was deliberately NOT silenced by waiving those contexts into this artifact (that would pollute the spec with unrelated concerns). check_binds + check_claims (which read the artifact directly) both pass; the actors check is the one that does not meaningfully apply."
+    - "Formal-slot validation is a hand check against schema.md (no spec_graph linter yet)."
+    - "AST-call check: the target is a CLI, driven via subprocess (`conftest.Repo.run` → `subprocess.run([python, <worktree>/check_actors.py, <graph>, --base, <sha>], cwd=fixture)`) — the real entry point, not an in-process symbol call. Expected values on every assertion are FIXTURE inputs (module stems the test wrote) or the exit code, never a re-implementation of the target's logic. Verified: 27/27 items fail against a no-op stub, 19 RED / 8 GREEN vs HEAD."
+    - "CI-home: the suite lives at spec-flow/scripts/spec_graph/tests/ and is NOT collected by CI today (CI runs only defender/tests + defender/learning) — write-code-from-spec MUST add a pytest step for spec-flow/ or the suite never gates in CI (Q1)."
+    - "COLD RECONCILER (step-9, Opus, hot read of the full trail) found 3 composition holes + 1 watch-item, all resolved by ADDED tests (not new human forks — they complete decisions already made): F1 path-granular collision-freedom ∧ transitivity (cross_package_collision_no_false_reach_transitive) — the highest-value catch, guards the natural stem-collection-per-hop implementation that would silently violate Q2; F2 co-fire ∧ transitive import (co_firing_with_transitive_import_reach); F3 entrypoint-keyed suppression ∧ modelled intermediate (suppression_keyed_on_entrypoint_transitive); F4 subdir-cwd anchoring (whole_repo_diff_anchored_from_subdir). It confirmed CLEAN: the fully-qualified control pairings, the outside-codeRoots gap test, e1, the r6 waiver, the star-import drop, and N2∧O2. Also tightened test_transitive_finding_names_the_reached_changed_module to assert the intermediate is ABSENT (altitude)."
+    - "CONSERVATION blind-reader (step-9, tests-only) independently recovered the full intent and found NO invented scope; the broader-coverage gaps it noted are recorded under handoff.coverage_gaps."
