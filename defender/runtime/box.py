@@ -442,7 +442,11 @@ def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) ->
         "DEFENDER_DIR": str(defender_dir),
         "DEFENDER_RUN_DIR": str(run_dir),
         "DEFENDER_RUNS_BASE": str(run_dir.parent),
-        "PATH": _BOX_PATH,
+        # The `defender-*` shims live inside the RO BIND (`defender/bin/`), not the image, and
+        # resolve their own tree via $DEFENDER_DIR — so granting them is a PATH entry rather
+        # than a rootfs build. A program the policy grants but the box cannot find is a silent
+        # capability loss, which is why the repertoire is asserted rather than assumed.
+        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
         "PYTHONPATH": str(defender_dir.parent),
         "LANG": "C.UTF-8",
         "TZ": "UTC",
@@ -454,7 +458,11 @@ def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) ->
         "--read-only",
         "--mount", f"type=bind,source={run_dir},target={run_dir}",
         "--mount", f"type=bind,source={defender_dir},target={defender_dir},readonly",
-        "--tmpfs", f"/tmp:rw,noexec,nosuid,size={spec.tmpfs_size}",
+        # mode=1777 is /tmp's conventional sticky-writable mode. Stated explicitly because the
+        # rootfs is `--read-only`, and a tmpfs that lands 0755 makes the noexec demand
+        # unobservable: the stage step fails on WRITE permission and the test can no longer
+        # tell "cannot execute here" from "cannot write here".
+        "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),
     ]
     for key in BOX_ENV_ALLOWLIST:

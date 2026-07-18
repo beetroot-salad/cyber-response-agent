@@ -380,11 +380,19 @@ def _run_box_entrypoint() -> int:
         print(f"box entrypoint: undecodable request frame: {e}", file=sys.stderr)
         return 2
 
+    # The environment handed to the program is filtered to the box's positive allowlist. The
+    # container's own env is NOT the allowlist on its own: a rootfs bakes its own variables in
+    # (`python:3.11-slim` ships GPG_KEY, PYTHON_VERSION, PYTHON_SHA256), and `docker run` has no
+    # way to clear an image's ENV. Filtering here — the one place every boxed program is
+    # launched from — is what makes the allowlist true of what the model's code actually sees,
+    # regardless of which rootfs the spec names.
+    box_env = {k: v for k, v in os.environ.items() if k in box.BOX_ENV_ALLOWLIST}
+
     try:
         rc, out, err = run_parsed(
             pipelines,
             command="",
-            env=dict(os.environ),
+            env=box_env,
             cwd=Path.cwd(),
             timeout=float(os.environ.get("DEFENDER_BOX_TIMEOUT", "120")),
         )
