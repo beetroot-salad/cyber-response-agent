@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py).
+# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -41,8 +41,6 @@ ISO_UTC_RE = re.compile(
 )
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
-    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def _require_utc(value: str) -> str:
@@ -59,16 +57,16 @@ def _require_utc(value: str) -> str:
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
 
 
 def active_changes(ctx: VerbContext, *, host: str, at: str) -> dict | list:
     params = {"host": host, "at": _require_utc(at)}
-    return transport.http_get(ctx, _config(ctx), "/changes/active", params=params)
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/changes/active", params=params)
 
 
 def get_change(ctx: VerbContext, *, cr_id: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/changes/{cr_id}")
+    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/changes/{cr_id}")
 
 
 def list_changes(
@@ -91,7 +89,7 @@ def list_changes(
         params["host"] = host
     if active_at:
         params["active_at"] = _require_utc(active_at)
-    return transport.http_get(ctx, _config(ctx), "/changes", params=params or None)
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/changes", params=params or None)
 
 
 VERBS = {

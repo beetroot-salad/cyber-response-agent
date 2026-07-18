@@ -23,10 +23,10 @@ from defender.runtime import circuit_breaker as cb  # noqa: E402
 
 # #611: six of the seven adapters lost their CLI — a data source is reached through the `query`
 # tool now, so those adapters are VERBS registries with no `main()`/`build_parser()`. Only
-# `ticket_cli.py` keeps its argparse CLI (three subprocess consumers pin it), so the exit-64
+# `ticket_adapter.py` keeps its argparse CLI (three subprocess consumers pin it), so the exit-64
 # usage-error contract is asserted against the ONE surviving CLI. It fails fast at argparse on a
 # bad invocation, before touching docker, so it runs with no environment.
-_ADAPTERS = ["ticket_cli.py"]
+_ADAPTERS = ["ticket_adapter.py"]
 _ADAPTERS_DIR = _DEFENDER / "scripts" / "adapters"
 
 

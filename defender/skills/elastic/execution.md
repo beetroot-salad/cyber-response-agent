@@ -33,7 +33,7 @@ add an explicit `LIMIT`. Prefer `esql` for any count / distribution / cardinalit
 timing dimension; use `query` (KQL search) only when you need raw event
 documents themselves.
 
-**Do not Read `elastic_cli.py` source to discover params.** This doc plus the
+**Do not Read `elastic_adapter.py` source to discover params.** This doc plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 The source is ~500 lines and reading it shows up as the single largest source of

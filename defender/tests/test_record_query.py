@@ -56,23 +56,23 @@ def test_derive_system_from_defender_shim():
 
 
 def test_derive_system_from_cli_path():
-    assert ge.derive_system(["python3", "/x/cmdb_cli.py", "host-lookup", "web-1"]) == "cmdb"
+    assert ge.derive_system(["python3", "/x/cmdb_adapter.py", "host-lookup", "web-1"]) == "cmdb"
 
 
 def test_derive_system_multiword_cli_path_normalizes_underscore():
     # A multi-word adapter file uses `_`, but the canonical system name and the
     # `defender-<system>` shim use `-`; the path form must agree with the shim
     # form so the queries-table join key is stable across both.
-    assert ge.derive_system(["python3", "/x/host_state_cli.py", "inspect", "c1"]) == "host-state"
-    assert ge.derive_system(["/x/change_mgmt_cli.py", "list"]) == "change-mgmt"
-    assert ge.derive_system(["python3", "/x/threat_intel_cli.py", "lookup"]) == "threat-intel"
+    assert ge.derive_system(["python3", "/x/host_state_adapter.py", "inspect", "c1"]) == "host-state"
+    assert ge.derive_system(["/x/change_mgmt_adapter.py", "list"]) == "change-mgmt"
+    assert ge.derive_system(["python3", "/x/threat_intel_adapter.py", "lookup"]) == "threat-intel"
 
 
 def test_derive_system_ignores_stray_tokens_before_shim():
-    # A path/flag value that merely starts with `defender-` or ends in `_cli.py`
+    # A path/flag value that merely starts with `defender-` or ends in `_adapter.py`
     # must not pre-empt the real adapter shim that follows it.
     assert ge.derive_system(["--out", "defender-runs/x", "defender-cmdb", "q"]) == "cmdb"
-    assert ge.derive_system(["FOO=/x/elastic_cli.py", "defender-cmdb", "q"]) == "cmdb"
+    assert ge.derive_system(["FOO=/x/elastic_adapter.py", "defender-cmdb", "q"]) == "cmdb"
 
 
 def test_derive_system_skips_non_adapter_and_unknown():

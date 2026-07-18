@@ -49,12 +49,12 @@ def _write_skill(skills_dir: Path, name: str, description: str, *, block_scalar:
 
 def test_injects_oneliner_description(tmp_path):
     hook = _load()
-    _write_skill(tmp_path, "elastic", "Use elastic_cli.py --help, not source reads.")
+    _write_skill(tmp_path, "elastic", "Use elastic_adapter.py --help, not source reads.")
 
     desc = hook.read_description("elastic", skills_dir=tmp_path)
     augmented = hook.build_augmented_prompt(_gather_prompt(tmp_path, "elastic"), "elastic", desc)
     assert "auto-injected from SKILL frontmatter" in augmented
-    assert "Use elastic_cli.py --help, not source reads." in augmented
+    assert "Use elastic_adapter.py --help, not source reads." in augmented
 
 
 def test_injects_block_scalar_description(tmp_path):

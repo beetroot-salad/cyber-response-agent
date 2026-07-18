@@ -41,7 +41,7 @@ for other Falco events against the same container ID — events where the Docker
 lookup succeeded will have `container.name` resolved:
 
 ```bash
-defender/scripts/adapters/elastic_cli.py query \
+defender/scripts/adapters/elastic_adapter.py query \
   'falco.output_fields.container.id: "7e76d1cea7c4"' \
   --index 'logs-falco.alerts-*' \
   --limit 10

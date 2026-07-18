@@ -51,7 +51,7 @@ from defender.learning.leads import (  # noqa: E402
 )
 from defender.learning.pipeline.judge import compare  # noqa: E402
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
-from defender.scripts.adapters import cmdb_cli, elastic_cli  # noqa: E402
+from defender.scripts.adapters import cmdb_adapter, elastic_adapter  # noqa: E402
 from defender.scripts.visualize import visualize_runtime  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -415,17 +415,17 @@ def test_verb_declares_engine_and_body_param_per_verb(tmp_path):
     VERB across all three engine classes: elastic.esql → esql/`query`; elastic.query & .alerts →
     lucene/`native_query`; a param-only verb → no engine, no body param. A SYSTEM-keyed resolver
     (today's _is_esql) fails the elastic.query case."""
-    assert engine_of(elastic_cli.VERBS["esql"]) == "esql"
-    assert body_param_of(elastic_cli.VERBS["esql"]) == "query"
+    assert engine_of(elastic_adapter.VERBS["esql"]) == "esql"
+    assert body_param_of(elastic_adapter.VERBS["esql"]) == "query"
 
-    assert engine_of(elastic_cli.VERBS["query"]) == "lucene"
-    assert body_param_of(elastic_cli.VERBS["query"]) == "native_query"
-    assert engine_of(elastic_cli.VERBS["alerts"]) == "lucene"
-    assert body_param_of(elastic_cli.VERBS["alerts"]) == "native_query"
+    assert engine_of(elastic_adapter.VERBS["query"]) == "lucene"
+    assert body_param_of(elastic_adapter.VERBS["query"]) == "native_query"
+    assert engine_of(elastic_adapter.VERBS["alerts"]) == "lucene"
+    assert body_param_of(elastic_adapter.VERBS["alerts"]) == "native_query"
 
     # the param-only majority class: no engine, no body param
-    assert engine_of(cmdb_cli.VERBS["get-host"]) == "none"
-    assert body_param_of(cmdb_cli.VERBS["get-host"]) is None
+    assert engine_of(cmdb_adapter.VERBS["get-host"]) == "none"
+    assert body_param_of(cmdb_adapter.VERBS["get-host"]) is None
 
 
 def test_body_param_marker_survives_validate_params(tmp_path):
@@ -470,7 +470,7 @@ def test_verb_declaration_read_without_importing_the_transport(tmp_path):
     for mod in (draft_synthesis, lead_extraction):
         src = Path(mod.__file__).read_text(encoding="utf-8")
         assert "ModuleVerbRegistry" not in src, f"{mod.__name__} imports the live registry"
-        assert "import elastic_cli" not in src, \
+        assert "import elastic_adapter" not in src, \
             f"{mod.__name__} reaches an adapter/transport to resolve the engine"
         assert "adapters" not in src, \
             f"{mod.__name__} reaches an adapter/transport to resolve the engine"
@@ -891,8 +891,8 @@ def test_workspace_map_positive_control(tmp_path):
     """workspace_map_positive_control — the map still lists the adapter surface, so the negative is
     not passing because the map went empty."""
     text = workspace_map_mod.workspace_map(tmp_path)
-    assert "Adapter CLIs" in text
-    assert "elastic_cli.py" in text, "the adapter surface vanished from the map"
+    assert "Adapters" in text
+    assert "elastic_adapter.py" in text, "the adapter surface vanished from the map"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -960,7 +960,7 @@ def test_validate_scaffold_green_on_all_seven_via_registry_probe():
 
 def test_validate_scaffold_normalizes_the_spelling_split():
     """validate_scaffold_normalizes_the_spelling_split — a single invocation locates BOTH the
-    adapter (underscore, change_mgmt_cli.py) and the skill/corpus (hyphen, skills/change-mgmt/) for
+    adapter (underscore, change_mgmt_adapter.py) and the skill/corpus (hyphen, skills/change-mgmt/) for
     change-mgmt / host-state / threat-intel — today NO spelling passes for these three."""
     results = {s: _run_validate_scaffold(s) for s in _SPELLING_SPLIT}
     for system, res in results.items():
@@ -972,7 +972,7 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
     shared modules + skill + execution.md, plus one crafted cmdb query template."""
     (root / "scripts" / "adapters").mkdir(parents=True)
-    for f in ("cmdb_cli.py", "_stub_transport.py", "faults.py"):
+    for f in ("cmdb_adapter.py", "_stub_transport.py", "faults.py"):
         src = DEFENDER / "scripts" / "adapters" / f
         if src.exists():
             (root / "scripts" / "adapters" / f).write_text(

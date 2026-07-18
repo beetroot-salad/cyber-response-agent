@@ -6,7 +6,7 @@ description: Ticket-server stub system reference — read-only ticket lookups fo
 The ticket-server stub is the v1 FastAPI app reused under
 playground-v2's compose (kept under the playground's `ticket-server`
 so v1 integrations stay working). v1's
-`soc-agent/scripts/tools/playground_ticket_cli.py` is a separate
+`soc-agent/scripts/tools/playground_ticket_adapter.py` is a separate
 ActionContract-shaped adapter for that ecosystem; this adapter is
 v2-flavored (`_stub_transport.py` + docker-exec-curl) and
 read-only.
@@ -99,7 +99,7 @@ Reached with the **`query` tool** — there is no command, no shim, and no `--he
 Params bind **by name**, with literal JSON types. `get-ticket` requires `key`;
 every `list-tickets` param is an optional filter.
 
-**Do not Read `ticket_cli.py` source to discover params.** This SKILL plus the
+**Do not Read `ticket_adapter.py` source to discover params.** This SKILL plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 

@@ -152,13 +152,13 @@ def test_ignores_malformed_stdin(monkeypatch):
     assert mod.main() == 0
 
 
-# --- adapter-CLI clamp: main loop must not query data sources directly ---
+# --- adapter clamp: main loop must not query data sources directly ---
 
 def test_denies_main_running_adapter_cli(monkeypatch, capsys):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/adapters/elastic_cli.py query 'x'"},
+        "tool_input": {"command": "python3 defender/scripts/adapters/elastic_adapter.py query 'x'"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
@@ -169,18 +169,18 @@ def test_denies_main_adapter_cli_absolute_path(monkeypatch):
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 /workspace/defender-v2-tree/defender/scripts/adapters/identity_cli.py whoami > /run/x.json"},
+        "tool_input": {"command": "python3 /workspace/defender-v2-tree/defender/scripts/adapters/identity_adapter.py whoami > /run/x.json"},
         "cwd": MAIN_CWD,
     })
     assert rc == 2
 
 
 def test_allows_subagent_running_adapter_cli(monkeypatch):
-    """Gather subagent (agent_id present) runs the adapter CLI — never blocked."""
+    """Gather subagent (agent_id present) runs the adapter — never blocked."""
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 .../scripts/adapters/elastic_cli.py query 'x'"},
+        "tool_input": {"command": "python3 .../scripts/adapters/elastic_adapter.py query 'x'"},
         **SUBAGENT,
     })
     assert rc == 0
@@ -198,7 +198,7 @@ def test_allows_main_running_invlang_cli(monkeypatch):
 
 
 def test_allows_main_running_record_query(monkeypatch):
-    """record_query.py is not an adapter *_cli.py; not matched (and the main
+    """record_query.py is not an adapter *_adapter.py; not matched (and the main
     loop never runs it anyway)."""
     mod = _load(monkeypatch)
     rc = _run(mod, monkeypatch, {
@@ -221,7 +221,7 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
         "tool_input": {"command": (
             "python3 defender/scripts/gather_tools/record_query.py --run-dir /r --lead l-001 "
             "--system elastic --query-id elastic.q -- "
-            "python3 defender/scripts/adapters/elastic_cli.py query 'x'"
+            "python3 defender/scripts/adapters/elastic_adapter.py query 'x'"
         )},
         "cwd": MAIN_CWD,
     })
@@ -229,7 +229,7 @@ def test_record_query_wrapped_adapter_cli_exempt_even_at_repo_root(monkeypatch):
 
 
 # --- adapter clamp via the `defender-*` invocation shims -------------------
-# The bin/ shims hide the scripts/adapters/*_cli.py path behind a bare token, so
+# The bin/ shims hide the scripts/adapters/*_adapter.py path behind a bare token, so
 # the clamp must recognise the adapter shim names too.
 
 def test_denies_main_running_adapter_shim(monkeypatch, capsys):

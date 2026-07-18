@@ -2,14 +2,14 @@
 """Emit on-disk orientation for the defender's initial prompt.
 
 Run from `defender/run.py` (build_prompt) so the agent's message 0
-already carries: run-dir contents, adapter CLI roster, system skills,
+already carries: run-dir contents, adapter roster, system skills,
 and gather query templates. The whole point is to absorb the discovery
 thrash (ls/find/grep across skills and tools) observed in trace runs —
 every call below replaces one or more interactive tool turns.
 
 Stays under ~60 short lines of output. Lists paths and presence, not
 file bodies — bodies are the SKILL's job. Credentials are not surfaced
-here: each adapter CLI sources them itself at call time (gather
+here: each adapter sources them itself at call time (gather
 subagent), so the orchestrator never needs them.
 
 Usage:
@@ -98,12 +98,12 @@ def workspace_map(run_dir: Path) -> str:
         lines.append(f"- {name}{marker}")
     lines.append("")
 
-    # Adapter CLIs
+    # Adapters
     adapters_dir = DEFENDER_DIR / "scripts" / "adapters"
-    lines.append(f"## Adapter CLIs — `{_rel(adapters_dir)}/`")
-    clis = _list_dir(adapters_dir, suffix="_cli.py")
-    if clis:
-        for name in clis:
+    lines.append(f"## Adapters — `{_rel(adapters_dir)}/`")
+    adapters = _list_dir(adapters_dir, suffix="_adapter.py")
+    if adapters:
+        for name in adapters:
             lines.append(f"- {name}  (a VERBS registry dispatched via the query tool; do not Read the source)")
     else:
         lines.append("- (none yet — v2 adapters TBD)")

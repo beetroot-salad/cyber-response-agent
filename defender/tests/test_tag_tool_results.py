@@ -1,6 +1,6 @@
 """Tests for defender/hooks/tag_tool_results.py.
 
-PostToolUse hook: wraps MCP output and annotates adapter-CLI / alert.json
+PostToolUse hook: wraps MCP output and annotates adapter / alert.json
 reads with a salted untrusted-data marker. Always exits 0; emits JSON on
 stdout only when it tags something.
 """
@@ -51,7 +51,7 @@ def test_adapter_cli_bash_is_annotated(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DEFENDER_RUN_DIR", str(tmp_path))
     out = _run(mod, {
         "tool_name": "Bash",
-        "tool_input": {"command": "python3 defender/scripts/adapters/wazuh_cli.py search ..."},
+        "tool_input": {"command": "python3 defender/scripts/adapters/wazuh_adapter.py search ..."},
     }, capsys)
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "[UNTRUSTED-cafe1234]" in ctx

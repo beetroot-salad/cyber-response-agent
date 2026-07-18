@@ -13,6 +13,6 @@
     "defender/tests/test_record_query.py:Path.write_text": "boundary-ok: Path.write_text, fault-injection (one-shot write failure)",
     "defender/tests/test_sql.py:sys.stdin": "boundary-ok: reads sys.stdin.buffer (the real interface)",
     "defender/tests/test_sql.py:tempfile.tempdir": "boundary-ok: stdlib tempfile.tempdir (odd-char temp paths)",
-    "defender/tests/test_ticket_cli.py:transport.http_get": "boundary-ok: stub-adapter docker-exec/HTTP transport (external IO); injectable but low value"
+    "defender/tests/test_ticket_adapter.py:transport.http_get": "boundary-ok: stub-adapter docker-exec/HTTP transport (external IO); injectable but low value"
   }
 }

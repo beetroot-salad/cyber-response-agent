@@ -52,7 +52,7 @@ what manufactures the read PR's fixtures.
   decoupled (the disposition enum is mirrored locally, drift-guarded by a test).
 
 - **Not the gather adapter.** The writer is a driver **post-step**, separate from the
-  read-only `ticket_cli.py` (which is deliberately read-only and lives inside the
+  read-only `ticket_adapter.py` (which is deliberately read-only and lives inside the
   gather gate regime). It uses the low-level transport primitives (`docker_exec_curl`
   + `split_status`), **not** `http_post` — `http_post` `sys.exit`s on error, which is
   right for a CLI adapter but fatal for an in-process post-step.

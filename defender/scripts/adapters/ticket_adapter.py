@@ -20,9 +20,9 @@ in this package still allowed to exit: it maps a raised fault back to the exit c
 subprocess callers contract on.
 
 Usage (the CLI surface):
-    ticket_cli.py health-check
-    ticket_cli.py list-tickets [--status open] [--label brute-force] [--q sshd]
-    ticket_cli.py get-ticket SOC-1042 [--require-closed]
+    ticket_adapter.py health-check
+    ticket_adapter.py list-tickets [--status open] [--label brute-force] [--q sshd]
+    ticket_adapter.py get-ticket SOC-1042 [--require-closed]
 
 Exit codes:
     0 — success
@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py) or the CLI runs it directly.
+# verb registry loads this module BY PATH (see cmdb_adapter.py) or the CLI runs it directly.
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -54,12 +54,10 @@ SYSTEM = "ticket"
 PREFIX = "TICKET"
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
-    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
 
 
 def list_tickets(
@@ -86,7 +84,7 @@ def list_tickets(
         params["label"] = label
     if q:
         params["q"] = q
-    return transport.http_get(ctx, _config(ctx), "/tickets", params=params or None)
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/tickets", params=params or None)
 
 
 def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> dict:
@@ -97,7 +95,7 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     can't reach the in-flight ticket even by key — the refusal is a query error (exit 1),
     the same code the CLI callers already pin.
     """
-    payload = transport.http_get_obj(ctx, _config(ctx), f"/tickets/{key}")
+    payload = transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/tickets/{key}")
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(
             f"{key} is status={payload.get('status')!r}, not 'closed' (--require-closed)"

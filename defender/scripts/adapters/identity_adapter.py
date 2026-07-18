@@ -19,7 +19,7 @@ error (1, carrying the stub's own `detail`).
 from __future__ import annotations
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py).
+# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -33,26 +33,24 @@ SYSTEM = "identity"
 PREFIX = "IDENTITY"
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
-    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
 
 
 def can_access(ctx: VerbContext, *, user: str, host: str) -> dict:
     return transport.http_get_obj(
-        ctx, _config(ctx), f"/users/{user}/can_access", params={"host": host},
+        ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}/can_access", params={"host": host},
     )
 
 
 def get_user(ctx: VerbContext, *, user: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}")
+    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}")
 
 
 def list_authorized_hosts(ctx: VerbContext, *, user: str) -> dict | list:
-    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts")
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}/authorized_hosts")
 
 
 def list_users(
@@ -63,11 +61,13 @@ def list_users(
         params["role"] = role
     if enabled is not None:
         params["enabled"] = "true" if enabled else "false"
-    return transport.http_get(ctx, _config(ctx), "/users", params=params or None)
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/users", params=params or None)
 
 
-def list_roles(ctx: VerbContext) -> dict | list:
-    return transport.http_get(ctx, _config(ctx), "/roles")
+# Same spelling as cmdb's `list_roles`, different service: each resolves its own
+# URL_BASE from its own config, so merging them would be a behavior change.
+def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/roles")
 
 
 VERBS = {

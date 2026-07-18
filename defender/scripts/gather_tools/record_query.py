@@ -46,11 +46,11 @@ from defender._run_paths import RunPaths
 # invlang lead-id grammar (defender/skills/invlang/SKILL.md) — keep in sync.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
-# An adapter `<system>_cli.py` path token → its `<system>`. `\w+` (not
-# `[A-Za-z0-9]+`) so a multi-word filename captures fully — `host_state_cli.py`
-# → `host_state` (normalized to `host-state` below), matching the `\w+_cli` form
-# in block_main_loop_raw_access.ADAPTER_CLI_RE / hooks/_cmd_segments.ADAPTER_CLI_RE.
-_CLI_RE = re.compile(r"(?:^|/)(\w+)_cli\.py$")
+# An adapter `<system>_adapter.py` path token → its `<system>`. `\w+` (not
+# `[A-Za-z0-9]+`) so a multi-word filename captures fully — `host_state_adapter.py`
+# → `host_state` (normalized to `host-state` below), matching the `\w+_adapter` form
+# in hooks/_cmd_segments.ADAPTER_RE.
+_ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
 # Non-adapter `defender-*` shims — never a lead system. Mirrors
 # hooks/_cmd_segments.NON_ADAPTER_SHIMS. `record-query` left with its shim (#611).
 _NON_ADAPTER = frozenset({"invlang"})
@@ -77,7 +77,7 @@ def derive_system(inner: list[str]) -> str | None:
     """Infer the lead ``system`` from the inner adapter invocation, generically.
 
     The inner command (everything after ``--``) is the adapter call: a
-    ``defender-<system>`` shim or a ``<system>_cli.py`` path. Returns the first
+    ``defender-<system>`` shim or a ``<system>_adapter.py`` path. Returns the first
     system name found, or None when none is detectable (the caller then requires
     an explicit ``--system``). Pure — no IO, no per-system table; a newly
     onboarded adapter is covered with no edit here."""
@@ -91,15 +91,15 @@ def derive_system(inner: list[str]) -> str | None:
             name = tok[len("defender-"):]
             if name and name not in _NON_ADAPTER:
                 return name
-        # Raw `<system>_cli.py` path form. The filename uses `_` where the
+        # Raw `<system>_adapter.py` path form. The filename uses `_` where the
         # canonical system name (and the `defender-<system>` shim) uses `-`
-        # (host_state_cli.py → host-state), so normalize to agree with the
+        # (host_state_adapter.py → host-state), so normalize to agree with the
         # shim-derived spelling and the queries-table join key. Skip `VAR=…`
         # assignment values (never an executable path) so a stray
-        # `FOO=/x/elastic_cli.py` doesn't pre-empt the real adapter token.
+        # `FOO=/x/elastic_adapter.py` doesn't pre-empt the real adapter token.
         if "=" in tok:
             continue
-        m = _CLI_RE.search(tok)
+        m = _ADAPTER_RE.search(tok)
         if m:
             name = m.group(1).replace("_", "-")
             if name not in _NON_ADAPTER:

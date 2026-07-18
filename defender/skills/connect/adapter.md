@@ -46,21 +46,21 @@ extend it in place rather than forking a new one.
 
 The reference to copy ships with this skill:
 
-- `examples/example_cli.py` — one complete, environment-agnostic adapter:
+- `examples/example_adapter.py` — one complete, environment-agnostic adapter:
   a `VERBS` mapping, verb functions that take a `VerbContext` and return a
   dict, and a transport that raises `faults`. It is the shape you copy into
-  `defender/scripts/adapters/{system}_cli.py`.
+  `defender/scripts/adapters/{system}_adapter.py`.
 
-The live tree's own `scripts/adapters/<system>_cli.py` modules are the same shape built
+The live tree's own `scripts/adapters/<system>_adapter.py` modules are the same shape built
 on the shared `_stub_transport.py`; read it and the closest sibling before
 you write anything. Then:
 
 1. **Reuse the shared transport module** if one exists (the siblings'
    `_stub_transport.py`, or whatever they import) — import *that*. Only on a
    truly greenfield tree do you write your own transport, modelled on
-   `example_cli.py`'s `_request`. One shared transport per tree, never two.
-2. **Copy the closest example** to `defender/scripts/adapters/{system}_cli.py`
-   — a sibling adapter if one exists, else `examples/example_cli.py` —
+   `example_adapter.py`'s `_request`. One shared transport per tree, never two.
+2. **Copy the closest example** to `defender/scripts/adapters/{system}_adapter.py`
+   — a sibling adapter if one exists, else `examples/example_adapter.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
    API. Keep the contract below intact.
 
@@ -101,7 +101,7 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   so the validator still reads the signature. Declaring it is what lets a template
   put in-body `${…}` substitutions into the query text — a param-only verb requires
   every `${…}` to be a *declared param*, so an undeclared body placeholder makes
-  `validate_scaffold` reject the template. `elastic_cli.py`'s `esql`
+  `validate_scaffold` reject the template. `elastic_adapter.py`'s `esql`
   (`@verb(engine="esql", body_param="query")`) and `query`/`alerts`
   (`@verb(engine="lucene", body_param="native_query")`) are the exemplars;
   `get-host` above is param-only and carries no decoration.
@@ -147,7 +147,7 @@ adapter's shape:
    verb contract**) and let the model write it. The aggregation runs
    in the source, exact; the verb returns the answer, not a payload. This is
    the default for any source rich enough to support it. Exemplar:
-   `elastic_cli.py`'s `esql` verb (`POST /_query` → `{columns, row_count,
+   `elastic_adapter.py`'s `esql` verb (`POST /_query` → `{columns, row_count,
    values}`) — not a Lucene filter that returns documents.
 2. **Filter-only source** — expose the native filter passthrough as a
    `native_query` param and return the rows; the model aggregates them
@@ -200,7 +200,7 @@ stop and remind them it belongs in an env var.
 
 ## Transport
 
-`example_cli.py`'s `_request` does HTTP via `urllib`; the live tree's
+`example_adapter.py`'s `_request` does HTTP via `urllib`; the live tree's
 `_stub_transport.py` shells out to `docker --context … exec … curl`. Swap
 that one layer for whatever your environment needs — direct HTTP, an SSH
 command, an existing CLI you wrap and parse, or a vendor SDK call. The right
@@ -272,9 +272,9 @@ Adapters run under `defender/.venv/bin/python3`; `uv.lock` is committed.
 ## No shim to install
 
 There is no `bin/` shim and no allowlist edit — dropping the
-`{system}_cli.py` module with its `VERBS` mapping under
+`{system}_adapter.py` module with its `VERBS` mapping under
 `scripts/adapters/` **is** the registration. The verb registry
-(`runtime/verbs.py`) discovers every `*_cli.py` in that directory by glob and
+(`runtime/verbs.py`) discovers every `*_adapter.py` in that directory by glob and
 reads its `VERBS` at prompt-build time. A module that exposes no `VERBS`
 mapping is discovered but *unreachable* (its verb set is empty and the tool
 rejects it), not unfiltered — so an incomplete adapter fails closed.
@@ -305,7 +305,7 @@ live system or anything is committed** — not only at the final diff. This is
 generated code that resolves real credentials and will query the maintainer's
 systems, so it gets read before it executes.
 
-Present the generated `{system}_cli.py` to the maintainer and ask them to
+Present the generated `{system}_adapter.py` to the maintainer and ask them to
 review it. Call out anything you're unsure about by name — an auth scheme you
 improvised, a transport quirk, a field or enum you guessed at, any departure
 from the example's shape. Do **not** run the live health-check / sample query
@@ -314,7 +314,7 @@ then re-run the validator and the alignment probe before asking again.
 
 In an **unattended run** with no human to ask, this checkpoint is a hard
 stop, not a skip: do not run the live test or commit. Leave the generated
-`{system}_cli.py` in place and report that it awaits review. ("You test
+`{system}_adapter.py` in place and report that it awaits review. ("You test
 integrations directly" in `SKILL.md` means *you*, in a normal session, run
 the tests after approval — not that an unattended run may self-approve.)
 

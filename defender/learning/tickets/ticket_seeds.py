@@ -9,7 +9,7 @@ empty store) is the deployment model — the sampler returns no seeds and the ac
 grounds off the systems-of-record as before.
 
 Offline only, and non-fatal by construction: it shells out to the read-only
-`ticket_cli.py` adapter (hook-clear off the runtime gate — no `agent_id`) and degrades
+`ticket_adapter.py` adapter (hook-clear off the runtime gate — no `agent_id`) and degrades
 to an empty pool on any failure. All knowledge of ticket fields stays behind
 `case_ticket`'s decoders/accessors — this module only applies the sampling policy
 (filter → window → uniform draw).
@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, UTC
 from defender.learning.core.config import REPO_ROOT, make_logger
 from defender.scripts.case_history import case_ticket
 
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
 _LIST_TIMEOUT_SEC = 15
 
 # The recency window: closed cases older than 24h (decorrelate from the current burst)

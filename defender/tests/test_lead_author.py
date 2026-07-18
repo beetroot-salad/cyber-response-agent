@@ -116,12 +116,12 @@ def catalog(tmp_path: Path) -> Path:
     (cat / "elastic" / "auth-events.md").write_text(
         "---\nid: elastic.auth-events\nstatus: established\n---\n\n"
         "## Goal\nAuthentication events for a host over a window.\n\n"
-        "## Query\n\n```\nelastic_cli.py query --window ${window} ${host_clause}\n```\n"
+        "## Query\n\n```\nelastic_adapter.py query --window ${window} ${host_clause}\n```\n"
     )
     (cat / "host-state" / "process-list.md").write_text(
         "---\nid: host-state.process-list\nstatus: established\n---\n\n"
         "## Goal\nRunning processes matching a pattern.\n\n"
-        "## Query\n\n```\nhost_state_cli.py process-list ${pattern}\n```\n"
+        "## Query\n\n```\nhost_state_adapter.py process-list ${pattern}\n```\n"
     )
     return cat
 

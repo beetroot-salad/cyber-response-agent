@@ -23,7 +23,7 @@ query(system="identity", verb="list-roles",            params={})
 `can-access` requires both `user` and `host`; `list-users`' two params are
 optional filters.
 
-**Do not Read `identity_cli.py` source to discover params.** This file plus the
+**Do not Read `identity_adapter.py` source to discover params.** This file plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 

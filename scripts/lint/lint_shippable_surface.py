@@ -66,7 +66,7 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.
     "defender/docs/",
-    # Per-vendor adapter CLIs live under scripts/adapters/ — by design vendor-named.
+    # Per-vendor adapters live under scripts/adapters/ — by design vendor-named.
     "defender/scripts/adapters/",
 )
 
@@ -95,7 +95,7 @@ FORBIDDEN = [
     re.compile(r"\bstub[-_]cmdb\b", re.IGNORECASE),
     re.compile(r"\bstub[-_]iam\b", re.IGNORECASE),
     re.compile(r"\bstub[-_]ticket\b", re.IGNORECASE),
-    re.compile(r"\bcmdb_cli\b", re.IGNORECASE),
+    re.compile(r"\bcmdb_adapter\b", re.IGNORECASE),
     re.compile(r"\bplayground\b", re.IGNORECASE),
     re.compile(r"\btarget-endpoint\b", re.IGNORECASE),
 ]

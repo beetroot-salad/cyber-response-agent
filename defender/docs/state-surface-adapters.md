@@ -57,17 +57,17 @@ Three reasons this beats tunnels:
 3. **No new auth surface** — `docker --context soc-playground` is already
    configured for elastic_cli's needs.
 
-Pick any role host as the curl bastion (`web-1` is fine). The adapter CLI
+Pick any role host as the curl bastion (`web-1` is fine). The adapter
 shells out to `docker --context soc-playground exec web-1 curl ...` and
 parses the response. The Bash permission allow rule covers it once added.
 
 For the host-state adapter, the same primitive is the entire transport:
 `docker --context soc-playground exec <target_host> <command>`. No HTTP.
 
-## Adapter CLI shape — mirror `elastic_cli.py`
+## Adapter shape — mirror `elastic_adapter.py`
 
-Each adapter is `defender/scripts/adapters/{system}_cli.py`. Conventions
-that need to match `elastic_cli.py`:
+Each adapter is `defender/scripts/adapters/{system}_adapter.py`. Conventions
+that need to match `elastic_adapter.py`:
 
 - A `VERBS` mapping keyed by verb name (plus `health-check`) — one plain
   annotated function per verb, no argparse, invoked through the `query` tool.
@@ -111,7 +111,7 @@ adapter. Each verb takes keyword-only params (shown in parentheses), not
   on miss — never 404. Agent must not treat `unknown` as
   refutation; it's the absence of a signal.
 - **ticket-server**: `list-tickets` (optional `status`, `label`, `q`),
-  `get-ticket` (`key`). v1's `playground_ticket_cli.py` (in
+  `get-ticket` (`key`). v1's `playground_ticket_adapter.py` (in
   `soc-agent/scripts/tools/`) is a reference shape, not a drop-in —
   the v2 ticket-server is the same code but the adapter conventions
   should match v2 elastic_cli, not v1.
@@ -126,9 +126,9 @@ Since #611 a data-source adapter is not on any bash lane. The gather subagent
 calls the in-process typed `query` tool (`runtime/query_tool.py`), which
 dispatches `(system, verb, params)` against the verb registry
 (`runtime/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
-`scripts/adapters/*_cli.py`). That registry IS the allowlist — a system or verb
+`scripts/adapters/*_adapter.py`). That registry IS the allowlist — a system or verb
 not in it is rejected — so a new adapter auto-gates by dropping its
-`{system}_cli.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
+`{system}_adapter.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
 permission entry needed. The main loop is denied data-source access entirely
 (the gather subagent is the data-access layer); the per-agent grant model
 (`runtime/permission/`, #575) gates what remains on the read-only bash lanes.
@@ -170,7 +170,7 @@ These are deployment-specific facts every adapter SKILL should put in
   `hosts/inventory.yaml` at startup. Realm changes via Keycloak admin
   UI do **not** reflect until container restart — flag this in
   `read_guidance`.
-- **ticket-server**: shared with v1's `playground_ticket_cli.py`; the
+- **ticket-server**: shared with v1's `playground_ticket_adapter.py`; the
   endpoint shapes are identical. If/when v2 forks the surface, the
   adapter and SKILL drift point will be here.
 - **host-state**: outputs are point-in-time. Two calls 60s apart can
@@ -192,7 +192,7 @@ pattern on small surfaces first), not a multi-PR split:
    adapter contract on a non-REST source.
 4. **change-mgmt**, **threat-intel** — straightforward once 1–3 are
    stable.
-5. **ticket-server** — last; v1's `playground_ticket_cli.py` already
+5. **ticket-server** — last; v1's `playground_ticket_adapter.py` already
    works but doesn't match v2 conventions. Decide port-vs-rewrite at
    this point in the batch, but it ships with the others, not after.
 

@@ -35,7 +35,7 @@ PROMPT_PATH = HERE / "forward.md"
 
 # Scoped, closed-only read of the cited covering policy for a benign forward-check
 # (issue #338) — same read-only adapter the seed sampler uses.
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_cli.py"
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
 _POLICY_FETCH_TIMEOUT = 15
 _NO_CITED_POLICY = (
     "(no cited covering policy — none was offered, or the store is unreachable)"

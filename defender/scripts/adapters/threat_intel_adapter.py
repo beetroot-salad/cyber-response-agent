@@ -23,7 +23,7 @@ from __future__ import annotations
 import urllib.parse
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py).
+# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -39,18 +39,16 @@ PREFIX = "THREAT_INTEL"
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
-    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
 
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
     # /lookup/{value:path} — the value may contain dots/colons; quote it.
     quoted = urllib.parse.quote(value, safe="")
-    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}")
+    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/lookup/{quoted}")
 
 
 def list_indicators(
@@ -73,7 +71,7 @@ def list_indicators(
         params["type"] = type
     if tag:
         params["tag"] = tag
-    return transport.http_get(ctx, _config(ctx), "/indicators", params=params or None)
+    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/indicators", params=params or None)
 
 
 VERBS = {

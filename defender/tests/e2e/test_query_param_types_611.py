@@ -46,7 +46,7 @@ ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
 
 def clamping(rec: VerbRecorder) -> FakeVerbs:
     """A verb that uses its `int` param the way the REAL one does. `elastic.query` ends in
-    `min(limit, RETURNED_DOC_CAP)` (`elastic_cli._build_search_body`), and `min("20", 20)` raises
+    `min(limit, RETURNED_DOC_CAP)` (`elastic_adapter._build_search_body`), and `min("20", 20)` raises
     `TypeError` — an unmapped fault, which the capture files as exit 2 = infra. The fake carries
     that one line so the whole chain (boundary → verb → fault map → breaker) is exercised for
     real; a fake that merely accepts the string would prove only half the bug."""

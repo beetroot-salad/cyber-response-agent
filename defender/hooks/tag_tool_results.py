@@ -12,9 +12,9 @@ architecture rather than copied verbatim:
 - ``Task``/``Agent`` — annotate gather-subagent dispatches. The gather
   subagent reads raw data-source payloads and returns a *summary* into
   the main loop; that summary is the primary untrusted channel into the
-  main loop (the main loop is blocked from the adapter CLIs / gather_raw
+  main loop (the main loop is blocked from the adapters / gather_raw
   directly), so its return is marked untrusted-derived.
-- ``Bash``         — annotate only adapter-CLI / record_query invocations
+- ``Bash``         — annotate only adapter / record_query invocations
   (the commands that return raw data-source payloads). Plain main-loop
   utilities (``ls``/``jq``/``cat`` over the agent's own artifacts) are
   trusted and left alone.
@@ -34,7 +34,6 @@ Exit codes:
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -43,11 +42,13 @@ from pathlib import Path
 # or run directly as a script.
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
+from defender.hooks._cmd_segments import ADAPTER_RE
 from defender.hooks._run_dir import read_meta_salt
 
 # Commands that return raw data-source payloads (mirrors the markers the
-# block_main_loop_raw_access hook keys on).
-ADAPTER_CLI_RE = re.compile(r"scripts/adapters/\w+_cli\.py\b")
+# block_main_loop_raw_access hook keys on). `ADAPTER_RE` is imported from the
+# shared taxonomy rather than re-declared — this module used to carry a second
+# copy kept in step by comment.
 GATHER_EXEC_MARKER = "record_query.py"
 # A gather-subagent dispatch — the Task/Agent prompt points the subagent at
 # the gather skill, whose return summarizes raw data-source output.
@@ -91,7 +92,7 @@ def context_annotation(tool_name: str, salt: str) -> dict:
 
 def _bash_is_untrusted(tool_input: dict) -> bool:
     cmd = str(tool_input.get("command", ""))
-    return bool(ADAPTER_CLI_RE.search(cmd)) or GATHER_EXEC_MARKER in cmd
+    return bool(ADAPTER_RE.search(cmd)) or GATHER_EXEC_MARKER in cmd
 
 
 def _read_is_untrusted(tool_input: dict) -> bool:
