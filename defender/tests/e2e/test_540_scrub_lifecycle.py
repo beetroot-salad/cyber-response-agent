@@ -528,6 +528,16 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     assert order.index("scrub") < order.index("iterdir")
     assert order.index("run_investigation") < order.index("scrub"), \
         "the scrub must run on a FROZEN tree, after the investigation"
+
+    # The frozen-tree premise this whole family rests on is BOX TEARDOWN, not merely
+    # "the investigation returned". A box torn down after the post-steps satisfies every
+    # other assertion here while the scrub walks a tree a live box is still writing —
+    # the scrub's TOCTOU-free argument would then be false and nothing would say so.
+    assert "stop_box" in order, "the entrypoint never tears the box down"
+    assert order.index("stop_box") < order.index("scrub"), \
+        "the box must be STOPPED before the scrub walks: 'no live writer' is the scrub's " \
+        "whole justification, and a teardown after the scrub makes it a race, not a check"
+
     for later in ("cross_check_tables", "visualize"):
         assert later in order and order.index("scrub") < order.index(later)
 
