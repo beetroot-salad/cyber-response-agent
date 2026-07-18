@@ -130,15 +130,20 @@ def _rel(curator: str) -> str:
 
 def _gate(wt: Path, pol, cmd: str):
     """Drive the REAL bash gate the way production does (``tools._tool_bash`` passes
-    ``deps.run_dir`` + ``deps.defender_dir``).
+    ``deps.run_dir``, ``deps.defender_dir`` AND ``deps.cwd_anchor``).
 
-    Threading ``defender_dir`` is now LOAD-BEARING, not ceremony: since #575 a ``cat`` operand is
-    RESOLVED before it is scope-checked, and a repo-relative operand (the spelling the curator
-    types, cwd=worktree) is rebased on ``defender_dir.parent`` to resolve it. Omit it and the gate
-    would have no cwd to rebase against — it FAILS CLOSED (``bash._in_scope``), so a test that
-    omitted it would be asserting denies for the wrong reason."""
+    Threading the anchor is LOAD-BEARING, not ceremony: since #575 a ``cat`` operand is RESOLVED
+    before it is scope-checked, and a repo-relative operand (the spelling the curator types,
+    cwd=worktree) is rebased on the anchor to resolve it. Omit it and the gate rebases on the
+    default — the RUN DIR since #540 — so every corpus read would deny for the wrong reason.
+
+    The curator is TREE-anchored: it edits a throwaway worktree while its ``run_dir`` is the
+    pending queue, so its anchor is the worktree root. Production sets exactly this at
+    ``CuratorDeps.for_run`` (``cwd_anchor=repo_root``); this helper mirrors it, which is the
+    point of the helper."""
     return permission.decide_bash(
         cmd, policy=pol, run_dir=wt / "runs", defender_dir=wt / "defender",
+        cwd_anchor=wt,
     )
 
 
