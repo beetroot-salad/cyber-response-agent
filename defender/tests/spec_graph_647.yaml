@@ -1,0 +1,1125 @@
+schema_version: 1
+design: "#647 — delete the inert run-dir meta.json; mint the per-run salt in-process"
+base: be8d2c27
+
+# ---------------------------------------------------------------------------
+# DEMANDS — the spec proper.
+# form: test  → a POINTER {id,kind,form,binds,discharged_by}, NO outcome. The
+#               observable-outcome prose lives in the named test's docstring
+#               (step 8 authors it; check_binds scans it there).
+# form: clause | waiver → carries `outcome`.
+# ---------------------------------------------------------------------------
+demands:
+
+  # --- Demand #0: the return contract -------------------------------------
+  - {id: d0_builder_returns_run_dir_and_salt, kind: behavior, form: test,
+     discharged_by: test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane,
+     binds: ["materialize_run_dir", "interacts(materialize_run_dir->run_dir)",
+             "interacts(materialize_run_dir->salt)"]}
+
+  - {id: d1_return_pair_is_promised_on_the_success_lane_only, kind: seam, form: test,
+     discharged_by: test_builder_early_exit_lanes_fire_before_any_salt_is_minted,
+     binds: ["materialize_run_dir", "interacts(materialize_run_dir->salt)"]}
+
+  - {id: d2_run_py_unpacks_both_elements_in_order, kind: behavior, form: test,
+     discharged_by: test_run_py_unpacks_the_pair_and_threads_both_elements_onward,
+     binds: ["run_investigation", "interacts(run_investigation->run_dir)",
+             "interacts(run_investigation->salt)"]}
+
+  # --- The origin pin (C39 — the obligation this change actually creates) ---
+  - {id: d3_salt_origin_reaches_run_investigation, kind: behavior, form: test,
+     discharged_by: test_salt_returned_by_the_builder_is_the_salt_that_reaches_run_investigation,
+     binds: ["interacts(materialize_run_dir->salt)", "interacts(run_investigation->salt)",
+             "drives(run_investigation->orient)"]}
+
+  # --- Coherence: one token per model context ------------------------------
+  - {id: d4_salt_coherence_under_a_real_mint, kind: parity, form: test,
+     discharged_by: test_every_salted_surface_in_one_model_context_carries_the_minted_token,
+     binds: ["salt.access[api]", "salt.access[fs]", "salt.access[bash]",
+             "interacts(orient->wrap)", "interacts(tool_write_file->wrap)",
+             "interacts(query_tool->wrap)", "interacts(gather_dispatch->wrap)"]}
+
+  - {id: d5_gather_inherits_the_parent_token, kind: behavior, form: test,
+     discharged_by: test_gather_subagent_is_bound_with_the_parent_token_not_a_fresh_mint,
+     binds: ["gather_dispatch", "interacts(gather_dispatch->salt)",
+             "drives(run_investigation->gather_dispatch)"]}
+
+  # POSITIVE CONTROL for d7 (the negative). A second live token is legitimate.
+  - {id: d6_curator_leg_mints_its_own_token, kind: domain-outcome, form: test,
+     discharged_by: test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_token,
+     binds: ["salt.domain.alternatives[salt-is-None]", "lesson_read",
+             "interacts(lesson_read->wrap)"]}
+
+  # NEGATIVE — paired positive control: d6_curator_leg_mints_its_own_token.
+  - {id: d7_no_main_lane_surface_takes_an_unshared_token, kind: negative, form: test,
+     discharged_by: test_no_surface_on_the_run_lane_obtains_a_salt_from_a_source_no_other_surface_knows,
+     binds: ["salt.access[api]", "salt.access[fs]", "salt.access[bash]",
+             "salt.domain.alternatives[salt-is-None]", "interacts(run_investigation->salt)"]}
+
+  # NEGATIVE — paired positive control: d6_curator_leg_mints_its_own_token
+  # (it shows the uuid4 fallback channel works at all).
+  - {id: d8_fail_open_fresh_mint_unreachable_from_the_run_lane, kind: negative, form: test,
+     discharged_by: test_fail_open_fresh_mint_is_not_reachable_from_run_py_through_the_driver,
+     binds: ["salt.domain.alternatives[salt-is-None]", "interacts(run_investigation->salt)",
+             "drives(run_investigation->gather_dispatch)"]}
+
+  - {id: d9_empty_salt_is_not_constructible_on_the_run_lane, kind: negative, form: test,
+     discharged_by: test_empty_string_salt_is_not_constructible_once_the_disk_read_is_gone,
+     binds: ["salt.domain.distinguished[]", "interacts(run_investigation->salt)"]}
+
+  # POSITIVE CONTROL for d9: a real 16-hex token flows and renders correctly.
+  - {id: d10_minted_token_shape_is_sixteen_hex, kind: shape, form: test,
+     discharged_by: test_minted_salt_is_sixteen_lowercase_hex_characters,
+     binds: ["salt.domain.distinguished[secrets-token-hex-8]",
+             "interacts(materialize_run_dir->salt)"]}
+
+  # The token's SECURITY property, which d10 does NOT cover: shape, per-run uniqueness and
+  # coherence are all satisfied by `random.Random(run_id).getrandbits(64)`, and the run id is
+  # `{utc_timestamp}-{alert.stem}` — predictable. The mint must be independent of it.
+  - {id: d33_mint_is_independent_of_the_run_id, kind: negative, form: test,
+     discharged_by: test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets,
+     binds: ["salt.domain.distinguished[secrets-token-hex-8]", "salt.identity",
+             "interacts(materialize_run_dir->salt)"]}
+
+  # --- The removed file -----------------------------------------------------
+  # NEGATIVE — paired positive control: d12_investigation_artifacts_survive.
+  - {id: d11_no_meta_json_on_disk_after_a_driven_run, kind: negative, form: test,
+     discharged_by: test_a_driven_run_leaves_no_meta_json_in_the_run_dir,
+     binds: ["meta_json", "run_dir.identity",
+             "interacts(materialize_run_dir->meta_json)"]}
+
+  - {id: d12_investigation_artifacts_survive, kind: survival, form: test,
+     discharged_by: test_run_dir_still_carries_every_investigation_artifact_after_the_removal,
+     binds: ["run_dir", "run_dir.identity", "interacts(materialize_run_dir->run_dir)"]}
+
+  # --- The NEW pin the human minted at step 7 ------------------------------
+  # SCOPE: this pin tracks the listing against the run dir's REAL children and asserts the
+  # removed file is gone. It does NOT bless the listing's contents. Specifically it does not
+  # bless `ground_truth.yaml`, which workspace_map lists into MAIN's message 0 whenever the
+  # fixture carries a sibling one (26 tracked fixtures, incl. every held-out eval case): MAIN
+  # is told the answer key exists, though permission/files.py denies reading it by filename.
+  # PRE-EXISTING and explicitly OUT OF SCOPE for #647 (human decision). Follow-up: decide
+  # whether workspace_map should skip it the way it skips gather_raw.
+  - {id: d13_message_zero_run_dir_listing_is_pinned, kind: shape, form: test,
+     discharged_by: test_message_zero_orientation_lists_exactly_the_materialized_run_dir_children,
+     binds: ["message_zero_orientation.payload", "workspace_map",
+             "interacts(workspace_map->run_dir)",
+             "interacts(orient->message_zero_orientation)"]}
+
+  - {id: d14_replayed_message_zero_listing_shifts_with_the_harness_write, kind: shape, form: test,
+     discharged_by: test_replayed_message_zero_listing_matches_the_production_run_dir_file_set,
+     binds: ["message_zero_orientation.payload", "replay_harness",
+             "interacts(replay_harness->run_dir)"]}
+
+  # SCOPED, explicitly: the parity claim covers fixtures with NO sibling ground_truth.yaml.
+  # materialize_run_dir conditionally copies one (run_common.py:69-71) and the replay harness
+  # has no such branch, so on a ground-truth-carrying fixture the two builders PROVABLY diverge
+  # by exactly that file. That axis is untouched by this change; the demand claims nothing
+  # about it, and the test asserts its own precondition rather than assuming it.
+  - {id: d15_both_builders_present_the_same_run_dir_file_set, kind: parity, form: test,
+     discharged_by: test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set,
+     binds: ["run_dir.identity", "interacts(materialize_run_dir->run_dir)",
+             "interacts(replay_harness->run_dir)"]}
+
+  # --- The relocation -------------------------------------------------------
+  - {id: d16_wrap_lives_in_untrusted_module, kind: seam, form: test,
+     discharged_by: test_wrap_is_importable_from_defender_runtime_untrusted,
+     binds: ["untrusted_module", "wrap"]}
+
+  # RECORDED: byte-identity is asserted for BOTH `untrusted` and `siem-data`, but after this
+  # change `siem-data` has NO LIVE PRODUCER — its sole producer was the deleted hook's
+  # context_annotation (hooks/tag_tool_results.py:75), and its only other repo-wide
+  # occurrences are three assertions in tests/test_tag_tool_results.py, deleted with the
+  # module. The assertion is KEPT because the relocation must not change wrap's behaviour for
+  # any tag it is called with — wrap takes the tag as a free parameter, so this pins the
+  # function's domain, not a live surface. `untrusted` is the only tag any live call site
+  # passes post-change.
+  - {id: d17_wrap_output_is_byte_identical, kind: shape, form: test,
+     discharged_by: test_relocated_wrap_emits_the_same_delimiter_bytes_for_the_same_inputs,
+     binds: ["wrap.payload", "interacts(orient->wrap).payload"]}
+
+  # POSITIVE CONTROL for d19 (the orphan negative): the four importers resolve.
+  - {id: d18_every_importer_of_wrap_resolves_after_the_move, kind: survival, form: test,
+     discharged_by: test_every_importer_of_the_relocated_wrap_resolves_after_the_move,
+     binds: ["untrusted_module", "wrap", "tag_tool_results",
+             "interacts(orient->wrap)", "interacts(tool_write_file->wrap)",
+             "interacts(query_tool->wrap)", "interacts(gather_dispatch->wrap)",
+             "interacts(lesson_read->wrap)"]}
+
+  # NEGATIVE — paired positive control: d18_every_importer_of_wrap_resolves_after_the_move.
+  # Surface-general on purpose (the enumeration failed twice): derived with a tool,
+  # never from a file list.
+  - {id: d19_no_symbol_survives_orphaned_by_the_deletion, kind: negative, form: test,
+     discharged_by: test_no_symbol_survives_whose_only_reachability_was_the_deleted_entrypoint,
+     binds: ["tag_tool_results", "hooks_run_dir", "wrap"]}
+
+  # NEGATIVE — paired positive control: d18_every_importer_of_wrap_resolves_after_the_move
+  # (it shows the import channel resolves at all, so a clean sweep is not vacuous).
+  - {id: d20_import_of_the_deleted_module_fails_at_collection, kind: negative, form: test,
+     discharged_by: test_no_module_in_the_repo_still_imports_the_deleted_hook_module,
+     binds: ["tag_tool_results", "interacts(query_tool->wrap)"]}
+
+  # --- The surviving module and the accessor set ---------------------------
+  - {id: d21_hooks_run_dir_survives_its_deleted_member, kind: survival, form: test,
+     discharged_by: test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal,
+     binds: ["hooks_run_dir", "interacts(budget_enforcer->hooks_run_dir)",
+             "interacts(circuit_breaker->hooks_run_dir)",
+             "interacts(record_lesson_load->hooks_run_dir)"]}
+
+  - {id: d22_run_paths_exposes_five_accessors, kind: shape, form: test,
+     discharged_by: test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed,
+     binds: ["RunPaths", "interacts(run_investigation->RunPaths)"]}
+
+  # NEGATIVE — paired positive control: d22_run_paths_exposes_five_accessors.
+  - {id: d23_no_surviving_reference_to_run_paths_meta, kind: negative, form: test,
+     discharged_by: test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_json,
+     binds: ["RunPaths", "meta_json"]}
+
+  # --- The repo-wide caller obligation (surface-general) -------------------
+  # NEGATIVE — paired positive control: d2_run_py_unpacks_both_elements_in_order.
+  - {id: d24_no_caller_of_the_changed_builder_outside_defender, kind: negative, form: test,
+     discharged_by: test_no_module_outside_the_defender_package_imports_run_common,
+     binds: ["run_common", "materialize_run_dir", "gather_only"]}
+
+  - {id: d25_gather_only_is_gone, kind: survival, form: test,
+     discharged_by: test_the_deleted_manual_gather_harness_leaves_no_dependent_behind,
+     binds: ["gather_only", "drives(gather_only->materialize_run_dir)"]}
+
+  # --- Model-facing prose ---------------------------------------------------
+  # NEGATIVE — paired positive control: d27_skill_delimiter_clause_survives.
+  - {id: d26_no_live_model_facing_prose_names_a_producerless_mechanism, kind: negative, form: test,
+     discharged_by: test_no_live_model_facing_prose_names_a_mechanism_with_no_producer,
+     binds: ["SKILL_md", "prose_sites", "tag_tool_results"]}
+
+  - {id: d27_skill_delimiter_clause_survives, kind: survival, form: test,
+     discharged_by: test_skill_md_run_delimiter_clause_survives_with_its_producer_intact,
+     binds: ["SKILL_md", "wrap", "interacts(orient->wrap)"]}
+
+  # NEGATIVE — paired positive control: d27_skill_delimiter_clause_survives. The same
+  # sweep must still FIND the surviving delimiter clause, or a sweep that matches
+  # nothing would pass vacuously.
+  - {id: d28_prose_site_set_is_derived_with_a_tool, kind: negative, form: test,
+     discharged_by: test_prose_site_sweep_is_derived_from_the_repo_not_from_a_fixed_list,
+     binds: ["prose_sites", "meta_json", "tag_tool_results"]}
+
+  # RECLASSIFIED at repair (human decision, REVERSING the earlier "live prose to fix" call in
+  # the F-D hole): docs/design-v3-init-and-connect.md, docs/handlers-refactor-map.md and
+  # docs/evaluation-and-chaos-design.md describe a PREDECESSOR codebase that no longer exists,
+  # so correcting the one stale line would leave a doc that reads current and is wrong
+  # throughout. They are ARCHIVED under docs/archive/ with a stale banner, following #650's
+  # precedent for security-model.md. This is also what legitimizes the sweep's docs/archive/
+  # exclusion for them.
+  - {id: d34_predecessor_docs_are_archived_not_corrected, kind: survival, form: test,
+     discharged_by: test_the_three_predecessor_codebase_docs_are_archived_rather_than_corrected,
+     binds: ["prose_sites", "meta_json"]}
+
+  # --- The env boundary -----------------------------------------------------
+  - {id: d29_run_dir_env_var_survives_with_its_readers, kind: survival, form: test,
+     discharged_by: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_readers,
+     binds: ["DEFENDER_RUN_DIR", "DEFENDER_RUN_DIR.access[env]",
+             "interacts(run_investigation->DEFENDER_RUN_DIR)",
+             "interacts(ticket_adapter->DEFENDER_RUN_DIR)"]}
+
+  # NEGATIVE — paired positive control: d29_run_dir_env_var_survives_with_its_readers
+  # (the subprocess env channel still carries DEFENDER_RUN_DIR, so an empty salt
+  # result is not just an empty environment).
+  - {id: d30_no_salt_crosses_the_subprocess_boundary, kind: negative, form: test,
+     discharged_by: test_the_subprocess_environment_carries_no_path_to_the_run_salt,
+     binds: ["DEFENDER_RUN_DIR.access[env]", "salt.access[env]"]}
+
+  - {id: d31_run_dir_env_var_unset_member, kind: domain-outcome, form: test,
+     discharged_by: test_resolve_run_dir_returns_none_when_the_env_var_is_unset,
+     binds: ["DEFENDER_RUN_DIR.domain.distinguished[unset]", "hooks_run_dir"]}
+
+  # --- Waivers (human decisions recorded at step 7) ------------------------
+  # --- Author finding, surfaced by check_actors, NOT yet human-resolved ----
+  # clause, deliberately: a clause binding does NOT pre-discharge, so the R5
+  # obligation below stays OPEN. This is the run's single waiver candidate.
+  - {id: d32_frozen_generation_replay_does_not_reach_the_builder, kind: survival, form: clause,
+     outcome: {nl: "The secondary-metric replay driver runs the actor stage inside
+       a worktree pinned to an older generation, which still ships the pre-change
+       run_common and _run_paths; it works on a staging directory the HEAD harness
+       projects rather than on a run dir the changed builder produced, so it never
+       calls the changed builder and no frozen worktree can be broken by the new
+       return contract."},
+     rejected: [{nl: "Pinning a cross-generation compatibility test that drives a
+       frozen worktree's builder against HEAD's caller."}],
+     binds: ["replay_actor", "materialize_run_dir", "run_common",
+             "interacts(replay_actor->run_dir)"]}
+
+  - {id: w1_no_completion_marker_replacement, kind: survival, form: waiver,
+     outcome: {nl: "No on-disk marker replaces the removed meta.json write as a
+       signal that materialization finished; the run dir carries no completion
+       marker and none is owed."},
+     rejected: [{nl: "Minting a sentinel file to preserve the incidental
+       last-unconditional-write property."}],
+     binds: ["meta_json", "run_dir.identity"]}
+
+  - {id: w2_operator_artifact_listing_loses_a_line, kind: survival, form: waiver,
+     outcome: {nl: "The operator-facing end-of-run artifact listing printed by
+       run.py legitimately loses its meta.json line, exactly as MAIN's
+       orientation does, and no test pins that listing."},
+     rejected: [{nl: "Pinning the stderr artifact block as a second run-dir
+       listing surface."}],
+     binds: ["operator_artifact_listing", "run_dir.identity"]}
+
+  - {id: w3_alert_stem_into_the_rendered_run_dir_listing, kind: negative, form: waiver,
+     outcome: {nl: "The alert filename's stem reaches the rendered RUN_DIR heading
+       and the run-dir listing frame with no sanitizer, and this spec does not pin
+       a hostile-stem case; the surface is deferred to issue #648."},
+     rejected: [{nl: "Minting a hostile-stem demand at the orientation render
+       site inside this change."}],
+     binds: ["message_zero_orientation.payload", "alert_stem_source",
+             "interacts(workspace_map->run_dir)"]}
+
+  - {id: w4_committed_experiment_fixtures_untouched, kind: survival, form: waiver,
+     outcome: {nl: "The 22 committed meta.json fixtures under experiments/ keep
+       their contents and their schema; none is read through RunPaths and none is
+       reached by this change."},
+     binds: ["meta_json"]}
+
+  - {id: w5_evals_scenario_builders_untouched, kind: survival, form: waiver,
+     outcome: {nl: "The evals scenario builders copy fixture trees wholesale and
+       call neither run-dir builder, so they need no change and this spec pins
+       nothing about them."},
+     binds: ["harness", "harness_lead", "interacts(harness->run_dir)",
+             "interacts(harness_lead->run_dir)"]}
+
+  - {id: w6_replay_harness_builder_stays_divergent, kind: parity, form: waiver,
+     outcome: {nl: "The replay harness keeps its own builder signature — it takes
+       the token as a parameter and returns a bare path — and convergence with the
+       production builder is not owed; only the resulting file set is pinned."},
+     binds: ["replay_harness", "interacts(replay_harness->run_dir)"]}
+
+# ---------------------------------------------------------------------------
+# STRUCTURE
+# ---------------------------------------------------------------------------
+structure:
+  axes: [run_id, alert_stem, model_context]
+
+  actors:
+    - {id: run_investigation, frame: composition, provenance: code}   # run.py + runtime/driver.py
+    - {id: materialize_run_dir, frame: leg, provenance: design}       # run_common builder (modified)
+    - {id: orient, frame: leg, provenance: code}
+    - {id: workspace_map, frame: leg, provenance: code}
+    - {id: tool_write_file, frame: leg, provenance: code}             # runtime/tools.py
+    - {id: query_tool, frame: leg, provenance: code}
+    - {id: gather_dispatch, frame: leg, provenance: code}             # runtime/tools_gather.py
+    - {id: lesson_read, frame: leg, provenance: code}                 # the FIFTH salted surface
+    - {id: replay_harness, frame: composition, provenance: code}      # tests/e2e/_replay_harness.py
+    - {id: harness, frame: composition, provenance: code}             # evals/harness.py
+    - {id: harness_lead, frame: composition, provenance: code}        # evals/harness_lead.py
+    - {id: loop, frame: composition, provenance: code}                # learning/loop.py
+    - {id: gather_only, frame: composition, provenance: code}         # DELETED by this change
+    - {id: tag_tool_results_main, frame: leg, provenance: code}       # DELETED (never wired)
+    - {id: budget_enforcer, frame: leg, provenance: code}
+    - {id: circuit_breaker, frame: leg, provenance: code}
+    - {id: record_lesson_load, frame: leg, provenance: code}
+    - {id: ticket_adapter, frame: leg, provenance: code}
+    - {id: replay_actor, frame: composition, provenance: code}      # learning/ops/replay_actor.py
+
+  boundaries:
+    - id: run_dir
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "Read off run_common.py:52-55 — the run dir is
+            `resolve_runs_base() / run_id`, and run_id defaults to
+            `{utc_timestamp}-{alert.stem}`; the exists() guard at :56 makes the
+            key exclusive."}
+          derivations:
+            - {value: alert_stem, fn_of: alert_stem, injective: false}
+          sharing: unique-key
+
+    - id: meta_json          # REMOVED
+      provenance: code
+      facets: {}
+
+    - id: salt
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "A per-run trust token. On the run lane it is 16
+            lowercase hex characters from secrets.token_hex(8); on the learning
+            lane it is a 32-hex uuid4."}
+          default: null
+          distinguished: ["", "secrets-token-hex-8"]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: "salt-is-None", crosses_validation: true}
+        identity:
+          key_axes: [model_context]
+          evidence: {nl: "Read off agent_definition.bind and tools.py:194 — one
+            resolved token per bound deps object, and every surface in one model
+            context reads deps.salt; the learning stages bind separately and
+            therefore key a different context."}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            api:  {trust: derived, constraints: [salted-wrap]}
+            fs:   {trust: derived, constraints: [salted-wrap]}
+            bash: {trust: derived, constraints: [salted-wrap]}
+            env:  {trust: derived, constraints: [removed-channel]}
+
+    - id: untrusted_content
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            fs:   {trust: attacker-influenced, constraints: [salted-wrap]}
+            bash: {trust: attacker-influenced, constraints: [salted-wrap]}
+            api:  {trust: attacker-influenced, constraints: [salted-wrap]}
+
+    - id: wrap
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: open_frame,  source: const:RUN_DELIMITER_OPEN,  slots: {salt: salt}}
+            - {role: body,        source: template:WRAPPED_BODY,     slots: {content: untrusted_content}}
+            - {role: close_frame, source: const:RUN_DELIMITER_CLOSE, slots: {salt: salt}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The salted quarantine delimiter around one untrusted payload:
+            an open frame, the raw content, and a matching close frame — the whole
+            thing byte-identical before and after the relocation. DOMAIN
+            CONTRACTION, recorded: the `tag` slot took two values before this
+            change (`untrusted`, `siem-data`); after it, `siem-data` has no live
+            producer at all — its sole producer was the deleted hook's
+            context_annotation — so `untrusted` is the only tag any live call site
+            passes. The tag remains a free parameter of wrap and d17 still pins
+            byte-identity for both, because the relocation must not change the
+            function's behaviour anywhere in its domain."
+
+    - id: untrusted_module   # ADDED — defender/runtime/untrusted.py
+      provenance: design
+      facets: {}
+
+    - id: tag_tool_results   # REMOVED — defender/hooks/tag_tool_results.py
+      provenance: code
+      facets: {}
+
+    - id: hooks_run_dir      # SURVIVES; loses read_meta_salt
+      provenance: code
+      facets: {}
+
+    - id: RunPaths           # loses the .meta accessor
+      provenance: code
+      facets: {}
+
+    - id: run_common
+      provenance: code
+      facets: {}
+
+    - id: gather_only        # REMOVED — scripts/testing/gather_only.py
+      provenance: code
+      facets: {}
+
+    - id: message_zero_orientation
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: raw_alert,   source: template:RAW_ALERT_WRAPPED, slots: {salt: salt}}
+            - {role: workspace,   source: template:WORKSPACE_MAP,     slots: {run_dir: run_dir}}
+            - {role: alert_stem_frame, source: template:RUN_DIR_HEADING, slots: {stem: alert_stem_source}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "MAIN's first model request: the untrusted-wrapped raw alert plus
+            the workspace map, whose Run dir section enumerates the run dir's
+            children (gather_raw excluded). Nothing pins this listing today."
+
+    - id: operator_artifact_listing
+      provenance: code
+      facets: {}
+
+    - id: alert_stem_source
+      provenance: code
+      facets: {}
+
+    - id: SKILL_md
+      provenance: code
+      facets: {}
+
+    - id: prose_sites
+      provenance: design
+      facets: {}
+
+    - id: DEFENDER_RUN_DIR
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "An absolute path to the run dir, exported into the
+            bash tool's subprocess environment; consumers must tolerate it being
+            unset or naming a non-directory."}
+          default: null
+          distinguished: ["unset"]
+          falsy_valid: false
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            env: {trust: operator, constraints: [is-dir-guard]}
+            api: {trust: operator, constraints: [is-dir-guard]}
+
+  interacts:
+    # the builder
+    - {from: materialize_run_dir, to: run_dir,   mode: write,  via: fs,  provenance: design, interpolates: [run_id]}
+    - {from: materialize_run_dir, to: meta_json, mode: remove, via: fs,  provenance: design}
+    - {from: materialize_run_dir, to: salt,      mode: write,  via: api, provenance: design, sends: payload}
+    - {from: materialize_run_dir, to: RunPaths,  mode: read,   via: api, provenance: design}
+
+    # the driver
+    - {from: run_investigation, to: run_dir,   mode: read,  via: api, provenance: design}
+    - {from: run_investigation, to: salt,      mode: read,  via: api, provenance: design}
+    - {from: run_investigation, to: RunPaths,  mode: read,  via: api, provenance: design}
+    - {from: run_investigation, to: run_common, mode: invoke, via: api, provenance: code}
+    - {from: run_investigation, to: DEFENDER_RUN_DIR, mode: write, via: env, provenance: code}
+    - {from: run_investigation, to: operator_artifact_listing, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+
+    # the salted surfaces (the five live wraps)
+    - {from: orient,          to: wrap, mode: invoke, via: api, provenance: code, sends: payload, transport: llm}
+    - {from: tool_write_file, to: wrap, mode: invoke, via: fs,  provenance: code, sends: payload, transport: llm}
+    - {from: query_tool,      to: wrap, mode: invoke, via: bash, provenance: code, sends: payload, transport: llm}
+    - {from: gather_dispatch, to: wrap, mode: invoke, via: api, provenance: code, sends: payload, transport: llm}
+    - {from: lesson_read,     to: wrap, mode: invoke, via: fs,  provenance: code, sends: payload, transport: llm}
+    - {from: gather_dispatch, to: salt, mode: read,   via: api, provenance: code}
+    - {from: lesson_read,     to: salt, mode: read,   via: api, provenance: code}
+    - {from: orient,          to: untrusted_content, mode: read, via: fs, provenance: code}
+    - {from: query_tool,      to: untrusted_content, mode: read, via: bash, provenance: code}
+    - {from: tool_write_file, to: untrusted_content, mode: read, via: fs, provenance: code}
+
+    # message 0
+    - {from: orient,        to: message_zero_orientation, mode: write, via: api, provenance: code, sends: payload}
+    - {from: workspace_map, to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: workspace_map, to: alert_stem_source, mode: read, via: fs, provenance: code}
+
+    # the relocated symbol and the retired module
+    - {from: orient,          to: untrusted_module, mode: read, via: api, provenance: design}
+    - {from: tool_write_file, to: untrusted_module, mode: read, via: api, provenance: design}
+    - {from: query_tool,      to: untrusted_module, mode: read, via: api, provenance: design}
+    - {from: gather_dispatch, to: untrusted_module, mode: read, via: api, provenance: design}
+    - {from: tag_tool_results_main, to: tag_tool_results, mode: remove, via: api, provenance: design}
+    - {from: tag_tool_results_main, to: hooks_run_dir,    mode: remove, via: api, provenance: design}
+
+    # the surviving hooks module's live consumers
+    - {from: budget_enforcer,    to: hooks_run_dir, mode: read, via: api, provenance: code}
+    - {from: circuit_breaker,    to: hooks_run_dir, mode: read, via: api, provenance: code}
+    - {from: record_lesson_load, to: hooks_run_dir, mode: read, via: api, provenance: code}
+    - {from: budget_enforcer,    to: DEFENDER_RUN_DIR, mode: read, via: env, provenance: code}
+    - {from: ticket_adapter,     to: DEFENDER_RUN_DIR, mode: read, via: env, provenance: code}
+
+    # the parallel and scenario builders
+    - {from: replay_harness, to: run_dir,   mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: replay_harness, to: meta_json, mode: remove, via: fs, provenance: design}
+    - {from: harness,        to: run_dir,   mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: harness_lead,   to: run_dir,   mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: loop,           to: run_dir,   mode: read,  via: fs, provenance: code}
+    - {from: replay_actor,   to: run_dir,   mode: read,  via: fs, provenance: code}
+    # DROPPED at repair: `{from: replay_actor, to: run_common, mode: read, via: fs}` was not
+    # backed by any reference — learning/ops/replay_actor.py names neither run_common nor
+    # materialize_run_dir. The edge modelled "the pinned worktree SHIPS the file", which is
+    # not a read and not an interaction. The claim it was standing in for is d32's, and d32
+    # binds the run_common boundary directly.
+
+    # the deleted out-of-package caller
+    - {from: gather_only, to: run_common, mode: invoke, via: api, provenance: code}
+    - {from: gather_only, to: meta_json,  mode: read,   via: fs,  provenance: code}
+
+    # prose
+    - {from: orient, to: SKILL_md,    mode: read, via: fs, provenance: code}
+    - {from: orient, to: prose_sites, mode: read, via: fs, provenance: design}
+
+  drives:
+    - {from: run_investigation, to: orient,             provenance: code, multiplicity: serial}
+    - {from: run_investigation, to: gather_dispatch,    provenance: code, multiplicity: concurrent}
+    - {from: run_investigation, to: query_tool,         provenance: code, multiplicity: serial}
+    - {from: run_investigation, to: tool_write_file,    provenance: code, multiplicity: serial}
+    - {from: run_investigation, to: materialize_run_dir, provenance: design, multiplicity: serial}
+    - {from: orient,            to: workspace_map,      provenance: code, multiplicity: serial}
+    - {from: gather_only,       to: materialize_run_dir, provenance: code, multiplicity: serial}
+    - {from: loop,              to: lesson_read,        provenance: code, multiplicity: serial}
+    - {from: replay_harness,    to: run_investigation,  provenance: code, multiplicity: serial}
+    - {from: harness,           to: loop,               provenance: code, multiplicity: serial}
+    - {from: harness_lead,      to: loop,               provenance: code, multiplicity: serial}
+    - {from: replay_actor,      to: loop,               provenance: code, multiplicity: serial}
+
+# ---------------------------------------------------------------------------
+# CLAIMS — the ledger. C* inherited from the discuss/design doc (verbatim
+# verdicts, with the run's corrections applied); G* raised at grounding;
+# P* the executed probes of steps 2-6.
+# ---------------------------------------------------------------------------
+claims:
+  # --- inherited from the design doc ---------------------------------------
+  - {id: C1, kind: behavior, source: discuss, claim: "meta.json holds exactly {run_id: <run_dir basename>, salt: <16 hex>}, written at run_common.py:59-65", probe: "materialized a run dir; dumped key set, run_id==dirname, salt length", probe_kind: executed, observed: "keys ['run_id','salt']; run_id==dirname True; salt len 16; run dir = [alert.json, gather_raw, meta.json]", verdict: holds}
+  - {id: C4, kind: census, source: discuss, claim: "PRIOR DOC CLAIMED: the only out-of-process reader of the salt is hooks/_run_dir.read_meta_salt", probe: "re-ran the grep from the REPO ROOT on both the RunPaths symbol and the 'meta.json' string literal", probe_kind: search, observed: "REFUTED. THREE readers, not two: run.py:151, hooks/_run_dir.py:68, and scripts/testing/gather_only.py:125. The third was missed because the original sweep ran with cwd inside defender/ and gather_only.py uses a string literal, not RunPaths.meta", verdict: refuted}
+  - {id: C23, kind: census, source: discuss, claim: "PRIOR DOC CLAIMED: nothing else in the repo reads the run dir's meta.json", probe: "repo-root grep for 'meta.json' across all .py, classifying every hit", probe_kind: search, observed: "REFUTED by scripts/testing/gather_only.py:125. All OTHER hits are confirmed unrelated trees: playground-v2/attacks (own run manifests), evals/run_judge_ab.py + test (judge snapshots), experiments/ (own fixture harnesses)", verdict: refuted}
+  - {id: C28, kind: census, source: discuss, claim: "PRIOR DOC CLAIMED: materialize_run_dir has exactly one live caller", probe: "repo-root grep for materialize_run_dir", probe_kind: search, observed: "REFUTED. TWO live callers: defender/run.py:141 and scripts/testing/gather_only.py:124. The experiments/advisory-ab hits are same-named LOCAL functions (replay.py:83, capture.py:57), not calls into run_common — genuinely unrelated", verdict: refuted}
+  - {id: C2, kind: census, source: discuss, claim: "run_id in meta.json is read by nobody", probe: "repo-root grep for readers of the field", probe_kind: search, observed: "no reader anywhere, including gather_only.py which reads only .get('salt'). run_id is derived as run_dir.name at every consumer", verdict: holds}
+  - {id: C3, kind: referential, source: discuss, claim: "every live salt consumer receives the salt as a Python value threaded run.py -> driver.run_investigation -> bind", probe: "read the parameter end to end", probe_kind: read, observed: "orient.py:98, tools.py:376, query_tool.py:403/409, tools_gather.py:337/494 all take it from deps/param; none re-reads disk", verdict: holds}
+  - {id: C5, kind: referential, source: discuss, claim: "read_meta_salt is reachable solely from tag_tool_results.main() via get_salt()", probe: "repo-root grep for every caller of both symbols", probe_kind: search, observed: "read_meta_salt imported only by hooks/tag_tool_results.py:46; get_salt called only at tag_tool_results.py:116, inside main()", verdict: holds}
+  - {id: C6, kind: census, source: discuss, claim: "tag_tool_results.main() is wired into nothing — no PostToolUse entry in any live config", probe: "grep PostToolUse and tag_tool_results across all json/toml/yaml/yml/sh including .claude/", probe_kind: search, observed: "the only wiring is .claude/worktrees/gather-verifiable-code-289/.../run-settings.json:101 — an ARCHIVED WORKTREE. No live config references it. Independently re-verified by the cold reviewer", verdict: holds}
+  - {id: C7, kind: referential, source: discuss, claim: "query_tool.py:394-395 says tag_tool_results lives in a hook whose main() is never called", probe: "read the cited lines", probe_kind: read, observed: "confirmed verbatim; tests/spec_graph_611-query-tool.yaml:558 records the same as a REFUTED observation", verdict: holds}
+  - {id: C8, kind: referential, source: discuss, claim: "run.py:151 reading the salt back is a round-trip within the process that just wrote it", probe: "traced materialize_run_dir's callers and the read site", probe_kind: read, observed: "run.py:141 writes via materialize_run_dir, reads at 151 — same function, no process boundary. No resume path adopts a pre-existing run dir. gather_only.py:124-125 has the identical shape", verdict: holds}
+  - {id: C9, kind: behavior, source: discuss, claim: "coherence is pinned today by test_salt_coherence_545.py:57 and test_bind_sole_seam_551.py:611", probe: "ran both suites plus test_tag_tool_results on the current tree", probe_kind: executed, observed: "58 passed in 0.94s at 9d748d9f; cold reviewer independently reproduced 58 passed in 0.86s", verdict: holds}
+  - {id: C14, kind: behavior, source: discuss, claim: "MAIN holds the salt in cleartext before it can run a single tool", probe: "drove a replayed run and checked message 0 for the literal salt, before any tool call", probe_kind: executed, observed: "salt literal in message 0: True; '<run-deadbeefcafe0000-untrusted>' in message 0: True; message 0 is request 0 of 2, which precedes every tool call by construction", verdict: holds}
+  - {id: C15, kind: referential, source: discuss, claim: "GATHER is bound with deps.salt and therefore knows the salt", probe: "read tools_gather.py:475", probe_kind: read, observed: "bind(GATHER_DEF, deps.run_dir, salt=deps.salt, ...) — inherits, does not mint", verdict: holds}
+  - {id: C16, kind: referential, source: discuss, claim: "the learning stages mint a fresh salt", probe: "read agent_definition.py:20-28", probe_kind: read, observed: "'MAIN/GATHER keep the persisted trust token; the stages mint a fresh one'. NOTE: this docstring is itself a mechanism-8 target — 'persisted' becomes false", verdict: holds}
+  - {id: C18, kind: census, source: discuss, claim: "RunPaths.meta is one accessor with exactly three call sites", probe: "repo-root grep '\\.meta\\b' across all .py", probe_kind: search, observed: "exactly run.py:151, run_common.py:62, hooks/_run_dir.py:68. TRUE BUT MISLEADING — this census is symbol-scoped and structurally cannot see gather_only.py:125's string literal. Retained as a cautionary entry", verdict: holds}
+  - {id: C19, kind: behavior, source: discuss, claim: "the meta.json write in tests/e2e/_replay_harness.py:259 is inert", probe: "commented out line 259 and ran the full e2e suite; restored after", probe_kind: executed, observed: "121 passed in 19.17s with the write removed. Harness restored to a clean git diff. NARROWED at step 7: this measured pass/fail, NOT prompt content — see P1/G18, the replayed message-0 listing shifts too", verdict: holds}
+  - {id: C20, kind: referential, source: discuss, claim: "_write_meta exercises the PRIMARY path (salt read from file, asserting live wraps), not a fallback", probe: "enumerated every test calling it", probe_kind: read, observed: "7 of 8 tests call _write_meta and assert on the file-supplied salt, e.g. <run-deadbeef-siem-data>", verdict: holds}
+  - {id: C21, kind: referential, source: discuss, claim: "the fallback salt path has its own test that writes no meta", probe: "read test_fallback_salt_when_no_run_dir (line 116)", probe_kind: read, observed: "confirmed — the single test not calling _write_meta", verdict: holds}
+  - {id: C22, kind: census, source: discuss, claim: "retiring the disk path removes the main body of test_tag_tool_results.py, not one case", probe: "counted tests depending on _write_meta", probe_kind: search, observed: "7 of 8. Moot under mechanism 5 — the whole file goes", verdict: holds}
+  - {id: C25, kind: referential, source: discuss, claim: "evals/run_judge_ab.py reads a DIFFERENT meta.json — judge A/B snapshots with {direction: ...}", probe: "read the site", probe_kind: read, observed: "run_judge_ab.py:65 reads case_dir/'meta.json'; docstring line 20 documents the {direction} schema. Different root, different schema. Cold reviewer concurred", verdict: holds}
+  - {id: C27, kind: census, source: discuss, claim: "UNDERCOUNTED. main() was said to be the sole caller of SIX orphaned symbols (mcp_wrapped_output, context_annotation, _bash_is_untrusted, _read_is_untrusted, GATHER_EXEC_MARKER, GATHER_DISPATCH_MARKER)", probe: "repo-root grep of every module-level name in tag_tool_results.py, excluding the module and its test", probe_kind: search, observed: "CORRECTED to SEVEN — _subagent_is_untrusted was missed by the original census. Superseded by G14, which re-ran the sweep at the base and re-counted", verdict: refuted}
+  - {id: C29, kind: census, source: discuss, claim: "hooks/_run_dir.py survives — update_json_locked and resolve_run_dir have live consumers", probe: "repo-root grep importers of the module", probe_kind: search, observed: "runtime/circuit_breaker.py:45, hooks/budget_enforcer.py:33 (both), hooks/record_lesson_load.py:34 (resolve_run_dir). Only read_meta_salt is dead", verdict: holds}
+  - {id: C30, kind: census, source: discuss, claim: "wrap() is the only live CODE symbol in tag_tool_results.py — imported by exactly four runtime modules", probe: "grep the import sites", probe_kind: search, observed: "orient.py:39, tools.py:35, query_tool.py:83, tools_gather.py:41 — verified exactly, cold reviewer concurred. Scoped to code: prose references are a separate census (C36/G23)", verdict: holds}
+  - {id: C31, kind: referential, source: discuss, claim: "the issue cites docs/security-model.md as live and defers it to #649, but #650 archived it and #649 is closed", probe: "read commit 9d748d9f; queried #649 state", probe_kind: read, observed: "#650 moved the doc to docs/archive/ with a stale banner (not a content fix); #649 state=CLOSED. The 'stored in meta.json' line survives at docs/archive/security-model.md:70 as marked-stale archived prose. Deliberately NOT touched", verdict: holds}
+  - {id: C33, kind: behavior, source: discuss, claim: "lint_stale_refs is partly load-bearing for CI — it catches SOME of the dangling references", probe: "ran scripts/lint/lint_stale_refs.py against the REAL staged deletion with STALE_REF_BASE=be8d2c27", probe_kind: executed, observed: "REFUTED as a safety net. The executed run surfaces EXACTLY ONE of the seven prose sites: _bash_is_untrusted at runtime/query_tool.py:394. `meta` and `wrap` are dropped as generic identifiers (<8 chars, no underscore); defender/tests/spec_graph_*.yaml is excluded by glob; docs/ and defender/docs/ are excluded directories. CI catches 1 of 7 — the prose demand may not lean on it", verdict: refuted}
+  - {id: C34, kind: referential, source: discuss, claim: "the existing `unwrap` is an unrelated concept, so relocating wrap() splits no pair", probe: "read _cmd_segments.unwrap and its callers", probe_kind: read, observed: "unwrap strips a `bash -c`/timeout command wrapper (permission/bash.py:136). wrap() has NO unwrap counterpart anywhere — the salt delimiter is never programmatically stripped, only described to the model. Cold reviewer independently refuted the collision hypothesis", verdict: holds}
+  - {id: C35, kind: census, source: discuss, claim: "committed meta.json fixtures exist under experiments/ — one with the EXACT run-dir schema — but none is reached by this change", probe: "git ls-files; dumped fixture schemas; grepped experiments/ for salt reads; checked ci.yml gate scope", probe_kind: search, observed: "experiments/actor-basin-276/fixtures/*/meta.json is literally {run_id, salt}. Other families carry a SUPERSET schema. NONE read via RunPaths.meta, NO experiment reads the salt key, and experiments/ is outside the pytest gate. Inert; the spec must NOT delete or rewrite these", verdict: holds}
+  - {id: C36, kind: census, source: discuss, claim: "prose references to the retired module span six files, split between live docs (update) and historical records (do not)", probe: "repo-root grep of CLAUDE.md and docs/ for tag_tool_results and meta.json", probe_kind: search, observed: "UNDERCOUNTED — superseded by G23, which found nine live sites. The live/historical split it recorded stands for the files it did name", verdict: refuted}
+  - {id: C37, kind: census, source: discuss, claim: "scripts/testing/gather_only.py is not exercised by the gate, so a break there ships silently", probe: "checked ci.yml gate scope against the file's path", probe_kind: search, observed: "ci.yml:37 collects `tests/ learning/` under defender/ only; scripts/testing/ is neither collected by pytest nor a test module. MOOT at step 7 — the human resolved the fork by DELETING the file, so the residual risk is deleted with it", verdict: holds}
+  - {id: C38, kind: referential, source: discuss, claim: "context_annotation is the sole producer of the [UNTRUSTED-{salt}] marker that SKILL.md:89 instructs MAIN to honor", probe: "repo-root grep for the marker string across .py and .md", probe_kind: read, observed: "producers: hooks/tag_tool_results.py:85 ONLY. Consumers/assertions: SKILL.md:89 (model-facing prose) and tests/test_tag_tool_results.py:57,76,90 (deleted with the module). Since main() is never called, the marker is ALREADY never emitted at runtime", verdict: holds}
+  - {id: C39, kind: reachability, source: discuss, claim: "the existing coherence pin does NOT cover the origin seam mechanism 1 creates", probe: "break-attempt: searched for any test that drives materialize_run_dir's returned salt into run_investigation, then read test_salt_coherence_545.py end to end for a path that crosses the seam", probe_kind: executed, observed: "test_salt_coherence_545.py injects a hardcoded salt at BOTH ends (lines 41-42 materialize(salt=), line 51 drive(salt=)); it never calls materialize_run_dir and never goes through run.py. No other test crosses the seam — no counterexample found. Confirmed at the base: the file passes standalone (1 passed in 0.97s) while never importing run_common", verdict: unrefuted}
+  - {id: C32, kind: reachability, source: discuss, claim: "no symbol outside the deletion closure becomes unreachable", probe: "break-attempt: grepped every module-level name in tag_tool_results.py for external users from the repo root, and re-ran the sweep at the base", probe_kind: executed, observed: "only wrap survives with external users (C30, G14); ADAPTER_RE is an import, not a definition. No counterexample found in CODE. The closure was NOT complete on first attempt — the prose/marker surfaces (C38/G23) and gather_only.py (C4) both escaped it — so the verdict is unrefuted, never confirmed", verdict: unrefuted}
+
+  # --- grounding claims (step 3 brief, re-probed at be8d2c27) --------------
+  - {id: G1, kind: referential, claim: "the salt threads run.py -> driver.run_investigation(salt=) -> agent_definition.bind, and every live consumer reads deps.salt rather than disk", probe: "read run.py:141-158, driver.py:531, agent_definition.bind, and the five wrap call sites", probe_kind: read, observed: "driver.py:531 `deps = replace(bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir), run_id=run_id)`; consumers at orient.py:98, tools.py:376, query_tool.py:403/409, tools_gather.py:337/494 all read the bound value", verdict: holds}
+  - {id: G2, kind: referential, claim: "there is a FIFTH salted surface the design doc omits: learning/author/lesson_read.py:66 reaches wrap transitively via runtime.tools._bound_and_wrap", probe: "read lesson_read.py:66 and tools._bound_and_wrap (tools.py:355-376)", probe_kind: read, observed: "lesson_read.py:66 `return _bound_and_wrap(deps, p, path, text, read_tool='lesson_read')`; _bound_and_wrap wraps with deps.salt at tools.py:376. The curator legitimately carries a DIFFERENT token because the learning stages bind salt=None", verdict: holds}
+  - {id: G3, kind: referential, claim: "after the change there are exactly two salt origins: secrets.token_hex(8) in the builder and uuid.uuid4().hex in bind's fallback", probe: "read run_common.py:63 and runtime/tools.py:194", probe_kind: read, observed: "tools.py:194 `resolved_salt = salt if salt is not None else uuid.uuid4().hex` — the fallback keys on `is not None`, so salt='' passes through UNRESOLVED", verdict: holds}
+  - {id: G4, kind: referential, claim: "materialize_run_dir has TWO sys.exit lanes BEFORE the salt is minted, so the (Path, str) pair is promised on the success lane only", probe: "read run_common.py:47-73", probe_kind: read, observed: "sys.exit(f'alert not found: {alert}') at :49 and sys.exit(f'run dir already exists: {run_dir}') at :56, both above the token_hex call at :63", verdict: holds}
+  - {id: G5, kind: referential, claim: "materialize_run_dir performs four filesystem side effects; removing the meta.json write leaves it side-effecting", probe: "read run_common.py:57-72", probe_kind: read, observed: "mkdir gather_raw (:57), copy alert.json (:58), write meta.json (:62 — removed), conditional copy of a sibling ground_truth.yaml (:71). Three survive", verdict: holds}
+  - {id: G6, kind: census, claim: "DEFENDER_RUN_DIR is exported into the bash subprocess and survives the change with exactly two live non-test readers", probe: "repo-root grep -rn DEFENDER_RUN_DIR --include=*.py, classifying every hit", probe_kind: search, observed: "writer: run_common.py:99. Live readers: hooks/_run_dir.py:54 (resolve_run_dir) and defender/scripts/adapters/ticket_adapter.py:154. Everything else is a test monkeypatch, a docstring, or the deleted hook module (tag_tool_results.py:24), plus one unrelated experiments/ copy", verdict: holds}
+  - {id: G7, kind: referential, claim: "read_meta_salt ends in a fail-open — a fresh secrets.token_hex(8) when no run dir or no meta is available", probe: "read hooks/_run_dir.py:61-80", probe_kind: read, observed: "the final `return secrets.token_hex(8)` is unconditional on the miss path; a caller taking it would wrap with a token no other surface knew. Deleted, not replaced", verdict: holds}
+  - {id: G8, kind: referential, claim: "the flock'd update_json_locked primitive lives in the SAME module read_meta_salt is removed from", probe: "read hooks/_run_dir.py:26-50", probe_kind: read, observed: "update_json_locked is the fcntl.flock read-modify-write behind per-run budget.json and circuit_breaker.json; it and resolve_run_dir are untouched by the removal", verdict: holds}
+  - {id: G9, kind: census, claim: "wrap(content, tag, salt) returns f'<run-{salt}-{tag}>\\n{content}\\n</run-{salt}-{tag}>' and has NO unwrap counterpart anywhere in the repo", probe: "read the definition at hooks/tag_tool_results.py:62-63; repo-root grep -rn 'unwrap' --include=*.py", probe_kind: search, observed: "definition confirmed byte for byte. The only `unwrap` is _cmd_segments.unwrap, which strips a bash -c command wrapper — an unrelated concept (C34). Tags in use: untrusted, siem-data", verdict: holds}
+  - {id: G10, kind: referential, claim: "tests/e2e/_replay_harness.py carries a PARALLEL run-dir builder that takes the salt as a parameter and returns a bare Path", probe: "read _replay_harness.py:255-269", probe_kind: read, observed: "materialize(tmp_path, golden, *, run_id, salt) -> Path; it mkdirs gather_raw, copies alert.json, writes meta.json at :259, and returns run_dir. It does NOT call materialize_run_dir and keeps working unchanged", verdict: holds}
+  - {id: G11, kind: census, claim: "the deleted scripts/testing/gather_only.py was reachable by no gate instrument in the repo", probe: "checked ci.yml gate scope, the vulture root, and specGraph.codeRoots against the file's path", probe_kind: search, observed: "ci.yml collects `tests/ learning/` under defender/ only; vulture scans `defender`; check_actors' codeRoots are ['defender/runtime','defender/learning','defender/evals','defender/run.py']. None reaches scripts/. Ruff E,F does reach it but sees no tuple-unpack or missing-file bug", verdict: holds}
+  - {id: G12, kind: census, claim: "three independent run-dir builders exist, not one", probe: "repo-root grep for run-dir construction: materialize_run_dir callers, the harness materialize functions, and shutil.copytree in evals/", probe_kind: search, observed: "(1) run_common.materialize_run_dir; (2) tests/e2e/_replay_harness.materialize (salt as a param, bare Path); (3) evals/harness.py:68 + evals/harness_lead.py:57, which build scenario run dirs by bare shutil.copytree of fixture trees (harness_lead.py:77,90,103,195; harness.py:86) and call NEITHER of the other two", verdict: holds}
+  - {id: G13, kind: census, claim: "22 meta.json files are committed to git, ALL under experiments/*/fixtures/, and zero under defender/", probe: "git ls-files | grep 'meta.json$', grouped by fixture family", probe_kind: search, observed: "actor-basin-276: 2; predict-comparison-experiment: 7; predict-rewrite-runs: 1; predict-rewrite: 5; predict_fastpath_ab: 7. Total 22, none under defender/, so no e2e golden is orphaned", verdict: holds}
+  - {id: G14, kind: census, claim: "SEVEN symbols in tag_tool_results.py are orphaned by deleting main() — one more than the design doc's six", probe: "for each module-level name, repo-root grep --include=*.py excluding the module and its own test, counting external hits", probe_kind: search, observed: "get_salt 0, mcp_wrapped_output 0, context_annotation 0, _read_is_untrusted 0, _subagent_is_untrusted 0, GATHER_EXEC_MARKER 0, GATHER_DISPATCH_MARKER 0; _bash_is_untrusted 1 — and that single hit is PROSE (a comment at runtime/query_tool.py:394), not a call. _subagent_is_untrusted is the one C27 missed", verdict: holds}
+  - {id: G15, kind: census, claim: "materialize_run_dir has exactly two callers at the base, and gather_only.py is the second", probe: "repo-root grep -rn materialize_run_dir over *.py, *.md, *.yaml", probe_kind: search, observed: "defender/run.py:141 and scripts/testing/gather_only.py:124. experiments/advisory-ab/plan_only/{replay,capture}.py define same-named LOCAL functions — unrelated. After the human's step-7 deletion of gather_only.py, run.py:141 is the sole caller", verdict: holds}
+  - {id: G16, kind: census, claim: "gather_only.py has zero references repo-wide, so deleting it orphans nothing", probe: "repo-root grep -rl gather_only over every file type", probe_kind: search, observed: "exactly two files match: scripts/testing/gather_only.py itself, and defender/tests/spec_graph_585.yaml — whose hit is the demand id `d5_search_registered_on_gather_only`, about the GATHER agent's toolset, not this file", verdict: holds}
+  - {id: G17, kind: census, claim: "the live prose site set for this change, derived with a repo-root sweep rather than a fixed list, is nine sites across seven files", probe: "repo-root grep -rn 'meta\\.json' --include=*.md and grep -rn 'tag_tool_results' across *.py/*.md/*.yaml/*.json, classifying every hit as live-or-historical", probe_kind: search, observed: "LIVE: defender/SKILL.md:89 (the [UNTRUSTED-{salt}] marker clause only), defender/runtime/agent_definition.py:24 ('persisted'), defender/runtime/tools.py:9, defender/runtime/query_tool.py:394-395, defender/hooks/_cmd_segments.py:86, defender/CLAUDE.md:95 and :140, defender/hooks/_run_dir.py module docstring ('meta.json location'), defender/_run_paths.py class docstring ('the six artifact accessors'), plus the human's three repo-root docs: docs/design-v3-init-and-connect.md:223 and :376, docs/handlers-refactor-map.md:14 and :77, docs/evaluation-and-chaos-design.md:159. HISTORICAL, not touched: defender/docs/runtime-per-loop-compaction-design.md:138, docs/archive/security-model.md:70 and :72, and the whole playground-v2/ + experiments/ trees (different roots, own manifests)", verdict: holds}
+  - {id: G18, kind: referential, claim: "message 0's run-dir listing comes from orient.py:205 -> defender/scripts/workspace_map.py:80, which enumerates run_dir.iterdir() skipping gather_raw", probe: "read orient.py:195-215 and workspace_map.py:77-89", probe_kind: read, observed: "orient inlines '## Workspace\\n' + workspace_map(run_dir) into the sections that become message 0; workspace_map emits a '## Run dir' heading then one '- {child.name}' line per sorted child, continuing past gather_raw. Nothing pins this listing today", verdict: holds}
+  - {id: G19, kind: referential, claim: "run.py prints a SECOND, operator-facing run-dir listing at the end of the run", probe: "read run.py:166-169", probe_kind: read, observed: "`print('[run.py] artifacts:')` then `for entry in sorted(run_dir.iterdir())` to stderr. A second surface that loses its meta.json line; the human's resolution pins only message 0", verdict: holds}
+  - {id: G20, kind: referential, claim: "RunPaths declares six artifact accessors and its class docstring enumerates them by count", probe: "read _run_paths.py:14-52", probe_kind: read, observed: "'the six artifact accessors (alert/report/investigation/executed_queries/gather_raw/meta)'; the accessors are alert, report, investigation, executed_queries, gather_raw, meta. Removing meta makes the count five and the docstring stale", verdict: holds}
+  - {id: G21, kind: referential, claim: "SKILL.md:88-91 carries TWO trust cues in one sentence, only one of which loses its producer", probe: "read defender/SKILL.md:85-95", probe_kind: read, observed: "'Content wrapped in `<run-{salt}-…>` delimiters or prefixed with an `[UNTRUSTED-{salt}]` marker is tagged external data'. The delimiter clause KEEPS its producer (wrap, five live call sites); the marker clause's sole producer is context_annotation, which is deleted. Only the marker clause is excised", verdict: holds}
+  - {id: G22, kind: census, claim: "hooks/_run_dir.py survives with three live consumers of its other two symbols", probe: "repo-root grep for importers of defender.hooks._run_dir", probe_kind: search, observed: "runtime/circuit_breaker.py:45 and hooks/budget_enforcer.py:33 take update_json_locked + resolve_run_dir; hooks/record_lesson_load.py:34 takes resolve_run_dir. Deleting read_meta_salt orphans the module's `secrets` and `RunPaths` imports; `json` stays (update_json_locked uses it)", verdict: holds}
+  - {id: G23, kind: census, claim: "no importer of wrap exists beyond the four runtime modules the design names", probe: "repo-root grep -rn 'tag_tool_results' over *.py/*.md/*.yaml/*.json, separating imports from prose", probe_kind: search, observed: "IMPORTS: runtime/orient.py:39 (unaliased), runtime/tools.py:35, runtime/tools_gather.py:41, runtime/query_tool.py:83 (the latter three as _wrap). Everything else is prose or the module's own test. lesson_read reaches wrap transitively through tools, not by import (G2)", verdict: holds}
+  - {id: G24, kind: referential, claim: "the salt no longer crosses the process boundary after the change, but DEFENDER_RUN_DIR still does", probe: "read run_common.run_env:99-100 against the deleted read_meta_salt path", probe_kind: read, observed: "run_env exports DEFENDER_RUN_DIR and DEFENDER_RUNS_BASE into the bash tool's subprocess env. read_meta_salt was the ONLY mechanism that turned that var into a salt; with it gone the var survives for its two live readers and carries no salt path", verdict: holds}
+
+  # --- probes executed for this gate --------------------------------------
+  - {id: P1, kind: behavior, claim: "the run-dir listing inlined into message 0 gains and loses its '- meta.json' line exactly with the file", probe: "rendered workspace_map(run_dir) over a run dir with and without meta.json and diffed the '## Run dir' section", probe_kind: executed, observed: "WITH: ['## Run dir — `/tmp/.../run`', '- alert.json', '- meta.json', '']; WITHOUT: ['## Run dir — `/tmp/.../run`', '- alert.json', '']. The line vanishes; the '## Run dir' section itself survives. This refutes the design's first obligation as originally written and is why the human narrowed it", verdict: holds}
+  - {id: P2, kind: behavior, claim: "an unreadable alert makes materialize_run_dir propagate PermissionError uncaught rather than taking a sys.exit lane", probe: "drove materialize_run_dir against a chmod-000 alert file", probe_kind: executed, observed: "PermissionError escapes shutil.copy uncaught; the is_file() guard at :49 passes. Pre-existing, unchanged by this change, and dispositioned PRE_EXISTING by all three answerers", verdict: holds}
+  - {id: P3, kind: reachability, claim: "materialize_run_dir does not sanitize run_id, so an absolute run_id discards runs_base entirely", probe: "break-attempt: called materialize_run_dir with an absolute run_id, a '../' run_id, an embedded null byte, and an empty string", probe_kind: executed, observed: "an absolute run_id made `runs_base / run_id` discard the base — the probe created /etc/passwd-run/ on the host and removed it; '../' escapes the base; a null byte raises an uncaught ValueError instead of the clean sys.exit; an empty run_id collapses the run dir onto runs_base. NOT a vulnerability under this threat model (run_id comes from --run-id or the minted {ts}-{alert.stem}, and .stem strips directories), and NOT touched by this change — reported for its own issue", verdict: holds}
+  - {id: P4, kind: primitive, claim: "wrap() with an empty salt emits a degenerate delimiter the model cannot distinguish from a forgeable one", probe: "called wrap('X', 'untrusted', '')", probe_kind: executed, observed: "'<run--untrusted>\\nX\\n</run--untrusted>' — no token at all between the dashes. Reachable today only because bind keys its fallback on `is not None` (G3) and the OLD disk read used .get('salt', '')", verdict: holds}
+  - {id: P5, kind: primitive, claim: "the replay harness's normalize() with an empty salt splices the marker between every character", probe: "called normalize('abc', run_dir=Path('/nope'), salt='', run_id='rid')", probe_kind: executed, observed: "'<SALT>a<SALT>b<SALT>c<SALT>' — str.replace('') matches at every position. The blast radius of an empty salt is not a quiet no-op", verdict: holds}
+  - {id: P6, kind: reachability, claim: "the new return contract eliminates the empty-salt lane on the run path — an accidental strengthening", probe: "break-attempt: traced every way run.py could hand run_investigation an empty salt under the OLD and the NEW contract", probe_kind: executed, observed: "OLD: run.py:151 `json.loads(...).get('salt', '')` returns '' for any meta.json missing the key — constructible. NEW: the value comes straight from secrets.token_hex(8) on the success lane, and the two sys.exit lanes above it return nothing at all (G4). No counterexample found on the run lane; the learning lane's salt=None fallback is a separate, intentional origin", verdict: unrefuted}
+  - {id: P7, kind: behavior, claim: "the e2e suite is green at be8d2c27 in this worktree apart from one environment-only failure", probe: "PYTHONPATH=<worktree> .venv/bin/python -m pytest tests/e2e -m 'not llm and not live' -q -p no:randomly", probe_kind: executed, observed: "1 failed, 120 passed in 24.99s. The failure is test_query_tool_611.py::test_query_return_wrap_positive_control, which shells out to the defender-sql shim: 'duckdb is not installed'. An environment gap in the worktree's interpreter resolution, not a code regression — the in-process _HAS_DUCKDB probe and the subprocess shim disagree", verdict: holds}
+  - {id: P8, kind: primitive, claim: "two independently wrapped strings rendered adjacently cannot be confused for one boundary", probe: "concatenated two wrap() outputs and inspected the seam", probe_kind: executed, observed: "each wrap emits its own trailing newline before the close tag, so the seam is '</run-S-untrusted><run-S-untrusted>' with no ambiguity — the adjacency concern is factually refuted. Dispositioned PRE_EXISTING; no demand owed", verdict: holds}
+  - {id: P9, kind: behavior, claim: "the full gate suite is green at be8d2c27: 2205 passed, 8 skipped", probe: "cd defender && uv run pytest tests/ learning/ -m 'not llm and not live' -q at be8d2c27", probe_kind: executed, observed: "2205 passed, 8 skipped. NOT independently reproduced by this gate run — see handoff.deviations: the full collection terminates with rc=2 and zero output under this session's sandbox. The parts that did run reproduce green: learning/ = 113 passed in 1.78s, tests/e2e = 120 passed + the P7 environment failure, test_salt_coherence_545.py = 1 passed", verdict: holds}
+  - {id: P10, kind: census, claim: "the evals scenario builders are a THIRD run-dir builder family the design doc never mentions", probe: "grep -n copytree over defender/evals/*.py and read the surrounding functions", probe_kind: search, observed: "evals/harness.py:86 and evals/harness_lead.py:77,90,103,195 build their trees by bare shutil.copytree of fixture directories. They call neither materialize_run_dir nor the replay harness's materialize, so they mint no salt and write no meta.json — they are unaffected, but they were invisible to the design's builder census", verdict: holds}
+  - {id: P11, kind: behavior, claim: "the repo's own symbol-reference instrument is structurally blind to the caller this change twice missed", probe: "pyrefly-refs defender/run_common.py:47 materialize_run_dir", probe_kind: executed, observed: "'materialize_run_dir — 2 references in 2 files (resolved): defender/run.py:141, defender/run_common.py:47 [grep floor: 5 files contain the name; pyrefly resolved 2]'. It reports TWO and silently omits scripts/testing/gather_only.py:124, because configDir is `defender`. A confident, wrong, smaller answer — the reason the caller demand is written surface-general", verdict: holds}
+  - {id: P12, kind: reachability, claim: "nothing in the repo consumes meta.json's incidental 'materialization finished' property", probe: "break-attempt: searched for any lock, sentinel, or readiness check gating a run dir, then read learn_drain's inflight rename and loop.py's run-dir entry", probe_kind: executed, observed: "no lock or on-disk marker enforces a finished run dir anywhere. learn_drain's inflight rename guards only marker double-claims, and `loop.py <run_dir>` can already be pointed at a directory still being written. The ordering was a usual-case property, never derived from meta.json. No counterexample found — no replacement marker is owed", verdict: unrefuted}
+  - {id: P13, kind: behavior, claim: "the learning suite is green at be8d2c27 in this worktree", probe: "PYTHONPATH=<worktree> .venv/bin/python -m pytest learning/ -m 'not llm and not live' -q -p no:randomly", probe_kind: executed, observed: "113 passed in 1.78s", verdict: holds}
+
+# ---------------------------------------------------------------------------
+# GATE
+# ---------------------------------------------------------------------------
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}   # dominates — this change is mostly removal
+    - {rule: R6, fired: true}
+
+  obligations:
+    # --- R1 — unread channel -----------------------------------------------
+    - {rule: R1, element: "interacts(orient->wrap).payload",
+       witness: "Five edges send a payload to the wrap boundary and the whole
+         function is relocating to a new module; no executable shape demand
+         pinned the emitted delimiter bytes once test_tag_tool_results.py is
+         deleted with the module.",
+       discharged_by: d17_wrap_output_is_byte_identical}
+    - {rule: R1, element: "interacts(orient->message_zero_orientation)",
+       witness: "orient sends the workspace map into message 0 and the run-dir
+         listing slot varies with the run dir's file set, which this change
+         edits; no shape demand bound that payload before this spec.",
+       discharged_by: d13_message_zero_run_dir_listing_is_pinned}
+
+    # --- R2 — shared sink ---------------------------------------------------
+    - {rule: R2, element: "run_dir.identity",
+       witness: "Three writers reach run_dir — materialize_run_dir, the replay
+         harness's materialize, and the evals copytree builders — and the change
+         edits two of them separately, so their file sets can diverge silently.",
+       discharged_by: d15_both_builders_present_the_same_run_dir_file_set}
+    - {rule: R2, element: "salt.identity",
+       witness: "Two origins now write the salt boundary (secrets.token_hex on
+         the run lane, uuid4 in bind's fallback); key_axes is [model_context],
+         so a surface reading the wrong context's token is a cross-key read.",
+       discharged_by: d4_salt_coherence_under_a_real_mint}
+    - {rule: R2, element: "drives(run_investigation->gather_dispatch)",
+       witness: "GATHER is driven concurrently over one run dir and inherits the
+         parent token by binding deps.salt; a fresh mint here would fail the
+         quarantine open.",
+       discharged_by: d5_gather_inherits_the_parent_token}
+
+    # --- R3 — cross-via parity ---------------------------------------------
+    - {rule: R3, element: "salt.access[api]",
+       witness: "The salted-wrap constraint must hold on every via that reaches
+         untrusted content; the api lane (orient's raw alert, gather's return) is
+         one cell.",
+       discharged_by: d4_salt_coherence_under_a_real_mint}
+    - {rule: R3, element: "salt.access[fs]",
+       witness: "The fs lane (tools.read_file of gather_raw, lesson_read) is the
+         second cell of the salted-wrap constraint.",
+       discharged_by: d4_salt_coherence_under_a_real_mint}
+    - {rule: R3, element: "salt.access[bash]",
+       witness: "The bash lane (query_tool's adapter output) is the third cell;
+         a constraint pinned on one surface and absent on its sibling is the
+         canonical fail-open.",
+       discharged_by: d4_salt_coherence_under_a_real_mint}
+    - {rule: R3, element: "salt.access[env]",
+       witness: "The env via is REMOVED — read_meta_salt was the only mechanism
+         that turned DEFENDER_RUN_DIR into a salt. Nothing must reintroduce a
+         salt path across the subprocess boundary.",
+       discharged_by: d30_no_salt_crosses_the_subprocess_boundary}
+
+    # --- R4 — domain coverage ----------------------------------------------
+    - {rule: R4, element: "salt.domain.distinguished[]",
+       witness: "The empty string is a distinguished member: bind keys its
+         fallback on `is not None`, so '' passes through unresolved and wrap
+         emits <run--untrusted> (P4). The old .get('salt','') read could produce
+         it; the new contract must not.",
+       discharged_by: d9_empty_salt_is_not_constructible_on_the_run_lane}
+    - {rule: R4, element: "salt.domain.distinguished[secrets-token-hex-8]",
+       witness: "The shipped default column — a 16-hex token — must be exercised
+         as the positive control for the empty-salt negative.",
+       discharged_by: d10_minted_token_shape_is_sixteen_hex}
+    - {rule: R4, element: "salt.domain.alternatives[salt-is-None]",
+       witness: "salt=None is a documented alternative that crosses validation:
+         the learning stages rely on it to mint a uuid4, and the run lane must
+         never reach it.",
+       discharged_by: d6_curator_leg_mints_its_own_token}
+    - {rule: R4, element: "DEFENDER_RUN_DIR.domain.distinguished[unset]",
+       witness: "resolve_run_dir survives read_meta_salt's removal and its unset
+         member is the branch the deleted fail-open used to paper over.",
+       discharged_by: d31_run_dir_env_var_unset_member}
+
+    # --- R5 — subtraction and conservation (dominant) ----------------------
+    - {rule: R5, element: "meta_json",
+       witness: "The boundary is removed with live in-edges from run.py's read,
+         hooks/_run_dir's read, gather_only's read, the replay harness's write,
+         and workspace_map's enumeration. Each dependent needs its own survival
+         answer.",
+       discharged_by: d11_no_meta_json_on_disk_after_a_driven_run}
+    - {rule: R5, element: "interacts(run_investigation->run_dir)",
+       witness: "run.py's dependent workflow — obtaining the salt — ran through
+         the removed file; its substitute is the returned tuple.",
+       discharged_by: d3_salt_origin_reaches_run_investigation}
+    - {rule: R5, element: "interacts(workspace_map->run_dir)",
+       witness: "workspace_map's enumeration is a live in-edge on the removed
+         file: message 0's listing legitimately loses a line, and nothing pins
+         that listing today.",
+       discharged_by: d13_message_zero_run_dir_listing_is_pinned}
+    - {rule: R5, element: "interacts(replay_harness->run_dir)",
+       witness: "The harness's meta.json write is a live in-edge; deleting it is
+         NOT a pure deletion, because it shifts the replayed message 0 too.",
+       discharged_by: d14_replayed_message_zero_listing_shifts_with_the_harness_write}
+    - {rule: R5, element: "operator_artifact_listing",
+       witness: "run.py's end-of-run stderr artifact block is a SECOND run-dir
+         listing surface that loses its meta.json line; the resolutions pin only
+         message 0.",
+       discharged_by: w2_operator_artifact_listing_loses_a_line}
+    - {rule: R5, element: "run_dir.identity",
+       witness: "The run dir loses one of four materialized entries; the
+         investigation artifacts a driven run produces must be unchanged.",
+       discharged_by: d12_investigation_artifacts_survive}
+    - {rule: R5, element: "RunPaths",
+       witness: "The .meta accessor is removed from a boundary with live
+         in-edges from run.py, run_common, and hooks/_run_dir; the class
+         docstring's accessor count drops six to five.",
+       discharged_by: d22_run_paths_exposes_five_accessors}
+    - {rule: R5, element: "meta_json",
+       witness: "A symbol-scoped census over RunPaths.meta structurally cannot
+         see a `run_dir / \"meta.json\"` string literal — the exact trap that hid
+         the second caller twice. The sweep must cover both spellings.",
+       discharged_by: d23_no_surviving_reference_to_run_paths_meta}
+    - {rule: R5, element: "tag_tool_results",
+       witness: "The whole module is removed while four runtime modules import
+         its one live symbol; each importer is a dependent whose workflow must
+         complete through the relocated substitute.",
+       discharged_by: d18_every_importer_of_wrap_resolves_after_the_move}
+    - {rule: R5, element: "wrap",
+       witness: "The substitute home is a NEW module; the seam must exist before
+         any importer can be said to survive.",
+       discharged_by: d16_wrap_lives_in_untrusted_module}
+    - {rule: R5, element: "interacts(tag_tool_results_main->tag_tool_results)",
+       witness: "Deleting the never-wired main() orphans seven sibling symbols
+         (G14 corrects the doc's six). No symbol may survive whose only
+         reachability was through it.",
+       discharged_by: d19_no_symbol_survives_orphaned_by_the_deletion}
+    - {rule: R5, element: "tag_tool_results",
+       witness: "A missed importer of the deleted module raises at import time
+         and takes every unrelated test in that module down with it at
+         collection.",
+       discharged_by: d20_import_of_the_deleted_module_fails_at_collection}
+    - {rule: R5, element: "hooks_run_dir",
+       witness: "read_meta_salt is removed from a module with three live
+         consumers of its other two symbols; the flock'd update_json_locked and
+         resolve_run_dir must remain importable and functional.",
+       discharged_by: d21_hooks_run_dir_survives_its_deleted_member}
+    - {rule: R5, element: "gather_only",
+       witness: "The whole actor is deleted. Its in-edges are the only thing
+         that would owe a survival demand, and the census found zero references
+         repo-wide (G16) — so what is owed instead is the stronger property the
+         deletion buys: no caller outside defender/ survives.",
+       discharged_by: d24_no_caller_of_the_changed_builder_outside_defender}
+    - {rule: R5, element: "drives(gather_only->materialize_run_dir)",
+       witness: "The drive edge into the changed builder is removed; nothing may
+         be left behind that still drives the old contract.",
+       discharged_by: d25_gather_only_is_gone}
+    - {rule: R5, element: "run_common",
+       witness: "After the deletion nothing outside defender/ imports
+         run_common — a verifiable property that replaces the repo-wide caller
+         enumeration two prior sweeps got wrong.",
+       discharged_by: d24_no_caller_of_the_changed_builder_outside_defender}
+    - {rule: R5, element: "SKILL_md",
+       witness: "The [UNTRUSTED-{salt}] marker clause loses its sole producer
+         (context_annotation) while the sibling <run-{salt}-…> clause in the same
+         sentence keeps its producer. Only the marker clause is excised.",
+       discharged_by: d26_no_live_model_facing_prose_names_a_producerless_mechanism}
+    - {rule: R5, element: "SKILL_md",
+       witness: "The surviving delimiter clause is the positive control: excising
+         too much would silently drop a live behavioral contract from MAIN's
+         system prompt.",
+       discharged_by: d27_skill_delimiter_clause_survives}
+    - {rule: R5, element: "prose_sites",
+       witness: "Nine live prose sites describe a mechanism that is going away,
+         and CI's stale-ref lint catches exactly one of them (C33, refuted). The
+         site set must be derived with a repo-root sweep, never from a fixed list
+         — every fixed list this change produced was wrong.",
+       discharged_by: d28_prose_site_set_is_derived_with_a_tool}
+    - {rule: R5, element: "prose_sites",
+       witness: "Three of those live sites (docs/design-v3-init-and-connect.md,
+         docs/handlers-refactor-map.md, docs/evaluation-and-chaos-design.md) describe
+         a predecessor codebase in its entirety, not just the removed file. Correcting
+         one line leaves a doc that reads current and is wrong throughout; the human
+         reclassified all three to ARCHIVE, following #650. The archived state is the
+         demand, and it is what makes the sweep's docs/archive/ exclusion honest.",
+       discharged_by: d34_predecessor_docs_are_archived_not_corrected}
+    - {rule: R5, element: "salt.access[env]",
+       witness: "The deleted fail-open (a fresh token when no run dir was
+         resolvable) is a removed facet on a boundary with live in-edges; nothing
+         may reintroduce a silent fresh mint on the run lane.",
+       discharged_by: d8_fail_open_fresh_mint_unreachable_from_the_run_lane}
+    - {rule: R5, element: "DEFENDER_RUN_DIR",
+       witness: "The env var survives the removal of the only mechanism that
+         turned it into a salt; its two live readers must still resolve it across
+         the subprocess boundary.",
+       discharged_by: d29_run_dir_env_var_survives_with_its_readers}
+    - {rule: R5, element: "meta_json",
+       witness: "JUDGMENT EXTENSION (recorded as considered): the delta removes
+         a disclosure surface rather than tightening a constraint, so no caller
+         becomes constructible in a newly-unsafe state — EXCEPT that bind's
+         uuid4 fallback is the same fail-open shape at a different site, which is
+         why d8 is written as a safe-by-construction reachability demand rather
+         than a behavioral one.",
+       discharged_by: d8_fail_open_fresh_mint_unreachable_from_the_run_lane}
+    - {rule: R5, element: "meta_json",
+       witness: "meta.json was the last unconditional write in the builder, so
+         it incidentally marked 'materialization finished'. All three answerers
+         flagged the loss; the probe found no consumer (P12).",
+       discharged_by: w1_no_completion_marker_replacement}
+    - {rule: R5, element: "harness",
+       witness: "The evals scenario builders are a third builder family the
+         design never enumerated; they copytree fixture trees and touch neither
+         changed builder.",
+       discharged_by: w5_evals_scenario_builders_untouched}
+    - {rule: R5, element: "replay_harness",
+       witness: "The parallel builder keeps a divergent signature after the
+         production one changes; convergence is not owed, only the file set.",
+       discharged_by: w6_replay_harness_builder_stays_divergent}
+    - {rule: R5, element: "run_common",
+       witness: "OPEN — a clause binds this, and a clause does not discharge.
+         check_actors (widened config) surfaced learning/ops/replay_actor.py as a
+         re-exec driver the graph did not model: evals/_pipeline.py:111 runs it as
+         a subprocess inside a worktree pinned to an older generation, which still
+         ships the PRE-change run_common and _run_paths. Reading it shows it works
+         on a HEAD-projected staging dir and re-execs learning/pipeline/
+         malicious_actor/run.py (a same-stem module, not defender/run.py), so it
+         does not reach the changed builder — but that is a read, not a probe, and
+         no human has ruled on it. Waiver candidate.",
+       discharged_by: d32_frozen_generation_replay_does_not_reach_the_builder}
+    - {rule: R5, element: "meta_json",
+       witness: "22 committed meta.json fixtures under experiments/ carry the
+         literal {run_id, salt} schema and look in scope; none is reached.",
+       discharged_by: w4_committed_experiment_fixtures_untouched}
+
+    # --- R6 — rendered-sink trust walk -------------------------------------
+    - {rule: R6, element: "wrap.payload",
+       witness: "The delimiter FRAME interpolates the salt on both the open and
+         close tags. Chooser: secrets.token_hex(8) (or uuid4) — not model- or
+         attacker-influenced; sanitizer: the generator's hex alphabet. The one
+         chooser that escapes that is the caller passing '' (P4), which is the
+         frame collapsing, not the value.",
+       discharged_by: d10_minted_token_shape_is_sixteen_hex}
+    - {rule: R6, element: "wrap.payload",
+       witness: "The chooser for the salt slot must be UNPREDICTABLE, not merely
+         per-run. d10 pins the alphabet and d4/d7 pin coherence, but all three are
+         satisfied by a PRNG seeded on the run id — and run_id is
+         `{utc_timestamp}-{alert.stem}`, a value a payload author can influence and
+         an outsider can guess. The frame's whole security property is that the
+         chooser is `secrets`, so it is pinned independently.",
+       discharged_by: d33_mint_is_independent_of_the_run_id}
+    - {rule: R6, element: "message_zero_orientation.payload",
+       witness: "The run-dir listing renders child NAMES into a markdown list
+         and the RUN_DIR heading renders the run dir path. Chooser for both: the
+         alert filename's stem, threaded through run_id into the directory name.
+         Sanitizer column: EMPTY — materialize_run_dir does not sanitize run_id
+         (P3). This is the frame slot, not a payload value.",
+       discharged_by: w3_alert_stem_into_the_rendered_run_dir_listing}
+
+  holes:
+    - {rule: R0, element: "salt.domain.distinguished[]",
+       resolution: "Human: the empty-salt semantics question is settled BY the
+         change rather than decided alongside it. The old disk read's
+         .get('salt','') could yield '', which bind passes through unresolved
+         (G3) and wrap renders as <run--untrusted> (P4); the new contract returns
+         the minted value directly, so the lane disappears. Recorded as an
+         accidental strengthening and pinned as a negative demand, not left as
+         an open semantic question. Rests on P6 (reachability, executed).",
+       resolved_to: d9_empty_salt_is_not_constructible_on_the_run_lane}
+    - {rule: R0, element: "interacts(materialize_run_dir->salt)",
+       resolution: "Human (fork F-A, 3/3 unsettled): the first intent obligation
+         was overreach. 'Removing meta.json must not alter what MAIN or GATHER
+         see' is refuted by execution (P1) — MAIN's orientation legitimately
+         loses one line. The obligation is NARROWED to 'the same salted surfaces
+         and the same investigation artifacts', and a NEW demand pins message
+         0's run-dir listing, which nothing pinned before.",
+       resolved_to: d13_message_zero_run_dir_listing_is_pinned}
+    - {rule: R0, element: "gather_only",
+       resolution: "Human (fork F-B, 3/3 unsettled on verification): the doc's
+         mechanism 7 said 'update gather_only.py'. It is DELETED instead — a
+         manual, live-billed harness no gate instrument reaches (G11), and the
+         direct cause of two of this change's three enumeration failures. Zero
+         references repo-wide (G16). The repo-wide caller obligation is then
+         discharged by a stronger, verifiable property.",
+       resolved_to: d24_no_caller_of_the_changed_builder_outside_defender}
+    - {rule: R0, element: "meta_json",
+       resolution: "Human (fork F-C, 3/3 unsettled): meta.json's incidental
+         'materialization finished' property has no consumer (P12). No
+         replacement marker is owed; recorded as an explicit non-obligation
+         rather than left as an open question.",
+       resolved_to: w1_no_completion_marker_replacement}
+    - {rule: R0, element: "prose_sites",
+       resolution: "Human (fork F-D, 3/3 unsettled): the prose demand may NOT
+         bind a fixed list. Every fixed list this change produced was wrong (six
+         orphans became seven, four prose sites became nine), and the CI lint
+         catches one of seven (C33, refuted). The demand derives its site set
+         with a repo-root sweep. Additionally, docs/design-v3-init-and-connect.md,
+         docs/handlers-refactor-map.md and docs/evaluation-and-chaos-design.md were
+         classified LIVE prose to fix — RECLASSIFIED at repair, see the hole below;
+         runtime-per-loop-compaction-design.md and docs/archive/security-model.md
+         stay untouched as historical record.",
+       resolved_to: d28_prose_site_set_is_derived_with_a_tool}
+
+    - {rule: R5, element: "prose_sites",
+       resolution: "Human decision at repair, REVERSING F-D's classification of the
+         three repo-root docs. design-v3-init-and-connect.md, handlers-refactor-map.md
+         and evaluation-and-chaos-design.md all describe a PREDECESSOR codebase that no
+         longer exists, so correcting the single meta.json line in each would leave a
+         document that reads current and is wrong throughout — the same condition #650
+         resolved for security-model.md by archiving. All three are therefore ARCHIVED:
+         moved under docs/archive/ with a stale banner. The spec DEMANDS the archived
+         state (d34) rather than a prose correction, and the sweep's docs/archive/
+         exclusion covers them legitimately, because they are a record.",
+       resolved_to: d34_predecessor_docs_are_archived_not_corrected}
+
+    - {rule: R0, element: "message_zero_orientation.payload",
+       resolution: "Human: OUT OF SCOPE for #647, recorded rather than fixed.
+         workspace_map lists `ground_truth.yaml` into MAIN's message 0 whenever the
+         fixture carries a sibling one — 26 tracked fixtures, including every held-out
+         eval case. MAIN cannot READ it (permission/files.py denies the filename) but is
+         told it exists. Pre-existing; this change neither creates nor widens it. d13
+         pins the listing against the run dir's real children and carries an explicit
+         scope comment stating it does NOT bless this file's presence. FOLLOW-UP owed:
+         decide whether workspace_map should skip ground_truth.yaml the way it skips
+         gather_raw.",
+       resolved_to: d13_message_zero_run_dir_listing_is_pinned}
+    - {rule: R6, element: "message_zero_orientation.payload",
+       resolution: "Human (consensus OUT_OF_SCOPE): the alert-stem-into-the-frame
+         chooser is real and unsanitized (P3), but it is a pre-existing surface
+         deferred to issue #648, not created by this change. Waived, not tested.",
+       resolved_to: w3_alert_stem_into_the_rendered_run_dir_listing}
+    - {rule: R0, element: "harness",
+       resolution: "Author finding, no human fork needed: the evals scenario
+         builders (P10) are a third run-dir builder family absent from the design
+         doc's census. They call neither changed builder and mint no salt, so the
+         resolution is a recorded waiver rather than a demand — but the omission
+         is logged because a builder census that misses a builder is the shape of
+         this change's other two failures.",
+       resolved_to: w5_evals_scenario_builders_untouched}
+
+    - {rule: R5, element: "replay_actor",
+       resolution: "UNRESOLVED — routed to the human. NEW FINDING of this gate
+         run: check_actors flagged learning/ops/replay_actor.py as an unmodelled
+         re-exec driver, under BOTH the widened and the stock config (its
+         subprocess arm is not gated on the changed set). It is now modelled as an
+         actor, NOT silenced under actor_waivers. The reading behind d32 — that a
+         frozen-generation worktree's pre-change builder is never driven by HEAD's
+         caller — is probe_kind: read, and this change's history is that reads of
+         caller sets were wrong twice. Either accept d32 as a waiver or demand an
+         executed reachability probe over a real gen-{N-K} worktree.",
+       resolved_to: d32_frozen_generation_replay_does_not_reach_the_builder}
+
+  pre_discharged:
+    - {rule: R2, element: "run_dir.identity", by: d15_both_builders_present_the_same_run_dir_file_set,
+       edge: "interacts(materialize_run_dir->run_dir)"}
+       # Key coverage (R2a) is satisfied on this edge already: every writer
+       # interpolates run_id, the full key_axes, and the exists() guard at
+       # run_common.py:56 makes the key exclusive. Cites G12 (census) for the
+       # writer list and C1 (behavior, executed) for the emitted key.
+    - {rule: R3, element: "DEFENDER_RUN_DIR.access[env]", by: d29_run_dir_env_var_survives_with_its_readers,
+       edge: "interacts(ticket_adapter->DEFENDER_RUN_DIR)"}
+       # The is-dir-guard constraint is already enforced identically on both
+       # vias and is untouched by this change. Cites G6 (census) for the reader
+       # list and G24 (referential) for the surviving contract.
+    - {rule: R1, element: "wrap.payload", by: d17_wrap_output_is_byte_identical,
+       edge: "interacts(gather_dispatch->wrap)"}
+       # roles-disjoint-sources and all-slots-bound hold by construction on the
+       # f-string; the demand pins the emitted bytes across the relocation.
+       # Cites G9 (census) for the format and C30 (census) for the importer set.
+
+# ---------------------------------------------------------------------------
+# HANDOFF
+# ---------------------------------------------------------------------------
+handoff:
+  forks:
+    - "F-A (3/3 unsettled) — 'removing meta.json must not alter what MAIN or GATHER see'. RESOLVED: refuted by execution (P1); the obligation is narrowed to the same SALTED SURFACES and the same INVESTIGATION ARTIFACTS. MAIN's orientation legitimately loses its `- meta.json` line. A NEW demand (d13) pins message 0's run-dir listing, which nothing pinned before — and this reclassifies the replay-harness write from a pure deletion to a message-0-shifting one (d14)."
+    - "F-B (consensus on scope, 3/3 unsettled on verification) — how to keep the uncollected second caller honest. RESOLVED: scripts/testing/gather_only.py is DELETED, not updated. Zero references repo-wide (G16); the residual risk C37 named is deleted with the file, and the caller obligation becomes the stronger `nothing outside defender/ imports run_common` (d24)."
+    - "F-C (3/3 unsettled) — the lost completion marker. RESOLVED as an explicit NON-OBLIGATION: nothing consumes the 'materialization finished' property (P12). Recorded as waiver w1."
+    - "F-D (3/3 unsettled) — may the prose demand bind a fixed list? RESOLVED: no. The site set is derived with a repo-root tool sweep (d28); three repo-root docs are classified LIVE, two historical files stay untouched."
+    - "Silent branch (A1 pre-existing / A2+A3 unsettled) — empty-salt semantics. Resolved by the change itself: the new contract eliminates the '' lane on the run lane (P6), pinned as d9 with d10 as its positive control."
+
+  refuted:
+    - "C4 / C23 / C28 — the prior doc's meta.json reader and materialize_run_dir caller censuses. REFUTED: scripts/testing/gather_only.py:124-125 is a second caller and a third reader. Root cause: the sweeps ran with cwd inside defender/, so everything outside the package tree was structurally invisible."
+    - "C27 — UNDERCOUNTED. Six orphaned symbols, not seven: `_subagent_is_untrusted` was missed. Corrected by G14, which re-ran the sweep symbol by symbol at the base."
+    - "C33 — REFUTED as a safety net. Executed against the real deletion, lint_stale_refs surfaces exactly ONE of the seven prose sites (`_bash_is_untrusted` at query_tool.py:394). `meta` and `wrap` are filtered as generic identifiers, spec_graph YAML is glob-excluded, and docs/ is a directory exclusion. The prose demand may not lean on CI."
+    - "C36 — UNDERCOUNTED. Six prose files, not nine; superseded by G17's tool-derived sweep."
+    - "The design's first intent obligation — refuted by P1 and narrowed by the human (see forks)."
+    - "REPAIR PASS — a test docstring of THIS suite asserted a FALSEHOOD. test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane claimed 'the token has no on-disk home — it exists only as the returned value'. REFUTED BY EXECUTION: a driven run writes the salt to run_dir/llm_requests.jsonl via observe.RequestLogger (observe.py:104,149), which streams every model message, and those messages carry `<run-{salt}-untrusted>` verbatim; a probe found the salt in BOTH meta.json and llm_requests.jsonl, and this suite REQUIRES llm_requests.jsonl to exist (d12). CORRECTED IN PROSE, not by weakening any assertion: the true claim is that meta.json's copy had no reader and goes, while the salt's remaining presence in llm_requests.jsonl is pre-existing, out of scope, and not a regression — the change removes one of two on-disk copies. Consistent with the design's own non-obligation ('This is not hardening. The change denies no principal access to the salt.'). The same over-claim was scoped down in test_the_subprocess_environment_carries_no_path_to_the_run_salt, whose no-recoverable-salt arm is now stated as holding AT MATERIALIZATION TIME (which is when the env is built and when the assertion runs)."
+    - "REPAIR PASS — d17's siem-data arm. The tag LOSES ITS ONLY PRODUCER with this change: `git grep siem-data` returns hooks/tag_tool_results.py:75 (deleted) and three assertions in tests/test_tag_tool_results.py (deleted). Nothing produces it post-change. The byte-identity assertion is KEPT — wrap takes the tag as a free parameter and the relocation must not change its behaviour anywhere in its domain — but the docstring, the demand comment and the wrap boundary's payload facet now record the domain contraction, so no future reader infers the tag is in use."
+
+  deferred:
+    - "d13/d14 — whether the production and replayed message-0 listings agree can only be pinned once the builder actually returns the pair; write-code-from-spec re-probes P1 against the implemented tree."
+    - "d19/d28 — the deletion closure and the prose site set are surface-general on purpose. C32 is `unrefuted`, never `holds`: the closure was demonstrably incomplete on the first two attempts. write-code-from-spec must re-derive both with a tool against the real diff, not from any list in this artifact."
+    - "d24 — 'nothing outside defender/ imports run_common' is verifiable only after gather_only.py is actually deleted."
+    - "d32 — whether a frozen-generation worktree's pre-change builder can ever be driven by HEAD's caller can only be settled by an executed probe over a real gen-{N-K} worktree, which the secondary harness materializes at run time. write-code-from-spec inherits it."
+
+  drops:
+    - "test_run_py_end_of_run_artifact_listing — a second run-dir listing surface (G19). No demand minted; recorded as waiver w2 because the human's resolution pins message 0 only. THE CLOSEST CALL IN THIS RUN."
+    - "materialize_run_dir input-shape family (alert as dir/symlink/unreadable, sibling ground_truth present/absent, run_id none/empty/unicode/separators/not-fs-safe, collision-exits-before-mint, retry, TOCTOU) — consensus PRE_EXISTING; the change neither helps nor harms. P2 and P3 record the real behavior found while probing them."
+    - "wrap() format family (empty content, delimiter-shaped content, salt-in-content, tag outside the set, salt with markup, boundary-lookalike, adjacency) — consensus PRE_EXISTING; wrap's signature and output are explicitly unchanged. P8 factually refuted the adjacency concern."
+    - "delimiter-forgery family (guessed salt, partial fragment, mismatched tag, predicted run_id, collision) — consensus PRE_EXISTING; unguessability never depended on where the token was stored."
+    - "test_alert_stem_contains_path_traversal_or_shell_metacharacters — consensus OUT_OF_SCOPE, deferred to #648; surfaces in the gate as R6's second obligation and closes as waiver w3."
+    - "test_salt_is_short_relative_to_attacker_query_budget — entropy-budget sizing, out of scope (widest answerer spread in the run: 3 different readings)."
+    - "test_content_impersonates_the_trust_instruction_prose_itself / test_content_contains_real_closing_delimiter_shape_with_correct_salt — the security dive's asset census scopes the asset to the salt, not prompt-injection robustness generally."
+    - "test_visualize_or_judge_renders_transcript_with_salted_tags_and_no_recoverable_salt_value — no post-hoc consumer of the salt value exists; resolves to no-consequence WITH evidence (C2, G6)."
+    - "test_learning_persist_copy_stage_on_run_dir_without_meta_json / test_ticket_adapter_reads_run_dir_env_var_with_no_paired_meta_json / test_rerun_same_run_id_against_new_code_run_dir — settled by census: no consumer reads meta.json on these paths."
+    - "test_rerun_same_run_id_against_old_code_run_dir — a mixed-version run dir hits the exists() guard at run_common.py:56 and exits before anything reads it; no demand owed."
+    - "test_concurrent_gather_subagents_lock_budget_and_circuit_breaker_json — the flock primitive is untouched (G8); consensus that it needs no new pin here."
+    - "test_orient_lazy_run_common_import_failure_silently_degrades_to_empty_env — pre-existing broad except in orient; unchanged by this diff."
+    - "test_second_salt_origin_fires_when_a_caller_binds_with_salt_none / test_curator_forward_check_mints_fresh_salt — folded into d6 as the positive control rather than dropped."
+    - "test_evals_harness_materializes_scenario_run_dir_without_meta_json — folded into waiver w5 (P10); the builders are unaffected but the omission is logged as a hole."
+    - "test_collateral_collection_failure_across_unrelated_tests_sharing_the_missed_importer — subsumed by d20, which is the same mechanism at the collection boundary."
+    - "REPAIR PASS — DROPPED GRAPH EDGE: `{from: replay_actor, to: run_common, mode: read, via: fs}` (was spec_graph_647.yaml:473). Unbacked: learning/ops/replay_actor.py contains no reference to run_common or materialize_run_dir. The edge modelled 'the pinned worktree SHIPS the file', which is neither a read nor an interaction. Dropped rather than re-worded; the claim it stood in for is d32's, which binds the run_common boundary directly. The replay_actor->run_dir edge and the replay_actor actor both stay."
+    - "REPAIR PASS — NOT DROPPED, deliberately SCOPED: d15's builder parity. materialize_run_dir conditionally copies a sibling ground_truth.yaml (run_common.py:69-71) and _replay_harness.materialize has NO such branch, so the two builders provably diverge on that axis while the test hardcodes `prod_names == {alert.json, gather_raw}` and drives a golden with no ground truth. Rather than let the demand read stronger than it is, the parity claim is now stated as scoped to fixtures WITHOUT a sibling ground truth, in both the demand comment and the docstring, and the test ASSERTS its own precondition (the golden carries no ground_truth.yaml) instead of assuming it. Neither builder's ground-truth handling is edited by #647, so no demand is owed on the other column."
+    - "REPAIR PASS — FOLLOW-UP OWED, not fixed here: workspace_map lists `ground_truth.yaml` into MAIN's message 0 whenever the fixture carries a sibling one (26 tracked fixtures, including every held-out eval case). MAIN cannot READ it — permission/files.py denies the filename — but is told it exists. PRE-EXISTING and explicitly OUT OF SCOPE for #647 (human decision). d13's assertion is UNCHANGED; a scope comment on the message-0 listing test and on the demand records that the pin does NOT bless the file's presence. The open question for the follow-up: should workspace_map skip ground_truth.yaml the way it skips gather_raw?"
+
+  # Step 9's null-stub run. The stub: `runtime/untrusted.wrap` returns "" and
+  # `materialize_run_dir` returns `(runs_base/run_id, "")` creating nothing. It CANNOT
+  # un-delete a file, un-remove an accessor, or un-edit prose, so every demand whose target
+  # is a REMOVAL is unstubbable by construction and passes; those are recorded, not repaired.
+  # Result: 18 failed / 14 passed, and after repair every one of the 18 fails on its OWN
+  # demand-specific assertion (no shared fixture crash, no import error).
+  nullstub_passes:
+    - {test: test_run_py_unpacks_the_pair_and_threads_both_elements_onward,
+       class: "removal-shaped — the caller edit is applied in the stub tree; the stub can only
+         null the builder's BODY, not the call site's unpack"}
+    - {test: test_no_symbol_survives_whose_only_reachability_was_the_deleted_entrypoint,
+       class: "removal-shaped — a null stub cannot restore a deleted module"}
+    - {test: test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed,
+       class: "removal-shaped — the accessor's absence is the implementation"}
+    - {test: test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_json,
+       class: "removal-shaped — a repo sweep over a tree the stub does not change"}
+    - {test: test_no_module_outside_the_defender_package_imports_run_common,
+       class: "removal-shaped — the deletion of the out-of-package caller is the implementation"}
+    - {test: test_the_deleted_manual_gather_harness_leaves_no_dependent_behind,
+       class: "removal-shaped — file absence"}
+    - {test: test_no_live_model_facing_prose_names_a_mechanism_with_no_producer,
+       class: "removal-shaped — a prose edit the stub cannot revert"}
+    - {test: test_prose_site_sweep_is_derived_from_the_repo_not_from_a_fixed_list,
+       class: "removal-shaped — same sweep; its non-vacuity arm is what makes it non-trivial"}
+    - {test: test_wrap_is_importable_from_defender_runtime_untrusted,
+       class: "seam-existence — the demand IS 'the module exists', which the stub satisfies by
+         construction. Discrimination for wrap's behaviour lives in d17, which failed on its
+         own byte-identity assertion"}
+    - {test: test_every_importer_of_the_relocated_wrap_resolves_after_the_move,
+       class: "survival — object identity across importers, true of any wrap incl. the stub;
+         the bytes are pinned by d17"}
+    - {test: test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal,
+       class: "survival — characterization guard over untouched code (green@HEAD by design)"}
+    - {test: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_readers,
+       class: "survival — characterization guard over untouched code (green@HEAD by design)"}
+    - {test: test_resolve_run_dir_returns_none_when_the_env_var_is_unset,
+       class: "domain-outcome — the unset branch of an untouched resolver (green@HEAD)"}
+    - {test: test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_token,
+       class: "positive control — the SECOND, legitimate salt origin on an untouched leg; it is
+         green@HEAD on purpose, which is what makes the run-lane negatives non-vacuous"}
+
+  deviations:
+    - "GATE TOOLING BLIND SPOT, handled: .claude/spec-flow.json's specGraph.codeRoots covers only defender/{runtime,learning,evals} and run.py — excluding run_common.py, _run_paths.py, hooks/ and scripts/, i.e. most of this change. check_actors.py:151-158 calls an outside-codeRoots reach 'an accepted, silent gap'. The actors check was therefore run against a SPEC-RUN-LOCAL widened config at /tmp/.../scratchpad/spec-flow-647-widened.json, adding defender/run_common.py, defender/_run_paths.py, defender/hooks, defender/scripts and the repo-root scripts/ tree. .claude/spec-flow.json itself is NOT edited — widening codeRoots permanently is a repo-wide decision affecting every future spec. No actor_waivers were used to silence a driver."
+    - "check_actors' import arm is structurally inert at write-tests time: it gates on `git diff --name-only <base>...HEAD -- '*.py'`, and a spec branch that has authored only this YAML has an empty changed set. Only the subprocess arm can fire. Re-run it from write-code-from-spec, with the same widened config, once the real diff exists."
+    - "check_binds reports every form:test demand as a dangling pointer, by construction: `discharged_by` names tests step 8 has not authored yet. Expected at step 6; it must come back clean once the suite is committed."
+    - "Formal-slot validation (kinds, forms, modes, vias, invariant vocabularies) is a MANUAL hand check against schema.md — no spec_graph linter exists yet."
+    - "P9's full-suite baseline (2205 passed, 8 skipped at be8d2c27) was NOT independently reproduced in this session: `pytest tests/ learning/` terminates with rc=2 and zero output under this sandbox, and `pytest tests/` alone does the same. The subsets that do run are green — learning/ 113 passed, tests/e2e 120 passed, test_salt_coherence_545 1 passed — apart from the P7 environment failure (test_query_return_wrap_positive_control, duckdb missing from the shim's interpreter, not a code regression). write-code-from-spec must re-establish the full baseline before trusting a red/green signal. UPDATE (step 8): the full collection DOES complete under this session's sandbox — `PYTHONPATH=<worktree> /workspace/defender/.venv/bin/python -m pytest tests/ learning/ -m 'not llm and not live' -q -p no:randomly`, 65s. Worktree baseline WITHOUT this suite: 16 failed / 2189 passed / 8 skipped, the 16 being three pre-existing path-anchoring parametrized tests (test_query_tool_611::test_query_return_wrap_positive_control plus the two test_grant_gate_575 cases). WITH this suite: 45 failed / 2192 passed / 8 skipped — exactly the 16 pre-existing plus 29 new reds, and 3 new greens (the two survival characterizations over untouched code plus the curator positive control)."
+    - "SUITE PLACEMENT: both test modules live in `defender/tests/`, NOT in
+       `defender/tests/e2e/` where the replay-driven siblings (test_salt_coherence_545.py,
+       test_query_tool_611.py) sit. check_binds discovers `discharged_by` docstrings with a
+       NON-recursive `test_dir.glob('*.py')` over the graph's own directory, so an e2e-subdir
+       suite reports every driven demand as a dangling prose orphan (measured: 14 of 32). The
+       artifact rule — suite beside the graph — wins; `pytestmark = pytest.mark.e2e` still
+       routes the driven module with the rest of the replay suite, and it imports the shared
+       harness from `defender.tests.e2e._replay_harness` unchanged."
+    - "d2 (test_run_py_unpacks_the_pair_and_threads_both_elements_onward) is the ONE demand
+       discharged structurally rather than by driving the entry point: it AST-parses the real
+       `defender/run.py` and asserts the unpack targets, the onward kwargs, and the absence of
+       a disk read. `run.py:main` resolves `driver.run_investigation` by module attribute with
+       no make_model seam, so driving it end-to-end would need a live billable model — and the
+       repo bans monkeypatch.setattr. The value read is the real file, not one the test body
+       computed, but write-code-from-spec should know this demand pins SHAPE, not behaviour;
+       the behavioural half of the same seam is d3, which drives the real loop."
+    - "NEW FINDING, step 8: the `persisted` prose census was undercounted. G17 named ONE live
+       site (agent_definition.py:24); the tool-derived sweep finds FIVE — runtime/
+       agent_definition.py:24 and :379, runtime/tools.py:183, and the docstrings of two
+       EXISTING tests, tests/e2e/test_salt_coherence_545.py:4,12 and
+       tests/test_bind_sole_seam_551.py:335. All five become false once nothing persists.
+       Pinned by d28 (the derived prose sweep), not by d26 (which stays strictly
+       model-facing). Same failure mode as the run's other two enumeration misses: a
+       hand-written site list, one tier short."
+    - "The suite was validated against a THROWAWAY full implementation of the change (built,
+       run, and reverted at step 9 — never committed, and `git status` is clean of it): 32/32
+       green, and the sibling suites `tests/e2e` + `learning` came back 247 passed / 1 failed,
+       the single failure being the pre-existing duckdb-shim environment gap (P7). So the
+       spec is known-achievable, not merely known-red."
+    - "C33's executed run of lint_stale_refs against the real deletion is carried from the step-2/3 record, not re-executed in this session — staging the deletion to re-run it would have dirtied the spec worktree."
+    - "REPAIR PASS — ENTROPY WAS UNPINNED. Every test in the suite as first authored passed against an implementation minting `random.Random(run_id).getrandbits(64)`: shape (d10), per-run uniqueness, and coherence (d4/d7) are all satisfied by a seeded PRNG, and run_id is `{utc_timestamp}-{alert.stem}` — influenceable and guessable. Since the token's ONLY security property is unguessability, d33 was added: three builds under the SAME run id (different runs bases) must mint three different tokens, and an AST walk over materialize_run_dir must find a `secrets.*` call and no `random.*`/`hashlib.*` one. Surfaces in the gate as a second R6 obligation on wrap.payload (the frame's chooser)."
+    - "REPAIR PASS — SHALLOW-CLONE HARD ERROR FIXED. module_level_names_at_base ran `git show be8d2c27:<path>` with check=True, so on CI's shallow checkout the orphan census (d19) would raise CalledProcessError — reporting 'the census broke' as if it were 'the closure leaked'. It now runs check=False, attempts a best-effort `git fetch --depth=1 origin <base>`, and pytest.skips with the git stderr if the base object is still unavailable. This makes d19 SKIPPABLE on a shallow checkout; write-code-from-spec must confirm it actually RUNS (not skips) in the gate environment before trusting a green."
+    - "REPAIR PASS — DOCS RECLASSIFIED (human decision, reversing F-D). The three repo-root docs are ARCHIVED, not corrected: docs/design-v3-init-and-connect.md, docs/handlers-refactor-map.md, docs/evaluation-and-chaos-design.md each describe a predecessor codebase that no longer exists, so fixing the one meta.json line each would leave a doc that reads current and is wrong throughout — exactly the condition #650 resolved for security-model.md. New demand d34 asserts each file is ABSENT from docs/ , PRESENT at docs/archive/, and carries a stale banner in its opening block, with #650's own doc as the positive control. The sweep's docs/archive/ exclusion (UNRELATED_TREES) therefore covers them legitimately, and its comment now says so. NOTE FOR write-code-from-spec: the spec diff is tests + spec_graph only — the file moves are IMPLEMENTATION, to be performed by write-code-from-spec, not by this pass."
+    - "REPAIR PASS — RE-VERIFICATION. Null-stub discrimination was re-run for the two NEW tests (d33 entropy, d34 archived docs) and the materially changed ones (d0 return-contract docstring, d13, d15, d17). The stub: `runtime/untrusted.wrap` returns \"\" and `materialize_run_dir` returns `(runs_base/run_id, \"\")` creating nothing. ALL SIX fail against it on their OWN demand-specific assertion — no import error, no shared-fixture crash. d34 does NOT join nullstub_passes: unlike its removal-shaped prose siblings it fails against the stub, because the docs are still at their repo-root paths in the stub tree. Additionally d33 was discriminated against the SPECIFIC wrong implementation it exists to catch — a real builder minting `random.Random(run_id).getrandbits(64)` — which passes d0 and d10 and fails ONLY d33, on its own assertion ('the same run id minted the same token more than once'). Both stubs were reverted (`git checkout defender/run_common.py`, `rm defender/runtime/untrusted.py`); `git status --porcelain` shows exactly the three untracked spec files and no stub or skeleton source."
