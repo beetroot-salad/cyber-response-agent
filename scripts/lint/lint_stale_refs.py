@@ -308,10 +308,18 @@ def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
                 idents.add(m.group(1))
         m = REMOVED_PY_IMPORT.match(line)
         if m:
-            for g in m.groups():
-                if not g:
-                    continue
-                for part in re.split(r"[\s,]+", g):
+            # ONLY the from-import's TARGETS (group 2) are candidate removed identifiers.
+            # The MODULE PATH — group 1 of `from X import Y`, group 3 of `import X` — is
+            # deliberately not collected: dropping an import line is evidence that the
+            # imported NAME may be gone, never that the module is. Collecting the path's
+            # last component made every surviving importer of that module read as a stale
+            # reference, because a module's binding site is a FILE and `_still_defined`
+            # only recognises AST bindings (def/class/assignment/import), so it could
+            # never clear the ident. A genuinely deleted module is covered by the
+            # removed-paths walk in `_scan`, not from here.
+            targets = m.group(2)
+            if targets:
+                for part in re.split(r"[\s,]+", targets):
                     part = part.strip().split(".")[-1]
                     if part and len(part) >= 4:
                         idents.add(part)
