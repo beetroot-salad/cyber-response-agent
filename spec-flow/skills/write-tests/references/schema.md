@@ -180,7 +180,8 @@ Two extractors populate the graph; their outputs meet at the gate.
 - every sibling surface reaching the same resources, with the constraints it enforces (as `constraints_by_via`, trust labeled);
 - the consumers of anything the design removes — found by *reading* prompts and call-sites (a prompt line reading "grep, not index" names a consumer of grep), never by signature grep — naming the sweep that established the list;
 - the real semantics of every external tool driven (`--help`, docs — not priors);
-- every config knob: type, default, distinguished members, documented alternatives — and, per documented alternative, whether the shipped default stays valid under it (`crosses_validation`).
+- every config knob: type, default, distinguished members, documented alternatives — and, per documented alternative, whether the shipped default stays valid under it (`crosses_validation`);
+- every **consequence-bearing fact** on a path the change touches — a side-effecting call on a read/write path, an unbounded sink, a shared trace/sink — flagged with the disposition it expects (the premise/claim it feeds, or an explicit `no-consequence`), so a consequence-shaped fact cannot leave the brief as inert narrative (SKILL.md step 1; the step-9 gate reconciles the flags).
 
 **Demand extraction (structure, `provenance: design`)** materializes the rest: resolving `binds:` addresses pulls the demanded boundaries, facets, and edges into existence. At spec time the delta *is* this demand-implied structure.
 
