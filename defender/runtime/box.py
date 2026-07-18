@@ -368,6 +368,12 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "DEFENDER_RUN_DIR",
     "DEFENDER_RUNS_BASE",
     "PATH",
+    # `defender` is a PEP-420 NAMESPACE package with no __init__.py, so it resolves only when
+    # the mount's PARENT is on sys.path. The entrypoint is reached as `python3 -m
+    # defender.runtime.bash_exec`, and -m resolves against sys.path rather than the cwd, so
+    # this must be set explicitly — relying on the working directory silently yields
+    # `ModuleNotFoundError: No module named 'defender'` as an in-box error nobody can read.
+    "PYTHONPATH",
     "LANG",
     "TZ",
 )
@@ -437,6 +443,7 @@ def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) ->
         "DEFENDER_RUN_DIR": str(run_dir),
         "DEFENDER_RUNS_BASE": str(run_dir.parent),
         "PATH": _BOX_PATH,
+        "PYTHONPATH": str(defender_dir.parent),
         "LANG": "C.UTF-8",
         "TZ": "UTC",
     }
