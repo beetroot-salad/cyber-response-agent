@@ -21,11 +21,15 @@ it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, w
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
-Below the model there are exactly TWO fakeable boundaries, and both are INJECTED
-(never monkeypatched): the model itself (`make_model`) and the data-source verb
-registry (`verbs=` → `run_investigation(verbs=…)`, #611). A scenario hands `drive`
-a `FakeVerbs` table of plain annotated functions; the real query tool validates
-against their real signatures, the real capture capability writes the real rows.
+Below the model there are exactly THREE fakeable boundaries, and all are INJECTED
+(never monkeypatched): the model itself (`make_model`), the data-source verb
+registry (`verbs=` → `run_investigation(verbs=…)`, #611), and the box executor
+(`box=` → `run_investigation(box=…)`, #540). A scenario hands `drive` a `FakeVerbs`
+table of plain annotated functions; the real query tool validates against their real
+signatures, the real capture capability writes the real rows. The `box` seam is the
+same shape one layer lower: the bash tool's execution boundary is a container the
+test process cannot start hermetically, so a scenario hands in a `BoxExecutor` built
+over a fake transport and the REAL framing codec still runs on both sides.
 """
 from __future__ import annotations
 
@@ -268,7 +272,7 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
-def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None):
+def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None, box=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -286,7 +290,15 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
     gather; anything else is the main loop) so the main loop and a nested gather get
     distinct fakes, each returned as a `BuiltModel` (settings=None — a FunctionModel
     needs no provider settings). `override_allow_model_requests(False)` makes any real
-    provider call raise, so the run is provably hermetic."""
+    provider call raise, so the run is provably hermetic.
+
+    `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
+    `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
+    every bash tool call in the replay executes through THAT executor. Omit it and the run
+    builds the production box from `BoxSpec` — which needs a real daemon, so any scenario
+    whose script contains a bash turn must supply one. Passed only when supplied, for the
+    same reason `verbs` is: a bash-free replay should not have to name an executor it never
+    reaches."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -307,9 +319,13 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
             return gather_built
         return main_built
 
-    verb_seam = {} if verbs is None else {"verbs": verbs}
+    seams: dict[str, Any] = {}
+    if verbs is not None:
+        seams["verbs"] = verbs
+    if box is not None:
+        seams["box"] = box
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=DEFENDER, salt=salt, make_model=make_model, **verb_seam,
+            defender_dir=DEFENDER, salt=salt, make_model=make_model, **seams,
         ))

@@ -1,0 +1,706 @@
+schema_version: 1
+design: "issue #540 + defender/tests/intent_540.md (revision 2, 2026-07-18) + fork resolutions recorded in handoff.forks"
+base: 7956aa950a5cd5e5d58a241e89449ba1b6c9ef01
+
+# ============================================================================
+# NOTE ON STATE: this file is the structure + ledger half, written at step 5.
+# The demand list, gate record and handoff are completed after the answerers
+# and the gate run. Do not consume it as final until `gate.evaluated` is
+# populated for R0-R6.
+# ============================================================================
+
+# ============================================================================
+# DEMANDS — the spec proper. `form: test` demands are POINTERS: the
+# observable-outcome prose lives in the named test's docstring, which is what
+# check_binds scans. `clause`/`waiver` carry their own `outcome`.
+# ============================================================================
+demands:
+  # ---- #0 the box executor's contract (human-resolved; see handoff.forks) ----
+  - {id: d0_box_result_contract, kind: behavior, form: test, discharged_by: test_box_returns_boxresult_dataclass_not_a_tuple,
+     binds: ["interacts(BoxExecutor->box_wire).response", box_wire.payload]}
+  - {id: d0_frame_absence_is_the_fault_signal, kind: negative, form: test, discharged_by: test_unframed_stdout_is_never_returned_as_program_output,
+     binds: ["interacts(BoxExecutor->box_wire).response"]}
+  - {id: d0_program_rc_survives_inside_the_frame, kind: behavior, form: test, discharged_by: test_program_rc_127_inside_the_frame_reaches_the_model,
+     binds: ["interacts(BoxExecutor->box_wire).response"]}   # POSITIVE CONTROL for d0_frame_absence
+  - {id: d0_bytes_cross_untranscoded, kind: shape, form: test, discharged_by: test_program_output_bytes_cross_the_frame_untranscoded,
+     binds: [box_wire.payload]}
+  - {id: d0_boxfault_raises_never_returns, kind: behavior, form: test, discharged_by: test_infrastructure_failure_raises_boxfault,
+     binds: ["interacts(BoxExecutor->box_wire).response"]}
+  - {id: d0_malformed_frame_fails_closed, kind: negative, form: test, discharged_by: test_malformed_frame_never_becomes_a_different_command,
+     binds: [box_wire.payload, "interacts(box_entrypoint->box_wire)"]}
+  - {id: d0_no_pickle_on_the_boundary, kind: negative, form: test, discharged_by: test_no_pickle_on_the_box_boundary,
+     binds: [box_wire.payload]}
+
+  # ---- O7 / NO15 — byte-exact or fail ----
+  - {id: d_hostile_argv_crosses_byte_exact, kind: behavior, form: test, discharged_by: test_hostile_argv_crosses_byte_exact,
+     binds: [box_wire.payload, bash_exec_pipeline.domain]}
+  - {id: d_non_utf8_argv_rejected_loudly, kind: negative, form: test, discharged_by: test_non_utf8_argv_rejected_rather_than_transcoded,
+     binds: [box_wire.payload]}
+  - {id: d_embedded_nul_rejected, kind: negative, form: test, discharged_by: test_embedded_nul_argv_rejected,
+     binds: [box_wire.payload]}
+  - {id: d_no_second_parse_in_the_box, kind: negative, form: test, discharged_by: test_box_accepts_no_raw_command_string,
+     binds: ["interacts(box_entrypoint->box_wire)", bash_exec_pipeline.domain]}
+  - {id: d_command_substitution_splits_at_parse, kind: behavior, form: test, discharged_by: test_command_substitution_splits_into_four_tokens_at_the_host_parse,
+     binds: [bash_exec_pipeline.domain]}   # R-B13: NOT preserved as one literal token, unlike quotes/backticks/globs
+
+  # ---- O1 / O5 / O6 — the filesystem boundary ----
+  - {id: d_outside_paths_absent_not_denied, kind: negative, form: test, discharged_by: test_host_path_outside_the_binds_is_absent,
+     binds: ["run_dir.access[box-write]", "defender_dir.access[box-read]"]}
+  - {id: d_binds_are_readable, kind: behavior, form: test, discharged_by: test_run_dir_and_defender_dir_are_readable_in_box,
+     binds: ["defender_dir.access[box-read]"]}   # POSITIVE CONTROL
+  - {id: d_defender_dir_write_is_erofs, kind: negative, form: test, discharged_by: test_write_under_defender_dir_fails_erofs_by_errno,
+     binds: ["defender_dir.access[box-write]"]}
+  - {id: d_defender_dir_import_succeeds, kind: behavior, form: test, discharged_by: test_defender_dir_imports_from_the_ro_bind,
+     binds: ["defender_dir.access[box-read]"]}   # POSITIVE CONTROL for d_defender_dir_write_is_erofs
+  - {id: d_write_set_is_one_directory, kind: negative, form: test, discharged_by: test_another_runs_run_dir_is_absent,
+     binds: [run_dir.identity, "run_dir.access[box-write]"]}
+  - {id: d_run_dir_write_reaches_the_host, kind: behavior, form: test, discharged_by: test_bytes_written_in_box_appear_on_the_host,
+     binds: ["run_dir.access[box-write]"]}       # POSITIVE CONTROL
+  - {id: d_dotdot_cannot_escape_run_dir, kind: negative, form: test, discharged_by: test_dotdot_operand_cannot_name_a_sibling_run,
+     binds: [cwd_anchor.identity, "run_dir.access[box-write]"]}
+
+  # ---- O2 — the network boundary ----
+  - {id: d_no_outbound_tcp, kind: negative, form: test, discharged_by: test_no_outbound_tcp_connect_succeeds,
+     binds: ["box_network.access[box-connect]"]}
+  - {id: d_no_outbound_ipv6, kind: negative, form: test, discharged_by: test_no_outbound_ipv6_connect_succeeds,
+     binds: ["box_network.access[box-connect]"]}
+  - {id: d_no_outbound_udp, kind: negative, form: test, discharged_by: test_no_udp_sendto_reaches_a_destination,
+     binds: ["box_network.access[box-connect]"]}
+  - {id: d_dns_fails_by_gaierror, kind: negative, form: test, discharged_by: test_dns_resolution_fails_from_inside_the_box,
+     binds: ["box_network.access[box-connect]"]}
+  - {id: d_egress_control_proves_the_channel, kind: behavior, form: test, discharged_by: test_the_same_egress_attempt_succeeds_outside_the_box,
+     binds: ["box_network.access[box-connect]"]}   # POSITIVE CONTROL — without it every negative above passes vacuously
+  - {id: d_egress_fault_asserted_by_errno, kind: behavior, form: test, discharged_by: test_egress_failure_is_a_bare_oserror_asserted_by_errno,
+     binds: ["box_network.access[box-connect]"]}
+  - {id: d_no_socket_mounted_inward, kind: negative, form: test, discharged_by: test_no_unix_socket_is_mounted_into_the_box,
+     binds: [box_network]}
+
+  # ---- O3 — secrets ----
+  - {id: d_no_host_secret_in_box_env, kind: negative, form: test, discharged_by: test_no_host_secret_is_present_in_the_box_env,
+     binds: ["box_env.access[box-read]", box_env.domain]}
+  - {id: d_box_env_is_a_positive_allowlist, kind: shape, form: test, discharged_by: test_box_env_contains_exactly_the_allowlist,
+     binds: [box_env.domain]}   # POSITIVE CONTROL for d_no_host_secret_in_box_env
+  - {id: d_host_side_key_strip_unchanged, kind: survival, form: test, discharged_by: test_run_env_provider_key_strip_still_governs_host_subprocesses,
+     binds: [run_env]}
+
+  # ---- O4 — the boundary is structural, not the matcher ----
+  - {id: d_boundary_holds_with_the_gate_disabled, kind: domain-outcome, form: test, discharged_by: test_boundary_holds_with_decide_bash_approving_everything,
+     binds: ["bash_gate.access[bash]", "run_dir.access[box-write]", "box_network.access[box-connect]", "box_env.access[box-read]"]}
+  - {id: d_never_falls_back_in_process, kind: negative, form: test, discharged_by: test_no_box_failure_path_executes_in_process,
+     binds: [BoxExecutor, "drives(_tool_bash->BoxExecutor)"]}
+  - {id: d_allow_unsandboxed_is_the_only_opt_out, kind: behavior, form: test, discharged_by: test_allow_unsandboxed_is_the_sole_loud_opt_out,
+     binds: [BoxSpec.domain]}   # POSITIVE CONTROL for d_never_falls_back_in_process
+
+  # ---- O8 / O9 — the reap-time scrub ----
+  - {id: d_scrub_raises_on_symlink, kind: behavior, form: test, discharged_by: test_scrub_raises_on_a_planted_symlink,
+     binds: ["interacts(scrub->run_dir)"]}
+  - {id: d_scrub_catches_symlink_to_directory, kind: behavior, form: test, discharged_by: test_scrub_catches_a_symlink_to_a_directory,
+     binds: ["interacts(scrub->run_dir)"]}   # C53: lands under `dirs`, so (*dirs,*files) is load-bearing
+  - {id: d_scrub_raises_on_within_bind_hardlink, kind: behavior, form: test, discharged_by: test_scrub_raises_on_a_within_bind_hardlink,
+     binds: ["interacts(scrub->run_dir)"]}
+  - {id: d_scrub_s_isreg_guard_required, kind: negative, form: test, discharged_by: test_scrub_does_not_flag_a_directory_by_nlink,
+     binds: ["interacts(scrub->run_dir)"]}   # C53b: directory nlink is fs-dependent
+  - {id: d_scrub_never_sanitizes, kind: negative, form: test, discharged_by: test_scrub_removes_and_rewrites_nothing,
+     binds: ["interacts(scrub->run_dir)"]}
+  - {id: d_clean_tree_passes_scrub, kind: behavior, form: test, discharged_by: test_a_clean_run_dir_passes_the_scrub,
+     binds: ["interacts(scrub->run_dir)"]}   # POSITIVE CONTROL for the whole scrub family
+  - {id: d_scrub_precedes_first_consumer, kind: seam, form: test, discharged_by: test_scrub_runs_before_the_first_run_dir_consumer,
+     binds: ["drives(run_main->run_investigation)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}
+  - {id: d_no_consumer_runs_on_a_tainted_tree, kind: negative, form: test, discharged_by: test_no_consumer_runs_when_the_scrub_raises,
+     binds: ["interacts(run_main->run_dir)", "interacts(visualize_run->run_dir)", "interacts(persist_copy_shared_inputs->run_dir)"]}
+
+  # ---- O10 / O11 — lifecycle, fail-closed, teardown ----
+  - {id: d_construction_failure_refuses_the_run, kind: behavior, form: test, discharged_by: test_box_construction_failure_refuses_the_run,
+     binds: [start_box, "drives(run_main->start_box)"]}
+  - {id: d_startup_probes_rather_than_detects, kind: behavior, form: test, discharged_by: test_startup_attempts_a_box_rather_than_detecting_a_binary,
+     binds: [start_box]}
+  - {id: d_path_identity_sentinel, kind: behavior, form: test, discharged_by: test_path_identity_sentinel_fails_closed,
+     binds: [start_box, "run_dir.access[box-write]"]}
+  - {id: d_mid_run_exec_failure_is_a_tool_error, kind: behavior, form: test, discharged_by: test_mid_run_exec_failure_degrades_to_a_tool_error,
+     binds: [BoxExecutor, "interacts(BoxExecutor->box_wire).response"]}
+  - {id: d_container_name_is_run_id_derived, kind: shape, form: test, discharged_by: test_container_name_is_defender_run_run_id,
+     binds: [container_name.identity]}
+  - {id: d_box_torn_down_on_crash, kind: behavior, form: test, discharged_by: test_box_does_not_outlive_a_crashed_driver,
+     binds: [stop_box, "drives(run_main->stop_box)"]}
+  - {id: d_teardown_is_idempotent, kind: behavior, form: test, discharged_by: test_teardown_of_an_absent_box_succeeds,
+     binds: [stop_box]}
+  - {id: d_reaper_keys_on_return_code_not_stderr, kind: negative, form: test, discharged_by: test_reaper_does_not_treat_stderr_as_failure,
+     binds: [stop_box]}   # C43: the idempotent SUCCESS path writes to stderr at rc=0
+  - {id: d_pre_create_reap_clears_a_stopped_collision, kind: behavior, form: test, discharged_by: test_a_stopped_box_of_the_same_name_does_not_block_a_new_run,
+     binds: [container_name.identity, start_box]}
+
+  # ---- O12 / M9 — the repertoire and the three-site cwd ----
+  - {id: d_relative_operand_names_one_file_at_three_sites, kind: parity, form: test, discharged_by: test_relative_operand_names_the_same_file_at_all_three_sites,
+     binds: [cwd_anchor.identity, decide_bash, _resolve_operand, BoxExecutor]}
+  - {id: d_cwd_is_reapplied_per_exec, kind: shape, form: test, discharged_by: test_cwd_is_reapplied_per_call_and_does_not_persist,
+     binds: [cwd_anchor.identity, BoxExecutor]}   # C35: cwd does NOT persist; /tmp does
+  - {id: d_cwd_exists_before_first_exec, kind: behavior, form: test, discharged_by: test_the_chosen_cwd_exists_before_the_first_exec,
+     binds: [start_box, cwd_anchor.identity]}
+  - {id: d_repertoire_runs_in_box, kind: domain-outcome, form: test, discharged_by: test_the_granted_bash_repertoire_runs_inside_the_box,
+     binds: [BoxSpec.domain, "defender_dir.access[box-read]"]}
+  - {id: d_namespace_package_imports_in_box, kind: shape, form: test, discharged_by: test_defender_namespace_package_imports_in_the_box,
+     binds: ["defender_dir.access[box-read]", box_entrypoint]}
+
+  # ---- O14 / F1 / F3 — the knob, the tmpfs ----
+  - {id: d_boxspec_carries_three_replaceables, kind: seam, form: test, discharged_by: test_boxspec_carries_runtime_rootfs_and_lifecycle,
+     binds: [BoxSpec.domain]}
+  - {id: d_boundary_holds_at_the_runc_floor, kind: parity, form: test, discharged_by: test_boundary_holds_under_both_runc_and_runsc,
+     binds: ["BoxSpec.domain.alternatives[runc]", "BoxSpec.domain.distinguished[runsc]"]}
+  - {id: d_tmpfs_is_noexec, kind: negative, form: test, discharged_by: test_a_script_on_the_tmpfs_cannot_execute,
+     binds: ["box_tmpfs.domain.distinguished[noexec]"]}
+  - {id: d_rw_bind_remains_exec_able, kind: behavior, form: test, discharged_by: test_a_script_on_the_rw_bind_executes,
+     binds: ["run_dir.access[box-write]"]}   # POSITIVE CONTROL for d_tmpfs_is_noexec
+  - {id: d_tmpfs_is_size_capped, kind: domain-outcome, form: test, discharged_by: test_tmpfs_exhaustion_fails_the_run_loudly,
+     binds: ["box_tmpfs.domain.distinguished[size_cap]"]}
+
+  # ---- O15 — what must NOT change ----
+  - {id: d_decide_bash_still_runs_host_side, kind: survival, form: test, discharged_by: test_decide_bash_runs_host_side_before_every_box_call,
+     binds: ["bash_gate.access[bash]", "interacts(_tool_bash->bash_gate)"]}
+  - {id: d_read_denylist_survives, kind: survival, form: test, discharged_by: test_ground_truth_read_denylist_still_denies_on_both_surfaces,
+     binds: ["bash_policy_denylist.access[bash]", "bash_policy_denylist.access[read-tool]"]}
+  - {id: d_main_cannot_read_gather_raw, kind: survival, form: test, discharged_by: test_main_loop_still_cannot_read_gather_raw,
+     binds: [gather_raw.identity, "bash_gate.access[bash]"]}
+
+  # ---- the deps seam ----
+  - {id: d_tool_bash_executes_through_the_box_seam, kind: seam, form: test, discharged_by: test_tool_bash_executes_through_the_injected_box_seam,
+     binds: ["AgentDeps.access[bind]", _tool_bash, "drives(_tool_bash->BoxExecutor)"]}
+
+  # ---- step-7 resolutions: obligations minted from the gate's residue ----
+  # H4 — the scrub allowlists rather than denylists st_mode types.
+  - {id: d_scrub_allowlists_regular_and_dir_only, kind: negative, form: test, discharged_by: test_scrub_raises_on_a_fifo_socket_or_device_node,
+     binds: ["interacts(scrub->run_dir)"]}
+  - {id: d_scrub_permits_regular_files_and_directories, kind: behavior, form: test, discharged_by: test_scrub_passes_regular_files_and_real_directories,
+     binds: ["interacts(scrub->run_dir)"]}   # POSITIVE CONTROL for the allowlist
+  # H3 — every bash-enabled role gets a box; gather_only.py is deleted.
+  - {id: d_every_bash_enabled_role_has_a_box, kind: parity, form: test, discharged_by: test_every_bash_enabled_role_executes_through_a_box,
+     binds: ["AgentDeps.access[bind]", "drives(_tool_bash->BoxExecutor)"]}
+  - {id: d_gather_only_removal_survives, kind: survival, form: test, discharged_by: test_gather_only_workflow_completes_via_its_substitute,
+     binds: ["AgentDeps.access[direct-ctor]", gather_only_script]}
+  # R6 obligations (recommendation taken; see handoff.forks)
+  - {id: d_box_filename_cannot_forge_a_workspace_map_section, kind: negative, form: test, discharged_by: test_a_box_authored_filename_cannot_forge_a_workspace_map_section,
+     binds: ["interacts(workspace_map->run_dir)", model_context.payload]}
+  - {id: d_workspace_map_renders_a_benign_name_intact, kind: behavior, form: test, discharged_by: test_workspace_map_renders_an_ordinary_filename_intact,
+     binds: [model_context.payload]}   # POSITIVE CONTROL
+  - {id: d_hostile_run_id_fails_loudly, kind: negative, form: test, discharged_by: test_hostile_run_id_fails_rather_than_splitting_the_bind_spec,
+     binds: [container_name.identity, run_dir.identity]}
+  # R2 obligations — the four shared sinks the box now co-writes
+  - {id: d_box_write_cannot_overwrite_a_claimed_lead, kind: uniqueness, form: test, discharged_by: test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar,
+     binds: [gather_raw.identity, "interacts(BoxExecutor->gather_raw)"]}
+  - {id: d_run_id_collision_refuses_rather_than_reaping_a_sibling, kind: uniqueness, form: test, discharged_by: test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling,
+     binds: [container_name.identity, run_dir.identity]}
+  # R4 — the falsy domain member
+  - {id: d_empty_pipeline_crosses_as_a_valid_frame, kind: domain-outcome, form: test, discharged_by: test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame,
+     binds: ["bash_exec_pipeline.domain.distinguished[first]", box_wire.payload]}
+  # R5 — the workflow the delta subtracts
+  - {id: d_e2e_bash_corpus_still_completes, kind: survival, form: test, discharged_by: test_the_existing_e2e_bash_corpus_completes_through_the_box,
+     binds: [bash_exec_run_parsed, "drives(_tool_bash->BoxExecutor)", replay_actor]}
+  # O2 — loopback and bind/listen resolved as IN CONTRACT
+  - {id: d_loopback_is_in_contract, kind: behavior, form: test, discharged_by: test_loopback_between_two_boxed_processes_is_permitted,
+     binds: ["box_network.access[box-loopback]"]}
+
+  # gate obligation #19 — daemon text reaching the model must arrive labelled
+  - {id: d_infrastructure_fault_text_reaches_the_model_labelled, kind: shape, form: test, discharged_by: test_infrastructure_fault_text_reaches_the_model_labelled,
+     binds: ["interacts(BoxExecutor->box_wire).response"]}
+
+  # ---- waivers: examined noes, recorded (step 7) ----
+  - {id: w_salt_relocation_is_out_of_scope, kind: negative, form: waiver,
+     outcome: {nl: "The per-run salt is readable from inside the box because meta.json lives in run_dir, which is the rw bind. This spec does NOT close it: the human resolved that meta.json is removed from the run dir in a separate session. Until that lands, the injection-tagging defence is degraded — a boxed process can read the salt and forge or close <run-{salt}-...> delimiters. Recorded as a cross-session dependency, not an oversight."},
+     binds: ["run_meta_salt.access[box-read]"]}
+  - {id: w_scrub_certifies_link_shape_only, kind: negative, form: waiver,
+     outcome: {nl: "A clean scrub certifies LINK SHAPE ONLY and licenses no content-provenance assumption. Nothing in this scope constrains the CONTENT the box writes into run_dir: a boxed process can forge executed_queries.jsonl rows, fabricate a {lead_id}.lead.json that never went through the O_EXCL claim, and rewrite any artifact. Sixteen host consumers read that tree and none uses a symlink-safe primitive. O8 is narrowed in writing to link-safety; content provenance is filed as a follow-up."},
+     binds: ["interacts(scrub->run_dir)", gather_raw.identity, executed_queries_jsonl.identity]}
+  - {id: w_host_consumer_confinement_out_of_scope, kind: negative, form: waiver,
+     outcome: {nl: "Host-side consumer confinement (Landlock / openat2 RESOLVE_BENEATH for the renderer and learning loop) is excluded by the human's scoping decision (NO1). The accepted risk has named witnesses: persist.py:210,217 copying into the DURABLE learning state dir, and workspace_map.py:79 dereferencing into the model's own context window in-process, upstream of the scrub."},
+     binds: ["run_dir.access[host-read]"]}
+  - {id: w_microvm_tier_deferred, kind: negative, form: waiver,
+     outcome: {nl: "The microVM tier (NO7) is deferred, not rejected, so crosses_validation stays unresolved rather than being probed. Costed reason: Hetzner Cloud documents no nested virtualisation on any instance line, so the tier requires Server Auction bare metal."},
+     binds: ["BoxSpec.domain.alternatives[microvm]"]}
+  - {id: w_no_socket_positive_control, kind: negative, form: waiver,
+     outcome: {nl: "d_no_socket_mounted_inward has no paired positive control, because building one would mean mounting a socket into the box — the exact thing the negative forbids. The capability is known to exist (a bind-mounted host UDS is connectable under --host-uds=open) but is deliberately unused. Waived explicitly rather than left as a silently vacuous negative."},
+     binds: [box_network]}
+
+  # ---- clauses (deliberate prose deferrals — do NOT discharge a gate obligation) ----
+  - {id: c_teardown_verb_is_not_reap, kind: shape, form: clause,
+     outcome: {nl: "The box teardown function is named with a verb other than 'reap', because 'reap' already means waitpid-on-pipeline-children in bash_exec._reap_upstream — the same module scope this work modifies."},
+     binds: [stop_box]}
+  - {id: c_no_apt_update_network_gate, kind: negative, form: clause,
+     outcome: {nl: "No rootfs build step uses apt-get update's exit code as a network sanity gate, because it exits 0 with no network and only install fails at rc=100."},
+     binds: [BoxSpec.domain]}
+  - {id: c_no_reliance_on_in_box_permission_bits, kind: negative, form: clause,
+     outcome: {nl: "No in-box logic leans on file permission bits or uid, because the guest runs as uid 0 with dac_override; the mount list is the boundary."},
+     binds: ["run_dir.access[box-write]"]}
+
+# ============================================================================
+# STRUCTURE — the address space. `provenance: code` is the grounded
+# neighborhood (census-backed, see claims); `design` is demand-implied.
+# ============================================================================
+structure:
+  axes: [run_id, lead_id, seq, alert_stem, via]
+
+  actors:
+    # --- existing, grounded ---
+    - {id: run_main,            frame: composition, provenance: code}   # defender/run.py main() :132-185
+    - {id: run_investigation,   frame: composition, provenance: code}   # driver.py :494-563
+    - {id: _tool_bash,          frame: leg,         provenance: code}   # tools.py :260-293
+    - {id: decide_bash,         frame: leg,         provenance: code}   # permission/bash.py :281-329
+    - {id: bash_exec_run_parsed, frame: leg,        provenance: code}   # bash_exec.py :306-352
+    - {id: _resolve_operand,    frame: leg,         provenance: code}   # tools.py :304-313
+    - {id: materialize_run_dir, frame: leg,         provenance: code}   # run_common.py :47-72
+    - {id: run_env,             frame: leg,         provenance: code}   # run_common.py :75-102
+    # --- run_dir consumers (census CC14: 16 sites; the design named 2) ---
+    - {id: workspace_map,       frame: leg,         provenance: code}   # IN-RUN, in-process, feeds model msg 0
+    - {id: visualize_run,       frame: leg,         provenance: code}   # 3rd process via run_common.visualize
+    - {id: lead_repository_stage_tables, frame: leg, provenance: code}  # copytree, symlinks unset
+    - {id: persist_copy_shared_inputs,   frame: leg, provenance: code}  # DURABLE learning state dir
+    - {id: learn_drain,         frame: composition, provenance: code}   # loop.py --learn-drain, separate process
+    - {id: evals_harness_lead,  frame: composition, provenance: code}   # copies a whole real run dir; own worktree+venv
+    # check_actors found this one: it re-execs lead_repository + run as a subprocess,
+    # relocating the tree anchor onto whatever tree it runs in. Grounding named the
+    # re-exec boundary; extraction dropped the actor. Modelled, not waived.
+    - {id: replay_actor,        frame: composition, provenance: code}
+    - {id: observe_logger,      frame: leg,         provenance: code}   # fd held open whole run; close NOT finally-guaranteed (R-A7)
+    - {id: observe_write_trace, frame: leg,         provenance: code}   # truncating write, driver.py :561
+    - {id: gather_only_script,  frame: leg,         provenance: code}   # scripts/testing/gather_only.py — builds AgentDeps OUTSIDE bind
+    # --- new, demand-implied ---
+    - {id: start_box,           frame: leg,         provenance: design}
+    - {id: stop_box,            frame: leg,         provenance: design}
+    - {id: BoxExecutor,         frame: leg,         provenance: design}
+    - {id: box_entrypoint,      frame: leg,         provenance: design}  # python3 -m defender.runtime.bash_exec — NEW surface (C51)
+    - {id: scrub,               frame: leg,         provenance: design}
+
+  boundaries:
+    # ---------------- the box's mount + isolation surface ----------------
+    - id: run_dir
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "run_dir is $DEFENDER_RUNS_BASE/{run_id}/ minted by materialize_run_dir (run_common.py:47-72); run_id = f'{UTC ts}-{alert.stem}' or --run-id. Read off the mint site, not inferred."}
+          derivations:
+            - {value: alert_stem, fn_of: run_id, injective: false}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            box-write:   {trust: attacker-influenced, constraints: [confine]}
+            host-write:  {trust: operator, constraints: []}
+            host-read:   {trust: operator, constraints: unknown}
+    - id: defender_dir
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            box-read:  {trust: attacker-influenced, constraints: [confine]}
+            box-write: {trust: attacker-influenced, constraints: [confine]}    # EROFS — structural, not a denylist
+    - id: box_network
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            box-connect: {trust: attacker-influenced, constraints: [confine]}
+            box-listen:  {trust: attacker-influenced, constraints: unknown}   # R0: bind/listen policy undecided
+            box-loopback: {trust: attacker-influenced, constraints: unknown}  # R0: lo is UP under --network=none (C05)
+    - id: box_env
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            box-read: {trust: attacker-influenced, constraints: [confine]}   # positive allowlist (F7)
+        domain:
+          type: enum
+          refinement: {nl: "the positive allowlist of variables built for the box"}
+          default: "DEFENDER_DIR, DEFENDER_RUN_DIR, DEFENDER_RUNS_BASE, PATH, locale/TZ"
+          distinguished: ["DEFENDER_RUNS_BASE"]   # names run_dir.parent, which is NOT mounted
+          falsy_valid: false
+          documented_alternatives: []
+    - id: box_tmpfs
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "size cap and exec mode of the /tmp tmpfs"}
+          default: noexec
+          distinguished: [noexec, size_cap]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: ":exec", crosses_validation: false}
+    - id: BoxSpec
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "runtime + rootfs + lifecycle, one dataclass; one env var is the sole external lever"}
+          default: runsc
+          distinguished: [runsc, runc]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: runc,    crosses_validation: true}    # the supported FLOOR; boundary must hold here
+            - {value: microvm, crosses_validation: unknown} # NO7 deferred tier
+            - {value: per_call_run, crosses_validation: unknown}  # NO9 kept available
+    - id: container_name
+      provenance: design
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "defender-run-{run_id} — the on-disk half of the box handle (M4), so a crashed driver's box is reapable from the run id alone."}
+          sharing: unique-key
+
+    # ---------------- the wire (demand #0) ----------------
+    - id: box_wire
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: request,  source: const:REQUEST_MAGIC,  slots: {pipeline: bash_exec_pipeline}}
+            - {role: response, source: const:RESPONSE_MAGIC, slots: {result: BoxResult}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "A length-prefixed binary framing carrying RAW BYTES in both directions: MAGIC|rc|len(out)|len(err)|out_bytes|err_bytes, decoded into BoxResult(rc:int, out:bytes, err:bytes). Not JSON (cannot carry arbitrary bytes without base64), not pickle (would deserialize on the trusted-parse side). The fault signal is the FRAME'S ABSENCE — any unframed stdout is by definition daemon text."
+    - {id: BoxResult, provenance: design, facets: {}}
+    # The rendered sink R6 could not fire on, because extraction omitted it entirely.
+    - id: model_context
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: workspace_map, source: template:WORKSPACE_MAP, slots: {entries: run_dir}}
+          invariants: [all-slots-bound]
+          nl: "Message 0 renders `- {child.name}` RAW into markdown from sorted(run_dir.iterdir()), in-process and upstream of the scrub. After the delta the chooser of those names is the BOX; the sanitizer column is empty. A newline in a name forges a sibling bullet or a ## heading."
+    - id: bash_exec_pipeline
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "Pipeline(connector, stages=[Stage(argv, stderr)]); connector in {first,&&,||,;}, stderr in {capture,devnull,stdout}"}
+          default: capture
+          distinguished: [first, "&&", "||", ";", capture, devnull, stdout]
+          falsy_valid: true      # an empty pipeline list is valid: run_parsed returns (0,"","")
+          documented_alternatives: []
+
+    # ---------------- the gate that must survive unchanged (O15) ----------------
+    - id: bash_gate
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bash:      {trust: attacker-influenced, constraints: [denylist, confine]}
+            read-tool: {trust: attacker-influenced, constraints: [denylist, confine]}
+    - id: bash_policy_denylist
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bash:      {trust: attacker-influenced, constraints: [denylist]}
+            read-tool: {trust: attacker-influenced, constraints: [denylist]}
+    - id: cwd_anchor
+      provenance: code
+      facets:
+        identity:
+          key_axes: [via]
+          evidence: {nl: "THE three-site coupling (C52): permission/bash.py:234 (gate rebase, EXACT), tools.py:312-313 (_resolve_operand rebase, whose docstring explicitly pins the tie), and the executor's cwd= argument inside the run_parsed call at tools.py:284-290. All three currently anchor on defender_dir.parent, which is NEITHER bind."}
+          sharing: unique-key
+
+    # ---------------- shared sinks inside the rw bind ----------------
+    - id: gather_raw
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lead_id, seq]
+          evidence: {nl: "{run_dir}/gather_raw/{lead_id}.lead.json via record_lead.claim_lead (O_CREAT|O_EXCL, hooks/record_lead.py:143) and {run_dir}/gather_raw/{lead_id}/{seq}.json via record_query.py. Read off both writer templates."}
+          sharing: unique-key
+    - id: lessons_loaded_jsonl
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "TWO host-side appenders with no coordination beyond append_jsonl: runtime/tools.py:249 and hooks/record_lesson_load.py:91. The append fires on a READ path (_gated_read)."}
+          sharing: serialized-append
+    - id: llm_requests_jsonl
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "observe.RequestLogger opens it at driver.py:519 and holds the fd for the whole run, flushing live. close() is NOT finally-guaranteed (R-A7)."}
+          sharing: serialized-append
+    - id: executed_queries_jsonl
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id, lead_id, seq]
+          evidence: {nl: "query_tool.py:383 append_jsonl into RunPaths(run_dir).executed_queries; capture is inseparable from the call."}
+          sharing: serialized-append
+    - id: run_meta_salt
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            box-write: {trust: attacker-influenced, constraints: unknown}   # R0: the box can rewrite the salt
+            host-read: {trust: operator, constraints: []}
+    - id: run_visualizations
+      provenance: code
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "visualize_run.py:125 dest_dir = _DEFENDER_DIR/'run-visualizations'/run_dir.name; ONE writer, TWO invokers (run_common.visualize from run.py:184, and orchestrate.py:961-962 from the learn drain — last write wins). NOT git-tracked for output: git ls-files returns only .gitignore, content '*.html' (refutes the design's O8 witness)."}
+          sharing: unique-key
+
+    # ---------------- the deps seam ----------------
+    - id: AgentDeps
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bind:        {trust: operator, constraints: [confine]}
+            direct-ctor: {trust: operator, constraints: unknown}   # R0: gather_only.py bypasses bind
+
+  interacts:
+    # --- the exec seam, as it is today ---
+    - {from: _tool_bash, to: bash_gate,  mode: invoke, via: api, provenance: code}
+    - {from: _tool_bash, to: cwd_anchor, mode: read,   via: api, provenance: code}
+    - {from: decide_bash, to: cwd_anchor, mode: read,  via: api, provenance: code}
+    - {from: _resolve_operand, to: cwd_anchor, mode: read, via: api, provenance: code}
+    - {from: decide_bash, to: bash_policy_denylist, mode: read, via: api, provenance: code}
+    # --- the exec seam, as it becomes ---
+    - {from: _tool_bash, to: box_wire, mode: invoke, via: api, provenance: design, sends: payload, transport: subprocess}
+    - {from: BoxExecutor, to: box_wire, mode: write, via: subprocess, provenance: design, sends: payload}
+    - {from: box_entrypoint, to: box_wire, mode: write, via: subprocess, provenance: design, sends: payload}
+    - {from: BoxExecutor, to: cwd_anchor, mode: read, via: api, provenance: design}
+    - {from: _tool_bash, to: AgentDeps, mode: read, via: api, provenance: design}
+    # --- the box's own surfaces ---
+    - {from: start_box, to: BoxSpec,       mode: read,  via: env, provenance: design}
+    - {from: start_box, to: container_name, mode: write, via: subprocess, provenance: design, interpolates: [run_id]}
+    - {from: stop_box,  to: container_name, mode: remove, via: subprocess, provenance: design, interpolates: [run_id]}
+    - {from: start_box, to: box_env,       mode: write, via: env, provenance: design}
+    - {from: start_box, to: box_tmpfs,     mode: write, via: subprocess, provenance: design}
+    - {from: BoxExecutor, to: run_dir,      mode: write, via: box-write,   provenance: design, interpolates: []}
+    - {from: BoxExecutor, to: defender_dir, mode: read,  via: box-read,    provenance: design}
+    - {from: BoxExecutor, to: box_network,  mode: invoke, via: box-connect, provenance: design}
+    - {from: BoxExecutor, to: box_env,      mode: read,  via: box-read,    provenance: design}
+    # --- the scrub ---
+    - {from: scrub, to: run_dir, mode: read, via: fs, provenance: design}
+    - {from: run_main, to: scrub, mode: invoke, via: api, provenance: design}
+    # --- run_dir writers (existing) ---
+    - {from: materialize_run_dir, to: run_dir, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: observe_logger,      to: llm_requests_jsonl, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: observe_write_trace, to: run_dir, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: run_investigation,   to: gather_raw, mode: write, via: fs, provenance: code, interpolates: [lead_id, seq]}
+    - {from: run_investigation,   to: lessons_loaded_jsonl, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: run_investigation,   to: executed_queries_jsonl, mode: write, via: fs, provenance: code, interpolates: [run_id, lead_id, seq]}
+    # NOTE: the box writes MODEL-CHOSEN paths, not a template. `interpolates: []` is the
+    # truth and is load-bearing: an arbitrary-path writer covers NO axis by construction,
+    # which is precisely the key-coverage failure R2(a) exists to catch.
+    - {from: BoxExecutor,         to: gather_raw, mode: write, via: box-write, provenance: design, interpolates: []}
+    - {from: BoxExecutor,         to: lessons_loaded_jsonl, mode: write, via: box-write, provenance: design, interpolates: []}
+    - {from: BoxExecutor,         to: llm_requests_jsonl, mode: write, via: box-write, provenance: design, interpolates: []}
+    - {from: BoxExecutor,         to: executed_queries_jsonl, mode: write, via: box-write, provenance: design, interpolates: []}
+    - {from: BoxExecutor,         to: run_meta_salt, mode: write, via: box-write, provenance: design, interpolates: []}
+    - {from: BoxExecutor,         to: run_meta_salt, mode: read,  via: box-read,  provenance: design}
+    # --- run_dir consumers (the census) ---
+    - {from: workspace_map,   to: run_dir, mode: read, via: fs, provenance: code}   # IN-RUN, upstream of the scrub
+    - {from: workspace_map,   to: model_context, mode: write, via: api, provenance: code, sends: payload, transport: llm}
+    - {from: run_main,        to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: visualize_run,   to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: visualize_run,   to: run_visualizations, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: lead_repository_stage_tables, to: gather_raw, mode: read, via: fs, provenance: code}
+    - {from: persist_copy_shared_inputs,   to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: learn_drain,     to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: learn_drain,     to: run_visualizations, mode: write, via: fs, provenance: code, interpolates: [run_id]}
+    - {from: evals_harness_lead, to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: replay_actor,       to: run_dir, mode: read, via: fs, provenance: code}
+    - {from: gather_only_script, to: AgentDeps, mode: invoke, via: direct-ctor, provenance: code}
+
+  drives:
+    - {from: run_main,          to: run_investigation, provenance: code,   multiplicity: serial}
+    - {from: run_main,          to: start_box,         provenance: design, multiplicity: serial}
+    - {from: run_main,          to: stop_box,          provenance: design, multiplicity: serial}
+    - {from: run_investigation, to: _tool_bash,        provenance: code,   multiplicity: serial}
+    - {from: _tool_bash,        to: BoxExecutor,       provenance: design, multiplicity: serial}
+    - {from: BoxExecutor,       to: box_entrypoint,    provenance: design, multiplicity: serial}
+    - {from: run_main,          to: learn_drain,       provenance: code,   multiplicity: concurrent}  # queue marker, unbounded delay
+    - {from: run_main,          to: visualize_run,     provenance: code,   multiplicity: serial}      # 3rd process
+
+# ============================================================================
+# CLAIMS — the ledger. Every load-bearing statement about EXISTING reality,
+# probed not asserted. probe_kind is the instrument ACTUALLY used and is gated
+# against `kind`: a behavior/primitive/reachability claim may NOT close on
+# `read`. Inherited entries keep their discuss-doc ids (C-prefixed).
+# ============================================================================
+claims:
+  # ---- REFUTED — the suite may not assert this content ----
+  - id: C39
+    kind: behavior
+    claim: "Docker writes its OWN errors to the container's stdout with CRLF, leaving stderr empty, at rc=127."
+    probe: "docker run --rm alpine:latest /nonexistent-binary-xyz, capturing stdout and stderr separately and hexdumping line endings"
+    probe_kind: executed
+    observed: "rc=127 as claimed, but stdout=0 bytes and stderr=347 bytes with plain LF. Exactly inverted. Docker server 29.5.3."
+    verdict: refuted
+    note: "O17/M16 exist BECAUSE of this claim. The obligation survives; its witness does not. It also retires F9's options (a) text-match and (b) rc-classification, which were heuristics built on this exact shape — they would have been pinned to a version that has already changed. The length-prefixed framing is version-independent."
+  - id: C19_rglob
+    kind: primitive
+    claim: "skills/invlang/corpus.py:160 calls rglob('investigation.md'), and rglob descends symlinked directories."
+    probe: "built a temp tree with linkdir -> real/ and ran Path(d).rglob('*'); then read _corpus.py"
+    probe_kind: executed
+    observed: "rglob yields ['real','linkdir','real/inner.txt'] — it lists the symlink but does NOT descend. And _corpus.py line 160 is blank; the file contains no rglob call at all, only non-recursive .glob()."
+    verdict: refuted
+    note: "A grounding error, propagated into enumeration. The premise built on it was dropped. The symlinked-directory family survives RE-SITED on shutil.copytree(symlinks=False) — see C_copytree_launders."
+  - id: C_parse_dollar_paren
+    kind: behavior
+    claim: "bash_exec.parse preserves $(...) as one literal argv token, like quotes, backticks and globs."
+    probe: "bash_exec.parse('echo $(whoami)')"
+    probe_kind: executed
+    observed: "['echo', '$', '(', 'whoami', ')'] — four tokens. Quotes ('a b'), backticks (`y`) and globs (*.txt) ARE each preserved as one token."
+    verdict: refuted
+    note: "A uniform 'all four shell-metacharacter classes cross as single literal tokens' assertion is false. This asymmetry is at the HOST parse, upstream of the box entirely."
+  - id: C_logger_close_guaranteed
+    kind: referential
+    claim: "logger.close() is guaranteed on the crash path by a try/finally around the agent loop."
+    probe: "read driver.py:505-570; grep -n 'try:|finally:|logger.close' runtime/driver.py"
+    probe_kind: read
+    observed: "No finally: exists. logger.close() sits after a try/except catching only UsageLimitExceeded and RunAborted; any other exception propagates past it."
+    verdict: refuted
+    note: "Makes the scrub-vs-open-fd composition real rather than hypothetical: on a genuine crash the llm_requests.jsonl fd is not merely open, it is leaked."
+  - id: C_620_red
+    kind: behavior
+    claim: "test_620_consumers is RED BY CONSTRUCTION against an unbuilt runtime.verbs.verb surface (per its own docstring)."
+    probe: "pytest tests/ -k 620 -m 'not live' -q"
+    probe_kind: executed
+    observed: "47 passed, 2051 deselected."
+    verdict: refuted
+    note: "Stale docstring."
+  - id: C48_gittracked
+    kind: referential
+    claim: "visualize_run.py's symlink-following copy lands in the GIT-TRACKED defender/run-visualizations/, so the dereferenced output is committed."
+    probe: "git ls-files defender/run-visualizations && cat defender/run-visualizations/.gitignore"
+    probe_kind: read
+    observed: "Exactly one tracked file: .gitignore, whose content is '*.html'. The mirrored pages are git-ignored."
+    verdict: refuted
+    note: "The dereference is real and the sink is the repo working tree, but nothing is committed by an ordinary git add. O8's witness must be restated — the STRONGER witnesses are persist.py:210,217 (durable learning state dir) and workspace_map.py:79 (the model's own context, in-process, upstream of the scrub)."
+
+  # ---- HOLDS — executed, safe to cite ----
+  - {id: C36a, kind: primitive, claim: "A non-UTF-8 argv element crosses docker exec silently rewritten to U+FFFD at rc=0.", probe: "subprocess.run(['docker','exec',C,'od','-An','-tx1'], with b'\\xff\\xfe\\x80' as an argv element)", probe_kind: executed, observed: "rc=0; hex 'ef bf bd' x3 — three replacement characters, one per invalid byte.", verdict: holds}
+  - {id: C36b, kind: primitive, claim: "An embedded NUL in argv is rejected by Python's subprocess before docker sees it.", probe: "subprocess.run(['docker','exec',C,'echo','a\\x00b'])", probe_kind: executed, observed: "ValueError: embedded null byte", verdict: holds}
+  - {id: C40, kind: primitive, claim: "--tmpfs implies noexec (a script there fails rc=126); a bind mount IS exec-able.", probe: "ran a chmod+x script from --tmpfs /tmp and from a bind-mounted dir", probe_kind: executed, observed: "tmpfs: 'Permission denied', exit 126. bind: 'ran-ok', exit 0.", verdict: holds}
+  - {id: C43a, kind: behavior, claim: "docker rm -f on a missing name is rc=0 but writes 'Error response from daemon' to STDERR.", probe: "docker rm -f this-container-does-not-exist-xyz123", probe_kind: executed, observed: "rc=0, stdout empty, stderr 'Error response from daemon: No such container: ...'", verdict: holds, note: "A reaper keying on stderr misfires on the SUCCESS path. Check the return code."}
+  - {id: C43b, kind: behavior, claim: "STOPPED containers collide on name at rc=125.", probe: "created a container, stopped it, docker run again with the same name", probe_kind: executed, observed: "rc=125, 'Conflict. The container name ... is already in use'", verdict: holds, note: "Makes the pre-create reap necessary, not tidy."}
+  - {id: C35a, kind: behavior, claim: "cwd does NOT persist across docker exec calls; /tmp DOES.", probe: "exec sh -c 'cd /tmp && pwd' then a fresh exec pwd; touch /tmp/marker in exec 1, ls it in exec 2", probe_kind: executed, observed: "exec1 '/tmp', exec2 '/'. Marker file found in exec 2.", verdict: holds, note: "REFUTES the design's 'cwd and /tmp persist' rationale in half. cwd must be re-applied per call via docker exec -w."}
+  - {id: C35b, kind: behavior, claim: "docker exec -w <missing> is rc=127; docker run -w <missing> silently CREATES the directory.", probe: "both invocations against a nonexistent workdir", probe_kind: executed, observed: "exec -w: rc=127 'OCI runtime exec failed ... chdir to cwd'. run -w: rc=0, pwd prints it, ls shows it exists.", verdict: holds}
+  - {id: C53a, kind: primitive, claim: "os.walk(followlinks=False) yields a symlink-to-a-DIRECTORY under `dirs`, not `files`.", probe: "built a temp tree with symlink-to-dir, symlink-to-file and a hardlinked regular file; walked it", probe_kind: executed, observed: "dirs: ['realdir','link_to_dir']; files: ['hardlinked.txt','regfile.txt','link_to_file']", verdict: holds, note: "M10's (*dirs, *files) iteration is LOAD-BEARING — a files-only walk misses the symlinked dir entirely."}
+  - {id: C53b, kind: primitive, claim: "Directory nlink is filesystem-dependent, so an unguarded st_nlink>1 test yields false positives on directories.", probe: "same temp tree; printed every st_nlink", probe_kind: executed, observed: "realdir nlink=2; symlink nlink=1; the hardlinked regular pair each nlink=2", verdict: holds, note: "The S_ISREG guard before the nlink test is REQUIRED, not decorative."}
+  - {id: C56a, kind: primitive, claim: "EROFS surfaces as a bare OSError, not a PermissionError subclass.", probe: "write to /sys/kernel/notes (read-only sysfs)", probe_kind: executed, observed: "type(e) is OSError exactly; errno 30; isinstance(e, PermissionError) False", verdict: holds}
+  - {id: C56b, kind: primitive, claim: "ENOSPC surfaces as a bare OSError.", probe: "write to /dev/full", probe_kind: executed, observed: "type is exactly OSError, errno 28", verdict: holds}
+  - {id: C56c, kind: primitive, claim: "ENETUNREACH surfaces as a bare OSError.", probe: "connect(('fc00::1',80)) with no IPv6 route", probe_kind: executed, observed: "errno 101, type(e) is OSError exactly", verdict: holds}
+  - {id: C56d, kind: primitive, claim: "The DNS errno values -3 (EAI_AGAIN) and -2 (EAI_NONAME) are absent from errno.errorcode.", probe: "errno.errorcode lookup for -2 and -3", probe_kind: executed, observed: "-3 in errno.errorcode == False; .get(-3) is None; same for -2", verdict: holds, note: "Any errno->name lookup for the DNS case must not assume errno.errorcode contains it."}
+  - {id: C18_copytree_dangling, kind: primitive, claim: "shutil.copytree(symlinks=False) on a tree containing a DANGLING symlink raises.", probe: "copytree over a temp dir containing a symlink to /nonexistent", probe_kind: executed, observed: "shutil.Error listing the failure — it collects, partial-copies, then raises at the end", verdict: holds}
+  - {id: C_copytree_launders, kind: primitive, claim: "shutil.copytree(symlinks=False) DESCENDS a symlinked directory and launders it — the destination entry is a real directory, os.path.islink False.", probe: "copytree over a tree containing linkdir -> outside/, then os.path.islink on the destination entry", probe_kind: executed, observed: "cp_false/linkdir/secret.txt present; the destination entry is a REAL directory, islink False", verdict: holds, note: "The re-sited home of the symlinked-directory family after C19_rglob was refuted. Real sites: lead_repository.py:327, evals/harness.py:86, evals/harness_lead.py:77/90/103/195. Nothing downstream of the copy can tell it was ever a link."}
+  - {id: C_api_key_vars, kind: behavior, claim: "providers.api_key_vars() returns exactly {ANTHROPIC_API_KEY, FIREWORKS_API_KEY}.", probe: "python -c 'from defender.runtime import providers; print(sorted(providers.api_key_vars()))'", probe_kind: executed, observed: "['ANTHROPIC_API_KEY','FIREWORKS_API_KEY']", verdict: holds, note: "So run_env's strip removes exactly these two and inherits everything else — the reason F7 resolved to a positive allowlist."}
+  - {id: C_suite_baseline, kind: behavior, claim: "The suite is green on this tree at base.", probe: "pytest tests/ learning/ -m 'not live' -q", probe_kind: executed, observed: "2203 passed, 8 skipped, 0 failed — AFTER creating the worktree's missing defender/.venv symlink. Without it, 16 tests fail on ModuleNotFoundError: pydantic_ai because the bin/defender-* bash shims resolve ${DEFENDER}/.venv/bin/python3 relative to their own location.", verdict: holds}
+  - {id: C_toolset_bash, kind: census, claim: "Which AgentDeps-threading roles enable bash.", probe: "grep -rn 'ToolSet(' --include=*.py . | grep -v .venv, then inspect each for bash=", probe_kind: search, observed: "bash=True: lead_author, curator, actor, judge(+read). Empty ToolSet (no bash): verify_forward, oracle.", verdict: holds}
+  - {id: C_arg_max, kind: primitive, claim: "Platform limits relevant to argv and pipe crossing.", probe: "getconf ARG_MAX; os.fpathconf(0,'PC_PIPE_BUF')", probe_kind: executed, observed: "ARG_MAX=2097152; PC_PIPE_BUF=4096", verdict: holds}
+  - {id: C_bin_shims, kind: census, claim: "defender/bin/ contents — the program namespace run_env prefixes onto PATH.", probe: "ls -la defender/bin/", probe_kind: search, observed: "README.md plus 4 bash shims: defender-invlang, defender-lessons, defender-policy, defender-sql", verdict: holds, note: "defender-policy is operator-only and kept off every lane by a GATE control — but O4 requires the boundary to hold with the gate absent, and the mount list makes the binary PRESENT."}
+  - {id: C_no_sandbox_knob, kind: census, claim: "DEFENDER_ALLOW_UNSANDBOXED exists in the tree.", probe: "grep -rn 'DEFENDER_ALLOW_UNSANDBOXED|ALLOW_UNSANDBOX|docker|container' --include=*.py --include=*.md --include=*.toml --include=*.yml defender/ scripts/ docs/ .github/", probe_kind: search, observed: "ZERO hits for the sandbox var. All docker/container hits are playground-v2/, docs/state-surface-adapters.md, or lessons-environment corpus text. defender/runtime/ contains no docker reference at all.", verdict: refuted, note: "O10 and M12 both speak of this knob as if extant. It has never been written."}
+  - {id: C_consumer_census, kind: census, claim: "The complete set of host-side run_dir consumers, and whether any uses a symlink-safe primitive.", probe: "three sweeps: copy/walk primitives over defender/ scripts/; RunPaths/run_dir writers; then grep -rn 'islink|lstat|realpath|O_NOFOLLOW|followlinks|symlinks=' --include=*.py defender/ scripts/", probe_kind: search, observed: "16 consumer sites (the design named 2). The symlink-safe-primitive sweep returns ZERO hits repo-wide.", verdict: holds, note: "Stronger than the design claims: it is not 'these two dereference', it is 'nothing in the tree can do otherwise'. Missed by the design: persist.py:210,217 (durable state dir) and workspace_map.py:79 (model context, in-process, upstream of the scrub)."}
+  - {id: C_execution_contexts, kind: census, claim: "The cross-process boundaries a run_dir crosses.", probe: "grep -rn 'execv|\\.venv/bin/python' --include=*.py defender/ scripts/ | grep -v .venv | grep -v tests/", probe_kind: search, observed: "7 boundaries: run.py:30, learning/loop.py:27, evals/secondary.py:82, scripts/_venv.py:33, evals/_pipeline.py:124-128, run_common.py:111 (visualize as a THIRD process), and the frontend/prologue split-outs.", verdict: holds, note: "run_common.py:111 is the one an import-following census misses entirely — visualize_run.py is never imported by run.py."}
+  - {id: C_agentdeps_subtypes, kind: census, claim: "AgentDeps production subtypes and their construction seam.", probe: "grep -rn 'AgentDeps' --include=*.py . | grep -v .venv, filtered to class X(AgentDeps)", probe_kind: search, observed: "7 subtypes plus bare AgentDeps as MAIN's deps_cls = 8 roles. All go through bind EXCEPT scripts/testing/gather_only.py:39,127 which constructs AgentDeps directly.", verdict: holds, note: "Type-checker confirmation via symbol-refs not run; grep is lexically complete for the subclass syntax but blind to type()/make_dataclass/re-export aliases."}
+  - {id: C_dood, kind: primitive, claim: "This environment is docker-outside-of-Docker; bind SOURCES resolve on the real daemon host.", probe: "test -e /.dockerenv; docker info --format '{{.DockerRootDir}}'; ls /var/lib/docker; then write through a bind and try to read it back from this shell", probe_kind: executed, observed: "/.dockerenv present; daemon reports DockerRootDir=/var/lib/docker which does NOT exist on this container's filesystem; a file written through a bind is completely invisible from this shell afterward.", verdict: holds, note: "Makes C41 unprobeable here, and independently validates F8's sentinel: a misconfigured bind is silently empty rather than an error."}
+  - {id: C46, kind: behavior, claim: "Under DooD an absent bind SOURCE is silently created as an empty directory rather than erroring.", probe: "docker run --rm -v $NONEXISTENT:/mnt alpine sh -c 'ls -la /mnt'", probe_kind: executed, observed: "rc=0, /mnt is an empty directory, no error at any stage.", verdict: holds, note: "Host-side persistence half unprobed — see C_dood."}
+
+  # ---- DEFERRED / UNPROBED — carried to write-code-from-spec ----
+  - {id: C41, kind: behavior, claim: "Artifacts written through the rw bind land root-owned on the host; a non-root host caller cannot read a 0600 one.", probe: "wrote and chmod-0600'd a file inside the container through a bind, then tried to read it from the host side", probe_kind: executed, observed: "Container-side write succeeded (uid 0 inside). Host-side: the bind source directory shows NOTHING — the write is invisible from this shell because bind sources resolve on the real daemon host (C_dood).", verdict: deferred, note: "Architecturally unobservable from inside this sandbox. Settle on a non-DooD host. O13's 'no copy step' is true of the bytes and unverified for the ACCESS."}
+  - {id: C56_dns_eai_again, kind: primitive, claim: "DNS under a genuinely absent network raises socket.gaierror with errno -3 (EAI_AGAIN).", probe: "socket.getaddrinfo on a bogus hostname", probe_kind: executed, observed: "This sandbox has live egress; the bogus host resolved to errno -2 (EAI_NONAME), not -3 — DNS completed rather than failing network-down.", verdict: deferred, note: "Needs a genuinely network-isolated namespace. The errno.errorcode absence half (C56d) IS settled."}
+  - {id: C_materialize_race, kind: behavior, claim: "materialize_run_dir's exists()-then-mkdir TOCTOU manifests as a deterministic loser under real concurrency.", probe: "read run_common.py:47-75 only", probe_kind: read, observed: "Bare .mkdir(parents=True) with no exist_ok, behind a non-atomic `if run_dir.exists(): sys.exit`. The construction is confirmed non-atomic; the RACE was not driven.", verdict: unprobed, note: "probe_kind read cannot close a behavior claim. Settle by racing two processes on one run_id."}
+  - {id: C_runs_base_in_box, kind: reachability, claim: "DEFENDER_RUNS_BASE is reachable from code running inside the box.", probe: "grep -rn 'resolve_runs_base|DEFENDER_RUNS_BASE' --include=*.py . | grep -v .venv", probe_kind: search, observed: "All call sites are operator/eval-side (run_common, evals/*, learning/ops/*); none under the agent-facing tool path.", verdict: unprobed, note: "A search cannot close a reachability claim. Settle by starting a real run and grepping the bash tool's subprocess env from inside a tool call. Load-bearing because run_env sets DEFENDER_RUNS_BASE = run_dir.parent, which is NOT mounted."}
+
+# ============================================================================
+# GATE — every rule, every run. A rule with no entry reads as SKIPPED, not clean.
+# ============================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true,  note: "7 unknown invariants, 3 unresolvable payload-slot addresses, 2 zero-edge actors, a self-referential derivation, 3 dead axes, and 4 normative design sentences binding no element. Bidirectional reconciliation ran. Structural defects fixed in-place; the decisions routed to step 7."}
+    - {rule: R1, fired: true,  note: "3 sends-edges into box_wire with no shape demand on the edge payload; and the facet violated its OWN roles-disjoint-sources invariant — request and response both declared const:FRAME_MAGIC, so a reflected frame would decode as the opposite direction. Fixed to REQUEST_MAGIC/RESPONSE_MAGIC."}
+    - {rule: R2, fired: true,  note: "6 identity sinks gained a second writer in a SECOND NAMESPACE (BoxExecutor via the rw bind). Zero uniqueness demands existed. Critically: BoxExecutor's declared `interpolates` were a fiction — the box writes MODEL-CHOSEN paths, so it covers no axis by construction, which is exactly the key-coverage failure R2(a) exists to catch. Corrected to `interpolates: []` on all six edges."}
+    - {rule: R3, fired: true,  note: "6 multi-via access boundaries. bash_policy_denylist pre-discharged (the only cleanly discharged parity pair). Parity cells minted for the read-tool via and the salt."}
+    - {rule: R4, fired: true,  note: "bash_exec_pipeline had 7 unbound distinguished members INCLUDING the falsy one (the empty pipeline, B12). box_tmpfs fully pre-discharged, one binding mis-targeted and corrected. BoxSpec's rootfs/lifecycle axes carry no members — routed as a hole."}
+    - {rule: R5, fired: true,  note: "Judgment extension CONSIDERED and FIRED: `bash enabled + box absent` was constructible via four box-less bash=True learning roles plus gather_only.py's direct-ctor bypass of `bind`. Human resolved by porting the learning agents and DELETING gather_only.py — which is itself a removal with live in-edges, so a survival demand is owed. The delta's central subtraction (in-process run_parsed) was invisible to the trigger because the actor carried zero edges."}
+    - {rule: R6, fired: true,  note: "FIRED ON JUDGMENT ONLY — the rendered sinks were ABSENT from the graph, so the formal trigger could not have fired and a clean R6 would have CERTIFIED the blind spot. Three attacker-influenced choosers with an empty sanitizer column: run_id spliced into the docker --name grammar and the :-separated bind spec; a box-authored filename rendered raw as `- {child.name}` into model context message 0; and the tag salt readable from the box's read set. model_context added to the graph as a payload-facet boundary."}
+  obligations:
+    - {rule: R2, element: "gather_raw.identity", witness: "claim_lead's O_CREAT|O_EXCL buys lead_id exclusivity only in the HOST namespace; the box is a second creator in a second namespace and does not go through claim_lead.", discharged_by: d_box_write_cannot_overwrite_a_claimed_lead}
+    - {rule: R2, element: "container_name.identity", witness: "F6 states verbatim that the pre-create reap is safe 'only because run_id is unique per run; pin that assumption in a test'. No demand did.", discharged_by: d_run_id_collision_refuses_rather_than_reaping_a_sibling}
+    - {rule: R4, element: "bash_exec_pipeline.domain.distinguished[first]", witness: "The falsy member — parse('') returns [] (B12) — must cross as a VALID rc=0 frame and not be confused with a decode failure.", discharged_by: d_empty_pipeline_crosses_as_a_valid_frame}
+    - {rule: R5, element: "bash_exec_run_parsed", witness: "The delta removes the in-process execution path that every existing e2e test drives (C58); no survival demand covered the workflow, only the gate.", discharged_by: d_e2e_bash_corpus_still_completes}
+    - {rule: R5, element: "gather_only_script", witness: "Deleted per the human's H3 resolution; a removed element with live in-edges owes a survival demand.", discharged_by: d_gather_only_removal_survives}
+    - {rule: R5, element: "AgentDeps", witness: "Four bash=True learning roles have no box and gather_only.py bypasses bind, so 'bash enabled, box absent' was representable AND reachable past the single seam.", discharged_by: d_every_bash_enabled_role_has_a_box}
+    - {rule: R6, element: "interacts(workspace_map->model_context).payload", witness: "`- {child.name}` is rendered RAW into markdown from sorted(run_dir.iterdir()), in-process and upstream of the scrub. After the delta the chooser is the BOX and the sanitizer column is empty; a newline forges a sibling bullet or a ## heading in message 0.", discharged_by: d_box_filename_cannot_forge_a_workspace_map_section}
+    - {rule: R6, element: "container_name.identity", witness: "run_id = f'{ts}-{alert.stem}' with ZERO validation, spliced into the docker --name grammar and into the :-separated bind-spec FRAME. Chooser: the alert filename, which is perimeter data.", discharged_by: d_hostile_run_id_fails_loudly}
+    - {rule: R3, element: "run_meta_salt.access[box-read]", witness: "The salt is the unguessable delimiter tag_tool_results.wrap fences untrusted data with, and it sits in the box's READ set. Pre-delta the gate's cat scope confined it; post-delta O4 makes the mount list the boundary and it does not exclude meta.json.", discharged_by: w_salt_relocation_is_out_of_scope}
+    - {rule: R4, element: "box_env.domain.distinguished[DEFENDER_RUNS_BASE]", witness: "The allowlist exports DEFENDER_RUNS_BASE, which names run_dir.parent — a path that is NOT mounted, and which under DooD is silently created as an empty dir rather than erroring.", discharged_by: d_box_env_is_a_positive_allowlist}
+  holes:
+    - {rule: R6, element: "run_meta_salt.access[box-read]", resolution: "HUMAN: meta.json is removed from the run dir in a separate session. Recorded as a cross-session DEPENDENCY — #540's boundary claim is not complete until that lands.", resolved_to: w_salt_relocation_is_out_of_scope}
+    - {rule: R0, element: "interacts(scrub->run_dir)", resolution: "HUMAN: O8 is narrowed IN WRITING to link-safety. A clean scrub licenses no content-provenance assumption; content provenance is filed as a follow-up.", resolved_to: w_scrub_certifies_link_shape_only}
+    - {rule: R5, element: "AgentDeps.access[direct-ctor]", resolution: "HUMAN: port the learning agents so every bash-enabled role has a box, and DELETE gather_only.py rather than guarding the bypass. Scope expansion beyond the original A/B/C freeze, recorded as such.", resolved_to: d_every_bash_enabled_role_has_a_box}
+    - {rule: R0, element: "interacts(scrub->run_dir)", resolution: "HUMAN: the scrub ALLOWLISTS S_ISREG and S_ISDIR and raises on every other st_mode type — an allowlist, not a FIFO/socket/device denylist, so it fails closed on types nobody enumerated.", resolved_to: d_scrub_allowlists_regular_and_dir_only}
+    - {rule: R0, element: "box_network.access[box-loopback]", resolution: "Loopback is IN CONTRACT: lo is up under --network=none (C05) and there is no peer outside the box, so O2 is untouched. O2 to be restated to name loopback explicitly rather than bringing lo down and losing intra-box IPC.", resolved_to: d_loopback_is_in_contract}
+    - {rule: R0, element: "box_network.access[box-listen]", resolution: "In contract for the same reason — nothing off-box can route to a listener under --network=none.", resolved_to: d_loopback_is_in_contract}
+    - {rule: R0, element: "run_dir.access[host-read]", resolution: "Re-grounded rather than asked: the consumer census already established constraints: [] — zero lstat/islink/realpath/O_NOFOLLOW across all 16 consumers.", resolved_to: w_host_consumer_confinement_out_of_scope}
+    - {rule: R0, element: "BoxSpec.domain.alternatives[microvm]", resolution: "Deferred tier (NO7); crosses_validation stays unresolved by recorded waiver rather than being probed.", resolved_to: w_microvm_tier_deferred}
+    - {rule: R0, element: "DEFENDER_ALLOW_UNSANDBOXED", resolution: "The knob does NOT exist repo-wide (zero hits). It is NEW surface and is the positive control for d_never_falls_back_in_process — the most security-critical negative in the set, which is otherwise vacuous.", resolved_to: d_allow_unsandboxed_is_the_only_opt_out}
+  pre_discharged:
+    - {rule: R4, element: "box_tmpfs.domain.distinguished[noexec]", by: d_tmpfs_is_noexec, edge: "interacts(start_box->box_tmpfs)"}
+    - {rule: R4, element: "box_tmpfs.domain.distinguished[size_cap]", by: d_tmpfs_is_size_capped, edge: "interacts(start_box->box_tmpfs)"}
+    - {rule: R4, element: "BoxSpec.domain.alternatives[runc]", by: d_boundary_holds_at_the_runc_floor, edge: "interacts(start_box->BoxSpec)"}
+    - {rule: R3, element: "bash_policy_denylist.access[bash]", by: d_read_denylist_survives, edge: "interacts(decide_bash->bash_policy_denylist)"}
+    - {rule: R3, element: "cwd_anchor.identity", by: d_relative_operand_names_one_file_at_three_sites, edge: "interacts(decide_bash->cwd_anchor)"}
+    - {rule: R2, element: "container_name.identity", by: d_pre_create_reap_clears_a_stopped_collision, edge: "interacts(start_box->container_name)"}
+
+# ============================================================================
+# HANDOFF — the baton. Written for the IMPLEMENTER, not the reviewer.
+# ============================================================================
+handoff:
+  forks:
+    - "#0 the box executor's contract — RESOLVED to dataclasses at every Python seam (BoxResult/BoxFault/BoxSpec) over a LENGTH-PREFIXED BINARY FRAMING carrying raw bytes. Not JSON (cannot carry arbitrary bytes without base64, and O7 promises byte-exact-or-fail), not pickle (would deserialize on the trusted-parse side). The fault signal is the FRAME'S ABSENCE. This dissolved forks F5 and F9 outright."
+    - "F1 the knob — BoxSpec dataclass, three replaceables, default runsc anchored in the dataclass, one env var as the sole external lever."
+    - "F2 the scrub keeps BOTH halves — hardlink check justified on the WITHIN-BIND threat (cross-boundary is EXDEV, within-bind succeeds). The S_ISREG guard is required, not decorative."
+    - "F3 tmpfs stays noexec and size-capped; exhaustion fails the run loudly (TM class 7, not a security boundary)."
+    - "F4 cwd = run_dir, re-applied per call via docker exec -w. cwd does NOT persist (C35 refuted); /tmp does."
+    - "F6 fail closed at box start, tool error mid-run, NEVER an in-process fallback."
+    - "F8 startup sentinel proves host<->box path identity and fails closed — the only mechanism that catches C46's silent-empty-dir AS a failure."
+    - "H1 the salt-secrecy collapse — the human resolved that meta.json is removed from the run dir in a SEPARATE SESSION. See dependencies below."
+    - "H2 content trust — O8 narrowed IN WRITING to link-safety; content provenance filed as a follow-up."
+    - "H3 absent box — the human chose to PORT THE LEARNING AGENTS so every bash-enabled role has a box, and to DELETE scripts/testing/gather_only.py. This is a deliberate scope expansion beyond the original A/B/C freeze."
+    - "H4 special files — the scrub ALLOWLISTS S_ISREG and S_ISDIR and raises on everything else, rather than denylisting FIFO/socket/device."
+    - "O2 loopback and bind/listen resolved as IN CONTRACT — no peer exists outside the box."
+  refuted:
+    - "C39 — Docker does NOT write its errors to stdout with CRLF leaving stderr empty. On server 29.5.3 it writes to STDERR with plain LF and stdout is EMPTY, at rc=127. O17/M16 exist because of this claim; the obligation survives, the witness does not. It also retires F9's heuristic options, which were built on the refuted shape and would have been pinned to a version that already changed."
+    - "C35 — cwd does NOT persist across docker exec. /tmp does. Both issue-comment §3 and RSD §What it is now item 3 must be corrected."
+    - "C21 — a planted symlink CAN be dereferenced by the box when its target is image-present (/etc/passwd resolves, 839 bytes). ENOENT holds only for image-ABSENT targets, so O9 is a live requirement, not a belt on a closed hole."
+    - "C48 — defender/run-visualizations/ is NOT git-tracked for output (git ls-files returns only .gitignore, content '*.html'). The dereference is real but nothing is committed. O8's witness must be restated: the stronger ones are persist.py:210,217 (durable learning state dir) and workspace_map.py:79 (the model's own context, in-process, upstream of the scrub)."
+    - "C33 — the mount-ordering trap does not exist. Docker sorts mount destinations by path depth. RSD §Filesystem isolation must DELETE the section; there is nothing for a test to pin."
+    - "$(...) is NOT preserved as one literal argv token — parse('echo $(whoami)') yields four tokens ['echo','$','(','whoami',')'], while quotes, backticks and globs ARE each one token. No uniform metacharacter assertion is valid."
+    - "logger.close() is NOT finally-guaranteed in driver.py — only UsageLimitExceeded and RunAborted are caught, so any other exception leaks the open llm_requests.jsonl fd. This makes the scrub-vs-open-fd composition real rather than hypothetical."
+    - "test_620_consumers is GREEN, not red-by-construction as its own docstring claims."
+    - "DEFENDER_ALLOW_UNSANDBOXED does not exist anywhere in the tree (zero hits), though O10 and M12 both discuss it as extant."
+  deferred:
+    - "C41 — root-owned bind artifacts. Unprobeable in this environment: it is docker-outside-of-Docker, so bind SOURCES resolve on the real daemon host and are invisible to the test process. Settle on a non-DooD host. O13's ACCESS half depends on it and the scrub, renderer and learning loop are all downstream."
+    - "C56 DNS under a genuinely absent network (EAI_AGAIN / -3). This sandbox has live egress, so a bogus hostname resolved to -2 EAI_NONAME instead. The errno.errorcode-absence half IS settled."
+    - "materialize_run_dir's exists()-then-mkdir TOCTOU. The construction is confirmed non-atomic by reading, but the race was never DRIVEN — a read cannot close a behavior claim."
+    - "DEFENDER_RUNS_BASE reachability from inside a box. Search-only; a search cannot close a reachability claim. Load-bearing because run_env sets it to run_dir.parent, which is not mounted."
+  dependencies:
+    - "meta.json must leave run_dir (separate session). Until it does, the per-run salt is readable from inside the box and the injection-tagging defence is degraded: a boxed process can read the salt and forge or close <run-{salt}-...> delimiters. write-code-from-spec must NOT assume meta.json is present in run_dir."
+  nullstub_passes:
+    - "test_run_env_provider_key_strip_still_governs_host_subprocesses — SURVIVAL. Touches no box code; green at base IS the contract. It reddens only if the delta breaks the host-side key strip."
+    - "test_ground_truth_read_denylist_still_denies_on_both_surfaces — SURVIVAL (O15). Same class."
+    - "test_main_loop_still_cannot_read_gather_raw — SURVIVAL (O15). Same class."
+    - "test_command_substitution_splits_into_four_tokens_at_the_host_parse — GROUNDING PIN. Pins existing HEAD behaviour (the R-B13 refutation) at the host parse, entirely upstream of the box, so a no-op box cannot change it."
+    - "test_a_clean_run_dir_passes_the_scrub — POSITIVE CONTROL. Exists precisely to stop a scrub that rejects everything from reading green."
+    - "test_scrub_passes_regular_files_and_real_directories — POSITIVE CONTROL for the H4 allowlist."
+    - "test_scrub_does_not_flag_a_directory_by_nlink — POSITIVE CONTROL for the S_ISREG guard (C53b)."
+    - "test_workspace_map_renders_an_ordinary_filename_intact — POSITIVE CONTROL for the R6 forgery test; without it a renderer that escapes everything into mush would pass."
+    - "test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar — SURVIVAL in uniqueness clothing: the O_EXCL claim already holds at HEAD, so the demand is that the box does not break it."
+    - "test_teardown_of_an_absent_box_succeeds — *** GENUINE WEAKNESS, NOT A CLEAN CLASS ***. A stop_box that does nothing at all passes it: idempotence alone is not falsifiable in isolation. It is only meaningful paired with test_reaper_does_not_treat_stderr_as_failure, whose rc-not-zero leg does redden a no-op. write-code-from-spec should treat this pair as one obligation."
+  deviations:
+    - "The third answerer terminated on an output-token limit after ~36 of 181 premises. The ambiguity measurement is 3-way on those and 2-way on the remainder — divergence is still detected, but without majority voting. Answerers one and two completed in full."
+    - "The formal closed-vocabulary slot check was performed by hand; the spec_graph linter does not exist yet."
+    - "NULL-STUB COVERAGE IS PARTIAL IN THIS ENVIRONMENT: 42 tests fail on their own demand-specific assertion, 10 pass (each classified in nullstub_passes), and 25 SKIP because this sandbox is docker-outside-of-Docker — F8's startup sentinel cannot pass when bind sources resolve on a filesystem the test process cannot see. A skipped test binds nothing here. Those 25 run for real on a native daemon, including CI ubuntu-latest, and their discrimination is UNVERIFIED until then."
+    - "The suite was authored by three parallel agents. They diverged on the executor method name (run vs run_parsed); reconciled to run_parsed, which is what M7 and the existing bash_exec.run_parsed both name. Caught by a cross-file API check, not by either author — the composition failure a throughput cut invites."
+    - "test_scrub_raises_on_a_fifo_socket_or_device_node binds only PARTIALLY: it proves FIFO, socket and device nodes all raise, but cannot distinguish H4's allowlist from an equivalent denylist, because no test can construct an st_mode type nobody enumerated. The allowlist SHAPE must be enforced at code review. The H4 motivating case is bound as a TERMINATION assertion (a join deadline), so an implementation that opens the FIFO fails instead of hanging CI."
+    - "The ordering and crash-teardown demands are asserted against the AST of run.py main() — statement order and control-flow shape, never line numbers — because main() has no injection seam for the box or the scrub and driving it end-to-end needs model credentials."
+    - "C41 and three other claims could not be probed in this environment (docker-outside-of-Docker, live network egress). Listed under deferred."
+    - "The worktree was missing its defender/.venv symlink, which every sibling worktree has. Without it 16 tests fail on ModuleNotFoundError: pydantic_ai — a provisioning gap, not a defect. The symlink was created (gitignored, zero repo diff); the real baseline is 2203 passed, 8 skipped, 0 failed."
+    - "R6 fired on judgment, not on its formal trigger, because the rendered sinks were absent from the extracted graph. model_context was added afterwards. A clean R6 on the original graph would have certified the blind spot — recorded because it is the extraction-completeness failure mode, the gate's single point of failure."
